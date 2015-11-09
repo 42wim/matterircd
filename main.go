@@ -20,10 +20,10 @@ func main() {
 	}
 	defer socket.Close()
 
-	start(irckit.NewServer("matterircd"), socket)
+	start(socket)
 }
 
-func start(srv irckit.Server, socket net.Listener) {
+func start(socket net.Listener) {
 	for {
 		conn, err := socket.Accept()
 		if err != nil {
@@ -32,8 +32,9 @@ func start(srv irckit.Server, socket net.Listener) {
 		}
 
 		go func() {
+			newsrv := irckit.NewServer("matterircd")
 			logger.Infof("New connection: %s", conn.RemoteAddr())
-			err = srv.Connect(irckit.NewUserMM(conn, srv))
+			err = newsrv.Connect(irckit.NewUserMM(conn, newsrv))
 			if err != nil {
 				logger.Errorf("Failed to join: %v", err)
 				return
