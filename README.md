@@ -37,7 +37,7 @@ LOGIN <mattermost hostname> <teamname> <login> <pass>
 Also works with windows ;-)
 ![windows](http://snag.gy/cGSCA.jpg)
 
-If you use chrome, you can easily test with ![circ](https://chrome.google.com/webstore/detail/circ/bebigdkelppomhhjaaianniiifjbgocn?hl=en-US)
+If you use chrome, you can easily test with [circ](https://chrome.google.com/webstore/detail/circ/bebigdkelppomhhjaaianniiifjbgocn?hl=en-US)
 
 # Binaries
-You can find the binaries ![here](https://github.com/42wim/matterircd/releases/tag/v0.1)
+You can find the binaries [here](https://github.com/42wim/matterircd/releases/tag/v0.1)
