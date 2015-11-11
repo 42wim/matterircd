@@ -14,6 +14,7 @@ Most of the work happens in [mm-go-irckit](https://github.com/42wim/mm-go-irckit
 * reconnects with backoff on mattermost restarts
 * support multiple users
 * support channel backlog (messages when you're disconnected from IRC/mattermost)
+* WHOIS, WHO, JOIN, LEAVE, NICK, LIST, ISON, PRIVMSG support
 
 # Usage
 
@@ -41,3 +42,4 @@ If you use chrome, you can easily test with [circ](https://chrome.google.com/web
 
 # Binaries
 You can find the binaries [here](https://github.com/42wim/matterircd/releases/tag/v0.1)
+
