@@ -11,19 +11,19 @@ import (
 
 var logger log.Logger = log.NullLogger
 
-func init() {
-	flagDebug := flag.Bool("debug", false, "enable debug")
+func main() {
+	flagDebug := flag.Bool("debug", false, "enable debug logging")
+	flagBindInterface := flag.String("interface", "127.0.0.1", "interface to bind to")
 	flag.Parse()
+
 	logger = golog.New(os.Stderr, log.Info)
 	if *flagDebug {
 		logger.Info("enabling debug")
 		logger = golog.New(os.Stderr, log.Debug)
 	}
-}
 
-func main() {
 	irckit.SetLogger(logger)
-	socket, err := net.Listen("tcp", "127.0.0.1:6667")
+	socket, err := net.Listen("tcp", *flagBindInterface+":6667")
 	if err != nil {
 		logger.Errorf("Failed to listen on socket: %v\n", err)
 	}
