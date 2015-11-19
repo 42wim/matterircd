@@ -12,13 +12,15 @@ import (
 )
 
 var logger log.Logger = log.NullLogger
-var flagRestrict *string
+var flagRestrict, flagDefaultTeam, flagDefaultServer *string
 
 func main() {
 	flagDebug := flag.Bool("debug", false, "enable debug logging")
 	flagBindInterface := flag.String("interface", "127.0.0.1", "interface to bind to")
 	flagBindPort := flag.Int("port", 6667, "Port to bind to")
-	flagRestrict = flag.String("restrict", "", "only allow connection to specified mattermost instances. Space delimited")
+	flagRestrict = flag.String("restrict", "", "only allow connection to specified mattermost server/instances. Space delimited")
+	flagDefaultTeam = flag.String("mmteam", "", "specify default mattermost team")
+	flagDefaultServer = flag.String("mmserver", "", "specify default mattermost server/instance")
 	flag.Parse()
 
 	logger = golog.New(os.Stderr, log.Info)
@@ -46,7 +48,8 @@ func start(socket net.Listener) {
 		}
 
 		go func() {
-			cfg := &irckit.MmCfg{AllowedServers: strings.Fields(*flagRestrict)}
+			cfg := &irckit.MmCfg{AllowedServers: strings.Fields(*flagRestrict),
+				DefaultTeam: *flagDefaultTeam, DefaultServer: *flagDefaultServer}
 			newsrv := irckit.NewServer("matterircd")
 			logger.Infof("New connection: %s", conn.RemoteAddr())
 			err = newsrv.Connect(irckit.NewUserMM(conn, newsrv, cfg))
