@@ -8,14 +8,17 @@ import (
 	"github.com/alexcesaro/log/golog"
 	"net"
 	"os"
+	"strings"
 )
 
 var logger log.Logger = log.NullLogger
+var flagRestrict *string
 
 func main() {
 	flagDebug := flag.Bool("debug", false, "enable debug logging")
 	flagBindInterface := flag.String("interface", "127.0.0.1", "interface to bind to")
 	flagBindPort := flag.Int("port", 6667, "Port to bind to")
+	flagRestrict = flag.String("restrict", "", "only allow connection to specified mattermost instances. Space delimited")
 	flag.Parse()
 
 	logger = golog.New(os.Stderr, log.Info)
@@ -43,9 +46,10 @@ func start(socket net.Listener) {
 		}
 
 		go func() {
+			cfg := &irckit.MmCfg{AllowedServers: strings.Fields(*flagRestrict)}
 			newsrv := irckit.NewServer("matterircd")
 			logger.Infof("New connection: %s", conn.RemoteAddr())
-			err = newsrv.Connect(irckit.NewUserMM(conn, newsrv))
+			err = newsrv.Connect(irckit.NewUserMM(conn, newsrv, cfg))
 			if err != nil {
 				logger.Errorf("Failed to join: %v", err)
 				return
