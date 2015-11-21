@@ -19,6 +19,9 @@ Most of the work happens in [mm-go-irckit](https://github.com/42wim/mm-go-irckit
 * set default team/server
 * WHOIS, WHO, JOIN, LEAVE, NICK, LIST, ISON, PRIVMSG support
 
+# Binaries
+You can find the binaries [here](https://github.com/42wim/matterircd/releases/tag/v0.2)
+
 # Usage
 
 ```
@@ -62,7 +65,3 @@ Also works with windows ;-)
 ![windows](http://snag.gy/cGSCA.jpg)
 
 If you use chrome, you can easily test with [circ](https://chrome.google.com/webstore/detail/circ/bebigdkelppomhhjaaianniiifjbgocn?hl=en-US)
-
-# Binaries
-You can find the binaries [here](https://github.com/42wim/matterircd/releases/tag/v0.2)
-
