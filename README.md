@@ -64,5 +64,5 @@ Also works with windows ;-)
 If you use chrome, you can easily test with [circ](https://chrome.google.com/webstore/detail/circ/bebigdkelppomhhjaaianniiifjbgocn?hl=en-US)
 
 # Binaries
-You can find the binaries [here](https://github.com/42wim/matterircd/releases/tag/v0.1)
+You can find the binaries [here](https://github.com/42wim/matterircd/releases/tag/v0.2)
 
