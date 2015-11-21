@@ -14,16 +14,39 @@ Most of the work happens in [mm-go-irckit](https://github.com/42wim/mm-go-irckit
 * reconnects with backoff on mattermost restarts
 * support multiple users
 * support channel backlog (messages when you're disconnected from IRC/mattermost)
+* search messages (/msg mattermost search query)
+* restrict to specified mattermost instances
+* set default team/server
 * WHOIS, WHO, JOIN, LEAVE, NICK, LIST, ISON, PRIVMSG support
 
 # Usage
 
-Matterircd will listen on localhost port 6667.  
+```
+Usage of matterircd:
+  -debug=false: enable debug logging
+  -interface="127.0.0.1": interface to bind to
+  -mmserver="": specify default mattermost server/instance
+  -mmteam="": specify default mattermost team
+  -port=6667: Port to bind to
+  -restrict="": only allow connection to specified mattermost server/instances. Space delimited
+```
+
+Matterircd will listen by default on localhost port 6667.  
 Connect with your favorite irc-client to localhost:6667
 
+## Mattermost user commands
+Login
+
 ```
-LOGIN <mattermost hostname> <teamname> <login> <pass>
+/msg mattermost login <server> <team> <login> <password>
 ```
+
+Search
+```
+/msg mattermost search query
+```
+
+## Examples
 
 1. Login to your favorite mattermost service by sending a message to the mattermost user
 ![login](http://snag.gy/aAop5.jpg)
