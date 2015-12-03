@@ -15,6 +15,7 @@ Most of the work happens in [mm-go-irckit](https://github.com/42wim/mm-go-irckit
 * support multiple users
 * support channel backlog (messages when you're disconnected from IRC/mattermost)
 * search messages (/msg mattermost search query)
+* scrollback support (/msg mattermost scrollback #channel limit)
 * restrict to specified mattermost instances
 * set default team/server
 * WHOIS, WHO, JOIN, LEAVE, NICK, LIST, ISON, PRIVMSG support
@@ -48,6 +49,13 @@ Search
 ```
 /msg mattermost search query
 ```
+
+Scrollback
+```
+/msg mattermost scrollback <channel> <limit>
+e.g. /msg mattermost scrollback #bugs 100 shows the last 100 messages of #bugs
+```
+
 
 ## Examples
 
