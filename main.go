@@ -21,6 +21,7 @@ func main() {
 	flagRestrict = flag.String("restrict", "", "only allow connection to specified mattermost server/instances. Space delimited")
 	flagDefaultTeam = flag.String("mmteam", "", "specify default mattermost team")
 	flagDefaultServer = flag.String("mmserver", "", "specify default mattermost server/instance")
+	flagLoginServiceNick = flag.String("loginservice-nick", "mattermost", "Nick name to use for the login service bot")
 	flag.Parse()
 
 	logger = golog.New(os.Stderr, log.Info)
@@ -49,7 +50,8 @@ func start(socket net.Listener) {
 
 		go func() {
 			cfg := &irckit.MmCfg{AllowedServers: strings.Fields(*flagRestrict),
-				DefaultTeam: *flagDefaultTeam, DefaultServer: *flagDefaultServer}
+				DefaultTeam: *flagDefaultTeam, DefaultServer: *flagDefaultServer,
+				LoginServiceNick: *flagLoginServiceNick}
 			newsrv := irckit.ServerConfig{Name: "matterircd", Version: "0.2"}.Server()
 			logger.Infof("New connection: %s", conn.RemoteAddr())
 			err = newsrv.Connect(irckit.NewUserMM(conn, newsrv, cfg))
