@@ -13,6 +13,7 @@ import (
 
 var logger log.Logger = log.NullLogger
 var flagRestrict, flagDefaultTeam, flagDefaultServer *string
+var flagInsecure *bool
 
 func main() {
 	flagDebug := flag.Bool("debug", false, "enable debug logging")
@@ -21,6 +22,7 @@ func main() {
 	flagRestrict = flag.String("restrict", "", "only allow connection to specified mattermost server/instances. Space delimited")
 	flagDefaultTeam = flag.String("mmteam", "", "specify default mattermost team")
 	flagDefaultServer = flag.String("mmserver", "", "specify default mattermost server/instance")
+	flagInsecure = flag.Bool("mminsecure", false, "use http connection to mattermost")
 	flag.Parse()
 
 	logger = golog.New(os.Stderr, log.Info)
@@ -49,7 +51,8 @@ func start(socket net.Listener) {
 
 		go func() {
 			cfg := &irckit.MmCfg{AllowedServers: strings.Fields(*flagRestrict),
-				DefaultTeam: *flagDefaultTeam, DefaultServer: *flagDefaultServer}
+				DefaultTeam: *flagDefaultTeam, DefaultServer: *flagDefaultServer,
+				Insecure: *flagInsecure}
 			newsrv := irckit.ServerConfig{Name: "matterircd", Version: "0.2"}.Server()
 			logger.Infof("New connection: %s", conn.RemoteAddr())
 			err = newsrv.Connect(irckit.NewUserMM(conn, newsrv, cfg))
