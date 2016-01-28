@@ -2,10 +2,12 @@
 
 Minimal IRC server which integrates with [mattermost](https://www.mattermost.org) 
 
-Work in progress, does the basics for now.   
 Should be rather stable now. Tested on Windows / Linux   
 
 Most of the work happens in [mm-go-irckit](https://github.com/42wim/mm-go-irckit) (based on github.com/shazow/go-irckit)
+
+Building from current code needs mattermost 1.4.0
+(latest binary should still work against mattermost 1.2+)
 
 # Features
 
