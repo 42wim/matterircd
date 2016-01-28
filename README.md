@@ -75,3 +75,7 @@ Also works with windows ;-)
 ![windows](http://snag.gy/cGSCA.jpg)
 
 If you use chrome, you can easily test with [circ](https://chrome.google.com/webstore/detail/circ/bebigdkelppomhhjaaianniiifjbgocn?hl=en-US)
+
+## Caveats
+Matterircd sends a "Unicode Character 'MONGOLIAN VOWEL SEPARATOR' (U+180E)" at the end of every line to mattermost, more information about this can be found in ![this issue](https://github.com/42wim/matterircd/issues/24)
+
