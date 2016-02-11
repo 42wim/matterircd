@@ -1,7 +1,6 @@
 # matterircd
 
-Minimal IRC server which integrates with [mattermost](https://www.mattermost.org) 
-
+Minimal IRC server which integrates with [mattermost](https://www.mattermost.org)   
 Tested on Windows / Linux   
 
 Most of the work happens in [mm-go-irckit](https://github.com/42wim/mm-go-irckit) (based on github.com/shazow/go-irckit)
@@ -26,9 +25,9 @@ Matterircd v0.2 works only on mattermost < 1.4.0
 * WHOIS, WHO, JOIN, LEAVE, NICK, LIST, ISON, PRIVMSG, MODE, TOPIC support
 
 # Binaries
-You can find the binaries [here](https://github.com/42wim/matterircd/releases/)
-For use with mattermost 1.4.0+ [v0.3](https://github.com/42wim/matterircd/releases/tag/v0.3) 
-For use with mattermost <1.4.0 [v0.2](https://github.com/42wim/matterircd/releases/tag/v0.2)
+You can find the binaries [here](https://github.com/42wim/matterircd/releases/)   
+For use with mattermost 1.4.0+ [v0.3](https://github.com/42wim/matterircd/releases/tag/v0.3)   
+For use with mattermost <1.4.0 [v0.2](https://github.com/42wim/matterircd/releases/tag/v0.2)   
 
 # Usage
 
