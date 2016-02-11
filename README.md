@@ -9,7 +9,7 @@ Most of the work happens in [mm-go-irckit](https://github.com/42wim/mm-go-irckit
 Building from current code needs mattermost 1.4.0 and higher
 
 # Compatibility
-Matterircd v0.3 is needed for mattermost 1.4.0 and higher
+Matterircd v0.3 is needed for mattermost 1.4.0 and higher  
 Matterircd v0.2 works only on mattermost < 1.4.0
 
 # Features
