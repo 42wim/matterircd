@@ -53,7 +53,7 @@ func start(socket net.Listener) {
 			cfg := &irckit.MmCfg{AllowedServers: strings.Fields(*flagRestrict),
 				DefaultTeam: *flagDefaultTeam, DefaultServer: *flagDefaultServer,
 				Insecure: *flagInsecure}
-			newsrv := irckit.ServerConfig{Name: "matterircd", Version: "0.2"}.Server()
+			newsrv := irckit.ServerConfig{Name: "matterircd", Version: "0.3"}.Server()
 			logger.Infof("New connection: %s", conn.RemoteAddr())
 			err = newsrv.Connect(irckit.NewUserMM(conn, newsrv, cfg))
 			if err != nil {

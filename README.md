@@ -2,12 +2,15 @@
 
 Minimal IRC server which integrates with [mattermost](https://www.mattermost.org) 
 
-Should be rather stable now. Tested on Windows / Linux   
+Tested on Windows / Linux   
 
 Most of the work happens in [mm-go-irckit](https://github.com/42wim/mm-go-irckit) (based on github.com/shazow/go-irckit)
 
-Building from current code needs mattermost 1.4.0
-(latest binary should still work against mattermost 1.2+)
+Building from current code needs mattermost 1.4.0 and higher
+
+# Compatibility
+Matterircd v0.3 is needed for mattermost 1.4.0 and higher
+Matterircd v0.2 works only on mattermost < 1.4.0
 
 # Features
 
@@ -20,7 +23,7 @@ Building from current code needs mattermost 1.4.0
 * scrollback support (/msg mattermost scrollback #channel limit)
 * restrict to specified mattermost instances
 * set default team/server
-* WHOIS, WHO, JOIN, LEAVE, NICK, LIST, ISON, PRIVMSG support
+* WHOIS, WHO, JOIN, LEAVE, NICK, LIST, ISON, PRIVMSG, MODE, TOPIC support
 
 # Binaries
 You can find the binaries [here](https://github.com/42wim/matterircd/releases/tag/v0.2)
@@ -31,6 +34,7 @@ You can find the binaries [here](https://github.com/42wim/matterircd/releases/ta
 Usage of matterircd:
   -debug=false: enable debug logging
   -interface="127.0.0.1": interface to bind to
+  -mminsecure=false: use http connection to mattermost
   -mmserver="": specify default mattermost server/instance
   -mmteam="": specify default mattermost team
   -port=6667: Port to bind to
