@@ -1,14 +1,15 @@
 # matterircd
 
-Minimal IRC server which integrates with [mattermost](https://www.mattermost.org)   
-Tested on Windows / Linux   
+Minimal IRC server which integrates with [mattermost](https://www.mattermost.org)
+Tested on Windows / Linux
 
 Most of the work happens in [mm-go-irckit](https://github.com/42wim/mm-go-irckit) (based on github.com/shazow/go-irckit)
 
 Building from current code needs mattermost 1.4.0 and higher
 
 # Compatibility
-Matterircd v0.3 is needed for mattermost 1.4.0 and higher  
+
+Matterircd v0.3 is needed for mattermost 1.4.0 and higher
 Matterircd v0.2 works only on mattermost < 1.4.0
 
 # Features
@@ -25,9 +26,10 @@ Matterircd v0.2 works only on mattermost < 1.4.0
 * WHOIS, WHO, JOIN, LEAVE, NICK, LIST, ISON, PRIVMSG, MODE, TOPIC support
 
 # Binaries
-You can find the binaries [here](https://github.com/42wim/matterircd/releases/)   
-For use with mattermost 1.4.0+ [v0.3](https://github.com/42wim/matterircd/releases/tag/v0.3)   
-For use with mattermost <1.4.0 [v0.2](https://github.com/42wim/matterircd/releases/tag/v0.2)   
+
+You can find the binaries [here](https://github.com/42wim/matterircd/releases/)
+For use with mattermost 1.4.0+ [v0.3](https://github.com/42wim/matterircd/releases/tag/v0.3)
+For use with mattermost <1.4.0 [v0.2](https://github.com/42wim/matterircd/releases/tag/v0.2)
 
 # Usage
 
@@ -42,14 +44,21 @@ Usage of matterircd:
   -restrict="": only allow connection to specified mattermost server/instances. Space delimited
 ```
 
-Matterircd will listen by default on localhost port 6667.  
+Matterircd will listen by default on localhost port 6667.
 Connect with your favorite irc-client to localhost:6667
 
 ## Mattermost user commands
+
 Login
 
 ```
-/msg mattermost login <server> <team> <login> <password>
+/msg mattermost login <server> <team> <username/email> <password>
+```
+
+Or if it is set up to only allow one host:
+
+```
+/msg mattermost login <username/email> <password>
 ```
 
 Search
@@ -63,6 +72,9 @@ Scrollback
 e.g. /msg mattermost scrollback #bugs 100 shows the last 100 messages of #bugs
 ```
 
+## Docker
+
+A docker image for easily setting up and running matterircd on a server is available at [docker hub](https://hub.docker.com/r/xyproto/matterircd/).
 
 ## Examples
 
@@ -82,5 +94,6 @@ Also works with windows ;-)
 If you use chrome, you can easily test with [circ](https://chrome.google.com/webstore/detail/circ/bebigdkelppomhhjaaianniiifjbgocn?hl=en-US)
 
 ## Caveats
+
 Matterircd sends a "Unicode Character 'MONGOLIAN VOWEL SEPARATOR' (U+180E)" at the end of every line to mattermost, more information about this can be found in ![this issue](https://github.com/42wim/matterircd/issues/24)
 
