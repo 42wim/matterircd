@@ -5,7 +5,9 @@ Tested on Windows / Linux
 
 Most of the work happens in [mm-go-irckit](https://github.com/42wim/mm-go-irckit) (based on github.com/shazow/go-irckit)
 
-Building from current code needs mattermost 1.4.0 and higher
+**!!!WARNING!!!**  
+Building from current code (master) also needs mattermost master!
+
 
 # Compatibility
 
