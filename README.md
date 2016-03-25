@@ -5,14 +5,14 @@ Tested on Windows / Linux
 
 Most of the work happens in [mm-go-irckit](https://github.com/42wim/mm-go-irckit) (based on github.com/shazow/go-irckit)
 
-**!!!WARNING!!!**  
-Building from current code (master) also needs mattermost master!
-
-
 # Compatibility
 
 * Matterircd v0.3 is needed for mattermost 1.4.0 and higher
 * Matterircd v0.2 works only on mattermost < 1.4.0
+
+Master branch of matterircd should always work against latest STABLE mattermost release.  
+(note: if you use mattermost docker image, you can run the image with 2.0 or 2.1 tag)   
+If you want to run matterircd with mattermost DEV builds, use the develop branch of matterircd.
 
 # Features
 
