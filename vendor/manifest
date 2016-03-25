@@ -1,0 +1,123 @@
+{
+	"version": 0,
+	"dependencies": [
+		{
+			"importpath": "github.com/42wim/matterbridge-plus/matterclient",
+			"repository": "https://github.com/42wim/matterbridge-plus",
+			"revision": "69aa52502bb6da86ecfa6db7714caed9d0208fea",
+			"branch": "master",
+			"path": "/matterclient",
+			"notests": true
+		},
+		{
+			"importpath": "github.com/42wim/mm-go-irckit",
+			"repository": "https://github.com/42wim/mm-go-irckit",
+			"revision": "981089989a9934560bd9a95756da915d319fd2ee",
+			"branch": "master",
+			"notests": true
+		},
+		{
+			"importpath": "github.com/alecthomas/log4go",
+			"repository": "https://github.com/alecthomas/log4go",
+			"revision": "e5dc62318d9bd58682f1dceb53a4b24e8253682f",
+			"branch": "master",
+			"notests": true
+		},
+		{
+			"importpath": "github.com/alexcesaro/log",
+			"repository": "https://github.com/alexcesaro/log",
+			"revision": "61e686294e58a8698a9e1091268bb4ac1116bd5e",
+			"branch": "master",
+			"notests": true
+		},
+		{
+			"importpath": "github.com/gorilla/websocket",
+			"repository": "https://github.com/gorilla/websocket",
+			"revision": "e2e3d8414d0fbae04004f151979f4e27c6747fe7",
+			"branch": "master",
+			"notests": true
+		},
+		{
+			"importpath": "github.com/jessevdk/go-flags",
+			"repository": "https://github.com/jessevdk/go-flags",
+			"revision": "6b9493b3cb60367edd942144879646604089e3f7",
+			"branch": "master",
+			"notests": true
+		},
+		{
+			"importpath": "github.com/jpillora/backoff",
+			"repository": "https://github.com/jpillora/backoff",
+			"revision": "f85df8d02bdf497eea1b176c7a52bac31ec62aac",
+			"branch": "master",
+			"notests": true
+		},
+		{
+			"importpath": "github.com/mattermost/platform/einterfaces",
+			"repository": "https://github.com/mattermost/platform",
+			"revision": "f4e5fb711f5ace84793e9343d9deda9ac6aee636",
+			"branch": "master",
+			"path": "/einterfaces",
+			"notests": true
+		},
+		{
+			"importpath": "github.com/mattermost/platform/model",
+			"repository": "https://github.com/mattermost/platform",
+			"revision": "f189bc2073cf800c5f4506a69bdb51d7065269bf",
+			"branch": "HEAD",
+			"path": "/model",
+			"notests": true
+		},
+		{
+			"importpath": "github.com/nicksnyder/go-i18n/i18n",
+			"repository": "https://github.com/nicksnyder/go-i18n",
+			"revision": "37e5c2de3e03e4b82693e3fcb4a6aa2cc4eb07e3",
+			"branch": "master",
+			"path": "/i18n",
+			"notests": true
+		},
+		{
+			"importpath": "github.com/pborman/uuid",
+			"repository": "https://github.com/pborman/uuid",
+			"revision": "c55201b036063326c5b1b89ccfe45a184973d073",
+			"branch": "master",
+			"notests": true
+		},
+		{
+			"importpath": "github.com/shazow/go-irckit",
+			"repository": "https://github.com/shazow/go-irckit",
+			"revision": "f29f5d64b0fb28bd19317479943e57342169a8bd",
+			"branch": "master",
+			"notests": true
+		},
+		{
+			"importpath": "github.com/sorcix/irc",
+			"repository": "https://github.com/sorcix/irc",
+			"revision": "b0e9178cb394e8dae013b459ffd23dca3237ed88",
+			"branch": "master",
+			"notests": true
+		},
+		{
+			"importpath": "golang.org/x/crypto/bcrypt",
+			"repository": "https://go.googlesource.com/crypto",
+			"revision": "c197bcf24cde29d3f73c7b4ac6fd41f4384e8af6",
+			"branch": "master",
+			"path": "/bcrypt",
+			"notests": true
+		},
+		{
+			"importpath": "golang.org/x/crypto/blowfish",
+			"repository": "https://go.googlesource.com/crypto",
+			"revision": "c197bcf24cde29d3f73c7b4ac6fd41f4384e8af6",
+			"branch": "master",
+			"path": "/blowfish",
+			"notests": true
+		},
+		{
+			"importpath": "gopkg.in/yaml.v2",
+			"repository": "https://gopkg.in/yaml.v2",
+			"revision": "a83829b6f1293c91addabc89d0571c246397bbf4",
+			"branch": "master",
+			"notests": true
+		}
+	]
+}
