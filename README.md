@@ -26,6 +26,7 @@ If you want to run matterircd with mattermost DEV builds, use the develop branch
 * restrict to specified mattermost instances
 * set default team/server
 * WHOIS, WHO, JOIN, LEAVE, NICK, LIST, ISON, PRIVMSG, MODE, TOPIC support
+* support TLS (ssl)
 
 # Binaries
 
@@ -36,18 +37,36 @@ You can find the binaries [here](https://github.com/42wim/matterircd/releases/)
 # Usage
 
 ```
-Usage of matterircd:
-  -debug=false: enable debug logging
-  -interface="127.0.0.1": interface to bind to
-  -mminsecure=false: use http connection to mattermost
-  -mmserver="": specify default mattermost server/instance
-  -mmteam="": specify default mattermost team
-  -port=6667: Port to bind to
-  -restrict="": only allow connection to specified mattermost server/instances. Space delimited
+Usage of ./matterircd:
+  -bind string
+        interface:port to bind to. (default "127.0.0.1:6667")
+  -debug
+        enable debug logging
+  -interface string
+        interface to bind to (deprecated: use -bind)
+  -mminsecure
+        use http connection to mattermost
+  -mmserver string
+        specify default mattermost server/instance
+  -mmteam string
+        specify default mattermost team
+  -port int
+        Port to bind to (deprecated: use -bind)
+  -restrict string
+        only allow connection to specified mattermost server/instances. Space delimited
+  -tlsbind string
+        interface:port to bind to. (e.g 127.0.0.1:6697)
+  -tlsdir string
+        directory to look for key.pem and cert.pem. (default ".")
+  -version
+        show version
 ```
 
 Matterircd will listen by default on localhost port 6667.
 Connect with your favorite irc-client to localhost:6667
+
+For TLS support you'll need to generate certificates.   
+You can use this program [generate_cert.go](https://golang.org/src/crypto/tls/generate_cert.go) to generate key.pem and cert.pem
 
 ## Mattermost user commands
 
