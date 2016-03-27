@@ -19,8 +19,9 @@ var Version = "0.4-dev"
 
 func main() {
 	flagDebug := flag.Bool("debug", false, "enable debug logging")
-	flagBindInterface := flag.String("interface", "127.0.0.1", "interface to bind to")
-	flagBindPort := flag.Int("port", 6667, "Port to bind to")
+	flagBind := flag.String("bind", "127.0.0.1:6667", "interface:port to bind to.")
+	flagBindInterface := flag.String("interface", "", "interface to bind to (deprecated: use -bind)")
+	flagBindPort := flag.Int("port", 0, "Port to bind to (deprecated: use -bind)")
 	flagRestrict = flag.String("restrict", "", "only allow connection to specified mattermost server/instances. Space delimited")
 	flagDefaultTeam = flag.String("mmteam", "", "specify default mattermost team")
 	flagDefaultServer = flag.String("mmserver", "", "specify default mattermost server/instance")
@@ -48,10 +49,15 @@ func main() {
 			start(socket)
 		}()
 	}
-	socket, err := net.Listen("tcp", fmt.Sprintf("%s:%d", *flagBindInterface, *flagBindPort))
-	if err != nil {
-		logger.Errorf("Can not listen on %s: %v\n", *flagBindInterface, err)
+	// backwards compatible
+	if *flagBind == "127.0.0.1:6667" && *flagBindInterface != "" && *flagBindPort != 0 {
+		*flagBind = fmt.Sprintf("%s:%d", *flagBindInterface, *flagBindPort)
 	}
+	socket, err := net.Listen("tcp", *flagBind)
+	if err != nil {
+		logger.Errorf("Can not listen on %s: %v\n", *flagBind, err)
+	}
+	logger.Info("Listening on", *flagBind)
 	defer socket.Close()
 	start(socket)
 }
