@@ -628,8 +628,10 @@ func (s *server) handle(u *User) {
 				Trailing: "You will be missed.",
 			})
 			s.Publish(&event{QuitEvent, s, nil, u, msg})
-			if u.mc.WsClient != nil {
-				u.logoutFromMattermost()
+			if u.mc != nil {
+				if u.mc.WsClient != nil {
+					u.logoutFromMattermost()
+				}
 			}
 			return
 		case irc.PING:
