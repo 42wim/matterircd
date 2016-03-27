@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"flag"
 	"fmt"
 	"github.com/42wim/mm-go-irckit"
@@ -12,7 +13,7 @@ import (
 )
 
 var logger log.Logger = log.NullLogger
-var flagRestrict, flagDefaultTeam, flagDefaultServer *string
+var flagRestrict, flagDefaultTeam, flagDefaultServer, flagTLSBind, flagTLSDir *string
 var flagInsecure *bool
 var Version = "0.4-dev"
 
@@ -25,6 +26,8 @@ func main() {
 	flagDefaultServer = flag.String("mmserver", "", "specify default mattermost server/instance")
 	flagInsecure = flag.Bool("mminsecure", false, "use http connection to mattermost")
 	flagVersion := flag.Bool("version", false, "show version")
+	flagTLSBind = flag.String("tlsbind", "", "interface:port to bind to. (e.g 127.0.0.1:6697)")
+	flagTLSDir = flag.String("tlsdir", ".", "directory to look for key.pem and cert.pem.")
 	flag.Parse()
 
 	logger = golog.New(os.Stderr, log.Info)
@@ -38,13 +41,35 @@ func main() {
 	}
 
 	irckit.SetLogger(logger)
+	if *flagTLSBind != "" {
+		go func() {
+			socket := tlsbind()
+			defer socket.Close()
+			start(socket)
+		}()
+	}
 	socket, err := net.Listen("tcp", fmt.Sprintf("%s:%d", *flagBindInterface, *flagBindPort))
 	if err != nil {
-		logger.Errorf("Failed to listen on socket: %v\n", err)
+		logger.Errorf("Can not listen on %s: %v\n", *flagBindInterface, err)
 	}
 	defer socket.Close()
-
 	start(socket)
+}
+
+func tlsbind() net.Listener {
+	cert, err := tls.LoadX509KeyPair(*flagTLSDir+"/cert.pem", *flagTLSDir+"/key.pem")
+	if err != nil {
+		logger.Errorf("could not load TLS, incorrect directory?")
+		os.Exit(1)
+	}
+	config := tls.Config{Certificates: []tls.Certificate{cert}}
+	listenerTLS, err := tls.Listen("tcp", *flagTLSBind, &config)
+	if err != nil {
+		logger.Errorf("Can not listen on %s: %v\n", *flagTLSBind, err)
+		os.Exit(1)
+	}
+	logger.Info("TLS listening on", *flagTLSBind)
+	return listenerTLS
 }
 
 func start(socket net.Listener) {
