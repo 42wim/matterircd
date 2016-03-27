@@ -5,6 +5,7 @@ COPY . /go/src/github.com/42wim/matterircd
 RUN apk update && apk add go git \
         && cd /go/src/github.com/42wim/matterircd \
         && export GOPATH=/go \
+        && git checkout develop \
         && go get \
         && go build -o /bin/matterircd \
         && rm -rf /go \
