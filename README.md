@@ -95,7 +95,7 @@ e.g. /msg mattermost scrollback #bugs 100 shows the last 100 messages of #bugs
 
 ## Docker
 
-A docker image for easily setting up and running matterircd on a server is available at [docker hub](https://hub.docker.com/r/xyproto/matterircd/).
+A docker image for easily setting up and running matterircd on a server is available at [docker hub](https://hub.docker.com/r/42wim/matterircd/).
 
 ## Examples
 
