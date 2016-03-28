@@ -17,6 +17,7 @@ type Credentials struct {
 	Team   string
 	Pass   string
 	Server string
+	NoTLS  bool
 }
 
 type Message struct {
@@ -52,8 +53,14 @@ func (m *MMClient) Login() error {
 		Max:    5 * time.Minute,
 		Jitter: true,
 	}
+	uriScheme := "https://"
+	wsScheme := "wss://"
+	if m.NoTLS {
+		uriScheme = "http://"
+		wsScheme = "ws://"
+	}
 	// login to mattermost
-	m.Client = model.NewClient("https://" + m.Credentials.Server)
+	m.Client = model.NewClient(uriScheme + m.Credentials.Server)
 	var myinfo *model.Result
 	var appErr *model.AppError
 	for {
@@ -78,7 +85,7 @@ func (m *MMClient) Login() error {
 	m.Team = myinfo.Data.(*model.Team)
 
 	// setup websocket connection
-	wsurl := "wss://" + m.Credentials.Server + "/api/v1/websocket"
+	wsurl := wsScheme + m.Credentials.Server + "/api/v1/websocket"
 	header := http.Header{}
 	header.Set(model.HEADER_AUTH, "BEARER "+m.Client.AuthToken)
 

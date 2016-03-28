@@ -34,6 +34,9 @@ func NewUserMM(c net.Conn, srv Server, cfg *MmCfg) *User {
 
 func (u *User) loginToMattermost() (*matterclient.MMClient, error) {
 	mc := matterclient.New(u.Credentials.Login, u.Credentials.Pass, u.Credentials.Team, u.Credentials.Server)
+	if u.Cfg.Insecure {
+		mc.Credentials.NoTLS = true
+	}
 	mc.Login()
 	u.MmWsQuit = false
 	return mc, nil
