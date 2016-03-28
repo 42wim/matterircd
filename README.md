@@ -9,6 +9,9 @@ Most of the work happens in [mm-go-irckit](https://github.com/42wim/mm-go-irckit
 * Matterircd v0.4 works with mattermost 1.4.0 until latest STABLE [2.1.0 release](https://github.com/mattermost/platform/releases/tag/v2.1.0)
 * Matterircd v0.2 works only on mattermost < 1.4.0
 
+:warning: mattermost 2.1 on dockerhub is not the STABLE 2.1.0 release.   
+If you use docker images be sure to run the mattermost image with tag 2.0 and not 2.1 :warning:
+
 Master branch of matterircd should always work against latest STABLE mattermost release.  
 (note: if you use mattermost docker image, you can run the image with 2.0 or 2.1 tag)   
 If you want to run matterircd with mattermost DEV builds, use the develop branch of matterircd.
