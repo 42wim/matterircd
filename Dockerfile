@@ -1,4 +1,4 @@
-FROM alpine
+FROM alpine:edge
 ENTRYPOINT ["/bin/matterircd"]
 
 COPY . /go/src/github.com/42wim/matterircd
