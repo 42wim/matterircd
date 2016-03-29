@@ -648,12 +648,16 @@ func (s *server) handle(u *User) {
 					Command: irc.ERR_NEEDMOREPARAMS,
 					Params:  []string{msg.Command},
 				})
-			} else if s.config.InviteOnly || u.mc.User == nil {
-				err = u.Encode(&irc.Message{
-					Prefix:   s.Prefix(),
-					Command:  irc.ERR_INVITEONLYCHAN,
-					Trailing: "Cannot join channel (+i)",
-				})
+			} else if s.config.InviteOnly || u.mc == nil || u.mc.User == nil {
+				channels := strings.Split(msg.Params[0], ",")
+				for _, channel := range channels {
+					err = u.Encode(&irc.Message{
+						Prefix:   s.Prefix(),
+						Command:  irc.ERR_INVITEONLYCHAN,
+						Params:   []string{u.Nick, channel},
+						Trailing: "Cannot join channel (+i)",
+					})
+				}
 			} else {
 				channels := strings.Split(msg.Params[0], ",")
 				for _, channel := range channels {
@@ -663,6 +667,7 @@ func (s *server) handle(u *User) {
 						u.Encode(&irc.Message{
 							Prefix:   s.Prefix(),
 							Command:  irc.ERR_INVITEONLYCHAN,
+							Params:   []string{u.Nick, channel},
 							Trailing: "Cannot join channel (+i)",
 						})
 						continue

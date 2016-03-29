@@ -37,7 +37,13 @@ func (u *User) loginToMattermost() (*matterclient.MMClient, error) {
 	if u.Cfg.Insecure {
 		mc.Credentials.NoTLS = true
 	}
-	mc.Login()
+	if logger.LogDebug() {
+		mc.SetLogLevel("debug")
+	}
+	err := mc.Login()
+	if err != nil {
+		return nil, err
+	}
 	u.MmWsQuit = false
 	return mc, nil
 }

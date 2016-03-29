@@ -2,7 +2,7 @@ package matterclient
 
 import (
 	"errors"
-	"log"
+	log "github.com/Sirupsen/logrus"
 	"net/http"
 	"strings"
 	"time"
@@ -39,12 +39,25 @@ type MMClient struct {
 	Users        map[string]*model.User
 	MessageChan  chan *Message
 	Team         *model.Team
+	log          *log.Entry
 }
 
 func New(login, pass, team, server string) *MMClient {
 	cred := &Credentials{Login: login, Pass: pass, Team: team, Server: server}
 	mmclient := &MMClient{Credentials: cred, MessageChan: make(chan *Message, 100)}
+	mmclient.log = log.WithFields(log.Fields{"module": "matterclient"})
+	log.SetFormatter(&log.TextFormatter{FullTimestamp: true})
+	log.SetLevel(log.InfoLevel)
 	return mmclient
+}
+
+func (m *MMClient) SetLogLevel(level string) {
+	l, err := log.ParseLevel(level)
+	if err != nil {
+		log.SetLevel(log.InfoLevel)
+		return
+	}
+	log.SetLevel(l)
 }
 
 func (m *MMClient) Login() error {
@@ -63,17 +76,23 @@ func (m *MMClient) Login() error {
 	m.Client = model.NewClient(uriScheme + m.Credentials.Server)
 	var myinfo *model.Result
 	var appErr *model.AppError
+	var logmsg = "trying login"
 	for {
-		log.Println("retrying login", m.Credentials.Team, m.Credentials.Login, m.Credentials.Server)
+		m.log.Debugf(logmsg+" %s %s %s", m.Credentials.Team, m.Credentials.Login, m.Credentials.Server)
 		myinfo, appErr = m.Client.LoginByEmail(m.Credentials.Team, m.Credentials.Login, m.Credentials.Pass)
 		if appErr != nil {
 			d := b.Duration()
+			m.log.Debug(appErr.DetailedError)
 			if !strings.Contains(appErr.DetailedError, "connection refused") &&
 				!strings.Contains(appErr.DetailedError, "invalid character") {
+				if appErr.Message == "" {
+					return errors.New(appErr.DetailedError)
+				}
 				return errors.New(appErr.Message)
 			}
-			log.Printf("LOGIN: %s, reconnecting in %s", appErr, d)
+			m.log.Debug("LOGIN: %s, reconnecting in %s", appErr, d)
 			time.Sleep(d)
+			logmsg = "retrying login"
 			continue
 		}
 		break
