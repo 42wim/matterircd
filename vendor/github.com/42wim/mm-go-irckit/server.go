@@ -386,7 +386,9 @@ func (s *server) topic(u *User, channelname string, header string) {
 	ch := s.Channel(channelname)
 	ch.Topic(u, header)
 	channelname = strings.Replace(channelname, "#", "", -1)
-	u.mc.UpdateChannelHeader(u.mc.GetChannelId(channelname), header)
+	if u.mc != nil && u.mc.User != nil {
+		u.mc.UpdateChannelHeader(u.mc.GetChannelId(channelname), header)
+	}
 }
 
 func (s *server) welcome(u *User) error {
@@ -487,7 +489,7 @@ func (s *server) list(u *User) []*irc.Message {
 		Trailing: "Channel Users Topic",
 	}
 	r = append(r, &msg)
-	if u.mc.User != nil {
+	if u.mc != nil && u.mc.User != nil {
 		for _, channel := range append(u.mc.Channels.Channels, u.mc.MoreChannels.Channels...) {
 			// FIXME: This needs to be broken up into multiple messages to fit <510 chars
 			if strings.Contains(channel.Name, "__") {
