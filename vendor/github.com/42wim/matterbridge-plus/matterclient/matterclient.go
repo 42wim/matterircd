@@ -47,7 +47,6 @@ func New(login, pass, team, server string) *MMClient {
 	mmclient := &MMClient{Credentials: cred, MessageChan: make(chan *Message, 100)}
 	mmclient.log = log.WithFields(log.Fields{"module": "matterclient"})
 	log.SetFormatter(&log.TextFormatter{FullTimestamp: true})
-	log.SetLevel(log.InfoLevel)
 	return mmclient
 }
 
@@ -240,10 +239,18 @@ func (m *MMClient) PostMessage(channel string, text string) {
 }
 
 func (m *MMClient) JoinChannel(channel string) error {
-	if m.GetChannelId(strings.Replace(channel, "#", "", 1)) == "" {
+	cleanChan := strings.Replace(channel, "#", "", 1)
+	if m.GetChannelId(cleanChan) == "" {
 		return errors.New("failed to join")
 	}
-	_, err := m.Client.JoinChannel(m.GetChannelId(strings.Replace(channel, "#", "", 1)))
+	for _, c := range m.Channels.Channels {
+		if c.Name == cleanChan {
+			m.log.Debug("Not joining ", cleanChan, " already joined.")
+			return nil
+		}
+	}
+	m.log.Debug("Joining ", cleanChan)
+	_, err := m.Client.JoinChannel(m.GetChannelId(cleanChan))
 	if err != nil {
 		return errors.New("failed to join")
 	}
@@ -292,4 +299,18 @@ func (m *MMClient) UpdateLastViewed(channelId string) {
 	if err != nil {
 		log.Print(err)
 	}
+}
+
+func (m *MMClient) UsernamesInChannel(channelName string) []string {
+	ceiRes, err := m.Client.GetChannelExtraInfo(m.GetChannelId(channelName), 5000, "")
+	if err != nil {
+		log.Errorf("UsernamesInChannel(%s) failed: %s", channelName, err)
+		return []string{}
+	}
+	extra := ceiRes.Data.(*model.ChannelExtra)
+	result := []string{}
+	for _, member := range extra.Members {
+		result = append(result, member.Username)
+	}
+	return result
 }

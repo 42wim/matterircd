@@ -4,7 +4,7 @@
 		{
 			"importpath": "github.com/42wim/matterbridge-plus/matterclient",
 			"repository": "https://github.com/42wim/matterbridge-plus",
-			"revision": "ba082237ebf304fdb54d11171c02f0c28b584d73",
+			"revision": "e1133fcc941a12ed2fa554a5ee3476982c2d8df8",
 			"branch": "master",
 			"path": "/matterclient",
 			"notests": true
@@ -13,6 +13,13 @@
 			"importpath": "github.com/42wim/mm-go-irckit",
 			"repository": "https://github.com/42wim/mm-go-irckit",
 			"revision": "9574bbbb9487ed468eb4ff00d145a9d34d3f9b0d",
+			"branch": "master",
+			"notests": true
+		},
+		{
+			"importpath": "github.com/Sirupsen/logrus",
+			"repository": "https://github.com/Sirupsen/logrus",
+			"revision": "4b6ea7319e214d98c938f12692336f7ca9348d6b",
 			"branch": "master",
 			"notests": true
 		},
@@ -110,6 +117,28 @@
 			"revision": "c197bcf24cde29d3f73c7b4ac6fd41f4384e8af6",
 			"branch": "master",
 			"path": "/blowfish",
+			"notests": true
+		},
+		{
+			"importpath": "golang.org/x/net/http2/hpack",
+			"repository": "https://go.googlesource.com/net",
+			"revision": "e45385e9b226f570b1f086bf287b25d3d4117776",
+			"branch": "master",
+			"path": "/http2/hpack",
+			"notests": true
+		},
+		{
+			"importpath": "gopkg.in/airbrake/gobrake.v2",
+			"repository": "https://gopkg.in/airbrake/gobrake.v2",
+			"revision": "31c8ff1fb8b79a6947e6565e9a6df535f98a6b94",
+			"branch": "master",
+			"notests": true
+		},
+		{
+			"importpath": "gopkg.in/gemnasium/logrus-airbrake-hook.v2",
+			"repository": "https://gopkg.in/gemnasium/logrus-airbrake-hook.v2",
+			"revision": "31e6fd4bd5a98d8ee7673d24bc54ec73c31810dd",
+			"branch": "master",
 			"notests": true
 		},
 		{
