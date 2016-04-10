@@ -15,7 +15,7 @@ import (
 var logger log.Logger = log.NullLogger
 var flagRestrict, flagDefaultTeam, flagDefaultServer, flagTLSBind, flagTLSDir *string
 var flagInsecure *bool
-var Version = "0.4"
+var Version = "0.5"
 
 func main() {
 	flagDebug := flag.Bool("debug", false, "enable debug logging")

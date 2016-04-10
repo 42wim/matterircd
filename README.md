@@ -6,7 +6,7 @@ Tested on Windows / Linux
 Most of the work happens in [mm-go-irckit](https://github.com/42wim/mm-go-irckit) (based on github.com/shazow/go-irckit)
 
 # Compatibility
-* Matterircd v0.4 works with mattermost 1.4.0 until latest STABLE [2.1.0 release](https://github.com/mattermost/platform/releases/tag/v2.1.0)
+* Matterircd v0.5 works with mattermost 1.4.0 until latest STABLE [2.1.0 release](https://github.com/mattermost/platform/releases/tag/v2.1.0)
 * Matterircd v0.2 works only on mattermost < 1.4.0
 
 :warning: mattermost 2.1 on dockerhub is not the STABLE 2.1.0 release.   
@@ -33,8 +33,25 @@ If you want to run matterircd with mattermost DEV builds, use the develop branch
 # Binaries
 
 You can find the binaries [here](https://github.com/42wim/matterircd/releases/)
-* For use with mattermost 1.4.0-2.1.0 [v0.4](https://github.com/42wim/matterircd/releases/tag/v0.4)
+* For use with mattermost 1.4.0-2.1.0 [v0.5](https://github.com/42wim/matterircd/releases/tag/v0.5)
 * For use with mattermost <1.4.0 [v0.2](https://github.com/42wim/matterircd/releases/tag/v0.2)
+
+# Building
+
+Go 1.6 is required 
+Make sure you have [Go](https://golang.org/doc/install) properly installed, including setting up your [GOPATH] (https://golang.org/doc/code.html#GOPATH)
+
+```
+cd $GOPATH
+go get github.com/42wim/matterircd
+```
+
+You should now have matterircd binary in the bin directory:
+
+```
+$ ls bin/
+matterircd
+```
 
 # Usage
 
