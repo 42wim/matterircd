@@ -135,9 +135,7 @@ func (ch *channel) Part(u *User, text string) {
 		})
 		return
 	}
-	for to := range ch.usersIdx {
-		to.Encode(msg)
-	}
+	u.Encode(msg)
 	delete(ch.usersIdx, u)
 	n := len(ch.usersIdx)
 	ch.mu.Unlock()

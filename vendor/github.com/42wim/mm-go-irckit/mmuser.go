@@ -231,7 +231,11 @@ func (u *User) handleWsActionPost(rmsg *model.Message) {
 	if data.UserId == u.mc.User.Id {
 		// our own message - http://www.fileformat.info/info/unicode/char/180e/fontsupport.htm
 		if strings.Contains(data.Message, "᠎") {
-			logger.Debugf("message is sent from IRC, contains unicode, not relaying", data.Message)
+			logger.Debugf("message is sent from IRC, contains unicode, not relaying %#v", data.Message)
+			return
+		}
+		if data.Type == "system_join_leave" {
+			logger.Debugf("our own join/leave message. not relaying %#v", data.Message)
 			return
 		}
 	}
@@ -309,7 +313,6 @@ func (u *User) handleWsActionUserRemoved(rmsg *model.Message) {
 
 	// remove ourselves from the channel
 	if rmsg.UserId == u.mc.User.Id {
-		ch.Part(u, "")
 		return
 	}
 
@@ -334,9 +337,7 @@ func (u *User) handleWsActionUserAdded(rmsg *model.Message) {
 	ch := u.Srv.Channel("#" + u.mc.GetChannelName(rmsg.ChannelId))
 	// add ourselves to the channel
 	if rmsg.UserId == u.mc.User.Id {
-		logger.Debug("ACTION_USER_ADDED adding myself to", u.mc.GetChannelName(rmsg.ChannelId), rmsg.ChannelId)
-		ch.Topic(u, u.mc.GetChannelHeader(rmsg.ChannelId))
-		ch.Join(u)
+		logger.Debug("ACTION_USER_ADDED not adding myself to", u.mc.GetChannelName(rmsg.ChannelId), rmsg.ChannelId)
 		return
 	}
 	ghost := u.createMMUser(u.mc.Users[rmsg.UserId])
@@ -546,9 +547,13 @@ func (u *User) syncMMChannel(id string, name string) {
 		// join all the channels we're on on MM
 		if d.Id == u.mc.User.Id {
 			ch := srv.Channel("#" + name)
-			logger.Debug("syncMMChannel adding myself to ", name, id)
 			ch.Topic(u, u.mc.GetChannelHeader(id))
-			ch.Join(u)
+			// only join when we're not yet on the channel
+			if !ch.HasUser(u) {
+				logger.Debug("syncMMChannel adding myself to ", name, id)
+				ch.Join(u)
+			}
+			continue
 		}
 
 		cghost, ok := srv.HasUser(d.Username)
@@ -569,7 +574,6 @@ func (u *User) syncMMChannel(id string, name string) {
 
 func (u *User) joinMMChannel(channel string) error {
 	u.mc.JoinChannel(channel)
-	u.syncMMChannel(u.mc.GetChannelId(strings.Replace(channel, "#", "", 1)), strings.Replace(channel, "#", "", 1))
 	return nil
 }
 

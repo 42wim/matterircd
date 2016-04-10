@@ -614,8 +614,14 @@ func (s *server) handle(u *User) {
 					})
 					continue
 				}
+				// first part on irc
 				ch.Part(u, msg.Trailing)
+				// now part on mattermost
 				u.mc.Client.LeaveChannel(u.mc.GetChannelId(strings.Replace(chName, "#", "", 1)))
+				// part all other (ghost)users on the channel
+				for _, k := range ch.Users() {
+					ch.Part(k, "")
+				}
 			}
 		case irc.QUIT:
 			partMsg = msg.Trailing
@@ -676,10 +682,8 @@ func (s *server) handle(u *User) {
 					}
 					ch := s.Channel(channel)
 					ch.Topic(u, u.mc.GetChannelHeader(u.mc.GetChannelId(strings.Replace(channel, "#", "", -1))))
-					err = ch.Join(u)
-					if err == nil {
-						s.Publish(&event{JoinEvent, s, ch, u, msg})
-					}
+					ch.Join(u)
+					u.syncMMChannel(u.mc.GetChannelId(strings.Replace(channel, "#", "", 1)), strings.Replace(channel, "#", "", 1))
 				}
 			}
 		case irc.MOTD:

@@ -12,7 +12,7 @@
 		{
 			"importpath": "github.com/42wim/mm-go-irckit",
 			"repository": "https://github.com/42wim/mm-go-irckit",
-			"revision": "72358b848530ca94c1967b65878c4ce99595feae",
+			"revision": "9574bbbb9487ed468eb4ff00d145a9d34d3f9b0d",
 			"branch": "master",
 			"notests": true
 		},
