@@ -4,21 +4,24 @@
 		{
 			"importpath": "github.com/42wim/matterbridge-plus/matterclient",
 			"repository": "https://github.com/42wim/matterbridge-plus",
-			"revision": "e1133fcc941a12ed2fa554a5ee3476982c2d8df8",
-			"branch": "master",
+			"vcs": "git",
+			"revision": "14123a919c2b3b0588afb001c9b49ddcaa492a19",
+			"branch": "develop",
 			"path": "/matterclient",
 			"notests": true
 		},
 		{
 			"importpath": "github.com/42wim/mm-go-irckit",
 			"repository": "https://github.com/42wim/mm-go-irckit",
-			"revision": "9574bbbb9487ed468eb4ff00d145a9d34d3f9b0d",
-			"branch": "master",
+			"vcs": "git",
+			"revision": "3799862b2c201f94b64ac193239287e13186a4d0",
+			"branch": "develop",
 			"notests": true
 		},
 		{
 			"importpath": "github.com/Sirupsen/logrus",
 			"repository": "https://github.com/Sirupsen/logrus",
+			"vcs": "",
 			"revision": "4b6ea7319e214d98c938f12692336f7ca9348d6b",
 			"branch": "master",
 			"notests": true
@@ -26,6 +29,7 @@
 		{
 			"importpath": "github.com/alecthomas/log4go",
 			"repository": "https://github.com/alecthomas/log4go",
+			"vcs": "",
 			"revision": "e5dc62318d9bd58682f1dceb53a4b24e8253682f",
 			"branch": "master",
 			"notests": true
@@ -33,6 +37,7 @@
 		{
 			"importpath": "github.com/alexcesaro/log",
 			"repository": "https://github.com/alexcesaro/log",
+			"vcs": "",
 			"revision": "61e686294e58a8698a9e1091268bb4ac1116bd5e",
 			"branch": "master",
 			"notests": true
@@ -40,6 +45,7 @@
 		{
 			"importpath": "github.com/gorilla/websocket",
 			"repository": "https://github.com/gorilla/websocket",
+			"vcs": "",
 			"revision": "e2e3d8414d0fbae04004f151979f4e27c6747fe7",
 			"branch": "master",
 			"notests": true
@@ -47,6 +53,7 @@
 		{
 			"importpath": "github.com/jessevdk/go-flags",
 			"repository": "https://github.com/jessevdk/go-flags",
+			"vcs": "",
 			"revision": "6b9493b3cb60367edd942144879646604089e3f7",
 			"branch": "master",
 			"notests": true
@@ -54,6 +61,7 @@
 		{
 			"importpath": "github.com/jpillora/backoff",
 			"repository": "https://github.com/jpillora/backoff",
+			"vcs": "",
 			"revision": "f85df8d02bdf497eea1b176c7a52bac31ec62aac",
 			"branch": "master",
 			"notests": true
@@ -61,6 +69,7 @@
 		{
 			"importpath": "github.com/nicksnyder/go-i18n/i18n",
 			"repository": "https://github.com/nicksnyder/go-i18n",
+			"vcs": "",
 			"revision": "37e5c2de3e03e4b82693e3fcb4a6aa2cc4eb07e3",
 			"branch": "master",
 			"path": "/i18n",
@@ -69,6 +78,7 @@
 		{
 			"importpath": "github.com/pborman/uuid",
 			"repository": "https://github.com/pborman/uuid",
+			"vcs": "",
 			"revision": "c55201b036063326c5b1b89ccfe45a184973d073",
 			"branch": "master",
 			"notests": true
@@ -76,6 +86,7 @@
 		{
 			"importpath": "github.com/shazow/go-irckit",
 			"repository": "https://github.com/shazow/go-irckit",
+			"vcs": "",
 			"revision": "f29f5d64b0fb28bd19317479943e57342169a8bd",
 			"branch": "master",
 			"notests": true
@@ -83,6 +94,7 @@
 		{
 			"importpath": "github.com/sorcix/irc",
 			"repository": "https://github.com/sorcix/irc",
+			"vcs": "",
 			"revision": "b0e9178cb394e8dae013b459ffd23dca3237ed88",
 			"branch": "master",
 			"notests": true
@@ -90,6 +102,7 @@
 		{
 			"importpath": "golang.org/x/crypto/bcrypt",
 			"repository": "https://go.googlesource.com/crypto",
+			"vcs": "",
 			"revision": "c197bcf24cde29d3f73c7b4ac6fd41f4384e8af6",
 			"branch": "master",
 			"path": "/bcrypt",
@@ -98,6 +111,7 @@
 		{
 			"importpath": "golang.org/x/crypto/blowfish",
 			"repository": "https://go.googlesource.com/crypto",
+			"vcs": "",
 			"revision": "c197bcf24cde29d3f73c7b4ac6fd41f4384e8af6",
 			"branch": "master",
 			"path": "/blowfish",
@@ -106,6 +120,7 @@
 		{
 			"importpath": "golang.org/x/net/http2/hpack",
 			"repository": "https://go.googlesource.com/net",
+			"vcs": "",
 			"revision": "e45385e9b226f570b1f086bf287b25d3d4117776",
 			"branch": "master",
 			"path": "/http2/hpack",
@@ -114,6 +129,7 @@
 		{
 			"importpath": "gopkg.in/airbrake/gobrake.v2",
 			"repository": "https://gopkg.in/airbrake/gobrake.v2",
+			"vcs": "",
 			"revision": "31c8ff1fb8b79a6947e6565e9a6df535f98a6b94",
 			"branch": "master",
 			"notests": true
@@ -121,6 +137,7 @@
 		{
 			"importpath": "gopkg.in/gemnasium/logrus-airbrake-hook.v2",
 			"repository": "https://gopkg.in/gemnasium/logrus-airbrake-hook.v2",
+			"vcs": "",
 			"revision": "31e6fd4bd5a98d8ee7673d24bc54ec73c31810dd",
 			"branch": "master",
 			"notests": true
@@ -128,6 +145,7 @@
 		{
 			"importpath": "gopkg.in/yaml.v2",
 			"repository": "https://gopkg.in/yaml.v2",
+			"vcs": "",
 			"revision": "a83829b6f1293c91addabc89d0571c246397bbf4",
 			"branch": "master",
 			"notests": true
