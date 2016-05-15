@@ -372,7 +372,7 @@ func (u *User) handleMMDM(toUser *User, msg string) {
 	// We don't have a DM with this user yet.
 	if u.mc.GetChannelId(toUser.User+"__"+u.mc.User.Id) == "" && u.mc.GetChannelId(u.mc.User.Id+"__"+toUser.User) == "" {
 		// create DM channel
-		_, err := u.mc.Client.CreateDirectChannel(map[string]string{"user_id": toUser.User})
+		_, err := u.mc.Client.CreateDirectChannel(toUser.User)
 		if err != nil {
 			logger.Debugf("direct message to %#v failed: %s", toUser, err)
 		}
