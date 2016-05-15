@@ -26,6 +26,7 @@ If you want to run matterircd with mattermost DEV builds, use the develop branch
 * set default team/server
 * WHOIS, WHO, JOIN, LEAVE, NICK, LIST, ISON, PRIVMSG, MODE, TOPIC support
 * support TLS (ssl)
+* support LDAP logins (mattermost enterprise) (use your ldap account/pass to login)
 
 # Binaries
 
