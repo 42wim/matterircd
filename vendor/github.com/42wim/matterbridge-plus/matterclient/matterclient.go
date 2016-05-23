@@ -4,6 +4,8 @@ import (
 	"errors"
 	log "github.com/Sirupsen/logrus"
 	"net/http"
+	"net/http/cookiejar"
+	"net/url"
 	"strings"
 	"time"
 
@@ -78,7 +80,18 @@ func (m *MMClient) Login() error {
 	var logmsg = "trying login"
 	for {
 		m.log.Debugf(logmsg+" %s %s %s", m.Credentials.Team, m.Credentials.Login, m.Credentials.Server)
-		myinfo, appErr = m.Client.Login(m.Credentials.Login, m.Credentials.Pass)
+		if strings.Contains(m.Credentials.Pass, model.SESSION_COOKIE_TOKEN) {
+			token := strings.Split(m.Credentials.Pass, model.SESSION_COOKIE_TOKEN+"=")
+			m.Client.HttpClient.Jar = m.createCookieJar(token[1])
+			m.Client.MockSession(token[1])
+			myinfo, appErr = m.Client.GetMe("")
+			if myinfo.Data.(*model.User) == nil {
+				m.log.Debug("LOGIN TOKEN:", m.Credentials.Pass, "is invalid")
+				return errors.New("invalid " + model.SESSION_COOKIE_TOKEN)
+			}
+		} else {
+			myinfo, appErr = m.Client.Login(m.Credentials.Login, m.Credentials.Pass)
+		}
 		if appErr != nil {
 			d := b.Duration()
 			m.log.Debug(appErr.DetailedError)
@@ -325,4 +338,19 @@ func (m *MMClient) UsernamesInChannel(channelName string) []string {
 		result = append(result, member.Username)
 	}
 	return result
+}
+
+func (m *MMClient) createCookieJar(token string) *cookiejar.Jar {
+	var cookies []*http.Cookie
+	jar, _ := cookiejar.New(nil)
+	firstCookie := &http.Cookie{
+		Name:   "MMAUTHTOKEN",
+		Value:  token,
+		Path:   "/",
+		Domain: m.Credentials.Server,
+	}
+	cookies = append(cookies, firstCookie)
+	cookieURL, _ := url.Parse("https://" + m.Credentials.Server)
+	jar.SetCookies(cookieURL, cookies)
+	return jar
 }
