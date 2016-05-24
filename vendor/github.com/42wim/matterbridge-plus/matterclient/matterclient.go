@@ -81,6 +81,7 @@ func (m *MMClient) Login() error {
 	for {
 		m.log.Debugf(logmsg+" %s %s %s", m.Credentials.Team, m.Credentials.Login, m.Credentials.Server)
 		if strings.Contains(m.Credentials.Pass, model.SESSION_COOKIE_TOKEN) {
+			m.log.Debugf(logmsg+" with ", model.SESSION_COOKIE_TOKEN)
 			token := strings.Split(m.Credentials.Pass, model.SESSION_COOKIE_TOKEN+"=")
 			m.Client.HttpClient.Jar = m.createCookieJar(token[1])
 			m.Client.MockSession(token[1])
@@ -111,15 +112,16 @@ func (m *MMClient) Login() error {
 	}
 	// reset timer
 	b.Reset()
-	m.User = myinfo.Data.(*model.User)
 
-	teamdata, _ := m.Client.GetAllTeamListings()
-	teams := teamdata.Data.(map[string]*model.Team)
-	for k, v := range teams {
+	initLoad, _ := m.Client.GetInitialLoad()
+	initData := initLoad.Data.(*model.InitialLoad)
+	m.User = initData.User
+	for _, v := range initData.Teams {
+		m.log.Debug("trying ", v.Name, " ", v.Id)
 		if v.Name == m.Credentials.Team {
-			m.Client.SetTeamId(k)
+			m.Client.SetTeamId(v.Id)
 			m.Team = v
-			m.log.Debug("GetallTeamListings: found id ", k)
+			m.log.Debug("GetallTeamListings: found id ", v.Id, " for team ", v.Name)
 			break
 		}
 	}
