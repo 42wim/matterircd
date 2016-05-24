@@ -6,7 +6,7 @@ Tested on Windows / Linux
 Most of the work happens in [mm-go-irckit](https://github.com/42wim/mm-go-irckit) (based on github.com/shazow/go-irckit)
 
 # Compatibility
-* Matterircd v0.6 works with mattermost 3.0.0+ [3.0.0 release](https://github.com/mattermost/platform/releases/tag/v3.0.0)
+* Matterircd v0.6.1 works with mattermost 3.0.0+ [3.0.0 release](https://github.com/mattermost/platform/releases/tag/v3.0.0)
 * Matterircd v0.5 works with mattermost 1.4.0 until [2.2.0 release](https://github.com/mattermost/platform/releases/tag/v2.2.0)
 * Matterircd v0.2 works only on mattermost < 1.4.0
 
@@ -31,7 +31,7 @@ If you want to run matterircd with mattermost DEV builds, use the develop branch
 # Binaries
 
 You can find the binaries [here](https://github.com/42wim/matterircd/releases/)
-* For use with mattermost 3.0.0 [v0.6](https://github.com/42wim/matterircd/releases/tag/v0.6)
+* For use with mattermost 3.0.0 [v0.6.1](https://github.com/42wim/matterircd/releases/tag/v0.6.1)
 * For use with mattermost 1.4.0-2.2.0 [v0.5](https://github.com/42wim/matterircd/releases/tag/v0.5)
 * For use with mattermost <1.4.0 [v0.2](https://github.com/42wim/matterircd/releases/tag/v0.2)
 
