@@ -1,6 +1,7 @@
 package matterclient
 
 import (
+	"crypto/tls"
 	"errors"
 	log "github.com/Sirupsen/logrus"
 	"net/http"
@@ -15,11 +16,12 @@ import (
 )
 
 type Credentials struct {
-	Login  string
-	Team   string
-	Pass   string
-	Server string
-	NoTLS  bool
+	Login         string
+	Team          string
+	Pass          string
+	Server        string
+	NoTLS         bool
+	SkipTLSVerify bool
 }
 
 type Message struct {
@@ -75,6 +77,7 @@ func (m *MMClient) Login() error {
 	}
 	// login to mattermost
 	m.Client = model.NewClient(uriScheme + m.Credentials.Server)
+	m.Client.HttpClient.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: m.SkipTLSVerify}}
 	var myinfo *model.Result
 	var appErr *model.AppError
 	var logmsg = "trying login"
@@ -137,7 +140,8 @@ func (m *MMClient) Login() error {
 	var WsClient *websocket.Conn
 	var err error
 	for {
-		WsClient, _, err = websocket.DefaultDialer.Dial(wsurl, header)
+		wsDialer := &websocket.Dialer{Proxy: http.ProxyFromEnvironment, TLSClientConfig: &tls.Config{InsecureSkipVerify: m.SkipTLSVerify}}
+		WsClient, _, err = wsDialer.Dial(wsurl, header)
 		if err != nil {
 			d := b.Duration()
 			log.Printf("WSS: %s, reconnecting in %s", err, d)
