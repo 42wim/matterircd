@@ -117,6 +117,10 @@ func (c *Client) DoApiPost(url string, data string) (*http.Response, *AppError) 
 	if rp, err := c.HttpClient.Do(rq); err != nil {
 		return nil, NewLocAppError(url, "model.client.connecting.app_error", nil, err.Error())
 	} else if rp.StatusCode >= 300 {
+		defer func() {
+			ioutil.ReadAll(rp.Body)
+			rp.Body.Close()
+		}()
 		return nil, AppErrorFromJson(rp.Body)
 	} else {
 		return rp, nil
@@ -139,6 +143,10 @@ func (c *Client) DoApiGet(url string, data string, etag string) (*http.Response,
 	} else if rp.StatusCode == 304 {
 		return rp, nil
 	} else if rp.StatusCode >= 300 {
+		defer func() {
+			ioutil.ReadAll(rp.Body)
+			rp.Body.Close()
+		}()
 		return rp, AppErrorFromJson(rp.Body)
 	} else {
 		return rp, nil
@@ -200,6 +208,10 @@ func (c *Client) GetAllTeams() (*Result, *AppError) {
 		return nil, err
 	} else {
 
+		defer func() {
+			ioutil.ReadAll(r.Body)
+			r.Body.Close()
+		}()
 		return &Result{r.Header.Get(HEADER_REQUEST_ID),
 			r.Header.Get(HEADER_ETAG_SERVER), TeamMapFromJson(r.Body)}, nil
 	}
@@ -210,6 +222,10 @@ func (c *Client) GetAllTeamListings() (*Result, *AppError) {
 		return nil, err
 	} else {
 
+		defer func() {
+			ioutil.ReadAll(r.Body)
+			r.Body.Close()
+		}()
 		return &Result{r.Header.Get(HEADER_REQUEST_ID),
 			r.Header.Get(HEADER_ETAG_SERVER), TeamMapFromJson(r.Body)}, nil
 	}
@@ -226,6 +242,10 @@ func (c *Client) FindTeamByName(name string) (*Result, *AppError) {
 			val = true
 		}
 
+		defer func() {
+			ioutil.ReadAll(r.Body)
+			r.Body.Close()
+		}()
 		return &Result{r.Header.Get(HEADER_REQUEST_ID),
 			r.Header.Get(HEADER_ETAG_SERVER), val}, nil
 	}
@@ -307,6 +327,10 @@ func (c *Client) GetUser(id string, etag string) (*Result, *AppError) {
 	if r, err := c.DoApiGet("/users/"+id+"/get", "", etag); err != nil {
 		return nil, err
 	} else {
+		defer func() {
+			ioutil.ReadAll(r.Body)
+			r.Body.Close()
+		}()
 		return &Result{r.Header.Get(HEADER_REQUEST_ID),
 			r.Header.Get(HEADER_ETAG_SERVER), UserFromJson(r.Body)}, nil
 	}
@@ -316,6 +340,10 @@ func (c *Client) GetMe(etag string) (*Result, *AppError) {
 	if r, err := c.DoApiGet("/users/me", "", etag); err != nil {
 		return nil, err
 	} else {
+		defer func() {
+			ioutil.ReadAll(r.Body)
+			r.Body.Close()
+		}()
 		return &Result{r.Header.Get(HEADER_REQUEST_ID),
 			r.Header.Get(HEADER_ETAG_SERVER), UserFromJson(r.Body)}, nil
 	}
@@ -325,6 +353,10 @@ func (c *Client) GetProfilesForDirectMessageList(teamId string) (*Result, *AppEr
 	if r, err := c.DoApiGet("/users/profiles_for_dm_list/"+teamId, "", ""); err != nil {
 		return nil, err
 	} else {
+		defer func() {
+			ioutil.ReadAll(r.Body)
+			r.Body.Close()
+		}()
 		return &Result{r.Header.Get(HEADER_REQUEST_ID),
 			r.Header.Get(HEADER_ETAG_SERVER), UserMapFromJson(r.Body)}, nil
 	}
@@ -334,6 +366,10 @@ func (c *Client) GetProfiles(teamId string, etag string) (*Result, *AppError) {
 	if r, err := c.DoApiGet("/users/profiles/"+teamId, "", etag); err != nil {
 		return nil, err
 	} else {
+		defer func() {
+			ioutil.ReadAll(r.Body)
+			r.Body.Close()
+		}()
 		return &Result{r.Header.Get(HEADER_REQUEST_ID),
 			r.Header.Get(HEADER_ETAG_SERVER), UserMapFromJson(r.Body)}, nil
 	}
@@ -343,6 +379,10 @@ func (c *Client) GetDirectProfiles(etag string) (*Result, *AppError) {
 	if r, err := c.DoApiGet("/users/direct_profiles", "", etag); err != nil {
 		return nil, err
 	} else {
+		defer func() {
+			ioutil.ReadAll(r.Body)
+			r.Body.Close()
+		}()
 		return &Result{r.Header.Get(HEADER_REQUEST_ID),
 			r.Header.Get(HEADER_ETAG_SERVER), UserMapFromJson(r.Body)}, nil
 	}
@@ -389,6 +429,10 @@ func (c *Client) login(m map[string]string) (*Result, *AppError) {
 		if c.AuthToken != sessionToken.Value {
 			NewLocAppError("/users/login", "model.client.login.app_error", nil, "")
 		}
+		defer func() {
+			ioutil.ReadAll(r.Body)
+			r.Body.Close()
+		}()
 
 		return &Result{r.Header.Get(HEADER_REQUEST_ID),
 			r.Header.Get(HEADER_ETAG_SERVER), UserFromJson(r.Body)}, nil
@@ -470,6 +514,10 @@ func (c *Client) GetSessions(id string) (*Result, *AppError) {
 	if r, err := c.DoApiGet("/users/"+id+"/sessions", "", ""); err != nil {
 		return nil, err
 	} else {
+		defer func() {
+			ioutil.ReadAll(r.Body)
+			r.Body.Close()
+		}()
 		return &Result{r.Header.Get(HEADER_REQUEST_ID),
 			r.Header.Get(HEADER_ETAG_SERVER), SessionsFromJson(r.Body)}, nil
 	}
@@ -701,6 +749,10 @@ func (c *Client) CreateDirectChannel(userId string) (*Result, *AppError) {
 	if r, err := c.DoApiPost(c.GetTeamRoute()+"/channels/create_direct", MapToJson(data)); err != nil {
 		return nil, err
 	} else {
+		defer func() {
+			ioutil.ReadAll(r.Body)
+			r.Body.Close()
+		}()
 		return &Result{r.Header.Get(HEADER_REQUEST_ID),
 			r.Header.Get(HEADER_ETAG_SERVER), ChannelFromJson(r.Body)}, nil
 	}
@@ -746,6 +798,10 @@ func (c *Client) GetChannels(etag string) (*Result, *AppError) {
 	if r, err := c.DoApiGet(c.GetTeamRoute()+"/channels/", "", etag); err != nil {
 		return nil, err
 	} else {
+		defer func() {
+			ioutil.ReadAll(r.Body)
+			r.Body.Close()
+		}()
 		return &Result{r.Header.Get(HEADER_REQUEST_ID),
 			r.Header.Get(HEADER_ETAG_SERVER), ChannelListFromJson(r.Body)}, nil
 	}
@@ -755,6 +811,10 @@ func (c *Client) GetChannel(id, etag string) (*Result, *AppError) {
 	if r, err := c.DoApiGet(c.GetChannelRoute(id)+"/", "", etag); err != nil {
 		return nil, err
 	} else {
+		defer func() {
+			ioutil.ReadAll(r.Body)
+			r.Body.Close()
+		}()
 		return &Result{r.Header.Get(HEADER_REQUEST_ID),
 			r.Header.Get(HEADER_ETAG_SERVER), ChannelDataFromJson(r.Body)}, nil
 	}
@@ -764,6 +824,10 @@ func (c *Client) GetMoreChannels(etag string) (*Result, *AppError) {
 	if r, err := c.DoApiGet(c.GetTeamRoute()+"/channels/more", "", etag); err != nil {
 		return nil, err
 	} else {
+		defer func() {
+			ioutil.ReadAll(r.Body)
+			r.Body.Close()
+		}()
 		return &Result{r.Header.Get(HEADER_REQUEST_ID),
 			r.Header.Get(HEADER_ETAG_SERVER), ChannelListFromJson(r.Body)}, nil
 	}
@@ -840,6 +904,10 @@ func (c *Client) UpdateLastViewedAt(channelId string) (*Result, *AppError) {
 	if r, err := c.DoApiPost(c.GetChannelRoute(channelId)+"/update_last_viewed_at", ""); err != nil {
 		return nil, err
 	} else {
+		defer func() {
+			ioutil.ReadAll(r.Body)
+			r.Body.Close()
+		}()
 		return &Result{r.Header.Get(HEADER_REQUEST_ID),
 			r.Header.Get(HEADER_ETAG_SERVER), nil}, nil
 	}
@@ -858,6 +926,10 @@ func (c *Client) CreatePost(post *Post) (*Result, *AppError) {
 	if r, err := c.DoApiPost(c.GetChannelRoute(post.ChannelId)+"/posts/create", post.ToJson()); err != nil {
 		return nil, err
 	} else {
+		defer func() {
+			ioutil.ReadAll(r.Body)
+			r.Body.Close()
+		}()
 		return &Result{r.Header.Get(HEADER_REQUEST_ID),
 			r.Header.Get(HEADER_ETAG_SERVER), PostFromJson(r.Body)}, nil
 	}
@@ -876,6 +948,10 @@ func (c *Client) GetPosts(channelId string, offset int, limit int, etag string) 
 	if r, err := c.DoApiGet(c.GetChannelRoute(channelId)+fmt.Sprintf("/posts/page/%v/%v", offset, limit), "", etag); err != nil {
 		return nil, err
 	} else {
+		defer func() {
+			ioutil.ReadAll(r.Body)
+			r.Body.Close()
+		}()
 		return &Result{r.Header.Get(HEADER_REQUEST_ID),
 			r.Header.Get(HEADER_ETAG_SERVER), PostListFromJson(r.Body)}, nil
 	}
@@ -885,6 +961,10 @@ func (c *Client) GetPostsSince(channelId string, time int64) (*Result, *AppError
 	if r, err := c.DoApiGet(c.GetChannelRoute(channelId)+fmt.Sprintf("/posts/since/%v", time), "", ""); err != nil {
 		return nil, err
 	} else {
+		defer func() {
+			ioutil.ReadAll(r.Body)
+			r.Body.Close()
+		}()
 		return &Result{r.Header.Get(HEADER_REQUEST_ID),
 			r.Header.Get(HEADER_ETAG_SERVER), PostListFromJson(r.Body)}, nil
 	}
@@ -894,6 +974,10 @@ func (c *Client) GetPostsBefore(channelId string, postid string, offset int, lim
 	if r, err := c.DoApiGet(c.GetChannelRoute(channelId)+fmt.Sprintf("/posts/%v/before/%v/%v", postid, offset, limit), "", etag); err != nil {
 		return nil, err
 	} else {
+		defer func() {
+			ioutil.ReadAll(r.Body)
+			r.Body.Close()
+		}()
 		return &Result{r.Header.Get(HEADER_REQUEST_ID),
 			r.Header.Get(HEADER_ETAG_SERVER), PostListFromJson(r.Body)}, nil
 	}
@@ -903,6 +987,10 @@ func (c *Client) GetPostsAfter(channelId string, postid string, offset int, limi
 	if r, err := c.DoApiGet(fmt.Sprintf(c.GetChannelRoute(channelId)+"/posts/%v/after/%v/%v", postid, offset, limit), "", etag); err != nil {
 		return nil, err
 	} else {
+		defer func() {
+			ioutil.ReadAll(r.Body)
+			r.Body.Close()
+		}()
 		return &Result{r.Header.Get(HEADER_REQUEST_ID),
 			r.Header.Get(HEADER_ETAG_SERVER), PostListFromJson(r.Body)}, nil
 	}
@@ -912,6 +1000,10 @@ func (c *Client) GetPost(channelId string, postId string, etag string) (*Result,
 	if r, err := c.DoApiGet(c.GetChannelRoute(channelId)+fmt.Sprintf("/posts/%v/get", postId), "", etag); err != nil {
 		return nil, err
 	} else {
+		defer func() {
+			ioutil.ReadAll(r.Body)
+			r.Body.Close()
+		}()
 		return &Result{r.Header.Get(HEADER_REQUEST_ID),
 			r.Header.Get(HEADER_ETAG_SERVER), PostListFromJson(r.Body)}, nil
 	}
@@ -933,6 +1025,10 @@ func (c *Client) SearchPosts(terms string, isOrSearch bool) (*Result, *AppError)
 	if r, err := c.DoApiPost(c.GetTeamRoute()+"/posts/search", StringInterfaceToJson(data)); err != nil {
 		return nil, err
 	} else {
+		defer func() {
+			ioutil.ReadAll(r.Body)
+			r.Body.Close()
+		}()
 		return &Result{r.Header.Get(HEADER_REQUEST_ID),
 			r.Header.Get(HEADER_ETAG_SERVER), PostListFromJson(r.Body)}, nil
 	}
@@ -1134,6 +1230,10 @@ func (c *Client) GetTeamMembers(teamId string) (*Result, *AppError) {
 	if r, err := c.DoApiGet("/teams/members/"+teamId, "", ""); err != nil {
 		return nil, err
 	} else {
+		defer func() {
+			ioutil.ReadAll(r.Body)
+			r.Body.Close()
+		}()
 		return &Result{r.Header.Get(HEADER_REQUEST_ID),
 			r.Header.Get(HEADER_ETAG_SERVER), TeamMembersFromJson(r.Body)}, nil
 	}
@@ -1297,6 +1397,10 @@ func (c *Client) GetInitialLoad() (*Result, *AppError) {
 	if r, err := c.DoApiGet("/users/initial_load", "", ""); err != nil {
 		return nil, err
 	} else {
+		defer func() {
+			ioutil.ReadAll(r.Body)
+			r.Body.Close()
+		}()
 		return &Result{r.Header.Get(HEADER_REQUEST_ID),
 			r.Header.Get(HEADER_ETAG_SERVER), InitialLoadFromJson(r.Body)}, nil
 	}
