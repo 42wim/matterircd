@@ -183,12 +183,7 @@ func (s *server) RenameUser(u *User, newNick string) bool {
 	s.Lock()
 	if _, exists := s.users[ID(newNick)]; exists {
 		s.Unlock()
-		u.Encode(&irc.Message{
-			Prefix:   s.Prefix(),
-			Command:  irc.ERR_NICKNAMEINUSE,
-			Params:   []string{newNick},
-			Trailing: "Nickname is already in use",
-		})
+		s.encodeMessage(u, irc.ERR_NICKNAMEINUSE, []string{newNick}, "Nickname is already in use")
 		return false
 	}
 
@@ -572,6 +567,23 @@ func (s *server) names(u *User, channels ...string) []*irc.Message {
 	return r
 }
 
+func (s *server) okParams(u *User, msg *irc.Message, length int) bool {
+	if len(msg.Params) < length {
+		s.encodeMessage(u, irc.ERR_NEEDMOREPARAMS, []string{msg.Command, u.Nick}, "Not enough parameters")
+		return false
+	}
+	return true
+}
+
+func (s *server) encodeMessage(u *User, cmd string, params []string, trailing string) error {
+	return u.Encode(&irc.Message{
+		Prefix:   s.Prefix(),
+		Command:  cmd,
+		Params:   params,
+		Trailing: trailing,
+	})
+}
+
 func (s *server) Handle(u *User) {
 	s.handle(u)
 }
@@ -593,49 +605,29 @@ func (s *server) handle(u *User) {
 		// TODO: Move this giant switch statement into a command registry system, similar to https://godoc.org/github.com/shazow/ssh-chat/chat#Commands
 		switch msg.Command {
 		case irc.PART:
-			if len(msg.Params) < 1 {
-				u.Encode(&irc.Message{
-					Prefix:  s.Prefix(),
-					Command: irc.ERR_NEEDMOREPARAMS,
-					Params:  []string{msg.Command},
-				})
-				continue
-			}
-			logger.Debugf("channels: %#v", s.channels)
-			channels := strings.Split(msg.Params[0], ",")
-			for _, chName := range channels {
-				ch, exists := s.HasChannel(chName)
-				if !exists {
-					u.Encode(&irc.Message{
-						Prefix:   s.Prefix(),
-						Command:  irc.ERR_NOSUCHCHANNEL,
-						Params:   []string{chName},
-						Trailing: "No such channel",
-					})
-					continue
-				}
-				// first part on irc
-				ch.Part(u, msg.Trailing)
-				// now part on mattermost
-				u.mc.Client.LeaveChannel(u.mc.GetChannelId(strings.Replace(chName, "#", "", 1)))
-				// part all other (ghost)users on the channel
-				for _, k := range ch.Users() {
-					ch.Part(k, "")
+			if s.okParams(u, msg, 1) {
+				logger.Debugf("channels: %#v", s.channels)
+				channels := strings.Split(msg.Params[0], ",")
+				for _, chName := range channels {
+					ch, exists := s.HasChannel(chName)
+					if !exists {
+						err = s.encodeMessage(u, irc.ERR_NOSUCHCHANNEL, []string{chName}, "No such channel")
+						continue
+					}
+					// first part on irc
+					ch.Part(u, msg.Trailing)
+					// now part on mattermost
+					u.mc.Client.LeaveChannel(u.mc.GetChannelId(strings.Replace(chName, "#", "", 1)))
+					// part all other (ghost)users on the channel
+					for _, k := range ch.Users() {
+						ch.Part(k, "")
+					}
 				}
 			}
 		case irc.QUIT:
 			partMsg = msg.Trailing
-			u.Encode(&irc.Message{
-				Prefix:   u.Prefix(),
-				Command:  irc.QUIT,
-				Trailing: partMsg,
-			})
-			u.Encode(&irc.Message{
-				Prefix:   s.Prefix(),
-				Command:  irc.ERROR,
-				Trailing: "You will be missed.",
-			})
-			s.Publish(&event{QuitEvent, s, nil, u, msg})
+			s.encodeMessage(u, irc.QUIT, []string{}, partMsg)
+			s.encodeMessage(u, irc.ERROR, []string{}, "You will be missed.")
 			if u.mc != nil {
 				if u.mc.WsClient != nil {
 					u.logoutFromMattermost()
@@ -643,189 +635,114 @@ func (s *server) handle(u *User) {
 			}
 			return
 		case irc.PING:
-			err = u.Encode(&irc.Message{
-				Prefix:   s.Prefix(),
-				Command:  irc.PONG,
-				Params:   []string{s.config.Name},
-				Trailing: msg.Trailing,
-			})
+			s.encodeMessage(u, irc.PONG, []string{s.config.Name}, msg.Trailing)
 		case irc.JOIN:
-			if len(msg.Params) < 1 {
-				u.Encode(&irc.Message{
-					Prefix:  s.Prefix(),
-					Command: irc.ERR_NEEDMOREPARAMS,
-					Params:  []string{msg.Command},
-				})
-			} else if s.config.InviteOnly || u.mc == nil || u.mc.User == nil {
-				channels := strings.Split(msg.Params[0], ",")
-				for _, channel := range channels {
-					err = u.Encode(&irc.Message{
-						Prefix:   s.Prefix(),
-						Command:  irc.ERR_INVITEONLYCHAN,
-						Params:   []string{u.Nick, channel},
-						Trailing: "Cannot join channel (+i)",
-					})
-				}
-			} else {
-				channels := strings.Split(msg.Params[0], ",")
-				for _, channel := range channels {
-					// you can only join existing channels
-					err := u.joinMMChannel(channel)
-					if err != nil {
-						u.Encode(&irc.Message{
-							Prefix:   s.Prefix(),
-							Command:  irc.ERR_INVITEONLYCHAN,
-							Params:   []string{u.Nick, channel},
-							Trailing: "Cannot join channel (+i)",
-						})
-						continue
+			if s.okParams(u, msg, 1) {
+				if s.config.InviteOnly || u.mc == nil || u.mc.User == nil {
+					channels := strings.Split(msg.Params[0], ",")
+					for _, channel := range channels {
+						err = s.encodeMessage(u, irc.ERR_INVITEONLYCHAN, []string{u.Nick, channel}, "Cannot join channel (+i)")
 					}
-					ch := s.Channel(channel)
-					ch.Topic(u, u.mc.GetChannelHeader(u.mc.GetChannelId(strings.Replace(channel, "#", "", -1))))
-					ch.Join(u)
-					u.syncMMChannel(u.mc.GetChannelId(strings.Replace(channel, "#", "", 1)), strings.Replace(channel, "#", "", 1))
+				} else {
+					channels := strings.Split(msg.Params[0], ",")
+					for _, channel := range channels {
+						// you can only join existing channels
+						err := u.joinMMChannel(channel)
+						if err != nil {
+							s.encodeMessage(u, irc.ERR_INVITEONLYCHAN, []string{u.Nick, channel}, "Cannot join channel (+i)")
+							continue
+						}
+						ch := s.Channel(channel)
+						ch.Topic(u, u.mc.GetChannelHeader(u.mc.GetChannelId(strings.Replace(channel, "#", "", -1))))
+						ch.Join(u)
+						u.syncMMChannel(u.mc.GetChannelId(strings.Replace(channel, "#", "", 1)), strings.Replace(channel, "#", "", 1))
+					}
 				}
 			}
 		case irc.MOTD:
 			err = u.Encode(s.motd(u)...)
 		case irc.NAMES:
-			if len(msg.Params) < 1 {
-				u.Encode(&irc.Message{
-					Prefix:  s.Prefix(),
-					Command: irc.ERR_NEEDMOREPARAMS,
-					Params:  []string{msg.Command},
-				})
-				continue
+			if !s.okParams(u, msg, 1) {
+				err = u.Encode(s.names(u, msg.Params[0])...)
 			}
-			err = u.Encode(s.names(u, msg.Params[0])...)
 		case irc.LIST:
 			u.Encode(s.list(u)...)
 		case irc.TOPIC:
-			if len(msg.Params) < 1 {
-				u.Encode(&irc.Message{
-					Prefix:  s.Prefix(),
-					Command: irc.ERR_NEEDMOREPARAMS,
-					Params:  []string{msg.Command},
-				})
-				continue
+			if s.okParams(u, msg, 1) {
+				s.topic(u, msg.Params[0], msg.Trailing)
 			}
-			s.topic(u, msg.Params[0], msg.Trailing)
 		case irc.WHO:
-			if len(msg.Params) < 1 {
-				u.Encode(&irc.Message{
-					Prefix:  s.Prefix(),
-					Command: irc.ERR_NEEDMOREPARAMS,
-					Params:  []string{msg.Command},
-				})
-				continue
+			if s.okParams(u, msg, 1) {
+				opFilter := len(msg.Params) >= 2 && msg.Params[1] == "o"
+				err = u.Encode(s.who(u, msg.Params[0], opFilter)...)
 			}
-			opFilter := len(msg.Params) >= 2 && msg.Params[1] == "o"
-			err = u.Encode(s.who(u, msg.Params[0], opFilter)...)
 		case irc.WHOIS:
-			if len(msg.Params) < 1 {
-				u.Encode(&irc.Message{
-					Prefix:  s.Prefix(),
-					Command: irc.ERR_NEEDMOREPARAMS,
-					Params:  []string{msg.Command},
-				})
-				continue
-			}
-			if _, ok := s.HasUser(msg.Params[0]); ok {
-				err = u.Encode(s.whois(u, msg.Params[0])...)
-			} else {
-				err = u.Encode(&irc.Message{
-					Prefix:   s.Prefix(),
-					Command:  irc.ERR_NOSUCHNICK,
-					Params:   msg.Params,
-					Trailing: "No such nick/channel",
-				})
+			if s.okParams(u, msg, 1) {
+				if _, ok := s.HasUser(msg.Params[0]); ok {
+					err = u.Encode(s.whois(u, msg.Params[0])...)
+				} else {
+					s.encodeMessage(u, irc.ERR_NOSUCHNICK, msg.Params, "No such nick/channel")
+				}
 			}
 		case irc.MODE:
-			if len(msg.Params) < 1 {
-				u.Encode(&irc.Message{
-					Prefix:  s.Prefix(),
-					Command: irc.ERR_NEEDMOREPARAMS,
-					Params:  []string{msg.Command},
-				})
-				continue
-			}
-			if len(msg.Params) > 1 {
-				u.Encode(s.mode(u, msg.Params[0], msg.Params[1])...)
-			} else {
-				u.Encode(s.mode(u, msg.Params[0], "")...)
+			if s.okParams(u, msg, 1) {
+				if len(msg.Params) > 1 {
+					u.Encode(s.mode(u, msg.Params[0], msg.Params[1])...)
+				} else {
+					u.Encode(s.mode(u, msg.Params[0], "")...)
+				}
 			}
 		case irc.ISON:
-			if len(msg.Params) < 1 {
-				u.Encode(&irc.Message{
-					Prefix:  s.Prefix(),
-					Command: irc.ERR_NEEDMOREPARAMS,
-					Params:  []string{msg.Command},
-				})
-				continue
+			if s.okParams(u, msg, 1) {
+				err = u.Encode(s.ison(u, msg.Params...)...)
 			}
-			err = u.Encode(s.ison(u, msg.Params...)...)
 		case irc.PRIVMSG:
-			if len(msg.Params) < 1 {
-				u.Encode(&irc.Message{
-					Prefix:  s.Prefix(),
-					Command: irc.ERR_NEEDMOREPARAMS,
-					Params:  []string{msg.Command},
-				})
-				continue
-			}
-
-			query := msg.Params[0]
-			if _, exists := s.HasChannel(query); exists {
-				p := strings.Replace(msg.Params[0], "#", "", -1)
-				msg.Trailing = strings.Replace(msg.Trailing, "\r", "", -1)
-				// fix non-rfc clients
-				if !strings.HasPrefix(msg.Trailing, ":") {
-					if len(msg.Params) == 2 {
-						msg.Trailing = msg.Params[1]
+			if s.okParams(u, msg, 1) {
+				//fix clients not sending colons
+				if len(msg.Params) > 1 {
+					tr := strings.Join(msg.Params[1:], " ")
+					msg.Trailing = msg.Trailing + tr
+				}
+				// empty message
+				if msg.Trailing == "" {
+					continue
+				}
+				query := msg.Params[0]
+				if _, exists := s.HasChannel(query); exists {
+					p := strings.Replace(query, "#", "", -1)
+					msg.Trailing = strings.Replace(msg.Trailing, "\r", "", -1)
+					// fix non-rfc clients
+					if !strings.HasPrefix(msg.Trailing, ":") {
+						if len(msg.Params) == 2 {
+							msg.Trailing = msg.Params[1]
+						}
 					}
+					// CTCP ACTION (/me)
+					if strings.HasPrefix(msg.Trailing, "\x01ACTION ") {
+						msg.Trailing = strings.Replace(msg.Trailing, "\x01ACTION ", "", -1)
+						msg.Trailing = "*" + msg.Trailing + "*"
+					}
+					msg.Trailing += "᠎"
+					post := &model.Post{ChannelId: u.mc.GetChannelId(p), Message: msg.Trailing}
+					u.mc.Client.CreatePost(post)
+				} else if toUser, exists := s.HasUser(query); exists {
+					if query == "mattermost" {
+						go u.handleMMServiceBot(toUser, msg.Trailing)
+						continue
+					}
+					if toUser.MmGhostUser {
+						u.handleMMDM(toUser, msg.Trailing)
+						continue
+					}
+					err = s.encodeMessage(u, irc.PRIVMSG, []string{toUser.Nick}, msg.Trailing)
+				} else {
+					err = s.encodeMessage(u, irc.ERR_NOSUCHNICK, msg.Params, "No such nick/channel")
 				}
-				// CTCP ACTION (/me)
-				if strings.HasPrefix(msg.Trailing, "\x01ACTION ") {
-					msg.Trailing = strings.Replace(msg.Trailing, "\x01ACTION ", "", -1)
-					msg.Trailing = "*" + msg.Trailing + "*"
-				}
-				msg.Trailing += "᠎"
-				post := &model.Post{ChannelId: u.mc.GetChannelId(p), Message: msg.Trailing}
-				u.mc.Client.CreatePost(post)
-			} else if toUser, exists := s.HasUser(query); exists {
-				if query == "mattermost" {
-					go u.handleMMServiceBot(toUser, msg.Trailing)
-					continue
-				}
-				if toUser.MmGhostUser {
-					u.handleMMDM(toUser, msg.Trailing)
-					continue
-				}
-				toUser.Encode(&irc.Message{
-					Prefix:   u.Prefix(),
-					Command:  irc.PRIVMSG,
-					Params:   []string{toUser.Nick},
-					Trailing: msg.Trailing,
-				})
-				s.Publish(&event{UserMsgEvent, s, nil, u, msg})
-			} else {
-				err = u.Encode(&irc.Message{
-					Prefix:   s.Prefix(),
-					Command:  irc.ERR_NOSUCHNICK,
-					Params:   msg.Params,
-					Trailing: "No such nick/channel",
-				})
 			}
 		case irc.NICK:
-			if len(msg.Params) < 1 {
-				u.Encode(&irc.Message{
-					Prefix:  s.Prefix(),
-					Command: irc.ERR_NEEDMOREPARAMS,
-					Params:  []string{msg.Command},
-				})
-				continue
+			if s.okParams(u, msg, 1) {
+				s.RenameUser(u, msg.Params[0])
 			}
-			s.RenameUser(u, msg.Params[0])
 		}
 		if err != nil {
 			logger.Errorf("handle encode error for %s: %s", u.ID(), err.Error())
@@ -872,13 +789,7 @@ func (s *server) handshake(u *User) error {
 		if msg.Command == irc.NICK && msg.Trailing != "" {
 			msg.Params = append(msg.Params, msg.Trailing)
 		}
-
-		if len(msg.Params) < 1 {
-			u.Encode(&irc.Message{
-				Prefix:  s.Prefix(),
-				Command: irc.ERR_NEEDMOREPARAMS,
-				Params:  []string{msg.Command},
-			})
+		if !s.okParams(u, msg, 1) {
 			continue
 		}
 
@@ -900,14 +811,7 @@ func (s *server) handshake(u *User) error {
 
 		ok := s.add(u)
 		if !ok {
-			u.Encode(
-				&irc.Message{
-					Prefix:   s.Prefix(),
-					Command:  irc.ERR_NICKNAMEINUSE,
-					Params:   []string{u.Nick},
-					Trailing: "Nickname is already in use",
-				},
-			)
+			s.encodeMessage(u, irc.ERR_NICKNAMEINUSE, []string{u.Nick}, "Nickname is already in use")
 			continue
 		}
 

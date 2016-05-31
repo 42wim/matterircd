@@ -2,7 +2,6 @@ package irckit
 
 import (
 	"net"
-	"strconv"
 	"strings"
 	"time"
 
@@ -11,6 +10,36 @@ import (
 	"github.com/mattermost/platform/model"
 	"github.com/sorcix/irc"
 )
+
+type MmInfo struct {
+	MmGhostUser    bool
+	MmClient       *model.Client
+	MmWsClient     *websocket.Conn
+	MmWsQuit       bool
+	Srv            Server
+	MmUsers        map[string]*model.User
+	MmUser         *model.User
+	MmChannels     *model.ChannelList
+	MmMoreChannels *model.ChannelList
+	MmTeam         *model.Team
+	Credentials    *MmCredentials
+	Cfg            *MmCfg
+	mc             *matterclient.MMClient
+}
+
+type MmCredentials struct {
+	Login  string
+	Team   string
+	Pass   string
+	Server string
+}
+
+type MmCfg struct {
+	AllowedServers []string
+	DefaultServer  string
+	DefaultTeam    string
+	Insecure       bool
+}
 
 func NewUserMM(c net.Conn, srv Server, cfg *MmCfg) *User {
 	u := NewUser(&conn{
@@ -22,13 +51,7 @@ func NewUserMM(c net.Conn, srv Server, cfg *MmCfg) *User {
 	u.MmInfo.Cfg = cfg
 
 	// used for login
-	mattermostService := &User{Nick: "mattermost", User: "mattermost", Real: "loginservice", Host: "service", channels: map[Channel]struct{}{}}
-	mattermostService.MmGhostUser = true
-	srv.Add(mattermostService)
-	if _, ok := srv.HasUser("mattermost"); !ok {
-		go srv.Handle(mattermostService)
-	}
-
+	u.createService("mattermost", "loginservice")
 	return u
 }
 
@@ -65,69 +88,44 @@ func (u *User) createMMUser(mmuser *model.User) *User {
 	}
 	ghost := &User{Nick: mmuser.Username, User: mmuser.Id, Real: mmuser.FirstName + " " + mmuser.LastName, Host: u.mc.Client.Url, channels: map[Channel]struct{}{}}
 	ghost.MmGhostUser = true
+	u.Srv.Add(ghost)
+	go u.Srv.Handle(ghost)
 	return ghost
 }
 
+func (u *User) createService(nick string, what string) {
+	service := &User{Nick: nick, User: nick, Real: what, Host: "service", channels: map[Channel]struct{}{}}
+	service.MmGhostUser = true
+	u.Srv.Add(service)
+	go u.Srv.Handle(service)
+}
+
+func (u *User) addUserToChannel(user *model.User, channel string) {
+	ghost := u.createMMUser(user)
+	logger.Info("adding", ghost.Nick, "to #"+channel)
+	ch := u.Srv.Channel("#" + channel)
+	ch.Join(ghost)
+}
+
 func (u *User) addUsersToChannels() {
-	var mmConnected bool
 	srv := u.Srv
-	// already connected to a mm server ? add teamname as suffix
-	if _, ok := srv.HasChannel("#town-square"); ok {
-		//mmConnected = true
-	}
-	rate := time.Second / 1
-	throttle := time.Tick(rate)
+	throttle := time.Tick(time.Millisecond * 300)
 
 	for _, mmchannel := range u.mc.Channels.Channels {
-
 		// exclude direct messages
 		if strings.Contains(mmchannel.Name, "__") {
 			continue
 		}
 		<-throttle
 		go func(mmchannel *model.Channel) {
-			edata, _ := u.mc.Client.GetChannelExtraInfo(mmchannel.Id, -1, "")
-			if mmConnected {
-				mmchannel.Name = mmchannel.Name + "-" + u.mc.Team.Name
-			}
-
-			// join ourself to all channels
+			u.syncMMChannel(mmchannel.Id, mmchannel.Name)
 			ch := srv.Channel("#" + mmchannel.Name)
-			ch.Topic(u, u.mc.GetChannelHeader(mmchannel.Id))
-			ch.Join(u)
-
-			// add everyone on the MM channel to the IRC channel
-			for _, d := range edata.Data.(*model.ChannelExtra).Members {
-				if mmConnected {
-					d.Username = d.Username + "-" + u.mc.Team.Name
-				}
-				// already joined
-				if d.Id == u.mc.User.Id {
-					continue
-				}
-
-				cghost, ok := srv.HasUser(d.Username)
-				if !ok {
-					ghost := u.createMMUser(u.mc.Users[d.Id])
-					ghost.MmGhostUser = true
-					logger.Info("adding", ghost.Nick, "to #"+mmchannel.Name)
-					srv.Add(ghost)
-					go srv.Handle(ghost)
-					ch := srv.Channel("#" + mmchannel.Name)
-					ch.Join(ghost)
-				} else {
-					ch := srv.Channel("#" + mmchannel.Name)
-					ch.Join(cghost)
-				}
-			}
-
 			// post everything to the channel you haven't seen yet
 			postlist := u.mc.GetPostsSince(mmchannel.Id, u.mc.Channels.Members[mmchannel.Id].LastViewedAt)
 			if postlist == nil {
 				logger.Errorf("something wrong with getMMPostsSince")
 				return
 			}
-			logger.Debugf("%#v", u.mc.Channels.Members[mmchannel.Id])
 			// traverse the order in reverse
 			for i := len(postlist.Order) - 1; i >= 0; i-- {
 				for _, post := range strings.Split(postlist.Posts[postlist.Order[i]].Message, "\n") {
@@ -145,48 +143,8 @@ func (u *User) addUsersToChannels() {
 		if mmuser.Id == u.mc.User.Id {
 			continue
 		}
-		_, ok := srv.HasUser(mmuser.Username)
-		if !ok {
-			if mmConnected {
-				mmuser.Username = mmuser.Username + "-" + u.mc.Team.Name
-			}
-			ghost := u.createMMUser(mmuser)
-			ghost.MmGhostUser = true
-			logger.Info("adding", ghost.Nick, "without a channel")
-			srv.Add(ghost)
-			go srv.Handle(ghost)
-		}
+		u.createMMUser(mmuser)
 	}
-}
-
-type MmInfo struct {
-	MmGhostUser    bool
-	MmClient       *model.Client
-	MmWsClient     *websocket.Conn
-	MmWsQuit       bool
-	Srv            Server
-	MmUsers        map[string]*model.User
-	MmUser         *model.User
-	MmChannels     *model.ChannelList
-	MmMoreChannels *model.ChannelList
-	MmTeam         *model.Team
-	Credentials    *MmCredentials
-	Cfg            *MmCfg
-	mc             *matterclient.MMClient
-}
-
-type MmCredentials struct {
-	Login  string
-	Team   string
-	Pass   string
-	Server string
-}
-
-type MmCfg struct {
-	AllowedServers []string
-	DefaultServer  string
-	DefaultTeam    string
-	Insecure       bool
 }
 
 func (u *User) WsReceiver() {
@@ -214,6 +172,8 @@ func (u *User) WsReceiver() {
 			u.addUsersToChannels()
 		}
 		logger.Debugf("WsReceiver: %#v", rmsg)
+		// check if we have the users/channels in our cache. If not update
+		u.checkWsActionMessage(&rmsg)
 		switch rmsg.Action {
 		case model.ACTION_POSTED:
 			u.handleWsActionPost(&rmsg)
@@ -238,10 +198,6 @@ func (u *User) handleWsActionPost(rmsg *model.Message) {
 			logger.Debugf("our own join/leave message. not relaying %#v", data.Message)
 			return
 		}
-	}
-	// we don't have the user, refresh the userlist
-	if u.mc.Users[data.UserId] == nil {
-		u.mc.UpdateUsers()
 	}
 	ghost := u.createMMUser(u.mc.Users[data.UserId])
 	// our own message, set our IRC self as user, not our mattermost self
@@ -302,13 +258,9 @@ func (u *User) handleWsActionPost(rmsg *model.Message) {
 
 	// updatelastviewed
 	u.mc.UpdateLastViewed(data.ChannelId)
-	return
 }
 
 func (u *User) handleWsActionUserRemoved(rmsg *model.Message) {
-	if u.mc.Users[rmsg.UserId] == nil {
-		u.mc.UpdateUsers()
-	}
 	ch := u.Srv.Channel("#" + u.mc.GetChannelName(rmsg.ChannelId))
 
 	// remove ourselves from the channel
@@ -322,31 +274,29 @@ func (u *User) handleWsActionUserRemoved(rmsg *model.Message) {
 		return
 	}
 	ch.Part(ghost, "")
-	return
 }
 
 func (u *User) handleWsActionUserAdded(rmsg *model.Message) {
-	if u.mc.GetChannelName(rmsg.ChannelId) == "" {
-		u.mc.UpdateChannels()
-	}
-
-	if u.mc.Users[rmsg.UserId] == nil {
-		u.mc.UpdateUsers()
-	}
-
-	ch := u.Srv.Channel("#" + u.mc.GetChannelName(rmsg.ChannelId))
-	// add ourselves to the channel
+	// do not add ourselves to the channel
 	if rmsg.UserId == u.mc.User.Id {
 		logger.Debug("ACTION_USER_ADDED not adding myself to", u.mc.GetChannelName(rmsg.ChannelId), rmsg.ChannelId)
 		return
 	}
-	ghost := u.createMMUser(u.mc.Users[rmsg.UserId])
-	if ghost == nil {
-		logger.Debug("couldn't add user", rmsg.UserId, u.mc.Users[rmsg.UserId].Username)
+	u.addUserToChannel(u.mc.Users[rmsg.UserId], u.mc.GetChannelName(rmsg.ChannelId))
+}
+
+func (u *User) checkWsActionMessage(rmsg *model.Message) {
+	// Don't check pings
+	if rmsg.Action == "ping" {
 		return
 	}
-	ch.Join(ghost)
-	return
+	logger.Debugf("checkWsActionMessage %#v\n", rmsg)
+	if u.mc.GetChannelName(rmsg.ChannelId) == "" {
+		u.mc.UpdateChannels()
+	}
+	if u.mc.Users[rmsg.UserId] == nil {
+		u.mc.UpdateUsers()
+	}
 }
 
 func (u *User) MsgUser(toUser *User, msg string) {
@@ -393,157 +343,11 @@ func (u *User) handleMMDM(toUser *User, msg string) {
 	u.mc.Client.CreatePost(post)
 }
 
-func (u *User) handleMMServiceBot(toUser *User, msg string) {
-	commands := strings.Fields(msg)
-	switch commands[0] {
-	case "LOGOUT", "logout":
-		{
-			u.logoutFromMattermost()
-		}
-	case "LOGIN", "login":
-		{
-			if u.mc != nil {
-				u.logoutFromMattermost()
-			}
-			cred := &MmCredentials{}
-			datalen := 5
-			if u.Cfg.DefaultTeam != "" {
-				cred.Team = u.Cfg.DefaultTeam
-				datalen--
-			}
-			if u.Cfg.DefaultServer != "" {
-				cred.Server = u.Cfg.DefaultServer
-				datalen--
-			}
-			data := strings.Split(msg, " ")
-			if len(data) == datalen {
-				cred.Pass = data[len(data)-1]
-				cred.Login = data[len(data)-2]
-				// no default server or team specified
-				if cred.Server == "" && cred.Team == "" {
-					cred.Server = data[len(data)-4]
-				}
-				if cred.Team == "" {
-					cred.Team = data[len(data)-3]
-				}
-				if cred.Server == "" {
-					cred.Server = data[len(data)-3]
-				}
-
-			}
-
-			// incorrect arguments
-			if len(data) != datalen {
-				// no server or team
-				if cred.Team != "" && cred.Server != "" {
-					u.MsgUser(toUser, "need LOGIN <login> <pass>")
-					return
-				}
-				// server missing
-				if cred.Team != "" {
-					u.MsgUser(toUser, "need LOGIN <server> <login> <pass>")
-					return
-				}
-				// team missing
-				if cred.Server != "" {
-					u.MsgUser(toUser, "need LOGIN <team> <login> <pass>")
-					return
-				}
-				u.MsgUser(toUser, "need LOGIN <server> <team> <login> <pass>")
-				return
-			}
-
-			if !u.isValidMMServer(cred.Server) {
-				u.MsgUser(toUser, "not allowed to connect to "+cred.Server)
-				return
-			}
-
-			u.Credentials = cred
-			var err error
-			u.mc, err = u.loginToMattermost()
-			if err != nil {
-				u.MsgUser(toUser, err.Error())
-				return
-			}
-			u.addUsersToChannels()
-			go u.WsReceiver()
-			u.MsgUser(toUser, "login OK")
-
-		}
-	case "SEARCH", "search":
-		{
-			if u.mc.Client == nil {
-				u.MsgUser(toUser, "Can not search, you're not logged in. Use LOGIN first.")
-				return
-			}
-			postlist := u.mc.SearchPosts(strings.Join(commands[1:], " "))
-			if postlist == nil || len(postlist.Order) == 0 {
-				u.MsgUser(toUser, "no results")
-				return
-			}
-			for i := len(postlist.Order) - 1; i >= 0; i-- {
-				timestamp := time.Unix(postlist.Posts[postlist.Order[i]].CreateAt/1000, 0).Format("January 02, 2006 15:04")
-				channelname := u.mc.GetChannelName(postlist.Posts[postlist.Order[i]].ChannelId)
-				u.MsgUser(toUser, "#"+channelname+" <"+u.mc.Users[postlist.Posts[postlist.Order[i]].UserId].Username+"> "+timestamp)
-				u.MsgUser(toUser, strings.Repeat("=", len("#"+channelname+" <"+u.mc.Users[postlist.Posts[postlist.Order[i]].UserId].Username+"> "+timestamp)))
-				for _, post := range strings.Split(postlist.Posts[postlist.Order[i]].Message, "\n") {
-					u.MsgUser(toUser, post)
-				}
-				u.MsgUser(toUser, "")
-				u.MsgUser(toUser, "")
-			}
-		}
-	case "SCROLLBACK", "scrollback", "sb":
-		{
-			if len(commands) != 3 {
-				u.MsgUser(toUser, "need SCROLLBACK <channel> <lines>")
-				u.MsgUser(toUser, "e.g. SCROLLBACK #bugs 10 (show last 10 lines from #bugs)")
-				return
-			}
-			limit, err := strconv.Atoi(commands[2])
-			if err != nil {
-				u.MsgUser(toUser, "need SCROLLBACK <channel> <lines>")
-				u.MsgUser(toUser, "e.g. SCROLLBACK #bugs 10 (show last 10 lines from #bugs)")
-				return
-			}
-			if !strings.Contains(commands[1], "#") {
-				u.MsgUser(toUser, "need SCROLLBACK <channel> <lines>")
-				u.MsgUser(toUser, "e.g. SCROLLBACK #bugs 10 (show last 10 lines from #bugs)")
-				return
-			}
-			commands[1] = strings.Replace(commands[1], "#", "", -1)
-			postlist := u.mc.GetPosts(u.mc.GetChannelId(commands[1]), limit)
-			if postlist == nil || len(postlist.Order) == 0 {
-				u.MsgUser(toUser, "no results")
-				return
-			}
-			for i := len(postlist.Order) - 1; i >= 0; i-- {
-				nick := u.mc.Users[postlist.Posts[postlist.Order[i]].UserId].Username
-				for _, post := range strings.Split(postlist.Posts[postlist.Order[i]].Message, "\n") {
-					u.MsgUser(toUser, "<"+nick+"> "+post)
-				}
-			}
-		}
-	default:
-		u.MsgUser(toUser, "possible commands: LOGIN, SEARCH, SCROLLBACK")
-		u.MsgUser(toUser, "<command> help for more info")
-	}
-
-}
-
+// sync IRC with mattermost channel state
 func (u *User) syncMMChannel(id string, name string) {
-	var mmConnected bool
 	srv := u.Srv
-	// already connected to a mm server ? add teamname as suffix
-	if _, ok := srv.HasChannel("#town-square"); ok {
-		//mmConnected = true
-	}
-
 	edata, _ := u.mc.Client.GetChannelExtraInfo(id, -1, "")
 	for _, d := range edata.Data.(*model.ChannelExtra).Members {
-		if mmConnected {
-			d.Username = d.Username + "-" + u.mc.Team.Name
-		}
 		// join all the channels we're on on MM
 		if d.Id == u.mc.User.Id {
 			ch := srv.Channel("#" + name)
@@ -555,20 +359,7 @@ func (u *User) syncMMChannel(id string, name string) {
 			}
 			continue
 		}
-
-		cghost, ok := srv.HasUser(d.Username)
-		if !ok {
-			ghost := u.createMMUser(u.mc.Users[d.Id])
-			ghost.MmGhostUser = true
-			logger.Info("adding", ghost.Nick, "to #"+name)
-			srv.Add(ghost)
-			go srv.Handle(ghost)
-			ch := srv.Channel("#" + name)
-			ch.Join(ghost)
-		} else {
-			ch := srv.Channel("#" + name)
-			ch.Join(cghost)
-		}
+		u.addUserToChannel(u.mc.Users[d.Id], name)
 	}
 }
 
