@@ -11,9 +11,10 @@ import (
 // NewUser creates a *User, wrapping a connection with metadata we need for our server.
 func NewUser(c Conn) *User {
 	return &User{
-		Conn:     c,
-		Host:     "*",
-		channels: map[Channel]struct{}{},
+		Conn:        c,
+		Host:        "*",
+		channels:    map[Channel]struct{}{},
+		ownMessages: newMessageCache(),
 	}
 }
 
@@ -38,6 +39,8 @@ type User struct {
 	Host string
 
 	channels map[Channel]struct{}
+
+	ownMessages *messageCache
 
 	MmInfo
 }

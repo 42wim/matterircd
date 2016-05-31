@@ -229,8 +229,8 @@ func (u *User) handleWsActionPost(rmsg *model.Message) {
 	data := model.PostFromJson(strings.NewReader(rmsg.Props["post"]))
 	logger.Debug("receiving userid", data.UserId)
 	if data.UserId == u.mc.User.Id {
-		// our own message - http://www.fileformat.info/info/unicode/char/180e/fontsupport.htm
-		if strings.Contains(data.Message, "᠎") {
+		// check if this is a message we sent; if so, ignore it
+		if u.ownMessages.messageIn(data.ChannelId, data.Message) {
 			logger.Debugf("message is sent from IRC, contains unicode, not relaying %#v", data.Message)
 			return
 		}
