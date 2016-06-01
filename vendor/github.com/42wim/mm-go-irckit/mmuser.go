@@ -190,7 +190,7 @@ func (u *User) handleWsActionPost(rmsg *model.Message) {
 	logger.Debug("receiving userid", data.UserId)
 	if data.UserId == u.mc.User.Id {
 		// our own message - http://www.fileformat.info/info/unicode/char/180e/fontsupport.htm
-		if strings.Contains(data.Message, "᠎") {
+		if strings.Contains(data.Message, "​") {
 			logger.Debugf("message is sent from IRC, contains unicode, not relaying %#v", data.Message)
 			return
 		}
