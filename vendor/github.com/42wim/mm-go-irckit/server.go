@@ -722,7 +722,7 @@ func (s *server) handle(u *User) {
 						msg.Trailing = strings.Replace(msg.Trailing, "\x01ACTION ", "", -1)
 						msg.Trailing = "*" + msg.Trailing + "*"
 					}
-					msg.Trailing += "᠎"
+					msg.Trailing += " ​"
 					post := &model.Post{ChannelId: u.mc.GetChannelId(p), Message: msg.Trailing}
 					u.mc.Client.CreatePost(post)
 				} else if toUser, exists := s.HasUser(query); exists {

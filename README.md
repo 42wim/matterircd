@@ -134,5 +134,5 @@ If you use chrome, you can easily test with [circ](https://chrome.google.com/web
 
 ## Caveats
 
-Matterircd sends a "Unicode Character 'MONGOLIAN VOWEL SEPARATOR' (U+180E)" at the end of every line to mattermost, more information about this can be found in ![this issue](https://github.com/42wim/matterircd/issues/24)
+Matterircd sends a "Unicode Character 'MONGOLIAN VOWEL SEPARATOR' (U+180E)" at the end of every line to mattermost, more information about this can be found in [this issue](https://github.com/42wim/matterircd/issues/24) (update, as of >0.7 this is changed to 'space + zero-width space')
 
