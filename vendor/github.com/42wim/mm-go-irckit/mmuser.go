@@ -364,8 +364,7 @@ func (u *User) syncMMChannel(id string, name string) {
 }
 
 func (u *User) joinMMChannel(channel string) error {
-	u.mc.JoinChannel(channel)
-	return nil
+	return u.mc.JoinChannel(channel)
 }
 
 func (u *User) isValidMMServer(server string) bool {
