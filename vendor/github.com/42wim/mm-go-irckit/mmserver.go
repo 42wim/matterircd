@@ -12,3 +12,10 @@ func (s *server) Logout(user *User) {
 		ch.Unlink()
 	}
 }
+
+func (s *server) ChannelCount() int {
+	return len(s.channels)
+}
+func (s *server) UserCount() int {
+	return len(s.users)
+}

@@ -66,6 +66,8 @@ type Server interface {
 	Add(u *User) bool
 	Handle(u *User)
 	Logout(u *User)
+	ChannelCount() int
+	UserCount() int
 }
 
 // ServerConfig produces a Server setup with configuration options.
@@ -567,6 +569,18 @@ func (s *server) names(u *User, channels ...string) []*irc.Message {
 	return r
 }
 
+func (s *server) lusers(u *User) []*irc.Message {
+	r := []*irc.Message{}
+	msg := irc.Message{
+		Prefix:   s.Prefix(),
+		Command:  irc.RPL_LUSERCLIENT,
+		Params:   []string{u.Nick},
+		Trailing: "There are " + strconv.Itoa(u.Srv.UserCount()) + " users and " + strconv.Itoa(u.Srv.ChannelCount()) + " channels on 1 server",
+	}
+	r = append(r, &msg)
+	return r
+}
+
 func (s *server) okParams(u *User, msg *irc.Message, length int) bool {
 	if len(msg.Params) < length {
 		s.encodeMessage(u, irc.ERR_NEEDMOREPARAMS, []string{msg.Command, u.Nick}, "Not enough parameters")
@@ -647,7 +661,7 @@ func (s *server) handle(u *User) {
 					channels := strings.Split(msg.Params[0], ",")
 					for _, channel := range channels {
 						// you can only join existing channels
-						err := u.joinMMChannel(channel)
+						err := u.mc.JoinChannel(channel)
 						if err != nil {
 							s.encodeMessage(u, irc.ERR_INVITEONLYCHAN, []string{u.Nick, channel}, "Cannot join channel (+i)")
 							continue
@@ -667,6 +681,8 @@ func (s *server) handle(u *User) {
 			}
 		case irc.LIST:
 			u.Encode(s.list(u)...)
+		case irc.LUSERS:
+			u.Encode(s.lusers(u)...)
 		case irc.TOPIC:
 			if s.okParams(u, msg, 1) {
 				s.topic(u, msg.Params[0], msg.Trailing)
@@ -731,7 +747,7 @@ func (s *server) handle(u *User) {
 						continue
 					}
 					if toUser.MmGhostUser {
-						u.handleMMDM(toUser, msg.Trailing)
+						u.mc.SendDirectMessage(toUser.User, msg.Trailing)
 						continue
 					}
 					err = s.encodeMessage(u, irc.PRIVMSG, []string{toUser.Nick}, msg.Trailing)

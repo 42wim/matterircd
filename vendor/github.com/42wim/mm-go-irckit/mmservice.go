@@ -79,9 +79,7 @@ func (u *User) handleMMServiceBot(toUser *User, msg string) {
 				return
 			}
 			u.addUsersToChannels()
-			go u.WsReceiver()
 			u.MsgUser(toUser, "login OK")
-
 		}
 	case "SEARCH", "search":
 		{

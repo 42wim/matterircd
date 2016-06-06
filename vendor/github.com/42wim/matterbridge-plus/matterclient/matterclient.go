@@ -37,6 +37,7 @@ type MMClient struct {
 	*Credentials
 	Client       *model.Client
 	WsClient     *websocket.Conn
+	WsQuit       bool
 	Channels     *model.ChannelList
 	MoreChannels *model.ChannelList
 	User         *model.User
@@ -64,6 +65,9 @@ func (m *MMClient) SetLogLevel(level string) {
 }
 
 func (m *MMClient) Login() error {
+	if m.WsQuit {
+		return nil
+	}
 	b := &backoff.Backoff{
 		Min:    time.Second,
 		Max:    5 * time.Minute,
@@ -137,11 +141,11 @@ func (m *MMClient) Login() error {
 	header := http.Header{}
 	header.Set(model.HEADER_AUTH, "BEARER "+m.Client.AuthToken)
 
-	var WsClient *websocket.Conn
+	m.log.Debug("WsClient: making connection")
 	var err error
 	for {
 		wsDialer := &websocket.Dialer{Proxy: http.ProxyFromEnvironment, TLSClientConfig: &tls.Config{InsecureSkipVerify: m.SkipTLSVerify}}
-		WsClient, _, err = wsDialer.Dial(wsurl, header)
+		m.WsClient, _, err = wsDialer.Dial(wsurl, header)
 		if err != nil {
 			d := b.Duration()
 			log.Printf("WSS: %s, reconnecting in %s", err, d)
@@ -151,8 +155,6 @@ func (m *MMClient) Login() error {
 		break
 	}
 	b.Reset()
-
-	m.WsClient = WsClient
 
 	// populating users
 	m.UpdateUsers()
@@ -166,6 +168,10 @@ func (m *MMClient) Login() error {
 func (m *MMClient) WsReceiver() {
 	var rmsg model.Message
 	for {
+		if m.WsQuit {
+			m.log.Debug("exiting WsReceiver")
+			return
+		}
 		if err := m.WsClient.ReadJSON(&rmsg); err != nil {
 			log.Println("error:", err)
 			// reconnect
@@ -313,6 +319,14 @@ func (m *MMClient) GetPosts(channelId string, limit int) *model.PostList {
 	return res.Data.(*model.PostList)
 }
 
+func (m *MMClient) GetPublicLink(filename string) string {
+	res, err := m.Client.GetPublicLink(filename)
+	if err != nil {
+		return ""
+	}
+	return res.Data.(string)
+}
+
 func (m *MMClient) UpdateChannelHeader(channelId string, header string) {
 	data := make(map[string]string)
 	data["channel_id"] = channelId
@@ -359,4 +373,31 @@ func (m *MMClient) createCookieJar(token string) *cookiejar.Jar {
 	cookieURL, _ := url.Parse("https://" + m.Credentials.Server)
 	jar.SetCookies(cookieURL, cookies)
 	return jar
+}
+
+func (m *MMClient) SendDirectMessage(toUserId string, msg string) {
+	log.Println("SendDirectMessage to:", toUserId, msg)
+	var channel string
+	// We don't have a DM with this user yet.
+	if m.GetChannelId(toUserId+"__"+m.User.Id) == "" && m.GetChannelId(m.User.Id+"__"+toUserId) == "" {
+		// create DM channel
+		_, err := m.Client.CreateDirectChannel(toUserId)
+		if err != nil {
+			log.Debugf("SendDirectMessage to %#v failed: %s", toUserId, err)
+		}
+		// update our channels
+		mmchannels, _ := m.Client.GetChannels("")
+		m.Channels = mmchannels.Data.(*model.ChannelList)
+	}
+
+	// build the channel name
+	if toUserId > m.User.Id {
+		channel = m.User.Id + "__" + toUserId
+	} else {
+		channel = toUserId + "__" + m.User.Id
+	}
+	// build & send the message
+	msg = strings.Replace(msg, "\r", "", -1)
+	post := &model.Post{ChannelId: m.GetChannelId(channel), Message: msg}
+	m.Client.CreatePost(post)
 }
