@@ -200,16 +200,10 @@ func (u *User) handleWsActionPost(rmsg *model.Message) {
 			return
 		}
 		logger.Debug("direct message")
-		var rcvuser string
-		rcvusers := strings.Split(rcvchannel, "__")
-		if rcvusers[0] != u.mc.User.Id {
-			rcvuser = u.mc.Users[rcvusers[0]].Username
-		} else {
-			rcvuser = u.mc.Users[rcvusers[1]].Username
-		}
+		rcvuser := u.mc.GetOtherUserDM(rcvchannel)
 		msgs := strings.Split(data.Message, "\n")
 		for _, m := range msgs {
-			u.MsgSpoofUser(rcvuser, m)
+			u.MsgSpoofUser(rcvuser.Username, m)
 		}
 		return
 	}
@@ -236,12 +230,7 @@ func (u *User) handleWsActionPost(rmsg *model.Message) {
 
 	if len(data.Filenames) > 0 {
 		logger.Debugf("files detected")
-		for _, f := range data.Filenames {
-			logger.Debug("filename: ", f)
-			fname := u.mc.GetPublicLink(f)
-			if fname == "" {
-				continue
-			}
+		for _, fname := range u.mc.GetPublicLinks(data.Filenames) {
 			ch.Message(ghost, "download file - "+fname)
 		}
 	}
@@ -278,14 +267,6 @@ func (u *User) handleWsActionUserAdded(rmsg *model.Message) {
 }
 
 func (u *User) checkWsActionMessage(rmsg *model.Message) {
-	// Don't check pings
-	if rmsg.Action == "ping" {
-		logger.Debug("Ws PONG")
-		if u.mc != nil && !u.mc.WsQuit {
-			u.mc.WsClient.WriteMessage(websocket.PongMessage, []byte{})
-		}
-		return
-	}
 	logger.Debugf("checkWsActionMessage %#v\n", rmsg)
 	if u.mc.GetChannelName(rmsg.ChannelId) == "" {
 		u.mc.UpdateChannels()

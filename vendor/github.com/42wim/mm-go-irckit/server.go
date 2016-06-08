@@ -305,6 +305,26 @@ func (s *server) Len() int {
 	return len(s.users)
 }
 
+func (s *server) away(u *User, msg string) *irc.Message {
+	u.mc.WsAway = false
+	r := &irc.Message{
+		Prefix:   s.Prefix(),
+		Params:   []string{u.Nick},
+		Command:  irc.RPL_UNAWAY,
+		Trailing: "You are no longer marked as being away",
+	}
+	if msg != "" {
+		r = &irc.Message{
+			Prefix:   s.Prefix(),
+			Params:   []string{u.Nick},
+			Command:  irc.RPL_NOWAWAY,
+			Trailing: "You have been marked as being away",
+		}
+		u.mc.WsAway = true
+	}
+	return r
+}
+
 func (s *server) who(u *User, mask string, op bool) []*irc.Message {
 	// XXX: Cut this
 	endMsg := &irc.Message{
@@ -618,6 +638,10 @@ func (s *server) handle(u *User) {
 		}
 		// TODO: Move this giant switch statement into a command registry system, similar to https://godoc.org/github.com/shazow/ssh-chat/chat#Commands
 		switch msg.Command {
+		case irc.AWAY:
+			if u.mc != nil && u.mc.User != nil {
+				u.Encode(s.away(u, msg.Trailing))
+			}
 		case irc.PART:
 			if s.okParams(u, msg, 1) {
 				logger.Debugf("channels: %#v", s.channels)
