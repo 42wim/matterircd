@@ -24,7 +24,7 @@ If you want to run matterircd with mattermost DEV builds, use the develop branch
 * scrollback support (/msg mattermost scrollback #channel limit)
 * restrict to specified mattermost instances
 * set default team/server
-* WHOIS, WHO, JOIN, LEAVE, NICK, LIST, ISON, PRIVMSG, MODE, TOPIC support
+* WHOIS, WHO, JOIN, LEAVE, NICK, LIST, ISON, PRIVMSG, MODE, TOPIC, AWAY support
 * support TLS (ssl)
 * support LDAP logins (mattermost enterprise) (use your ldap account/pass to login)
 
