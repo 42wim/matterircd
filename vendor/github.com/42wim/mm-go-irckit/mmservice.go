@@ -11,6 +11,10 @@ func (u *User) handleMMServiceBot(toUser *User, msg string) {
 	switch commands[0] {
 	case "LOGOUT", "logout":
 		{
+			if u.mc == nil {
+				u.MsgUser(toUser, "You're not logged in. Use LOGIN first.")
+				return
+			}
 			u.logoutFromMattermost()
 		}
 	case "LOGIN", "login":
@@ -83,8 +87,8 @@ func (u *User) handleMMServiceBot(toUser *User, msg string) {
 		}
 	case "SEARCH", "search":
 		{
-			if u.mc.Client == nil {
-				u.MsgUser(toUser, "Can not search, you're not logged in. Use LOGIN first.")
+			if u.mc == nil {
+				u.MsgUser(toUser, "You're not logged in. Use LOGIN first.")
 				return
 			}
 			postlist := u.mc.SearchPosts(strings.Join(commands[1:], " "))
@@ -106,6 +110,10 @@ func (u *User) handleMMServiceBot(toUser *User, msg string) {
 		}
 	case "SCROLLBACK", "scrollback", "sb":
 		{
+			if u.mc == nil {
+				u.MsgUser(toUser, "You're not logged in. Use LOGIN first.")
+				return
+			}
 			if len(commands) != 3 {
 				u.MsgUser(toUser, "need SCROLLBACK <channel> <lines>")
 				u.MsgUser(toUser, "e.g. SCROLLBACK #bugs 10 (show last 10 lines from #bugs)")
