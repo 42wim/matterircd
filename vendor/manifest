@@ -70,7 +70,7 @@
 			"importpath": "github.com/mattermost/platform/einterfaces",
 			"repository": "https://github.com/mattermost/platform",
 			"vcs": "git",
-			"revision": "9d94869cc6a0fb9f051879437c104ccd76094380",
+			"revision": "974238231b9cdbd39a825ec8e9299fbb0b51f6b8",
 			"branch": "HEAD",
 			"path": "/einterfaces",
 			"notests": true
@@ -79,7 +79,7 @@
 			"importpath": "github.com/mattermost/platform/model",
 			"repository": "https://github.com/mattermost/platform",
 			"vcs": "git",
-			"revision": "9d94869cc6a0fb9f051879437c104ccd76094380",
+			"revision": "974238231b9cdbd39a825ec8e9299fbb0b51f6b8",
 			"branch": "HEAD",
 			"path": "/model",
 			"notests": true
@@ -142,6 +142,15 @@
 			"revision": "e45385e9b226f570b1f086bf287b25d3d4117776",
 			"branch": "master",
 			"path": "/http2/hpack",
+			"notests": true
+		},
+		{
+			"importpath": "golang.org/x/net/lex/httplex",
+			"repository": "https://go.googlesource.com/net",
+			"vcs": "git",
+			"revision": "1961d9def2b2d7a28d7958926d2457d05a178ecd",
+			"branch": "master",
+			"path": "/lex/httplex",
 			"notests": true
 		},
 		{
