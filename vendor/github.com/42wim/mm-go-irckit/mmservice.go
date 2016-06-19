@@ -20,7 +20,10 @@ func (u *User) handleMMServiceBot(toUser *User, msg string) {
 	case "LOGIN", "login":
 		{
 			if u.mc != nil {
-				u.logoutFromMattermost()
+				err := u.logoutFromMattermost()
+				if err != nil {
+					u.MsgUser(toUser, err.Error())
+				}
 			}
 			cred := &MmCredentials{}
 			datalen := 5

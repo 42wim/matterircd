@@ -1,11 +1,18 @@
 package irckit
 
 import (
-	"github.com/alexcesaro/log"
+	"github.com/Sirupsen/logrus"
 )
 
-var logger log.Logger = log.NullLogger
+var logger *logrus.Entry
 
-func SetLogger(l log.Logger) {
+func SetLogger(l *logrus.Entry) {
 	logger = l
+}
+
+func IsDebugLevel() bool {
+	if logger.Level == logrus.DebugLevel {
+		return true
+	}
+	return false
 }

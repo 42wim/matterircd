@@ -49,7 +49,6 @@ func NewUserMM(c net.Conn, srv Server, cfg *MmCfg) *User {
 	})
 	u.Srv = srv
 	u.MmInfo.Cfg = cfg
-
 	// used for login
 	u.createService("mattermost", "loginservice")
 	return u
@@ -60,13 +59,16 @@ func (u *User) loginToMattermost() (*matterclient.MMClient, error) {
 	if u.Cfg.Insecure {
 		mc.Credentials.NoTLS = true
 	}
-	if logger.LogDebug() {
+	if IsDebugLevel() {
 		mc.SetLogLevel("debug")
 	}
+	logger.Infof("login as %s (team: %s) on %s", u.Credentials.Login, u.Credentials.Team, u.Credentials.Server)
 	err := mc.Login()
 	if err != nil {
+		logger.Error("login failed")
 		return nil, err
 	}
+	logger.Info("login succeeded")
 	u.mc = mc
 	u.mc.WsQuit = false
 	go mc.WsReceiver()
@@ -75,8 +77,13 @@ func (u *User) loginToMattermost() (*matterclient.MMClient, error) {
 }
 
 func (u *User) logoutFromMattermost() error {
-	logger.Debug("LOGOUT")
-	u.mc.Client.Logout()
+	logger.Infof("logout as %s (team: %s) on %s", u.Credentials.Login, u.Credentials.Team, u.Credentials.Server)
+	_, err := u.mc.Client.Logout()
+	if err != nil {
+		logger.Error("logout failed")
+		return err
+	}
+	logger.Info("logout succeeded")
 	u.mc.WsQuit = true
 	u.mc.WsClient.Close()
 	u.mc.WsClient.UnderlyingConn().Close()
@@ -106,7 +113,7 @@ func (u *User) createService(nick string, what string) {
 
 func (u *User) addUserToChannel(user *model.User, channel string) {
 	ghost := u.createMMUser(user)
-	logger.Info("adding", ghost.Nick, "to #"+channel)
+	logger.Debug("adding", ghost.Nick, "to #"+channel)
 	ch := u.Srv.Channel("#" + channel)
 	ch.Join(ghost)
 }
@@ -127,7 +134,7 @@ func (u *User) addUsersToChannels() {
 			// post everything to the channel you haven't seen yet
 			postlist := u.mc.GetPostsSince(mmchannel.Id, u.mc.Channels.Members[mmchannel.Id].LastViewedAt)
 			if postlist == nil {
-				logger.Errorf("something wrong with getMMPostsSince")
+				logger.Error("something wrong with getMMPostsSince")
 				return
 			}
 			// traverse the order in reverse
@@ -319,7 +326,7 @@ func (u *User) syncMMChannel(id string, name string) {
 
 func (u *User) isValidMMServer(server string) bool {
 	if len(u.Cfg.AllowedServers) > 0 {
-		logger.Debug("allowedservers:", u.Cfg.AllowedServers)
+		logger.Debugf("allowedservers: %s", u.Cfg.AllowedServers)
 		for _, srv := range u.Cfg.AllowedServers {
 			if srv == server {
 				return true

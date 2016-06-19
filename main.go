@@ -5,17 +5,16 @@ import (
 	"flag"
 	"fmt"
 	"github.com/42wim/mm-go-irckit"
-	"github.com/alexcesaro/log"
-	"github.com/alexcesaro/log/golog"
+	"github.com/Sirupsen/logrus"
 	"net"
 	"os"
 	"strings"
 )
 
-var logger log.Logger = log.NullLogger
 var flagRestrict, flagDefaultTeam, flagDefaultServer, flagTLSBind, flagTLSDir *string
 var flagInsecure *bool
 var Version = "0.8-dev"
+var logger *logrus.Entry
 
 func main() {
 	flagDebug := flag.Bool("debug", false, "enable debug logging")
@@ -31,11 +30,15 @@ func main() {
 	flagTLSDir = flag.String("tlsdir", ".", "directory to look for key.pem and cert.pem.")
 	flag.Parse()
 
-	logger = golog.New(os.Stderr, log.Info)
+	ourlog := logrus.New()
+	ourlog.Formatter = &logrus.TextFormatter{FullTimestamp: true}
+	logger = ourlog.WithFields(logrus.Fields{"module": "matterircd"})
+
 	if *flagDebug {
 		logger.Info("enabling debug")
-		logger = golog.New(os.Stderr, log.Debug)
+		ourlog.Level = logrus.DebugLevel
 	}
+
 	if *flagVersion {
 		fmt.Println("Version:", Version)
 		return
@@ -55,9 +58,9 @@ func main() {
 	}
 	socket, err := net.Listen("tcp", *flagBind)
 	if err != nil {
-		logger.Errorf("Can not listen on %s: %v\n", *flagBind, err)
+		logger.Errorf("Can not listen on %s: %v", *flagBind, err)
 	}
-	logger.Info("Listening on", *flagBind)
+	logger.Infof("Listening on %s", *flagBind)
 	defer socket.Close()
 	start(socket)
 }

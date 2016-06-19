@@ -87,7 +87,7 @@ func (m *MMClient) Login() error {
 	var appErr *model.AppError
 	var logmsg = "trying login"
 	for {
-		m.log.Debugf(logmsg+" %s %s %s", m.Credentials.Team, m.Credentials.Login, m.Credentials.Server)
+		m.log.Debugf("%s %s %s %s", logmsg, m.Credentials.Team, m.Credentials.Login, m.Credentials.Server)
 		if strings.Contains(m.Credentials.Pass, model.SESSION_COOKIE_TOKEN) {
 			m.log.Debugf(logmsg+" with ", model.SESSION_COOKIE_TOKEN)
 			token := strings.Split(m.Credentials.Pass, model.SESSION_COOKIE_TOKEN+"=")
@@ -95,7 +95,7 @@ func (m *MMClient) Login() error {
 			m.Client.MockSession(token[1])
 			myinfo, appErr = m.Client.GetMe("")
 			if myinfo.Data.(*model.User) == nil {
-				m.log.Debug("LOGIN TOKEN:", m.Credentials.Pass, "is invalid")
+				m.log.Errorf("LOGIN TOKEN: %s is invalid", m.Credentials.Pass)
 				return errors.New("invalid " + model.SESSION_COOKIE_TOKEN)
 			}
 		} else {
@@ -111,7 +111,7 @@ func (m *MMClient) Login() error {
 				}
 				return errors.New(appErr.Message)
 			}
-			m.log.Debug("LOGIN: %s, reconnecting in %s", appErr, d)
+			m.log.Debugf("LOGIN: %s, reconnecting in %s", appErr, d)
 			time.Sleep(d)
 			logmsg = "retrying login"
 			continue
@@ -149,7 +149,7 @@ func (m *MMClient) Login() error {
 		m.WsClient, _, err = wsDialer.Dial(wsurl, header)
 		if err != nil {
 			d := b.Duration()
-			log.Printf("WSS: %s, reconnecting in %s", err, d)
+			m.log.Debugf("WSS: %s, reconnecting in %s", err, d)
 			time.Sleep(d)
 			continue
 		}
@@ -174,7 +174,7 @@ func (m *MMClient) WsReceiver() {
 			return
 		}
 		if err := m.WsClient.ReadJSON(&rmsg); err != nil {
-			log.Println("error:", err)
+			m.log.Error("error:", err)
 			// reconnect
 			m.Login()
 		}
@@ -355,25 +355,25 @@ func (m *MMClient) UpdateChannelHeader(channelId string, header string) {
 	data := make(map[string]string)
 	data["channel_id"] = channelId
 	data["channel_header"] = header
-	log.Printf("updating channelheader %#v, %#v", channelId, header)
+	m.log.Debugf("updating channelheader %#v, %#v", channelId, header)
 	_, err := m.Client.UpdateChannelHeader(data)
 	if err != nil {
-		log.Print(err)
+		log.Error(err)
 	}
 }
 
 func (m *MMClient) UpdateLastViewed(channelId string) {
-	log.Printf("posting lastview %#v", channelId)
+	m.log.Debugf("posting lastview %#v", channelId)
 	_, err := m.Client.UpdateLastViewedAt(channelId)
 	if err != nil {
-		log.Print(err)
+		m.log.Error(err)
 	}
 }
 
 func (m *MMClient) UsernamesInChannel(channelName string) []string {
 	ceiRes, err := m.Client.GetChannelExtraInfo(m.GetChannelId(channelName), 5000, "")
 	if err != nil {
-		log.Errorf("UsernamesInChannel(%s) failed: %s", channelName, err)
+		m.log.Errorf("UsernamesInChannel(%s) failed: %s", channelName, err)
 		return []string{}
 	}
 	extra := ceiRes.Data.(*model.ChannelExtra)
@@ -414,14 +414,14 @@ func (m *MMClient) GetOtherUserDM(channel string) *model.User {
 }
 
 func (m *MMClient) SendDirectMessage(toUserId string, msg string) {
-	log.Println("SendDirectMessage to:", toUserId, msg)
+	m.log.Debugf("SendDirectMessage to %s, msg %s", toUserId, msg)
 	var channel string
 	// We don't have a DM with this user yet.
 	if m.GetChannelId(toUserId+"__"+m.User.Id) == "" && m.GetChannelId(m.User.Id+"__"+toUserId) == "" {
 		// create DM channel
 		_, err := m.Client.CreateDirectChannel(toUserId)
 		if err != nil {
-			log.Debugf("SendDirectMessage to %#v failed: %s", toUserId, err)
+			m.log.Debugf("SendDirectMessage to %#v failed: %s", toUserId, err)
 		}
 		// update our channels
 		mmchannels, _ := m.Client.GetChannels("")
