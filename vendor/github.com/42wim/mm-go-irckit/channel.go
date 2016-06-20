@@ -2,10 +2,10 @@ package irckit
 
 import (
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
+	"github.com/mattermost/platform/model"
 	"github.com/sorcix/irc"
 )
 
@@ -222,19 +222,37 @@ func (ch *channel) Join(u *User) error {
 		})
 	}
 
-	msgs = append(msgs,
-		&irc.Message{
-			Prefix:   ch.Prefix(),
-			Command:  irc.RPL_NAMREPLY,
-			Params:   []string{u.Nick, "=", ch.name},
-			Trailing: strings.Join(ch.Names(), " "),
-		},
-		&irc.Message{
-			Prefix:   ch.Prefix(),
-			Params:   []string{u.Nick, ch.name},
-			Command:  irc.RPL_ENDOFNAMES,
-			Trailing: "End of /NAMES list.",
-		},
+	line := ""
+	i := 0
+	for _, name := range ch.Names() {
+		if i+len(name) < 400 {
+			line += name + " "
+			i += len(name)
+		} else {
+			msgs = append(msgs, &irc.Message{
+				Prefix:   ch.Prefix(),
+				Command:  irc.RPL_NAMREPLY,
+				Params:   []string{u.Nick, "=", ch.name},
+				Trailing: line,
+			})
+			line = ""
+			line += name + " "
+			i = len(name)
+		}
+	}
+	msgs = append(msgs, &irc.Message{
+		Prefix:   ch.Prefix(),
+		Command:  irc.RPL_NAMREPLY,
+		Params:   []string{u.Nick, "=", ch.name},
+		Trailing: line,
+	})
+
+	msgs = append(msgs, &irc.Message{
+		Prefix:   ch.Prefix(),
+		Params:   []string{u.Nick, ch.name},
+		Command:  irc.RPL_ENDOFNAMES,
+		Trailing: "End of /NAMES list.",
+	},
 	)
 
 	return u.Encode(msgs...)
@@ -263,7 +281,11 @@ func (ch *channel) Names() []string {
 	users := ch.Users()
 	names := make([]string, 0, len(users))
 	for _, u := range users {
-		names = append(names, u.Nick)
+		if u.Roles == model.ROLE_SYSTEM_ADMIN {
+			names = append(names, "@"+u.Nick)
+		} else {
+			names = append(names, u.Nick)
+		}
 	}
 	// TODO: Append in sorted order?
 	sort.Strings(names)

@@ -32,10 +32,11 @@ type User struct {
 	Conn
 
 	sync.RWMutex
-	Nick string // From NICK command
-	User string // From USER command
-	Real string // From USER command
-	Host string
+	Nick  string // From NICK command
+	User  string // From USER command
+	Real  string // From USER command
+	Host  string
+	Roles string
 
 	channels map[Channel]struct{}
 

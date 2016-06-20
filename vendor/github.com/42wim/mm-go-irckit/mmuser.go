@@ -59,9 +59,7 @@ func (u *User) loginToMattermost() (*matterclient.MMClient, error) {
 	if u.Cfg.Insecure {
 		mc.Credentials.NoTLS = true
 	}
-	if IsDebugLevel() {
-		mc.SetLogLevel("debug")
-	}
+	mc.SetLogLevel(LogLevel)
 	logger.Infof("login as %s (team: %s) on %s", u.Credentials.Login, u.Credentials.Team, u.Credentials.Server)
 	err := mc.Login()
 	if err != nil {
@@ -97,7 +95,7 @@ func (u *User) createMMUser(mmuser *model.User) *User {
 	if ghost, ok := u.Srv.HasUser(mmuser.Username); ok {
 		return ghost
 	}
-	ghost := &User{Nick: mmuser.Username, User: mmuser.Id, Real: mmuser.FirstName + " " + mmuser.LastName, Host: u.mc.Client.Url, channels: map[Channel]struct{}{}}
+	ghost := &User{Nick: mmuser.Username, User: mmuser.Id, Real: mmuser.FirstName + " " + mmuser.LastName, Host: u.mc.Client.Url, Roles: mmuser.Roles, channels: map[Channel]struct{}{}}
 	ghost.MmGhostUser = true
 	u.Srv.Add(ghost)
 	go u.Srv.Handle(ghost)
@@ -113,14 +111,26 @@ func (u *User) createService(nick string, what string) {
 
 func (u *User) addUserToChannel(user *model.User, channel string) {
 	ghost := u.createMMUser(user)
-	logger.Debug("adding", ghost.Nick, "to #"+channel)
-	ch := u.Srv.Channel("#" + channel)
+	logger.Debugf("adding %s to %s", ghost.Nick, channel)
+	ch := u.Srv.Channel(channel)
 	ch.Join(ghost)
 }
 
 func (u *User) addUsersToChannels() {
 	srv := u.Srv
 	throttle := time.Tick(time.Millisecond * 300)
+
+	// add all users, also who are not on channels
+	ch := srv.Channel("&users")
+	for _, mmuser := range u.mc.Users {
+		// do not add our own nick
+		if mmuser.Id == u.mc.User.Id {
+			continue
+		}
+		u.createMMUser(mmuser)
+		u.addUserToChannel(mmuser, "&users")
+	}
+	ch.Join(u)
 
 	for _, mmchannel := range u.mc.Channels.Channels {
 		// exclude direct messages
@@ -146,15 +156,6 @@ func (u *User) addUsersToChannels() {
 			u.mc.UpdateLastViewed(mmchannel.Id)
 
 		}(mmchannel)
-	}
-
-	// add all users, also who are not on channels
-	for _, mmuser := range u.mc.Users {
-		// do not add our own nick
-		if mmuser.Id == u.mc.User.Id {
-			continue
-		}
-		u.createMMUser(mmuser)
 	}
 }
 
@@ -270,7 +271,7 @@ func (u *User) handleWsActionUserAdded(rmsg *model.Message) {
 		logger.Debug("ACTION_USER_ADDED not adding myself to", u.mc.GetChannelName(rmsg.ChannelId), rmsg.ChannelId)
 		return
 	}
-	u.addUserToChannel(u.mc.Users[rmsg.UserId], u.mc.GetChannelName(rmsg.ChannelId))
+	u.addUserToChannel(u.mc.Users[rmsg.UserId], "#"+u.mc.GetChannelName(rmsg.ChannelId))
 }
 
 func (u *User) checkWsActionMessage(rmsg *model.Message) {
@@ -308,6 +309,13 @@ func (u *User) syncMMChannel(id string, name string) {
 	if edata == nil {
 		return
 	}
+	// let everyone join
+	for _, d := range edata.Data.(*model.ChannelExtra).Members {
+		if d.Id != u.mc.User.Id {
+			u.addUserToChannel(u.mc.Users[d.Id], "#"+name)
+		}
+	}
+	// before joining ourself
 	for _, d := range edata.Data.(*model.ChannelExtra).Members {
 		// join all the channels we're on on MM
 		if d.Id == u.mc.User.Id {
@@ -315,12 +323,11 @@ func (u *User) syncMMChannel(id string, name string) {
 			ch.Topic(u, u.mc.GetChannelHeader(id))
 			// only join when we're not yet on the channel
 			if !ch.HasUser(u) {
-				logger.Debug("syncMMChannel adding myself to ", name, id)
+				logger.Debugf("syncMMChannel adding myself to %s (id: %s)", name, id)
 				ch.Join(u)
 			}
-			continue
+			break
 		}
-		u.addUserToChannel(u.mc.Users[d.Id], name)
 	}
 }
 

@@ -219,6 +219,9 @@ func CmdPart(s Server, u *User, msg *irc.Message) error {
 	var err error
 	channels := strings.Split(msg.Params[0], ",")
 	for _, chName := range channels {
+		if strings.HasPrefix(chName, "&") {
+			continue
+		}
 		ch, exists := s.HasChannel(chName)
 		if !exists {
 			err = s.EncodeMessage(u, irc.ERR_NOSUCHCHANNEL, []string{chName}, "No such channel")

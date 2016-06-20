@@ -37,6 +37,7 @@ func main() {
 	if *flagDebug {
 		logger.Info("enabling debug")
 		ourlog.Level = logrus.DebugLevel
+		irckit.SetLogLevel("debug")
 	}
 
 	if *flagVersion {

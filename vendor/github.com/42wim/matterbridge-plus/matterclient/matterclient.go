@@ -125,11 +125,11 @@ func (m *MMClient) Login() error {
 	initData := initLoad.Data.(*model.InitialLoad)
 	m.User = initData.User
 	for _, v := range initData.Teams {
-		m.log.Debug("trying ", v.Name, " ", v.Id)
+		m.log.Debugf("trying %s (id: %s)", v.Name, v.Id)
 		if v.Name == m.Credentials.Team {
 			m.Client.SetTeamId(v.Id)
 			m.Team = v
-			m.log.Debug("GetallTeamListings: found id ", v.Id, " for team ", v.Name)
+			m.log.Debugf("GetallTeamListings: found id %s for team %s", v.Id, v.Name)
 			break
 		}
 	}
@@ -235,7 +235,7 @@ func (m *MMClient) parseActionPost(rmsg *Message) {
 }
 
 func (m *MMClient) UpdateUsers() error {
-	mmusers, _ := m.Client.GetProfiles(m.Client.GetTeamId(), "")
+	mmusers, _ := m.Client.GetProfilesForDirectMessageList(m.Team.Id)
 	m.Users = mmusers.Data.(map[string]*model.User)
 	return nil
 }

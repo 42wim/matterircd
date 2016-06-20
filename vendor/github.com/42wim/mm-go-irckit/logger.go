@@ -5,13 +5,18 @@ import (
 )
 
 var logger *logrus.Entry
+var LogLevel string
 
 func SetLogger(l *logrus.Entry) {
 	logger = l
 }
 
+func SetLogLevel(level string) {
+	LogLevel = level
+}
+
 func IsDebugLevel() bool {
-	if logger.Level == logrus.DebugLevel {
+	if LogLevel == "debug" {
 		return true
 	}
 	return false
