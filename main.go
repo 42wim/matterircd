@@ -13,7 +13,7 @@ import (
 
 var flagRestrict, flagDefaultTeam, flagDefaultServer, flagTLSBind, flagTLSDir *string
 var flagInsecure *bool
-var Version = "0.8-dev"
+var Version = "0.8"
 var logger *logrus.Entry
 
 func main() {

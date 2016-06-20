@@ -5,8 +5,17 @@ Tested on Windows / Linux
 
 Most of the work happens in [mm-go-irckit](https://github.com/42wim/mm-go-irckit) (based on github.com/shazow/go-irckit)
 
+# Docker
+Run the irc server on port 6667. You'll need to specify -bind 0.0.0.0:6667 otherwise it only listens on 127.0.0.1 in the container.
+
+```
+docker run -p 6667:6667 42wim/matterircd:latest -bind 0.0.0.0:6667
+```
+
+Now you can connect with your IRC client to port 6667 on your docker host.
+
 # Compatibility
-* Matterircd v0.7 works with mattermost 3.0.0+ [3.0.0 release](https://github.com/mattermost/platform/releases/tag/v3.0.0)
+* Matterircd v0.8 works with mattermost 3.0.0+ [3.0.0 release](https://github.com/mattermost/platform/releases/tag/v3.0.0)
 * Matterircd v0.5 works with mattermost 1.4.0 until [2.2.0 release](https://github.com/mattermost/platform/releases/tag/v2.2.0)
 * Matterircd v0.2 works only on mattermost < 1.4.0
 
@@ -27,11 +36,14 @@ If you want to run matterircd with mattermost DEV builds, use the develop branch
 * WHOIS, WHO, JOIN, LEAVE, NICK, LIST, ISON, PRIVMSG, MODE, TOPIC, LUSERS, AWAY support
 * support TLS (ssl)
 * support LDAP logins (mattermost enterprise) (use your ldap account/pass to login)
+* &users channel that contains members of all teams (if mattermost is so configured) for easy messaging
+* supports mattermost roles (shows admins with @ status for now)
+* gitlab auth hack by using mmtoken cookie (see https://github.com/42wim/matterircd/issues/29)
 
 # Binaries
 
 You can find the binaries [here](https://github.com/42wim/matterircd/releases/)
-* For use with mattermost 3.0.0 [v0.7](https://github.com/42wim/matterircd/releases/tag/v0.7)
+* For use with mattermost 3.0.0 [v0.8](https://github.com/42wim/matterircd/releases/tag/v0.8)
 * For use with mattermost 1.4.0-2.2.0 [v0.5](https://github.com/42wim/matterircd/releases/tag/v0.5)
 * For use with mattermost <1.4.0 [v0.2](https://github.com/42wim/matterircd/releases/tag/v0.2)
 
@@ -131,8 +143,3 @@ Also works with windows ;-)
 ![windows](http://snag.gy/cGSCA.jpg)
 
 If you use chrome, you can easily test with [circ](https://chrome.google.com/webstore/detail/circ/bebigdkelppomhhjaaianniiifjbgocn?hl=en-US)
-
-## Caveats
-
-Matterircd sends a "Unicode Character 'MONGOLIAN VOWEL SEPARATOR' (U+180E)" at the end of every line to mattermost, more information about this can be found in [this issue](https://github.com/42wim/matterircd/issues/24) (update, as of >0.7 this is changed to 'space + zero-width space')
-
