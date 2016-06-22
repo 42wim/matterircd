@@ -210,9 +210,30 @@ func (u *User) handleWsActionPost(rmsg *model.Message) {
 		logger.Debug("direct message")
 		rcvuser := u.mc.GetOtherUserDM(rcvchannel)
 		msgs := strings.Split(data.Message, "\n")
+
+		// check if we have a override_username (from webhooks) and use it
+		props := map[string]interface{}(data.Props)
+		overrideUsername, _ := props["override_username"].(string)
 		for _, m := range msgs {
-			u.MsgSpoofUser(rcvuser.Username, m)
+			// no empty messages
+			if m == "" {
+				continue
+			}
+			if overrideUsername != "" {
+				u.MsgSpoofUser(overrideUsername, m)
+			} else {
+				u.MsgSpoofUser(rcvuser.Username, m)
+			}
 		}
+
+		if len(data.Filenames) > 0 {
+			logger.Debugf("files detected")
+			for _, fname := range u.mc.GetPublicLinks(data.Filenames) {
+				u.MsgSpoofUser(rcvuser.Username, "download file - "+fname)
+			}
+		}
+		logger.Debug(u.mc.Users[data.UserId].Username, ":", data.Message)
+		logger.Debugf("%#v", data)
 		return
 	}
 
@@ -229,6 +250,9 @@ func (u *User) handleWsActionPost(rmsg *model.Message) {
 	props := map[string]interface{}(data.Props)
 	overrideUsername, _ := props["override_username"].(string)
 	for _, m := range msgs {
+		if m == "" {
+			continue
+		}
 		if overrideUsername != "" {
 			ch.SpoofMessage(overrideUsername, m)
 		} else {
