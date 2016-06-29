@@ -256,8 +256,6 @@ func CmdPing(s Server, u *User, msg *irc.Message) error {
 
 // CmdPrivMsg is a handler for the /PRIVMSG command.
 func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
-	logger.Debugf("CmdPrivMsg(): message from %s %s to %s", u.Nick, msg.Trailing, msg.Params[0])
-	defer logger.Debugf("exiting CmdPrivMsg(): message from %s %s to %s", u.Nick, msg.Trailing, msg.Params[0])
 	var err error
 	if len(msg.Params) > 1 {
 		tr := strings.Join(msg.Params[1:], " ")

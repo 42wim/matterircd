@@ -219,7 +219,6 @@ func (s *server) Channel(channelId string) Channel {
 	if name == "" {
 		name = channelId
 	}
-	logger.Debugf("Channel() %s %s %s %s", name, channelId, teamId, teamName)
 	s.Lock()
 	ch, ok := s.channels[name]
 	if !ok {
