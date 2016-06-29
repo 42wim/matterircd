@@ -6,25 +6,16 @@ import (
 	"time"
 
 	"github.com/42wim/matterbridge-plus/matterclient"
-	"github.com/gorilla/websocket"
 	"github.com/mattermost/platform/model"
 	"github.com/sorcix/irc"
 )
 
 type MmInfo struct {
-	MmGhostUser    bool
-	MmClient       *model.Client
-	MmWsClient     *websocket.Conn
-	MmWsQuit       bool
-	Srv            Server
-	MmUsers        map[string]*model.User
-	MmUser         *model.User
-	MmChannels     *model.ChannelList
-	MmMoreChannels *model.ChannelList
-	MmTeam         *model.Team
-	Credentials    *MmCredentials
-	Cfg            *MmCfg
-	mc             *matterclient.MMClient
+	MmGhostUser bool
+	Srv         Server
+	Credentials *MmCredentials
+	Cfg         *MmCfg
+	mc          *matterclient.MMClient
 }
 
 type MmCredentials struct {
@@ -109,17 +100,17 @@ func (u *User) createService(nick string, what string) {
 	go u.Srv.Handle(service)
 }
 
-func (u *User) addUserToChannel(user *model.User, channel string) {
+func (u *User) addUserToChannel(user *model.User, channel string, channelId string) {
 	ghost := u.createMMUser(user)
 	logger.Debugf("adding %s to %s", ghost.Nick, channel)
-	ch := u.Srv.Channel(channel)
+	ch := u.Srv.Channel(channelId)
 	ch.Join(ghost)
 }
 
 func (u *User) addUsersToChannels() {
 	srv := u.Srv
 	throttle := time.Tick(time.Millisecond * 300)
-
+	logger.Debug("in addUsersToChannels()")
 	// add all users, also who are not on channels
 	ch := srv.Channel("&users")
 	for _, mmuser := range u.mc.Users {
@@ -128,21 +119,26 @@ func (u *User) addUsersToChannels() {
 			continue
 		}
 		u.createMMUser(mmuser)
-		u.addUserToChannel(mmuser, "&users")
+		u.addUserToChannel(mmuser, "&users", "&users")
 	}
 	ch.Join(u)
 
-	for _, mmchannel := range u.mc.Channels.Channels {
+	for _, mmchannel := range u.mc.GetChannels() {
 		// exclude direct messages
 		if strings.Contains(mmchannel.Name, "__") {
 			continue
 		}
 		<-throttle
 		go func(mmchannel *model.Channel) {
-			u.syncMMChannel(mmchannel.Id, mmchannel.Name)
-			ch := srv.Channel("#" + mmchannel.Name)
+			channelName := mmchannel.Name
+			if mmchannel.TeamId != u.mc.Team.Id {
+				channelName = u.mc.GetTeamName(mmchannel.TeamId) + "/" + mmchannel.Name
+			}
+			u.syncMMChannel(mmchannel.Id, channelName)
+			srv.Channel(mmchannel.Id)
 			// post everything to the channel you haven't seen yet
-			postlist := u.mc.GetPostsSince(mmchannel.Id, u.mc.Channels.Members[mmchannel.Id].LastViewedAt)
+			//postlist := u.mc.GetPostsSince(mmchannel.Id, u.mc.Team.Channels.Members[mmchannel.Id].LastViewedAt)
+			postlist := u.mc.GetPostsSince(mmchannel.Id, u.mc.GetLastViewedAt(mmchannel.Id))
 			if postlist == nil {
 				logger.Error("something wrong with getMMPostsSince")
 				return
@@ -182,8 +178,11 @@ func (u *User) handleWsMessage() {
 }
 
 func (u *User) handleWsActionPost(rmsg *model.Message) {
+	var ch Channel
 	data := model.PostFromJson(strings.NewReader(rmsg.Props["post"]))
-	logger.Debug("receiving userid", data.UserId)
+	props := rmsg.Props
+	extraProps := model.StringInterfaceFromJson(strings.NewReader(rmsg.Props["post"]))["props"].(map[string]interface{})
+	logger.Debugf("handleWsActionPost() receiving userid %s", data.UserId)
 	if data.UserId == u.mc.User.Id {
 		// space + ZWSP
 		if strings.Contains(data.Message, " ​") {
@@ -195,78 +194,61 @@ func (u *User) handleWsActionPost(rmsg *model.Message) {
 			return
 		}
 	}
+	// create new "ghost" user
 	ghost := u.createMMUser(u.mc.Users[data.UserId])
 	// our own message, set our IRC self as user, not our mattermost self
 	if data.UserId == u.mc.User.Id {
 		ghost = u
 	}
-	rcvchannel := u.mc.GetChannelName(data.ChannelId)
+
+	spoofUsername := ghost.Nick
+	// check if we have a override_username (from webhooks) and use it
+	overrideUsername, _ := extraProps["override_username"].(string)
+	if overrideUsername != "" {
+		spoofUsername = overrideUsername
+	}
+
+	msgs := strings.Split(data.Message, "\n")
 	// direct message
-	if strings.Contains(rcvchannel, "__") {
+	if props["channel_type"] == "D" {
 		// our own message, ignore because we can't handle/fake those on IRC
 		if data.UserId == u.mc.User.Id {
 			return
 		}
-		logger.Debug("direct message")
-		rcvuser := u.mc.GetOtherUserDM(rcvchannel)
-		msgs := strings.Split(data.Message, "\n")
-
-		// check if we have a override_username (from webhooks) and use it
-		props := map[string]interface{}(data.Props)
-		overrideUsername, _ := props["override_username"].(string)
-		for _, m := range msgs {
-			// no empty messages
-			if m == "" {
-				continue
-			}
-			if overrideUsername != "" {
-				u.MsgSpoofUser(overrideUsername, m)
-			} else {
-				u.MsgSpoofUser(rcvuser.Username, m)
-			}
-		}
-
-		if len(data.Filenames) > 0 {
-			logger.Debugf("files detected")
-			for _, fname := range u.mc.GetPublicLinks(data.Filenames) {
-				u.MsgSpoofUser(rcvuser.Username, "download file - "+fname)
-			}
-		}
-		logger.Debug(u.mc.Users[data.UserId].Username, ":", data.Message)
-		logger.Debugf("%#v", data)
-		return
 	}
 
-	logger.Debugf("channel id %#v, name %#v", data.ChannelId, u.mc.GetChannelName(data.ChannelId))
-	ch := u.Srv.Channel("#" + rcvchannel)
-
-	// join if not in channel
-	if !ch.HasUser(ghost) {
-		ch.Join(ghost)
+	// not a private message so do channel stuff
+	if props["channel_type"] != "D" {
+		ch = u.Srv.Channel(data.ChannelId)
+		// join if not in channel
+		if !ch.HasUser(ghost) {
+			ch.Join(ghost)
+		}
 	}
-	msgs := strings.Split(data.Message, "\n")
 
 	// check if we have a override_username (from webhooks) and use it
-	props := map[string]interface{}(data.Props)
-	overrideUsername, _ := props["override_username"].(string)
 	for _, m := range msgs {
 		if m == "" {
 			continue
 		}
-		if overrideUsername != "" {
-			ch.SpoofMessage(overrideUsername, m)
+		if props["channel_type"] == "D" {
+			u.MsgSpoofUser(spoofUsername, m)
 		} else {
-			ch.Message(ghost, m)
+			ch.SpoofMessage(spoofUsername, m)
 		}
 	}
 
 	if len(data.Filenames) > 0 {
 		logger.Debugf("files detected")
 		for _, fname := range u.mc.GetPublicLinks(data.Filenames) {
-			ch.Message(ghost, "download file - "+fname)
+			if props["channel_type"] == "D" {
+				u.MsgSpoofUser(spoofUsername, "download file - "+fname)
+			} else {
+				ch.SpoofMessage(spoofUsername, "download file - "+fname)
+			}
 		}
 	}
-	logger.Debug(u.mc.Users[data.UserId].Username, ":", data.Message)
+	logger.Debugf("handleWsActionPost() user %s sent %s", u.mc.Users[data.UserId].Username, data.Message)
 	logger.Debugf("%#v", data)
 
 	// updatelastviewed
@@ -274,7 +256,7 @@ func (u *User) handleWsActionPost(rmsg *model.Message) {
 }
 
 func (u *User) handleWsActionUserRemoved(rmsg *model.Message) {
-	ch := u.Srv.Channel("#" + u.mc.GetChannelName(rmsg.ChannelId))
+	ch := u.Srv.Channel(rmsg.ChannelId)
 
 	// remove ourselves from the channel
 	if rmsg.UserId == u.mc.User.Id {
@@ -295,7 +277,7 @@ func (u *User) handleWsActionUserAdded(rmsg *model.Message) {
 		logger.Debug("ACTION_USER_ADDED not adding myself to", u.mc.GetChannelName(rmsg.ChannelId), rmsg.ChannelId)
 		return
 	}
-	u.addUserToChannel(u.mc.Users[rmsg.UserId], "#"+u.mc.GetChannelName(rmsg.ChannelId))
+	u.addUserToChannel(u.mc.Users[rmsg.UserId], "#"+u.mc.GetChannelName(rmsg.ChannelId), rmsg.ChannelId)
 }
 
 func (u *User) checkWsActionMessage(rmsg *model.Message) {
@@ -336,14 +318,14 @@ func (u *User) syncMMChannel(id string, name string) {
 	// let everyone join
 	for _, d := range edata.Data.(*model.ChannelExtra).Members {
 		if d.Id != u.mc.User.Id {
-			u.addUserToChannel(u.mc.Users[d.Id], "#"+name)
+			u.addUserToChannel(u.mc.Users[d.Id], "#"+name, id)
 		}
 	}
 	// before joining ourself
 	for _, d := range edata.Data.(*model.ChannelExtra).Members {
 		// join all the channels we're on on MM
 		if d.Id == u.mc.User.Id {
-			ch := srv.Channel("#" + name)
+			ch := srv.Channel(id)
 			ch.Topic(u, u.mc.GetChannelHeader(id))
 			// only join when we're not yet on the channel
 			if !ch.HasUser(u) {

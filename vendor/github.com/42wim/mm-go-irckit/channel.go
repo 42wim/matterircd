@@ -60,6 +60,7 @@ type channel struct {
 	created time.Time
 	name    string
 	server  Server
+	id      string
 
 	mu       sync.RWMutex
 	topic    string
@@ -67,10 +68,11 @@ type channel struct {
 }
 
 // NewChannel returns a Channel implementation for a given Server.
-func NewChannel(server Server, name string) Channel {
+func NewChannel(server Server, channelId string, name string) Channel {
 	return &channel{
 		created:  time.Now(),
 		server:   server,
+		id:       channelId,
 		name:     name,
 		usersIdx: map[*User]struct{}{},
 	}
@@ -91,7 +93,7 @@ func (ch *channel) Created() time.Time {
 
 // ID returns a normalized unique identifier for the channel.
 func (ch *channel) ID() string {
-	return ID(ch.name)
+	return ID(ch.id)
 }
 
 func (ch *channel) Message(from *User, text string) {

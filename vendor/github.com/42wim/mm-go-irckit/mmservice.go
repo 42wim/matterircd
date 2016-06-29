@@ -134,7 +134,7 @@ func (u *User) handleMMServiceBot(toUser *User, msg string) {
 				return
 			}
 			commands[1] = strings.Replace(commands[1], "#", "", -1)
-			postlist := u.mc.GetPosts(u.mc.GetChannelId(commands[1]), limit)
+			postlist := u.mc.GetPosts(u.mc.GetChannelId(commands[1], u.mc.Team.Id), limit)
 			if postlist == nil || len(postlist.Order) == 0 {
 				u.MsgUser(toUser, "no results")
 				return
