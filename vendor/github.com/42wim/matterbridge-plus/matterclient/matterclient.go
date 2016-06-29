@@ -167,6 +167,19 @@ func (m *MMClient) Login() error {
 	return nil
 }
 
+func (m *MMClient) Logout() error {
+	m.log.Debugf("logout as %s (team: %s) on %s", m.Credentials.Login, m.Credentials.Team, m.Credentials.Server)
+	m.WsQuit = true
+	m.WsClient.Close()
+	m.WsClient.UnderlyingConn().Close()
+	m.WsClient = nil
+	_, err := m.Client.Logout()
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func (m *MMClient) WsReceiver() {
 	var rmsg model.Message
 	for {

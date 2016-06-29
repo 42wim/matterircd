@@ -67,16 +67,11 @@ func (u *User) loginToMattermost() (*matterclient.MMClient, error) {
 
 func (u *User) logoutFromMattermost() error {
 	logger.Infof("logout as %s (team: %s) on %s", u.Credentials.Login, u.Credentials.Team, u.Credentials.Server)
-	_, err := u.mc.Client.Logout()
+	err := u.mc.Logout()
 	if err != nil {
 		logger.Error("logout failed")
-		return err
 	}
 	logger.Info("logout succeeded")
-	u.mc.WsQuit = true
-	u.mc.WsClient.Close()
-	u.mc.WsClient.UnderlyingConn().Close()
-	u.mc.WsClient = nil
 	u.Srv.Logout(u)
 	u.mc = nil
 	return nil
