@@ -39,6 +39,7 @@ type MMClient struct {
 	WsClient     *websocket.Conn
 	WsQuit       bool
 	WsAway       bool
+	WsConnected  bool
 	Channels     *model.ChannelList
 	MoreChannels *model.ChannelList
 	User         *model.User
@@ -66,6 +67,7 @@ func (m *MMClient) SetLogLevel(level string) {
 }
 
 func (m *MMClient) Login() error {
+	m.WsConnected = false
 	if m.WsQuit {
 		return nil
 	}
@@ -163,6 +165,9 @@ func (m *MMClient) Login() error {
 	// populating channels
 	m.UpdateChannels()
 
+	// only start to parse WS messages when login is completely done
+	m.WsConnected = true
+
 	return nil
 }
 
@@ -177,6 +182,10 @@ func (m *MMClient) WsReceiver() {
 			m.log.Error("error:", err)
 			// reconnect
 			m.Login()
+		}
+		// we're not fully logged in yet.
+		if !m.WsConnected {
+			continue
 		}
 		if rmsg.Action == "ping" {
 			m.handleWsPing()
