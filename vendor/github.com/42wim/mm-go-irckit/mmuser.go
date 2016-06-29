@@ -132,10 +132,12 @@ func (u *User) addUsersToChannels() {
 			u.syncMMChannel(mmchannel.Id, channelName)
 			srv.Channel(mmchannel.Id)
 			// post everything to the channel you haven't seen yet
-			//postlist := u.mc.GetPostsSince(mmchannel.Id, u.mc.Team.Channels.Members[mmchannel.Id].LastViewedAt)
 			postlist := u.mc.GetPostsSince(mmchannel.Id, u.mc.GetLastViewedAt(mmchannel.Id))
 			if postlist == nil {
-				logger.Error("something wrong with getMMPostsSince")
+				// if the channel is not from the primary team id, we can't get posts
+				if mmchannel.TeamId == u.mc.Team.Id {
+					logger.Errorf("something wrong with getPostsSince for channel %s (%s)", mmchannel.Id, mmchannel.Name)
+				}
 				return
 			}
 			// traverse the order in reverse
