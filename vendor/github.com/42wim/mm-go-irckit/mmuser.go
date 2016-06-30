@@ -278,7 +278,7 @@ func (u *User) handleWsActionUserAdded(rmsg *model.Message) {
 }
 
 func (u *User) checkWsActionMessage(rmsg *model.Message) {
-	logger.Debugf("checkWsActionMessage %#v\n", rmsg)
+	//logger.Debugf("checkWsActionMessage %#v\n", rmsg)
 	if u.mc.GetChannelName(rmsg.ChannelId) == "" {
 		u.mc.UpdateChannels()
 	}
