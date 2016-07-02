@@ -13,7 +13,7 @@ import (
 
 var flagRestrict, flagDefaultTeam, flagDefaultServer, flagTLSBind, flagTLSDir *string
 var flagInsecure *bool
-var Version = "0.8"
+var version = "0.8.1"
 var logger *logrus.Entry
 
 func main() {
@@ -41,7 +41,7 @@ func main() {
 	}
 
 	if *flagVersion {
-		fmt.Println("Version:", Version)
+		fmt.Println("Version:", version)
 		return
 	}
 
@@ -94,7 +94,7 @@ func start(socket net.Listener) {
 			cfg := &irckit.MmCfg{AllowedServers: strings.Fields(*flagRestrict),
 				DefaultTeam: *flagDefaultTeam, DefaultServer: *flagDefaultServer,
 				Insecure: *flagInsecure}
-			newsrv := irckit.ServerConfig{Name: "matterircd", Version: Version}.Server()
+			newsrv := irckit.ServerConfig{Name: "matterircd", Version: version}.Server()
 			logger.Infof("New connection: %s", conn.RemoteAddr())
 			err = newsrv.Connect(irckit.NewUserMM(conn, newsrv, cfg))
 			if err != nil {
