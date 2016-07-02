@@ -949,6 +949,7 @@ func (c *Client) JoinChannel(id string) (*Result, *AppError) {
 	if r, err := c.DoApiPost(c.GetChannelRoute(id)+"/join", ""); err != nil {
 		return nil, err
 	} else {
+		defer closeBody(r)
 		return &Result{r.Header.Get(HEADER_REQUEST_ID),
 			r.Header.Get(HEADER_ETAG_SERVER), nil}, nil
 	}
@@ -958,6 +959,7 @@ func (c *Client) JoinChannelByName(name string) (*Result, *AppError) {
 	if r, err := c.DoApiPost(c.GetChannelNameRoute(name)+"/join", ""); err != nil {
 		return nil, err
 	} else {
+		defer closeBody(r)
 		return &Result{r.Header.Get(HEADER_REQUEST_ID),
 			r.Header.Get(HEADER_ETAG_SERVER), nil}, nil
 	}
@@ -967,6 +969,7 @@ func (c *Client) LeaveChannel(id string) (*Result, *AppError) {
 	if r, err := c.DoApiPost(c.GetChannelRoute(id)+"/leave", ""); err != nil {
 		return nil, err
 	} else {
+		defer closeBody(r)
 		return &Result{r.Header.Get(HEADER_REQUEST_ID),
 			r.Header.Get(HEADER_ETAG_SERVER), nil}, nil
 	}
@@ -976,6 +979,7 @@ func (c *Client) DeleteChannel(id string) (*Result, *AppError) {
 	if r, err := c.DoApiPost(c.GetChannelRoute(id)+"/delete", ""); err != nil {
 		return nil, err
 	} else {
+		defer closeBody(r)
 		return &Result{r.Header.Get(HEADER_REQUEST_ID),
 			r.Header.Get(HEADER_ETAG_SERVER), nil}, nil
 	}
@@ -987,6 +991,7 @@ func (c *Client) AddChannelMember(id, user_id string) (*Result, *AppError) {
 	if r, err := c.DoApiPost(c.GetChannelRoute(id)+"/add", MapToJson(data)); err != nil {
 		return nil, err
 	} else {
+		defer closeBody(r)
 		return &Result{r.Header.Get(HEADER_REQUEST_ID),
 			r.Header.Get(HEADER_ETAG_SERVER), nil}, nil
 	}
@@ -998,6 +1003,7 @@ func (c *Client) RemoveChannelMember(id, user_id string) (*Result, *AppError) {
 	if r, err := c.DoApiPost(c.GetChannelRoute(id)+"/remove", MapToJson(data)); err != nil {
 		return nil, err
 	} else {
+		defer closeBody(r)
 		return &Result{r.Header.Get(HEADER_REQUEST_ID),
 			r.Header.Get(HEADER_ETAG_SERVER), nil}, nil
 	}
@@ -1007,6 +1013,7 @@ func (c *Client) UpdateLastViewedAt(channelId string) (*Result, *AppError) {
 	if r, err := c.DoApiPost(c.GetChannelRoute(channelId)+"/update_last_viewed_at", ""); err != nil {
 		return nil, err
 	} else {
+		defer closeBody(r)
 		return &Result{r.Header.Get(HEADER_REQUEST_ID),
 			r.Header.Get(HEADER_ETAG_SERVER), nil}, nil
 	}
