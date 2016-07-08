@@ -384,8 +384,8 @@ func CmdWhois(s Server, u *User, msg *irc.Message) error {
 		})
 
 		u.mc.UpdateUsers()
-		if _, ok := u.mc.Users[other.User]; ok {
-			idle := (model.GetMillis() - u.mc.Users[other.User].LastActivityAt) / 1000
+		if u.mc.GetUser(other.User) != nil {
+			idle := (model.GetMillis() - u.mc.GetUser(other.User).LastActivityAt) / 1000
 			r = append(r, &irc.Message{
 				Prefix:   s.Prefix(),
 				Params:   []string{u.Nick, other.Nick, strconv.FormatInt(idle, 10), "0"},

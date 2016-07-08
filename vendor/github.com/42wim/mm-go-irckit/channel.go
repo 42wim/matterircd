@@ -2,6 +2,7 @@ package irckit
 
 import (
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -176,7 +177,7 @@ func (ch *channel) Invite(from Prefixer, u *User) error {
 func (ch *channel) Topic(from Prefixer, text string) {
 	ch.mu.RLock()
 	ch.topic = text
-
+	ch.topic = strings.Replace(ch.topic, "\n", " ", -1)
 	msg := &irc.Message{
 		Prefix:   from.Prefix(),
 		Command:  irc.TOPIC,
@@ -193,6 +194,7 @@ func (ch *channel) Topic(from Prefixer, text string) {
 // Join introduces the User to the channel (sends relevant messages, stores).
 func (ch *channel) Join(u *User) error {
 	// TODO: Check if user is already here?
+	t := time.Now()
 	ch.mu.Lock()
 	if _, exists := ch.usersIdx[u]; exists {
 		ch.mu.Unlock()
@@ -204,6 +206,9 @@ func (ch *channel) Join(u *User) error {
 	u.Lock()
 	u.channels[ch] = struct{}{}
 	u.Unlock()
+	if u.MmGhostUser {
+		return nil
+	}
 
 	msg := &irc.Message{
 		Prefix:  u.Prefix(),
@@ -256,6 +261,7 @@ func (ch *channel) Join(u *User) error {
 		Trailing: "End of /NAMES list.",
 	},
 	)
+	logger.Debug(ch.name, " took ", time.Since(t))
 
 	return u.Encode(msgs...)
 }

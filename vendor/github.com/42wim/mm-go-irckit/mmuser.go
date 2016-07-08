@@ -97,7 +97,7 @@ func (u *User) createService(nick string, what string) {
 
 func (u *User) addUserToChannel(user *model.User, channel string, channelId string) {
 	ghost := u.createMMUser(user)
-	logger.Debugf("adding %s to %s", ghost.Nick, channel)
+	go logger.Debugf("adding %s to %s", ghost.Nick, channel)
 	ch := u.Srv.Channel(channelId)
 	ch.Join(ghost)
 }
@@ -108,7 +108,7 @@ func (u *User) addUsersToChannels() {
 	logger.Debug("in addUsersToChannels()")
 	// add all users, also who are not on channels
 	ch := srv.Channel("&users")
-	for _, mmuser := range u.mc.Users {
+	for _, mmuser := range u.mc.GetUsers() {
 		// do not add our own nick
 		if mmuser.Id == u.mc.User.Id {
 			continue
@@ -124,31 +124,30 @@ func (u *User) addUsersToChannels() {
 			continue
 		}
 		<-throttle
-		go func(mmchannel *model.Channel) {
-			channelName := mmchannel.Name
-			if mmchannel.TeamId != u.mc.Team.Id {
-				channelName = u.mc.GetTeamName(mmchannel.TeamId) + "/" + mmchannel.Name
+		//go func(mmchannel *model.Channel) {
+		channelName := mmchannel.Name
+		if mmchannel.TeamId != u.mc.Team.Id {
+			channelName = u.mc.GetTeamName(mmchannel.TeamId) + "/" + mmchannel.Name
+		}
+		u.syncMMChannel(mmchannel.Id, channelName)
+		srv.Channel(mmchannel.Id)
+		// post everything to the channel you haven't seen yet
+		postlist := u.mc.GetPostsSince(mmchannel.Id, u.mc.GetLastViewedAt(mmchannel.Id))
+		if postlist == nil {
+			// if the channel is not from the primary team id, we can't get posts
+			if mmchannel.TeamId == u.mc.Team.Id {
+				logger.Errorf("something wrong with getPostsSince for channel %s (%s)", mmchannel.Id, mmchannel.Name)
 			}
-			u.syncMMChannel(mmchannel.Id, channelName)
-			srv.Channel(mmchannel.Id)
-			// post everything to the channel you haven't seen yet
-			postlist := u.mc.GetPostsSince(mmchannel.Id, u.mc.GetLastViewedAt(mmchannel.Id))
-			if postlist == nil {
-				// if the channel is not from the primary team id, we can't get posts
-				if mmchannel.TeamId == u.mc.Team.Id {
-					logger.Errorf("something wrong with getPostsSince for channel %s (%s)", mmchannel.Id, mmchannel.Name)
-				}
-				return
+			return
+		}
+		// traverse the order in reverse
+		for i := len(postlist.Order) - 1; i >= 0; i-- {
+			for _, post := range strings.Split(postlist.Posts[postlist.Order[i]].Message, "\n") {
+				ch.SpoofMessage(u.mc.Users[postlist.Posts[postlist.Order[i]].UserId].Username, post)
 			}
-			// traverse the order in reverse
-			for i := len(postlist.Order) - 1; i >= 0; i-- {
-				for _, post := range strings.Split(postlist.Posts[postlist.Order[i]].Message, "\n") {
-					ch.SpoofMessage(u.mc.Users[postlist.Posts[postlist.Order[i]].UserId].Username, post)
-				}
-			}
-			u.mc.UpdateLastViewed(mmchannel.Id)
-
-		}(mmchannel)
+		}
+		u.mc.UpdateLastViewed(mmchannel.Id)
+		//		}(mmchannel)
 	}
 }
 
@@ -192,7 +191,7 @@ func (u *User) handleWsActionPost(rmsg *model.Message) {
 		}
 	}
 	// create new "ghost" user
-	ghost := u.createMMUser(u.mc.Users[data.UserId])
+	ghost := u.createMMUser(u.mc.GetUser(data.UserId))
 	// our own message, set our IRC self as user, not our mattermost self
 	if data.UserId == u.mc.User.Id {
 		ghost = u
@@ -245,7 +244,7 @@ func (u *User) handleWsActionPost(rmsg *model.Message) {
 			}
 		}
 	}
-	logger.Debugf("handleWsActionPost() user %s sent %s", u.mc.Users[data.UserId].Username, data.Message)
+	logger.Debugf("handleWsActionPost() user %s sent %s", u.mc.GetUser(data.UserId).Username, data.Message)
 	logger.Debugf("%#v", data)
 
 	// updatelastviewed
@@ -259,8 +258,8 @@ func (u *User) handleWsActionUserRemoved(rmsg *model.Message) {
 	if rmsg.UserId == u.mc.User.Id {
 		return
 	}
-
-	ghost := u.createMMUser(u.mc.Users[rmsg.UserId])
+	users := u.mc.GetUsers()
+	ghost := u.createMMUser(users[rmsg.UserId])
 	if ghost == nil {
 		logger.Debug("couldn't remove user", rmsg.UserId, u.mc.Users[rmsg.UserId].Username)
 		return
@@ -274,7 +273,7 @@ func (u *User) handleWsActionUserAdded(rmsg *model.Message) {
 		logger.Debug("ACTION_USER_ADDED not adding myself to", u.mc.GetChannelName(rmsg.ChannelId), rmsg.ChannelId)
 		return
 	}
-	u.addUserToChannel(u.mc.Users[rmsg.UserId], "#"+u.mc.GetChannelName(rmsg.ChannelId), rmsg.ChannelId)
+	u.addUserToChannel(u.mc.GetUser(rmsg.UserId), "#"+u.mc.GetChannelName(rmsg.ChannelId), rmsg.ChannelId)
 }
 
 func (u *User) checkWsActionMessage(rmsg *model.Message) {
@@ -282,7 +281,7 @@ func (u *User) checkWsActionMessage(rmsg *model.Message) {
 	if u.mc.GetChannelName(rmsg.ChannelId) == "" {
 		u.mc.UpdateChannels()
 	}
-	if u.mc.Users[rmsg.UserId] == nil {
+	if u.mc.GetUser(rmsg.UserId) == nil {
 		u.mc.UpdateUsers()
 	}
 }
@@ -315,7 +314,7 @@ func (u *User) syncMMChannel(id string, name string) {
 	// let everyone join
 	for _, d := range edata.Data.(*model.ChannelExtra).Members {
 		if d.Id != u.mc.User.Id {
-			u.addUserToChannel(u.mc.Users[d.Id], "#"+name, id)
+			u.addUserToChannel(u.mc.GetUser(d.Id), "#"+name, id)
 		}
 	}
 	// before joining ourself
