@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/42wim/matterbridge-plus/matterclient"
+	"github.com/42wim/matterbridge/matterclient"
 	"github.com/mattermost/platform/model"
 	"github.com/sorcix/irc"
 )
