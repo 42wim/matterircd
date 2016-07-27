@@ -2,6 +2,7 @@ package irckit
 
 import (
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -60,6 +61,7 @@ type channel struct {
 	created time.Time
 	name    string
 	server  Server
+	id      string
 
 	mu       sync.RWMutex
 	topic    string
@@ -67,10 +69,11 @@ type channel struct {
 }
 
 // NewChannel returns a Channel implementation for a given Server.
-func NewChannel(server Server, name string) Channel {
+func NewChannel(server Server, channelId string, name string) Channel {
 	return &channel{
 		created:  time.Now(),
 		server:   server,
+		id:       channelId,
 		name:     name,
 		usersIdx: map[*User]struct{}{},
 	}
@@ -91,7 +94,7 @@ func (ch *channel) Created() time.Time {
 
 // ID returns a normalized unique identifier for the channel.
 func (ch *channel) ID() string {
-	return ID(ch.name)
+	return ID(ch.id)
 }
 
 func (ch *channel) Message(from *User, text string) {
@@ -174,6 +177,8 @@ func (ch *channel) Invite(from Prefixer, u *User) error {
 func (ch *channel) Topic(from Prefixer, text string) {
 	ch.mu.RLock()
 	ch.topic = text
+	// no newlines in topic
+	ch.topic = strings.Replace(ch.topic, "\n", " ", -1)
 
 	msg := &irc.Message{
 		Prefix:   from.Prefix(),
@@ -202,6 +207,11 @@ func (ch *channel) Join(u *User) error {
 	u.Lock()
 	u.channels[ch] = struct{}{}
 	u.Unlock()
+
+	// only send join messages to real users
+	if u.MmGhostUser {
+		return nil
+	}
 
 	msg := &irc.Message{
 		Prefix:  u.Prefix(),

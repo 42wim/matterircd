@@ -3,12 +3,14 @@ package matterclient
 import (
 	"crypto/tls"
 	"errors"
-	log "github.com/Sirupsen/logrus"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
+
+	log "github.com/Sirupsen/logrus"
 
 	"github.com/gorilla/websocket"
 	"github.com/jpillora/backoff"
@@ -33,25 +35,33 @@ type Message struct {
 	Text     string
 }
 
-type MMClient struct {
-	*Credentials
-	Client       *model.Client
-	WsClient     *websocket.Conn
-	WsQuit       bool
-	WsAway       bool
-	WsConnected  bool
+type Team struct {
+	Team         *model.Team
+	Id           string
 	Channels     *model.ChannelList
 	MoreChannels *model.ChannelList
-	User         *model.User
 	Users        map[string]*model.User
-	MessageChan  chan *Message
-	Team         *model.Team
-	log          *log.Entry
+}
+
+type MMClient struct {
+	sync.RWMutex
+	*Credentials
+	Team        *Team
+	OtherTeams  []*Team
+	Client      *model.Client
+	WsClient    *websocket.Conn
+	WsQuit      bool
+	WsAway      bool
+	WsConnected bool
+	User        *model.User
+	Users       map[string]*model.User
+	MessageChan chan *Message
+	log         *log.Entry
 }
 
 func New(login, pass, team, server string) *MMClient {
 	cred := &Credentials{Login: login, Pass: pass, Team: team, Server: server}
-	mmclient := &MMClient{Credentials: cred, MessageChan: make(chan *Message, 100)}
+	mmclient := &MMClient{Credentials: cred, MessageChan: make(chan *Message, 100), Users: make(map[string]*model.User)}
 	mmclient.log = log.WithFields(log.Fields{"module": "matterclient"})
 	log.SetFormatter(&log.TextFormatter{FullTimestamp: true})
 	return mmclient
@@ -129,21 +139,16 @@ func (m *MMClient) Login() error {
 	// reset timer
 	b.Reset()
 
-	initLoad, _ := m.Client.GetInitialLoad()
-	initData := initLoad.Data.(*model.InitialLoad)
-	m.User = initData.User
-	for _, v := range initData.Teams {
-		m.log.Debugf("trying %s (id: %s)", v.Name, v.Id)
-		if v.Name == m.Credentials.Team {
-			m.Client.SetTeamId(v.Id)
-			m.Team = v
-			m.log.Debugf("GetallTeamListings: found id %s for team %s", v.Id, v.Name)
-			break
-		}
+	err := m.initUser()
+	if err != nil {
+		return err
 	}
+
 	if m.Team == nil {
 		return errors.New("team not found")
 	}
+	// set our team id as default route
+	m.Client.SetTeamId(m.Team.Id)
 
 	// setup websocket connection
 	wsurl := wsScheme + m.Credentials.Server + "/api/v3/users/websocket"
@@ -151,7 +156,6 @@ func (m *MMClient) Login() error {
 	header.Set(model.HEADER_AUTH, "BEARER "+m.Client.AuthToken)
 
 	m.log.Debug("WsClient: making connection")
-	var err error
 	for {
 		wsDialer := &websocket.Dialer{Proxy: http.ProxyFromEnvironment, TLSClientConfig: &tls.Config{InsecureSkipVerify: m.SkipTLSVerify}}
 		m.WsClient, _, err = wsDialer.Dial(wsurl, header)
@@ -165,21 +169,28 @@ func (m *MMClient) Login() error {
 	}
 	b.Reset()
 
-	// populating users
-	m.UpdateUsers()
-
-	// populating channels
-	m.UpdateChannels()
-
 	// only start to parse WS messages when login is completely done
 	m.WsConnected = true
 
 	return nil
 }
 
+func (m *MMClient) Logout() error {
+	m.log.Debugf("logout as %s (team: %s) on %s", m.Credentials.Login, m.Credentials.Team, m.Credentials.Server)
+	m.WsQuit = true
+	m.WsClient.Close()
+	m.WsClient.UnderlyingConn().Close()
+	m.WsClient = nil
+	_, err := m.Client.Logout()
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func (m *MMClient) WsReceiver() {
-	var rmsg model.Message
 	for {
+		var rmsg model.Message
 		if m.WsQuit {
 			m.log.Debug("exiting WsReceiver")
 			return
@@ -227,22 +238,16 @@ func (m *MMClient) parseMessage(rmsg *Message) {
 
 func (m *MMClient) parseActionPost(rmsg *Message) {
 	data := model.PostFromJson(strings.NewReader(rmsg.Raw.Props["post"]))
-	//	log.Println("receiving userid", data.UserId)
 	// we don't have the user, refresh the userlist
-	if m.Users[data.UserId] == nil {
+	if m.GetUser(data.UserId) == nil {
 		m.UpdateUsers()
 	}
-	rmsg.Username = m.Users[data.UserId].Username
+	rmsg.Username = m.GetUser(data.UserId).Username
 	rmsg.Channel = m.GetChannelName(data.ChannelId)
+	rmsg.Team = m.GetTeamName(rmsg.Raw.TeamId)
 	// direct message
-	if strings.Contains(rmsg.Channel, "__") {
-		//log.Println("direct message")
-		rcvusers := strings.Split(rmsg.Channel, "__")
-		if rcvusers[0] != m.User.Id {
-			rmsg.Channel = m.Users[rcvusers[0]].Username
-		} else {
-			rmsg.Channel = m.Users[rcvusers[1]].Username
-		}
+	if data.Type == "D" {
+		rmsg.Channel = m.GetUser(data.UserId).Username
 	}
 	rmsg.Text = data.Message
 	rmsg.Post = data
@@ -251,74 +256,86 @@ func (m *MMClient) parseActionPost(rmsg *Message) {
 
 func (m *MMClient) UpdateUsers() error {
 	mmusers, _ := m.Client.GetProfilesForDirectMessageList(m.Team.Id)
+	m.Lock()
 	m.Users = mmusers.Data.(map[string]*model.User)
+	m.Unlock()
 	return nil
 }
 
 func (m *MMClient) UpdateChannels() error {
 	mmchannels, _ := m.Client.GetChannels("")
-	m.Channels = mmchannels.Data.(*model.ChannelList)
-	mmchannels, _ = m.Client.GetMoreChannels("")
-	m.MoreChannels = mmchannels.Data.(*model.ChannelList)
+	mmchannels2, _ := m.Client.GetMoreChannels("")
+	m.Lock()
+	m.Team.Channels = mmchannels.Data.(*model.ChannelList)
+	m.Team.MoreChannels = mmchannels2.Data.(*model.ChannelList)
+	m.Unlock()
 	return nil
 }
 
-func (m *MMClient) GetChannelName(id string) string {
-	for _, channel := range append(m.Channels.Channels, m.MoreChannels.Channels...) {
-		if channel.Id == id {
-			return channel.Name
-		}
-	}
-	// not found? could be a new direct message from mattermost. Try to update and check again
-	m.UpdateChannels()
-	for _, channel := range append(m.Channels.Channels, m.MoreChannels.Channels...) {
-		if channel.Id == id {
-			return channel.Name
+func (m *MMClient) GetChannelName(channelId string) string {
+	m.RLock()
+	defer m.RUnlock()
+	for _, t := range m.OtherTeams {
+		for _, channel := range append(t.Channels.Channels, t.MoreChannels.Channels...) {
+			if channel.Id == channelId {
+				return channel.Name
+			}
 		}
 	}
 	return ""
 }
 
-func (m *MMClient) GetChannelId(name string) string {
-	for _, channel := range append(m.Channels.Channels, m.MoreChannels.Channels...) {
-		if channel.Name == name {
-			return channel.Id
+func (m *MMClient) GetChannelId(name string, teamId string) string {
+	m.RLock()
+	defer m.RUnlock()
+	if teamId == "" {
+		teamId = m.Team.Id
+	}
+	for _, t := range m.OtherTeams {
+		if t.Id == teamId {
+			for _, channel := range append(t.Channels.Channels, t.MoreChannels.Channels...) {
+				if channel.Name == name {
+					return channel.Id
+				}
+			}
 		}
 	}
 	return ""
 }
 
-func (m *MMClient) GetChannelHeader(id string) string {
-	for _, channel := range append(m.Channels.Channels, m.MoreChannels.Channels...) {
-		if channel.Id == id {
-			return channel.Header
+func (m *MMClient) GetChannelHeader(channelId string) string {
+	m.RLock()
+	defer m.RUnlock()
+	for _, t := range m.OtherTeams {
+		for _, channel := range append(t.Channels.Channels, t.MoreChannels.Channels...) {
+			if channel.Id == channelId {
+				return channel.Header
+			}
+
 		}
 	}
 	return ""
 }
 
-func (m *MMClient) PostMessage(channel string, text string) {
-	post := &model.Post{ChannelId: m.GetChannelId(channel), Message: text}
+func (m *MMClient) PostMessage(channelId string, text string) {
+	post := &model.Post{ChannelId: channelId, Message: text}
 	m.Client.CreatePost(post)
 }
 
-func (m *MMClient) JoinChannel(channel string) error {
-	cleanChan := strings.Replace(channel, "#", "", 1)
-	if m.GetChannelId(cleanChan) == "" {
-		return errors.New("failed to join")
-	}
-	for _, c := range m.Channels.Channels {
-		if c.Name == cleanChan {
-			m.log.Debug("Not joining ", cleanChan, " already joined.")
+func (m *MMClient) JoinChannel(channelId string) error {
+	m.RLock()
+	defer m.RUnlock()
+	for _, c := range m.Team.Channels.Channels {
+		if c.Id == channelId {
+			m.log.Debug("Not joining ", channelId, " already joined.")
 			return nil
 		}
 	}
-	m.log.Debug("Joining ", cleanChan)
-	_, err := m.Client.JoinChannel(m.GetChannelId(cleanChan))
+	m.log.Debug("Joining ", channelId)
+	_, err := m.Client.JoinChannel(channelId)
 	if err != nil {
 		return errors.New("failed to join")
 	}
-	//	m.SyncChannel(m.getMMChannelId(strings.Replace(channel, "#", "", 1)), strings.Replace(channel, "#", "", 1))
 	return nil
 }
 
@@ -385,10 +402,10 @@ func (m *MMClient) UpdateLastViewed(channelId string) {
 	}
 }
 
-func (m *MMClient) UsernamesInChannel(channelName string) []string {
-	ceiRes, err := m.Client.GetChannelExtraInfo(m.GetChannelId(channelName), 5000, "")
+func (m *MMClient) UsernamesInChannel(channelId string) []string {
+	ceiRes, err := m.Client.GetChannelExtraInfo(channelId, 5000, "")
 	if err != nil {
-		m.log.Errorf("UsernamesInChannel(%s) failed: %s", channelName, err)
+		m.log.Errorf("UsernamesInChannel(%s) failed: %s", channelId, err)
 		return []string{}
 	}
 	extra := ceiRes.Data.(*model.ChannelExtra)
@@ -414,43 +431,140 @@ func (m *MMClient) createCookieJar(token string) *cookiejar.Jar {
 	return jar
 }
 
-func (m *MMClient) GetOtherUserDM(channel string) *model.User {
-	m.UpdateUsers()
-	var rcvuser *model.User
-	if strings.Contains(channel, "__") {
-		rcvusers := strings.Split(channel, "__")
-		if rcvusers[0] != m.User.Id {
-			rcvuser = m.Users[rcvusers[0]]
-		} else {
-			rcvuser = m.Users[rcvusers[1]]
-		}
-	}
-	return rcvuser
-}
-
+// SendDirectMessage sends a direct message to specified user
 func (m *MMClient) SendDirectMessage(toUserId string, msg string) {
 	m.log.Debugf("SendDirectMessage to %s, msg %s", toUserId, msg)
-	var channel string
-	// We don't have a DM with this user yet.
-	if m.GetChannelId(toUserId+"__"+m.User.Id) == "" && m.GetChannelId(m.User.Id+"__"+toUserId) == "" {
-		// create DM channel
-		_, err := m.Client.CreateDirectChannel(toUserId)
-		if err != nil {
-			m.log.Debugf("SendDirectMessage to %#v failed: %s", toUserId, err)
-		}
-		// update our channels
-		mmchannels, _ := m.Client.GetChannels("")
-		m.Channels = mmchannels.Data.(*model.ChannelList)
+	// create DM channel (only happens on first message)
+	_, err := m.Client.CreateDirectChannel(toUserId)
+	if err != nil {
+		m.log.Debugf("SendDirectMessage to %#v failed: %s", toUserId, err)
 	}
+	channelName := model.GetDMNameFromIds(toUserId, m.User.Id)
 
-	// build the channel name
-	if toUserId > m.User.Id {
-		channel = m.User.Id + "__" + toUserId
-	} else {
-		channel = toUserId + "__" + m.User.Id
-	}
+	// update our channels
+	mmchannels, _ := m.Client.GetChannels("")
+	m.Lock()
+	m.Team.Channels = mmchannels.Data.(*model.ChannelList)
+	m.Unlock()
+
 	// build & send the message
 	msg = strings.Replace(msg, "\r", "", -1)
-	post := &model.Post{ChannelId: m.GetChannelId(channel), Message: msg}
+	post := &model.Post{ChannelId: m.GetChannelId(channelName, ""), Message: msg}
 	m.Client.CreatePost(post)
+}
+
+// GetTeamName returns the name of the specified teamId
+func (m *MMClient) GetTeamName(teamId string) string {
+	m.RLock()
+	defer m.RUnlock()
+	for _, t := range m.OtherTeams {
+		if t.Id == teamId {
+			return t.Team.Name
+		}
+	}
+	return ""
+}
+
+// GetChannels returns all channels we're members off
+func (m *MMClient) GetChannels() []*model.Channel {
+	m.RLock()
+	defer m.RUnlock()
+	var channels []*model.Channel
+	// our primary team channels first
+	channels = append(channels, m.Team.Channels.Channels...)
+	for _, t := range m.OtherTeams {
+		if t.Id != m.Team.Id {
+			channels = append(channels, t.Channels.Channels...)
+		}
+	}
+	return channels
+}
+
+// GetMoreChannels returns existing channels where we're not a member off.
+func (m *MMClient) GetMoreChannels() []*model.Channel {
+	m.RLock()
+	defer m.RUnlock()
+	var channels []*model.Channel
+	for _, t := range m.OtherTeams {
+		channels = append(channels, t.MoreChannels.Channels...)
+	}
+	return channels
+}
+
+// GetTeamFromChannel returns teamId belonging to channel (DM channels have no teamId).
+func (m *MMClient) GetTeamFromChannel(channelId string) string {
+	m.RLock()
+	defer m.RUnlock()
+	var channels []*model.Channel
+	for _, t := range m.OtherTeams {
+		channels = append(channels, t.Channels.Channels...)
+		for _, c := range channels {
+			if c.Id == channelId {
+				return t.Id
+			}
+		}
+	}
+	return ""
+}
+
+func (m *MMClient) GetLastViewedAt(channelId string) int64 {
+	m.RLock()
+	defer m.RUnlock()
+	for _, t := range m.OtherTeams {
+		if _, ok := t.Channels.Members[channelId]; ok {
+			return t.Channels.Members[channelId].LastViewedAt
+		}
+	}
+	return 0
+}
+
+func (m *MMClient) GetUsers() map[string]*model.User {
+	users := make(map[string]*model.User)
+	m.RLock()
+	defer m.RUnlock()
+	for k, v := range m.Users {
+		users[k] = v
+	}
+	return users
+}
+
+func (m *MMClient) GetUser(userId string) *model.User {
+	m.RLock()
+	defer m.RUnlock()
+	return m.Users[userId]
+}
+
+// initialize user and teams
+func (m *MMClient) initUser() error {
+	m.Lock()
+	defer m.Unlock()
+	m.log.Debug("initUser()")
+	initLoad, err := m.Client.GetInitialLoad()
+	if err != nil {
+		return err
+	}
+	initData := initLoad.Data.(*model.InitialLoad)
+	m.User = initData.User
+	// we only load all team data on initial login.
+	// all other updates are for channels from our (primary) team only.
+	m.log.Debug("initUser(): loading all team data")
+	for _, v := range initData.Teams {
+		m.Client.SetTeamId(v.Id)
+		mmusers, _ := m.Client.GetProfiles(v.Id, "")
+		t := &Team{Team: v, Users: mmusers.Data.(map[string]*model.User), Id: v.Id}
+		mmchannels, _ := m.Client.GetChannels("")
+		t.Channels = mmchannels.Data.(*model.ChannelList)
+		mmchannels, _ = m.Client.GetMoreChannels("")
+		t.MoreChannels = mmchannels.Data.(*model.ChannelList)
+		m.OtherTeams = append(m.OtherTeams, t)
+		if v.Name == m.Credentials.Team {
+			m.Team = t
+			m.log.Debugf("initUser(): found our team %s (id: %s)", v.Name, v.Id)
+		}
+		// add all users
+		for k, v := range t.Users {
+			m.Users[k] = v
+		}
+	}
+	return nil
 }

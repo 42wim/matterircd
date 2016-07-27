@@ -85,7 +85,7 @@ func (u *User) handleMMServiceBot(toUser *User, msg string) {
 				u.MsgUser(toUser, err.Error())
 				return
 			}
-			u.addUsersToChannels()
+			go u.addUsersToChannels()
 			u.MsgUser(toUser, "login OK")
 		}
 	case "SEARCH", "search":
@@ -102,8 +102,8 @@ func (u *User) handleMMServiceBot(toUser *User, msg string) {
 			for i := len(postlist.Order) - 1; i >= 0; i-- {
 				timestamp := time.Unix(postlist.Posts[postlist.Order[i]].CreateAt/1000, 0).Format("January 02, 2006 15:04")
 				channelname := u.mc.GetChannelName(postlist.Posts[postlist.Order[i]].ChannelId)
-				u.MsgUser(toUser, "#"+channelname+" <"+u.mc.Users[postlist.Posts[postlist.Order[i]].UserId].Username+"> "+timestamp)
-				u.MsgUser(toUser, strings.Repeat("=", len("#"+channelname+" <"+u.mc.Users[postlist.Posts[postlist.Order[i]].UserId].Username+"> "+timestamp)))
+				u.MsgUser(toUser, "#"+channelname+" <"+u.mc.GetUser(postlist.Posts[postlist.Order[i]].UserId).Username+"> "+timestamp)
+				u.MsgUser(toUser, strings.Repeat("=", len("#"+channelname+" <"+u.mc.GetUser(postlist.Posts[postlist.Order[i]].UserId).Username+"> "+timestamp)))
 				for _, post := range strings.Split(postlist.Posts[postlist.Order[i]].Message, "\n") {
 					u.MsgUser(toUser, post)
 				}
@@ -134,13 +134,13 @@ func (u *User) handleMMServiceBot(toUser *User, msg string) {
 				return
 			}
 			commands[1] = strings.Replace(commands[1], "#", "", -1)
-			postlist := u.mc.GetPosts(u.mc.GetChannelId(commands[1]), limit)
+			postlist := u.mc.GetPosts(u.mc.GetChannelId(commands[1], u.mc.Team.Id), limit)
 			if postlist == nil || len(postlist.Order) == 0 {
 				u.MsgUser(toUser, "no results")
 				return
 			}
 			for i := len(postlist.Order) - 1; i >= 0; i-- {
-				nick := u.mc.Users[postlist.Posts[postlist.Order[i]].UserId].Username
+				nick := u.mc.GetUser(postlist.Posts[postlist.Order[i]].UserId).Username
 				for _, post := range strings.Split(postlist.Posts[postlist.Order[i]].Message, "\n") {
 					u.MsgUser(toUser, "<"+nick+"> "+post)
 				}

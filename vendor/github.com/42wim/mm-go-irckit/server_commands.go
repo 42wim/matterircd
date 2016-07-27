@@ -66,16 +66,18 @@ func CmdJoin(s Server, u *User, msg *irc.Message) error {
 	var err error
 	channels := strings.Split(msg.Params[0], ",")
 	for _, channel := range channels {
+		channelName := strings.Replace(channel, "#", "", 1)
 		// you can only join existing channels
-		err := u.mc.JoinChannel(channel)
+		channelId := u.mc.GetChannelId(channelName, "")
+		err := u.mc.JoinChannel(channelId)
 		if err != nil {
 			s.EncodeMessage(u, irc.ERR_INVITEONLYCHAN, []string{u.Nick, channel}, "Cannot join channel (+i)")
 			continue
 		}
-		ch := s.Channel(channel)
-		ch.Topic(u, u.mc.GetChannelHeader(u.mc.GetChannelId(strings.Replace(channel, "#", "", -1))))
+		ch := s.Channel(channelId)
+		ch.Topic(u, u.mc.GetChannelHeader(channelId))
 		ch.Join(u)
-		u.syncMMChannel(u.mc.GetChannelId(strings.Replace(channel, "#", "", 1)), strings.Replace(channel, "#", "", 1))
+		u.syncMMChannel(channelId, channelName)
 	}
 	return err
 }
@@ -89,16 +91,21 @@ func CmdList(s Server, u *User, msg *irc.Message) error {
 		Params:   []string{u.Nick},
 		Trailing: "Channel Users Topic",
 	})
-	for _, channel := range append(u.mc.Channels.Channels, u.mc.MoreChannels.Channels...) {
+	for _, channel := range append(u.mc.GetChannels(), u.mc.GetMoreChannels()...) {
 		// FIXME: This needs to be broken up into multiple messages to fit <510 chars
 		if strings.Contains(channel.Name, "__") {
 			continue
+		}
+		channelName := channel.Name
+		// prefix channels outside of our team with team name
+		if channel.TeamId != u.mc.Team.Id {
+			channelName = u.mc.GetTeamName(channel.TeamId) + "/" + channel.Name
 		}
 		r = append(r, &irc.Message{
 			Prefix:   s.Prefix(),
 			Command:  irc.RPL_LIST,
 			Params:   []string{u.Nick},
-			Trailing: channel.Name + " #? " + strings.Replace(channel.Header, "\n", " | ", -1),
+			Trailing: channelName + " #? " + strings.Replace(channel.Header, "\n", " | ", -1),
 		})
 	}
 	r = append(r, &irc.Message{
@@ -219,6 +226,7 @@ func CmdPart(s Server, u *User, msg *irc.Message) error {
 	var err error
 	channels := strings.Split(msg.Params[0], ",")
 	for _, chName := range channels {
+		// we can not leave & channels
 		if strings.HasPrefix(chName, "&") {
 			continue
 		}
@@ -230,7 +238,7 @@ func CmdPart(s Server, u *User, msg *irc.Message) error {
 		// first part on irc
 		ch.Part(u, msg.Trailing)
 		// now part on mattermost
-		u.mc.Client.LeaveChannel(u.mc.GetChannelId(strings.Replace(chName, "#", "", 1)))
+		u.mc.Client.LeaveChannel(ch.ID())
 		// part all other (ghost)users on the channel
 		for _, k := range ch.Users() {
 			ch.Part(k, "")
@@ -258,8 +266,8 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 		return nil
 	}
 	query := msg.Params[0]
-	if _, exists := s.HasChannel(query); exists {
-		p := strings.Replace(query, "#", "", -1)
+	if ch, exists := s.HasChannel(query); exists {
+		//p := strings.Replace(query, "#", "", -1)
 		msg.Trailing = strings.Replace(msg.Trailing, "\r", "", -1)
 		// fix non-rfc clients
 		if !strings.HasPrefix(msg.Trailing, ":") {
@@ -273,7 +281,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 			msg.Trailing = "*" + msg.Trailing + "*"
 		}
 		msg.Trailing += " ​"
-		post := &model.Post{ChannelId: u.mc.GetChannelId(p), Message: msg.Trailing}
+		post := &model.Post{ChannelId: ch.ID(), Message: msg.Trailing}
 		_, err := u.mc.Client.CreatePost(post)
 		if err != nil {
 			u.MsgSpoofUser("mattermost", "msg: "+msg.Trailing+" could not be send: "+err.Error())
@@ -312,8 +320,7 @@ func CmdTopic(s Server, u *User, msg *irc.Message) error {
 	channelname := msg.Params[0]
 	ch := s.Channel(channelname)
 	ch.Topic(u, msg.Trailing)
-	channelname = strings.Replace(channelname, "#", "", -1)
-	u.mc.UpdateChannelHeader(u.mc.GetChannelId(channelname), msg.Trailing)
+	u.mc.UpdateChannelHeader(ch.ID(), msg.Trailing)
 	return nil
 }
 
@@ -377,8 +384,8 @@ func CmdWhois(s Server, u *User, msg *irc.Message) error {
 		})
 
 		u.mc.UpdateUsers()
-		if _, ok := u.mc.Users[other.User]; ok {
-			idle := (model.GetMillis() - u.mc.Users[other.User].LastActivityAt) / 1000
+		if u.mc.GetUser(other.User) != nil {
+			idle := (model.GetMillis() - u.mc.GetUser(other.User).LastActivityAt) / 1000
 			r = append(r, &irc.Message{
 				Prefix:   s.Prefix(),
 				Params:   []string{u.Nick, other.Nick, strconv.FormatInt(idle, 10), "0"},
