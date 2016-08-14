@@ -85,7 +85,8 @@ func (u *User) handleMMServiceBot(toUser *User, msg string) {
 				u.MsgUser(toUser, err.Error())
 				return
 			}
-			go u.addUsersToChannels()
+			u.addUsersToChannels()
+			go u.mc.StatusLoop()
 			u.MsgUser(toUser, "login OK")
 		}
 	case "SEARCH", "search":
