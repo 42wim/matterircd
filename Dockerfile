@@ -8,4 +8,4 @@ RUN apk update && apk add go git gcc musl-dev ca-certificates \
         && go get \
         && go build -o /bin/matterircd \
         && rm -rf /go \
-        && apk del --purge git go
+        && apk del --purge git go gcc musl-dev
