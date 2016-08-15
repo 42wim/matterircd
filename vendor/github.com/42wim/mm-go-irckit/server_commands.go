@@ -384,13 +384,24 @@ func CmdWhois(s Server, u *User, msg *irc.Message) error {
 		})
 
 		u.mc.UpdateUsers()
-		if u.mc.GetUser(other.User) != nil {
-			idle := (model.GetMillis() - u.mc.GetUser(other.User).LastActivityAt) / 1000
+		status := u.mc.GetStatus(other.User)
+		/*
+			if status != "" {
+				idle := (model.GetMillis() - lastActivityAt/1000)
+				r = append(r, &irc.Message{
+					Prefix:   s.Prefix(),
+					Params:   []string{u.Nick, other.Nick, strconv.FormatInt(idle, 10), "0"},
+					Command:  irc.RPL_WHOISIDLE,
+					Trailing: "seconds idle, signon time",
+				})
+			}
+		*/
+		if status != "online" {
 			r = append(r, &irc.Message{
 				Prefix:   s.Prefix(),
-				Params:   []string{u.Nick, other.Nick, strconv.FormatInt(idle, 10), "0"},
-				Command:  irc.RPL_WHOISIDLE,
-				Trailing: "seconds idle, signon time",
+				Params:   []string{u.Nick, other.Nick, status},
+				Command:  irc.RPL_AWAY,
+				Trailing: status,
 			})
 		}
 

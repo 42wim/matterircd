@@ -5,7 +5,7 @@
 			"importpath": "github.com/42wim/matterbridge/matterclient",
 			"repository": "https://github.com/42wim/matterbridge",
 			"vcs": "git",
-			"revision": "a1a11a88b334a4deb78915336def0113eec9738b",
+			"revision": "32e5f396e75927f10623ecdf8446a070506385eb",
 			"branch": "master",
 			"path": "/matterclient",
 			"notests": true
@@ -14,7 +14,7 @@
 			"importpath": "github.com/42wim/mm-go-irckit",
 			"repository": "https://github.com/42wim/mm-go-irckit",
 			"vcs": "git",
-			"revision": "d6e455a0e75f489c75836e91ba26d4b6e77b3bd9",
+			"revision": "23d6894a0e62d48a597225d39c5c4432ab4c1597",
 			"branch": "master",
 			"notests": true
 		},
@@ -70,8 +70,8 @@
 			"importpath": "github.com/mattermost/platform/einterfaces",
 			"repository": "https://github.com/mattermost/platform",
 			"vcs": "git",
-			"revision": "ab52700aaa76a5623de23cd0156f5dbd9a24e264",
-			"branch": "release-3.2",
+			"revision": "20735470185e0b0ac1d15b975041ed9a2e0e43bc",
+			"branch": "release-3.3",
 			"path": "/einterfaces",
 			"notests": true
 		},
@@ -79,8 +79,8 @@
 			"importpath": "github.com/mattermost/platform/model",
 			"repository": "https://github.com/mattermost/platform",
 			"vcs": "git",
-			"revision": "ab52700aaa76a5623de23cd0156f5dbd9a24e264",
-			"branch": "release-3.2",
+			"revision": "20735470185e0b0ac1d15b975041ed9a2e0e43bc",
+			"branch": "release-3.3",
 			"path": "/model",
 			"notests": true
 		},

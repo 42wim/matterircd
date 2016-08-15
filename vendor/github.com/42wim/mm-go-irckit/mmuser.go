@@ -160,22 +160,22 @@ func (u *User) handleWsMessage() {
 		logger.Debugf("WsReceiver: %#v", message.Raw)
 		// check if we have the users/channels in our cache. If not update
 		u.checkWsActionMessage(message.Raw)
-		switch message.Raw.Action {
-		case model.ACTION_POSTED:
+		switch message.Raw.Event {
+		case model.WEBSOCKET_EVENT_POSTED:
 			u.handleWsActionPost(message.Raw)
-		case model.ACTION_USER_REMOVED:
+		case model.WEBSOCKET_EVENT_USER_REMOVED:
 			u.handleWsActionUserRemoved(message.Raw)
-		case model.ACTION_USER_ADDED:
+		case model.WEBSOCKET_EVENT_USER_ADDED:
 			u.handleWsActionUserAdded(message.Raw)
 		}
 	}
 }
 
-func (u *User) handleWsActionPost(rmsg *model.Message) {
+func (u *User) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	var ch Channel
-	data := model.PostFromJson(strings.NewReader(rmsg.Props["post"]))
-	props := rmsg.Props
-	extraProps := model.StringInterfaceFromJson(strings.NewReader(rmsg.Props["post"]))["props"].(map[string]interface{})
+	data := model.PostFromJson(strings.NewReader(rmsg.Data["post"].(string)))
+	props := rmsg.Data
+	extraProps := model.StringInterfaceFromJson(strings.NewReader(rmsg.Data["post"].(string)))["props"].(map[string]interface{})
 	logger.Debugf("handleWsActionPost() receiving userid %s", data.UserId)
 	if data.UserId == u.mc.User.Id {
 		// space + ZWSP
@@ -249,7 +249,7 @@ func (u *User) handleWsActionPost(rmsg *model.Message) {
 	u.mc.UpdateLastViewed(data.ChannelId)
 }
 
-func (u *User) handleWsActionUserRemoved(rmsg *model.Message) {
+func (u *User) handleWsActionUserRemoved(rmsg *model.WebSocketEvent) {
 	ch := u.Srv.Channel(rmsg.ChannelId)
 
 	// remove ourselves from the channel
@@ -265,7 +265,7 @@ func (u *User) handleWsActionUserRemoved(rmsg *model.Message) {
 	ch.Part(ghost, "")
 }
 
-func (u *User) handleWsActionUserAdded(rmsg *model.Message) {
+func (u *User) handleWsActionUserAdded(rmsg *model.WebSocketEvent) {
 	// do not add ourselves to the channel
 	if rmsg.UserId == u.mc.User.Id {
 		logger.Debug("ACTION_USER_ADDED not adding myself to", u.mc.GetChannelName(rmsg.ChannelId), rmsg.ChannelId)
@@ -274,7 +274,7 @@ func (u *User) handleWsActionUserAdded(rmsg *model.Message) {
 	u.addUserToChannel(u.mc.GetUser(rmsg.UserId), "#"+u.mc.GetChannelName(rmsg.ChannelId), rmsg.ChannelId)
 }
 
-func (u *User) checkWsActionMessage(rmsg *model.Message) {
+func (u *User) checkWsActionMessage(rmsg *model.WebSocketEvent) {
 	if u.mc.GetChannelName(rmsg.ChannelId) == "" {
 		u.mc.UpdateChannels()
 	}
