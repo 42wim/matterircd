@@ -17,7 +17,7 @@ func DefaultCommands() Commands {
 	cmds.Add(Handler{Command: irc.JOIN, Call: CmdJoin, MinParams: 1, LoggedIn: true})
 	cmds.Add(Handler{Command: irc.LIST, Call: CmdList, LoggedIn: true})
 	cmds.Add(Handler{Command: irc.LUSERS, Call: CmdLusers})
-	cmds.Add(Handler{Command: irc.MODE, Call: CmdMode})
+	cmds.Add(Handler{Command: irc.MODE, Call: CmdMode, MinParams: 1, LoggedIn: true})
 	cmds.Add(Handler{Command: irc.MOTD, Call: CmdMotd})
 	cmds.Add(Handler{Command: irc.NAMES, Call: CmdNames, MinParams: 1, LoggedIn: true})
 	cmds.Add(Handler{Command: irc.NICK, Call: CmdNick, MinParams: 1})
