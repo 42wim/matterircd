@@ -76,8 +76,8 @@ func CmdJoin(s Server, u *User, msg *irc.Message) error {
 		}
 		ch := s.Channel(channelId)
 		ch.Topic(u, u.mc.GetChannelHeader(channelId))
-		ch.Join(u)
 		u.syncMMChannel(channelId, channelName)
+		ch.Join(u)
 	}
 	return err
 }
