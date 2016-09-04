@@ -1,5 +1,7 @@
 # matterircd
 
+[![Join the chat at https://gitter.im/42wim/matterircd](https://badges.gitter.im/42wim/matterircd.svg)](https://gitter.im/42wim/matterircd?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
+
 Minimal IRC server which integrates with [mattermost](https://www.mattermost.org)  
 Tested on Windows / Linux
 
