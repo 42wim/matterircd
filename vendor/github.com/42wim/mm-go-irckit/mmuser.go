@@ -73,7 +73,6 @@ func (u *User) logoutFromMattermost() error {
 	}
 	logger.Info("logout succeeded")
 	u.Srv.Logout(u)
-	u.mc = nil
 	return nil
 }
 

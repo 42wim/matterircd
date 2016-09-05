@@ -261,6 +261,9 @@ func (s *server) Quit(u *User, message string) {
 	s.Lock()
 	delete(s.users, u.ID())
 	s.Unlock()
+	if u.mc != nil {
+		u.mc.Logout()
+	}
 }
 
 func (s *server) guestNick() string {
