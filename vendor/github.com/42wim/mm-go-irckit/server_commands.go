@@ -250,6 +250,9 @@ func CmdPart(s Server, u *User, msg *irc.Message) error {
 
 // CmdPing is a handler for the /PING command.
 func CmdPing(s Server, u *User, msg *irc.Message) error {
+	if len(msg.Params) > 0 {
+		msg.Trailing = msg.Params[0]
+	}
 	s.EncodeMessage(u, irc.PONG, []string{s.Name()}, msg.Trailing)
 	return nil
 }
