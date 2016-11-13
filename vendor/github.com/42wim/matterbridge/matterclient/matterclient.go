@@ -125,8 +125,11 @@ func (m *MMClient) Login() error {
 		if appErr != nil {
 			d := b.Duration()
 			m.log.Debug(appErr.DetailedError)
+			//TODO more generic fix needed
 			if !strings.Contains(appErr.DetailedError, "connection refused") &&
-				!strings.Contains(appErr.DetailedError, "invalid character") {
+				!strings.Contains(appErr.DetailedError, "invalid character") &&
+				!strings.Contains(appErr.DetailedError, "connection reset by peer") &&
+				!strings.Contains(appErr.DetailedError, "connection timed out") {
 				if appErr.Message == "" {
 					return errors.New(appErr.DetailedError)
 				}
@@ -261,7 +264,7 @@ func (m *MMClient) parseActionPost(rmsg *Message) {
 	}
 	rmsg.Username = m.GetUser(data.UserId).Username
 	rmsg.Channel = m.GetChannelName(data.ChannelId)
-	rmsg.Team = m.GetTeamName(rmsg.Raw.TeamId)
+	rmsg.Team = m.GetTeamName(rmsg.Raw.Data["team_id"].(string))
 	// direct message
 	if rmsg.Raw.Data["channel_type"] == "D" {
 		rmsg.Channel = m.GetUser(data.UserId).Username
@@ -272,7 +275,7 @@ func (m *MMClient) parseActionPost(rmsg *Message) {
 }
 
 func (m *MMClient) UpdateUsers() error {
-	mmusers, err := m.Client.GetProfilesForDirectMessageList(m.Team.Id)
+	mmusers, err := m.Client.GetProfiles(0, 5000, "")
 	if err != nil {
 		return errors.New(err.DetailedError)
 	}
@@ -302,7 +305,7 @@ func (m *MMClient) GetChannelName(channelId string) string {
 	m.RLock()
 	defer m.RUnlock()
 	for _, t := range m.OtherTeams {
-		for _, channel := range append(t.Channels.Channels, t.MoreChannels.Channels...) {
+		for _, channel := range append(*t.Channels, *t.MoreChannels...) {
 			if channel.Id == channelId {
 				return channel.Name
 			}
@@ -319,7 +322,7 @@ func (m *MMClient) GetChannelId(name string, teamId string) string {
 	}
 	for _, t := range m.OtherTeams {
 		if t.Id == teamId {
-			for _, channel := range append(t.Channels.Channels, t.MoreChannels.Channels...) {
+			for _, channel := range append(*t.Channels, *t.MoreChannels...) {
 				if channel.Name == name {
 					return channel.Id
 				}
@@ -333,7 +336,7 @@ func (m *MMClient) GetChannelHeader(channelId string) string {
 	m.RLock()
 	defer m.RUnlock()
 	for _, t := range m.OtherTeams {
-		for _, channel := range append(t.Channels.Channels, t.MoreChannels.Channels...) {
+		for _, channel := range append(*t.Channels, *t.MoreChannels...) {
 			if channel.Id == channelId {
 				return channel.Header
 			}
@@ -351,7 +354,7 @@ func (m *MMClient) PostMessage(channelId string, text string) {
 func (m *MMClient) JoinChannel(channelId string) error {
 	m.RLock()
 	defer m.RUnlock()
-	for _, c := range m.Team.Channels.Channels {
+	for _, c := range *m.Team.Channels {
 		if c.Id == channelId {
 			m.log.Debug("Not joining ", channelId, " already joined.")
 			return nil
@@ -394,7 +397,7 @@ func (m *MMClient) GetPublicLink(filename string) string {
 	if err != nil {
 		return ""
 	}
-	return res.Data.(string)
+	return res
 }
 
 func (m *MMClient) GetPublicLinks(filenames []string) []string {
@@ -404,7 +407,7 @@ func (m *MMClient) GetPublicLinks(filenames []string) []string {
 		if err != nil {
 			continue
 		}
-		output = append(output, res.Data.(string))
+		output = append(output, res)
 	}
 	return output
 }
@@ -429,15 +432,17 @@ func (m *MMClient) UpdateLastViewed(channelId string) {
 }
 
 func (m *MMClient) UsernamesInChannel(channelId string) []string {
-	ceiRes, err := m.Client.GetChannelExtraInfo(channelId, 5000, "")
+	res, err := m.Client.GetMyChannelMembers()
 	if err != nil {
 		m.log.Errorf("UsernamesInChannel(%s) failed: %s", channelId, err)
 		return []string{}
 	}
-	extra := ceiRes.Data.(*model.ChannelExtra)
+	members := res.Data.(*model.ChannelMembers)
 	result := []string{}
-	for _, member := range extra.Members {
-		result = append(result, member.Username)
+	for _, channel := range *members {
+		if channel.ChannelId == channelId {
+			result = append(result, m.GetUser(channel.UserId).Username)
+		}
 	}
 	return result
 }
@@ -497,10 +502,10 @@ func (m *MMClient) GetChannels() []*model.Channel {
 	defer m.RUnlock()
 	var channels []*model.Channel
 	// our primary team channels first
-	channels = append(channels, m.Team.Channels.Channels...)
+	channels = append(channels, *m.Team.Channels...)
 	for _, t := range m.OtherTeams {
 		if t.Id != m.Team.Id {
-			channels = append(channels, t.Channels.Channels...)
+			channels = append(channels, *t.Channels...)
 		}
 	}
 	return channels
@@ -512,7 +517,7 @@ func (m *MMClient) GetMoreChannels() []*model.Channel {
 	defer m.RUnlock()
 	var channels []*model.Channel
 	for _, t := range m.OtherTeams {
-		channels = append(channels, t.MoreChannels.Channels...)
+		channels = append(channels, *t.MoreChannels...)
 	}
 	return channels
 }
@@ -523,8 +528,8 @@ func (m *MMClient) GetTeamFromChannel(channelId string) string {
 	defer m.RUnlock()
 	var channels []*model.Channel
 	for _, t := range m.OtherTeams {
-		channels = append(channels, t.Channels.Channels...)
-		channels = append(channels, t.MoreChannels.Channels...)
+		channels = append(channels, *t.Channels...)
+		channels = append(channels, *t.MoreChannels...)
 		for _, c := range channels {
 			if c.Id == channelId {
 				return t.Id
@@ -537,12 +542,12 @@ func (m *MMClient) GetTeamFromChannel(channelId string) string {
 func (m *MMClient) GetLastViewedAt(channelId string) int64 {
 	m.RLock()
 	defer m.RUnlock()
-	for _, t := range m.OtherTeams {
-		if _, ok := t.Channels.Members[channelId]; ok {
-			return t.Channels.Members[channelId].LastViewedAt
-		}
+	res, err := m.Client.GetChannel(channelId, "")
+	if err != nil {
+		return model.GetMillis()
 	}
-	return 0
+	data := res.Data.(*model.ChannelData)
+	return data.Member.LastViewedAt
 }
 
 func (m *MMClient) GetUsers() map[string]*model.User {
@@ -574,6 +579,10 @@ func (m *MMClient) GetStatus(userId string) string {
 		return "online"
 	}
 	return "offline"
+}
+
+func (m *MMClient) GetTeamId() string {
+	return m.Team.Id
 }
 
 func (m *MMClient) StatusLoop() {
@@ -612,7 +621,7 @@ func (m *MMClient) initUser() error {
 	//m.log.Debug("initUser(): loading all team data")
 	for _, v := range initData.Teams {
 		m.Client.SetTeamId(v.Id)
-		mmusers, _ := m.Client.GetProfiles(v.Id, "")
+		mmusers, _ := m.Client.GetProfiles(0, 5000, "")
 		t := &Team{Team: v, Users: mmusers.Data.(map[string]*model.User), Id: v.Id}
 		mmchannels, _ := m.Client.GetChannels("")
 		t.Channels = mmchannels.Data.(*model.ChannelList)

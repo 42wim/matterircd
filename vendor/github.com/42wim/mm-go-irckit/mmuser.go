@@ -128,7 +128,7 @@ func (u *User) addUsersToChannels() {
 			channelName = u.mc.GetTeamName(mmchannel.TeamId) + "/" + mmchannel.Name
 		}
 		u.syncMMChannel(mmchannel.Id, channelName)
-		srv.Channel(mmchannel.Id)
+		ch := srv.Channel(mmchannel.Id)
 		// post everything to the channel you haven't seen yet
 		postlist := u.mc.GetPostsSince(mmchannel.Id, u.mc.GetLastViewedAt(mmchannel.Id))
 		if postlist == nil {
@@ -249,16 +249,16 @@ func (u *User) handleWsActionPost(rmsg *model.WebSocketEvent) {
 }
 
 func (u *User) handleWsActionUserRemoved(rmsg *model.WebSocketEvent) {
-	ch := u.Srv.Channel(rmsg.ChannelId)
+	ch := u.Srv.Channel(rmsg.Broadcast.ChannelId)
 
 	// remove ourselves from the channel
-	if rmsg.UserId == u.mc.User.Id {
+	if rmsg.Broadcast.UserId == u.mc.User.Id {
 		return
 	}
 
-	ghost := u.createMMUser(u.mc.GetUser(rmsg.UserId))
+	ghost := u.createMMUser(u.mc.GetUser(rmsg.Broadcast.UserId))
 	if ghost == nil {
-		logger.Debug("couldn't remove user", rmsg.UserId, u.mc.GetUser(rmsg.UserId).Username)
+		logger.Debug("couldn't remove user", rmsg.Broadcast.UserId, u.mc.GetUser(rmsg.Broadcast.UserId).Username)
 		return
 	}
 	ch.Part(ghost, "")
@@ -266,18 +266,18 @@ func (u *User) handleWsActionUserRemoved(rmsg *model.WebSocketEvent) {
 
 func (u *User) handleWsActionUserAdded(rmsg *model.WebSocketEvent) {
 	// do not add ourselves to the channel
-	if rmsg.UserId == u.mc.User.Id {
-		logger.Debug("ACTION_USER_ADDED not adding myself to", u.mc.GetChannelName(rmsg.ChannelId), rmsg.ChannelId)
+	if rmsg.Broadcast.UserId == u.mc.User.Id {
+		logger.Debug("ACTION_USER_ADDED not adding myself to", u.mc.GetChannelName(rmsg.Broadcast.ChannelId), rmsg.Broadcast.ChannelId)
 		return
 	}
-	u.addUserToChannel(u.mc.GetUser(rmsg.UserId), "#"+u.mc.GetChannelName(rmsg.ChannelId), rmsg.ChannelId)
+	u.addUserToChannel(u.mc.GetUser(rmsg.Broadcast.UserId), "#"+u.mc.GetChannelName(rmsg.Broadcast.ChannelId), rmsg.Broadcast.ChannelId)
 }
 
 func (u *User) checkWsActionMessage(rmsg *model.WebSocketEvent) {
-	if u.mc.GetChannelName(rmsg.ChannelId) == "" {
+	if u.mc.GetChannelName(rmsg.Broadcast.ChannelId) == "" {
 		u.mc.UpdateChannels()
 	}
-	if u.mc.GetUser(rmsg.UserId) == nil {
+	if u.mc.GetUser(rmsg.Broadcast.UserId) == nil {
 		u.mc.UpdateUsers()
 	}
 }
@@ -303,20 +303,20 @@ func (u *User) MsgSpoofUser(rcvuser string, msg string) {
 // sync IRC with mattermost channel state
 func (u *User) syncMMChannel(id string, name string) {
 	srv := u.Srv
-	edata, _ := u.mc.Client.GetChannelExtraInfo(id, -1, "")
-	if edata == nil {
+	res, _ := u.mc.Client.GetProfilesInChannel(id, 0, 5000, "")
+	if res == nil {
 		return
 	}
-	// let everyone join
-	for _, d := range edata.Data.(*model.ChannelExtra).Members {
-		if d.Id != u.mc.User.Id {
-			u.addUserToChannel(u.mc.GetUser(d.Id), "#"+name, id)
+	users := res.Data.(map[string]*model.User)
+	for _, user := range users {
+		if user.Id != u.mc.User.Id {
+			u.addUserToChannel(user, "#"+name, id)
 		}
 	}
 	// before joining ourself
-	for _, d := range edata.Data.(*model.ChannelExtra).Members {
+	for _, user := range users {
 		// join all the channels we're on on MM
-		if d.Id == u.mc.User.Id {
+		if user.Id == u.mc.User.Id {
 			ch := srv.Channel(id)
 			ch.Topic(u, u.mc.GetChannelHeader(id))
 			// only join when we're not yet on the channel
