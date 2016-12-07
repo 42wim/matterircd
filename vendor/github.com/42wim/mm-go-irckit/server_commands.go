@@ -96,7 +96,7 @@ func CmdList(s Server, u *User, msg *irc.Message) error {
 		if strings.Contains(channel.Name, "__") {
 			continue
 		}
-		channelName := channel.Name
+		channelName := "#" + channel.Name                
 		// prefix channels outside of our team with team name
 		if channel.TeamId != u.mc.Team.Id {
 			channelName = u.mc.GetTeamName(channel.TeamId) + "/" + channel.Name
@@ -104,8 +104,8 @@ func CmdList(s Server, u *User, msg *irc.Message) error {
 		r = append(r, &irc.Message{
 			Prefix:   s.Prefix(),
 			Command:  irc.RPL_LIST,
-			Params:   []string{u.Nick},
-			Trailing: channelName + " #? " + strings.Replace(channel.Header, "\n", " | ", -1),
+			Params:   []string{u.Nick,channelName,"0",strings.Replace(channel.Header, "\n", " | ", -1)},
+			Trailing: "",
 		})
 	}
 	r = append(r, &irc.Message{
@@ -402,7 +402,7 @@ func CmdWhois(s Server, u *User, msg *irc.Message) error {
 		if status != "online" {
 			r = append(r, &irc.Message{
 				Prefix:   s.Prefix(),
-				Params:   []string{u.Nick, other.Nick, status},
+				Params:   []string{u.Nick, other.Nick},
 				Command:  irc.RPL_AWAY,
 				Trailing: status,
 			})
@@ -410,7 +410,7 @@ func CmdWhois(s Server, u *User, msg *irc.Message) error {
 
 		r = append(r, &irc.Message{
 			Prefix:   s.Prefix(),
-			Params:   []string{u.Nick},
+			Params:   []string{u.Nick, other.Nick},
 			Command:  irc.RPL_ENDOFWHOIS,
 			Trailing: "End of /WHOIS list.",
 		})

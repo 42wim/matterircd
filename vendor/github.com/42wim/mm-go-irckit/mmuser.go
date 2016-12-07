@@ -198,7 +198,11 @@ func (u *User) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	// check if we have a override_username (from webhooks) and use it
 	overrideUsername, _ := extraProps["override_username"].(string)
 	if overrideUsername != "" {
-		spoofUsername = overrideUsername
+		// only allow valid irc nicks
+		re := regexp.MustCompile("^[a-zA-Z0-9_]*$")
+		if re.MatchString(overrideUsername) {
+			spoofUsername = overrideUsername
+		}
 	}
 
 	msgs := strings.Split(data.Message, "\n")
