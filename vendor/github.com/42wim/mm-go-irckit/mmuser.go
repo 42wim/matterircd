@@ -2,6 +2,7 @@ package irckit
 
 import (
 	"net"
+	"regexp"
 	"strings"
 	"time"
 
