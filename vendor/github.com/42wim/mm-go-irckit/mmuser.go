@@ -96,6 +96,9 @@ func (u *User) createService(nick string, what string) {
 }
 
 func (u *User) addUserToChannel(user *model.User, channel string, channelId string) {
+	if user == nil {
+		return
+	}
 	ghost := u.createMMUser(user)
 	logger.Debugf("adding %s to %s", ghost.Nick, channel)
 	ch := u.Srv.Channel(channelId)
@@ -254,36 +257,51 @@ func (u *User) handleWsActionPost(rmsg *model.WebSocketEvent) {
 }
 
 func (u *User) handleWsActionUserRemoved(rmsg *model.WebSocketEvent) {
+	userId, ok := rmsg.Data["user_id"].(string)
+	if !ok {
+		return
+	}
 	ch := u.Srv.Channel(rmsg.Broadcast.ChannelId)
 
 	// remove ourselves from the channel
-	if rmsg.Broadcast.UserId == u.mc.User.Id {
+	if userId == u.mc.User.Id {
 		return
 	}
 
-	ghost := u.createMMUser(u.mc.GetUser(rmsg.Broadcast.UserId))
+	ghost := u.createMMUser(u.mc.GetUser(userId))
 	if ghost == nil {
-		logger.Debug("couldn't remove user", rmsg.Broadcast.UserId, u.mc.GetUser(rmsg.Broadcast.UserId).Username)
+		logger.Debugf("couldn't remove user %s (%s)", userId, u.mc.GetUser(userId).Username)
 		return
 	}
 	ch.Part(ghost, "")
 }
 
 func (u *User) handleWsActionUserAdded(rmsg *model.WebSocketEvent) {
-	// do not add ourselves to the channel
-	if rmsg.Broadcast.UserId == u.mc.User.Id {
-		logger.Debug("ACTION_USER_ADDED not adding myself to", u.mc.GetChannelName(rmsg.Broadcast.ChannelId), rmsg.Broadcast.ChannelId)
+	userId, ok := rmsg.Data["user_id"].(string)
+	if !ok {
 		return
 	}
-	u.addUserToChannel(u.mc.GetUser(rmsg.Broadcast.UserId), "#"+u.mc.GetChannelName(rmsg.Broadcast.ChannelId), rmsg.Broadcast.ChannelId)
+
+	// do not add ourselves to the channel
+	if userId == u.mc.User.Id {
+		logger.Debugf("ACTION_USER_ADDED not adding myself to %s (%s)", u.mc.GetChannelName(rmsg.Broadcast.ChannelId), rmsg.Broadcast.ChannelId)
+		return
+	}
+	u.addUserToChannel(u.mc.GetUser(userId), "#"+u.mc.GetChannelName(rmsg.Broadcast.ChannelId), rmsg.Broadcast.ChannelId)
 }
 
 func (u *User) checkWsActionMessage(rmsg *model.WebSocketEvent) {
 	if u.mc.GetChannelName(rmsg.Broadcast.ChannelId) == "" {
 		u.mc.UpdateChannels()
 	}
-	if u.mc.GetUser(rmsg.Broadcast.UserId) == nil {
-		u.mc.UpdateUsers()
+	if rmsg.Data == nil {
+		return
+	}
+	userid, ok := rmsg.Data["user_id"].(string)
+	if ok {
+		if u.mc.GetUser(userid) == nil {
+			u.mc.UpdateUsers()
+		}
 	}
 }
 

@@ -135,6 +135,13 @@ func (ch *channel) Part(u *User, text string) {
 		})
 		return
 	}
+
+	// only send join messages to real users
+	for to := range ch.usersIdx {
+		if to.MmGhostUser == false {
+			to.Encode(msg)
+		}
+	}
 	u.Encode(msg)
 	delete(ch.usersIdx, u)
 	ch.mu.Unlock()
@@ -208,18 +215,17 @@ func (ch *channel) Join(u *User) error {
 	u.channels[ch] = struct{}{}
 	u.Unlock()
 
-	// only send join messages to real users
-	if u.MmGhostUser {
-		return nil
-	}
-
 	msg := &irc.Message{
 		Prefix:  u.Prefix(),
 		Command: irc.JOIN,
 		Params:  []string{ch.name},
 	}
+
+	// only send join messages to real users
 	for to := range ch.usersIdx {
-		to.Encode(msg)
+		if to.MmGhostUser == false {
+			to.Encode(msg)
+		}
 	}
 
 	msgs := []*irc.Message{}
