@@ -80,6 +80,11 @@ func (m *MMClient) SetLogLevel(level string) {
 }
 
 func (m *MMClient) Login() error {
+	// check if this is a first connect or a reconnection
+	firstConnection := true
+	if m.WsConnected == true {
+		firstConnection = false
+	}
 	m.WsConnected = false
 	if m.WsQuit {
 		return nil
@@ -125,11 +130,7 @@ func (m *MMClient) Login() error {
 		if appErr != nil {
 			d := b.Duration()
 			m.log.Debug(appErr.DetailedError)
-			//TODO more generic fix needed
-			if !strings.Contains(appErr.DetailedError, "connection refused") &&
-				!strings.Contains(appErr.DetailedError, "invalid character") &&
-				!strings.Contains(appErr.DetailedError, "connection reset by peer") &&
-				!strings.Contains(appErr.DetailedError, "connection timed out") {
+			if firstConnection {
 				if appErr.Message == "" {
 					return errors.New(appErr.DetailedError)
 				}
@@ -621,11 +622,20 @@ func (m *MMClient) initUser() error {
 	//m.log.Debug("initUser(): loading all team data")
 	for _, v := range initData.Teams {
 		m.Client.SetTeamId(v.Id)
-		mmusers, _ := m.Client.GetProfiles(0, 50000, "")
+		mmusers, err := m.Client.GetProfiles(0, 50000, "")
+		if err != nil {
+			return errors.New(err.DetailedError)
+		}
 		t := &Team{Team: v, Users: mmusers.Data.(map[string]*model.User), Id: v.Id}
-		mmchannels, _ := m.Client.GetChannels("")
+		mmchannels, err := m.Client.GetChannels("")
+		if err != nil {
+			return errors.New(err.DetailedError)
+		}
 		t.Channels = mmchannels.Data.(*model.ChannelList)
-		mmchannels, _ = m.Client.GetMoreChannels("")
+		mmchannels, err = m.Client.GetMoreChannels("")
+		if err != nil {
+			return errors.New(err.DetailedError)
+		}
 		t.MoreChannels = mmchannels.Data.(*model.ChannelList)
 		m.OtherTeams = append(m.OtherTeams, t)
 		if v.Name == m.Credentials.Team {
