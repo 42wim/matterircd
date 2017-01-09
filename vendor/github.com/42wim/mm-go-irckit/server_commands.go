@@ -13,7 +13,7 @@ func DefaultCommands() Commands {
 	cmds := commands{}
 
 	cmds.Add(Handler{Command: irc.AWAY, Call: CmdAway, LoggedIn: true})
-	cmds.Add(Handler{Command: irc.ISON, Call: CmdIson, MinParams: 1})
+	cmds.Add(Handler{Command: irc.ISON, Call: CmdIson})
 	cmds.Add(Handler{Command: irc.JOIN, Call: CmdJoin, MinParams: 1, LoggedIn: true})
 	cmds.Add(Handler{Command: irc.LIST, Call: CmdList, LoggedIn: true})
 	cmds.Add(Handler{Command: irc.LUSERS, Call: CmdLusers})
@@ -44,6 +44,9 @@ func CmdAway(s Server, u *User, msg *irc.Message) error {
 // CmdIson is a handler for the /ISON command.
 func CmdIson(s Server, u *User, msg *irc.Message) error {
 	nicks := msg.Params
+	if len(msg.Params) == 0 {
+		nicks = strings.Fields(msg.Trailing)
+	}
 	on := make([]string, 0, len(nicks))
 	for _, nick := range nicks {
 		if _, ok := s.HasUser(nick); ok {
@@ -96,7 +99,7 @@ func CmdList(s Server, u *User, msg *irc.Message) error {
 		if strings.Contains(channel.Name, "__") {
 			continue
 		}
-		channelName := "#" + channel.Name                
+		channelName := "#" + channel.Name
 		// prefix channels outside of our team with team name
 		if channel.TeamId != u.mc.Team.Id {
 			channelName = u.mc.GetTeamName(channel.TeamId) + "/" + channel.Name
@@ -104,7 +107,7 @@ func CmdList(s Server, u *User, msg *irc.Message) error {
 		r = append(r, &irc.Message{
 			Prefix:   s.Prefix(),
 			Command:  irc.RPL_LIST,
-			Params:   []string{u.Nick,channelName,"0",strings.Replace(channel.Header, "\n", " | ", -1)},
+			Params:   []string{u.Nick, channelName, "0", strings.Replace(channel.Header, "\n", " | ", -1)},
 			Trailing: "",
 		})
 	}
