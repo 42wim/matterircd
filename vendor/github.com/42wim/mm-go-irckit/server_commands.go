@@ -344,11 +344,17 @@ func CmdWho(s Server, u *User, msg *irc.Message) error {
 	}
 
 	r := make([]*irc.Message, 0, ch.Len()+1)
+	statuses := u.mc.GetStatuses()
+
 	for _, other := range ch.Users() {
+		status := "H"
+		if statuses[other.User] != "online" {
+			status = "G"
+		}
 		// <me> <channel> <user> <host> <server> <nick> [H/G]: 0 <real>
 		r = append(r, &irc.Message{
 			Prefix:   s.Prefix(),
-			Params:   []string{u.Nick, mask, other.User, other.Host, "*", other.Nick, "H"},
+			Params:   []string{u.Nick, mask, other.User, other.Host, "*", other.Nick, status},
 			Command:  irc.RPL_WHOREPLY,
 			Trailing: "0 " + other.Real,
 		})
