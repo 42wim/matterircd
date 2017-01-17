@@ -15,7 +15,7 @@ docker run -p 6667:6667 42wim/matterircd:latest -bind 0.0.0.0:6667
 Now you can connect with your IRC client to port 6667 on your docker host.
 
 # Compatibility
-* Matterircd v0.11.1 works with mattermost 3.5.x - 3.6.0 [3.6.0 release](https://github.com/mattermost/platform/releases/tag/v3.6.0)
+* Matterircd v0.11.2 works with mattermost 3.5.x - 3.6.0 [3.6.0 release](https://github.com/mattermost/platform/releases/tag/v3.6.0)
 * Matterircd v0.10.2 works with mattermost 3.3.0 - 3.4.0 [3.4.0 release](https://github.com/mattermost/platform/releases/tag/v3.4.0)
 * Matterircd v0.9.1 works with mattermost 3.0.0 - 3.2.0 [3.2.0 release](https://github.com/mattermost/platform/releases/tag/v3.2.0)
 * Matterircd v0.5 works with mattermost 1.4.0 until [2.2.0 release](https://github.com/mattermost/platform/releases/tag/v2.2.0)
@@ -45,7 +45,7 @@ If you want to run matterircd with mattermost DEV builds, use the develop branch
 # Binaries
 
 You can find the binaries [here](https://github.com/42wim/matterircd/releases/)
-* For use with mattermost 3.5.0 and higher [v0.11.1](https://github.com/42wim/matterircd/releases/tag/v0.11.1)
+* For use with mattermost 3.5.0 and higher [v0.11.2](https://github.com/42wim/matterircd/releases/tag/v0.11.2)
 * For use with mattermost 3.3.0-3.4.0 [v0.10.2](https://github.com/42wim/matterircd/releases/tag/v0.10.2)
 * For use with mattermost 3.0.0-3.2.0 [v0.9.1](https://github.com/42wim/matterircd/releases/tag/v0.9.1)
 * For use with mattermost 1.4.0-2.2.0 [v0.5](https://github.com/42wim/matterircd/releases/tag/v0.5)
