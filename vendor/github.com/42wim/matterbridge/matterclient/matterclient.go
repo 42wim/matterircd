@@ -103,6 +103,7 @@ func (m *MMClient) Login() error {
 	// login to mattermost
 	m.Client = model.NewClient(uriScheme + m.Credentials.Server)
 	m.Client.HttpClient.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: m.SkipTLSVerify}}
+	m.Client.HttpClient.Timeout = time.Second * 10
 	var myinfo *model.Result
 	var appErr *model.AppError
 	var logmsg = "trying login"
@@ -158,11 +159,11 @@ func (m *MMClient) Login() error {
 	m.Client.SetTeamId(m.Team.Id)
 
 	// setup websocket connection
-	wsurl := wsScheme + m.Credentials.Server + model.API_URL_SUFFIX + "/users/websocket"
+	wsurl := wsScheme + m.Credentials.Server + model.API_URL_SUFFIX_V3 + "/users/websocket"
 	header := http.Header{}
 	header.Set(model.HEADER_AUTH, "BEARER "+m.Client.AuthToken)
 
-	m.log.Debug("WsClient: making connection")
+	m.log.Debugf("WsClient: making connection: %s", wsurl)
 	for {
 		wsDialer := &websocket.Dialer{Proxy: http.ProxyFromEnvironment, TLSClientConfig: &tls.Config{InsecureSkipVerify: m.SkipTLSVerify}}
 		m.WsClient, _, err = wsDialer.Dial(wsurl, header)
@@ -470,11 +471,16 @@ func (m *MMClient) SendDirectMessage(toUserId string, msg string) {
 	_, err := m.Client.CreateDirectChannel(toUserId)
 	if err != nil {
 		m.log.Debugf("SendDirectMessage to %#v failed: %s", toUserId, err)
+		return
 	}
 	channelName := model.GetDMNameFromIds(toUserId, m.User.Id)
 
 	// update our channels
-	mmchannels, _ := m.Client.GetChannels("")
+	mmchannels, err := m.Client.GetChannels("")
+	if err != nil {
+		m.log.Debug("SendDirectMessage: Couldn't update channels")
+		return
+	}
 	m.Lock()
 	m.Team.Channels = mmchannels.Data.(*model.ChannelList)
 	m.Unlock()

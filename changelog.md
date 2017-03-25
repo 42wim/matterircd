@@ -1,3 +1,6 @@
+# v0.11.3-dev
+* Support mattermost 3.7.0
+
 # v0.11.2
 ## Bugfix
 * Use correct status for /WHO #81
