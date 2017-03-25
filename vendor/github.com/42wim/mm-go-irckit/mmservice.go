@@ -106,7 +106,14 @@ func (u *User) handleMMServiceBot(toUser *User, msg string) {
 				u.MsgUser(toUser, "#"+channelname+" <"+u.mc.GetUser(postlist.Posts[postlist.Order[i]].UserId).Username+"> "+timestamp)
 				u.MsgUser(toUser, strings.Repeat("=", len("#"+channelname+" <"+u.mc.GetUser(postlist.Posts[postlist.Order[i]].UserId).Username+"> "+timestamp)))
 				for _, post := range strings.Split(postlist.Posts[postlist.Order[i]].Message, "\n") {
-					u.MsgUser(toUser, post)
+					if post != "" {
+						u.MsgUser(toUser, post)
+					}
+				}
+				if len(postlist.Posts[postlist.Order[i]].FileIds) > 0 {
+					for _, fname := range u.mc.GetPublicLinks(postlist.Posts[postlist.Order[i]].FileIds) {
+						u.MsgUser(toUser, "download file - "+fname)
+					}
 				}
 				u.MsgUser(toUser, "")
 				u.MsgUser(toUser, "")
@@ -143,7 +150,14 @@ func (u *User) handleMMServiceBot(toUser *User, msg string) {
 			for i := len(postlist.Order) - 1; i >= 0; i-- {
 				nick := u.mc.GetUser(postlist.Posts[postlist.Order[i]].UserId).Username
 				for _, post := range strings.Split(postlist.Posts[postlist.Order[i]].Message, "\n") {
-					u.MsgUser(toUser, "<"+nick+"> "+post)
+					if post != "" {
+						u.MsgUser(toUser, "<"+nick+"> "+post)
+					}
+				}
+				if len(postlist.Posts[postlist.Order[i]].FileIds) > 0 {
+					for _, fname := range u.mc.GetPublicLinks(postlist.Posts[postlist.Order[i]].FileIds) {
+						u.MsgUser(toUser, "<"+nick+"> download file - "+fname)
+					}
 				}
 			}
 		}
