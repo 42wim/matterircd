@@ -239,9 +239,9 @@ func (u *User) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		}
 	}
 
-	if len(data.Filenames) > 0 {
+	if len(data.FileIds) > 0 {
 		logger.Debugf("files detected")
-		for _, fname := range u.mc.GetPublicLinks(data.Filenames) {
+		for _, fname := range u.mc.GetPublicLinks(data.FileIds) {
 			if props["channel_type"] == "D" {
 				u.MsgSpoofUser(spoofUsername, "download file - "+fname)
 			} else {
