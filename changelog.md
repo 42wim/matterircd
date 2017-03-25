@@ -1,5 +1,10 @@
 # v0.11.3-dev
 * Support mattermost 3.7.0
+## Bugfix
+* Make public links (pasted images/attachments) work again
+
+## New features
+* Add support for public links in SCROLLBACK and SEARCH
 
 # v0.11.2
 ## Bugfix
