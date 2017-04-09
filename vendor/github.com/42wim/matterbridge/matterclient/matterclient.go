@@ -4,9 +4,11 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -34,6 +36,7 @@ type Message struct {
 	Channel  string
 	Username string
 	Text     string
+	Type     string
 }
 
 type Team struct {
@@ -47,19 +50,20 @@ type Team struct {
 type MMClient struct {
 	sync.RWMutex
 	*Credentials
-	Team        *Team
-	OtherTeams  []*Team
-	Client      *model.Client
-	User        *model.User
-	Users       map[string]*model.User
-	MessageChan chan *Message
-	log         *log.Entry
-	WsClient    *websocket.Conn
-	WsQuit      bool
-	WsAway      bool
-	WsConnected bool
-	WsSequence  int64
-	WsPingChan  chan *model.WebSocketResponse
+	Team          *Team
+	OtherTeams    []*Team
+	Client        *model.Client
+	User          *model.User
+	Users         map[string]*model.User
+	MessageChan   chan *Message
+	log           *log.Entry
+	WsClient      *websocket.Conn
+	WsQuit        bool
+	WsAway        bool
+	WsConnected   bool
+	WsSequence    int64
+	WsPingChan    chan *model.WebSocketResponse
+	ServerVersion string
 }
 
 func New(login, pass, team, server string) *MMClient {
@@ -104,6 +108,14 @@ func (m *MMClient) Login() error {
 	m.Client = model.NewClient(uriScheme + m.Credentials.Server)
 	m.Client.HttpClient.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: m.SkipTLSVerify}}
 	m.Client.HttpClient.Timeout = time.Second * 10
+	// bogus call to get the serverversion
+	m.Client.GetClientProperties()
+	if firstConnection && !supportedVersion(m.Client.ServerVersion) {
+		return fmt.Errorf("unsupported mattermost version: %s", m.Client.ServerVersion)
+	}
+	m.ServerVersion = m.Client.ServerVersion
+	m.log.Infof("Found version %s", m.ServerVersion)
+
 	var myinfo *model.Result
 	var appErr *model.AppError
 	var logmsg = "trying login"
@@ -177,6 +189,7 @@ func (m *MMClient) Login() error {
 	}
 	b.Reset()
 
+	m.log.Debug("WsClient: connected")
 	m.WsSequence = 1
 	m.WsPingChan = make(chan *model.WebSocketResponse)
 	// only start to parse WS messages when login is completely done
@@ -266,6 +279,7 @@ func (m *MMClient) parseActionPost(rmsg *Message) {
 	}
 	rmsg.Username = m.GetUser(data.UserId).Username
 	rmsg.Channel = m.GetChannelName(data.ChannelId)
+	rmsg.Type = data.Type
 	rmsg.Team = m.GetTeamName(rmsg.Raw.Data["team_id"].(string))
 	// direct message
 	if rmsg.Raw.Data["channel_type"] == "D" {
@@ -292,7 +306,12 @@ func (m *MMClient) UpdateChannels() error {
 	if err != nil {
 		return errors.New(err.DetailedError)
 	}
-	mmchannels2, err := m.Client.GetMoreChannels("")
+	var mmchannels2 *model.Result
+	if m.mmVersion() >= 3.8 {
+		mmchannels2, err = m.Client.GetMoreChannelsPage(0, 5000)
+	} else {
+		mmchannels2, err = m.Client.GetMoreChannels("")
+	}
 	if err != nil {
 		return errors.New(err.DetailedError)
 	}
@@ -427,6 +446,14 @@ func (m *MMClient) UpdateChannelHeader(channelId string, header string) {
 
 func (m *MMClient) UpdateLastViewed(channelId string) {
 	m.log.Debugf("posting lastview %#v", channelId)
+	if m.mmVersion() >= 3.8 {
+		view := model.ChannelView{ChannelId: channelId}
+		res, _ := m.Client.ViewChannel(view)
+		if res == false {
+			m.log.Errorf("ChannelView update for %s failed", channelId)
+		}
+		return
+	}
 	_, err := m.Client.UpdateLastViewedAt(channelId, true)
 	if err != nil {
 		m.log.Error(err)
@@ -628,6 +655,7 @@ func (m *MMClient) StatusLoop() {
 				m.Logout()
 				m.WsQuit = false
 				m.Login()
+				go m.WsReceiver()
 			}
 		}
 		time.Sleep(time.Second * 60)
@@ -659,7 +687,11 @@ func (m *MMClient) initUser() error {
 			return errors.New(err.DetailedError)
 		}
 		t.Channels = mmchannels.Data.(*model.ChannelList)
-		mmchannels, err = m.Client.GetMoreChannels("")
+		if m.mmVersion() >= 3.8 {
+			mmchannels, err = m.Client.GetMoreChannelsPage(0, 5000)
+		} else {
+			mmchannels, err = m.Client.GetMoreChannels("")
+		}
 		if err != nil {
 			return errors.New(err.DetailedError)
 		}
@@ -686,4 +718,19 @@ func (m *MMClient) sendWSRequest(action string, data map[string]interface{}) err
 	m.log.Debugf("sendWsRequest %#v", req)
 	m.WsClient.WriteJSON(req)
 	return nil
+}
+
+func (m *MMClient) mmVersion() float64 {
+	v, _ := strconv.ParseFloat(m.ServerVersion[0:3], 64)
+	return v
+}
+
+func supportedVersion(version string) bool {
+	if strings.HasPrefix(version, "3.5.0") ||
+		strings.HasPrefix(version, "3.6.0") ||
+		strings.HasPrefix(version, "3.7.0") ||
+		strings.HasPrefix(version, "3.8.0") {
+		return true
+	}
+	return false
 }
