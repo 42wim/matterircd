@@ -1,5 +1,5 @@
-# v0.11.3-dev
-* Support mattermost 3.7.0
+# v0.11.3
+* Support mattermost 3.7.0 and 3.8.0
 ## Bugfix
 * Make public links (pasted images/attachments) work again
 
