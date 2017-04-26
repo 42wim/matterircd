@@ -286,8 +286,9 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 			msg.Trailing = strings.Replace(msg.Trailing, "\x01ACTION ", "", -1)
 			msg.Trailing = "*" + msg.Trailing + "*"
 		}
-		msg.Trailing += " ​"
-		post := &model.Post{ChannelId: ch.ID(), Message: msg.Trailing}
+		props := make(map[string]interface{})
+		props["matterircd"] = true
+		post := &model.Post{ChannelId: ch.ID(), Message: msg.Trailing, Props: props}
 		_, err := u.mc.Client.CreatePost(post)
 		if err != nil {
 			u.MsgSpoofUser("mattermost", "msg: "+msg.Trailing+" could not be send: "+err.Error())

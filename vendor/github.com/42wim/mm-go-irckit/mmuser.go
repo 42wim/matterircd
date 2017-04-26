@@ -181,9 +181,8 @@ func (u *User) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	extraProps := model.StringInterfaceFromJson(strings.NewReader(rmsg.Data["post"].(string)))["props"].(map[string]interface{})
 	logger.Debugf("handleWsActionPost() receiving userid %s", data.UserId)
 	if data.UserId == u.mc.User.Id {
-		// space + ZWSP
-		if strings.Contains(data.Message, " ​") {
-			logger.Debugf("message is sent from IRC, contains unicode, not relaying %#v", data.Message)
+		if _, ok := extraProps["matterircd"].(bool); ok {
+			logger.Debugf("message is sent from matterirc, not relaying %#v", data.Message)
 			return
 		}
 		if data.Type == "system_join_leave" {
