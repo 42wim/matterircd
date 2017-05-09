@@ -248,6 +248,18 @@ func (u *User) handleWsActionPost(rmsg *model.WebSocketEvent) {
 			}
 		}
 	}
+
+	if len(data.FileIds) > 0 {
+		logger.Debugf("fileids detected")
+		for _, fname := range u.mc.GetDirectLinks(data.FileIds) {
+			if props["channel_type"] == "D" {
+				u.MsgSpoofUser(spoofUsername, "download file - "+fname)
+			} else {
+				ch.SpoofMessage(spoofUsername, "download file - "+fname)
+			}
+		}
+	}
+
 	logger.Debugf("handleWsActionPost() user %s sent %s", u.mc.GetUser(data.UserId).Username, data.Message)
 	logger.Debugf("%#v", data)
 
