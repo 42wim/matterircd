@@ -1,6 +1,8 @@
 # matterircd
 [![Join the IRC chat at https://webchat.freenode.net/?channels=matterircd](https://img.shields.io/badge/IRC-matterircd-green.svg)](https://webchat.freenode.net/?channels=matterircd)
 
+[![Join the chat at https://gitter.im/42wim/matterircd](https://badges.gitter.im/42wim/matterircd.svg)](https://gitter.im/42wim/matterircd?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
+
 Minimal IRC server which integrates with [mattermost](https://www.mattermost.org)  
 Tested on Windows / Linux
 
