@@ -106,15 +106,26 @@ func (m *MMClient) Login() error {
 	}
 	// login to mattermost
 	m.Client = model.NewClient(uriScheme + m.Credentials.Server)
-	m.Client.HttpClient.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: m.SkipTLSVerify}}
+	m.Client.HttpClient.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: m.SkipTLSVerify}, Proxy: http.ProxyFromEnvironment}
 	m.Client.HttpClient.Timeout = time.Second * 10
-	// bogus call to get the serverversion
-	m.Client.GetClientProperties()
-	if firstConnection && !supportedVersion(m.Client.ServerVersion) {
-		return fmt.Errorf("unsupported mattermost version: %s", m.Client.ServerVersion)
+
+	for {
+		d := b.Duration()
+		// bogus call to get the serverversion
+		m.Client.GetClientProperties()
+		if firstConnection && !supportedVersion(m.Client.ServerVersion) {
+			return fmt.Errorf("unsupported mattermost version: %s", m.Client.ServerVersion)
+		}
+		m.ServerVersion = m.Client.ServerVersion
+		if m.ServerVersion == "" {
+			m.log.Debugf("Server not up yet, reconnecting in %s", d)
+			time.Sleep(d)
+		} else {
+			m.log.Infof("Found version %s", m.ServerVersion)
+			break
+		}
 	}
-	m.ServerVersion = m.Client.ServerVersion
-	m.log.Infof("Found version %s", m.ServerVersion)
+	b.Reset()
 
 	var myinfo *model.Result
 	var appErr *model.AppError
@@ -251,7 +262,7 @@ func (m *MMClient) WsReceiver() {
 
 func (m *MMClient) parseMessage(rmsg *Message) {
 	switch rmsg.Raw.Event {
-	case model.WEBSOCKET_EVENT_POSTED:
+	case model.WEBSOCKET_EVENT_POSTED, model.WEBSOCKET_EVENT_POST_EDITED:
 		m.parseActionPost(rmsg)
 		/*
 			case model.ACTION_USER_REMOVED:
@@ -280,7 +291,17 @@ func (m *MMClient) parseActionPost(rmsg *Message) {
 	rmsg.Username = m.GetUser(data.UserId).Username
 	rmsg.Channel = m.GetChannelName(data.ChannelId)
 	rmsg.Type = data.Type
-	rmsg.Team = m.GetTeamName(rmsg.Raw.Data["team_id"].(string))
+	teamid, _ := rmsg.Raw.Data["team_id"].(string)
+	// edit messsages have no team_id for some reason
+	if teamid == "" {
+		// we can find the team_id from the channelid
+		result, _ := m.Client.GetChannel(data.ChannelId, "")
+		teamid = result.Data.(*model.ChannelData).Channel.TeamId
+		rmsg.Raw.Data["team_id"] = teamid
+	}
+	if teamid != "" {
+		rmsg.Team = m.GetTeamName(teamid)
+	}
 	// direct message
 	if rmsg.Raw.Data["channel_type"] == "D" {
 		rmsg.Channel = m.GetUser(data.UserId).Username
@@ -729,7 +750,8 @@ func supportedVersion(version string) bool {
 	if strings.HasPrefix(version, "3.5.0") ||
 		strings.HasPrefix(version, "3.6.0") ||
 		strings.HasPrefix(version, "3.7.0") ||
-		strings.HasPrefix(version, "3.8.0") {
+		strings.HasPrefix(version, "3.8.0") ||
+		strings.HasPrefix(version, "3.9.0") {
 		return true
 	}
 	return false
