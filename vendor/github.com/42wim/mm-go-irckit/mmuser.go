@@ -55,7 +55,7 @@ func (u *User) loginToMattermost() (*matterclient.MMClient, error) {
 	logger.Infof("login as %s (team: %s) on %s", u.Credentials.Login, u.Credentials.Team, u.Credentials.Server)
 	err := mc.Login()
 	if err != nil {
-		logger.Error("login failed")
+		logger.Errorf("login failed: %s", err)
 		return nil, err
 	}
 	logger.Info("login succeeded")
