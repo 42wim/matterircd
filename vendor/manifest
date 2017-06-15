@@ -5,7 +5,7 @@
 			"importpath": "github.com/42wim/matterbridge/matterclient",
 			"repository": "https://github.com/42wim/matterbridge",
 			"vcs": "git",
-			"revision": "860a371eebdf378822f9cd246447272186c46dea",
+			"revision": "511f653e6ea357a0094794d23e242a84f9f6ccb6",
 			"branch": "master",
 			"path": "/matterclient",
 			"notests": true
