@@ -1,3 +1,7 @@
+# v0.11.6
+## New features
+* Support mattermost 3.10.0
+
 # v0.11.5
 ## Bugfix
 * Fix crash #97
