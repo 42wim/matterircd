@@ -4,11 +4,15 @@ import (
 	"crypto/tls"
 	"flag"
 	"fmt"
-	"github.com/42wim/mm-go-irckit"
-	"github.com/Sirupsen/logrus"
+	"log"
 	"net"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"strings"
+
+	"github.com/42wim/mm-go-irckit"
+	"github.com/Sirupsen/logrus"
 )
 
 var (
@@ -41,6 +45,10 @@ func main() {
 		logger.Info("enabling debug")
 		ourlog.Level = logrus.DebugLevel
 		irckit.SetLogLevel("debug")
+
+		go func() {
+			log.Println(http.ListenAndServe("localhost:6060", nil))
+		}()
 	}
 	if *flagVersion {
 		fmt.Printf("version: %s %s\n", version, githash)
