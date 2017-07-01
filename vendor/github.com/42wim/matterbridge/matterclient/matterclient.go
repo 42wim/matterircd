@@ -37,6 +37,7 @@ type Message struct {
 	Username string
 	Text     string
 	Type     string
+	UserID   string
 }
 
 type Team struct {
@@ -64,6 +65,7 @@ type MMClient struct {
 	WsSequence    int64
 	WsPingChan    chan *model.WebSocketResponse
 	ServerVersion string
+	OnWsConnect   func()
 }
 
 func New(login, pass, team, server string) *MMClient {
@@ -99,10 +101,8 @@ func (m *MMClient) Login() error {
 		Jitter: true,
 	}
 	uriScheme := "https://"
-	wsScheme := "wss://"
 	if m.NoTLS {
 		uriScheme = "http://"
-		wsScheme = "ws://"
 	}
 	// login to mattermost
 	m.Client = model.NewClient(uriScheme + m.Credentials.Server)
@@ -181,6 +181,24 @@ func (m *MMClient) Login() error {
 	// set our team id as default route
 	m.Client.SetTeamId(m.Team.Id)
 
+	m.wsConnect()
+
+	return nil
+}
+
+func (m *MMClient) wsConnect() {
+	b := &backoff.Backoff{
+		Min:    time.Second,
+		Max:    5 * time.Minute,
+		Jitter: true,
+	}
+
+	m.WsConnected = false
+	wsScheme := "wss://"
+	if m.NoTLS {
+		wsScheme = "ws://"
+	}
+
 	// setup websocket connection
 	wsurl := wsScheme + m.Credentials.Server + model.API_URL_SUFFIX_V3 + "/users/websocket"
 	header := http.Header{}
@@ -189,6 +207,7 @@ func (m *MMClient) Login() error {
 	m.log.Debugf("WsClient: making connection: %s", wsurl)
 	for {
 		wsDialer := &websocket.Dialer{Proxy: http.ProxyFromEnvironment, TLSClientConfig: &tls.Config{InsecureSkipVerify: m.SkipTLSVerify}}
+		var err error
 		m.WsClient, _, err = wsDialer.Dial(wsurl, header)
 		if err != nil {
 			d := b.Duration()
@@ -198,15 +217,12 @@ func (m *MMClient) Login() error {
 		}
 		break
 	}
-	b.Reset()
 
 	m.log.Debug("WsClient: connected")
 	m.WsSequence = 1
 	m.WsPingChan = make(chan *model.WebSocketResponse)
 	// only start to parse WS messages when login is completely done
 	m.WsConnected = true
-
-	return nil
 }
 
 func (m *MMClient) Logout() error {
@@ -214,6 +230,10 @@ func (m *MMClient) Logout() error {
 	m.WsQuit = true
 	m.WsClient.Close()
 	m.WsClient.UnderlyingConn().Close()
+	if strings.Contains(m.Credentials.Pass, model.SESSION_COOKIE_TOKEN) {
+		m.log.Debug("Not invalidating session in logout, credential is a token")
+		return nil
+	}
 	_, err := m.Client.Logout()
 	if err != nil {
 		return err
@@ -239,12 +259,12 @@ func (m *MMClient) WsReceiver() {
 		if _, rawMsg, err = m.WsClient.ReadMessage(); err != nil {
 			m.log.Error("error:", err)
 			// reconnect
-			m.Login()
+			m.wsConnect()
 		}
 
 		var event model.WebSocketEvent
 		if err := json.Unmarshal(rawMsg, &event); err == nil && event.IsValid() {
-			m.log.Debugf("WsReceiver: %#v", event)
+			m.log.Debugf("WsReceiver event: %#v", event)
 			msg := &Message{Raw: &event, Team: m.Credentials.Team}
 			m.parseMessage(msg)
 			m.MessageChan <- msg
@@ -253,7 +273,7 @@ func (m *MMClient) WsReceiver() {
 
 		var response model.WebSocketResponse
 		if err := json.Unmarshal(rawMsg, &response); err == nil && response.IsValid() {
-			m.log.Debugf("WsReceiver: %#v", response)
+			m.log.Debugf("WsReceiver response: %#v", response)
 			m.parseResponse(response)
 			continue
 		}
@@ -286,10 +306,12 @@ func (m *MMClient) parseActionPost(rmsg *Message) {
 	data := model.PostFromJson(strings.NewReader(rmsg.Raw.Data["post"].(string)))
 	// we don't have the user, refresh the userlist
 	if m.GetUser(data.UserId) == nil {
-		m.UpdateUsers()
+		m.log.Infof("User %s is not known, ignoring message %s", data)
+		return
 	}
 	rmsg.Username = m.GetUserName(data.UserId)
 	rmsg.Channel = m.GetChannelName(data.ChannelId)
+	rmsg.UserID = data.UserId
 	rmsg.Type = data.Type
 	teamid, _ := rmsg.Raw.Data["team_id"].(string)
 	// edit messsages have no team_id for some reason
@@ -346,9 +368,21 @@ func (m *MMClient) GetChannelName(channelId string) string {
 	m.RLock()
 	defer m.RUnlock()
 	for _, t := range m.OtherTeams {
-		for _, channel := range append(*t.Channels, *t.MoreChannels...) {
-			if channel.Id == channelId {
-				return channel.Name
+		if t == nil {
+			continue
+		}
+		if t.Channels != nil {
+			for _, channel := range *t.Channels {
+				if channel.Id == channelId {
+					return channel.Name
+				}
+			}
+		}
+		if t.MoreChannels != nil {
+			for _, channel := range *t.MoreChannels {
+				if channel.Id == channelId {
+					return channel.Name
+				}
 			}
 		}
 	}
@@ -494,17 +528,15 @@ func (m *MMClient) UpdateLastViewed(channelId string) {
 }
 
 func (m *MMClient) UsernamesInChannel(channelId string) []string {
-	res, err := m.Client.GetMyChannelMembers()
+	res, err := m.Client.GetProfilesInChannel(channelId, 0, 50000, "")
 	if err != nil {
 		m.log.Errorf("UsernamesInChannel(%s) failed: %s", channelId, err)
 		return []string{}
 	}
-	members := res.Data.(*model.ChannelMembers)
+	members := res.Data.(map[string]*model.User)
 	result := []string{}
-	for _, channel := range *members {
-		if channel.ChannelId == channelId {
-			result = append(result, m.GetUser(channel.UserId).Username)
-		}
+	for _, member := range members {
+		result = append(result, member.Nickname)
 	}
 	return result
 }
@@ -596,7 +628,9 @@ func (m *MMClient) GetTeamFromChannel(channelId string) string {
 	var channels []*model.Channel
 	for _, t := range m.OtherTeams {
 		channels = append(channels, *t.Channels...)
-		channels = append(channels, *t.MoreChannels...)
+		if t.MoreChannels != nil {
+			channels = append(channels, *t.MoreChannels...)
+		}
 		for _, c := range channels {
 			if c.Id == channelId {
 				return t.Id
@@ -628,8 +662,17 @@ func (m *MMClient) GetUsers() map[string]*model.User {
 }
 
 func (m *MMClient) GetUser(userId string) *model.User {
-	m.RLock()
-	defer m.RUnlock()
+	m.Lock()
+	defer m.Unlock()
+	u, ok := m.Users[userId]
+	if !ok {
+		res, err := m.Client.GetProfilesByIds([]string{userId})
+		if err != nil {
+			return nil
+		}
+		u = res.Data.(map[string]*model.User)[userId]
+		m.Users[userId] = u
+	}
 	return m.Users[userId]
 }
 
@@ -642,7 +685,7 @@ func (m *MMClient) GetUserName(userId string) string {
 }
 
 func (m *MMClient) GetStatus(userId string) string {
-	res, err := m.Client.GetStatuses()
+	res, err := m.Client.GetStatusesByIds([]string{userId})
 	if err != nil {
 		return ""
 	}
@@ -682,6 +725,12 @@ func (m *MMClient) GetTeamId() string {
 }
 
 func (m *MMClient) StatusLoop() {
+	retries := 0
+	backoff := time.Second * 60
+	if m.OnWsConnect != nil {
+		m.OnWsConnect()
+	}
+	m.log.Debug("StatusLoop:", m.OnWsConnect)
 	for {
 		if m.WsQuit {
 			return
@@ -692,14 +741,23 @@ func (m *MMClient) StatusLoop() {
 			select {
 			case <-m.WsPingChan:
 				m.log.Debug("WS PONG received")
+				backoff = time.Second * 60
 			case <-time.After(time.Second * 5):
-				m.Logout()
-				m.WsQuit = false
-				m.Login()
-				go m.WsReceiver()
+				if retries > 3 {
+					m.Logout()
+					m.WsQuit = false
+					m.Login()
+					if m.OnWsConnect != nil {
+						m.OnWsConnect()
+					}
+					go m.WsReceiver()
+				} else {
+					retries++
+					backoff = time.Second * 5
+				}
 			}
 		}
-		time.Sleep(time.Second * 60)
+		time.Sleep(backoff)
 	}
 }
 

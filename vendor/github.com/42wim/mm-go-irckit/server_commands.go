@@ -14,7 +14,9 @@ func DefaultCommands() Commands {
 
 	cmds.Add(Handler{Command: irc.AWAY, Call: CmdAway, LoggedIn: true})
 	cmds.Add(Handler{Command: irc.ISON, Call: CmdIson})
+	cmds.Add(Handler{Command: irc.INVITE, Call: CmdInvite, LoggedIn: true, MinParams: 2})
 	cmds.Add(Handler{Command: irc.JOIN, Call: CmdJoin, MinParams: 1, LoggedIn: true})
+	cmds.Add(Handler{Command: irc.KICK, Call: CmdKick, MinParams: 1, LoggedIn: true})
 	cmds.Add(Handler{Command: irc.LIST, Call: CmdList, LoggedIn: true})
 	cmds.Add(Handler{Command: irc.LUSERS, Call: CmdLusers})
 	cmds.Add(Handler{Command: irc.MODE, Call: CmdMode, MinParams: 1, LoggedIn: true})
@@ -41,6 +43,27 @@ func CmdAway(s Server, u *User, msg *irc.Message) error {
 	return s.EncodeMessage(u, irc.RPL_NOWAWAY, []string{u.Nick}, "You have been marked as being away")
 }
 
+func CmdInvite(s Server, u *User, msg *irc.Message) error {
+	who := msg.Params[0]
+	channel := msg.Params[1]
+	other, ok := s.HasUser(who)
+	if !ok {
+		return nil
+	}
+
+	channelName := strings.Replace(channel, "#", "", 1)
+	id := u.mc.GetChannelId(channelName, "")
+	if id == "" {
+		return nil
+	}
+	_, err := u.mc.Client.AddChannelMember(id, other.User)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 // CmdIson is a handler for the /ISON command.
 func CmdIson(s Server, u *User, msg *irc.Message) error {
 	nicks := msg.Params
@@ -64,6 +87,26 @@ func CmdIson(s Server, u *User, msg *irc.Message) error {
 	)
 }
 
+func CmdKick(s Server, u *User, msg *irc.Message) error {
+	channel := msg.Params[0]
+	who := msg.Params[1]
+
+	other, ok := s.HasUser(who)
+	if !ok {
+		return nil
+	}
+	channelName := strings.Replace(channel, "#", "", 1)
+	id := u.mc.GetChannelId(channelName, "")
+	if id == "" {
+		return nil
+	}
+	_, err := u.mc.Client.RemoveChannelMember(id, other.User)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 // CmdJoin is a handler for the /JOIN command.
 func CmdJoin(s Server, u *User, msg *irc.Message) error {
 	var err error
@@ -73,6 +116,7 @@ func CmdJoin(s Server, u *User, msg *irc.Message) error {
 		// you can only join existing channels
 		channelId := u.mc.GetChannelId(channelName, "")
 		err := u.mc.JoinChannel(channelId)
+		logger.Debugf("Join channel %s, id %s, err: %v", channelName, channelId, err)
 		if err != nil {
 			s.EncodeMessage(u, irc.ERR_INVITEONLYCHAN, []string{u.Nick, channel}, "Cannot join channel (+i)")
 			continue
@@ -326,8 +370,29 @@ func CmdQuit(s Server, u *User, msg *irc.Message) error {
 func CmdTopic(s Server, u *User, msg *irc.Message) error {
 	channelname := msg.Params[0]
 	ch := s.Channel(channelname)
-	ch.Topic(u, msg.Trailing)
-	u.mc.UpdateChannelHeader(ch.ID(), msg.Trailing)
+	if msg.Trailing != "" {
+		ch.Topic(u, msg.Trailing)
+		u.mc.UpdateChannelHeader(ch.ID(), msg.Trailing)
+	} else {
+		r := make([]*irc.Message, 0, ch.Len()+1)
+		t := ch.GetTopic()
+		if t == "" {
+			r = append(r, &irc.Message{
+				Prefix:   s.Prefix(),
+				Params:   []string{u.Nick, channelname},
+				Command:  irc.RPL_NOTOPIC,
+				Trailing: "No topic is set",
+			})
+		} else {
+			r = append(r, &irc.Message{
+				Prefix:   s.Prefix(),
+				Params:   []string{u.Nick, channelname},
+				Command:  irc.RPL_TOPIC,
+				Trailing: t,
+			})
+		}
+		return u.Encode(r...)
+	}
 	return nil
 }
 
@@ -396,7 +461,6 @@ func CmdWhois(s Server, u *User, msg *irc.Message) error {
 			Trailing: chlist,
 		})
 
-		u.mc.UpdateUsers()
 		status := u.mc.GetStatus(other.User)
 		/*
 			if status != "" {

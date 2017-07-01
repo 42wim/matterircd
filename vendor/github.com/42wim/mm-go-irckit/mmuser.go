@@ -1,6 +1,7 @@
 package irckit
 
 import (
+	"fmt"
 	"net"
 	"regexp"
 	"strings"
@@ -55,7 +56,7 @@ func (u *User) loginToMattermost() (*matterclient.MMClient, error) {
 	logger.Infof("login as %s (team: %s) on %s", u.Credentials.Login, u.Credentials.Team, u.Credentials.Server)
 	err := mc.Login()
 	if err != nil {
-		logger.Error("login failed")
+		logger.Error("login failed", err)
 		return nil, err
 	}
 	logger.Info("login succeeded")
@@ -78,13 +79,15 @@ func (u *User) logoutFromMattermost() error {
 }
 
 func (u *User) createMMUser(mmuser *model.User) *User {
+	if mmuser == nil {
+		return nil
+	}
 	if ghost, ok := u.Srv.HasUser(mmuser.Username); ok {
 		return ghost
 	}
 	ghost := &User{Nick: mmuser.Username, User: mmuser.Id, Real: mmuser.FirstName + " " + mmuser.LastName, Host: u.mc.Client.Url, Roles: mmuser.Roles, channels: map[Channel]struct{}{}}
 	ghost.MmGhostUser = true
 	u.Srv.Add(ghost)
-	go u.Srv.Handle(ghost)
 	return ghost
 }
 
@@ -92,7 +95,6 @@ func (u *User) createService(nick string, what string) {
 	service := &User{Nick: nick, User: nick, Real: what, Host: "service", channels: map[Channel]struct{}{}}
 	service.MmGhostUser = true
 	u.Srv.Add(service)
-	go u.Srv.Handle(service)
 }
 
 func (u *User) addUserToChannel(user *model.User, channel string, channelId string) {
@@ -100,6 +102,10 @@ func (u *User) addUserToChannel(user *model.User, channel string, channelId stri
 		return
 	}
 	ghost := u.createMMUser(user)
+	if ghost == nil {
+		logger.Warnf("Cannot join %v into %s", user, channel)
+		return
+	}
 	logger.Debugf("adding %s to %s", ghost.Nick, channel)
 	ch := u.Srv.Channel(channelId)
 	ch.Join(ghost)
@@ -107,7 +113,7 @@ func (u *User) addUserToChannel(user *model.User, channel string, channelId stri
 
 func (u *User) addUsersToChannels() {
 	srv := u.Srv
-	throttle := time.Tick(time.Millisecond * 300)
+	throttle := time.Tick(time.Millisecond * 50)
 	logger.Debug("in addUsersToChannels()")
 	// add all users, also who are not on channels
 	ch := srv.Channel("&users")
@@ -121,18 +127,43 @@ func (u *User) addUsersToChannels() {
 	}
 	ch.Join(u)
 
+	channels := make(chan *model.Channel, 5)
+	for i := 0; i < 10; i++ {
+		go u.addUserToChannelWorker(channels, throttle)
+	}
+
 	for _, mmchannel := range u.mc.GetChannels() {
-		// exclude direct messages
-		if strings.Contains(mmchannel.Name, "__") {
-			continue
+		logger.Debug("Adding channel", mmchannel)
+		channels <- mmchannel
+	}
+	close(channels)
+}
+
+func (u *User) addUserToChannelWorker(channels <-chan *model.Channel, throttle <-chan time.Time) {
+	for {
+		mmchannel, ok := <-channels
+		if !ok {
+			logger.Debug("Done adding user to channels")
+			return
 		}
+		logger.Debug("addUserToChannelWorker", mmchannel)
+
 		<-throttle
-		channelName := mmchannel.Name
-		if mmchannel.TeamId != u.mc.Team.Id {
-			channelName = u.mc.GetTeamName(mmchannel.TeamId) + "/" + mmchannel.Name
+		// exclude direct messages
+		var spoof func(string, string)
+		if strings.Contains(mmchannel.Name, "__") {
+			userId := strings.Split(mmchannel.Name, "__")[0]
+			u.createMMUser(u.mc.GetUser(userId))
+			spoof = u.MsgSpoofUser
+		} else {
+			channelName := mmchannel.Name
+			if mmchannel.TeamId != u.mc.Team.Id {
+				channelName = u.mc.GetTeamName(mmchannel.TeamId) + "/" + mmchannel.Name
+			}
+			u.syncMMChannel(mmchannel.Id, channelName)
+			ch := u.Srv.Channel(mmchannel.Id)
+			spoof = ch.SpoofMessage
 		}
-		u.syncMMChannel(mmchannel.Id, channelName)
-		ch := srv.Channel(mmchannel.Id)
 		// post everything to the channel you haven't seen yet
 		postlist := u.mc.GetPostsSince(mmchannel.Id, u.mc.GetLastViewedAt(mmchannel.Id))
 		if postlist == nil {
@@ -140,12 +171,26 @@ func (u *User) addUsersToChannels() {
 			if mmchannel.TeamId == u.mc.Team.Id {
 				logger.Errorf("something wrong with getPostsSince for channel %s (%s)", mmchannel.Id, mmchannel.Name)
 			}
-			return
+			continue
 		}
+		var prevDate string
+
 		// traverse the order in reverse
 		for i := len(postlist.Order) - 1; i >= 0; i-- {
-			for _, post := range strings.Split(postlist.Posts[postlist.Order[i]].Message, "\n") {
-				ch.SpoofMessage(u.mc.Users[postlist.Posts[postlist.Order[i]].UserId].Username, post)
+			p := postlist.Posts[postlist.Order[i]]
+			if p.Type == model.POST_JOIN_LEAVE {
+				continue
+			}
+			ts := time.Unix(0, p.CreateAt*int64(time.Millisecond))
+			for _, post := range strings.Split(p.Message, "\n") {
+				if user, ok := u.mc.Users[p.UserId]; ok {
+					date := ts.Format("2006-01-02")
+					if date != prevDate {
+						spoof("matterircd", fmt.Sprintf("Replaying since %s", date))
+						prevDate = date
+					}
+					spoof(user.Username, fmt.Sprintf("[%s] %s", ts.Format("15:04"), post))
+				}
 			}
 		}
 		u.mc.UpdateLastViewed(mmchannel.Id)
@@ -153,18 +198,22 @@ func (u *User) addUsersToChannels() {
 }
 
 func (u *User) handleWsMessage() {
+	updateChannelsThrottle := time.Tick(time.Second * 60)
+
 	for {
 		if u.mc.WsQuit {
 			logger.Debug("exiting handleWsMessage")
 			return
 		}
-		logger.Debug("in handleWsMessage")
+		logger.Debug("in handleWsMessage", len(u.mc.MessageChan))
 		message := <-u.mc.MessageChan
-		logger.Debugf("WsReceiver: %#v", message.Raw)
+		logger.Debugf("MMUser WsReceiver: %#v", message.Raw)
 		// check if we have the users/channels in our cache. If not update
-		u.checkWsActionMessage(message.Raw)
+		u.checkWsActionMessage(message.Raw, updateChannelsThrottle)
 		switch message.Raw.Event {
 		case model.WEBSOCKET_EVENT_POSTED:
+			u.handleWsActionPost(message.Raw)
+		case model.WEBSOCKET_EVENT_POST_EDITED:
 			u.handleWsActionPost(message.Raw)
 		case model.WEBSOCKET_EVENT_USER_REMOVED:
 			u.handleWsActionUserRemoved(message.Raw)
@@ -185,9 +234,19 @@ func (u *User) handleWsActionPost(rmsg *model.WebSocketEvent) {
 			logger.Debugf("message is sent from matterirc, not relaying %#v", data.Message)
 			return
 		}
-		if data.Type == "system_join_leave" {
+		if data.Type == model.POST_JOIN_LEAVE {
 			logger.Debugf("our own join/leave message. not relaying %#v", data.Message)
 			return
+		}
+	}
+	if data.ParentId != "" {
+		parent, err := u.mc.Client.GetPost(data.ChannelId, data.ParentId, "")
+		if err != nil {
+			logger.Debugf("Unable to get parent post for", data)
+		} else {
+			parentPost := parent.Data.(*model.PostList).Posts[data.ParentId]
+			parentGhost := u.createMMUser(u.mc.GetUser(parentPost.UserId))
+			data.Message = fmt.Sprintf("%s (re @%s: %s)", data.Message, parentGhost.Nick, parentPost.Message)
 		}
 	}
 	// create new "ghost" user
@@ -197,7 +256,10 @@ func (u *User) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		ghost = u
 	}
 
-	spoofUsername := ghost.Nick
+	spoofUsername := data.UserId
+	if ghost != nil {
+		spoofUsername = ghost.Nick
+	}
 	// check if we have a override_username (from webhooks) and use it
 	overrideUsername, _ := extraProps["override_username"].(string)
 	if overrideUsername != "" {
@@ -218,12 +280,16 @@ func (u *User) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	}
 
 	// not a private message so do channel stuff
-	if props["channel_type"] != "D" {
+	if props["channel_type"] != "D" && ghost != nil {
 		ch = u.Srv.Channel(data.ChannelId)
 		// join if not in channel
 		if !ch.HasUser(ghost) {
 			ch.Join(ghost)
 		}
+	}
+	if data.Type == model.POST_JOIN_LEAVE {
+		logger.Debugf("join/leave message. not relaying %#v", data.Message)
+		return
 	}
 
 	// check if we have a override_username (from webhooks) and use it
@@ -289,18 +355,17 @@ func (u *User) handleWsActionUserAdded(rmsg *model.WebSocketEvent) {
 	u.addUserToChannel(u.mc.GetUser(userId), "#"+u.mc.GetChannelName(rmsg.Broadcast.ChannelId), rmsg.Broadcast.ChannelId)
 }
 
-func (u *User) checkWsActionMessage(rmsg *model.WebSocketEvent) {
+func (u *User) checkWsActionMessage(rmsg *model.WebSocketEvent, throttle <-chan time.Time) {
 	if u.mc.GetChannelName(rmsg.Broadcast.ChannelId) == "" {
-		u.mc.UpdateChannels()
+		select {
+		case <-throttle:
+			logger.Debugf("Updating channels for %#v", rmsg.Broadcast)
+			go u.mc.UpdateChannels()
+		default:
+		}
 	}
 	if rmsg.Data == nil {
 		return
-	}
-	userid, ok := rmsg.Data["user_id"].(string)
-	if ok {
-		if u.mc.GetUser(userid) == nil {
-			u.mc.UpdateUsers()
-		}
 	}
 }
 
@@ -340,11 +405,11 @@ func (u *User) syncMMChannel(id string, name string) {
 		// join all the channels we're on on MM
 		if user.Id == u.mc.User.Id {
 			ch := srv.Channel(id)
-			ch.Topic(u, u.mc.GetChannelHeader(id))
 			// only join when we're not yet on the channel
 			if !ch.HasUser(u) {
 				logger.Debugf("syncMMChannel adding myself to %s (id: %s)", name, id)
 				ch.Join(u)
+				ch.Topic(u, u.mc.GetChannelHeader(id))
 			}
 			break
 		}

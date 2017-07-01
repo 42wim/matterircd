@@ -5,7 +5,7 @@
 			"importpath": "github.com/42wim/matterbridge/matterclient",
 			"repository": "https://github.com/42wim/matterbridge",
 			"vcs": "git",
-			"revision": "511f653e6ea357a0094794d23e242a84f9f6ccb6",
+			"revision": "a58a3e50000340c75f8c82a0421558cfa901b1e9",
 			"branch": "master",
 			"path": "/matterclient",
 			"notests": true
@@ -14,7 +14,7 @@
 			"importpath": "github.com/42wim/mm-go-irckit",
 			"repository": "https://github.com/42wim/mm-go-irckit",
 			"vcs": "git",
-			"revision": "09c38524d4b24330ed747532e7c9f5790d19ba3e",
+			"revision": "816784be67d0241f8266ac19eaa9c7c2fc766c8b",
 			"branch": "master",
 			"notests": true
 		},
@@ -30,7 +30,7 @@
 			"importpath": "github.com/gorilla/websocket",
 			"repository": "https://github.com/gorilla/websocket",
 			"vcs": "git",
-			"revision": "a91eba7f97777409bc2c443f5534d41dd20c5720",
+			"revision": "ea4d1f681babbce9545c9c5f3d5194a789c89f5b",
 			"branch": "master",
 			"notests": true
 		},

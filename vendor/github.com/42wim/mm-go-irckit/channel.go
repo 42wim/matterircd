@@ -44,6 +44,9 @@ type Channel interface {
 	// Topic sets the topic of the channel (handler for TOPIC).
 	Topic(from Prefixer, text string)
 
+	// GetTopic gets the topic of the channel
+	GetTopic() string
+
 	// Unlink will disassociate the Channel from its Server.
 	Unlink()
 
@@ -77,6 +80,10 @@ func NewChannel(server Server, channelId string, name string) Channel {
 		name:     name,
 		usersIdx: map[*User]struct{}{},
 	}
+}
+
+func (ch *channel) GetTopic() string {
+	return ch.topic
 }
 
 func (ch *channel) Prefix() *irc.Prefix {
