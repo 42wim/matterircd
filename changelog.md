@@ -1,3 +1,19 @@
+# v0.12.0
+(thanks to @recht matterircd fork)
+## New features
+* Add KICK support
+* Add INVITE support
+* Also relay edited messages
+
+## Enhancement
+* Show the original message/author after replied messages
+* Print timestamp of replayed messages
+* Faster startup (joining channels)
+
+## Bugfix
+* Do not clear topic on empty /TOPIC command
+* Fix various possible panics
+
 # v0.11.6
 ## New features
 * Support mattermost 3.10.0

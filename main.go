@@ -14,7 +14,7 @@ import (
 var (
 	flagRestrict, flagDefaultTeam, flagDefaultServer, flagTLSBind, flagTLSDir *string
 	flagInsecure                                                              *bool
-	version                                                                   = "0.11.6"
+	version                                                                   = "0.12.0"
 	githash                                                                   string
 	logger                                                                    *logrus.Entry
 )
