@@ -115,7 +115,7 @@ func search(u *User, toUser *User, args []string) {
 			}
 		}
 		if len(postlist.Posts[postlist.Order[i]].FileIds) > 0 {
-			for _, fname := range u.mc.GetPublicLinks(postlist.Posts[postlist.Order[i]].FileIds) {
+			for _, fname := range u.mc.GetFileLinks(postlist.Posts[postlist.Order[i]].FileIds) {
 				u.MsgUser(toUser, "download file - "+fname)
 			}
 		}
@@ -167,7 +167,7 @@ func scrollback(u *User, toUser *User, args []string) {
 			}
 		}
 		if len(postlist.Posts[postlist.Order[i]].FileIds) > 0 {
-			for _, fname := range u.mc.GetPublicLinks(postlist.Posts[postlist.Order[i]].FileIds) {
+			for _, fname := range u.mc.GetFileLinks(postlist.Posts[postlist.Order[i]].FileIds) {
 				u.MsgUser(toUser, "<"+nick+"> download file - "+fname)
 			}
 		}

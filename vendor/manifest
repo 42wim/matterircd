@@ -5,7 +5,7 @@
 			"importpath": "github.com/42wim/matterbridge/matterclient",
 			"repository": "https://github.com/42wim/matterbridge",
 			"vcs": "git",
-			"revision": "a58a3e50000340c75f8c82a0421558cfa901b1e9",
+			"revision": "ac19c94b9f068fd92fdf6b06157c4af84cd1e197",
 			"branch": "master",
 			"path": "/matterclient",
 			"notests": true
@@ -14,7 +14,7 @@
 			"importpath": "github.com/42wim/mm-go-irckit",
 			"repository": "https://github.com/42wim/mm-go-irckit",
 			"vcs": "git",
-			"revision": "74475bab225805e633551a88bd82b585a5f85f90",
+			"revision": "f37e066b6f1f7e9b5e64fe09c99ab2e0a991717e",
 			"branch": "master",
 			"notests": true
 		},
