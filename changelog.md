@@ -1,3 +1,20 @@
+# v0.13.0
+## New features
+* Support mattermost 4.0
+
+## Enhancement
+* Show slack attachments if they have a fallback/contain text
+* Show links even when public links are disabled #105
+* Edited messages now have "(edited)" appended
+* ```-bind ""``` now disables non-tls port-binding when you have ```-tlsbind``` specified #109
+
+## Bugfix
+* Long messages from mattermost will be split in multiple smaller messages #103
+* Fix join/leave messages for recent mattermost versions #113, #104
+* Ignore messages sent to &users #108 
+* Ignore posts that have a reaction (emoji) added #111
+
+
 # v0.12.0
 (thanks to @recht matterircd fork)
 ## New features
