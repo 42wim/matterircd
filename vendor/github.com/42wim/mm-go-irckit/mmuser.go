@@ -260,6 +260,16 @@ func (u *User) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	if ghost != nil {
 		spoofUsername = ghost.Nick
 	}
+
+	// if we got attachments (eg slack attachments) and we have a fallback message, show this.
+	if entries, ok := extraProps["attachments"].([]interface{}); ok {
+		for _, entry := range entries {
+			if f, ok := entry.(map[string]interface{}); ok {
+				data.Message = data.Message + "\n" + f["fallback"].(string)
+			}
+		}
+	}
+
 	// check if we have a override_username (from webhooks) and use it
 	overrideUsername, _ := extraProps["override_username"].(string)
 	if overrideUsername != "" {
@@ -279,6 +289,11 @@ func (u *User) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		}
 	}
 
+	if data.Type == model.POST_JOIN_LEAVE || data.Type == "system_leave_channel" || data.Type == "system_join_channel" {
+		logger.Debugf("join/leave message. not relaying %#v", data.Message)
+		return
+	}
+
 	// not a private message so do channel stuff
 	if props["channel_type"] != "D" && ghost != nil {
 		ch = u.Srv.Channel(data.ChannelId)
@@ -286,10 +301,6 @@ func (u *User) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		if !ch.HasUser(ghost) {
 			ch.Join(ghost)
 		}
-	}
-	if data.Type == model.POST_JOIN_LEAVE {
-		logger.Debugf("join/leave message. not relaying %#v", data.Message)
-		return
 	}
 
 	// check if we have a override_username (from webhooks) and use it
@@ -379,12 +390,22 @@ func (u *User) MsgUser(toUser *User, msg string) {
 }
 
 func (u *User) MsgSpoofUser(rcvuser string, msg string) {
+	for len(msg) > 400 {
+		u.Encode(&irc.Message{
+			Prefix:   &irc.Prefix{Name: rcvuser, User: rcvuser, Host: rcvuser},
+			Command:  irc.PRIVMSG,
+			Params:   []string{u.Nick},
+			Trailing: msg[:400] + "\n",
+		})
+		msg = msg[400:]
+	}
 	u.Encode(&irc.Message{
 		Prefix:   &irc.Prefix{Name: rcvuser, User: rcvuser, Host: rcvuser},
 		Command:  irc.PRIVMSG,
 		Params:   []string{u.Nick},
 		Trailing: msg,
 	})
+
 }
 
 // sync IRC with mattermost channel state

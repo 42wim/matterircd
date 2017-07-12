@@ -315,6 +315,9 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 	if msg.Trailing == "" {
 		return nil
 	}
+	if msg.Params[0] == "&users" {
+		return nil
+	}
 	query := msg.Params[0]
 	if ch, exists := s.HasChannel(query); exists {
 		//p := strings.Replace(query, "#", "", -1)
