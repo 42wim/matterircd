@@ -41,6 +41,7 @@ type User struct {
 	channels map[Channel]struct{}
 
 	MmInfo
+	SlackInfo
 }
 
 func (u *User) ID() string {
