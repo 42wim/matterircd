@@ -446,7 +446,10 @@ func CmdWho(s Server, u *User, msg *irc.Message) error {
 	}
 
 	r := make([]*irc.Message, 0, ch.Len()+1)
-	statuses := u.mc.GetStatuses()
+	statuses := make(map[string]string)
+	if u.sc == nil {
+		statuses = u.mc.GetStatuses()
+	}
 
 	for _, other := range ch.Users() {
 		status := "H"
@@ -496,8 +499,10 @@ func CmdWhois(s Server, u *User, msg *irc.Message) error {
 			Command:  irc.RPL_WHOISCHANNELS,
 			Trailing: chlist,
 		})
-
-		status := u.mc.GetStatus(other.User)
+		var status string
+		if u.sc == nil {
+			status = u.mc.GetStatus(other.User)
+		}
 		/*
 			if status != "" {
 				idle := (model.GetMillis() - lastActivityAt/1000)

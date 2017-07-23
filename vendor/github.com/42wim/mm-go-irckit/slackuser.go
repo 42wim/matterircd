@@ -8,15 +8,17 @@ import (
 )
 
 type SlackInfo struct {
-	Token string
-	sc    *slack.Client
-	rtm   *slack.RTM
-	sinfo *slack.Info
+	Token  string
+	sc     *slack.Client
+	rtm    *slack.RTM
+	sinfo  *slack.Info
+	susers map[string]slack.User
 }
 
 func (u *User) loginToSlack() (*slack.Client, error) {
 	u.sc = slack.New(u.Token)
 	u.rtm = u.sc.NewRTM()
+	u.susers = make(map[string]slack.User)
 	go u.rtm.ManageConnection()
 	go u.handleSlack()
 	time.Sleep(time.Second * 2)
@@ -45,7 +47,7 @@ func (u *User) createSlackUser(slackuser *slack.User) *User {
 	if ghost, ok := u.Srv.HasUser(slackuser.Name); ok {
 		return ghost
 	}
-	ghost := &User{Nick: slackuser.Name, User: slackuser.ID, Real: "first" + " " + "last", Host: "host", Roles: "", channels: map[Channel]struct{}{}}
+	ghost := &User{Nick: slackuser.Name, User: slackuser.ID, Real: slackuser.RealName, Host: "host", Roles: "", channels: map[Channel]struct{}{}}
 	ghost.MmGhostUser = true
 	u.Srv.Add(ghost)
 	return ghost
@@ -68,7 +70,7 @@ func (u *User) addSlackUserToChannel(user *slack.User, channel string, channelId
 
 func (u *User) addSlackUsersToChannels() {
 	srv := u.Srv
-	throttle := time.Tick(time.Millisecond * 200)
+	throttle := time.Tick(time.Millisecond * 100)
 	logger.Debug("in addUsersToChannels()")
 	// add all users, also who are not on channels
 	ch := srv.Channel("&users")
@@ -80,33 +82,31 @@ func (u *User) addSlackUsersToChannels() {
 		}
 		u.createSlackUser(&mmuser)
 		u.addSlackUserToChannel(&mmuser, "&users", "&users")
+		u.susers[mmuser.ID] = mmuser
 	}
 	ch.Join(u)
 
-	channels := make(chan *slack.Channel)
-	go u.addSlackUserToChannelWorker(channels, throttle)
+	channels := make(chan slack.Channel, 10)
+	for i := 0; i < 10; i++ {
+		go u.addSlackUserToChannelWorker(channels, throttle)
+	}
 	mmchannels, _ := u.sc.GetChannels(true)
-	/*
-		for _, mmchannel := range mmchannels {
-			logger.Debugf("CHANNELS %#v %#v\n", mmchannel.Name, mmchannel.ID)
-		}
-	*/
 	for _, mmchannel := range mmchannels {
-		logger.Debug("Adding channel", mmchannel)
-		channels <- &mmchannel
+		if mmchannel.IsMember {
+			logger.Debug("Adding channel", mmchannel)
+			channels <- mmchannel
+		}
 	}
 	close(channels)
 }
 
-func (u *User) addSlackUserToChannelWorker(channels <-chan *slack.Channel, throttle <-chan time.Time) {
+func (u *User) addSlackUserToChannelWorker(channels <-chan slack.Channel, throttle <-chan time.Time) {
 	for {
 		mmchannel, ok := <-channels
 		if !ok {
 			logger.Debug("Done adding user to channels")
 			return
 		}
-		//	logger.Debug("addSlackUserToChannelWorker", mmchannel)
-
 		<-throttle
 		// exclude direct messages
 		//var spoof func(string, string)
@@ -201,17 +201,18 @@ func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
 
 // sync IRC with mattermost channel state
 func (u *User) syncSlackChannel(id string, name string) {
-	logger.Debugf("syncSlackChannel %#v %#v", id, name)
 	srv := u.Srv
 	info, err := u.sc.GetChannelInfo(id)
 	if err != nil {
-		logger.Debug(err)
+		logger.Info(err)
 	}
 
 	for _, user := range info.Members {
 		if u.sinfo.User.ID != user {
-			slackuser, _ := u.sc.GetUserInfo(user)
-			u.addSlackUserToChannel(slackuser, "#"+name, id)
+			//slackuser, _ := u.sc.GetUserInfo(user)
+			if slackuser, ok := u.susers[user]; ok {
+				u.addSlackUserToChannel(&slackuser, "#"+name, id)
+			}
 		}
 	}
 	// before joining ourself
