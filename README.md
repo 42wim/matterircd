@@ -121,6 +121,7 @@ Scrollback
 e.g. /msg mattermost scrollback #bugs 100 shows the last 100 messages of #bugs
 ```
 ## Slack user commands
+Get a slack token on https://api.slack.com/custom-integrations/legacy-tokens
 
 Login
 
