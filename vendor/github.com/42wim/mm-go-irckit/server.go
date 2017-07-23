@@ -84,7 +84,7 @@ type ServerConfig struct {
 	// DiscardEmpty setting will start a goroutine to discard empty channels.
 	DiscardEmpty bool
 	// NewChannel overrides the constructor for a new Channel in a given Server and Name.
-	NewChannel func(s Server, channelId string, name string) Channel
+	NewChannel func(s Server, channelId string, name string, service string) Channel
 	// Commands is the handler registry to use (default: DefaultCommands())
 	Commands Commands
 }
@@ -210,21 +210,34 @@ func (s *server) Channel(channelId string) Channel {
 	s.Lock()
 	ch, ok := s.channels[channelId]
 	if !ok {
-		name := s.u.mc.GetChannelName(channelId)
-		teamId := s.u.mc.GetTeamFromChannel(channelId)
-		teamName := s.u.mc.GetTeamName(teamId)
+		var name, service string
+		if s.u.sc != nil {
+			info, err := s.u.sc.GetChannelInfo(channelId)
+			if err != nil {
+				name = channelId
+			} else {
+				name = "#" + info.Name
+			}
+			service = "slack"
+		}
+		if s.u.mc != nil {
+			name = s.u.mc.GetChannelName(channelId)
+			teamId := s.u.mc.GetTeamFromChannel(channelId)
+			teamName := s.u.mc.GetTeamName(teamId)
 
-		if teamName != "" && teamId != s.u.mc.Team.Id {
-			name = "#" + teamName + "/" + name
-		}
-		if teamId == s.u.mc.Team.Id {
-			name = "#" + name
-		}
-		if name == "" {
-			name = channelId
+			if teamName != "" && teamId != s.u.mc.Team.Id {
+				name = "#" + teamName + "/" + name
+			}
+			if teamId == s.u.mc.Team.Id {
+				name = "#" + name
+			}
+			if name == "" {
+				name = channelId
+			}
+			service = "mattermost"
 		}
 		newFn := s.config.NewChannel
-		ch = newFn(s, channelId, name)
+		ch = newFn(s, channelId, name, service)
 		s.channels[channelId] = ch
 		s.channels[name] = ch
 		s.Unlock()

@@ -41,6 +41,9 @@ type Channel interface {
 	// Message transmits a message from a User to the channel (handler for PRIVMSG).
 	Message(u *User, text string)
 
+	// Service returns the service that set the channel
+	Service() string
+
 	// Topic sets the topic of the channel (handler for TOPIC).
 	Topic(from Prefixer, text string)
 
@@ -65,6 +68,7 @@ type channel struct {
 	name    string
 	server  Server
 	id      string
+	service string
 
 	mu       sync.RWMutex
 	topic    string
@@ -72,12 +76,13 @@ type channel struct {
 }
 
 // NewChannel returns a Channel implementation for a given Server.
-func NewChannel(server Server, channelId string, name string) Channel {
+func NewChannel(server Server, channelId string, name string, service string) Channel {
 	return &channel{
 		created:  time.Now(),
 		server:   server,
 		id:       channelId,
 		name:     name,
+		service:  service,
 		usersIdx: map[*User]struct{}{},
 	}
 }
@@ -88,6 +93,10 @@ func (ch *channel) GetTopic() string {
 
 func (ch *channel) Prefix() *irc.Prefix {
 	return ch.server.Prefix()
+}
+
+func (ch *channel) Service() string {
+	return ch.service
 }
 
 func (ch *channel) String() string {

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/mattermost/platform/model"
+	"github.com/nlopes/slack"
 	"github.com/sorcix/irc"
 )
 
@@ -333,20 +334,52 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 			msg.Trailing = strings.Replace(msg.Trailing, "\x01ACTION ", "", -1)
 			msg.Trailing = "*" + msg.Trailing + "*"
 		}
-		props := make(map[string]interface{})
-		props["matterircd"] = true
-		post := &model.Post{ChannelId: ch.ID(), Message: msg.Trailing, Props: props}
-		_, err := u.mc.Client.CreatePost(post)
-		if err != nil {
-			u.MsgSpoofUser("mattermost", "msg: "+msg.Trailing+" could not be send: "+err.Error())
+		if ch.Service() == "slack" {
+			np := slack.NewPostMessageParameters()
+			np.AsUser = true
+			np.Username = u.User
+			np.Attachments = append(np.Attachments, slack.Attachment{CallbackID: "matterircd"})
+			_, _, err := u.sc.PostMessage(strings.ToUpper(ch.ID()), msg.Trailing, np)
+			if err != nil {
+				return err
+			}
+		}
+		if ch.Service() == "mattermost" {
+			props := make(map[string]interface{})
+			props["matterircd"] = true
+			post := &model.Post{ChannelId: ch.ID(), Message: msg.Trailing, Props: props}
+			_, err := u.mc.Client.CreatePost(post)
+			if err != nil {
+				u.MsgSpoofUser("mattermost", "msg: "+msg.Trailing+" could not be send: "+err.Error())
+			}
 		}
 	} else if toUser, exists := s.HasUser(query); exists {
 		if query == "mattermost" {
-			go u.handleMMServiceBot(toUser, msg.Trailing)
+			go u.handleServiceBot(query, toUser, msg.Trailing)
+			return nil
+		}
+		if query == "slack" {
+			go u.handleServiceBot(query, toUser, msg.Trailing)
 			return nil
 		}
 		if toUser.MmGhostUser {
-			u.mc.SendDirectMessage(toUser.User, msg.Trailing)
+			if u.sc != nil {
+				_, _, dchannel, err := u.sc.OpenIMChannel(toUser.User)
+				if err != nil {
+					return err
+				}
+				np := slack.NewPostMessageParameters()
+				np.AsUser = true
+				np.Username = u.User
+				np.Attachments = append(np.Attachments, slack.Attachment{CallbackID: "matterircd"})
+				_, _, err = u.sc.PostMessage(dchannel, msg.Trailing, np)
+				if err != nil {
+					return err
+				}
+			}
+			if u.mc != nil {
+				u.mc.SendDirectMessage(toUser.User, msg.Trailing)
+			}
 			return nil
 		}
 		err = s.EncodeMessage(u, irc.PRIVMSG, []string{toUser.Nick}, msg.Trailing)

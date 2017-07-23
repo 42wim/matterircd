@@ -44,6 +44,7 @@ func NewUserMM(c net.Conn, srv Server, cfg *MmCfg) *User {
 	u.MmInfo.Cfg = cfg
 	// used for login
 	u.createService("mattermost", "loginservice")
+	u.createService("slack", "loginservice")
 	return u
 }
 
