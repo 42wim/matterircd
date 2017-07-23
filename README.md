@@ -1,7 +1,7 @@
 # matterircd
 [![Join the IRC chat at https://webchat.freenode.net/?channels=matterircd](https://img.shields.io/badge/IRC-matterircd-green.svg)](https://webchat.freenode.net/?channels=matterircd)
 
-Minimal IRC server which integrates with [mattermost](https://www.mattermost.org)  
+Minimal IRC server which integrates with [mattermost](https://www.mattermost.org) and [slack](https://www.slack.com)
 Tested on Windows / Linux
 
 Most of the work happens in [mm-go-irckit](https://github.com/42wim/mm-go-irckit) (based on github.com/shazow/go-irckit)
@@ -17,6 +17,7 @@ Now you can connect with your IRC client to port 6667 on your docker host.
 
 # Compatibility
 * Matterircd v0.13.0 works with mattermost 3.5.x - 3.10.0, 4.0.x [4.0.0 release](https://github.com/mattermost/platform/releases/tag/v4.0.0)
+* Matterircd v0.14.0-dev also supports slack
 
 Master branch of matterircd should always work against latest STABLE mattermost release.  
 If you want to run matterircd with mattermost DEV builds, use the develop branch of matterircd.
@@ -118,6 +119,13 @@ Scrollback
 ```
 /msg mattermost scrollback <channel> <limit>
 e.g. /msg mattermost scrollback #bugs 100 shows the last 100 messages of #bugs
+```
+## Slack user commands
+
+Login
+
+```
+/msg slack login <token>
 ```
 
 ## Docker
