@@ -1,3 +1,8 @@
+# v0.14.0
+## New features
+* Support mattermost 4.1
+* Add initial support for slack
+
 # v0.13.0
 ## New features
 * Support mattermost 4.0
