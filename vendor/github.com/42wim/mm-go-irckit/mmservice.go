@@ -1,12 +1,14 @@
 package irckit
 
 import (
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/mattermost/platform/model"
 )
@@ -263,7 +265,11 @@ var cmds = map[string]Command{
 func (u *User) handleServiceBot(service string, toUser *User, msg string) {
 
 	//func (u *User) handleMMServiceBot(toUser *User, msg string) {
-	commands := strings.Fields(msg)
+	commands, err := parseCommandString(msg)
+	if err != nil {
+		u.MsgUser(toUser, fmt.Sprintf("\"%s\" is improperly formatted", msg))
+		return
+	}
 	cmd, ok := cmds[strings.ToLower(commands[0])]
 	if !ok {
 		keys := make([]string, 0)
@@ -299,4 +305,68 @@ func (u *User) handleServiceBot(service string, toUser *User, msg string) {
 		return
 	}
 	cmd.handler(u, toUser, commands[1:], service)
+}
+
+func parseCommandString(line string) ([]string, error) {
+	args := []string{}
+	buf := ""
+	var escaped, doubleQuoted, singleQuoted bool
+
+	got := false
+
+	for _, r := range line {
+
+		// If the string is escaped
+		if escaped {
+			buf += string(r)
+			escaped = false
+			continue
+		}
+
+		// If "\"
+		if r == '\\' {
+			if singleQuoted {
+				buf += string(r)
+			} else {
+				escaped = true
+			}
+			continue
+		}
+
+		// If it is whitespace
+		if unicode.IsSpace(r) {
+			if singleQuoted || doubleQuoted {
+				buf += string(r)
+			} else if got {
+				args = append(args, buf)
+				buf = ""
+				got = false
+			}
+			continue
+		}
+		// If Quoted
+		switch r {
+		case '"':
+			if !singleQuoted {
+				doubleQuoted = !doubleQuoted
+				continue
+			}
+		case '\'':
+			if !doubleQuoted {
+				singleQuoted = !singleQuoted
+				continue
+			}
+		}
+		got = true
+		buf += string(r)
+	}
+
+	if got {
+		args = append(args, buf)
+	}
+	if escaped || singleQuoted || doubleQuoted {
+		return nil, errors.New("invalid command line string")
+	}
+
+	return args, nil
 }
