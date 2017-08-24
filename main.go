@@ -13,7 +13,7 @@ import (
 
 var (
 	flagRestrict, flagDefaultTeam, flagDefaultServer, flagTLSBind, flagTLSDir *string
-	flagInsecure                                                              *bool
+	flagInsecure, flagSkipTLSVerify                                           *bool
 	version                                                                   = "0.14.0"
 	githash                                                                   string
 	logger                                                                    *logrus.Entry
@@ -28,6 +28,7 @@ func main() {
 	flagDefaultTeam = flag.String("mmteam", "", "specify default mattermost team")
 	flagDefaultServer = flag.String("mmserver", "", "specify default mattermost server/instance")
 	flagInsecure = flag.Bool("mminsecure", false, "use http connection to mattermost")
+	flagSkipTLSVerify = flag.Bool("mmskiptlsverify", false, "skip verification of mattermost certificate chain and hostname")
 	flagVersion := flag.Bool("version", false, "show version")
 	flagTLSBind = flag.String("tlsbind", "", "interface:port to bind to. (e.g 127.0.0.1:6697)")
 	flagTLSDir = flag.String("tlsdir", ".", "directory to look for key.pem and cert.pem.")
@@ -107,7 +108,7 @@ func start(socket net.Listener) {
 		go func() {
 			cfg := &irckit.MmCfg{AllowedServers: strings.Fields(*flagRestrict),
 				DefaultTeam: *flagDefaultTeam, DefaultServer: *flagDefaultServer,
-				Insecure: *flagInsecure}
+				Insecure: *flagInsecure, SkipTLSVerify: *flagSkipTLSVerify}
 			newsrv := irckit.ServerConfig{Name: "matterircd", Version: version}.Server()
 			logger.Infof("New connection: %s", conn.RemoteAddr())
 			err = newsrv.Connect(irckit.NewUserMM(conn, newsrv, cfg))
