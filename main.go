@@ -4,11 +4,12 @@ import (
 	"crypto/tls"
 	"flag"
 	"fmt"
-	"github.com/42wim/mm-go-irckit"
-	"github.com/Sirupsen/logrus"
 	"net"
 	"os"
 	"strings"
+
+	"github.com/42wim/mm-go-irckit"
+	"github.com/Sirupsen/logrus"
 )
 
 var (
@@ -32,6 +33,7 @@ func main() {
 	flagVersion := flag.Bool("version", false, "show version")
 	flagTLSBind = flag.String("tlsbind", "", "interface:port to bind to. (e.g 127.0.0.1:6697)")
 	flagTLSDir = flag.String("tlsdir", ".", "directory to look for key.pem and cert.pem.")
+	flagSkipTLSVerify = flag.Bool("mmskiptlsverify", false, "Skip verification of the servers certificate chain and hostname (default: false)")
 	flag.Parse()
 
 	ourlog := logrus.New()
