@@ -57,9 +57,9 @@ func CmdInvite(s Server, u *User, msg *irc.Message) error {
 	if id == "" {
 		return nil
 	}
-	_, err := u.mc.Client.AddChannelMember(id, other.User)
-	if err != nil {
-		return err
+	_, resp := u.mc.Client.AddChannelMember(id, other.User)
+	if resp.Error != nil {
+		return resp.Error
 	}
 
 	return nil
@@ -101,9 +101,9 @@ func CmdKick(s Server, u *User, msg *irc.Message) error {
 	if id == "" {
 		return nil
 	}
-	_, err := u.mc.Client.RemoveChannelMember(id, other.User)
-	if err != nil {
-		return err
+	_, resp := u.mc.Client.RemoveUserFromChannel(id, other.User)
+	if resp.Error != nil {
+		return resp.Error
 	}
 	return nil
 }
@@ -286,7 +286,7 @@ func CmdPart(s Server, u *User, msg *irc.Message) error {
 		// first part on irc
 		ch.Part(u, msg.Trailing)
 		// now part on mattermost
-		u.mc.Client.LeaveChannel(ch.ID())
+		u.mc.Client.RemoveUserFromChannel(ch.ID(), u.mc.User.Id)
 		// part all other (ghost)users on the channel
 		for _, k := range ch.Users() {
 			ch.Part(k, "")
@@ -348,9 +348,9 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 			props := make(map[string]interface{})
 			props["matterircd"] = true
 			post := &model.Post{ChannelId: ch.ID(), Message: msg.Trailing, Props: props}
-			_, err := u.mc.Client.CreatePost(post)
-			if err != nil {
-				u.MsgSpoofUser("mattermost", "msg: "+msg.Trailing+" could not be send: "+err.Error())
+			_, resp := u.mc.Client.CreatePost(post)
+			if resp.Error != nil {
+				u.MsgSpoofUser("mattermost", "msg: "+msg.Trailing+" could not be send: "+resp.Error.Error())
 			}
 		}
 	} else if toUser, exists := s.HasUser(query); exists {

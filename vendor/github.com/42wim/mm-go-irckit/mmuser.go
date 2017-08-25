@@ -248,11 +248,10 @@ func (u *User) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		}
 	}
 	if data.ParentId != "" {
-		parent, err := u.mc.Client.GetPost(data.ChannelId, data.ParentId, "")
-		if err != nil {
+		parentPost, resp := u.mc.Client.GetPost(data.ParentId, "")
+		if resp.Error != nil {
 			logger.Debugf("Unable to get parent post for", data)
 		} else {
-			parentPost := parent.Data.(*model.PostList).Posts[data.ParentId]
 			parentGhost := u.createMMUser(u.mc.GetUser(parentPost.UserId))
 			data.Message = fmt.Sprintf("%s (re @%s: %s)", data.Message, parentGhost.Nick, parentPost.Message)
 		}
@@ -423,18 +422,17 @@ func (u *User) MsgSpoofUser(rcvuser string, msg string) {
 // sync IRC with mattermost channel state
 func (u *User) syncMMChannel(id string, name string) {
 	srv := u.Srv
-	res, _ := u.mc.Client.GetProfilesInChannel(id, 0, 5000, "")
-	if res == nil {
+	mmusers, resp := u.mc.Client.GetUsersInChannel(id, 0, 50000, "")
+	if resp.Error != nil {
 		return
 	}
-	users := res.Data.(map[string]*model.User)
-	for _, user := range users {
+	for _, user := range mmusers {
 		if user.Id != u.mc.User.Id {
 			u.addUserToChannel(user, "#"+name, id)
 		}
 	}
 	// before joining ourself
-	for _, user := range users {
+	for _, user := range mmusers {
 		// join all the channels we're on on MM
 		if user.Id == u.mc.User.Id {
 			ch := srv.Channel(id)

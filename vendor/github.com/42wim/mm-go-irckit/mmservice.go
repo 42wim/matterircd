@@ -178,12 +178,11 @@ func searchUsers(u *User, toUser *User, args []string, service string) {
 	if service == "slack" {
 		u.MsgUser(toUser, "not implemented")
 	}
-	res, err := u.mc.Client.SearchUsers(model.UserSearch{Term: strings.Join(args, " ")})
-	if err != nil {
-		u.MsgUser(toUser, fmt.Sprint("Error", err))
+	users, resp := u.mc.Client.SearchUsers(&model.UserSearch{Term: strings.Join(args, " ")})
+	if resp.Error != nil {
+		u.MsgUser(toUser, fmt.Sprint("Error", resp.Error))
 		return
 	}
-	users := res.Data.([]*model.User)
 	for _, user := range users {
 		u.MsgUser(toUser, fmt.Sprint(user.Nickname, user.FirstName, user.LastName))
 	}
@@ -238,7 +237,7 @@ func api(u *User, toUser *User, args []string, service string) {
 	var r *http.Response
 	var err error = nil
 	if strings.ToLower(args[0]) == "get" {
-		r, err = u.mc.Client.DoApiGet(args[1], "", "")
+		r, err = u.mc.Client.DoApiGet(args[1], "")
 	} else {
 		r, err = u.mc.Client.DoApiPost(args[1], strings.Join(args[2:], " "))
 	}
