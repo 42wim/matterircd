@@ -8,28 +8,28 @@ import (
 	"io"
 )
 
-type ChannelSearch struct {
+type TeamSearch struct {
 	Term string `json:"term"`
 }
 
-// ToJson convert a Channel to a json string
-func (c *ChannelSearch) ToJson() string {
+// ToJson convert a TeamSearch to json string
+func (c *TeamSearch) ToJson() string {
 	b, err := json.Marshal(c)
 	if err != nil {
 		return ""
-	} else {
-		return string(b)
 	}
+
+	return string(b)
 }
 
-// ChannelSearchFromJson will decode the input and return a Channel
-func ChannelSearchFromJson(data io.Reader) *ChannelSearch {
+// TeamSearchFromJson decodes the input and returns a TeamSearch
+func TeamSearchFromJson(data io.Reader) *TeamSearch {
 	decoder := json.NewDecoder(data)
-	var cs ChannelSearch
+	var cs TeamSearch
 	err := decoder.Decode(&cs)
 	if err == nil {
 		return &cs
-	} else {
-		return nil
 	}
+
+	return nil
 }
