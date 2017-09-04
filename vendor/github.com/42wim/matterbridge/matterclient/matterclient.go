@@ -451,9 +451,22 @@ func (m *MMClient) GetChannelHeader(channelId string) string {
 	return ""
 }
 
-func (m *MMClient) PostMessage(channelId string, text string) {
+func (m *MMClient) PostMessage(channelId string, text string) (string, error) {
 	post := &model.Post{ChannelId: channelId, Message: text}
-	m.Client.CreatePost(post)
+	res, resp := m.Client.CreatePost(post)
+	if resp.Error != nil {
+		return "", resp.Error
+	}
+	return res.Id, nil
+}
+
+func (m *MMClient) EditMessage(postId string, text string) (string, error) {
+	post := &model.Post{Message: text}
+	res, resp := m.Client.UpdatePost(postId, post)
+	if resp.Error != nil {
+		return "", resp.Error
+	}
+	return res.Id, nil
 }
 
 func (m *MMClient) JoinChannel(channelId string) error {
@@ -468,7 +481,7 @@ func (m *MMClient) JoinChannel(channelId string) error {
 	m.log.Debug("Joining ", channelId)
 	_, resp := m.Client.AddChannelMember(channelId, m.User.Id)
 	if resp.Error != nil {
-		return errors.New("failed to join")
+		return resp.Error
 	}
 	return nil
 }
@@ -498,8 +511,8 @@ func (m *MMClient) GetPosts(channelId string, limit int) *model.PostList {
 }
 
 func (m *MMClient) GetPublicLink(filename string) string {
-	res, err := m.Client.GetFileLink(filename)
-	if err != nil {
+	res, resp := m.Client.GetFileLink(filename)
+	if resp.Error != nil {
 		return ""
 	}
 	return res
@@ -508,8 +521,8 @@ func (m *MMClient) GetPublicLink(filename string) string {
 func (m *MMClient) GetPublicLinks(filenames []string) []string {
 	var output []string
 	for _, f := range filenames {
-		res, err := m.Client.GetFileLink(f)
-		if err != nil {
+		res, resp := m.Client.GetFileLink(f)
+		if resp.Error != nil {
 			continue
 		}
 		output = append(output, res)
@@ -525,8 +538,8 @@ func (m *MMClient) GetFileLinks(filenames []string) []string {
 
 	var output []string
 	for _, f := range filenames {
-		res, err := m.Client.GetFileLink(f)
-		if err != nil {
+		res, resp := m.Client.GetFileLink(f)
+		if resp.Error != nil {
 			// public links is probably disabled, create the link ourselves
 			output = append(output, uriScheme+m.Credentials.Server+model.API_URL_SUFFIX_V3+"/files/"+f+"/get")
 			continue
@@ -587,9 +600,9 @@ func (m *MMClient) createCookieJar(token string) *cookiejar.Jar {
 func (m *MMClient) SendDirectMessage(toUserId string, msg string) {
 	m.log.Debugf("SendDirectMessage to %s, msg %s", toUserId, msg)
 	// create DM channel (only happens on first message)
-	_, err := m.Client.CreateDirectChannel(m.User.Id, toUserId)
-	if err != nil {
-		m.log.Debugf("SendDirectMessage to %#v failed: %s", toUserId, err)
+	_, resp := m.Client.CreateDirectChannel(m.User.Id, toUserId)
+	if resp.Error != nil {
+		m.log.Debugf("SendDirectMessage to %#v failed: %s", toUserId, resp.Error)
 		return
 	}
 	channelName := model.GetDMNameFromIds(toUserId, m.User.Id)
@@ -799,13 +812,19 @@ func (m *MMClient) initUser() error {
 		for _, user := range mmusers {
 			usermap[user.Id] = user
 		}
+
 		t := &Team{Team: team, Users: usermap, Id: team.Id}
 
-		mmchannels, resp := m.Client.GetPublicChannelsForTeam(team.Id, 0, 5000, "")
+		mmchannels, resp := m.Client.GetChannelsForTeamForUser(team.Id, m.User.Id, "")
 		if resp.Error != nil {
-			return errors.New(resp.Error.DetailedError)
+			return resp.Error
 		}
 		t.Channels = mmchannels
+		mmchannels, resp = m.Client.GetPublicChannelsForTeam(team.Id, 0, 5000, "")
+		if resp.Error != nil {
+			return resp.Error
+		}
+		t.MoreChannels = mmchannels
 		m.OtherTeams = append(m.OtherTeams, t)
 		if team.Name == m.Credentials.Team {
 			m.Team = t
