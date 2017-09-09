@@ -3,8 +3,6 @@ package irckit
 import (
 	"errors"
 	"fmt"
-	"io/ioutil"
-	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -142,7 +140,14 @@ func login(u *User, toUser *User, args []string, service string) {
 	u.mc.OnWsConnect = u.addUsersToChannels
 	go u.mc.StatusLoop()
 	u.MsgUser(toUser, "login OK")
-
+	// set nick to mattermost nickname or username if nick empty
+	if u.mc.User.Nickname != "" {
+		if !u.Srv.RenameUser(u, u.mc.User.Nickname) {
+			u.Srv.RenameUser(u, u.mc.User.Username)
+		}
+	} else {
+		u.Srv.RenameUser(u, u.mc.User.Username)
+	}
 }
 
 func search(u *User, toUser *User, args []string, service string) {
@@ -230,35 +235,12 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 
 }
 
-func api(u *User, toUser *User, args []string, service string) {
-	if service == "slack" {
-		u.MsgUser(toUser, "not implemented")
-	}
-	var r *http.Response
-	var err error = nil
-	if strings.ToLower(args[0]) == "get" {
-		r, err = u.mc.Client.DoApiGet(args[1], "")
-	} else {
-		r, err = u.mc.Client.DoApiPost(args[1], strings.Join(args[2:], " "))
-	}
-	if err != nil {
-		u.MsgUser(toUser, fmt.Sprintf("API error: %s", err))
-		return
-	}
-	if r.Body != nil {
-		b, _ := ioutil.ReadAll(r.Body)
-		r.Body.Close()
-		u.MsgUser(toUser, string(b))
-	}
-}
-
 var cmds = map[string]Command{
 	"logout":      {handler: logout, login: true, minParams: 0, maxParams: 0},
 	"login":       {handler: login, minParams: 2, maxParams: 4},
 	"search":      {handler: search, login: true, minParams: 1, maxParams: -1},
 	"searchusers": {handler: searchUsers, login: true, minParams: 1, maxParams: -1},
 	"scrollback":  {handler: scrollback, login: true, minParams: 2, maxParams: 2},
-	"api":         {handler: api, login: true, minParams: 2, maxParams: -1},
 }
 
 func (u *User) handleServiceBot(service string, toUser *User, msg string) {

@@ -277,6 +277,13 @@ func (m *MMClient) WsReceiver() {
 			// check if we didn't empty the message
 			if msg.Text != "" {
 				m.MessageChan <- msg
+				continue
+			}
+			// if we have file attached but the message is empty, also send it
+			if msg.Post != nil {
+				if msg.Text != "" || len(msg.Post.FileIds) > 0 {
+					m.MessageChan <- msg
+				}
 			}
 			continue
 		}
@@ -854,7 +861,8 @@ func supportedVersion(version string) bool {
 		strings.HasPrefix(version, "3.9.0") ||
 		strings.HasPrefix(version, "3.10.0") ||
 		strings.HasPrefix(version, "4.0") ||
-		strings.HasPrefix(version, "4.1") {
+		strings.HasPrefix(version, "4.1") ||
+		strings.HasPrefix(version, "4.2") {
 		return true
 	}
 	return false
