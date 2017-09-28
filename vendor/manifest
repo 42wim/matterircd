@@ -69,10 +69,35 @@
 			"notests": true
 		},
 		{
+			"importpath": "github.com/nicksnyder/go-i18n/i18n",
+			"repository": "https://github.com/nicksnyder/go-i18n",
+			"vcs": "git",
+			"revision": "ca33e78c8a430e2df435b02f63a3944fa8e9ea11",
+			"branch": "master",
+			"path": "/i18n",
+			"notests": true
+		},
+		{
 			"importpath": "github.com/nlopes/slack",
 			"repository": "https://github.com/nlopes/slack",
 			"vcs": "git",
 			"revision": "ca8436d76f805ec1e682eaae2de3c3a9bc894b0f",
+			"branch": "master",
+			"notests": true
+		},
+		{
+			"importpath": "github.com/pborman/uuid",
+			"repository": "https://github.com/pborman/uuid",
+			"vcs": "git",
+			"revision": "e790cca94e6cc75c7064b1332e63811d4aae1a53",
+			"branch": "master",
+			"notests": true
+		},
+		{
+			"importpath": "github.com/pelletier/go-toml",
+			"repository": "https://github.com/pelletier/go-toml",
+			"vcs": "git",
+			"revision": "16398bac157da96aa88f98a2df640c7f32af1da2",
 			"branch": "master",
 			"notests": true
 		},
@@ -82,6 +107,24 @@
 			"vcs": "git",
 			"revision": "d007bfcbaef198e6c15c40e004d59ce4aac4fbff",
 			"branch": "master",
+			"notests": true
+		},
+		{
+			"importpath": "golang.org/x/crypto/bcrypt",
+			"repository": "https://go.googlesource.com/crypto",
+			"vcs": "git",
+			"revision": "76eec36fa14229c4b25bb894c2d0e591527af429",
+			"branch": "master",
+			"path": "/bcrypt",
+			"notests": true
+		},
+		{
+			"importpath": "golang.org/x/crypto/blowfish",
+			"repository": "https://go.googlesource.com/crypto",
+			"vcs": "git",
+			"revision": "76eec36fa14229c4b25bb894c2d0e591527af429",
+			"branch": "master",
+			"path": "blowfish",
 			"notests": true
 		},
 		{
@@ -106,6 +149,14 @@
 			"repository": "https://gopkg.in/gemnasium/logrus-airbrake-hook.v2",
 			"vcs": "",
 			"revision": "31e6fd4bd5a98d8ee7673d24bc54ec73c31810dd",
+			"branch": "master",
+			"notests": true
+		},
+		{
+			"importpath": "gopkg.in/yaml.v2",
+			"repository": "https://gopkg.in/yaml.v2",
+			"vcs": "git",
+			"revision": "eb3733d160e74a9c7e442f435eb3bea458e1d19f",
 			"branch": "master",
 			"notests": true
 		}
