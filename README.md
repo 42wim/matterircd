@@ -16,11 +16,9 @@ docker run -p 6667:6667 42wim/matterircd:latest -bind 0.0.0.0:6667
 Now you can connect with your IRC client to port 6667 on your docker host.
 
 # Compatibility
-* Matterircd v0.14.0 works with mattermost 3.5.x - 3.10.0, 4.0.x - 4.1.x [4.1.0 release](https://github.com/mattermost/platform/releases/tag/v4.1.0)
-* Matterircd v0.14.0 also supports slack
+* Matterircd v0.15.0 works with slack (initial support) and mattermost 3.8.x - 3.10.0, 4.x
 
 Master branch of matterircd should always work against latest STABLE mattermost release.  
-If you want to run matterircd with mattermost DEV builds, use the develop branch of matterircd.
 
 # Features
 
@@ -43,11 +41,11 @@ If you want to run matterircd with mattermost DEV builds, use the develop branch
 # Binaries
 
 You can find the binaries [here](https://github.com/42wim/matterircd/releases/)
-* For use with mattermost 3.5.0 and higher [v0.14.0](https://github.com/42wim/matterircd/releases/tag/v0.14.0)
+* For use with mattermost 3.8.0 and higher [v0.15.0](https://github.com/42wim/matterircd/releases/tag/v0.15.0)
 
 # Building
 
-Go 1.6+ is required 
+Go 1.8+ is required 
 Make sure you have [Go](https://golang.org/doc/install) properly installed, including setting up your [GOPATH] (https://golang.org/doc/code.html#GOPATH)
 
 ```
@@ -76,6 +74,8 @@ Usage of ./matterircd:
         use http connection to mattermost
   -mmserver string
         specify default mattermost server/instance
+  -mmskiptlsverify
+        skip verification of mattermost certificate chain and hostname
   -mmteam string
         specify default mattermost team
   -port int

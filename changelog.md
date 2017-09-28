@@ -1,3 +1,12 @@
+# v0.15.0
+##New features
+* Support mattermost 4.2 and higher (4.x) (use mattermost v4 API)
+* Add -mmskiptlsverify option to skip TLS certificate checks on mattermost
+
+## Enhancements
+* Display nickname, if set #120
+* Replace IRC parsing function with shellwords like function to allow for passwords with spaces. (#8)
+
 # v0.14.0
 ## New features
 * Support mattermost 4.1
