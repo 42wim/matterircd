@@ -281,7 +281,7 @@ func (m *MMClient) WsReceiver() {
 			}
 			// if we have file attached but the message is empty, also send it
 			if msg.Post != nil {
-				if msg.Text != "" || len(msg.Post.FileIds) > 0 {
+				if msg.Text != "" || len(msg.Post.FileIds) > 0 || msg.Post.Type == "slack_attachment" {
 					m.MessageChan <- msg
 				}
 			}
@@ -299,7 +299,7 @@ func (m *MMClient) WsReceiver() {
 
 func (m *MMClient) parseMessage(rmsg *Message) {
 	switch rmsg.Raw.Event {
-	case model.WEBSOCKET_EVENT_POSTED, model.WEBSOCKET_EVENT_POST_EDITED:
+	case model.WEBSOCKET_EVENT_POSTED, model.WEBSOCKET_EVENT_POST_EDITED, model.WEBSOCKET_EVENT_POST_DELETED:
 		m.parseActionPost(rmsg)
 		/*
 			case model.ACTION_USER_REMOVED:
@@ -467,6 +467,15 @@ func (m *MMClient) PostMessage(channelId string, text string) (string, error) {
 	return res.Id, nil
 }
 
+func (m *MMClient) PostMessageWithFiles(channelId string, text string, fileIds []string) (string, error) {
+	post := &model.Post{ChannelId: channelId, Message: text, FileIds: fileIds}
+	res, resp := m.Client.CreatePost(post)
+	if resp.Error != nil {
+		return "", resp.Error
+	}
+	return res.Id, nil
+}
+
 func (m *MMClient) EditMessage(postId string, text string) (string, error) {
 	post := &model.Post{Message: text}
 	res, resp := m.Client.UpdatePost(postId, post)
@@ -474,6 +483,14 @@ func (m *MMClient) EditMessage(postId string, text string) (string, error) {
 		return "", resp.Error
 	}
 	return res.Id, nil
+}
+
+func (m *MMClient) DeleteMessage(postId string) error {
+	_, resp := m.Client.DeletePost(postId)
+	if resp.Error != nil {
+		return resp.Error
+	}
+	return nil
 }
 
 func (m *MMClient) JoinChannel(channelId string) error {
@@ -772,6 +789,14 @@ func (m *MMClient) GetTeamId() string {
 	return m.Team.Id
 }
 
+func (m *MMClient) UploadFile(data []byte, channelId string, filename string) (string, error) {
+	f, resp := m.Client.UploadFile(data, channelId, filename)
+	if resp.Error != nil {
+		return "", resp.Error
+	}
+	return f.FileInfos[0].Id, nil
+}
+
 func (m *MMClient) StatusLoop() {
 	retries := 0
 	backoff := time.Second * 60
@@ -870,9 +895,7 @@ func supportedVersion(version string) bool {
 	if strings.HasPrefix(version, "3.8.0") ||
 		strings.HasPrefix(version, "3.9.0") ||
 		strings.HasPrefix(version, "3.10.0") ||
-		strings.HasPrefix(version, "4.0") ||
-		strings.HasPrefix(version, "4.1") ||
-		strings.HasPrefix(version, "4.2") {
+		strings.HasPrefix(version, "4.") {
 		return true
 	}
 	return false
