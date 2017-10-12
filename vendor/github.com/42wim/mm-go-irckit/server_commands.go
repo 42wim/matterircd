@@ -337,6 +337,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 		// CTCP ACTION (/me)
 		if strings.HasPrefix(msg.Trailing, "\x01ACTION ") {
 			msg.Trailing = strings.Replace(msg.Trailing, "\x01ACTION ", "", -1)
+			msg.Trailing = strings.Replace(msg.Trailing, "\x01", "", -1)
 			msg.Trailing = "*" + msg.Trailing + "*"
 		}
 		if ch.Service() == "slack" {
