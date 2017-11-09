@@ -140,14 +140,7 @@ func login(u *User, toUser *User, args []string, service string) {
 	u.mc.OnWsConnect = u.addUsersToChannels
 	go u.mc.StatusLoop()
 	u.MsgUser(toUser, "login OK")
-	// set nick to mattermost nickname or username if nick empty
-	if u.mc.User.Nickname != "" {
-		if !u.Srv.RenameUser(u, u.mc.User.Nickname) {
-			u.Srv.RenameUser(u, u.mc.User.Username)
-		}
-	} else {
-		u.Srv.RenameUser(u, u.mc.User.Username)
-	}
+
 }
 
 func search(u *User, toUser *User, args []string, service string) {

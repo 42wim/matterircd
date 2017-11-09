@@ -315,6 +315,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 	var err error
 	if len(msg.Params) > 1 {
 		tr := strings.Join(msg.Params[1:], " ")
+		msg.Params = []string{msg.Params[0]}
 		msg.Trailing = msg.Trailing + tr
 	}
 	// empty message
@@ -362,10 +363,12 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 	} else if toUser, exists := s.HasUser(query); exists {
 		if query == "mattermost" {
 			go u.handleServiceBot(query, toUser, msg.Trailing)
+			msg.Trailing = "<redacted>"
 			return nil
 		}
 		if query == "slack" {
 			go u.handleServiceBot(query, toUser, msg.Trailing)
+			msg.Trailing = "<redacted>"
 			return nil
 		}
 		if toUser.MmGhostUser {
