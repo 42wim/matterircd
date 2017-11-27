@@ -28,7 +28,7 @@ func main() {
 	config.Logger = logger
 
 	// config related. instantiate a new config.Config to store flags
-	cfg := config.Config{}
+	cfg = config.Config{}
 	flagConfig := flag.String("config", "", "config file")
 
 	// bools for showing version/enabling debug
@@ -105,7 +105,7 @@ func main() {
 func tlsbind() net.Listener {
 	cert, err := tls.LoadX509KeyPair(cfg.TLSDir+"/cert.pem", cfg.TLSDir+"/key.pem")
 	if err != nil {
-		logger.Errorf("could not load TLS, incorrect directory?")
+		logger.Errorf("could not load TLS, incorrect directory? Error: %s", err)
 		os.Exit(1)
 	}
 	config := tls.Config{Certificates: []tls.Certificate{cert}}
@@ -114,7 +114,7 @@ func tlsbind() net.Listener {
 		logger.Errorf("Can not listen on %s: %v\n", cfg.TLSBind, err)
 		os.Exit(1)
 	}
-	logger.Info("TLS listening on", cfg.TLSBind)
+	logger.Info("TLS listening on ", cfg.TLSBind)
 	return listenerTLS
 }
 
