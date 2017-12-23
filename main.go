@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"flag"
 	"fmt"
+	"github.com/42wim/matterircd/config"
 	"github.com/42wim/mm-go-irckit"
 	"github.com/Sirupsen/logrus"
 	"net"
@@ -17,28 +18,46 @@ var (
 	version                                                                   = "0.15.0"
 	githash                                                                   string
 	logger                                                                    *logrus.Entry
+	cfg                                                                       config.Config
 )
 
 func main() {
-	flagDebug := flag.Bool("debug", false, "enable debug logging")
-	flagBind := flag.String("bind", "127.0.0.1:6667", "interface:port to bind to.")
-	flagBindInterface := flag.String("interface", "", "interface to bind to (deprecated: use -bind)")
-	flagBindPort := flag.Int("port", 0, "Port to bind to (deprecated: use -bind)")
-	flagRestrict = flag.String("restrict", "", "only allow connection to specified mattermost server/instances. Space delimited")
-	flagDefaultTeam = flag.String("mmteam", "", "specify default mattermost team")
-	flagDefaultServer = flag.String("mmserver", "", "specify default mattermost server/instance")
-	flagInsecure = flag.Bool("mminsecure", false, "use http connection to mattermost")
-	flagSkipTLSVerify = flag.Bool("mmskiptlsverify", false, "skip verification of mattermost certificate chain and hostname")
-	flagVersion := flag.Bool("version", false, "show version")
-	flagTLSBind = flag.String("tlsbind", "", "interface:port to bind to. (e.g 127.0.0.1:6697)")
-	flagTLSDir = flag.String("tlsdir", ".", "directory to look for key.pem and cert.pem.")
-	flag.Parse()
-
 	ourlog := logrus.New()
 	ourlog.Formatter = &logrus.TextFormatter{FullTimestamp: true}
 	logger = ourlog.WithFields(logrus.Fields{"module": "matterircd"})
+	config.Logger = logger
 
-	if *flagDebug {
+	// config related. instantiate a new config.Config to store flags
+	cfg = config.Config{}
+	flagConfig := flag.String("config", "", "config file")
+
+	// bools for showing version/enabling debug
+	flagVersion := flag.Bool("version", false, "show version")
+	flag.BoolVar(&cfg.Debug, "debug", false, "enable debug logging")
+
+	// bind related cfg
+	flag.StringVar(&cfg.Bind, "bind", "127.0.0.1:6667", "interface:port to bind to.")
+	flag.StringVar(&cfg.BindInterface, "interface", "", "interface to bind to (deprecated: use -bind)")
+	flag.IntVar(&cfg.BindPort, "port", 0, "Port to bind to (deprecated: use -bind)")
+
+	// mattermost related cfg
+	flag.StringVar(&cfg.Restrict, "restrict", "", "only allow connection to specified mattermost server/instances. Space delimited")
+	flag.StringVar(&cfg.DefaultTeam, "mmteam", "", "specify default mattermost team")
+	flag.StringVar(&cfg.DefaultServer, "mmserver", "", "specify default mattermost server/instance")
+	flag.BoolVar(&cfg.Insecure, "mminsecure", false, "use http connection to mattermost")
+
+	// TLS related cfg
+	flag.BoolVar(&cfg.SkipTLSVerify, "mmskiptlsverify", false, "skip verification of mattermost certificate chain and hostname")
+	flag.StringVar(&cfg.TLSBind, "tlsbind", "", "interface:port to bind to. (e.g 127.0.0.1:6697)")
+	flag.StringVar(&cfg.TLSDir, "tlsdir", ".", "directory to look for key.pem and cert.pem.")
+	flag.Parse()
+
+	// if -config was set, load the config file (overrides args)
+	if *flagConfig != "" {
+		cfg = *config.LoadConfig(*flagConfig, cfg)
+	}
+
+	if cfg.Debug {
 		logger.Info("enabling debug")
 		ourlog.Level = logrus.DebugLevel
 		irckit.SetLogLevel("debug")
@@ -55,25 +74,27 @@ func main() {
 		logger.Infof("WARNING: THIS IS A DEVELOPMENT VERSION. Things may break.")
 	}
 
-	if *flagTLSBind != "" {
+	if cfg.TLSBind != "" {
 		go func() {
-			logger.Infof("Listening on %s (TLS)", *flagTLSBind)
+			logger.Infof("Listening on %s (TLS)", cfg.TLSBind)
 			socket := tlsbind()
 			defer socket.Close()
 			start(socket)
 		}()
 	}
+
 	// backwards compatible
-	if *flagBind == "127.0.0.1:6667" && *flagBindInterface != "" && *flagBindPort != 0 {
-		*flagBind = fmt.Sprintf("%s:%d", *flagBindInterface, *flagBindPort)
+	if cfg.Bind == "127.0.0.1:6667" && cfg.BindInterface != "" && cfg.BindPort != 0 {
+		cfg.Bind = fmt.Sprintf("%s:%d", cfg.BindInterface, cfg.BindPort)
 	}
-	if *flagBind != "" {
+
+	if cfg.Bind != "" {
 		go func() {
-			socket, err := net.Listen("tcp", *flagBind)
+			socket, err := net.Listen("tcp", cfg.Bind)
 			if err != nil {
-				logger.Errorf("Can not listen on %s: %v", *flagBind, err)
+				logger.Errorf("Can not listen on %s: %v", cfg.Bind, err)
 			}
-			logger.Infof("Listening on %s", *flagBind)
+			logger.Infof("Listening on %s", cfg.Bind)
 			defer socket.Close()
 			start(socket)
 		}()
@@ -82,18 +103,18 @@ func main() {
 }
 
 func tlsbind() net.Listener {
-	cert, err := tls.LoadX509KeyPair(*flagTLSDir+"/cert.pem", *flagTLSDir+"/key.pem")
+	cert, err := tls.LoadX509KeyPair(cfg.TLSDir+"/cert.pem", cfg.TLSDir+"/key.pem")
 	if err != nil {
-		logger.Errorf("could not load TLS, incorrect directory?")
+		logger.Errorf("could not load TLS, incorrect directory? Error: %s", err)
 		os.Exit(1)
 	}
 	config := tls.Config{Certificates: []tls.Certificate{cert}}
-	listenerTLS, err := tls.Listen("tcp", *flagTLSBind, &config)
+	listenerTLS, err := tls.Listen("tcp", cfg.TLSBind, &config)
 	if err != nil {
-		logger.Errorf("Can not listen on %s: %v\n", *flagTLSBind, err)
+		logger.Errorf("Can not listen on %s: %v\n", cfg.TLSBind, err)
 		os.Exit(1)
 	}
-	logger.Info("TLS listening on", *flagTLSBind)
+	logger.Info("TLS listening on ", cfg.TLSBind)
 	return listenerTLS
 }
 
@@ -106,12 +127,12 @@ func start(socket net.Listener) {
 		}
 
 		go func() {
-			cfg := &irckit.MmCfg{AllowedServers: strings.Fields(*flagRestrict),
-				DefaultTeam: *flagDefaultTeam, DefaultServer: *flagDefaultServer,
-				Insecure: *flagInsecure, SkipTLSVerify: *flagSkipTLSVerify}
+			irccfg := &irckit.MmCfg{AllowedServers: strings.Fields(cfg.Restrict),
+				DefaultTeam: cfg.DefaultTeam, DefaultServer: cfg.DefaultServer,
+				Insecure: cfg.Insecure, SkipTLSVerify: cfg.SkipTLSVerify}
 			newsrv := irckit.ServerConfig{Name: "matterircd", Version: version}.Server()
 			logger.Infof("New connection: %s", conn.RemoteAddr())
-			err = newsrv.Connect(irckit.NewUserMM(conn, newsrv, cfg))
+			err = newsrv.Connect(irckit.NewUserMM(conn, newsrv, irccfg))
 			if err != nil {
 				logger.Errorf("Failed to join: %v", err)
 				return

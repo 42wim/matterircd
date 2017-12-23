@@ -1,0 +1,8 @@
+bind = "10.0.0.100:6667"
+tlsbind = "10.0.0.100:6697"
+tlsdir = "/etc/pki/tls/matermost/"
+insecure = false
+tlsverify = false
+server = "chat.mycompany.com"
+team = "mycompany"
+restrict = "chat.mycompany.com"
