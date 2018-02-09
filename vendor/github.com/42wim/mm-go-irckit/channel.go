@@ -322,7 +322,7 @@ func (ch *channel) Names() []string {
 	users := ch.Users()
 	names := make([]string, 0, len(users))
 	for _, u := range users {
-		if strings.Contains(u.Roles, model.ROLE_SYSTEM_ADMIN.Id) {
+		if strings.Contains(u.Roles, model.SYSTEM_ADMIN_ROLE_ID) {
 			names = append(names, "@"+u.Nick)
 		} else {
 			names = append(names, u.Nick)

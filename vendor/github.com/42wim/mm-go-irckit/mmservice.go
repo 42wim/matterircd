@@ -153,6 +153,9 @@ func search(u *User, toUser *User, args []string, service string) {
 		return
 	}
 	for i := len(postlist.Order) - 1; i >= 0; i-- {
+		if postlist.Posts[postlist.Order[i]].DeleteAt > postlist.Posts[postlist.Order[i]].CreateAt {
+			continue
+		}
 		timestamp := time.Unix(postlist.Posts[postlist.Order[i]].CreateAt/1000, 0).Format("January 02, 2006 15:04")
 		channelname := u.mc.GetChannelName(postlist.Posts[postlist.Order[i]].ChannelId)
 		u.MsgUser(toUser, "#"+channelname+" <"+u.mc.GetUser(postlist.Posts[postlist.Order[i]].UserId).Username+"> "+timestamp)

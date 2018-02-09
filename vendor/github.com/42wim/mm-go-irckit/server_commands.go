@@ -408,6 +408,7 @@ func CmdQuit(s Server, u *User, msg *irc.Message) error {
 			u.logoutFromMattermost()
 		}
 	}
+	u.Conn.Close()
 	return nil
 }
 
