@@ -585,9 +585,14 @@ func (m *MMClient) UpdateChannelHeader(channelId string, header string) {
 func (m *MMClient) UpdateLastViewed(channelId string) {
 	m.log.Debugf("posting lastview %#v", channelId)
 	view := &model.ChannelView{ChannelId: channelId}
-	res, _ := m.Client.ViewChannel(m.User.Id, view)
-	if !res {
-		m.log.Errorf("ChannelView update for %s failed", channelId)
+	view.PrevChannelId = "j6thgjm19pfezjkutoy8ed676h"
+	res, resp := m.Client.ViewChannel("me", view)
+	//	m.log.Errorf("lastviewedtimes %#v", res.LastViewedAtTimes)
+	if res.LastViewedAtTimes[channelId] == 0 {
+		m.log.Errorf("channel %s", m.GetChannelName(channelId))
+	}
+	if resp.Error != nil {
+		m.log.Errorf("ChannelView update for %s failed: %s", channelId, resp.Error)
 	}
 }
 
@@ -817,9 +822,14 @@ func (m *MMClient) StatusLoop() {
 				backoff = time.Second * 60
 			case <-time.After(time.Second * 5):
 				if retries > 3 {
+					m.log.Debug("StatusLoop() timeout")
 					m.Logout()
 					m.WsQuit = false
-					m.Login()
+					err := m.Login()
+					if err != nil {
+						log.Errorf("Login failed: %#v", err)
+						break
+					}
 					if m.OnWsConnect != nil {
 						m.OnWsConnect()
 					}
