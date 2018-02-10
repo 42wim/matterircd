@@ -61,6 +61,9 @@ type Channel interface {
 
 	// Spoof message
 	SpoofMessage(from string, text string)
+
+	// Spoof notice
+	SpoofNotice(from string, text string)
 }
 
 type channel struct {

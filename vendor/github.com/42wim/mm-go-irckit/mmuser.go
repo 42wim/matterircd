@@ -345,12 +345,16 @@ func (u *User) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		}
 		if props["channel_type"] == "D" {
 			u.MsgSpoofUser(spoofUsername, m)
-		} else {
-			if ch.ID() == "&messages" {
-				spoofUsername += "/" + u.Srv.Channel(data.ChannelId).String()
-			}
-			ch.SpoofMessage(spoofUsername, m)
+			continue
 		}
+		if ch.ID() == "&messages" {
+			spoofUsername += "/" + u.Srv.Channel(data.ChannelId).String()
+		}
+		if strings.Contains(data.Message, "@channel") || strings.Contains(data.Message, "@here") {
+			ch.SpoofNotice(spoofUsername, m)
+			continue
+		}
+		ch.SpoofMessage(spoofUsername, m)
 	}
 
 	if len(data.FileIds) > 0 {
