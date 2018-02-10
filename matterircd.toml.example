@@ -1,8 +1,26 @@
-bind = "10.0.0.100:6667"
-tlsbind = "10.0.0.100:6697"
-tlsdir = "/etc/pki/tls/matermost/"
-insecure = false
-tlsverify = false
-server = "chat.mycompany.com"
-team = "mycompany"
-restrict = "chat.mycompany.com"
+#interface:port to bind to. (default "127.0.0.1:6667")
+Bind = "127.0.0.1:6667"
+
+#enable debug logging
+Debug = false
+
+#specify default mattermost server/instance
+DefaultServer = "chat.mycompany.com"
+
+#specify default mattermost team
+DefaultTeam = "mycompany"
+
+#use http connection to mattermost
+Insecure = false
+
+#skip verification of mattermost certificate chain and hostname
+SkipTLSVerify = false
+
+#interface:port to bind to. (e.g 127.0.0.1:6697)
+TLSBind = "127.0.0.1:6697"
+
+#directory to look for key.pem and cert.pem. (default ".")
+TLSDir = "/etc/pki/tls/matermost/"
+
+#only allow connection to specified mattermost server/instances. Space delimited
+Restrict = "chat.mycompany.com"
