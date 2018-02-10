@@ -19,6 +19,9 @@ type Config struct {
 	DefaultServer string
 	DefaultTeam   string
 	Restrict      string
+	JoinExclude   []string
+	JoinInclude   []string
+	PartFake      bool
 }
 
 func LoadConfig(cfgfile string, defaultcfg Config) *Config {
