@@ -29,7 +29,7 @@ func main() {
 
 	// config related. instantiate a new config.Config to store flags
 	cfg = config.Config{}
-	flagConfig := flag.String("config", "", "config file")
+	flagConfig := flag.String("conf", "", "config file")
 
 	// bools for showing version/enabling debug
 	flagVersion := flag.Bool("version", false, "show version")
