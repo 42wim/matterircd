@@ -96,6 +96,15 @@
 			"notests": true
 		},
 		{
+			"importpath": "github.com/mattermost/platform/vendor/github.com/alecthomas/log4go",
+			"repository": "https://github.com/mattermost/platform",
+			"vcs": "git",
+			"revision": "3e0c3eff9f2ddec241cdb3f7a91230fd7c51a5f6",
+			"branch": "master",
+			"path": "/vendor/github.com/alecthomas/log4go",
+			"notests": true
+		},
+		{
 			"importpath": "github.com/mattermost/platform/vendor/github.com/gorilla/websocket",
 			"repository": "https://github.com/mattermost/platform",
 			"vcs": "git",
