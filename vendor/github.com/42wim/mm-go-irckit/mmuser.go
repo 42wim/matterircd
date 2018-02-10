@@ -33,6 +33,9 @@ type MmCfg struct {
 	DefaultTeam    string
 	Insecure       bool
 	SkipTLSVerify  bool
+	JoinExclude    []string
+	JoinInclude    []string
+	PartFake       bool
 }
 
 func NewUserMM(c net.Conn, srv Server, cfg *MmCfg) *User {
@@ -129,6 +132,10 @@ func (u *User) addUsersToChannels() {
 		u.createMMUser(mmuser)
 		u.addUserToChannel(mmuser, "&users", "&users")
 	}
+	ch.Join(u)
+
+	// channel that receives messages from channels not joined on irc
+	ch = srv.Channel("&messages")
 	ch.Join(u)
 
 	channels := make(chan *model.Channel, 5)
@@ -314,7 +321,16 @@ func (u *User) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		ch = u.Srv.Channel(data.ChannelId)
 		// join if not in channel
 		if !ch.HasUser(ghost) {
-			ch.Join(ghost)
+			ch = u.Srv.Channel("&messages")
+			// ch.Join(ghost)
+		}
+		// excluded channel
+		if stringInSlice(ch.String(), u.Cfg.JoinExclude) {
+			ch = u.Srv.Channel("&messages")
+		}
+		// not in included channel
+		if len(u.Cfg.JoinInclude) > 0 && !stringInSlice(ch.String(), u.Cfg.JoinInclude) {
+			ch = u.Srv.Channel("&messages")
 		}
 	}
 
@@ -330,6 +346,9 @@ func (u *User) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		if props["channel_type"] == "D" {
 			u.MsgSpoofUser(spoofUsername, m)
 		} else {
+			if ch.ID() == "&messages" {
+				spoofUsername += "/" + u.Srv.Channel(data.ChannelId).String()
+			}
 			ch.SpoofMessage(spoofUsername, m)
 		}
 	}
@@ -447,7 +466,15 @@ func (u *User) syncMMChannel(id string, name string) {
 			// only join when we're not yet on the channel
 			if !ch.HasUser(u) {
 				logger.Debugf("syncMMChannel adding myself to %s (id: %s)", name, id)
-				ch.Join(u)
+				if !stringInSlice(ch.String(), u.Cfg.JoinExclude) {
+					if len(u.Cfg.JoinInclude) > 0 {
+						if stringInSlice(ch.String(), u.Cfg.JoinInclude) {
+							ch.Join(u)
+						}
+					} else {
+						ch.Join(u)
+					}
+				}
 				ch.Topic(u, u.mc.GetChannelHeader(id))
 			}
 			break
