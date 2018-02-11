@@ -1,5 +1,36 @@
+# v0.16.0
+## New features
+* `-conf` option (for a config file). See https://github.com/42wim/matterircd/blob/master/matterircd.toml.example for an example. Thanks @slowbro for this PR.
+* New config file options
+   * JoinExclude: an array of channels that won't be joined on IRC.
+    Messages that get sent to unjoined channels (but you're joined on mattermost) will
+    get sent to the &messages channel.
+    You can still /JOIN exclude channels.
+
+    JoinExclude = ["#town-square","#boringchannel"]
+
+    * JoinInclude: an array of channels that only will be joined on IRC.
+    If it's empty, it means all channels get joined (except those defined in JoinExclude)
+    Messages that get sent to unjoined channels (but you're joined on mattermost) will
+    get sent to the &messages channel.
+
+    JoinInclude = ["#devops"]
+
+    * PartFake: a bool that defines if you do a /LEAVE or /PART on IRC it will also
+    actually leave the channel on mattermost.
+    Default false
+
+    PartFake = true
+
+* don't log passwords used with 'mattermost' and 'slack'. Closes #73
+
+## Bugfix
+* Already read messages are replayed again and again #130
+* Update to latest mattermost (4.6) libs
+* Deprecated flags `-bindinterface` and `-port` removed
+
 # v0.15.0
-##New features
+## New features
 * Support mattermost 4.2 and higher (4.x) (use mattermost v4 API)
 * Add -mmskiptlsverify option to skip TLS certificate checks on mattermost
 

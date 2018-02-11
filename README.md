@@ -16,9 +16,9 @@ docker run -p 6667:6667 42wim/matterircd:latest -bind 0.0.0.0:6667
 Now you can connect with your IRC client to port 6667 on your docker host.
 
 # Compatibility
-* Matterircd v0.15.0 works with slack (initial support) and mattermost 3.8.x - 3.10.0, 4.x
+* Matterircd v0.16.0 works with slack (initial support) and mattermost 3.8.x - 3.10.0, 4.x
 
-Master branch of matterircd should always work against latest STABLE mattermost release.  
+Master branch of matterircd should always work against latest STABLE mattermost release.
 
 # Features
 
@@ -41,7 +41,7 @@ Master branch of matterircd should always work against latest STABLE mattermost 
 # Binaries
 
 You can find the binaries [here](https://github.com/42wim/matterircd/releases/)
-* For use with mattermost 3.8.0 and higher [v0.15.0](https://github.com/42wim/matterircd/releases/tag/v0.15.0)
+* For use with mattermost 3.8.0 and higher [v0.16.0](https://github.com/42wimterircd/relases/latest)
 
 # Building
 
@@ -66,6 +66,8 @@ matterircd
 Usage of ./matterircd:
   -bind string
         interface:port to bind to. (default "127.0.0.1:6667")
+  -conf string
+        config file
   -debug
         enable debug logging
   -interface string
@@ -95,6 +97,10 @@ Connect with your favorite irc-client to localhost:6667
 
 For TLS support you'll need to generate certificates.   
 You can use this program [generate_cert.go](https://golang.org/src/crypto/tls/generate_cert.go) to generate key.pem and cert.pem
+
+## Config file
+See [matterircd.toml.example](https://github.com/42wim/matterircd/blob/master/matterircd.toml.example)   
+Run with `matterircd -conf matterircd.toml`
 
 ## Mattermost user commands
 
