@@ -37,8 +37,6 @@ func main() {
 
 	// bind related cfg
 	flag.StringVar(&cfg.Bind, "bind", "127.0.0.1:6667", "interface:port to bind to.")
-	flag.StringVar(&cfg.BindInterface, "interface", "", "interface to bind to (deprecated: use -bind)")
-	flag.IntVar(&cfg.BindPort, "port", 0, "Port to bind to (deprecated: use -bind)")
 
 	// mattermost related cfg
 	flag.StringVar(&cfg.Restrict, "restrict", "", "only allow connection to specified mattermost server/instances. Space delimited")
