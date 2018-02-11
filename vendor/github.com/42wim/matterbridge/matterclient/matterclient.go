@@ -585,12 +585,7 @@ func (m *MMClient) UpdateChannelHeader(channelId string, header string) {
 func (m *MMClient) UpdateLastViewed(channelId string) {
 	m.log.Debugf("posting lastview %#v", channelId)
 	view := &model.ChannelView{ChannelId: channelId}
-	view.PrevChannelId = "j6thgjm19pfezjkutoy8ed676h"
-	res, resp := m.Client.ViewChannel("me", view)
-	//	m.log.Errorf("lastviewedtimes %#v", res.LastViewedAtTimes)
-	if res.LastViewedAtTimes[channelId] == 0 {
-		m.log.Errorf("channel %s", m.GetChannelName(channelId))
-	}
+	_, resp := m.Client.ViewChannel(m.User.Id, view)
 	if resp.Error != nil {
 		m.log.Errorf("ChannelView update for %s failed: %s", channelId, resp.Error)
 	}
