@@ -338,7 +338,10 @@ func (u *User) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	if len(msgs) > 0 && rmsg.Event == model.WEBSOCKET_EVENT_POST_EDITED {
 		msgs[len(msgs)-1] = msgs[len(msgs)-1] + " (edited)"
 	}
-	// check if we have a override_username (from webhooks) and use it
+	// append channel name where messages are sent from
+	if ch.ID() == "&messages" {
+		spoofUsername += "/" + u.Srv.Channel(data.ChannelId).String()
+	}
 	for _, m := range msgs {
 		if m == "" {
 			continue
@@ -346,9 +349,6 @@ func (u *User) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		if props["channel_type"] == "D" {
 			u.MsgSpoofUser(spoofUsername, m)
 			continue
-		}
-		if ch.ID() == "&messages" {
-			spoofUsername += "/" + u.Srv.Channel(data.ChannelId).String()
 		}
 		if strings.Contains(data.Message, "@channel") || strings.Contains(data.Message, "@here") {
 			ch.SpoofNotice(spoofUsername, m)
