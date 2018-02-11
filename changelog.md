@@ -1,3 +1,8 @@
+# v0.16.1
+## Bugfix
+* Remove debug code which could cause a crash
+* Only append channel name to sender once in &messages
+
 # v0.16.0
 ## New features
 * `-conf` option (for a config file). See https://github.com/42wim/matterircd/blob/master/matterircd.toml.example for an example. Thanks @slowbro for this PR.
