@@ -1,3 +1,7 @@
+# v0.16.2
+## Bugfix
+* Remove crash on channel lookup of private messages
+
 # v0.16.1
 ## Bugfix
 * Remove debug code which could cause a crash
