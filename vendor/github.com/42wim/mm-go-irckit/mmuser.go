@@ -339,7 +339,7 @@ func (u *User) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		msgs[len(msgs)-1] = msgs[len(msgs)-1] + " (edited)"
 	}
 	// append channel name where messages are sent from
-	if ch.ID() == "&messages" {
+	if props["channel_type"] != "D" && ch.ID() == "&messages" {
 		spoofUsername += "/" + u.Srv.Channel(data.ChannelId).String()
 	}
 	for _, m := range msgs {
