@@ -1,3 +1,7 @@
+# v0.16.3
+## Bugfix
+* Fix crash on /nick change when not logged in #141
+
 # v0.16.2
 ## Bugfix
 * Remove crash on channel lookup of private messages
