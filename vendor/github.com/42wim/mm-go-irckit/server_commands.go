@@ -265,10 +265,13 @@ func CmdNames(s Server, u *User, msg *irc.Message) error {
 
 // CmdNick is a handler for the /NICK command.
 func CmdNick(s Server, u *User, msg *irc.Message) error {
-	err := u.mc.UpdateUserNick(msg.Params[0])
-	if err != nil {
-		s.EncodeMessage(u, irc.ERR_ERRONEUSNICKNAME, []string{u.Nick}, "Erroneus nickname")
-		return err
+	// only update mattermost nick if we're logged in
+	if u.mc != nil {
+		err := u.mc.UpdateUserNick(msg.Params[0])
+		if err != nil {
+			s.EncodeMessage(u, irc.ERR_ERRONEUSNICKNAME, []string{u.Nick}, "Erroneus nickname")
+			return err
+		}
 	}
 	s.RenameUser(u, msg.Params[0])
 	return nil
