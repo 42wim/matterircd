@@ -321,15 +321,18 @@ func (u *User) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		ch = u.Srv.Channel(data.ChannelId)
 		// join if not in channel
 		if !ch.HasUser(ghost) {
-			ch = u.Srv.Channel("&messages")
-			// ch.Join(ghost)
+			logger.Debugf("User %s is not in channel %s. Joining now", ghost.Nick, ch.String())
+			//ch = u.Srv.Channel("&messages")
+			ch.Join(ghost)
 		}
 		// excluded channel
 		if stringInSlice(ch.String(), u.Cfg.JoinExclude) {
+			logger.Debugf("channel %s is in JoinExclude, send to &messages", ch.String())
 			ch = u.Srv.Channel("&messages")
 		}
 		// not in included channel
 		if len(u.Cfg.JoinInclude) > 0 && !stringInSlice(ch.String(), u.Cfg.JoinInclude) {
+			logger.Debugf("channel %s is not in JoinInclude, send to &messages", ch.String())
 			ch = u.Srv.Channel("&messages")
 		}
 	}
