@@ -1,3 +1,7 @@
+# v0.16.4
+## Bugfix
+* Fix some messages going to &messages #140
+
 # v0.16.3
 ## Bugfix
 * Fix crash on /nick change when not logged in #141
