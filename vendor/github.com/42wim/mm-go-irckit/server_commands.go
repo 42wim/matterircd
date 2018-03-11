@@ -36,11 +36,21 @@ func DefaultCommands() Commands {
 }
 
 func CmdAway(s Server, u *User, msg *irc.Message) error {
-	u.mc.WsAway = false
+	if u.mc != nil {
+		u.mc.WsAway = false
+	}
+	if u.sc != nil {
+		u.sc.SetUserPresence("auto")
+	}
 	if msg.Trailing == "" {
 		return s.EncodeMessage(u, irc.RPL_UNAWAY, []string{u.Nick}, "You are no longer marked as being away")
 	}
-	u.mc.WsAway = true
+	if u.mc != nil {
+		u.mc.WsAway = true
+	}
+	if u.sc != nil {
+		u.sc.SetUserPresence("away")
+	}
 	return s.EncodeMessage(u, irc.RPL_NOWAWAY, []string{u.Nick}, "You have been marked as being away")
 }
 
@@ -110,24 +120,44 @@ func CmdKick(s Server, u *User, msg *irc.Message) error {
 
 // CmdJoin is a handler for the /JOIN command.
 func CmdJoin(s Server, u *User, msg *irc.Message) error {
-	var err error
+	var (
+		channelId string
+		topic     string
+		sync      func(string, string)
+	)
+
 	channels := strings.Split(msg.Params[0], ",")
 	for _, channel := range channels {
 		channelName := strings.Replace(channel, "#", "", 1)
 		// you can only join existing channels
-		channelId := u.mc.GetChannelId(channelName, "")
-		err := u.mc.JoinChannel(channelId)
-		logger.Debugf("Join channel %s, id %s, err: %v", channelName, channelId, err)
-		if err != nil {
-			s.EncodeMessage(u, irc.ERR_INVITEONLYCHAN, []string{u.Nick, channel}, "Cannot join channel (+i)")
-			continue
+		if u.mc != nil {
+			channelId = u.mc.GetChannelId(channelName, "")
+			err := u.mc.JoinChannel(channelId)
+			if err != nil {
+				s.EncodeMessage(u, irc.ERR_INVITEONLYCHAN, []string{u.Nick, channel}, "Cannot join channel (+i)")
+				continue
+			}
+			logger.Debugf("Join channel %s, id %s, err: %v", channelName, channelId, err)
+			topic = u.mc.GetChannelHeader(channelId)
+			sync = u.syncMMChannel
+		}
+		if u.sc != nil {
+			mychan, err := u.sc.JoinChannel(channelName)
+			if err != nil {
+				s.EncodeMessage(u, irc.ERR_INVITEONLYCHAN, []string{u.Nick, channel}, "Cannot join channel (+i)")
+				continue
+			}
+			channelId = mychan.ID
+			logger.Debugf("Join channel %s, id %s, err: %v", channelName, channelId, err)
+			topic = mychan.Topic.Value
+			sync = u.syncSlackChannel
 		}
 		ch := s.Channel(channelId)
-		ch.Topic(u, u.mc.GetChannelHeader(channelId))
-		u.syncMMChannel(channelId, channelName)
+		ch.Topic(u, topic)
+		sync(channelId, channelName)
 		ch.Join(u)
 	}
-	return err
+	return nil
 }
 
 // CmdList is a handler for the /LIST command.
