@@ -1,3 +1,11 @@
+# v0.16.5
+## New features
+* Add support for private channels in slack #142
+
+## Bugfix
+* Slack: fixes join/parts #143, #146
+* Slack: fixes away #144
+
 # v0.16.4
 ## Bugfix
 * Fix some messages going to &messages #140

@@ -16,7 +16,7 @@ docker run -p 6667:6667 42wim/matterircd:latest -bind 0.0.0.0:6667
 Now you can connect with your IRC client to port 6667 on your docker host.
 
 # Compatibility
-* Matterircd v0.16.4 works with slack (initial support) and mattermost 3.8.x - 3.10.0, 4.x
+* Matterircd v0.16.5 works with slack and mattermost 3.8.x - 3.10.0, 4.x
 
 Master branch of matterircd should always work against latest STABLE mattermost release.
 
