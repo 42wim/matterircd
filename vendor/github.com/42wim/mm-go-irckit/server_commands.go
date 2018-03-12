@@ -325,14 +325,21 @@ func CmdPart(s Server, u *User, msg *irc.Message) error {
 		ch.Part(u, msg.Trailing)
 		// now part on mattermost
 		if !u.Cfg.PartFake {
-			u.mc.Client.RemoveUserFromChannel(ch.ID(), u.mc.User.Id)
+			if u.mc != nil {
+				u.mc.Client.RemoveUserFromChannel(ch.ID(), u.mc.User.Id)
+			}
+			if u.sc != nil {
+				u.sc.LeaveChannel(ch.ID())
+			}
 		}
 		// part all other (ghost)users on the channel
 		for _, k := range ch.Users() {
 			ch.Part(k, "")
 		}
 	}
-	u.mc.UpdateChannels()
+	if u.mc != nil {
+		u.mc.UpdateChannels()
+	}
 	return err
 }
 

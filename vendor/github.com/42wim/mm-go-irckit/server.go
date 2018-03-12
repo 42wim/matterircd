@@ -215,6 +215,12 @@ func (s *server) Channel(channelId string) Channel {
 			info, err := s.u.sc.GetChannelInfo(channelId)
 			if err != nil {
 				name = channelId
+				info, err := s.u.sc.GetGroupInfo(channelId)
+				if err != nil {
+					name = channelId
+				} else {
+					name = "#" + info.Name
+				}
 			} else {
 				name = "#" + info.Name
 			}

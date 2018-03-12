@@ -91,10 +91,11 @@ func (u *User) addSlackUsersToChannels() {
 	}
 	ch.Join(u)
 
-	channels := make(chan slack.Channel, 10)
+	channels := make(chan interface{}, 10)
 	for i := 0; i < 10; i++ {
 		go u.addSlackUserToChannelWorker(channels, throttle)
 	}
+	groups, _ := u.sc.GetGroups(true)
 	mmchannels, _ := u.sc.GetChannels(true)
 	for _, mmchannel := range mmchannels {
 		if mmchannel.IsMember {
@@ -102,10 +103,15 @@ func (u *User) addSlackUsersToChannels() {
 			channels <- mmchannel
 		}
 	}
+	for _, mmchannel := range groups {
+		logger.Debug("Adding private channel", mmchannel)
+		channels <- mmchannel
+	}
 	close(channels)
 }
 
-func (u *User) addSlackUserToChannelWorker(channels <-chan slack.Channel, throttle <-chan time.Time) {
+func (u *User) addSlackUserToChannelWorker(channels <-chan interface{}, throttle <-chan time.Time) {
+	var ID, name string
 	for {
 		mmchannel, ok := <-channels
 		if !ok {
@@ -113,9 +119,20 @@ func (u *User) addSlackUserToChannelWorker(channels <-chan slack.Channel, thrott
 			return
 		}
 		<-throttle
+		switch mmchannel.(type) {
+		case slack.Channel:
+			ID = mmchannel.(slack.Channel).ID
+			name = mmchannel.(slack.Channel).Name
+			u.syncSlackChannel(ID, name)
+		case slack.Group:
+			ID = mmchannel.(slack.Group).ID
+			name = mmchannel.(slack.Group).Name
+			logger.Debugf("GROUP %#v", mmchannel.(slack.Group))
+			u.syncSlackGroup(ID, name)
+
+		}
 		// exclude direct messages
 		//var spoof func(string, string)
-		u.syncSlackChannel(mmchannel.ID, mmchannel.Name)
 		//ch := u.Srv.Channel(mmchannel.ID)
 		// post everything to the channel you haven't seen yet
 	}
@@ -228,6 +245,38 @@ func (u *User) syncSlackChannel(id string, name string) {
 			// only join when we're not yet on the channel
 			if !ch.HasUser(u) {
 				logger.Debugf("syncSlackchannel adding myself to %s (id: %s)", name, id)
+				ch.Join(u)
+				//ch.Topic(u, u.mc.GetChannelHeader(id))
+			}
+			break
+		}
+	}
+}
+
+// sync IRC with mattermost channel state
+func (u *User) syncSlackGroup(id string, name string) {
+	srv := u.Srv
+	info, err := u.sc.GetGroupInfo(id)
+	if err != nil {
+		logger.Info(err)
+	}
+
+	for _, user := range info.Members {
+		if u.sinfo.User.ID != user {
+			//slackuser, _ := u.sc.GetUserInfo(user)
+			if slackuser, ok := u.susers[user]; ok {
+				u.addSlackUserToChannel(&slackuser, "#"+name, id)
+			}
+		}
+	}
+	// before joining ourself
+	for _, user := range info.Members {
+		// join all the channels we're on on MM
+		if user == u.sinfo.User.ID {
+			ch := srv.Channel(id)
+			// only join when we're not yet on the channel
+			if !ch.HasUser(u) {
+				logger.Debugf("syncSlackgroup adding myself to %s (id: %s)", name, id)
 				ch.Join(u)
 				//ch.Topic(u, u.mc.GetChannelHeader(id))
 			}
