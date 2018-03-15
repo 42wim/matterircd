@@ -1,7 +1,7 @@
 package irckit
 
 import (
-	"github.com/Sirupsen/logrus"
+	"github.com/sirupsen/logrus"
 )
 
 var logger *logrus.Entry

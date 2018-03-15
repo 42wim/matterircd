@@ -460,7 +460,12 @@ func CmdTopic(s Server, u *User, msg *irc.Message) error {
 	ch := s.Channel(channelname)
 	if msg.Trailing != "" {
 		ch.Topic(u, msg.Trailing)
-		u.mc.UpdateChannelHeader(ch.ID(), msg.Trailing)
+		if u.mc != nil {
+			u.mc.UpdateChannelHeader(ch.ID(), msg.Trailing)
+		}
+		if u.sc != nil {
+			u.sc.SetChannelTopic(strings.ToUpper(ch.ID()), msg.Trailing)
+		}
 	} else {
 		r := make([]*irc.Message, 0, ch.Len()+1)
 		t := ch.GetTopic()

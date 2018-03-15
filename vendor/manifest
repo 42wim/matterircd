@@ -5,7 +5,7 @@
 			"importpath": "github.com/42wim/matterbridge/matterclient",
 			"repository": "https://github.com/42wim/matterbridge",
 			"vcs": "git",
-			"revision": "8be107cecc9ed68c7f97ec7561b2a7eeee9ce791",
+			"revision": "db25ee59c5c9a46feed526133bea6b296256a960",
 			"branch": "master",
 			"path": "/matterclient",
 			"notests": true
@@ -14,15 +14,7 @@
 			"importpath": "github.com/42wim/mm-go-irckit",
 			"repository": "https://github.com/42wim/mm-go-irckit",
 			"vcs": "git",
-			"revision": "2c36c3b2a0d0aa7c8fd4a95cfbe49e87e9aa3603",
-			"branch": "master",
-			"notests": true
-		},
-		{
-			"importpath": "github.com/Sirupsen/logrus",
-			"repository": "https://github.com/Sirupsen/logrus",
-			"vcs": "git",
-			"revision": "10f801ebc38b33738c9d17d50860f484a0988ff5",
+			"revision": "d7763fd981efbc12dfcbc072e4beb8c793c66ebb",
 			"branch": "master",
 			"notests": true
 		},
@@ -168,6 +160,30 @@
 			"notests": true
 		},
 		{
+			"importpath": "github.com/mattn/go-colorable",
+			"repository": "https://github.com/mattn/go-colorable",
+			"vcs": "git",
+			"revision": "efa589957cd060542a26d2dd7832fd6a6c6c3ade",
+			"branch": "master",
+			"notests": true
+		},
+		{
+			"importpath": "github.com/mattn/go-isatty",
+			"repository": "https://github.com/mattn/go-isatty",
+			"vcs": "git",
+			"revision": "6ca4dbf54d38eea1a992b3c722a76a5d1c4cb25c",
+			"branch": "master",
+			"notests": true
+		},
+		{
+			"importpath": "github.com/mgutz/ansi",
+			"repository": "https://github.com/mgutz/ansi",
+			"vcs": "git",
+			"revision": "9520e82c474b0a04dd04f8a40959027271bab992",
+			"branch": "master",
+			"notests": true
+		},
+		{
 			"importpath": "github.com/nicksnyder/go-i18n/i18n",
 			"repository": "https://github.com/nicksnyder/go-i18n",
 			"vcs": "git",
@@ -201,10 +217,26 @@
 			"notests": true
 		},
 		{
+			"importpath": "github.com/sirupsen/logrus",
+			"repository": "https://github.com/sirupsen/logrus",
+			"vcs": "git",
+			"revision": "90150a8ed11b6ce285e77e8af2b0109559ce4777",
+			"branch": "master",
+			"notests": true
+		},
+		{
 			"importpath": "github.com/sorcix/irc",
 			"repository": "https://github.com/sorcix/irc",
 			"vcs": "git",
 			"revision": "d007bfcbaef198e6c15c40e004d59ce4aac4fbff",
+			"branch": "master",
+			"notests": true
+		},
+		{
+			"importpath": "github.com/x-cray/logrus-prefixed-formatter",
+			"repository": "https://github.com/x-cray/logrus-prefixed-formatter",
+			"vcs": "git",
+			"revision": "bb2702d423886830dee131692131d35648c382e2",
 			"branch": "master",
 			"notests": true
 		},
@@ -227,12 +259,39 @@
 			"notests": true
 		},
 		{
+			"importpath": "golang.org/x/crypto/ssh/terminal",
+			"repository": "https://go.googlesource.com/crypto",
+			"vcs": "git",
+			"revision": "21652f85b0fdddb6c2b6b77a5beca5c5a908174a",
+			"branch": "master",
+			"path": "/ssh/terminal",
+			"notests": true
+		},
+		{
 			"importpath": "golang.org/x/net/websocket",
 			"repository": "https://go.googlesource.com/net",
 			"vcs": "git",
 			"revision": "ab5485076ff3407ad2d02db054635913f017b0ed",
 			"branch": "master",
 			"path": "/websocket",
+			"notests": true
+		},
+		{
+			"importpath": "golang.org/x/sys/unix",
+			"repository": "https://go.googlesource.com/sys",
+			"vcs": "git",
+			"revision": "cc7307a45468e49eaf2997c890f14aa03a26917b",
+			"branch": "master",
+			"path": "unix",
+			"notests": true
+		},
+		{
+			"importpath": "golang.org/x/sys/windows",
+			"repository": "https://go.googlesource.com/sys",
+			"vcs": "git",
+			"revision": "cc7307a45468e49eaf2997c890f14aa03a26917b",
+			"branch": "master",
+			"path": "/windows",
 			"notests": true
 		},
 		{
