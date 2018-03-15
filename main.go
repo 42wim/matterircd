@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"github.com/42wim/matterircd/config"
 	"github.com/42wim/mm-go-irckit"
-	"github.com/Sirupsen/logrus"
+	"github.com/sirupsen/logrus"
 	"net"
 	"os"
 	"strings"
@@ -15,7 +15,7 @@ import (
 var (
 	flagRestrict, flagDefaultTeam, flagDefaultServer, flagTLSBind, flagTLSDir *string
 	flagInsecure, flagSkipTLSVerify                                           *bool
-	version                                                                   = "0.16.5"
+	version                                                                   = "0.16.6-dev"
 	githash                                                                   string
 	logger                                                                    *logrus.Entry
 	cfg                                                                       config.Config

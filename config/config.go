@@ -2,7 +2,7 @@ package config
 
 import (
 	"github.com/BurntSushi/toml"
-	"github.com/Sirupsen/logrus"
+	"github.com/sirupsen/logrus"
 )
 
 var Logger *logrus.Entry
