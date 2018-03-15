@@ -2,6 +2,7 @@ package irckit
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -383,6 +384,10 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 			msg.Trailing = strings.Replace(msg.Trailing, "\x01", "", -1)
 			msg.Trailing = "*" + msg.Trailing + "*"
 		}
+		// strip IRC colors
+		re := regexp.MustCompile(`[[:cntrl:]](?:\d{1,2}(?:,\d{1,2})?)?`)
+		msg.Trailing = re.ReplaceAllString(msg.Trailing, "")
+
 		if ch.Service() == "slack" {
 			np := slack.NewPostMessageParameters()
 			np.AsUser = true

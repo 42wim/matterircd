@@ -18,6 +18,7 @@ type MmInfo struct {
 	Credentials *MmCredentials
 	Cfg         *MmCfg
 	mc          *matterclient.MMClient
+	idleStop    chan struct{}
 }
 
 type MmCredentials struct {
@@ -46,6 +47,7 @@ func NewUserMM(c net.Conn, srv Server, cfg *MmCfg) *User {
 	})
 	u.Srv = srv
 	u.MmInfo.Cfg = cfg
+	u.idleStop = make(chan struct{})
 	// used for login
 	u.createService("mattermost", "loginservice")
 	u.createService("slack", "loginservice")
@@ -71,6 +73,15 @@ func (u *User) loginToMattermost() (*matterclient.MMClient, error) {
 	u.mc.WsQuit = false
 	go mc.WsReceiver()
 	go u.handleWsMessage()
+
+	// do anti idle on town-square, every installation should have this channel
+	channels := u.mc.GetChannels()
+	for _, channel := range channels {
+		if channel.Name == "town-square" {
+			go u.antiIdle(channel.Id)
+			continue
+		}
+	}
 	return mc, nil
 }
 
@@ -82,6 +93,7 @@ func (u *User) logoutFromMattermost() error {
 	}
 	logger.Info("logout succeeded")
 	u.Srv.Logout(u)
+	u.idleStop <- struct{}{}
 	return nil
 }
 
@@ -500,4 +512,18 @@ func (u *User) isValidMMServer(server string) bool {
 		return false
 	}
 	return true
+}
+
+// antiIdle does a lastviewed every 60 seconds so that the user is shown as online instead of away
+func (u *User) antiIdle(channelId string) {
+	ticker := time.NewTicker(time.Second * 60)
+	for {
+		select {
+		case <-u.idleStop:
+			logger.Debug("stopping antiIdle loop")
+			return
+		case <-ticker.C:
+			u.mc.UpdateLastViewed(channelId)
+		}
+	}
 }
