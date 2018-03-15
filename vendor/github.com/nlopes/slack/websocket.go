@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"golang.org/x/net/websocket"
+	"github.com/gorilla/websocket"
 )
 
 const (
@@ -27,6 +27,7 @@ type RTM struct {
 	IncomingEvents   chan RTMEvent
 	outgoingMessages chan OutgoingMessage
 	killChannel      chan bool
+	disconnected     chan struct{} // disconnected is closed when Disconnect is invoked, regardless of connection state. Allows for ManagedConnection to not leak.
 	forcePing        chan bool
 	rawEvents        chan json.RawMessage
 	wasIntentional   bool
@@ -43,6 +44,10 @@ type RTM struct {
 	// rtm.start to connect to Slack, otherwise it will use
 	// rtm.connect
 	useRTMStart bool
+
+	// dialer is a gorilla/websocket Dialer. If nil, use the default
+	// Dialer.
+	dialer *websocket.Dialer
 }
 
 // RTMOptions allows configuration of various options available for RTM messaging
@@ -59,9 +64,14 @@ type RTMOptions struct {
 
 // Disconnect and wait, blocking until a successful disconnection.
 func (rtm *RTM) Disconnect() error {
+	// this channel is always closed on disconnect. lets the ManagedConnection() function
+	// properly clean up.
+	close(rtm.disconnected)
+
 	if !rtm.isConnected {
 		return errors.New("Invalid call to Disconnect - Slack API is already disconnected")
 	}
+
 	rtm.killChannel <- true
 	return nil
 }
