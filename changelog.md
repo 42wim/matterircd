@@ -1,3 +1,12 @@
+# v0.16.6
+## Bugfix
+* Strip IRC colors. Closes 42wim/matterircd#149
+* slack: Replace mentions, channels, etc..  #13
+* slack: Use displayname if possible (instead of name)
+* slack: Enable LinkNames. (@here,@all) Closes 42wim/matterircd#152
+* slack: Add topic change support (slack). Closes 42wim/matterircd#151
+* mattermost: Print list of valid team names when team not found (42wim/matterbridge#390)
+
 # v0.16.5
 ## New features
 * Add support for private channels in slack #142
