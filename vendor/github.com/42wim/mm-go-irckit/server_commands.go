@@ -386,6 +386,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 		if ch.Service() == "slack" {
 			np := slack.NewPostMessageParameters()
 			np.AsUser = true
+			np.LinkNames = 1
 			np.Username = u.User
 			np.Attachments = append(np.Attachments, slack.Attachment{CallbackID: "matterircd"})
 			_, _, err := u.sc.PostMessage(strings.ToUpper(ch.ID()), msg.Trailing, np)

@@ -1,6 +1,8 @@
 package irckit
 
 import (
+	"html"
+	"regexp"
 	"strings"
 	"time"
 
@@ -210,6 +212,13 @@ func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
 	}
 
 	for _, m := range msgs {
+		// cleanup the message
+		m = u.replaceMention(m)
+		m = u.replaceVariable(m)
+		m = u.replaceChannel(m)
+		m = u.replaceURL(m)
+		m = html.UnescapeString(m)
+
 		if m == "" {
 			continue
 		}
@@ -283,4 +292,56 @@ func (u *User) syncSlackGroup(id string, name string) {
 			break
 		}
 	}
+}
+
+// @see https://api.slack.com/docs/message-formatting#linking_to_channels_and_users
+func (u *User) replaceMention(text string) string {
+	results := regexp.MustCompile(`<@([a-zA-z0-9]+)>`).FindAllStringSubmatch(text, -1)
+	for _, r := range results {
+		text = strings.Replace(text, "<@"+r[1]+">", "@"+u.userName(r[1]), -1)
+	}
+	return text
+}
+
+// @see https://api.slack.com/docs/message-formatting#linking_to_channels_and_users
+func (u *User) replaceChannel(text string) string {
+	results := regexp.MustCompile(`<#[a-zA-Z0-9]+\|(.+?)>`).FindAllStringSubmatch(text, -1)
+	for _, r := range results {
+		text = strings.Replace(text, r[0], "#"+r[1], -1)
+	}
+	return text
+}
+
+// @see https://api.slack.com/docs/message-formatting#variables
+func (u *User) replaceVariable(text string) string {
+	results := regexp.MustCompile(`<!((?:subteam\^)?[a-zA-Z0-9]+)(?:\|@?(.+?))?>`).FindAllStringSubmatch(text, -1)
+	for _, r := range results {
+		if r[2] != "" {
+			text = strings.Replace(text, r[0], "@"+r[2], -1)
+		} else {
+			text = strings.Replace(text, r[0], "@"+r[1], -1)
+		}
+	}
+	return text
+}
+
+// @see https://api.slack.com/docs/message-formatting#linking_to_urls
+func (u *User) replaceURL(text string) string {
+	results := regexp.MustCompile(`<(.*?)(\|.*?)?>`).FindAllStringSubmatch(text, -1)
+	for _, r := range results {
+		text = strings.Replace(text, r[0], r[1], -1)
+	}
+	return text
+}
+
+func (u *User) userName(id string) string {
+	for _, us := range u.susers {
+		if us.ID == id {
+			if us.Profile.DisplayName != "" {
+				return us.Profile.DisplayName
+			}
+			return us.Name
+		}
+	}
+	return ""
 }
