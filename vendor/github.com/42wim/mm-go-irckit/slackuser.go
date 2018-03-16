@@ -22,7 +22,6 @@ func (u *User) loginToSlack() (*slack.Client, error) {
 	u.rtm = u.sc.NewRTM()
 	u.susers = make(map[string]slack.User)
 	go u.rtm.ManageConnection()
-	go u.handleSlack()
 	//time.Sleep(time.Second * 2)
 	u.sinfo = u.rtm.GetInfo()
 	for u.sinfo == nil {
@@ -30,6 +29,7 @@ func (u *User) loginToSlack() (*slack.Client, error) {
 		logger.Debug("still waiting for sinfo")
 		u.sinfo = u.rtm.GetInfo()
 	}
+	go u.handleSlack()
 	u.addSlackUsersToChannels()
 	return u.sc, nil
 }
