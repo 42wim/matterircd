@@ -10,11 +10,12 @@ import (
 )
 
 type SlackInfo struct {
-	Token  string
-	sc     *slack.Client
-	rtm    *slack.RTM
-	sinfo  *slack.Info
-	susers map[string]slack.User
+	Token     string
+	sc        *slack.Client
+	rtm       *slack.RTM
+	sinfo     *slack.Info
+	susers    map[string]slack.User
+	connected bool
 }
 
 func (u *User) loginToSlack() (*slack.Client, error) {
@@ -31,6 +32,7 @@ func (u *User) loginToSlack() (*slack.Client, error) {
 	}
 	go u.handleSlack()
 	u.addSlackUsersToChannels()
+	u.connected = true
 	return u.sc, nil
 }
 
@@ -44,6 +46,7 @@ func (u *User) logoutFromSlack() error {
 	u.Srv.Logout(u)
 	u.sc = nil
 	logger.Info("logout succeeded")
+	u.connected = false
 	return nil
 }
 
@@ -344,4 +347,8 @@ func (u *User) userName(id string) string {
 		}
 	}
 	return ""
+}
+
+func (u *User) isConnected() bool {
+	return u.connected
 }
