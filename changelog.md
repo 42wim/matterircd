@@ -1,3 +1,14 @@
+# v0.16.7
+
+## Bugfix
+* mattermost: Update lastview every 60 second as antiIdle (mattermost). Closes 42wim/matterircd#147
+* slack: Make sure we only can execute comands if login is fully done. Closes 42wim/matterircd#154
+* slack: Add invite support (slack). Closes 42wim/matterircd#159
+* slack: Add list support (slack)
+* slack: Fix channel parts for private channels
+* slack: Add kick support (slack)
+* slack: Allow to mention yourself.. Closes 42wim/matterircd#157
+
 # v0.16.6
 ## Bugfix
 * Strip IRC colors. Closes 42wim/matterircd#149
