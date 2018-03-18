@@ -338,6 +338,7 @@ func (u *User) replaceURL(text string) string {
 }
 
 func (u *User) userName(id string) string {
+	// TODO dynamically update when new users are joining slack
 	for _, us := range u.susers {
 		if us.ID == id {
 			if us.Profile.DisplayName != "" {
@@ -345,6 +346,9 @@ func (u *User) userName(id string) string {
 			}
 			return us.Name
 		}
+	}
+	if id == u.sinfo.User.ID {
+		return u.sinfo.User.Name
 	}
 	return ""
 }
