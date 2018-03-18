@@ -163,13 +163,6 @@ func (ch *channel) Part(u *User, text string) {
 		})
 		return
 	}
-
-	// only send join messages to real users
-	for to := range ch.usersIdx {
-		if to.MmGhostUser == false {
-			to.Encode(msg)
-		}
-	}
 	u.Encode(msg)
 	delete(ch.usersIdx, u)
 	ch.mu.Unlock()

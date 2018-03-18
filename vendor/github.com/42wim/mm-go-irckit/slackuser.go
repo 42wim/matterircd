@@ -222,9 +222,22 @@ func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
 		m = u.replaceURL(m)
 		m = html.UnescapeString(m)
 
+		// look in attachments if we have no text
+		if m == "" {
+			for _, attach := range rmsg.Attachments {
+				if attach.Text != "" {
+					m = attach.Text
+				} else {
+					m = attach.Fallback
+				}
+			}
+		}
+
+		// still no text, ignore this message
 		if m == "" {
 			continue
 		}
+
 		if strings.HasPrefix(rmsg.Channel, "D") {
 			u.MsgSpoofUser(spoofUsername, m)
 		} else {
