@@ -50,6 +50,11 @@ func main() {
 	flag.StringVar(&cfg.TLSDir, "tlsdir", ".", "directory to look for key.pem and cert.pem.")
 	flag.Parse()
 
+	// Check for .matterird config file
+	if _, err := os.Stat(os.Getenv("HOME") +  "/.matterircd"); err == nil {
+		cfg = *config.LoadConfig(os.Getenv("HOME") + "/.matterircd", cfg)
+	}
+
 	// if -config was set, load the config file (overrides args)
 	if *flagConfig != "" {
 		cfg = *config.LoadConfig(*flagConfig, cfg)
