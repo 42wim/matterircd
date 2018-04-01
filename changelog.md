@@ -1,5 +1,11 @@
-# v0.16.7
+# v0.16.8
+## Bugfix
+* Fix newlines in topic to client. Closes 42wim/matterircd#163
+* Remove double part messages. Closes 42wim/matterircd#156
+* mattermost: Fix away (mattermost). Closes 42wim/matterircd#165
+* slack: Look into attachments if message is empty (slack). Fixes 42wim/matterircd#160
 
+# v0.16.7
 ## Bugfix
 * mattermost: Update lastview every 60 second as antiIdle (mattermost). Closes 42wim/matterircd#147
 * slack: Make sure we only can execute comands if login is fully done. Closes 42wim/matterircd#154
