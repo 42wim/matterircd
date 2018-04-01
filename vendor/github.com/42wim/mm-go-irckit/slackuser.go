@@ -195,12 +195,29 @@ func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
 		return
 	}
 
+	// handle bot messages
+	botname := ""
+	if rmsg.User == "" && rmsg.BotID != "" {
+		bot, _ := u.rtm.GetBotInfo(rmsg.BotID)
+		if bot.Name != "" {
+			botname = bot.Name
+			if rmsg.Username != "" {
+				botname = rmsg.Username
+			}
+		}
+	}
+
 	// create new "ghost" user
 	ghost := u.createSlackUser(user)
 
 	spoofUsername := user.ID
 	if ghost != nil {
 		spoofUsername = ghost.Nick
+	}
+
+	// if we have a botname, use it
+	if botname != "" {
+		spoofUsername = botname
 	}
 
 	msgs := strings.Split(rmsg.Text, "\n")

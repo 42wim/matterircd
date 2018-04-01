@@ -212,7 +212,7 @@ func (ch *channel) Topic(from Prefixer, text string) {
 		Prefix:   from.Prefix(),
 		Command:  irc.TOPIC,
 		Params:   []string{ch.name},
-		Trailing: text,
+		Trailing: ch.topic,
 	}
 	for to := range ch.usersIdx {
 		to.Encode(msg)

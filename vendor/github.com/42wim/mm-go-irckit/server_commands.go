@@ -38,7 +38,7 @@ func DefaultCommands() Commands {
 
 func CmdAway(s Server, u *User, msg *irc.Message) error {
 	if u.mc != nil {
-		u.mc.WsAway = false
+		u.mc.UpdateStatus(u.mc.User.Id, "online")
 	}
 	if u.sc != nil {
 		u.sc.SetUserPresence("auto")
@@ -47,7 +47,7 @@ func CmdAway(s Server, u *User, msg *irc.Message) error {
 		return s.EncodeMessage(u, irc.RPL_UNAWAY, []string{u.Nick}, "You are no longer marked as being away")
 	}
 	if u.mc != nil {
-		u.mc.WsAway = true
+		u.mc.UpdateStatus(u.mc.User.Id, "away")
 	}
 	if u.sc != nil {
 		u.sc.SetUserPresence("away")
