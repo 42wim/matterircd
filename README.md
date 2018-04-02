@@ -15,6 +15,30 @@ docker run -p 6667:6667 42wim/matterircd:latest -bind 0.0.0.0:6667
 
 Now you can connect with your IRC client to port 6667 on your docker host.
 
+# FreeBSD
+Install the port.
+```
+# pkg install matterircd
+```
+Or with a local ports tree.
+```
+$ cd /usr/ports/net-im/matterircd
+# make install clean
+```
+
+Enable the service.
+```
+echo "matterircd_enable="YES" >> /etc/rc.conf
+```
+Copy the default configuration and modify to your needs.
+```
+# cp /usr/local/etc/matterircd/matterircd.toml.sample /usr/local/etc/matterircd/matterircd.toml
+```
+Start the service.
+```
+# service matterircd start
+```
+
 # Compatibility
 * Matterircd v0.16.8 works with slack and mattermost 3.8.x - 3.10.0, 4.x
 
