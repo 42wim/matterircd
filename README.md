@@ -32,7 +32,7 @@ echo "matterircd_enable="YES" >> /etc/rc.conf
 ```
 Copy the default configuration and modify to your needs.
 ```
-# cp /usr/local/etc/matterircd/matteircd.toml.sample /usr/local/etc/matterircd/matteircd.toml
+# cp /usr/local/etc/matterircd/matterircd.toml.sample /usr/local/etc/matterircd/matterircd.toml
 ```
 Start the service.
 ```
