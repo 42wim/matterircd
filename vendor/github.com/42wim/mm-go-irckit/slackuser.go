@@ -12,12 +12,13 @@ import (
 )
 
 type SlackInfo struct {
-	Token     string
-	sc        *slack.Client
-	rtm       *slack.RTM
-	sinfo     *slack.Info
-	susers    map[string]slack.User
-	connected bool
+	Token      string
+	sc         *slack.Client
+	rtm        *slack.RTM
+	sinfo      *slack.Info
+	susers     map[string]slack.User
+	connected  bool
+	inprogress bool
 	sync.RWMutex
 }
 

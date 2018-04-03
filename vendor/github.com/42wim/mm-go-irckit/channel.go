@@ -236,6 +236,11 @@ func (ch *channel) Join(u *User) error {
 	u.channels[ch] = struct{}{}
 	u.Unlock()
 
+	// speed-up & users join
+	if ch.name == "&users" && u.MmGhostUser {
+		return nil
+	}
+
 	msg := &irc.Message{
 		Prefix:  u.Prefix(),
 		Command: irc.JOIN,
