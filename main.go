@@ -19,6 +19,7 @@ var (
 	githash                                                                   string
 	logger                                                                    *logrus.Entry
 	cfg                                                                       config.Config
+	xdg_config_home								  string
 )
 
 func main() {
@@ -49,6 +50,17 @@ func main() {
 	flag.StringVar(&cfg.TLSBind, "tlsbind", "", "interface:port to bind to. (e.g 127.0.0.1:6697)")
 	flag.StringVar(&cfg.TLSDir, "tlsdir", ".", "directory to look for key.pem and cert.pem.")
 	flag.Parse()
+
+	// Check for config in XDG home
+	if os.Getenv("XDG_CONFIG_HOME") == "" {
+		xdg_config_home = os.Getenv("HOME") + "/.config"
+	} else {
+		xdg_config_home = os.Getenv("XDG_CONIFG_HOME")
+	}
+
+	if _, err := os.Stat(xdg_config_home +  "/matterircd/matterircd.toml"); err == nil {
+		cfg = *config.LoadConfig(xdg_config_home +  "/matterircd/matterircd.toml", cfg)
+	}
 
 	// Check for .matterird config file
 	if _, err := os.Stat(os.Getenv("HOME") +  "/.matterircd"); err == nil {
