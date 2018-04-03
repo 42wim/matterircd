@@ -1,9 +1,11 @@
 package irckit
 
 import (
+	"errors"
 	"html"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/nlopes/slack"
@@ -16,19 +18,27 @@ type SlackInfo struct {
 	sinfo     *slack.Info
 	susers    map[string]slack.User
 	connected bool
+	sync.RWMutex
 }
 
 func (u *User) loginToSlack() (*slack.Client, error) {
 	u.sc = slack.New(u.Token)
 	u.rtm = u.sc.NewRTM()
+	u.Lock()
 	u.susers = make(map[string]slack.User)
+	u.Unlock()
 	go u.rtm.ManageConnection()
 	//time.Sleep(time.Second * 2)
 	u.sinfo = u.rtm.GetInfo()
+	count := 0
 	for u.sinfo == nil {
 		time.Sleep(time.Millisecond * 500)
 		logger.Debug("still waiting for sinfo")
 		u.sinfo = u.rtm.GetInfo()
+		count++
+		if count == 20 {
+			return nil, errors.New("couldn't connect in 10 seconds. Check your credentials")
+		}
 	}
 	go u.handleSlack()
 	u.addSlackUsersToChannels()
@@ -92,7 +102,9 @@ func (u *User) addSlackUsersToChannels() {
 		}
 		u.createSlackUser(&mmuser)
 		u.addSlackUserToChannel(&mmuser, "&users", "&users")
+		u.Lock()
 		u.susers[mmuser.ID] = mmuser
+		u.Unlock()
 	}
 	ch.Join(u)
 
@@ -157,8 +169,8 @@ func (u *User) handleSlack() {
 			case *slack.MessageEvent:
 				u.handleSlackActionPost(ev)
 			case *slack.DisconnectedEvent:
-				logger.Debugf("disconnecting..")
-				return
+				logger.Debug("disconnected event received, we should reconnect now..")
+				//return
 			}
 		}
 	}
@@ -274,8 +286,9 @@ func (u *User) syncSlackChannel(id string, name string) {
 	for _, user := range info.Members {
 		if u.sinfo.User.ID != user {
 			//slackuser, _ := u.sc.GetUserInfo(user)
-			if slackuser, ok := u.susers[user]; ok {
-				u.addSlackUserToChannel(&slackuser, "#"+name, id)
+			slackuser := u.getSlackUser(user)
+			if slackuser != nil {
+				u.addSlackUserToChannel(slackuser, "#"+name, id)
 			}
 		}
 	}
@@ -306,8 +319,9 @@ func (u *User) syncSlackGroup(id string, name string) {
 	for _, user := range info.Members {
 		if u.sinfo.User.ID != user {
 			//slackuser, _ := u.sc.GetUserInfo(user)
-			if slackuser, ok := u.susers[user]; ok {
-				u.addSlackUserToChannel(&slackuser, "#"+name, id)
+			slackuser := u.getSlackUser(user)
+			if slackuser != nil {
+				u.addSlackUserToChannel(slackuser, "#"+name, id)
 			}
 		}
 	}
@@ -367,7 +381,18 @@ func (u *User) replaceURL(text string) string {
 	return text
 }
 
+func (u *User) getSlackUser(name string) *slack.User {
+	u.RLock()
+	defer u.RUnlock()
+	if user, ok := u.susers[name]; ok {
+		return &user
+	}
+	return nil
+}
+
 func (u *User) userName(id string) string {
+	u.RLock()
+	defer u.RUnlock()
 	// TODO dynamically update when new users are joining slack
 	for _, us := range u.susers {
 		if us.ID == id {

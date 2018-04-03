@@ -23,6 +23,10 @@ type Command struct {
 }
 
 func logout(u *User, toUser *User, args []string, service string) {
+	if u.inprogress {
+		u.MsgUser(toUser, "login or logout in progress. Please wait")
+		return
+	}
 	switch service {
 	case "mattermost":
 		u.logoutFromMattermost()
@@ -32,6 +36,10 @@ func logout(u *User, toUser *User, args []string, service string) {
 }
 
 func login(u *User, toUser *User, args []string, service string) {
+	if u.inprogress {
+		u.MsgUser(toUser, "login or logout in progress. Please wait")
+		return
+	}
 	if service == "slack" {
 		var err error
 		if len(args) != 1 {
@@ -54,6 +62,8 @@ func login(u *User, toUser *User, args []string, service string) {
 				return
 			}
 		}
+		u.inprogress = true
+		defer func() { u.inprogress = false }()
 		u.sc, err = u.loginToSlack()
 		if err != nil {
 			u.MsgUser(toUser, err.Error())
