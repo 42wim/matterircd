@@ -2,7 +2,7 @@
 [![Join the IRC chat at https://webchat.freenode.net/?channels=matterircd](https://img.shields.io/badge/IRC-matterircd-green.svg)](https://webchat.freenode.net/?channels=matterircd)
 
 Minimal IRC server which integrates with [mattermost](https://www.mattermost.org) and [slack](https://www.slack.com)
-Tested on Windows / Linux
+Tested on FreeBSD / Linux / Windows
 
 Most of the work happens in [mm-go-irckit](https://github.com/42wim/mm-go-irckit) (based on github.com/shazow/go-irckit)
 
@@ -14,6 +14,30 @@ docker run -p 6667:6667 42wim/matterircd:latest -bind 0.0.0.0:6667
 ```
 
 Now you can connect with your IRC client to port 6667 on your docker host.
+
+# FreeBSD
+Install the port.
+```
+# pkg install matterircd
+```
+Or with a local ports tree.
+```
+$ cd /usr/ports/net-im/matterircd
+# make install clean
+```
+
+Enable the service.
+```
+echo "matterircd_enable="YES" >> /etc/rc.conf
+```
+Copy the default configuration and modify to your needs.
+```
+# cp /usr/local/etc/matterircd/matterircd.toml.sample /usr/local/etc/matterircd/matterircd.toml
+```
+Start the service.
+```
+# service matterircd start
+```
 
 # Compatibility
 * Matterircd v0.16.8 works with slack and mattermost 3.8.x - 3.10.0, 4.x
