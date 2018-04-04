@@ -214,8 +214,12 @@ func (ch *channel) Topic(from Prefixer, text string) {
 		Params:   []string{ch.name},
 		Trailing: ch.topic,
 	}
+
+	// only send join messages to real users
 	for to := range ch.usersIdx {
-		to.Encode(msg)
+		if to.MmGhostUser == false {
+			to.Encode(msg)
+		}
 	}
 
 	ch.mu.RUnlock()

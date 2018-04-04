@@ -68,7 +68,7 @@ func (u *User) createSlackUser(slackuser *slack.User) *User {
 	if ghost, ok := u.Srv.HasUser(slackuser.Name); ok {
 		return ghost
 	}
-	ghost := &User{Nick: slackuser.Name, User: slackuser.ID, Real: slackuser.RealName, Host: "host", Roles: "", channels: map[Channel]struct{}{}}
+	ghost := &User{Nick: slackuser.Name, User: slackuser.ID, Real: slackuser.RealName, Host: "host", Roles: "", channels: map[Channel]struct{}{}, DisplayName: slackuser.Profile.DisplayName}
 	ghost.MmGhostUser = true
 	u.Srv.Add(ghost)
 	return ghost
@@ -214,9 +214,8 @@ func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
 		bot, _ := u.rtm.GetBotInfo(rmsg.BotID)
 		if bot.Name != "" {
 			botname = bot.Name
-			if rmsg.Username != "" {
-				botname = rmsg.Username
-			}
+		} else if rmsg.Username != "" {
+			botname = rmsg.Username
 		}
 	}
 
@@ -226,6 +225,10 @@ func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
 	spoofUsername := user.ID
 	if ghost != nil {
 		spoofUsername = ghost.Nick
+		if ghost.DisplayName != "" {
+			spoofUsername = "|"
+			//	spoofUsername = ghost.DisplayName
+		}
 	}
 
 	// if we have a botname, use it
@@ -271,6 +274,9 @@ func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
 		if strings.HasPrefix(rmsg.Channel, "D") {
 			u.MsgSpoofUser(spoofUsername, m)
 		} else {
+			if ghost.DisplayName != "" {
+				m = "<" + ghost.DisplayName + "> " + m
+			}
 			ch.SpoofMessage(spoofUsername, m)
 		}
 	}
@@ -293,19 +299,12 @@ func (u *User) syncSlackChannel(id string, name string) {
 			}
 		}
 	}
-	// before joining ourself
-	for _, user := range info.Members {
-		// join all the channels we're on on MM
-		if user == u.sinfo.User.ID {
-			ch := srv.Channel(id)
-			// only join when we're not yet on the channel
-			if !ch.HasUser(u) {
-				logger.Debugf("syncSlackchannel adding myself to %s (id: %s)", name, id)
-				ch.Join(u)
-				//ch.Topic(u, u.mc.GetChannelHeader(id))
-			}
-			break
-		}
+
+	ch := srv.Channel(id)
+	ch.Topic(u, info.Topic.Value)
+	if !ch.HasUser(u) {
+		logger.Debugf("syncSlackchannel adding myself to %s (id: %s)", name, id)
+		ch.Join(u)
 	}
 }
 
@@ -326,19 +325,12 @@ func (u *User) syncSlackGroup(id string, name string) {
 			}
 		}
 	}
-	// before joining ourself
-	for _, user := range info.Members {
-		// join all the channels we're on on MM
-		if user == u.sinfo.User.ID {
-			ch := srv.Channel(id)
-			// only join when we're not yet on the channel
-			if !ch.HasUser(u) {
-				logger.Debugf("syncSlackgroup adding myself to %s (id: %s)", name, id)
-				ch.Join(u)
-				//ch.Topic(u, u.mc.GetChannelHeader(id))
-			}
-			break
-		}
+
+	ch := srv.Channel(id)
+	ch.Topic(u, info.Topic.Value)
+	if !ch.HasUser(u) {
+		logger.Debugf("syncSlackchannel adding myself to %s (id: %s)", name, id)
+		ch.Join(u)
 	}
 }
 
