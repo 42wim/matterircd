@@ -205,7 +205,9 @@ func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
 
 	user, err := u.rtm.GetUserInfo(rmsg.User)
 	if err != nil {
-		return
+		if rmsg.BotID == "" {
+			return
+		}
 	}
 
 	// handle bot messages
@@ -222,12 +224,15 @@ func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
 	// create new "ghost" user
 	ghost := u.createSlackUser(user)
 
-	spoofUsername := user.ID
-	if ghost != nil {
-		spoofUsername = ghost.Nick
-		if ghost.DisplayName != "" {
-			spoofUsername = "|"
-			//	spoofUsername = ghost.DisplayName
+	spoofUsername := ""
+	if user != nil {
+		spoofUsername = user.ID
+		if ghost != nil {
+			spoofUsername = ghost.Nick
+			if ghost.DisplayName != "" && ghost.DisplayName != ghost.Nick {
+				spoofUsername = "|"
+				//	spoofUsername = ghost.DisplayName
+			}
 		}
 	}
 
@@ -239,8 +244,9 @@ func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
 	msgs := strings.Split(rmsg.Text, "\n")
 	// direct message
 
+	ch = u.Srv.Channel(rmsg.Channel)
+
 	if ghost != nil {
-		ch = u.Srv.Channel(rmsg.Channel)
 		// join if not in channel
 		if !ch.HasUser(ghost) {
 			ch.Join(ghost)
@@ -274,7 +280,7 @@ func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
 		if strings.HasPrefix(rmsg.Channel, "D") {
 			u.MsgSpoofUser(spoofUsername, m)
 		} else {
-			if ghost.DisplayName != "" {
+			if ghost != nil && ghost.DisplayName != "" {
 				m = "<" + ghost.DisplayName + "> " + m
 			}
 			ch.SpoofMessage(spoofUsername, m)
