@@ -280,7 +280,7 @@ func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
 		if strings.HasPrefix(rmsg.Channel, "D") {
 			u.MsgSpoofUser(spoofUsername, m)
 		} else {
-			if ghost != nil && ghost.DisplayName != "" {
+			if ghost != nil && ghost.DisplayName != "" && ghost.DisplayName != ghost.Nick {
 				m = "<" + ghost.DisplayName + "> " + m
 			}
 			ch.SpoofMessage(spoofUsername, m)
