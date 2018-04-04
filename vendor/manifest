@@ -196,7 +196,7 @@
 			"importpath": "github.com/nlopes/slack",
 			"repository": "https://github.com/nlopes/slack",
 			"vcs": "git",
-			"revision": "91c91a11ad0b66b7a690029c56c330ca9f18841b",
+			"revision": "a22b9657ebc0b4948d7b3a13957c9b75aa55c54c",
 			"branch": "master",
 			"notests": true
 		},
