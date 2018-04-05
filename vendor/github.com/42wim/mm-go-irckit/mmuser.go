@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/42wim/matterbridge/matterclient"
+	"github.com/42wim/matterircd/config"
 	"github.com/mattermost/platform/model"
 	"github.com/sorcix/irc"
 )
@@ -29,14 +30,16 @@ type MmCredentials struct {
 }
 
 type MmCfg struct {
-	AllowedServers []string
-	DefaultServer  string
-	DefaultTeam    string
-	Insecure       bool
-	SkipTLSVerify  bool
-	JoinExclude    []string
-	JoinInclude    []string
-	PartFake       bool
+	AllowedServers     []string
+	SlackSettings      config.Settings
+	MattermostSettings config.Settings
+	DefaultServer      string
+	DefaultTeam        string
+	Insecure           bool
+	SkipTLSVerify      bool
+	JoinExclude        []string
+	JoinInclude        []string
+	PartFake           bool
 }
 
 func NewUserMM(c net.Conn, srv Server, cfg *MmCfg) *User {
@@ -47,6 +50,15 @@ func NewUserMM(c net.Conn, srv Server, cfg *MmCfg) *User {
 	})
 	u.Srv = srv
 	u.MmInfo.Cfg = cfg
+	u.MmInfo.Cfg.AllowedServers = cfg.MattermostSettings.Restrict
+	u.MmInfo.Cfg.DefaultServer = cfg.MattermostSettings.DefaultServer
+	u.MmInfo.Cfg.DefaultTeam = cfg.MattermostSettings.DefaultTeam
+	u.MmInfo.Cfg.JoinInclude = cfg.MattermostSettings.JoinInclude
+	u.MmInfo.Cfg.JoinExclude = cfg.MattermostSettings.JoinExclude
+	u.MmInfo.Cfg.PartFake = cfg.MattermostSettings.PartFake
+	u.MmInfo.Cfg.Insecure = cfg.MattermostSettings.Insecure
+	u.MmInfo.Cfg.SkipTLSVerify = cfg.MattermostSettings.SkipTLSVerify
+
 	u.idleStop = make(chan struct{})
 	// used for login
 	u.createService("mattermost", "loginservice")

@@ -41,6 +41,22 @@ func (u *User) loginToSlack() (*slack.Client, error) {
 			return nil, errors.New("couldn't connect in 10 seconds. Check your credentials")
 		}
 	}
+
+	// we only know which server we are connecting to when we actually are connected.
+	// disconnect if we're not allowed
+	if len(u.MmInfo.Cfg.SlackSettings.Restrict) > 0 {
+		ok := false
+		for _, domain := range u.MmInfo.Cfg.SlackSettings.Restrict {
+			if domain == u.sinfo.Team.Domain {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			u.rtm.Disconnect()
+			return nil, errors.New("Not allowed to connect to " + u.sinfo.Team.Domain + " slack")
+		}
+	}
 	go u.handleSlack()
 	u.addSlackUsersToChannels()
 	u.connected = true
@@ -213,11 +229,12 @@ func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
 	// handle bot messages
 	botname := ""
 	if rmsg.User == "" && rmsg.BotID != "" {
-		bot, _ := u.rtm.GetBotInfo(rmsg.BotID)
-		if bot.Name != "" {
-			botname = bot.Name
-		} else if rmsg.Username != "" {
-			botname = rmsg.Username
+		botname = rmsg.Username
+		if botname == "" {
+			bot, _ := u.rtm.GetBotInfo(rmsg.BotID)
+			if bot.Name != "" {
+				botname = bot.Name
+			}
 		}
 	}
 
@@ -229,7 +246,7 @@ func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
 		spoofUsername = user.ID
 		if ghost != nil {
 			spoofUsername = ghost.Nick
-			if ghost.DisplayName != "" && ghost.DisplayName != ghost.Nick {
+			if ghost.DisplayName != "" && ghost.DisplayName != ghost.Nick && u.MmInfo.Cfg.SlackSettings.UseDisplayName {
 				spoofUsername = "|"
 				//	spoofUsername = ghost.DisplayName
 			}
@@ -280,7 +297,8 @@ func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
 		if strings.HasPrefix(rmsg.Channel, "D") {
 			u.MsgSpoofUser(spoofUsername, m)
 		} else {
-			if ghost != nil && ghost.DisplayName != "" && ghost.DisplayName != ghost.Nick {
+			if ghost != nil && ghost.DisplayName != "" && ghost.DisplayName != ghost.Nick &&
+				u.MmInfo.Cfg.SlackSettings.UseDisplayName {
 				m = "<" + ghost.DisplayName + "> " + m
 			}
 			ch.SpoofMessage(spoofUsername, m)

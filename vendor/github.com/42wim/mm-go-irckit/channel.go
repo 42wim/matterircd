@@ -207,6 +207,7 @@ func (ch *channel) Topic(from Prefixer, text string) {
 	ch.topic = text
 	// no newlines in topic
 	ch.topic = strings.Replace(ch.topic, "\n", " ", -1)
+	ch.topic = strings.Replace(ch.topic, "\r", " ", -1)
 
 	msg := &irc.Message{
 		Prefix:   from.Prefix(),
