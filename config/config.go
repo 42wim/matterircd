@@ -3,6 +3,7 @@ package config
 import (
 	"github.com/BurntSushi/toml"
 	"github.com/sirupsen/logrus"
+	"strings"
 )
 
 var Logger *logrus.Entry
@@ -27,7 +28,14 @@ type Config struct {
 }
 
 type Settings struct {
+	DefaultServer  string
+	DefaultTeam    string
+	Insecure       bool
+	JoinExclude    []string
+	JoinInclude    []string
+	PartFake       bool
 	Restrict       []string
+	SkipTLSVerify  bool
 	UseDisplayName bool
 }
 
@@ -36,5 +44,30 @@ func LoadConfig(cfgfile string, defaultcfg Config) *Config {
 		Logger.Fatalf("Error loading config file %s: %s", cfgfile, err)
 	}
 	Logger.Infof("Loaded config from %s", cfgfile)
+	// migratie mattermost specific settings from general to mattermost settings
+	if len(defaultcfg.Mattermost.JoinInclude) == 0 {
+		defaultcfg.Mattermost.JoinInclude = defaultcfg.JoinInclude
+	}
+	if len(defaultcfg.Mattermost.JoinExclude) == 0 {
+		defaultcfg.Mattermost.JoinExclude = defaultcfg.JoinExclude
+	}
+	if !defaultcfg.Mattermost.PartFake {
+		defaultcfg.Mattermost.PartFake = defaultcfg.PartFake
+	}
+	if len(defaultcfg.Mattermost.Restrict) == 0 {
+		defaultcfg.Mattermost.Restrict = strings.Fields(defaultcfg.Restrict)
+	}
+	if defaultcfg.Mattermost.DefaultServer == "" {
+		defaultcfg.Mattermost.DefaultServer = defaultcfg.DefaultServer
+	}
+	if defaultcfg.Mattermost.DefaultTeam == "" {
+		defaultcfg.Mattermost.DefaultTeam = defaultcfg.DefaultTeam
+	}
+	if !defaultcfg.Mattermost.Insecure {
+		defaultcfg.Mattermost.Insecure = defaultcfg.Insecure
+	}
+	if !defaultcfg.Mattermost.SkipTLSVerify {
+		defaultcfg.Mattermost.SkipTLSVerify = defaultcfg.SkipTLSVerify
+	}
 	return &defaultcfg
 }

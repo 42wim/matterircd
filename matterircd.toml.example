@@ -4,6 +4,13 @@ Bind = "127.0.0.1:6667"
 #enable debug logging (default false)
 Debug = false
 
+#interface:port to bind to. (e.g 127.0.0.1:6697) (deault "")
+TLSBind = "127.0.0.1:6697"
+
+#directory to look for key.pem and cert.pem. (default ".")
+TLSDir = "/etc/pki/tls/matermost/"
+
+[mattermost]
 #specify default mattermost server/instance (default "")
 DefaultServer = "chat.mycompany.com"
 
@@ -13,13 +20,6 @@ DefaultTeam = "mycompany"
 #use http connection to mattermost (default false)
 Insecure = false
 
-#an array of channels that won't be joined on IRC.
-#Messages that get sent to unjoined channels (but you're joined on mattermost) will
-#get sent to the &messages channel.
-#You can still /JOIN exclude channels.
-#default ""
-JoinExclude = ["#town-square","#boringchannel"]
-
 #an array of channels that only will be joined on IRC.
 #If it's empty, it means all channels get joined (except those defined in JoinExclude)
 #Messages that get sent to unjoined channels (but you're joined on mattermost) will
@@ -27,19 +27,33 @@ JoinExclude = ["#town-square","#boringchannel"]
 #default ""
 JoinInclude = ["#devops"]
 
+#an array of channels that won't be joined on IRC.
+#Messages that get sent to unjoined channels (but you're joined on mattermost) will
+#get sent to the &messages channel.
+#You can still /JOIN exclude channels.
+#default ""
+JoinExclude = ["#town-square","#boringchannel"]
+
 #PartFake: a bool that defines if you do a /LEAVE or /PART on IRC it will also
 #actually leave the channel on mattermost.
 #Default false
 PartFake = true
 
+#only allow connection to specified mattermost server/instances. 
+#Array, default empty
+Restrict = ["chat.mycompany.com"]
+
 #skip verification of mattermost certificate chain and hostname (default false)
 SkipTLSVerify = false
 
-#interface:port to bind to. (e.g 127.0.0.1:6697) (deault "")
-TLSBind = "127.0.0.1:6697"
+[slack]
+# This will add the slack DisplayName as prefix to every message if the DisplayName differs from the Username
+# More info about username/displayname see https://api.slack.com/changelog/2017-09-the-one-about-usernames
+# Default false
+UseDisplayName = false
 
-#directory to look for key.pem and cert.pem. (default ".")
-TLSDir = "/etc/pki/tls/matermost/"
-
-#only allow connection to specified mattermost server/instances. Space delimited (default "")
-Restrict = "chat.mycompany.com"
+#only allow connection to specific slack sites. (eg for myslack.slack.com just specify myslack)
+#As we only connect using tokens, this will first do a ccnnection to see what team the token is from. If this
+#team isn't in the Restrict list, the user will be disconnected.
+#Array, default empty 
+Restrict = ["myslack"]
