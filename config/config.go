@@ -8,6 +8,8 @@ import (
 var Logger *logrus.Entry
 
 type Config struct {
+	Slack         Settings
+	Mattermost    Settings
 	Debug         bool
 	Bind          string
 	BindInterface string
@@ -22,6 +24,10 @@ type Config struct {
 	JoinExclude   []string
 	JoinInclude   []string
 	PartFake      bool
+}
+
+type Settings struct {
+	Restrict []string
 }
 
 func LoadConfig(cfgfile string, defaultcfg Config) *Config {

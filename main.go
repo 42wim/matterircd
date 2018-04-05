@@ -128,7 +128,7 @@ func start(socket net.Listener) {
 			irccfg := &irckit.MmCfg{AllowedServers: strings.Fields(cfg.Restrict),
 				DefaultTeam: cfg.DefaultTeam, DefaultServer: cfg.DefaultServer,
 				Insecure: cfg.Insecure, SkipTLSVerify: cfg.SkipTLSVerify, JoinInclude: cfg.JoinInclude,
-				JoinExclude: cfg.JoinExclude, PartFake: cfg.PartFake}
+				JoinExclude: cfg.JoinExclude, PartFake: cfg.PartFake, SlackSettings: cfg.Slack}
 			newsrv := irckit.ServerConfig{Name: "matterircd", Version: version}.Server()
 			logger.Infof("New connection: %s", conn.RemoteAddr())
 			err = newsrv.Connect(irckit.NewUserMM(conn, newsrv, irccfg))
