@@ -27,7 +27,8 @@ type Config struct {
 }
 
 type Settings struct {
-	Restrict []string
+	Restrict       []string
+	UseDisplayName bool
 }
 
 func LoadConfig(cfgfile string, defaultcfg Config) *Config {
