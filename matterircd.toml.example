@@ -47,13 +47,27 @@ Restrict = ["chat.mycompany.com"]
 SkipTLSVerify = false
 
 [slack]
-# This will add the slack DisplayName as prefix to every message if the DisplayName differs from the Username
-# More info about username/displayname see https://api.slack.com/changelog/2017-09-the-one-about-usernames
-# Default false
-UseDisplayName = false
+#Blacklist specific users from connecting.
+#As we only connect using tokens, this will first do a ccnnection to see what username the token is from. If this
+#username is on the blacklist the user will be disconnected.
+#Array, default empty 
+BlackListUser = ["username"]
+
+#https://get.slack.help/hc/en-us/articles/212281468-Direct-messages-and-group-DMs
+#Only join multiple person Direct messages when someone talks. This stops from cluttering your 
+#irc client with lots of windows.
+JoinMpImOnTalk = false
 
 #only allow connection to specific slack sites. (eg for myslack.slack.com just specify myslack)
 #As we only connect using tokens, this will first do a ccnnection to see what team the token is from. If this
 #team isn't in the Restrict list, the user will be disconnected.
 #Array, default empty 
 Restrict = ["myslack"]
+
+# This will add the slack DisplayName as prefix to every message if the DisplayName differs from the Username
+# More info about username/displayname see https://api.slack.com/changelog/2017-09-the-one-about-usernames
+# Default false
+UseDisplayName = false
+
+
+
