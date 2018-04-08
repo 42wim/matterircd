@@ -14,6 +14,8 @@
 * slack: Fix on-join race condition
 * slack: Always add yourself to your channels (fixes problem with > 500 users channels)
 * slack: remove carriage returns from topic
+* slack: Autojoin new channel/group when invited
+* slack: Join MpIm channel if we haven't joined it yet
 
 # v0.16.8
 ## Bugfix
