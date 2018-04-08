@@ -57,6 +57,22 @@ func (u *User) loginToSlack() (*slack.Client, error) {
 			return nil, errors.New("Not allowed to connect to " + u.sinfo.Team.Domain + " slack")
 		}
 	}
+	// we only know which user we are when we actually are connected.
+	// disconnect if we're not allowed
+	if len(u.MmInfo.Cfg.SlackSettings.BlackListUser) > 0 {
+		ok := false
+		for _, user := range u.MmInfo.Cfg.SlackSettings.BlackListUser {
+			if user == u.sinfo.User.Name {
+				ok = true
+				break
+			}
+		}
+		if ok {
+			u.rtm.Disconnect()
+			return nil, errors.New("Not allowed to connect")
+		}
+	}
+
 	go u.handleSlack()
 	u.addSlackUsersToChannels()
 	u.connected = true
@@ -133,11 +149,17 @@ func (u *User) addSlackUsersToChannels() {
 	mmchannels, _ := u.sc.GetChannels(true)
 	for _, mmchannel := range mmchannels {
 		if mmchannel.IsMember {
+			if mmchannel.IsMpIM && u.Cfg.SlackSettings.JoinMpImOnTalk {
+				continue
+			}
 			logger.Debug("Adding channel", mmchannel)
 			channels <- mmchannel
 		}
 	}
 	for _, mmchannel := range groups {
+		if mmchannel.IsMpIM && u.Cfg.SlackSettings.JoinMpImOnTalk {
+			continue
+		}
 		logger.Debug("Adding private channel", mmchannel)
 		channels <- mmchannel
 	}
@@ -184,6 +206,12 @@ func (u *User) handleSlack() {
 		for msg := range u.rtm.IncomingEvents {
 			switch ev := msg.Data.(type) {
 			case *slack.MessageEvent:
+				if ev.SubType == "group_join" {
+					u.syncSlackGroup(ev.Channel, "")
+				}
+				if ev.SubType == "channel_join" {
+					u.syncSlackChannel(ev.Channel, "")
+				}
 				u.handleSlackActionPost(ev)
 			case *slack.DisconnectedEvent:
 				logger.Debug("disconnected event received, we should reconnect now..")
@@ -270,6 +298,11 @@ func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
 		}
 	}
 
+	// join channel if we haven't yet
+	if !ch.HasUser(u) {
+		ch.Join(u)
+	}
+
 	for _, m := range msgs {
 		// cleanup the message
 		m = u.replaceMention(m)
@@ -314,6 +347,10 @@ func (u *User) syncSlackChannel(id string, name string) {
 		logger.Info(err)
 	}
 
+	if name == "" {
+		name = info.Name
+	}
+
 	for _, user := range info.Members {
 		if u.sinfo.User.ID != user {
 			//slackuser, _ := u.sc.GetUserInfo(user)
@@ -338,6 +375,10 @@ func (u *User) syncSlackGroup(id string, name string) {
 	info, err := u.sc.GetGroupInfo(id)
 	if err != nil {
 		logger.Info(err)
+	}
+
+	if name == "" {
+		name = info.Name
 	}
 
 	for _, user := range info.Members {
