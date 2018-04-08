@@ -1,3 +1,20 @@
+# v0.17.0
+## New features
+* general: mattermost configuration settings need to be migrated to `[mattermost]` settings. See matterircd.toml.example
+* slack: Add BlackListUser config setting. Blacklist users from connecting to slack. See matterircd.toml.example
+* slack: Add JoinMpImOnTalk config setting. Only join MultiPerson IM when someone talks. See mattericd.toml.example 
+* slack: Add Restrict config setting. Only allowed to connect to specified slack teams. See matterircd.toml.example
+* slack: Add UseDisplayName config setting. If displayname is set, the message will be prepended with `<displayname>`. See matterircd.toml.example
+* slack: also show messages from bots
+* slack: reconnect on disconnects
+
+## Bugfix
+* &users join speedup on teams with massive amount of users (tested on 26k users)
+* Only allow 1 login/logout in progress
+* slack: Fix on-join race condition
+* slack: Always add yourself to your channels (fixes problem with > 500 users channels)
+* slack: remove carriage returns from topic
+
 # v0.16.8
 ## Bugfix
 * Fix newlines in topic to client. Closes 42wim/matterircd#163
