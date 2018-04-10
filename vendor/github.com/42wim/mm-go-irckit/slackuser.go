@@ -242,7 +242,7 @@ func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
 	logger.Debugf("handleSlackActionPost() receiving msg %#v", rmsg)
 	if len(rmsg.Attachments) > 0 {
 		// skip messages we made ourselves
-		if rmsg.Attachments[0].CallbackID == "matterircd" {
+		if rmsg.Attachments[0].CallbackID == "matterircd_"+u.sinfo.User.ID {
 			return
 		}
 	}
@@ -291,16 +291,30 @@ func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
 
 	ch = u.Srv.Channel(rmsg.Channel)
 
-	if ghost != nil {
-		// join if not in channel
-		if !ch.HasUser(ghost) {
-			ch.Join(ghost)
+	// do not join channel for direct messages
+	if !strings.HasPrefix(rmsg.Channel, "D") {
+		if ghost != nil {
+			// join if not in channel
+			if !ch.HasUser(ghost) {
+				ch.Join(ghost)
+			}
+		}
+
+		// join channel if we haven't yet
+		if !ch.HasUser(u) {
+			ch.Join(u)
 		}
 	}
 
-	// join channel if we haven't yet
-	if !ch.HasUser(u) {
-		ch.Join(u)
+	// look in attachments if we have no text
+	if rmsg.Text == "" {
+		for _, attach := range rmsg.Attachments {
+			if attach.Text != "" {
+				msgs = append(msgs, strings.Split(attach.Text, "\n")...)
+			} else {
+				msgs = append(msgs, strings.Split(attach.Fallback, "\n")...)
+			}
+		}
 	}
 
 	for _, m := range msgs {
@@ -310,17 +324,6 @@ func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
 		m = u.replaceChannel(m)
 		m = u.replaceURL(m)
 		m = html.UnescapeString(m)
-
-		// look in attachments if we have no text
-		if m == "" {
-			for _, attach := range rmsg.Attachments {
-				if attach.Text != "" {
-					m = attach.Text
-				} else {
-					m = attach.Fallback
-				}
-			}
-		}
 
 		// still no text, ignore this message
 		if m == "" {

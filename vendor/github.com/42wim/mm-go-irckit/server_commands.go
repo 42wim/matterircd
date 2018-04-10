@@ -444,7 +444,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 			np.AsUser = true
 			np.LinkNames = 1
 			np.Username = u.User
-			np.Attachments = append(np.Attachments, slack.Attachment{CallbackID: "matterircd"})
+			np.Attachments = append(np.Attachments, slack.Attachment{CallbackID: "matterircd_" + u.sinfo.User.ID})
 			_, _, err := u.sc.PostMessage(strings.ToUpper(ch.ID()), msg.Trailing, np)
 			if err != nil {
 				return err
@@ -452,7 +452,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 		}
 		if ch.Service() == "mattermost" {
 			props := make(map[string]interface{})
-			props["matterircd"] = true
+			props["matterircd_"+u.mc.User.Id] = true
 			post := &model.Post{ChannelId: ch.ID(), Message: msg.Trailing, Props: props}
 			_, resp := u.mc.Client.CreatePost(post)
 			if resp.Error != nil {
@@ -479,7 +479,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 				np := slack.NewPostMessageParameters()
 				np.AsUser = true
 				np.Username = u.User
-				np.Attachments = append(np.Attachments, slack.Attachment{CallbackID: "matterircd"})
+				np.Attachments = append(np.Attachments, slack.Attachment{CallbackID: "matterircd_" + u.sinfo.User.ID})
 				_, _, err = u.sc.PostMessage(dchannel, msg.Trailing, np)
 				if err != nil {
 					return err
