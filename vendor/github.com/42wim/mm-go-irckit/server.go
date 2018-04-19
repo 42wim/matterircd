@@ -417,7 +417,7 @@ func (s *server) handshake(u *User) error {
 
 		// apparently NICK message can have a : prefix on connection
 		// https://github.com/42wim/matterircd/issues/32
-		if msg.Command == irc.NICK && msg.Trailing != "" {
+		if (msg.Command == irc.NICK || msg.Command == irc.PASS) && msg.Trailing != "" {
 			msg.Params = append(msg.Params, msg.Trailing)
 		}
 		if len(msg.Params) < 1 {
@@ -430,6 +430,8 @@ func (s *server) handshake(u *User) error {
 		case irc.USER:
 			u.User = msg.Params[0]
 			u.Real = msg.Trailing
+		case irc.PASS:
+			u.Pass = msg.Params
 		}
 
 		if u.Nick == "" || u.User == "" {
@@ -446,7 +448,16 @@ func (s *server) handshake(u *User) error {
 			continue
 		}
 		s.u = u
-		return s.welcome(u)
+
+		err = s.welcome(u)
+		if err == nil && u.Pass != nil {
+			service := "mattermost"
+			if len(u.Pass) == 1 {
+				service = "slack"
+			}
+			login(u, &User{Nick: service, User: service, Real: service, Host: "service", channels: map[Channel]struct{}{}}, u.Pass, service)
+		}
+		return err
 	}
 	return ErrHandshakeFailed
 }

@@ -36,6 +36,7 @@ type User struct {
 	Nick        string // From NICK command
 	User        string // From USER command
 	Real        string // From USER command
+	Pass        []string // From PASS command
 	Host        string
 	Roles       string
 	DisplayName string
