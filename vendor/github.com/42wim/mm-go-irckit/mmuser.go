@@ -277,7 +277,7 @@ func (u *User) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		return
 	}
 	if data.UserId == u.mc.User.Id {
-		if _, ok := extraProps["matterircd"].(bool); ok {
+		if _, ok := extraProps["matterircd_"+u.mc.User.Id].(bool); ok {
 			logger.Debugf("message is sent from matterirc, not relaying %#v", data.Message)
 			return
 		}
