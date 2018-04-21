@@ -1,3 +1,13 @@
+# v0.17.1
+## New features
+* general: enable login via irc PASS command during handshake instead of PRIVMSG 
+
+## Bugfix
+* mattermost: Update GetFileLinks to API_V4
+* slack/mattermost: Fix issue with matterircd users not being able to chat to eachother
+* slack: Do not join channels for single direct messages (slack)
+* slack: Split fallback messages on newline (slack)
+
 # v0.17.0
 ## New features
 * general: mattermost configuration settings need to be migrated to `[mattermost]` settings. See matterircd.toml.example

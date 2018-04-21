@@ -40,7 +40,7 @@ Start the service.
 ```
 
 # Compatibility
-* Matterircd v0.17.0 works with slack and mattermost 3.8.x - 3.10.0, 4.x
+* Matterircd works with slack and mattermost 3.8.x - 3.10.0, 4.x
 
 Master branch of matterircd should always work against latest STABLE mattermost release.
 
@@ -64,8 +64,7 @@ Master branch of matterircd should always work against latest STABLE mattermost 
 
 # Binaries
 
-You can find the binaries [here](https://github.com/42wim/matterircd/releases/)
-* For use with mattermost 3.8.0 and higher [0.17.0](https://github.com/42wim/matterircd/relases/latest)
+You can find the binaries [here](https://github.com/42wim/matterircd/releases/latest)
 
 # Building
 
