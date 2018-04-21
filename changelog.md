@@ -1,3 +1,7 @@
+# v0.17.2
+## Bugfix
+* mattermost: Fix message looping issue
+
 # v0.17.1
 ## New features
 * general: enable login via irc PASS command during handshake instead of PRIVMSG 
