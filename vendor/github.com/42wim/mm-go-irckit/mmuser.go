@@ -337,6 +337,18 @@ func (u *User) handleWsActionPost(rmsg *model.WebSocketEvent) {
 
 	if data.Type == model.POST_JOIN_LEAVE || data.Type == "system_leave_channel" || data.Type == "system_join_channel" {
 		logger.Debugf("join/leave message. not relaying %#v", data.Message)
+		ch = u.Srv.Channel(data.ChannelId)
+		if ghost == nil {
+			return
+		}
+		if !ch.HasUser(ghost) {
+			// TODO use u.handleWsActionUserAdded()
+			ch.Join(ghost)
+		} else {
+			// TODO use u.handleWsActionUserRemoved()
+			//u.handleWsActionUserRemoved(data)
+			ch.Part(ghost, "")
+		}
 		return
 	}
 

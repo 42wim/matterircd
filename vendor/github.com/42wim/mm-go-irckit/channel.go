@@ -169,6 +169,12 @@ func (ch *channel) Part(u *User, text string) {
 	u.Lock()
 	delete(u.channels, ch)
 	u.Unlock()
+
+	for to := range ch.usersIdx {
+		if to.MmGhostUser == false {
+			to.Encode(msg)
+		}
+	}
 }
 
 // Unlink will disassociate the Channel from the Server.
