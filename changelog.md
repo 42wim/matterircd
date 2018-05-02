@@ -1,3 +1,9 @@
+# v0.17.3
+## Bugfix
+* slack: Fix issues with bots with spaces in the name
+* mattermost: Actually join/remove users to channel when they join, not when they say something #113
+* mattermost: Join/remove users when they're added by someone else. Use a system message to show this #175
+
 # v0.17.2
 ## Bugfix
 * mattermost: Fix message looping issue
