@@ -283,7 +283,7 @@ func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
 
 	// if we have a botname, use it
 	if botname != "" {
-		spoofUsername = botname
+		spoofUsername = strings.TrimSpace(botname)
 	}
 
 	msgs := strings.Split(rmsg.Text, "\n")

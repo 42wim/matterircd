@@ -335,9 +335,39 @@ func (u *User) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		}
 	}
 
-	if data.Type == model.POST_JOIN_LEAVE || data.Type == "system_leave_channel" || data.Type == "system_join_channel" {
+	if data.Type == model.POST_JOIN_LEAVE || data.Type == "system_leave_channel" || data.Type == "system_join_channel" || data.Type == "system_add_to_channel" || data.Type == "system_remove_from_channel" {
 		logger.Debugf("join/leave message. not relaying %#v", data.Message)
 		ch = u.Srv.Channel(data.ChannelId)
+
+		if data.Type == "system_add_to_channel" {
+			if added, ok := extraProps["addedUsername"].(string); ok {
+				user, resp := u.mc.Client.GetUserByUsername(added, "")
+				if resp.Error != nil {
+					fmt.Println(resp.Error)
+					return
+				}
+				ghost := u.createMMUser(user)
+				ch.Join(ghost)
+				if adder, ok := extraProps["username"].(string); ok {
+					ch.SpoofMessage("system", "added "+added+" to the channel by "+adder)
+				}
+			}
+			return
+		}
+		if data.Type == "system_remove_from_channel" {
+			if removed, ok := extraProps["removedUsername"].(string); ok {
+				user, resp := u.mc.Client.GetUserByUsername(removed, "")
+				if resp.Error != nil {
+					fmt.Println(resp.Error)
+					return
+				}
+				ghost := u.createMMUser(user)
+				ch.Part(ghost, "")
+				ch.SpoofMessage("system", "removed "+removed+" from the channel")
+			}
+			return
+		}
+
 		if ghost == nil {
 			return
 		}
