@@ -337,6 +337,7 @@ func (u *User) handleWsActionPost(rmsg *model.WebSocketEvent) {
 
 	if data.Type == model.POST_JOIN_LEAVE || data.Type == "system_leave_channel" || data.Type == "system_join_channel" || data.Type == "system_add_to_channel" || data.Type == "system_remove_from_channel" {
 		logger.Debugf("join/leave message. not relaying %#v", data.Message)
+		u.mc.UpdateChannels()
 		ch = u.Srv.Channel(data.ChannelId)
 
 		if data.Type == "system_add_to_channel" {
@@ -347,6 +348,11 @@ func (u *User) handleWsActionPost(rmsg *model.WebSocketEvent) {
 					return
 				}
 				ghost := u.createMMUser(user)
+				// we are added ourselves
+				if user.Id == u.mc.User.Id {
+					u.syncMMChannel(data.ChannelId, u.mc.GetChannelName(data.ChannelId))
+					return
+				}
 				ch.Join(ghost)
 				if adder, ok := extraProps["username"].(string); ok {
 					ch.SpoofMessage("system", "added "+added+" to the channel by "+adder)
@@ -362,6 +368,12 @@ func (u *User) handleWsActionPost(rmsg *model.WebSocketEvent) {
 					return
 				}
 				ghost := u.createMMUser(user)
+				// we are removed
+				// TODO this doesn't actually work yet, we don't see the "system_remove_from_channel" message when we are removed ourselves
+				if user.Id == u.mc.User.Id {
+					ch.Part(u, "")
+					return
+				}
 				ch.Part(ghost, "")
 				ch.SpoofMessage("system", "removed "+removed+" from the channel")
 			}
