@@ -326,7 +326,7 @@ func (s *server) welcome(u *User) error {
 			Prefix:   s.Prefix(),
 			Command:  irc.RPL_MYINFO,
 			Params:   []string{u.Nick},
-			Trailing: fmt.Sprintf("%s %s o o", s.config.Name, s.config.Version),
+			Trailing: fmt.Sprintf("%s %s o o debugmode %t", s.config.Name, s.config.Version, IsDebugLevel()),
 		},
 		&irc.Message{
 			Prefix:   s.Prefix(),
