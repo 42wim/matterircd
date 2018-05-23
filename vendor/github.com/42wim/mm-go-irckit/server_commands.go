@@ -312,33 +312,18 @@ func CmdMotd(s Server, u *User, _ *irc.Message) error {
 
 // CmdNames is a handler for the /NAMES command.
 func CmdNames(s Server, u *User, msg *irc.Message) error {
-	channels := msg.Params
+	if len(msg.Params) < 1 {
+		return nil
+	}
 
-	r := []*irc.Message{}
-	for _, channel := range channels {
+	for _, channel := range strings.Split(msg.Params[0], ",") {
 		ch, exists := s.HasChannel(channel)
 		if !exists {
 			continue
 		}
-		// FIXME: This needs to be broken up into multiple messages to fit <510 chars
-		r = append(r, &irc.Message{
-			Prefix:   s.Prefix(),
-			Command:  irc.RPL_NAMREPLY,
-			Params:   []string{u.Nick, "=", channel},
-			Trailing: strings.Join(ch.Names(), " "),
-		})
+		ch.SendNamesResponse(u);
 	}
-	endParams := []string{u.Nick}
-	if len(channels) == 1 {
-		endParams = append(endParams, channels[0])
-	}
-	r = append(r, &irc.Message{
-		Prefix:   s.Prefix(),
-		Params:   endParams,
-		Command:  irc.RPL_ENDOFNAMES,
-		Trailing: "End of /NAMES list.",
-	})
-	return u.Encode(r...)
+	return nil
 }
 
 // CmdNick is a handler for the /NICK command.

@@ -365,7 +365,8 @@ func (u *User) syncSlackChannel(id string, name string) {
 	}
 
 	ch := srv.Channel(id)
-	ch.Topic(u, info.Topic.Value)
+	svc, _ := srv.HasUser("slack")
+	ch.Topic(svc, info.Topic.Value)
 	if !ch.HasUser(u) {
 		logger.Debugf("syncSlackchannel adding myself to %s (id: %s)", name, id)
 		ch.Join(u)
@@ -395,7 +396,8 @@ func (u *User) syncSlackGroup(id string, name string) {
 	}
 
 	ch := srv.Channel(id)
-	ch.Topic(u, info.Topic.Value)
+	svc, _ := srv.HasUser("slack")
+	ch.Topic(svc, info.Topic.Value)
 	if !ch.HasUser(u) {
 		logger.Debugf("syncSlackchannel adding myself to %s (id: %s)", name, id)
 		ch.Join(u)

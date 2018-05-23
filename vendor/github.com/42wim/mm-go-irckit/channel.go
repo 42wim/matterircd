@@ -32,6 +32,9 @@ type Channel interface {
 	// Invite prompts the User to join the Channel on behalf of Prefixer.
 	Invite(from Prefixer, u *User) error
 
+	// SendNamesResponse sends a User messages indicating the current members of the Channel.
+	SendNamesResponse(u *User) error
+
 	// Join introduces the User to the channel (handler for JOIN).
 	Join(u *User) error
 
@@ -232,49 +235,9 @@ func (ch *channel) Topic(from Prefixer, text string) {
 	ch.mu.RUnlock()
 }
 
-// Join introduces the User to the channel (sends relevant messages, stores).
-func (ch *channel) Join(u *User) error {
-	// TODO: Check if user is already here?
-	ch.mu.Lock()
-	if _, exists := ch.usersIdx[u]; exists {
-		ch.mu.Unlock()
-		return nil
-	}
-	topic := ch.topic
-	ch.usersIdx[u] = struct{}{}
-	ch.mu.Unlock()
-	u.Lock()
-	u.channels[ch] = struct{}{}
-	u.Unlock()
-
-	// speed-up & users join
-	if ch.name == "&users" && u.MmGhostUser {
-		return nil
-	}
-
-	msg := &irc.Message{
-		Prefix:  u.Prefix(),
-		Command: irc.JOIN,
-		Params:  []string{ch.name},
-	}
-
-	// only send join messages to real users
-	for to := range ch.usersIdx {
-		if to.MmGhostUser == false {
-			to.Encode(msg)
-		}
-	}
-
+// SendNamesResponse sends a User messages indicating the current members of the Channel.
+func (ch *channel) SendNamesResponse(u *User) error {
 	msgs := []*irc.Message{}
-	if topic != "" {
-		msgs = append(msgs, &irc.Message{
-			Prefix:   ch.Prefix(),
-			Command:  irc.RPL_TOPIC,
-			Params:   []string{u.Nick, ch.name},
-			Trailing: topic,
-		})
-	}
-
 	line := ""
 	i := 0
 	for _, name := range ch.Names() {
@@ -305,8 +268,56 @@ func (ch *channel) Join(u *User) error {
 		Params:   []string{u.Nick, ch.name},
 		Command:  irc.RPL_ENDOFNAMES,
 		Trailing: "End of /NAMES list.",
-	},
-	)
+	})
+
+	return u.Encode(msgs...)
+}
+
+// Join introduces a User to the channel (sends relevant messages, stores).
+func (ch *channel) Join(u *User) error {
+	// TODO: Check if user is already here?
+	ch.mu.Lock()
+	if _, exists := ch.usersIdx[u]; exists {
+		ch.mu.Unlock()
+		return nil
+	}
+	topic := ch.topic
+	ch.usersIdx[u] = struct{}{}
+	ch.mu.Unlock()
+	u.Lock()
+	u.channels[ch] = struct{}{}
+	u.Unlock()
+
+	// speed up &users join
+	if ch.name == "&users" && u.MmGhostUser {
+		return nil
+	}
+
+	msg := &irc.Message{
+		Prefix:  u.Prefix(),
+		Command: irc.JOIN,
+		Params:  []string{ch.name},
+	}
+
+	// send regular users a notification of the join
+	for to := range ch.usersIdx {
+		// only send join messages to real users
+		if to.MmGhostUser == false {
+			to.Encode(msg)
+		}
+	}
+
+	msgs := []*irc.Message{}
+	if topic != "" {
+		msgs = append(msgs, &irc.Message{
+			Prefix:   ch.Prefix(),
+			Command:  irc.RPL_TOPIC,
+			Params:   []string{u.Nick, ch.name},
+			Trailing: topic,
+		})
+	}
+
+	ch.SendNamesResponse(u);
 
 	return u.Encode(msgs...)
 }

@@ -40,6 +40,7 @@ type MmCfg struct {
 	JoinExclude        []string
 	JoinInclude        []string
 	PartFake           bool
+	PrefixMainTeam     bool
 }
 
 func NewUserMM(c net.Conn, srv Server, cfg *MmCfg) *User {
@@ -58,6 +59,7 @@ func NewUserMM(c net.Conn, srv Server, cfg *MmCfg) *User {
 	u.MmInfo.Cfg.PartFake = cfg.MattermostSettings.PartFake
 	u.MmInfo.Cfg.Insecure = cfg.MattermostSettings.Insecure
 	u.MmInfo.Cfg.SkipTLSVerify = cfg.MattermostSettings.SkipTLSVerify
+	u.MmInfo.Cfg.PrefixMainTeam = cfg.MattermostSettings.PrefixMainTeam
 
 	u.idleStop = make(chan struct{})
 	// used for login
@@ -192,7 +194,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *model.Channel, throttle <
 			spoof = u.MsgSpoofUser
 		} else {
 			channelName := mmchannel.Name
-			if mmchannel.TeamId != u.mc.Team.Id {
+			if mmchannel.TeamId != u.mc.Team.Id || u.Cfg.PrefixMainTeam {
 				channelName = u.mc.GetTeamName(mmchannel.TeamId) + "/" + mmchannel.Name
 			}
 			u.syncMMChannel(mmchannel.Id, channelName)
@@ -560,7 +562,8 @@ func (u *User) syncMMChannel(id string, name string) {
 						ch.Join(u)
 					}
 				}
-				ch.Topic(u, u.mc.GetChannelHeader(id))
+				svc, _ := srv.HasUser("mattermost")
+				ch.Topic(svc, u.mc.GetChannelHeader(id))
 			}
 			break
 		}
