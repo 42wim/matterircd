@@ -46,6 +46,9 @@ Restrict = ["chat.mycompany.com"]
 #skip verification of mattermost certificate chain and hostname (default false)
 SkipTLSVerify = false
 
+#also add the main team prefix to the channel name #team/channel (default false)
+PrefixMainTeam = false
+
 [slack]
 #Blacklist specific users from connecting.
 #As we only connect using tokens, this will first do a ccnnection to see what username the token is from. If this

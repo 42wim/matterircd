@@ -39,6 +39,7 @@ type Settings struct {
 	Restrict       []string
 	SkipTLSVerify  bool
 	UseDisplayName bool
+	PrefixMainTeam bool
 }
 
 func LoadConfig(cfgfile string, defaultcfg Config) *Config {
