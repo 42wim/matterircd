@@ -405,25 +405,26 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 		return nil
 	}
 	query := msg.Params[0]
-	if ch, exists := s.HasChannel(query); exists {
-		//p := strings.Replace(query, "#", "", -1)
-		msg.Trailing = strings.Replace(msg.Trailing, "\r", "", -1)
-		// fix non-rfc clients
-		if !strings.HasPrefix(msg.Trailing, ":") {
-			if len(msg.Params) == 2 {
-				msg.Trailing = msg.Params[1]
-			}
-		}
-		// CTCP ACTION (/me)
-		if strings.HasPrefix(msg.Trailing, "\x01ACTION ") {
-			msg.Trailing = strings.Replace(msg.Trailing, "\x01ACTION ", "", -1)
-			msg.Trailing = strings.Replace(msg.Trailing, "\x01", "", -1)
-			msg.Trailing = "*" + msg.Trailing + "*"
-		}
-		// strip IRC colors
-		re := regexp.MustCompile(`[[:cntrl:]](?:\d{1,2}(?:,\d{1,2})?)?`)
-		msg.Trailing = re.ReplaceAllString(msg.Trailing, "")
 
+	//p := strings.Replace(query, "#", "", -1)
+	msg.Trailing = strings.Replace(msg.Trailing, "\r", "", -1)
+	// fix non-rfc clients
+	if !strings.HasPrefix(msg.Trailing, ":") {
+		if len(msg.Params) == 2 {
+			msg.Trailing = msg.Params[1]
+		}
+	}
+	// CTCP ACTION (/me)
+	if strings.HasPrefix(msg.Trailing, "\x01ACTION ") {
+		msg.Trailing = strings.Replace(msg.Trailing, "\x01ACTION ", "", -1)
+		msg.Trailing = strings.Replace(msg.Trailing, "\x01", "", -1)
+		msg.Trailing = "*" + msg.Trailing + "*"
+	}
+	// strip IRC colors
+	re := regexp.MustCompile(`[[:cntrl:]](?:\d{1,2}(?:,\d{1,2})?)?`)
+	msg.Trailing = re.ReplaceAllString(msg.Trailing, "")
+
+	if ch, exists := s.HasChannel(query); exists {
 		if ch.Service() == "slack" {
 			np := slack.NewPostMessageParameters()
 			np.AsUser = true
