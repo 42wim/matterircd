@@ -317,6 +317,7 @@ func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
 		}
 	}
 
+	spoofUsername = strings.Replace(spoofUsername, " ", "_", -1)
 	for _, m := range msgs {
 		// cleanup the message
 		m = u.replaceMention(m)
