@@ -158,6 +158,12 @@ Login
 /msg slack login <token>
 ```
 
+Or use team/login/pass to login
+```
+/msg slack login <team> <login> <password>
+```
+After login it'll show you a token you can use for the token login
+
 ## Docker
 
 A docker image for easily setting up and running matterircd on a server is available at [docker hub](https://hub.docker.com/r/42wim/matterircd/).

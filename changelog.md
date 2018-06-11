@@ -1,3 +1,18 @@
+# v0.18.0
+## New features
+* general: Add debugmode true/false message in banner
+* irc: Add PrefixMainTeam setting. Also set the main team name as prefix in the irc-channel. See matterircd.toml.example
+* slack: Add support for login <team> <user> <pass> for slack (as addition to login <token>)
+
+## Bugfix
+* mattermost: update channels when adding/removing users to new channel. Alsso join channel when we are added. Closes 42wim/matterircd#178
+* irc: fix NAMES reply to send entire member list 
+* irc: Use service for on-join topic changes (instead of your own username)
+* irc: Handle \r, ACTION and colour sanitization everywhere
+* irc: Fix concurrent map read/write. Closes 42wim/matterircd#188
+* slack: Make sure to return for not implemented functions in slack. Closes 42wim/matterircd#186
+* slack: Replace spaces to underscore in botnames. Closes 42wim/matterircd#184
+
 # v0.17.3
 ## Bugfix
 * slack: Fix issues with bots with spaces in the name
