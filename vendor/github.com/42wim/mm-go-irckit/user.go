@@ -33,9 +33,9 @@ type User struct {
 	Conn
 
 	sync.RWMutex
-	Nick        string // From NICK command
-	User        string // From USER command
-	Real        string // From USER command
+	Nick        string   // From NICK command
+	User        string   // From USER command
+	Real        string   // From USER command
 	Pass        []string // From PASS command
 	Host        string
 	Roles       string
@@ -123,6 +123,14 @@ func (user *User) Encode(msgs ...*irc.Message) (err error) {
 		return nil
 	}
 	for _, msg := range msgs {
+		if msg.Command == "PRIVMSG" && (msg.Prefix.Name == "slack" || msg.Prefix.Name == "mattermost") && msg.Prefix.Host == "service" && strings.Contains(msg.Trailing, "token") {
+			logger.Debugf("-> %s %s %s", msg.Command, msg.Prefix.Name, "[token redacted]")
+			err := user.Conn.Encode(msg)
+			if err != nil {
+				return err
+			}
+			continue
+		}
 		logger.Debugf("-> %s", msg)
 		err := user.Conn.Encode(msg)
 		if err != nil {

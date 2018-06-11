@@ -1,8 +1,12 @@
 package irckit
 
 import (
+	"encoding/json"
 	"errors"
 	"html"
+	"io/ioutil"
+	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"sync"
@@ -22,7 +26,67 @@ type SlackInfo struct {
 	sync.RWMutex
 }
 
+// code taken from tanya project
+// see https://github.com/nolanlum/tanya/blob/master/LICENSE
+func (u *User) getSlackToken() (string, error) {
+	type findTeamResponseFull struct {
+		SSO    bool   `json:"sso"`
+		TeamID string `json:"team_id"`
+		slack.SlackResponse
+	}
+	type loginResponseFull struct {
+		Token string `json:"token"`
+		slack.SlackResponse
+	}
+
+	resp, err := http.PostForm("https://slack.com/api/auth.findTeam", url.Values{"domain": {u.Credentials.Team}})
+	defer resp.Body.Close()
+
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	var findTeamResponse findTeamResponseFull
+	err = json.Unmarshal(body, &findTeamResponse)
+	if err != nil {
+		return "", err
+	}
+	if findTeamResponse.SSO {
+		return "", errors.New("SSO teams not yet supported")
+	}
+	resp, err = http.PostForm("https://slack.com/api/auth.signin",
+		url.Values{"team": {findTeamResponse.TeamID}, "email": {u.Credentials.Login}, "password": {u.Credentials.Pass}})
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	body, err = ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	var loginResponse loginResponseFull
+	err = json.Unmarshal(body, &loginResponse)
+	if err != nil {
+		return "", err
+	}
+
+	if !loginResponse.Ok {
+		return "", errors.New(loginResponse.Error)
+	}
+	return loginResponse.Token, nil
+}
+
 func (u *User) loginToSlack() (*slack.Client, error) {
+	var err error
+	if u.Credentials != nil {
+		u.Token, err = u.getSlackToken()
+		if err != nil {
+			return nil, err
+		}
+	}
 	u.sc = slack.New(u.Token)
 	u.rtm = u.sc.NewRTM()
 	u.Lock()
