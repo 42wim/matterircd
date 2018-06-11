@@ -300,12 +300,14 @@ func (ch *channel) Join(u *User) error {
 	}
 
 	// send regular users a notification of the join
+	ch.mu.RLock()
 	for to := range ch.usersIdx {
 		// only send join messages to real users
 		if to.MmGhostUser == false {
 			to.Encode(msg)
 		}
 	}
+	ch.mu.RUnlock()
 
 	msgs := []*irc.Message{}
 	if topic != "" {
@@ -317,7 +319,7 @@ func (ch *channel) Join(u *User) error {
 		})
 	}
 
-	ch.SendNamesResponse(u);
+	ch.SendNamesResponse(u)
 
 	return u.Encode(msgs...)
 }

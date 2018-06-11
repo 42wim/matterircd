@@ -156,6 +156,7 @@ func login(u *User, toUser *User, args []string, service string) {
 func search(u *User, toUser *User, args []string, service string) {
 	if service == "slack" {
 		u.MsgUser(toUser, "not implemented")
+		return
 	}
 	postlist := u.mc.SearchPosts(strings.Join(args, " "))
 	if postlist == nil || len(postlist.Order) == 0 {
@@ -188,6 +189,7 @@ func search(u *User, toUser *User, args []string, service string) {
 func searchUsers(u *User, toUser *User, args []string, service string) {
 	if service == "slack" {
 		u.MsgUser(toUser, "not implemented")
+		return
 	}
 	users, resp := u.mc.Client.SearchUsers(&model.UserSearch{Term: strings.Join(args, " ")})
 	if resp.Error != nil {
@@ -202,6 +204,7 @@ func searchUsers(u *User, toUser *User, args []string, service string) {
 func scrollback(u *User, toUser *User, args []string, service string) {
 	if service == "slack" {
 		u.MsgUser(toUser, "not implemented")
+		return
 	}
 	if len(args) != 2 {
 		u.MsgUser(toUser, "need SCROLLBACK <channel> <lines>")
