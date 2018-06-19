@@ -31,7 +31,7 @@ type chatResponseFull struct {
 
 // PostMessageParameters contains all the parameters necessary (including the optional ones) for a PostMessage() request
 type PostMessageParameters struct {
-	Username        string       `json:"user_name"`
+	Username        string       `json:"username"`
 	AsUser          bool         `json:"as_user"`
 	Parse           string       `json:"parse"`
 	ThreadTimestamp string       `json:"thread_ts"`
@@ -157,7 +157,7 @@ func (api *Client) SendMessageContext(ctx context.Context, channelID string, opt
 		return "", "", "", err
 	}
 
-	return response.Channel, response.Timestamp, response.Text, nil
+	return response.Channel, response.Timestamp, response.Text, response.Err()
 }
 
 // ApplyMsgOptions utility function for debugging/testing chat requests.
@@ -331,11 +331,32 @@ func MsgOptionDisableMarkdown() MsgOption {
 	}
 }
 
+// this function combines multiple options into a single option.
+func MsgOptionCompose(options ...MsgOption) MsgOption {
+	return func(c *sendConfig) error {
+		for _, opt := range options {
+			if err := opt(c); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+}
+
+func MsgOptionParse(b bool) MsgOption {
+	return func(c *sendConfig) error {
+		var v string
+		if b { v = "1" } else { v = "0" }
+		c.values.Set("parse", v)
+		return nil
+	}
+}
+
 // MsgOptionPostMessageParameters maintain backwards compatibility.
 func MsgOptionPostMessageParameters(params PostMessageParameters) MsgOption {
 	return func(config *sendConfig) error {
 		if params.Username != DEFAULT_MESSAGE_USERNAME {
-			config.values.Set("username", string(params.Username))
+			config.values.Set("username", params.Username)
 		}
 
 		// chat.postEphemeral support
@@ -347,7 +368,7 @@ func MsgOptionPostMessageParameters(params PostMessageParameters) MsgOption {
 		MsgOptionAsUser(params.AsUser)(config)
 
 		if params.Parse != DEFAULT_MESSAGE_PARSE {
-			config.values.Set("parse", string(params.Parse))
+			config.values.Set("parse", params.Parse)
 		}
 		if params.LinkNames != DEFAULT_MESSAGE_LINK_NAMES {
 			config.values.Set("link_names", "1")

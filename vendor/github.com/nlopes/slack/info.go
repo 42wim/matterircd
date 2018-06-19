@@ -152,12 +152,11 @@ type Info struct {
 	Groups   []Group      `json:"groups,omitempty"`
 	Bots     []Bot        `json:"bots,omitempty"`
 	IMs      []IM         `json:"ims,omitempty"`
-	MpIMs    []MpIM       `json:"mpims,omitempty"`
 }
 
 type infoResponseFull struct {
 	Info
-	WebResponse
+	SlackResponse
 }
 
 // GetBotByID returns a bot given a bot id
@@ -205,16 +204,6 @@ func (info Info) GetIMByID(imID string) *IM {
 	for _, im := range info.IMs {
 		if im.ID == imID {
 			return &im
-		}
-	}
-	return nil
-}
-
-// GetMpIMByID returns an multiplayer IM given an multiplayer IM id
-func (info Info) GetMpIMByID(mpimID string) *MpIM {
-	for _, mpim := range info.MpIMs {
-		if mpim.ID == mpimID {
-			return &mpim
 		}
 	}
 	return nil
