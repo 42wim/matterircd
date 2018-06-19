@@ -1,3 +1,7 @@
+# v0.18.1
+## New features
+* mattermost: support mattermost 5.x
+
 # v0.18.0
 ## New features
 * general: Add debugmode true/false message in banner
