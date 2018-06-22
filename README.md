@@ -184,3 +184,10 @@ Also works with windows ;-)
 ![windows](http://snag.gy/cGSCA.jpg)
 
 If you use chrome, you can easily test with [circ](https://chrome.google.com/webstore/detail/circ/bebigdkelppomhhjaaianniiifjbgocn?hl=en-US)
+
+## Guides
+
+Here are some external guides and documentation that might help you get up and
+running more quickly:
+
+* [Breaking out of the Slack walled garden](https://purpleidea.com/blog/2018/06/22/breaking-out-of-the-slack-walled-garden/)
