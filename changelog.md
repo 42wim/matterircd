@@ -1,3 +1,7 @@
+# v0.18.2
+## Bugfix
+* slack: fix panic on websocket bug #189, #196
+
 # v0.18.1
 ## New features
 * mattermost: support mattermost 5.x
