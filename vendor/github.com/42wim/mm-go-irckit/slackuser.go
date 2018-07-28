@@ -209,23 +209,29 @@ func (u *User) addSlackUsersToChannels() {
 	for i := 0; i < 10; i++ {
 		go u.addSlackUserToChannelWorker(channels, throttle)
 	}
-	groups, _ := u.sc.GetGroups(true)
-	mmchannels, _ := u.sc.GetChannels(true)
-	for _, mmchannel := range mmchannels {
-		if mmchannel.IsMember {
-			if mmchannel.IsMpIM && u.Cfg.SlackSettings.JoinMpImOnTalk {
-				continue
-			}
-			logger.Debug("Adding channel", mmchannel)
-			channels <- mmchannel
-		}
+
+	params := slack.GetConversationsParameters{
+		Cursor: "",
+		ExcludeArchived: "true",
+		Limit: 100,
+		Types: []string{ "public_channel", "private_channel", "mpim" },
 	}
-	for _, mmchannel := range groups {
-		if mmchannel.IsMpIM && u.Cfg.SlackSettings.JoinMpImOnTalk {
-			continue
+
+	for {
+		mmchannels, nextCursor, _ := u.sc.GetConversations(&params)
+		params.Cursor = nextCursor
+		for _, mmchannel := range mmchannels {
+			if mmchannel.IsMember {
+				if mmchannel.IsMpIM && u.Cfg.SlackSettings.JoinMpImOnTalk {
+					continue
+				}
+				logger.Debug("Adding channel", mmchannel)
+				channels <- mmchannel
+			}
 		}
-		logger.Debug("Adding private channel", mmchannel)
-		channels <- mmchannel
+		if nextCursor == "" {
+			break
+		}
 	}
 	close(channels)
 }
@@ -410,22 +416,39 @@ func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
 // sync IRC with mattermost channel state
 func (u *User) syncSlackChannel(id string, name string) {
 	srv := u.Srv
-	info, err := u.sc.GetChannelInfo(id)
+	info, err := u.sc.GetConversationInfo(id, false)
 	if err != nil {
 		logger.Info(err)
+	}
+	if info == nil {
+		logger.Info("Unknown channel seen (" + id + ")")
+		return
 	}
 
 	if name == "" {
 		name = info.Name
 	}
 
-	for _, user := range info.Members {
-		if u.sinfo.User.ID != user {
-			//slackuser, _ := u.sc.GetUserInfo(user)
-			slackuser := u.getSlackUser(user)
-			if slackuser != nil {
-				u.addSlackUserToChannel(slackuser, "#"+name, id)
+	params := slack.GetUsersInConversationParameters {
+		ChannelID: id,
+		Cursor: "",
+		Limit: 100,
+	}
+
+	for {
+		members, nextCursor, _ := u.sc.GetUsersInConversation(&params)
+		params.Cursor = nextCursor
+		for _, user := range members {
+			if u.sinfo.User.ID != user {
+				//slackuser, _ := u.sc.GetUserInfo(user)
+				slackuser := u.getSlackUser(user)
+				if slackuser != nil {
+					u.addSlackUserToChannel(slackuser, "#"+name, id)
+				}
 			}
+		}
+		if nextCursor == "" {
+			break
 		}
 	}
 

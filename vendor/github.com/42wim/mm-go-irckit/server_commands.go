@@ -77,11 +77,7 @@ func CmdInvite(s Server, u *User, msg *irc.Message) error {
 	if u.sc != nil {
 		if ch, exists := s.HasChannel(channel); exists {
 			logger.Debugf("inviting %s to %s", other.User, strings.ToUpper(ch.ID()))
-			if strings.HasPrefix(ch.ID(), "c") {
-				u.sc.InviteUserToChannel(strings.ToUpper(ch.ID()), other.User)
-			} else {
-				u.sc.InviteUserToGroup(strings.ToUpper(ch.ID()), other.User)
-			}
+			u.sc.InviteUsersToConversation(strings.ToUpper(ch.ID()), other.User)
 		}
 	}
 
@@ -132,11 +128,7 @@ func CmdKick(s Server, u *User, msg *irc.Message) error {
 	}
 	if u.sc != nil {
 		if ch, exists := s.HasChannel(channel); exists {
-			if strings.HasPrefix(ch.ID(), "c") {
-				u.sc.KickUserFromChannel(strings.ToUpper(ch.ID()), other.User)
-			} else {
-				u.sc.KickUserFromGroup(strings.ToUpper(ch.ID()), other.User)
-			}
+			u.sc.KickUserFromConversation(strings.ToUpper(ch.ID()), other.User)
 		}
 	}
 	return nil
@@ -166,7 +158,8 @@ func CmdJoin(s Server, u *User, msg *irc.Message) error {
 			sync = u.syncMMChannel
 		}
 		if u.sc != nil {
-			mychan, err := u.sc.JoinChannel(channelName)
+			//TODO: handle warnings
+			mychan, _, _, err := u.sc.JoinConversation(channelName)
 			if err != nil {
 				s.EncodeMessage(u, irc.ERR_INVITEONLYCHAN, []string{u.Nick, channel}, "Cannot join channel (+i)")
 				continue
@@ -213,25 +206,28 @@ func CmdList(s Server, u *User, msg *irc.Message) error {
 		}
 	}
 	if u.sc != nil {
-		groups, _ := u.sc.GetGroups(false)
-		channels, _ := u.sc.GetChannels(false)
-		for _, channel := range channels {
-			channelName := "#" + channel.Name
-			r = append(r, &irc.Message{
-				Prefix:   s.Prefix(),
-				Command:  irc.RPL_LIST,
-				Params:   []string{u.Nick, channelName, "0", strings.Replace(channel.Topic.Value, "\n", " | ", -1)},
-				Trailing: "",
-			})
+		params := slack.GetConversationsParameters{
+			Cursor: "",
+			ExcludeArchived: "true",
+			Limit: 100,
+			Types: []string{ "public_channel", "private_channel", "mpim" },
 		}
-		for _, channel := range groups {
-			channelName := "#" + channel.Name
-			r = append(r, &irc.Message{
-				Prefix:   s.Prefix(),
-				Command:  irc.RPL_LIST,
-				Params:   []string{u.Nick, channelName, "0", strings.Replace(channel.Topic.Value, "\n", " | ", -1)},
-				Trailing: "",
-			})
+
+		for {
+			conversations, nextCursor, _ := u.sc.GetConversations(&params)
+			params.Cursor = nextCursor
+			for _, channel := range conversations {
+				channelName := "#" + channel.Name
+				r = append(r, &irc.Message{
+					Prefix:   s.Prefix(),
+					Command:  irc.RPL_LIST,
+					Params:   []string{u.Nick, channelName, "0", strings.Replace(channel.Topic.Value, "\n", " | ", -1)},
+					Trailing: "",
+				})
+				if nextCursor == "" {
+					break
+				}
+			}
 		}
 	}
 	r = append(r, &irc.Message{
@@ -362,11 +358,7 @@ func CmdPart(s Server, u *User, msg *irc.Message) error {
 				u.mc.Client.RemoveUserFromChannel(ch.ID(), u.mc.User.Id)
 			}
 			if u.sc != nil {
-				if strings.HasPrefix(ch.ID(), "c") {
-					u.sc.LeaveChannel(strings.ToUpper(ch.ID()))
-				} else {
-					u.sc.LeaveGroup(strings.ToUpper(ch.ID()))
-				}
+				u.sc.LeaveConversation(strings.ToUpper(ch.ID()))
 			}
 		}
 		// part all other (ghost)users on the channel
@@ -507,7 +499,7 @@ func CmdTopic(s Server, u *User, msg *irc.Message) error {
 			u.mc.UpdateChannelHeader(ch.ID(), msg.Trailing)
 		}
 		if u.sc != nil {
-			u.sc.SetChannelTopic(strings.ToUpper(ch.ID()), msg.Trailing)
+			u.sc.SetTopicOfConversation(strings.ToUpper(ch.ID()), msg.Trailing)
 		}
 	} else {
 		r := make([]*irc.Message, 0, ch.Len()+1)
