@@ -211,10 +211,10 @@ func (u *User) addSlackUsersToChannels() {
 	}
 
 	params := slack.GetConversationsParameters{
-		Cursor: "",
+		Cursor:          "",
 		ExcludeArchived: "true",
-		Limit: 100,
-		Types: []string{ "public_channel", "private_channel", "mpim" },
+		Limit:           100,
+		Types:           []string{"public_channel", "private_channel", "mpim"},
 	}
 
 	for {
@@ -387,6 +387,12 @@ func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
 		}
 	}
 
+	if len(rmsg.Files) > 0 {
+		for _, f := range rmsg.Files {
+			msgs = append(msgs, f.URLPrivate)
+		}
+	}
+
 	spoofUsername = strings.Replace(spoofUsername, " ", "_", -1)
 	for _, m := range msgs {
 		// cleanup the message
@@ -429,10 +435,10 @@ func (u *User) syncSlackChannel(id string, name string) {
 		name = info.Name
 	}
 
-	params := slack.GetUsersInConversationParameters {
+	params := slack.GetUsersInConversationParameters{
 		ChannelID: id,
-		Cursor: "",
-		Limit: 100,
+		Cursor:    "",
+		Limit:     100,
 	}
 
 	for {
