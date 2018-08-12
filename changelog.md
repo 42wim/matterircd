@@ -1,3 +1,8 @@
+# unreleased
+
+## Bugfix
+* slack: api changed, show uploaded files again
+
 # v0.18.2
 ## Bugfix
 * slack: fix panic on websocket bug #189, #196
