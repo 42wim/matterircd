@@ -196,7 +196,7 @@
 			"importpath": "github.com/nlopes/slack",
 			"repository": "https://github.com/nlopes/slack",
 			"vcs": "git",
-			"revision": "2123bd8e3090415072d6bfdab8a9096dea25ac20",
+			"revision": "f7d338b09d6f3c42ffcf0ab337ddd5e3f65af904",
 			"branch": "master",
 			"notests": true
 		},
@@ -213,6 +213,14 @@
 			"repository": "https://github.com/pelletier/go-toml",
 			"vcs": "git",
 			"revision": "16398bac157da96aa88f98a2df640c7f32af1da2",
+			"branch": "master",
+			"notests": true
+		},
+		{
+			"importpath": "github.com/pkg/errors",
+			"repository": "https://github.com/pkg/errors",
+			"vcs": "git",
+			"revision": "816c9085562cd7ee03e7f8188a1cfd942858cded",
 			"branch": "master",
 			"notests": true
 		},

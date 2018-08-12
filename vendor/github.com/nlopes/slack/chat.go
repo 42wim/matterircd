@@ -23,10 +23,21 @@ const (
 )
 
 type chatResponseFull struct {
-	Channel   string `json:"channel"`
-	Timestamp string `json:"ts"`
-	Text      string `json:"text"`
+	Channel          string `json:"channel"`
+	Timestamp        string `json:"ts"`         //Regualr message timestamp
+	MessageTimeStamp string `json:"message_ts"` //Ephemeral message timestamp
+	Text             string `json:"text"`
 	SlackResponse
+}
+
+// getMessageTimestamp will inspect the `chatResponseFull` to ruturn a timestamp value
+// in `chat.postMessage` its under `ts`
+// in `chat.postEphemeral` its under `message_ts`
+func (c chatResponseFull) getMessageTimestamp() string {
+	if len(c.Timestamp) > 0 {
+		return c.Timestamp
+	}
+	return c.MessageTimeStamp
 }
 
 // PostMessageParameters contains all the parameters necessary (including the optional ones) for a PostMessage() request
@@ -153,11 +164,11 @@ func (api *Client) SendMessageContext(ctx context.Context, channelID string, opt
 		return "", "", "", err
 	}
 
-	if err = post(ctx, api.httpclient, string(config.mode), config.values, &response, api.debug); err != nil {
+	if err = postSlackMethod(ctx, api.httpclient, string(config.mode), config.values, &response, api.debug); err != nil {
 		return "", "", "", err
 	}
 
-	return response.Channel, response.Timestamp, response.Text, response.Err()
+	return response.Channel, response.getMessageTimestamp(), response.Text, response.Err()
 }
 
 // ApplyMsgOptions utility function for debugging/testing chat requests.
@@ -196,6 +207,7 @@ const (
 	chatPostMessage   sendMode = "chat.postMessage"
 	chatDelete        sendMode = "chat.delete"
 	chatPostEphemeral sendMode = "chat.postEphemeral"
+	chatMeMessage     sendMode = "chat.meMessage"
 )
 
 type sendConfig struct {
@@ -232,6 +244,14 @@ func MsgOptionPostEphemeral2(userID string) MsgOption {
 		MsgOptionUser(userID)(config)
 		config.values.Del("ts")
 
+		return nil
+	}
+}
+
+// MsgOptionMeMessage posts a "me message" type from the calling user
+func MsgOptionMeMessage() MsgOption {
+	return func(config *sendConfig) error {
+		config.mode = chatMeMessage
 		return nil
 	}
 }
@@ -331,6 +351,22 @@ func MsgOptionDisableMarkdown() MsgOption {
 	}
 }
 
+// MsgOptionTS sets the thread TS of the message to enable creating or replying to a thread
+func MsgOptionTS(ts string) MsgOption {
+	return func(config *sendConfig) error {
+		config.values.Set("thread_ts", ts)
+		return nil
+	}
+}
+
+// MsgOptionBroadcast sets reply_broadcast to true
+func MsgOptionBroadcast() MsgOption {
+	return func(config *sendConfig) error {
+		config.values.Set("reply_broadcast", "true")
+		return nil
+	}
+}
+
 // this function combines multiple options into a single option.
 func MsgOptionCompose(options ...MsgOption) MsgOption {
 	return func(c *sendConfig) error {
@@ -346,7 +382,11 @@ func MsgOptionCompose(options ...MsgOption) MsgOption {
 func MsgOptionParse(b bool) MsgOption {
 	return func(c *sendConfig) error {
 		var v string
-		if b { v = "1" } else { v = "0" }
+		if b {
+			v = "1"
+		} else {
+			v = "0"
+		}
 		c.values.Set("parse", v)
 		return nil
 	}
