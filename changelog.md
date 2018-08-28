@@ -1,7 +1,9 @@
-# unreleased
+# v0.18.3
 
 ## Bugfix
 * slack: api changed, show uploaded files again
+
+Because of changes in slack API and the forced use of pagination, big channels with lots of users can take a while to load.
 
 # v0.18.2
 ## Bugfix
