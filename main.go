@@ -50,6 +50,8 @@ func main() {
 	flag.StringVar(&cfg.TLSDir, "tlsdir", ".", "directory to look for key.pem and cert.pem.")
 	flag.Parse()
 
+	// migrate config settings to mattermost settings
+	cfg = *config.Migrate(cfg)
 	// if -config was set, load the config file (overrides args)
 	if *flagConfig != "" {
 		cfg = *config.LoadConfig(*flagConfig, cfg)

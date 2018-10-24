@@ -42,11 +42,7 @@ type Settings struct {
 	PrefixMainTeam bool
 }
 
-func LoadConfig(cfgfile string, defaultcfg Config) *Config {
-	if _, err := toml.DecodeFile(cfgfile, &defaultcfg); err != nil {
-		Logger.Fatalf("Error loading config file %s: %s", cfgfile, err)
-	}
-	Logger.Infof("Loaded config from %s", cfgfile)
+func Migrate(defaultcfg Config) *Config {
 	// migratie mattermost specific settings from general to mattermost settings
 	if len(defaultcfg.Mattermost.JoinInclude) == 0 {
 		defaultcfg.Mattermost.JoinInclude = defaultcfg.JoinInclude
@@ -73,4 +69,13 @@ func LoadConfig(cfgfile string, defaultcfg Config) *Config {
 		defaultcfg.Mattermost.SkipTLSVerify = defaultcfg.SkipTLSVerify
 	}
 	return &defaultcfg
+}
+
+func LoadConfig(cfgfile string, defaultcfg Config) *Config {
+	if _, err := toml.DecodeFile(cfgfile, &defaultcfg); err != nil {
+		Logger.Fatalf("Error loading config file %s: %s", cfgfile, err)
+	}
+	Logger.Infof("Loaded config from %s", cfgfile)
+	// migratie mattermost specific settings from general to mattermost settings
+	return Migrate(defaultcfg)
 }
