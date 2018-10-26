@@ -5,7 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/42wim/matterircd/config"
-	"github.com/42wim/mm-go-irckit"
+	"github.com/42wim/matterircd/mm-go-irckit"
 	"github.com/sirupsen/logrus"
 	"net"
 	"os"
