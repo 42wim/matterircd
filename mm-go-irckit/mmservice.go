@@ -122,19 +122,23 @@ func login(u *User, toUser *User, args []string, service string) {
 		// no server or team
 		if cred.Team != "" && cred.Server != "" {
 			u.MsgUser(toUser, "need LOGIN <login> <pass>")
+			u.MsgUser(toUser, "when using a personal token replace <pass> with token=<yourtoken>")
 			return
 		}
 		// server missing
 		if cred.Team != "" {
 			u.MsgUser(toUser, "need LOGIN <server> <login> <pass>")
+			u.MsgUser(toUser, "when using a personal token replace <pass> with token=<yourtoken>")
 			return
 		}
 		// team missing
 		if cred.Server != "" {
 			u.MsgUser(toUser, "need LOGIN <team> <login> <pass>")
+			u.MsgUser(toUser, "when using a personal token replace <pass> with token=<yourtoken>")
 			return
 		}
 		u.MsgUser(toUser, "need LOGIN <server> <team> <login> <pass>")
+		u.MsgUser(toUser, "when using a personal token replace <pass> with token=<yourtoken>")
 		return
 	}
 
