@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
+	prefixed "github.com/matterbridge/logrus-prefixed-formatter"
 	log "github.com/sirupsen/logrus"
-	prefixed "github.com/x-cray/logrus-prefixed-formatter"
 
 	"github.com/gorilla/websocket"
 	"github.com/hashicorp/golang-lru"
@@ -26,6 +26,8 @@ type Credentials struct {
 	Login         string
 	Team          string
 	Pass          string
+	Token         string
+	CookieToken   bool
 	Server        string
 	NoTLS         bool
 	SkipTLSVerify bool
@@ -117,6 +119,23 @@ func (m *MMClient) Login() error {
 	m.Client.HttpClient.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: m.SkipTLSVerify}, Proxy: http.ProxyFromEnvironment}
 	m.Client.HttpClient.Timeout = time.Second * 10
 
+	if strings.Contains(m.Credentials.Pass, model.SESSION_COOKIE_TOKEN) {
+		token := strings.Split(m.Credentials.Pass, model.SESSION_COOKIE_TOKEN+"=")
+		if len(token) != 2 {
+			return errors.New("incorrect MMAUTHTOKEN. valid input is MMAUTHTOKEN=yourtoken")
+		}
+		m.Credentials.Token = token[1]
+		m.Credentials.CookieToken = true
+	}
+
+	if strings.Contains(m.Credentials.Pass, "token=") {
+		token := strings.Split(m.Credentials.Pass, "token=")
+		if len(token) != 2 {
+			return errors.New("incorrect personal token. valid input is token=yourtoken")
+		}
+		m.Credentials.Token = token[1]
+	}
+
 	for {
 		d := b.Duration()
 		// bogus call to get the serverversion
@@ -144,22 +163,22 @@ func (m *MMClient) Login() error {
 	var logmsg = "trying login"
 	for {
 		m.log.Debugf("%s %s %s %s", logmsg, m.Credentials.Team, m.Credentials.Login, m.Credentials.Server)
-		if strings.Contains(m.Credentials.Pass, model.SESSION_COOKIE_TOKEN) {
-			m.log.Debugf(logmsg + " with token")
-			token := strings.Split(m.Credentials.Pass, model.SESSION_COOKIE_TOKEN+"=")
-			if len(token) != 2 {
-				return errors.New("incorrect MMAUTHTOKEN. valid input is MMAUTHTOKEN=yourtoken")
-			}
-			m.Client.HttpClient.Jar = m.createCookieJar(token[1])
-			m.Client.AuthToken = token[1]
+		if m.Credentials.Token != "" {
 			m.Client.AuthType = model.HEADER_BEARER
+			m.Client.AuthToken = m.Credentials.Token
+			if m.Credentials.CookieToken {
+				m.log.Debugf(logmsg + " with cookie (MMAUTH) token")
+				m.Client.HttpClient.Jar = m.createCookieJar(m.Credentials.Token)
+			} else {
+				m.log.Debugf(logmsg + " with personal token")
+			}
 			m.User, resp = m.Client.GetMe("")
 			if resp.Error != nil {
 				return resp.Error
 			}
 			if m.User == nil {
 				m.log.Errorf("LOGIN TOKEN: %s is invalid", m.Credentials.Pass)
-				return errors.New("invalid " + model.SESSION_COOKIE_TOKEN)
+				return errors.New("invalid token")
 			}
 		} else {
 			m.User, resp = m.Client.Login(m.Credentials.Login, m.Credentials.Pass)
@@ -310,6 +329,11 @@ func (m *MMClient) parseMessage(rmsg *Message) {
 	switch rmsg.Raw.Event {
 	case model.WEBSOCKET_EVENT_POSTED, model.WEBSOCKET_EVENT_POST_EDITED, model.WEBSOCKET_EVENT_POST_DELETED:
 		m.parseActionPost(rmsg)
+	case "user_updated":
+		user := rmsg.Raw.Data["user"].(map[string]interface{})
+		if _, ok := user["id"].(string); ok {
+			m.UpdateUser(user["id"].(string))
+		}
 		/*
 			case model.ACTION_USER_REMOVED:
 				m.handleWsActionUserRemoved(&rmsg)
@@ -339,7 +363,7 @@ func (m *MMClient) parseActionPost(rmsg *Message) {
 	data := model.PostFromJson(strings.NewReader(rmsg.Raw.Data["post"].(string)))
 	// we don't have the user, refresh the userlist
 	if m.GetUser(data.UserId) == nil {
-		m.log.Infof("User %s is not known, ignoring message %s", data)
+		m.log.Infof("User %s is not known, ignoring message %s", data.UserId, data.Message)
 		return
 	}
 	rmsg.Username = m.GetUserName(data.UserId)
@@ -750,10 +774,28 @@ func (m *MMClient) GetUser(userId string) *model.User {
 	return m.Users[userId]
 }
 
+func (m *MMClient) UpdateUser(userId string) {
+	m.Lock()
+	defer m.Unlock()
+	res, resp := m.Client.GetUser(userId, "")
+	if resp.Error != nil {
+		return
+	}
+	m.Users[userId] = res
+}
+
 func (m *MMClient) GetUserName(userId string) string {
 	user := m.GetUser(userId)
 	if user != nil {
 		return user.Username
+	}
+	return ""
+}
+
+func (m *MMClient) GetNickName(userId string) string {
+	user := m.GetUser(userId)
+	if user != nil {
+		return user.Nickname
 	}
 	return ""
 }
@@ -820,7 +862,7 @@ func (m *MMClient) StatusLoop() {
 	if m.OnWsConnect != nil {
 		m.OnWsConnect()
 	}
-	m.log.Debug("StatusLoop:", m.OnWsConnect)
+	m.log.Debugf("StatusLoop: %p", m.OnWsConnect)
 	for {
 		if m.WsQuit {
 			return
