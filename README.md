@@ -4,8 +4,6 @@
 Minimal IRC server which integrates with [mattermost](https://www.mattermost.org) and [slack](https://www.slack.com)
 Tested on FreeBSD / Linux / Windows
 
-Most of the work happens in [mm-go-irckit](https://github.com/42wim/mm-go-irckit) (based on github.com/shazow/go-irckit)
-
 # Docker
 Run the irc server on port 6667. You'll need to specify -bind 0.0.0.0:6667 otherwise it only listens on 127.0.0.1 in the container.
 
@@ -61,6 +59,7 @@ Master branch of matterircd should always work against latest STABLE mattermost 
 * &users channel that contains members of all teams (if mattermost is so configured) for easy messaging
 * supports mattermost roles (shows admins with @ status for now)
 * gitlab auth hack by using mmtoken cookie (see https://github.com/42wim/matterircd/issues/29)
+* mattermost personal token support
 
 # Binaries
 
@@ -127,11 +126,18 @@ Run with `matterircd -conf matterircd.toml`
 
 ## Mattermost user commands
 
-Login
+Login with user/pass
 
 ```
 /msg mattermost login <server> <team> <username/email> <password>
 ```
+
+Login with personal token
+
+```
+/msg mattermost login <server> <team> <username/email> token=<yourpersonaltoken>
+```
+
 
 Or if it is set up to only allow one host:
 
