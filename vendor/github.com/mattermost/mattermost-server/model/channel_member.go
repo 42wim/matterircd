@@ -28,17 +28,25 @@ type ChannelUnread struct {
 }
 
 type ChannelMember struct {
-	ChannelId    string    `json:"channel_id"`
-	UserId       string    `json:"user_id"`
-	Roles        string    `json:"roles"`
-	LastViewedAt int64     `json:"last_viewed_at"`
-	MsgCount     int64     `json:"msg_count"`
-	MentionCount int64     `json:"mention_count"`
-	NotifyProps  StringMap `json:"notify_props"`
-	LastUpdateAt int64     `json:"last_update_at"`
+	ChannelId     string    `json:"channel_id"`
+	UserId        string    `json:"user_id"`
+	Roles         string    `json:"roles"`
+	LastViewedAt  int64     `json:"last_viewed_at"`
+	MsgCount      int64     `json:"msg_count"`
+	MentionCount  int64     `json:"mention_count"`
+	NotifyProps   StringMap `json:"notify_props"`
+	LastUpdateAt  int64     `json:"last_update_at"`
+	SchemeUser    bool      `json:"scheme_user"`
+	SchemeAdmin   bool      `json:"scheme_admin"`
+	ExplicitRoles string    `json:"explicit_roles"`
 }
 
 type ChannelMembers []ChannelMember
+
+type ChannelMemberForExport struct {
+	ChannelMember
+	ChannelName string
+}
 
 func (o *ChannelMembers) ToJson() string {
 	if b, err := json.Marshal(o); err != nil {

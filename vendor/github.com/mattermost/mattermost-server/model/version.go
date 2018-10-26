@@ -9,10 +9,21 @@ import (
 	"strings"
 )
 
-// This is a list of all the current viersions including any patches.
-// It should be maitained in chronological order with most current
+// This is a list of all the current versions including any patches.
+// It should be maintained in chronological order with most current
 // release at the front of the list.
 var versions = []string{
+	"5.4.0",
+	"5.3.0",
+	"5.2.0",
+	"5.1.0",
+	"5.0.0",
+	"4.10.0",
+	"4.9.0",
+	"4.8.1",
+	"4.8.0",
+	"4.7.2",
+	"4.7.1",
 	"4.7.0",
 	"4.6.0",
 	"4.5.0",
@@ -103,10 +114,6 @@ func GetPreviousVersion(version string) string {
 	}
 
 	return ""
-}
-
-func IsOfficalBuild() bool {
-	return BuildNumber != "_BUILD_NUMBER_"
 }
 
 func IsCurrentVersion(versionToCheck string) bool {
