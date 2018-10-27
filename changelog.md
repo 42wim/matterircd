@@ -1,16 +1,14 @@
 # v0.18.4
-
 ## Bugfix
 * general: fix cli args not override configuration file #205
 * mattermost: support multi DM-groups correctly #209
 * mattermost: add correct support for personal tokens #208
-     Use /msg mattermost login <server> <team> <login> token=<yourtoken>
+     `Use /msg mattermost login <server> <team> <login> token=<yourtoken>`
 * mattermost: Fix JoinInclude / JoinExclude logic when joining/parting channels. Also support #team/channel
 * mattermost: Fix issue with empty channelname
 * mattermost: Fix re-login on session expiry
 
 # v0.18.3
-
 ## Bugfix
 * slack: api changed, show uploaded files again
 
