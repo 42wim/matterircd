@@ -1,7 +1,7 @@
 module github.com/42wim/matterircd
 
 require (
-	github.com/42wim/matterbridge v1.11.4-0.20181026144756-107969c09a04
+	github.com/42wim/matterbridge v1.11.4-0.20181027112040-74e33b0a51f6
 	github.com/BurntSushi/toml v0.3.1
 	github.com/Sirupsen/logrus v1.0.6
 	github.com/alecthomas/log4go v0.0.0-20180109082532-d146e6b86faa
