@@ -225,13 +225,14 @@ func (s *server) Channel(channelId string) Channel {
 			teamId := s.u.mc.GetTeamFromChannel(channelId)
 			teamName := s.u.mc.GetTeamName(teamId)
 
-			if (teamName != "" && teamId != s.u.mc.Team.Id) || s.u.Cfg.PrefixMainTeam {
-				name = "#" + teamName + "/" + name
-			}
-			if teamId == s.u.mc.Team.Id && !s.u.Cfg.PrefixMainTeam {
-				name = "#" + name
-			}
-			if name == "" {
+			if name != "" {
+				if (teamName != "" && teamId != s.u.mc.Team.Id) || s.u.Cfg.PrefixMainTeam {
+					name = "#" + teamName + "/" + name
+				}
+				if teamId == s.u.mc.Team.Id && !s.u.Cfg.PrefixMainTeam {
+					name = "#" + name
+				}
+			} else {
 				name = channelId
 			}
 			service = "mattermost"
