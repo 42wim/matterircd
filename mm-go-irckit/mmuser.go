@@ -399,6 +399,13 @@ func (u *User) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	// not a private message so do channel stuff
 	if props["channel_type"] != "D" && ghost != nil {
 		ch = u.Srv.Channel(data.ChannelId)
+		// in an group
+		if props["channel_type"] == "G" {
+			myself := u.createMMUser(u.mc.User)
+			if !ch.HasUser(myself) {
+				u.syncMMChannel(data.ChannelId, u.mc.GetChannelName(data.ChannelId))
+			}
+		}
 		// join if not in channel
 		if !ch.HasUser(ghost) {
 			logger.Debugf("User %s is not in channel %s. Joining now", ghost.Nick, ch.String())
