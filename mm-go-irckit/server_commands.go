@@ -65,7 +65,7 @@ func CmdInvite(s Server, u *User, msg *irc.Message) error {
 
 	if u.mc != nil {
 		channelName := strings.Replace(channel, "#", "", 1)
-		id := u.mc.GetChannelId(channelName, "")
+		id := u.mc.GetChannelId(channelName, u.mc.Team.Id)
 		if id == "" {
 			return nil
 		}
@@ -117,7 +117,7 @@ func CmdKick(s Server, u *User, msg *irc.Message) error {
 	}
 	channelName := strings.Replace(channel, "#", "", 1)
 	if u.mc != nil {
-		id := u.mc.GetChannelId(channelName, "")
+		id := u.mc.GetChannelId(channelName, u.mc.Team.Id)
 		if id == "" {
 			return nil
 		}
