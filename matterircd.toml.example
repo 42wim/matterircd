@@ -10,6 +10,9 @@ TLSBind = "127.0.0.1:6697"
 #directory to look for key.pem and cert.pem. (default ".")
 TLSDir = "/etc/pki/tls/matermost/"
 
+##################################
+##### MATTERMOST EXAMPLE #########
+##################################
 [mattermost]
 #specify default mattermost server/instance (default "")
 DefaultServer = "chat.mycompany.com"
@@ -36,6 +39,9 @@ JoinExclude = ["#town-square","#boringchannel"]
 
 #PartFake: a bool that defines if you do a /LEAVE or /PART on IRC it will also
 #actually leave the channel on mattermost.
+#if false it actually leaves the channel on mattermost
+#if true it removes the channel from irc, but you're still joined on mattermost, messages
+#of this channel will be sent to &messages channel
 #Default false
 PartFake = true
 
@@ -49,6 +55,9 @@ SkipTLSVerify = false
 #also add the main team prefix to the channel name #team/channel (default false)
 PrefixMainTeam = false
 
+#############################
+##### SLACK EXAMPLE #########
+#############################
 [slack]
 #Blacklist specific users from connecting.
 #As we only connect using tokens, this will first do a ccnnection to see what username the token is from. If this
