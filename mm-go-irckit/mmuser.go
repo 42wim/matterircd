@@ -170,7 +170,7 @@ func (u *User) addUsersToChannels() {
 	}
 
 	for _, mmchannel := range u.mc.GetChannels() {
-		logger.Debug("Adding channel", mmchannel)
+		logger.Debugf("Adding channel %#v", mmchannel)
 		channels <- mmchannel
 	}
 	close(channels)
@@ -403,6 +403,7 @@ func (u *User) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		if props["channel_type"] == "G" {
 			myself := u.createMMUser(u.mc.User)
 			if !ch.HasUser(myself) {
+				ch.Join(myself)
 				u.syncMMChannel(data.ChannelId, u.mc.GetChannelName(data.ChannelId))
 			}
 		}

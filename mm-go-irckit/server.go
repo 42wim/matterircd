@@ -221,16 +221,19 @@ func (s *server) Channel(channelId string) Channel {
 			service = "slack"
 		}
 		if s.u.mc != nil {
-			name = s.u.mc.GetChannelName(channelId)
+			channelName := s.u.mc.GetChannelName(channelId)
 			teamId := s.u.mc.GetTeamFromChannel(channelId)
 			teamName := s.u.mc.GetTeamName(teamId)
 
-			if name != "" {
+			if channelName != "" {
 				if (teamName != "" && teamId != s.u.mc.Team.Id) || s.u.Cfg.PrefixMainTeam {
-					name = "#" + teamName + "/" + name
+					name = "#" + teamName + "/" + channelName
 				}
 				if teamId == s.u.mc.Team.Id && !s.u.Cfg.PrefixMainTeam {
-					name = "#" + name
+					name = "#" + channelName
+				}
+				if teamId == "G" {
+					name = "#" + channelName
 				}
 			} else {
 				name = channelId
