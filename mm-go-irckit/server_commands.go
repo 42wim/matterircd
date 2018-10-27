@@ -147,7 +147,18 @@ func CmdJoin(s Server, u *User, msg *irc.Message) error {
 		channelName := strings.Replace(channel, "#", "", 1)
 		// you can only join existing channels
 		if u.mc != nil {
-			channelId = u.mc.GetChannelId(channelName, "")
+			teamId := ""
+			sp := strings.Split(channelName, "/")
+			if len(sp) > 1 {
+				team, _ := u.mc.Client.GetTeamByName(sp[0], "")
+				if team == nil {
+					s.EncodeMessage(u, irc.ERR_INVITEONLYCHAN, []string{u.Nick, channel}, "Cannot join channel (+i)")
+					continue
+				}
+				teamId = team.Id
+				channelName = sp[1]
+			}
+			channelId = u.mc.GetChannelId(channelName, teamId)
 			err := u.mc.JoinChannel(channelId)
 			if err != nil {
 				s.EncodeMessage(u, irc.ERR_INVITEONLYCHAN, []string{u.Nick, channel}, "Cannot join channel (+i)")
@@ -169,6 +180,9 @@ func CmdJoin(s Server, u *User, msg *irc.Message) error {
 			topic = mychan.Topic.Value
 			sync = u.syncSlackChannel
 		}
+		// if we joined, remove channel from exclude and add to include
+		u.Cfg.JoinExclude = removeStringInSlice(channel, u.Cfg.JoinExclude)
+		u.Cfg.JoinInclude = append(u.Cfg.JoinInclude, channel)
 		ch := s.Channel(channelId)
 		ch.Topic(u, topic)
 		sync(channelId, channelName)
@@ -207,10 +221,10 @@ func CmdList(s Server, u *User, msg *irc.Message) error {
 	}
 	if u.sc != nil {
 		params := slack.GetConversationsParameters{
-			Cursor: "",
+			Cursor:          "",
 			ExcludeArchived: "true",
-			Limit: 100,
-			Types: []string{ "public_channel", "private_channel", "mpim" },
+			Limit:           100,
+			Types:           []string{"public_channel", "private_channel", "mpim"},
 		}
 
 		for {
@@ -317,7 +331,7 @@ func CmdNames(s Server, u *User, msg *irc.Message) error {
 		if !exists {
 			continue
 		}
-		ch.SendNamesResponse(u);
+		ch.SendNamesResponse(u)
 	}
 	return nil
 }
@@ -364,6 +378,8 @@ func CmdPart(s Server, u *User, msg *irc.Message) error {
 		// part all other (ghost)users on the channel
 		for _, k := range ch.Users() {
 			ch.Part(k, "")
+			// if we parted, remove channel from include
+			u.Cfg.JoinInclude = removeStringInSlice(chName, u.Cfg.JoinInclude)
 		}
 	}
 	if u.mc != nil {
