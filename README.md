@@ -48,7 +48,7 @@ Master branch of matterircd should always work against latest STABLE mattermost 
 * auto-join/leave to same channels as on mattermost
 * reconnects with backoff on mattermost restarts
 * support multiple users
-* support channel backlog (messages when you're disconnected from IRC/mattermost)
+* support channel/direct message backlog (messages when you're disconnected from IRC/mattermost)
 * search messages (/msg mattermost search query)
 * scrollback support (/msg mattermost scrollback #channel limit)
 * restrict to specified mattermost instances
