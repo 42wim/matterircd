@@ -8,6 +8,8 @@ github.com/Sirupsen/logrus
 github.com/alecthomas/log4go
 # github.com/davecgh/go-spew v1.1.0
 github.com/davecgh/go-spew/spew
+# github.com/desertbit/timer v0.0.0-20180107155436-c41aec40b27f
+github.com/desertbit/timer
 # github.com/go-ldap/ldap v2.5.1+incompatible
 github.com/go-ldap/ldap
 # github.com/gorilla/websocket v0.0.0-20180420171612-21ab95fa12b9

@@ -15,6 +15,8 @@ github.com/alecthomas/log4go v0.0.0-20180109082532-d146e6b86faa/go.mod h1:iCVmQ9
 github.com/bwmarrin/discordgo v0.0.0-20180201002541-8d5ab59c63e5/go.mod h1:5NIvFv5Z7HddYuXbuQegZ684DleQaCFqChP2iuBivJ8=
 github.com/davecgh/go-spew v1.1.0 h1:ZDRjVQ15GmhC3fiQ8ni8+OwkZQO4DARzQgrnXU1Liz8=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
+github.com/desertbit/timer v0.0.0-20180107155436-c41aec40b27f h1:U5y3Y5UE0w7amNe7Z5G/twsBW0KEalRQXZzf8ufSh9I=
+github.com/desertbit/timer v0.0.0-20180107155436-c41aec40b27f/go.mod h1:xH/i4TFMt8koVQZ6WFms69WAsDWr2XsYL3Hkl7jkoLE=
 github.com/dfordsoft/golib v0.0.0-20180313113957-2ea3495aee1d h1:rONNnZDE5CYuaSFQk+gP4GEQTXEUcyQ5p6p/dgxIHas=
 github.com/dfordsoft/golib v0.0.0-20180313113957-2ea3495aee1d/go.mod h1:UGa5M2Sz/Uh13AMse4+RELKCDw7kqgqlTjeGae+7vUY=
 github.com/dgrijalva/jwt-go v0.0.0-20170508165458-6c8dedd55f8a h1:MuHMeSsXbNEeUyxjB7T9P8s1+5k8OLTC/M27qsVwixM=

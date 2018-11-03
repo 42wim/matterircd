@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/desertbit/timer"
 	"github.com/sorcix/irc"
 )
 
@@ -152,6 +153,14 @@ func (user *User) Decode() {
 		<-c
 	}
 	buffer := make(chan *irc.Message)
+	bufferTimeout := user.Cfg.PasteBufferTimeout
+	// we need at least 100
+	if bufferTimeout == 0 {
+		bufferTimeout = 100
+	}
+	logger.Debugf("using paste buffer timeout: %#v\n", bufferTimeout)
+	t := timer.NewTimer(time.Duration(bufferTimeout) * time.Millisecond)
+	t.Stop()
 	go func(buffer chan *irc.Message) {
 		for {
 			select {
@@ -159,6 +168,8 @@ func (user *User) Decode() {
 				// are we starting a new buffer ?
 				if user.BufferedMsg == nil {
 					user.BufferedMsg = msg
+					// start timer now
+					t.Reset(time.Duration(bufferTimeout) * time.Millisecond)
 				} else {
 					// make sure we're sending to the same recipient in the buffer
 					if user.BufferedMsg.Params[0] == msg.Params[0] {
@@ -167,7 +178,7 @@ func (user *User) Decode() {
 						user.DecodeCh <- msg
 					}
 				}
-			case <-time.After(500 * time.Millisecond):
+			case <-t.C:
 				if user.BufferedMsg != nil {
 					// trim last newline
 					user.BufferedMsg.Trailing = strings.TrimSpace(user.BufferedMsg.Trailing)
@@ -175,6 +186,7 @@ func (user *User) Decode() {
 					user.DecodeCh <- user.BufferedMsg
 					// clear buffer
 					user.BufferedMsg = nil
+					t.Stop()
 				}
 			}
 		}

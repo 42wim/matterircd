@@ -41,6 +41,7 @@ type MmCfg struct {
 	JoinInclude        []string
 	PartFake           bool
 	PrefixMainTeam     bool
+	PasteBufferTimeout int
 }
 
 func NewUserMM(c net.Conn, srv Server, cfg *MmCfg) *User {

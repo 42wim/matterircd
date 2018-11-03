@@ -9,22 +9,23 @@ import (
 var Logger *logrus.Entry
 
 type Config struct {
-	Slack         Settings
-	Mattermost    Settings
-	Debug         bool
-	Bind          string
-	BindInterface string
-	BindPort      int
-	TLSBind       string
-	TLSDir        string
-	Insecure      bool
-	SkipTLSVerify bool
-	DefaultServer string
-	DefaultTeam   string
-	Restrict      string
-	JoinExclude   []string
-	JoinInclude   []string
-	PartFake      bool
+	Slack              Settings
+	Mattermost         Settings
+	Debug              bool
+	Bind               string
+	BindInterface      string
+	BindPort           int
+	TLSBind            string
+	TLSDir             string
+	Insecure           bool
+	SkipTLSVerify      bool
+	DefaultServer      string
+	DefaultTeam        string
+	Restrict           string
+	JoinExclude        []string
+	JoinInclude        []string
+	PartFake           bool
+	PasteBufferTimeout int
 }
 
 type Settings struct {
