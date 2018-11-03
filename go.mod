@@ -5,6 +5,7 @@ require (
 	github.com/BurntSushi/toml v0.3.1
 	github.com/Sirupsen/logrus v1.0.6
 	github.com/alecthomas/log4go v0.0.0-20180109082532-d146e6b86faa
+	github.com/desertbit/timer v0.0.0-20180107155436-c41aec40b27f
 	github.com/go-ldap/ldap v2.5.1+incompatible
 	github.com/gorilla/websocket v0.0.0-20180420171612-21ab95fa12b9
 	github.com/hashicorp/golang-lru v0.0.0-20160813221303-0a025b7e63ad
