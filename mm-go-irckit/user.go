@@ -5,6 +5,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/sorcix/irc"
 )
@@ -15,6 +16,7 @@ func NewUser(c Conn) *User {
 		Conn:     c,
 		Host:     "*",
 		channels: map[Channel]struct{}{},
+		DecodeCh: make(chan *irc.Message),
 	}
 }
 
@@ -40,6 +42,8 @@ type User struct {
 	Host        string
 	Roles       string
 	DisplayName string
+	BufferedMsg *irc.Message
+	DecodeCh    chan *irc.Message
 
 	channels map[Channel]struct{}
 
@@ -141,23 +145,59 @@ func (user *User) Encode(msgs ...*irc.Message) (err error) {
 }
 
 // Decode will receive and return a decoded message, or an error.
-func (user *User) Decode() (*irc.Message, error) {
+func (user *User) Decode() {
 	if user.MmGhostUser {
 		// block
 		c := make(chan struct{})
 		<-c
 	}
-	msg, err := user.Conn.Decode()
-	if err == nil && msg != nil {
-		dmsg := fmt.Sprintf("<- %s", msg)
-		if msg.Command == "PRIVMSG" && msg.Params != nil && (msg.Params[0] == "slack" || msg.Params[0] == "mattermost") {
-			// Don't log sensitive information
-			trail := strings.Split(msg.Trailing, " ")
-			if (msg.Trailing != "" && trail[0] == "login") || (len(msg.Params) > 1 && msg.Params[1] == "login") {
-				dmsg = fmt.Sprintf("<- PRIVMSG %s :login [redacted]", msg.Params[0])
+	buffer := make(chan *irc.Message)
+	go func(buffer chan *irc.Message) {
+		for {
+			select {
+			case msg := <-buffer:
+				// are we starting a new buffer ?
+				if user.BufferedMsg == nil {
+					user.BufferedMsg = msg
+				} else {
+					// make sure we're sending to the same recipient in the buffer
+					if user.BufferedMsg.Params[0] == msg.Params[0] {
+						user.BufferedMsg.Trailing += "\n" + msg.Trailing
+					} else {
+						user.DecodeCh <- msg
+					}
+				}
+			case <-time.After(500 * time.Millisecond):
+				if user.BufferedMsg != nil {
+					// trim last newline
+					user.BufferedMsg.Trailing = strings.TrimSpace(user.BufferedMsg.Trailing)
+					logger.Debugf("flushing buffer: %#v\n", user.BufferedMsg)
+					user.DecodeCh <- user.BufferedMsg
+					// clear buffer
+					user.BufferedMsg = nil
+				}
 			}
 		}
-		logger.Debug(dmsg)
+	}(buffer)
+	for {
+		msg, err := user.Conn.Decode()
+		if err == nil && msg != nil {
+			dmsg := fmt.Sprintf("<- %s", msg)
+			if msg.Command == "PRIVMSG" && msg.Params != nil && (msg.Params[0] == "slack" || msg.Params[0] == "mattermost") {
+				// Don't log sensitive information
+				trail := strings.Split(msg.Trailing, " ")
+				if (msg.Trailing != "" && trail[0] == "login") || (len(msg.Params) > 1 && msg.Params[1] == "login") {
+					dmsg = fmt.Sprintf("<- PRIVMSG %s :login [redacted]", msg.Params[0])
+				}
+			}
+			// PRIVMSG can be buffered
+			if msg.Command == "PRIVMSG" {
+				logger.Debugf("B: %#v\n", dmsg)
+				buffer <- msg
+			} else {
+				logger.Debug(dmsg)
+				user.DecodeCh <- msg
+			}
+		}
 	}
-	return msg, err
 }

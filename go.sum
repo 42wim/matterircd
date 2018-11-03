@@ -1,7 +1,5 @@
 github.com/42wim/go-gitter v0.0.0-20170828205020-017310c2d557 h1:IZtuWGfzQnKnCSu+vl8WGLhpVQ5Uvy3rlSwqXSg+sQg=
 github.com/42wim/go-gitter v0.0.0-20170828205020-017310c2d557/go.mod h1:jL0YSXMs/txjtGJ4PWrmETOk6KUHMDPMshgQZlTeB3Y=
-github.com/42wim/matterbridge v1.11.4-0.20181027112040-74e33b0a51f6 h1:HRXUSOczu+M/V6u7oBQ4MSnTF3VVU/Vj8TWJsQHPZzk=
-github.com/42wim/matterbridge v1.11.4-0.20181027112040-74e33b0a51f6/go.mod h1:vH++nst94Ad3NgJ4MIP2RwbxIZoXCvI6hhG93CPiSGg=
 github.com/42wim/matterbridge v1.11.4-0.20181027200341-32f478e4a078 h1:RqYKMNuspMpJaIAbSxyYQR7Sf9w4xwAFcCs28VbRfZg=
 github.com/42wim/matterbridge v1.11.4-0.20181027200341-32f478e4a078/go.mod h1:vH++nst94Ad3NgJ4MIP2RwbxIZoXCvI6hhG93CPiSGg=
 github.com/BurntSushi/toml v0.0.0-20170318202913-d94612f9fc14/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
@@ -164,8 +162,8 @@ go.uber.org/multierr v1.1.0/go.mod h1:wR5kodmAFQ0UK8QlbwjlSNy0Z68gJhDJUG5sjR94q/
 go.uber.org/zap v1.9.1 h1:XCJQEf3W6eZaVwhRBof6ImoYGJSITeKWsyeh3HFu/5o=
 go.uber.org/zap v1.9.1/go.mod h1:vwi/ZaCAaUcBkycHslxD9B2zi4UTXhF60s6SWpuDF0Q=
 golang.org/x/crypto v0.0.0-20180228161326-91a49db82a88/go.mod h1:6SG95UA2DQfeDnfUPMdvaQW0Q7yPrPDi9nlGo2tz2b4=
-golang.org/x/crypto v0.0.0-20180314180259-21652f85b0fd h1:cC/2DaX1wcQTuG22GhVYD0kedx0WJnOgKmrxsb3yS+4=
-golang.org/x/crypto v0.0.0-20180314180259-21652f85b0fd/go.mod h1:6SG95UA2DQfeDnfUPMdvaQW0Q7yPrPDi9nlGo2tz2b4=
+golang.org/x/crypto v0.0.0-20181030102418-4d3f4d9ffa16 h1:y6ce7gCWtnH+m3dCjzQ1PCuwl28DDIc3VNnvY29DlIA=
+golang.org/x/crypto v0.0.0-20181030102418-4d3f4d9ffa16/go.mod h1:6SG95UA2DQfeDnfUPMdvaQW0Q7yPrPDi9nlGo2tz2b4=
 golang.org/x/net v0.0.0-20180108090419-434ec0c7fe37 h1:BkNcmLtAVeWe9h5k0jt24CQgaG5vb4x/doFbAiEC/Ho=
 golang.org/x/net v0.0.0-20180108090419-434ec0c7fe37/go.mod h1:mL1N/T3taQHkDXs73rZJwtUhF3w3ftmwwsq0BUmARs4=
 golang.org/x/sync v0.0.0-20180314180146-1d60e4601c6f h1:wMNYb4v58l5UBM7MYRLPG6ZhfOqbKu7X5eyFl8ZhKvA=

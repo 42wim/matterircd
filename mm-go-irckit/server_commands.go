@@ -429,7 +429,8 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 		msg.Trailing = "*" + msg.Trailing + "*"
 	}
 	// strip IRC colors
-	re := regexp.MustCompile(`[[:cntrl:]](?:\d{1,2}(?:,\d{1,2})?)?`)
+	re := regexp.MustCompile(`\x03([019]?[0-9](,[019]?[0-9])?)?`)
+	//re := regexp.MustCompile(`[[:cntrl:]](?:\d{1,2}(?:,\d{1,2})?)?`)
 	msg.Trailing = re.ReplaceAllString(msg.Trailing, "")
 
 	if ch, exists := s.HasChannel(query); exists {

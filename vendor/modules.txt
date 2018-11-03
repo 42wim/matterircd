@@ -69,7 +69,7 @@ go.uber.org/zap/internal/bufferpool
 go.uber.org/zap/buffer
 go.uber.org/zap/internal/color
 go.uber.org/zap/internal/exit
-# golang.org/x/crypto v0.0.0-20180314180259-21652f85b0fd
+# golang.org/x/crypto v0.0.0-20181030102418-4d3f4d9ffa16
 golang.org/x/crypto/ssh/terminal
 golang.org/x/crypto/bcrypt
 golang.org/x/crypto/blowfish
