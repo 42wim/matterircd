@@ -356,20 +356,13 @@ func (s *server) Handle(u *User) {
 func (s *server) handle(u *User) {
 	var partMsg string
 	defer s.Quit(u, partMsg)
-
-	for {
-		msg, err := u.Decode()
-		if err != nil {
-			logger.Errorf("handle decode error for %s: %s", u.ID(), err.Error())
-			return
-		}
+	for msg := range u.DecodeCh {
 		if msg == nil {
 			// Ignore empty messages
 			continue
 		}
-
 		go func() {
-			err = s.commands.Run(s, u, msg)
+			err := s.commands.Run(s, u, msg)
 			logger.Debugf("Executed %#v %#v", msg, err)
 			if err == ErrUnknownCommand {
 				// TODO: Emit event?
@@ -400,13 +393,17 @@ func (s *server) add(u *User) (ok bool) {
 func (s *server) handshake(u *User) error {
 	// Assign host
 	u.Host = u.ResolveHost()
+	go u.Decode()
 
+	// Consume N messages then give up.
+	i := handshakeMsgTolerance
 	// Read messages until we filled in USER details.
-	for i := handshakeMsgTolerance; i > 0; i-- {
+	for msg := range u.DecodeCh {
+		fmt.Printf("in handshake %#v\n", msg)
+		i--
 		// Consume N messages then give up.
-		msg, err := u.Decode()
-		if err != nil {
-			return err
+		if i == 0 {
+			break
 		}
 		if msg == nil {
 			// Empty message, ignore.
@@ -447,7 +444,7 @@ func (s *server) handshake(u *User) error {
 		}
 		s.u = u
 
-		err = s.welcome(u)
+		err := s.welcome(u)
 		if err == nil && u.Pass != nil {
 			service := "mattermost"
 			if len(u.Pass) == 1 {

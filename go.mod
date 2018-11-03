@@ -26,7 +26,7 @@ require (
 	go.uber.org/atomic v1.3.2 // indirect
 	go.uber.org/multierr v1.1.0 // indirect
 	go.uber.org/zap v1.9.1 // indirect
-	golang.org/x/crypto v0.0.0-20180314180259-21652f85b0fd
+	golang.org/x/crypto v0.0.0-20181030102418-4d3f4d9ffa16
 	golang.org/x/sys v0.0.0-20180315095008-cc7307a45468
 	gopkg.in/airbrake/gobrake.v2 v2.0.9
 	gopkg.in/asn1-ber.v1 v1.0.0-20170511165959-379148ca0225 // indirect
