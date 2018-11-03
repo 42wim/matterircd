@@ -451,7 +451,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 			post := &model.Post{ChannelId: ch.ID(), Message: msg.Trailing, Props: props}
 			_, resp := u.mc.Client.CreatePost(post)
 			if resp.Error != nil {
-				u.MsgSpoofUser("mattermost", "msg: "+msg.Trailing+" could not be send: "+resp.Error.Error())
+				u.MsgSpoofUser(u, "mattermost", "msg: "+msg.Trailing+" could not be send: "+resp.Error.Error())
 			}
 		}
 	} else if toUser, exists := s.HasUser(query); exists {
@@ -481,7 +481,9 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 				}
 			}
 			if u.mc != nil {
-				u.mc.SendDirectMessage(toUser.User, msg.Trailing)
+				props := make(map[string]interface{})
+				props["matterircd_"+u.mc.User.Id] = true
+				u.mc.SendDirectMessageProps(toUser.User, msg.Trailing, props)
 			}
 			return nil
 		}

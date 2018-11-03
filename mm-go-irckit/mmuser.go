@@ -191,7 +191,10 @@ func (u *User) addUserToChannelWorker(channels <-chan *model.Channel, throttle <
 		if strings.Contains(mmchannel.Name, "__") {
 			userId := strings.Split(mmchannel.Name, "__")[0]
 			u.createMMUser(u.mc.GetUser(userId))
-			spoof = u.MsgSpoofUser
+			// wrap MsgSpoofser here
+			spoof = func(spoofUsername string, msg string) {
+				u.MsgSpoofUser(u, spoofUsername, msg)
+			}
 		} else {
 			channelName := mmchannel.Name
 			if mmchannel.TeamId != u.mc.Team.Id || u.Cfg.PrefixMainTeam {
@@ -329,13 +332,6 @@ func (u *User) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	}
 
 	msgs := strings.Split(data.Message, "\n")
-	// direct message
-	if props["channel_type"] == "D" {
-		// our own message, ignore because we can't handle/fake those on IRC
-		if data.UserId == u.mc.User.Id {
-			return
-		}
-	}
 
 	if data.Type == model.POST_JOIN_LEAVE || data.Type == "system_leave_channel" || data.Type == "system_join_channel" || data.Type == "system_add_to_channel" || data.Type == "system_remove_from_channel" {
 		logger.Debugf("join/leave message. not relaying %#v", data.Message)
@@ -438,7 +434,16 @@ func (u *User) handleWsActionPost(rmsg *model.WebSocketEvent) {
 			continue
 		}
 		if props["channel_type"] == "D" {
-			u.MsgSpoofUser(spoofUsername, m)
+			if data.UserId == u.mc.User.Id {
+				// we have to look in the mention to see who we are sending a message to
+				mentions := model.ArrayFromJson(strings.NewReader(props["mentions"].(string)))
+				if len(mentions) > 0 {
+					spoofUsername = u.mc.GetUserName(mentions[0])
+					u.MsgSpoofUser(u, spoofUsername, m)
+				}
+			} else {
+				u.MsgSpoofUser(ghost, spoofUsername, m)
+			}
 			continue
 		}
 		if strings.Contains(data.Message, "@channel") || strings.Contains(data.Message, "@here") {
@@ -452,7 +457,7 @@ func (u *User) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		logger.Debugf("files detected")
 		for _, fname := range u.mc.GetFileLinks(data.FileIds) {
 			if props["channel_type"] == "D" {
-				u.MsgSpoofUser(spoofUsername, "download file - "+fname)
+				u.MsgSpoofUser(u, spoofUsername, "download file - "+fname)
 			} else {
 				ch.SpoofMessage(spoofUsername, "download file - "+fname)
 			}
@@ -522,20 +527,20 @@ func (u *User) MsgUser(toUser *User, msg string) {
 	})
 }
 
-func (u *User) MsgSpoofUser(rcvuser string, msg string) {
+func (u *User) MsgSpoofUser(sender *User, rcvuser string, msg string) {
 	for len(msg) > 400 {
 		u.Encode(&irc.Message{
-			Prefix:   &irc.Prefix{Name: rcvuser, User: rcvuser, Host: rcvuser},
+			Prefix:   &irc.Prefix{Name: sender.Nick, User: sender.Nick, Host: sender.Host},
 			Command:  irc.PRIVMSG,
-			Params:   []string{u.Nick},
+			Params:   []string{rcvuser},
 			Trailing: msg[:400] + "\n",
 		})
 		msg = msg[400:]
 	}
 	u.Encode(&irc.Message{
-		Prefix:   &irc.Prefix{Name: rcvuser, User: rcvuser, Host: rcvuser},
+		Prefix:   &irc.Prefix{Name: sender.Nick, User: sender.Nick, Host: sender.Host},
 		Command:  irc.PRIVMSG,
-		Params:   []string{u.Nick},
+		Params:   []string{rcvuser},
 		Trailing: msg,
 	})
 
