@@ -408,7 +408,18 @@ func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
 		}
 
 		if strings.HasPrefix(rmsg.Channel, "D") {
-			u.MsgSpoofUser(u, spoofUsername, m)
+			if u.sinfo.User.ID == ghost.User {
+				members, _, _ := u.sc.GetUsersInConversation(&slack.GetUsersInConversationParameters{ChannelID: rmsg.Channel})
+				for _, member := range members {
+					if member != u.sinfo.User.ID {
+						ghostuser, _ := u.rtm.GetUserInfo(member)
+						ghost := u.createSlackUser(ghostuser)
+						u.MsgSpoofUser(u, ghost.Nick, m)
+					}
+				}
+			} else {
+				u.MsgSpoofUser(ghost, u.Nick, m)
+			}
 		} else {
 			if ghost != nil && ghost.DisplayName != "" && ghost.DisplayName != ghost.Nick &&
 				u.MmInfo.Cfg.SlackSettings.UseDisplayName {
