@@ -408,7 +408,7 @@ func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
 		}
 
 		if strings.HasPrefix(rmsg.Channel, "D") {
-			if u.sinfo.User.ID == ghost.User {
+			if u.Nick == ghost.Nick {
 				members, _, _ := u.sc.GetUsersInConversation(&slack.GetUsersInConversationParameters{ChannelID: rmsg.Channel})
 				for _, member := range members {
 					if member != u.sinfo.User.ID {
