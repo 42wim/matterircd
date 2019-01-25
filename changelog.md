@@ -1,3 +1,19 @@
+# v0.19.0
+## New features
+* irc: Add support for spoofing query messages. #195
+	* You can now see your own messages you've typed on slack/mattermost web in irc
+* irc: Add PasteBufferTimeout option (send ascii-art!)
+   	* See matterircd.toml.example for an example.
+   	* PasteBufferTimeout specifies the amount of time in milliseconds that messages get kept in matterircd internal buffer before being sent to
+   	 mattermost or slack.  Messages that will be received in this time will be concatenated together
+   	 So this can be used to paste stuff like ascii-art or code.
+   	 Default 0 (is disabled)
+   	 Depending on how fast you type 2500 is a good number
+
+## Bugfix
+* slack: Correctly handle different nick and username #203
+* slack: Ignore channel join messages #198
+
 # v0.18.4
 ## Bugfix
 * general: fix cli args not override configuration file #205
