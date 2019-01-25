@@ -310,6 +310,11 @@ func (u *User) handleSlack() {
 func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
 	var ch Channel
 	logger.Debugf("handleSlackActionPost() receiving msg %#v", rmsg)
+	//ignore specific subtypes
+	switch rmsg.SubType {
+	case "channel_join":
+		return
+	}
 	if len(rmsg.Attachments) > 0 {
 		// skip messages we made ourselves
 		if rmsg.Attachments[0].CallbackID == "matterircd_"+u.sinfo.User.ID {
