@@ -42,6 +42,7 @@ type MmCfg struct {
 	PartFake           bool
 	PrefixMainTeam     bool
 	PasteBufferTimeout int
+	DisableAutoView    bool
 }
 
 func NewUserMM(c net.Conn, srv Server, cfg *MmCfg) *User {
@@ -61,6 +62,7 @@ func NewUserMM(c net.Conn, srv Server, cfg *MmCfg) *User {
 	u.MmInfo.Cfg.Insecure = cfg.MattermostSettings.Insecure
 	u.MmInfo.Cfg.SkipTLSVerify = cfg.MattermostSettings.SkipTLSVerify
 	u.MmInfo.Cfg.PrefixMainTeam = cfg.MattermostSettings.PrefixMainTeam
+	u.MmInfo.Cfg.DisableAutoView = cfg.MattermostSettings.DisableAutoView
 
 	u.idleStop = make(chan struct{})
 	// used for login
@@ -92,7 +94,7 @@ func (u *User) loginToMattermost() (*matterclient.MMClient, error) {
 	// do anti idle on town-square, every installation should have this channel
 	channels := u.mc.GetChannels()
 	for _, channel := range channels {
-		if channel.Name == "town-square" {
+		if channel.Name == "town-square" && !u.Cfg.DisableAutoView {
 			go u.antiIdle(channel.Id)
 			continue
 		}
@@ -468,7 +470,9 @@ func (u *User) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	logger.Debugf("%#v", data)
 
 	// updatelastviewed
-	u.mc.UpdateLastViewed(data.ChannelId)
+	if (!u.Cfg.DisableAutoView) {
+		u.mc.UpdateLastViewed(data.ChannelId)
+	}
 }
 
 func (u *User) handleWsActionUserRemoved(rmsg *model.WebSocketEvent) {
