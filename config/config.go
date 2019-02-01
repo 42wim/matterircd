@@ -29,18 +29,19 @@ type Config struct {
 }
 
 type Settings struct {
-	BlackListUser  []string
-	DefaultServer  string
-	DefaultTeam    string
-	Insecure       bool
-	JoinExclude    []string
-	JoinInclude    []string
-	JoinMpImOnTalk bool
-	PartFake       bool
-	Restrict       []string
-	SkipTLSVerify  bool
-	UseDisplayName bool
-	PrefixMainTeam bool
+	BlackListUser   []string
+	DefaultServer   string
+	DefaultTeam     string
+	Insecure        bool
+	JoinExclude     []string
+	JoinInclude     []string
+	JoinMpImOnTalk  bool
+	PartFake        bool
+	Restrict        []string
+	SkipTLSVerify   bool
+	UseDisplayName  bool
+	PrefixMainTeam  bool
+	DisableAutoView bool
 }
 
 func Migrate(defaultcfg Config) *Config {

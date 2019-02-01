@@ -64,6 +64,12 @@ SkipTLSVerify = false
 #also add the main team prefix to the channel name #team/channel (default false)
 PrefixMainTeam = false
 
+#Only mark a conversation as viewed when you reply to that conversation or
+#channel. This prevents Mattermost from clearing mobile app notifications
+#instantly. Note that this prevents you from always appearing as online
+#(anti-idle support is turned off) (default false)
+DisableAutoView = false
+
 #############################
 ##### SLACK EXAMPLE #########
 #############################
