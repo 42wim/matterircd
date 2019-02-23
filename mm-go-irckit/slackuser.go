@@ -3,6 +3,7 @@ package irckit
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"html"
 	"io/ioutil"
 	"net/http"
