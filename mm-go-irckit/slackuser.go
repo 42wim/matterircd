@@ -264,6 +264,18 @@ func (u *User) addSlackUserToChannelWorker(channels <-chan interface{}, throttle
 	}
 }
 
+func formatTs(unixts string) string {
+	var targetts, targetus int64
+	fmt.Sscanf(unixts, "%d.%d", &targetts, &targetus)
+	ts := time.Unix(targetts, targetus*1000)
+
+	if ts.YearDay() != time.Now().YearDay() {
+		return ts.Format("2.1. 15:04:05")
+	} else {
+		return ts.Format("15:04:05")
+	}
+}
+
 func (u *User) handleSlack() {
 	for {
 		/*
@@ -286,25 +298,117 @@ func (u *User) handleSlack() {
 			case *slack.DisconnectedEvent:
 				logger.Debug("disconnected event received, we should reconnect now..")
 				//return
+			case *slack.ReactionAddedEvent:
+				logger.Debugf("ReactionAdded msg %#v", ev)
+				ts := formatTs(ev.Item.Timestamp)
+				msg := "[M " + ts + "] Added reaction :" + ev.Reaction + ":"
+				u.handleSlackActionMisc(ev.User, ev.Item.Channel, msg)
+			case *slack.ReactionRemovedEvent:
+				logger.Debugf("ReactionRemoved msg %#v", ev)
+				ts := formatTs(ev.Item.Timestamp)
+				msg := "[M " + ts + "] Removed reaction :" + ev.Reaction + ":"
+				u.handleSlackActionMisc(ev.User, ev.Item.Channel, msg)
+			case *slack.StarAddedEvent:
+				logger.Debugf("StarAdded msg %#v", ev)
+				ts := formatTs(ev.Item.Message.Timestamp)
+				msg := "[M " + ts + "] Message starred (" + ev.Item.Message.Text + ")"
+				u.handleSlackActionMisc(ev.User, ev.Item.Channel, msg)
+			case *slack.StarRemovedEvent:
+				logger.Debugf("StarRemoved msg %#v", ev)
+				ts := formatTs(ev.Item.Message.Timestamp)
+				msg := "[M " + ts + "] Message unstarred (" + ev.Item.Message.Text + ")"
+				u.handleSlackActionMisc(ev.User, ev.Item.Channel, msg)
+			case *slack.PinAddedEvent:
+				logger.Debugf("PinAdded msg %#v", ev)
+				ts := formatTs(ev.Item.Message.Timestamp)
+				msg := "[M " + ts + "] Message pinned (" + ev.Item.Message.Text + ")"
+				u.handleSlackActionMisc(ev.User, ev.Item.Channel, msg)
+			case *slack.PinRemovedEvent:
+				logger.Debugf("PinRemoved msg %#v", ev)
+				ts := formatTs(ev.Item.Message.Timestamp)
+				msg := "[M " + ts + "] Message unpinned (" + ev.Item.Message.Text + ")"
+				u.handleSlackActionMisc(ev.User, ev.Item.Channel, msg)
 			}
 		}
 	}
-	/*
-			logger.Debugf("MMUser WsReceiver: %#v", message.Raw)
-			// check if we have the users/channels in our cache. If not update
-			u.checkWsActionMessage(message.Raw, updateChannelsThrottle)
-			switch message.Raw.Event {
-			case model.WEBSOCKET_EVENT_POSTED:
-				u.handleWsActionPost(message.Raw)
-			case model.WEBSOCKET_EVENT_POST_EDITED:
-				u.handleWsActionPost(message.Raw)
-			case model.WEBSOCKET_EVENT_USER_REMOVED:
-				u.handleWsActionUserRemoved(message.Raw)
-			case model.WEBSOCKET_EVENT_USER_ADDED:
-				u.handleWsActionUserAdded(message.Raw)
+}
+
+func (u *User) handleSlackActionMisc(userid string, channel string, message string) {
+	var ch Channel
+
+	user, err := u.rtm.GetUserInfo(userid)
+	if err != nil {
+    return
+	}
+
+	// create new "ghost" user
+	ghost := u.createSlackUser(user)
+
+	spoofUsername := ""
+	if user != nil {
+		spoofUsername = user.ID
+		if ghost != nil {
+			spoofUsername = ghost.Nick
+			if ghost.DisplayName != "" && ghost.DisplayName != ghost.Nick && u.MmInfo.Cfg.SlackSettings.UseDisplayName {
+				spoofUsername = "|"
+				//	spoofUsername = ghost.DisplayName
 			}
 		}
-	*/
+	}
+
+	msgs := []string{}
+  msgs = append(msgs, message)
+
+
+	// direct message
+	ch = u.Srv.Channel(channel)
+
+	// do not join channel for direct messages
+	if !strings.HasPrefix(channel, "D") {
+		if ghost != nil {
+			// join if not in channel
+			if !ch.HasUser(ghost) {
+				ch.Join(ghost)
+			}
+		}
+
+		// join channel if we haven't yet
+		if !ch.HasUser(u) {
+			ch.Join(u)
+		}
+	}
+
+
+	spoofUsername = strings.Replace(spoofUsername, " ", "_", -1)
+	for _, m := range msgs {
+		// cleanup the message
+		m = u.replaceMention(m)
+		m = u.replaceVariable(m)
+		m = u.replaceChannel(m)
+		m = u.replaceURL(m)
+		m = html.UnescapeString(m)
+
+		if strings.HasPrefix(channel, "D") {
+			if u.Nick == ghost.Nick {
+				members, _, _ := u.sc.GetUsersInConversation(&slack.GetUsersInConversationParameters{ChannelID: channel})
+				for _, member := range members {
+					if member != u.sinfo.User.ID {
+						ghostuser, _ := u.rtm.GetUserInfo(member)
+						ghost := u.createSlackUser(ghostuser)
+						u.MsgSpoofUser(u, ghost.Nick, m)
+					}
+				}
+			} else {
+				u.MsgSpoofUser(ghost, u.Nick, m)
+			}
+		} else {
+			if ghost != nil && ghost.DisplayName != "" && ghost.DisplayName != ghost.Nick &&
+				u.MmInfo.Cfg.SlackSettings.UseDisplayName {
+				m = "<" + ghost.DisplayName + "> " + m
+			}
+			ch.SpoofMessage(spoofUsername, m)
+		}
+	}
 }
 
 func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
