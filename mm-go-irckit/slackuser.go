@@ -3,6 +3,7 @@ package irckit
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"html"
 	"io/ioutil"
 	"net/http"
@@ -329,6 +330,8 @@ func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
 		}
 	}
 
+	msghandled := false
+
 	// handle bot messages
 	botname := ""
 	if rmsg.User == "" && rmsg.BotID != "" {
@@ -361,7 +364,13 @@ func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
 		spoofUsername = strings.TrimSpace(botname)
 	}
 
-	msgs := strings.Split(rmsg.Text, "\n")
+	msgs := []string{}
+
+	if rmsg.Text != "" {
+		msgs = append(msgs, strings.Split(rmsg.Text, "\n")...)
+		msghandled = true
+	}
+
 	// direct message
 
 	ch = u.Srv.Channel(rmsg.Channel)
@@ -381,20 +390,45 @@ func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
 		}
 	}
 
-	// look in attachments if we have no text
-	if rmsg.Text == "" {
-		for _, attach := range rmsg.Attachments {
-			if attach.Text != "" {
-				msgs = append(msgs, strings.Split(attach.Text, "\n")...)
-			} else {
-				msgs = append(msgs, strings.Split(attach.Fallback, "\n")...)
+	// look in attachments
+	for _, attach := range rmsg.Attachments {
+		if attach.Pretext != "" {
+			msgs = append(msgs, strings.Split(attach.Pretext, "\n")...)
+		}
+
+		if attach.Text != "" {
+			for i, row := range strings.Split(attach.Text, "\n") {
+				msgs = append(msgs, "> "+row)
+				if i > 4 {
+					msgs = append(msgs, "> ...")
+					break
+				}
 			}
 		}
+		msghandled = true
 	}
 
-	if len(rmsg.Files) > 0 {
-		for _, f := range rmsg.Files {
-			msgs = append(msgs, f.URLPrivate)
+	// List files
+	for _, file := range rmsg.Files {
+		msgs = append(msgs, "Uploaded "+file.Mode+" "+
+			file.Name+" / "+file.Title+" ("+file.Filetype+"): "+file.URLPrivate)
+		msghandled = true
+	}
+
+	if msghandled {
+		if rmsg.ThreadTimestamp != "" {
+			var threadts, threadus int64
+			fmt.Sscanf(rmsg.ThreadTimestamp, "%d.%d", &threadts, &threadus)
+			ts := time.Unix(threadts, threadus*1000)
+
+			threadtime := ""
+			if ts.YearDay() != time.Now().YearDay() {
+				threadtime = ts.Format("2.1. 15:04:05")
+			} else {
+				threadtime = ts.Format("15:04:05")
+			}
+
+			msgs[0] = "[T " + threadtime + "] " + msgs[0]
 		}
 	}
 
@@ -408,8 +442,9 @@ func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
 		m = html.UnescapeString(m)
 
 		// still no text, ignore this message
-		if m == "" {
-			continue
+		if !msghandled {
+			//continue
+			m = fmt.Sprintf("Empty: %#v", rmsg)
 		}
 
 		if strings.HasPrefix(rmsg.Channel, "D") {
@@ -474,6 +509,12 @@ func (u *User) syncSlackChannel(id string, name string) {
 		}
 	}
 
+	//Add slackbot to all channels
+	slackuser := u.getSlackUser("USLACKBOT")
+	if slackuser != nil {
+		u.addSlackUserToChannel(slackuser, "#"+name, id)
+	}
+
 	ch := srv.Channel(id)
 	svc, _ := srv.HasUser("slack")
 	ch.Topic(svc, info.Topic.Value)
@@ -503,6 +544,12 @@ func (u *User) syncSlackGroup(id string, name string) {
 				u.addSlackUserToChannel(slackuser, "#"+name, id)
 			}
 		}
+	}
+
+	//Add slackbot to all channels
+	slackuser := u.getSlackUser("USLACKBOT")
+	if slackuser != nil {
+		u.addSlackUserToChannel(slackuser, "#"+name, id)
 	}
 
 	ch := srv.Channel(id)
