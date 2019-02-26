@@ -153,6 +153,7 @@ func (user *User) Decode() {
 		<-c
 	}
 	buffer := make(chan *irc.Message)
+	stop := make(chan struct{})
 	bufferTimeout := user.Cfg.PasteBufferTimeout
 	// we need at least 100
 	if bufferTimeout == 0 {
@@ -161,7 +162,7 @@ func (user *User) Decode() {
 	logger.Debugf("using paste buffer timeout: %#v\n", bufferTimeout)
 	t := timer.NewTimer(time.Duration(bufferTimeout) * time.Millisecond)
 	t.Stop()
-	go func(buffer chan *irc.Message) {
+	go func(buffer chan *irc.Message, stop chan struct{}) {
 		for {
 			select {
 			case msg := <-buffer:
@@ -188,9 +189,12 @@ func (user *User) Decode() {
 					user.BufferedMsg = nil
 					t.Stop()
 				}
+			case <-stop:
+				logger.Debug("closing decode()")
+				return
 			}
 		}
-	}(buffer)
+	}(buffer, stop)
 	for {
 		msg, err := user.Conn.Decode()
 		if err == nil && msg != nil {
@@ -210,6 +214,13 @@ func (user *User) Decode() {
 				logger.Debug(dmsg)
 				user.DecodeCh <- msg
 			}
+		}
+		if err != nil {
+			close(stop)
+			if err.Error() != "EOF" {
+				logger.Errorf("msg: %s err: %s", msg, err)
+			}
+			break
 		}
 	}
 }
