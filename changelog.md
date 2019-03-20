@@ -1,3 +1,11 @@
+# v0.19.1
+## New features
+* mattermost: Added support for disabling of automatic view flag updates (#226). See DisableAutoView in matterircd.toml.example
+* slack: Add message showing enhancements and add slackbot to all channels (#230)
+
+## Bugfix
+* general: Fix tight loop (100% CPU). Closes #231
+
 # v0.19.0
 ## New features
 * irc: Add support for spoofing query messages. #195
