@@ -152,13 +152,17 @@ func CmdJoin(s Server, u *User, msg *irc.Message) error {
 			if len(sp) > 1 {
 				team, _ := u.mc.Client.GetTeamByName(sp[0], "")
 				if team == nil {
-					s.EncodeMessage(u, irc.ERR_INVITEONLYCHAN, []string{u.Nick, channel}, "Cannot join channel (+i)")
+					s.EncodeMessage(u, irc.ERR_NOSUCHSERVER, []string{u.Nick, sp[0]}, "No such server")
 					continue
 				}
 				teamId = team.Id
 				channelName = sp[1]
 			}
 			channelId = u.mc.GetChannelId(channelName, teamId)
+			if channelId == "" {
+				s.EncodeMessage(u, irc.ERR_NOSUCHCHANNEL, []string{u.Nick, channel}, "No such channel")
+				continue
+			}
 			err := u.mc.JoinChannel(channelId)
 			logger.Debugf("Join channel %s, id %s, err: %v", channelName, channelId, err)
 			if err != nil {
