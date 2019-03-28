@@ -147,7 +147,7 @@ func CmdJoin(s Server, u *User, msg *irc.Message) error {
 		channelName := strings.Replace(channel, "#", "", 1)
 		// you can only join existing channels
 		if u.mc != nil {
-			teamId := ""
+			teamId := u.mc.Team.Id
 			sp := strings.Split(channelName, "/")
 			if len(sp) > 1 {
 				team, _ := u.mc.Client.GetTeamByName(sp[0], "")
