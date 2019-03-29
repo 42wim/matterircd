@@ -147,18 +147,18 @@ func CmdJoin(s Server, u *User, msg *irc.Message) error {
 		channelName := strings.Replace(channel, "#", "", 1)
 		// you can only join existing channels
 		if u.mc != nil {
-			teamId := u.mc.Team.Id
+			teamName := u.mc.Team.Team.Name
 			sp := strings.Split(channelName, "/")
 			if len(sp) > 1 {
-				team, _ := u.mc.Client.GetTeamByName(sp[0], "")
-				if team == nil {
-					s.EncodeMessage(u, irc.ERR_NOSUCHSERVER, []string{u.Nick, sp[0]}, "No such server")
-					continue
-				}
-				teamId = team.Id
+				teamName = sp[0]
 				channelName = sp[1]
 			}
-			channelId = u.mc.GetChannelId(channelName, teamId)
+			team, _ := u.mc.Client.GetTeamByName(teamName, "")
+			if team == nil {
+				s.EncodeMessage(u, irc.ERR_NOSUCHSERVER, []string{u.Nick, sp[0]}, "No such server")
+				continue
+			}
+			channelId = u.mc.GetChannelId(channelName, team.Id)
 			if channelId == "" {
 				s.EncodeMessage(u, irc.ERR_NOSUCHCHANNEL, []string{u.Nick, channel}, "No such channel")
 				continue
