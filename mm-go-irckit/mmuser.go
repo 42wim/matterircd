@@ -476,14 +476,21 @@ func (u *User) handleWsActionPost(rmsg *model.WebSocketEvent) {
 }
 
 func (u *User) handleWsActionUserRemoved(rmsg *model.WebSocketEvent) {
-	userId, ok := rmsg.Data["user_id"].(string)
+	logger.Debugf("in handleWsActionUserRemoved rmsg: %#v\n", rmsg)
+	logger.Debugf("in handleWsActionUserRemoved rmsg.Broadcast: %#v\n", rmsg.Broadcast)
+	if rmsg.Broadcast == nil {
+		return
+	}
+	channelId, ok := rmsg.Data["channel_id"].(string)
 	if !ok {
 		return
 	}
-	ch := u.Srv.Channel(rmsg.Broadcast.ChannelId)
+	userId := rmsg.Broadcast.UserId
+	ch := u.Srv.Channel(channelId)
 
 	// remove ourselves from the channel
 	if userId == u.mc.User.Id {
+		ch.Part(u, "")
 		return
 	}
 
