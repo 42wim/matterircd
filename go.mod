@@ -1,7 +1,7 @@
 module github.com/42wim/matterircd
 
 require (
-	github.com/42wim/matterbridge v1.14.2-0.20190401205019-1f8016182c00
+	github.com/42wim/matterbridge v1.14.2-0.20190401221558-17cc14a9d235
 	github.com/BurntSushi/toml v0.3.1
 	github.com/blang/semver v3.5.1+incompatible // indirect
 	github.com/desertbit/timer v0.0.0-20180107155436-c41aec40b27f
