@@ -1,37 +1,36 @@
-# github.com/42wim/matterbridge v1.11.4-0.20181103205104-b81ff9c008ed
+# github.com/42wim/matterbridge v1.14.2-0.20190401205019-1f8016182c00
 github.com/42wim/matterbridge/matterclient
 # github.com/BurntSushi/toml v0.3.1
 github.com/BurntSushi/toml
-# github.com/Sirupsen/logrus v1.0.6
-github.com/Sirupsen/logrus
-# github.com/alecthomas/log4go v0.0.0-20180109082532-d146e6b86faa
-github.com/alecthomas/log4go
-# github.com/davecgh/go-spew v1.1.0
+# github.com/blang/semver v3.5.1+incompatible
+github.com/blang/semver
+# github.com/davecgh/go-spew v1.1.1
 github.com/davecgh/go-spew/spew
 # github.com/desertbit/timer v0.0.0-20180107155436-c41aec40b27f
 github.com/desertbit/timer
-# github.com/go-ldap/ldap v2.5.1+incompatible
-github.com/go-ldap/ldap
-# github.com/gorilla/websocket v0.0.0-20180420171612-21ab95fa12b9
+# github.com/dyatlov/go-opengraph v0.0.0-20180429202543-816b6608b3c8
+github.com/dyatlov/go-opengraph/opengraph
+# github.com/gorilla/websocket v1.4.0
 github.com/gorilla/websocket
-# github.com/hashicorp/golang-lru v0.0.0-20160813221303-0a025b7e63ad
+# github.com/hashicorp/golang-lru v0.5.0
 github.com/hashicorp/golang-lru
 github.com/hashicorp/golang-lru/simplelru
-# github.com/jpillora/backoff v0.0.0-20170222002228-06c7a16c845d
+# github.com/jpillora/backoff v0.0.0-20180909062703-3050d21c67d7
 github.com/jpillora/backoff
+# github.com/konsorten/go-windows-terminal-sequences v1.0.1
+github.com/konsorten/go-windows-terminal-sequences
 # github.com/matterbridge/logrus-prefixed-formatter v0.0.0-20180806162718-01618749af61
 github.com/matterbridge/logrus-prefixed-formatter
-# github.com/mattermost/mattermost-server v5.4.0+incompatible
+# github.com/mattermost/mattermost-server v5.9.0+incompatible
 github.com/mattermost/mattermost-server/model
-github.com/mattermost/mattermost-server/utils/markdown
-github.com/mattermost/mattermost-server/einterfaces
 github.com/mattermost/mattermost-server/mlog
+github.com/mattermost/mattermost-server/services/timezones
 github.com/mattermost/mattermost-server/utils/jsonutils
-# github.com/mattermost/platform v4.6.2+incompatible
-github.com/mattermost/platform/model
-# github.com/mattn/go-colorable v0.0.0-20180310133214-efa589957cd0
+github.com/mattermost/mattermost-server/utils/markdown
+github.com/mattermost/mattermost-server/utils/fileutils
+# github.com/mattn/go-colorable v0.1.1
 github.com/mattn/go-colorable
-# github.com/mattn/go-isatty v0.0.0-20171107050531-6ca4dbf54d38
+# github.com/mattn/go-isatty v0.0.5
 github.com/mattn/go-isatty
 # github.com/mgutz/ansi v0.0.0-20170206155736-9520e82c474b
 github.com/mgutz/ansi
@@ -40,26 +39,23 @@ github.com/nicksnyder/go-i18n/i18n
 github.com/nicksnyder/go-i18n/i18n/bundle
 github.com/nicksnyder/go-i18n/i18n/language
 github.com/nicksnyder/go-i18n/i18n/translation
-# github.com/nlopes/slack v0.4.0
+# github.com/nlopes/slack v0.5.0
 github.com/nlopes/slack
-github.com/nlopes/slack/slackevents
 github.com/nlopes/slack/slackutilsx
 # github.com/pborman/uuid v0.0.0-20170612153648-e790cca94e6c
 github.com/pborman/uuid
-# github.com/pelletier/go-toml v1.0.1
+# github.com/pelletier/go-toml v1.2.0
 github.com/pelletier/go-toml
 # github.com/pkg/errors v0.8.0
 github.com/pkg/errors
 # github.com/pmezard/go-difflib v1.0.0
 github.com/pmezard/go-difflib/difflib
-# github.com/sirupsen/logrus v0.0.0-20180315010703-90150a8ed11b
+# github.com/sirupsen/logrus v1.3.0
 github.com/sirupsen/logrus
 # github.com/sorcix/irc v0.0.0-20160513142731-d007bfcbaef1
 github.com/sorcix/irc
-# github.com/stretchr/testify v0.0.0-20170714215325-05e8a0eda380
+# github.com/stretchr/testify v1.3.0
 github.com/stretchr/testify/assert
-# github.com/x-cray/logrus-prefixed-formatter v0.5.2
-github.com/x-cray/logrus-prefixed-formatter
 # go.uber.org/atomic v1.3.2
 go.uber.org/atomic
 # go.uber.org/multierr v1.1.0
@@ -71,23 +67,20 @@ go.uber.org/zap/internal/bufferpool
 go.uber.org/zap/buffer
 go.uber.org/zap/internal/color
 go.uber.org/zap/internal/exit
-# golang.org/x/crypto v0.0.0-20181030102418-4d3f4d9ffa16
+# golang.org/x/crypto v0.0.0-20190222235706-ffb98f73852f
 golang.org/x/crypto/ssh/terminal
 golang.org/x/crypto/bcrypt
 golang.org/x/crypto/blowfish
-# golang.org/x/sys v0.0.0-20180315095008-cc7307a45468
+# golang.org/x/net v0.0.0-20190110200230-915654e7eabc
+golang.org/x/net/html
+golang.org/x/net/html/atom
+# golang.org/x/sys v0.0.0-20190222171317-cd391775e71e
 golang.org/x/sys/unix
 golang.org/x/sys/windows
-golang.org/x/sys/windows/svc
-golang.org/x/sys/windows/registry
-golang.org/x/sys/windows/svc/debug
-golang.org/x/sys/windows/svc/eventlog
-golang.org/x/sys/windows/svc/mgr
-# gopkg.in/airbrake/gobrake.v2 v2.0.9
-gopkg.in/airbrake/gobrake.v2
-# gopkg.in/asn1-ber.v1 v1.0.0-20170511165959-379148ca0225
-gopkg.in/asn1-ber.v1
+# golang.org/x/text v0.3.0
+golang.org/x/text/language
+golang.org/x/text/internal/tag
 # gopkg.in/natefinch/lumberjack.v2 v2.0.0
 gopkg.in/natefinch/lumberjack.v2
-# gopkg.in/yaml.v2 v2.0.0-20170812160011-eb3733d160e7
+# gopkg.in/yaml.v2 v2.2.2
 gopkg.in/yaml.v2

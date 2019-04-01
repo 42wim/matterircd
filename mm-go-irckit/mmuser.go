@@ -9,7 +9,7 @@ import (
 
 	"github.com/42wim/matterbridge/matterclient"
 	"github.com/42wim/matterircd/config"
-	"github.com/mattermost/platform/model"
+	"github.com/mattermost/mattermost-server/model"
 	"github.com/sorcix/irc"
 )
 
@@ -289,7 +289,7 @@ func (u *User) handleWsActionPost(rmsg *model.WebSocketEvent) {
 			logger.Debugf("message is sent from matterirc, not relaying %#v", data.Message)
 			return
 		}
-		if data.Type == model.POST_JOIN_LEAVE {
+		if data.Type == model.POST_JOIN_LEAVE || data.Type == model.POST_JOIN_CHANNEL {
 			logger.Debugf("our own join/leave message. not relaying %#v", data.Message)
 			return
 		}
@@ -470,7 +470,7 @@ func (u *User) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	logger.Debugf("%#v", data)
 
 	// updatelastviewed
-	if (!u.Cfg.DisableAutoView) {
+	if !u.Cfg.DisableAutoView {
 		u.mc.UpdateLastViewed(data.ChannelId)
 	}
 }
