@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/mattermost/platform/model"
+	"github.com/mattermost/mattermost-server/model"
 	"github.com/nlopes/slack"
 	"github.com/sorcix/irc"
 )
@@ -160,11 +160,11 @@ func CmdJoin(s Server, u *User, msg *irc.Message) error {
 			}
 			channelId = u.mc.GetChannelId(channelName, teamId)
 			err := u.mc.JoinChannel(channelId)
+			logger.Debugf("Join channel %s, id %s, err: %v", channelName, channelId, err)
 			if err != nil {
 				s.EncodeMessage(u, irc.ERR_INVITEONLYCHAN, []string{u.Nick, channel}, "Cannot join channel (+i)")
 				continue
 			}
-			logger.Debugf("Join channel %s, id %s, err: %v", channelName, channelId, err)
 			topic = u.mc.GetChannelHeader(channelId)
 			sync = u.syncMMChannel
 		}
@@ -435,12 +435,17 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 
 	if ch, exists := s.HasChannel(query); exists {
 		if ch.Service() == "slack" {
+			var attachments []slack.Attachment
 			np := slack.NewPostMessageParameters()
 			np.AsUser = true
 			np.LinkNames = 1
 			np.Username = u.User
-			np.Attachments = append(np.Attachments, slack.Attachment{CallbackID: "matterircd_" + u.sinfo.User.ID})
-			_, _, err := u.sc.PostMessage(strings.ToUpper(ch.ID()), msg.Trailing, np)
+			attachments = append(attachments, slack.Attachment{CallbackID: "matterircd_" + u.sinfo.User.ID})
+			var opts []slack.MsgOption
+			opts = append(opts, slack.MsgOptionAttachments(attachments...))
+			opts = append(opts, slack.MsgOptionPostMessageParameters(np))
+			opts = append(opts, slack.MsgOptionText(msg.Trailing, false))
+			_, _, err := u.sc.PostMessage(strings.ToUpper(ch.ID()), opts...)
 			if err != nil {
 				return err
 			}
@@ -474,8 +479,14 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 				np := slack.NewPostMessageParameters()
 				np.AsUser = true
 				np.Username = u.User
-				np.Attachments = append(np.Attachments, slack.Attachment{CallbackID: "matterircd_" + u.sinfo.User.ID})
-				_, _, err = u.sc.PostMessage(dchannel, msg.Trailing, np)
+				var attachments []slack.Attachment
+				attachments = append(attachments, slack.Attachment{CallbackID: "matterircd_" + u.sinfo.User.ID})
+				var opts []slack.MsgOption
+				opts = append(opts, slack.MsgOptionAttachments(attachments...))
+				opts = append(opts, slack.MsgOptionPostMessageParameters(np))
+				opts = append(opts, slack.MsgOptionText(msg.Trailing, false))
+				_, _, err = u.sc.PostMessage(dchannel, opts...)
+				//_, _, err = u.sc.PostMessage(dchannel, msg.Trailing, np)
 				if err != nil {
 					return err
 				}
@@ -483,7 +494,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 			if u.mc != nil {
 				props := make(map[string]interface{})
 				props["matterircd_"+u.mc.User.Id] = true
-				u.mc.SendDirectMessageProps(toUser.User, msg.Trailing, props)
+				u.mc.SendDirectMessageProps(toUser.User, msg.Trailing, "", props)
 			}
 			return nil
 		}

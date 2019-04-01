@@ -4,12 +4,14 @@
 package model
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"io"
 	"math"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -110,15 +112,18 @@ const (
 	SUPPORT_SETTINGS_DEFAULT_HELP_LINK             = "https://about.mattermost.com/default-help/"
 	SUPPORT_SETTINGS_DEFAULT_REPORT_A_PROBLEM_LINK = "https://about.mattermost.com/default-report-a-problem/"
 	SUPPORT_SETTINGS_DEFAULT_SUPPORT_EMAIL         = "feedback@mattermost.com"
+	SUPPORT_SETTINGS_DEFAULT_RE_ACCEPTANCE_PERIOD  = 365
 
-	LDAP_SETTINGS_DEFAULT_FIRST_NAME_ATTRIBUTE = ""
-	LDAP_SETTINGS_DEFAULT_LAST_NAME_ATTRIBUTE  = ""
-	LDAP_SETTINGS_DEFAULT_EMAIL_ATTRIBUTE      = ""
-	LDAP_SETTINGS_DEFAULT_USERNAME_ATTRIBUTE   = ""
-	LDAP_SETTINGS_DEFAULT_NICKNAME_ATTRIBUTE   = ""
-	LDAP_SETTINGS_DEFAULT_ID_ATTRIBUTE         = ""
-	LDAP_SETTINGS_DEFAULT_POSITION_ATTRIBUTE   = ""
-	LDAP_SETTINGS_DEFAULT_LOGIN_FIELD_NAME     = ""
+	LDAP_SETTINGS_DEFAULT_FIRST_NAME_ATTRIBUTE         = ""
+	LDAP_SETTINGS_DEFAULT_LAST_NAME_ATTRIBUTE          = ""
+	LDAP_SETTINGS_DEFAULT_EMAIL_ATTRIBUTE              = ""
+	LDAP_SETTINGS_DEFAULT_USERNAME_ATTRIBUTE           = ""
+	LDAP_SETTINGS_DEFAULT_NICKNAME_ATTRIBUTE           = ""
+	LDAP_SETTINGS_DEFAULT_ID_ATTRIBUTE                 = ""
+	LDAP_SETTINGS_DEFAULT_POSITION_ATTRIBUTE           = ""
+	LDAP_SETTINGS_DEFAULT_LOGIN_FIELD_NAME             = ""
+	LDAP_SETTINGS_DEFAULT_GROUP_DISPLAY_NAME_ATTRIBUTE = ""
+	LDAP_SETTINGS_DEFAULT_GROUP_ID_ATTRIBUTE           = ""
 
 	SAML_SETTINGS_DEFAULT_ID_ATTRIBUTE         = ""
 	SAML_SETTINGS_DEFAULT_FIRST_NAME_ATTRIBUTE = ""
@@ -133,8 +138,7 @@ const (
 	NATIVEAPP_SETTINGS_DEFAULT_ANDROID_APP_DOWNLOAD_LINK = "https://about.mattermost.com/mattermost-android-app/"
 	NATIVEAPP_SETTINGS_DEFAULT_IOS_APP_DOWNLOAD_LINK     = "https://about.mattermost.com/mattermost-ios-app/"
 
-	WEBRTC_SETTINGS_DEFAULT_STUN_URI = ""
-	WEBRTC_SETTINGS_DEFAULT_TURN_URI = ""
+	EXPERIMENTAL_SETTINGS_DEFAULT_LINK_METADATA_TIMEOUT_MILLISECONDS = 5000
 
 	ANALYTICS_SETTINGS_DEFAULT_MAX_USERS_FOR_STATISTICS = 2500
 
@@ -172,7 +176,35 @@ const (
 
 	CLIENT_SIDE_CERT_CHECK_PRIMARY_AUTH   = "primary"
 	CLIENT_SIDE_CERT_CHECK_SECONDARY_AUTH = "secondary"
+
+	IMAGE_PROXY_TYPE_LOCAL      = "local"
+	IMAGE_PROXY_TYPE_ATMOS_CAMO = "atmos/camo"
 )
+
+var ServerTLSSupportedCiphers = map[string]uint16{
+	"TLS_RSA_WITH_RC4_128_SHA":                tls.TLS_RSA_WITH_RC4_128_SHA,
+	"TLS_RSA_WITH_3DES_EDE_CBC_SHA":           tls.TLS_RSA_WITH_3DES_EDE_CBC_SHA,
+	"TLS_RSA_WITH_AES_128_CBC_SHA":            tls.TLS_RSA_WITH_AES_128_CBC_SHA,
+	"TLS_RSA_WITH_AES_256_CBC_SHA":            tls.TLS_RSA_WITH_AES_256_CBC_SHA,
+	"TLS_RSA_WITH_AES_128_CBC_SHA256":         tls.TLS_RSA_WITH_AES_128_CBC_SHA256,
+	"TLS_RSA_WITH_AES_128_GCM_SHA256":         tls.TLS_RSA_WITH_AES_128_GCM_SHA256,
+	"TLS_RSA_WITH_AES_256_GCM_SHA384":         tls.TLS_RSA_WITH_AES_256_GCM_SHA384,
+	"TLS_ECDHE_ECDSA_WITH_RC4_128_SHA":        tls.TLS_ECDHE_ECDSA_WITH_RC4_128_SHA,
+	"TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA":    tls.TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA,
+	"TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA":    tls.TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA,
+	"TLS_ECDHE_RSA_WITH_RC4_128_SHA":          tls.TLS_ECDHE_RSA_WITH_RC4_128_SHA,
+	"TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA":     tls.TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA,
+	"TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA":      tls.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
+	"TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA":      tls.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
+	"TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256": tls.TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256,
+	"TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256":   tls.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256,
+	"TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256":   tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+	"TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256": tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+	"TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384":   tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+	"TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384": tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+	"TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305":    tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
+	"TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305":  tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
+}
 
 type ServiceSettings struct {
 	SiteURL                                           *string
@@ -182,6 +214,10 @@ type ServiceSettings struct {
 	ConnectionSecurity                                *string
 	TLSCertFile                                       *string
 	TLSKeyFile                                        *string
+	TLSMinVer                                         *string
+	TLSStrictTransport                                *bool
+	TLSStrictTransportMaxAge                          *int64
+	TLSOverwriteCiphers                               []string
 	UseLetsEncrypt                                    *bool
 	LetsEncryptCertificateCacheFile                   *string
 	Forward80To443                                    *bool
@@ -194,7 +230,7 @@ type ServiceSettings struct {
 	EnableIncomingWebhooks                            bool
 	EnableOutgoingWebhooks                            bool
 	EnableCommands                                    *bool
-	EnableOnlyAdminIntegrations                       *bool
+	DEPRECATED_DO_NOT_USE_EnableOnlyAdminIntegrations *bool `json:"EnableOnlyAdminIntegrations"` // This field is deprecated and must not be used.
 	EnablePostUsernameOverride                        bool
 	EnablePostIconOverride                            bool
 	EnableLinkPreviews                                *bool
@@ -224,9 +260,9 @@ type ServiceSettings struct {
 	EnableGifPicker                                   *bool
 	GfycatApiKey                                      *string
 	GfycatApiSecret                                   *string
-	RestrictCustomEmojiCreation                       *string
-	RestrictPostDelete                                *string
-	AllowEditPost                                     *string
+	DEPRECATED_DO_NOT_USE_RestrictCustomEmojiCreation *string `json:"RestrictCustomEmojiCreation"` // This field is deprecated and must not be used.
+	DEPRECATED_DO_NOT_USE_RestrictPostDelete          *string `json:"RestrictPostDelete"`          // This field is deprecated and must not be used.
+	DEPRECATED_DO_NOT_USE_AllowEditPost               *string `json:"AllowEditPost"`               // This field is deprecated and must not be used.
 	PostEditTimeLimit                                 *int
 	TimeBetweenUserTypingUpdatesMilliseconds          *int64
 	EnablePostSearch                                  *bool
@@ -241,13 +277,14 @@ type ServiceSettings struct {
 	ExperimentalEnableDefaultChannelLeaveJoinMessages *bool
 	ExperimentalGroupUnreadChannels                   *string
 	ExperimentalChannelOrganization                   *bool
-	ImageProxyType                                    *string
-	ImageProxyURL                                     *string
-	ImageProxyOptions                                 *string
+	DEPRECATED_DO_NOT_USE_ImageProxyType              *string `json:"ImageProxyType" mapstructure:"ImageProxyType"`       // This field is deprecated and must not be used.
+	DEPRECATED_DO_NOT_USE_ImageProxyURL               *string `json:"ImageProxyURL" mapstructure:"ImageProxyURL"`         // This field is deprecated and must not be used.
+	DEPRECATED_DO_NOT_USE_ImageProxyOptions           *string `json:"ImageProxyOptions" mapstructure:"ImageProxyOptions"` // This field is deprecated and must not be used.
 	EnableAPITeamDeletion                             *bool
 	ExperimentalEnableHardenedMode                    *bool
-	ExperimentalLimitClientConfig                     *bool
+	DisableLegacyMFA                                  *bool
 	EnableEmailInvitations                            *bool
+	ExperimentalLdapGroupSync                         *bool
 }
 
 func (s *ServiceSettings) SetDefaults() {
@@ -322,6 +359,22 @@ func (s *ServiceSettings) SetDefaults() {
 
 	if s.TLSCertFile == nil {
 		s.TLSCertFile = NewString(SERVICE_SETTINGS_DEFAULT_TLS_CERT_FILE)
+	}
+
+	if s.TLSMinVer == nil {
+		s.TLSMinVer = NewString("1.2")
+	}
+
+	if s.TLSStrictTransport == nil {
+		s.TLSStrictTransport = NewBool(false)
+	}
+
+	if s.TLSStrictTransportMaxAge == nil {
+		s.TLSStrictTransportMaxAge = NewInt64(63072000)
+	}
+
+	if s.TLSOverwriteCiphers == nil {
+		s.TLSOverwriteCiphers = []string{}
 	}
 
 	if s.UseLetsEncrypt == nil {
@@ -404,8 +457,8 @@ func (s *ServiceSettings) SetDefaults() {
 		s.EnableCommands = NewBool(false)
 	}
 
-	if s.EnableOnlyAdminIntegrations == nil {
-		s.EnableOnlyAdminIntegrations = NewBool(true)
+	if s.DEPRECATED_DO_NOT_USE_EnableOnlyAdminIntegrations == nil {
+		s.DEPRECATED_DO_NOT_USE_EnableOnlyAdminIntegrations = NewBool(true)
 	}
 
 	if s.WebsocketPort == nil {
@@ -462,16 +515,16 @@ func (s *ServiceSettings) SetDefaults() {
 		s.GfycatApiSecret = NewString(SERVICE_SETTINGS_DEFAULT_GFYCAT_API_SECRET)
 	}
 
-	if s.RestrictCustomEmojiCreation == nil {
-		s.RestrictCustomEmojiCreation = NewString(RESTRICT_EMOJI_CREATION_ALL)
+	if s.DEPRECATED_DO_NOT_USE_RestrictCustomEmojiCreation == nil {
+		s.DEPRECATED_DO_NOT_USE_RestrictCustomEmojiCreation = NewString(RESTRICT_EMOJI_CREATION_ALL)
 	}
 
-	if s.RestrictPostDelete == nil {
-		s.RestrictPostDelete = NewString(PERMISSIONS_DELETE_POST_ALL)
+	if s.DEPRECATED_DO_NOT_USE_RestrictPostDelete == nil {
+		s.DEPRECATED_DO_NOT_USE_RestrictPostDelete = NewString(PERMISSIONS_DELETE_POST_ALL)
 	}
 
-	if s.AllowEditPost == nil {
-		s.AllowEditPost = NewString(ALLOW_EDIT_POST_ALWAYS)
+	if s.DEPRECATED_DO_NOT_USE_AllowEditPost == nil {
+		s.DEPRECATED_DO_NOT_USE_AllowEditPost = NewString(ALLOW_EDIT_POST_ALWAYS)
 	}
 
 	if s.ExperimentalEnableAuthenticationTransfer == nil {
@@ -503,16 +556,16 @@ func (s *ServiceSettings) SetDefaults() {
 		s.ExperimentalChannelOrganization = NewBool(experimentalUnreadEnabled)
 	}
 
-	if s.ImageProxyType == nil {
-		s.ImageProxyType = NewString("")
+	if s.DEPRECATED_DO_NOT_USE_ImageProxyType == nil {
+		s.DEPRECATED_DO_NOT_USE_ImageProxyType = NewString("")
 	}
 
-	if s.ImageProxyURL == nil {
-		s.ImageProxyURL = NewString("")
+	if s.DEPRECATED_DO_NOT_USE_ImageProxyURL == nil {
+		s.DEPRECATED_DO_NOT_USE_ImageProxyURL = NewString("")
 	}
 
-	if s.ImageProxyOptions == nil {
-		s.ImageProxyOptions = NewString("")
+	if s.DEPRECATED_DO_NOT_USE_ImageProxyOptions == nil {
+		s.DEPRECATED_DO_NOT_USE_ImageProxyOptions = NewString("")
 	}
 
 	if s.EnableAPITeamDeletion == nil {
@@ -523,8 +576,12 @@ func (s *ServiceSettings) SetDefaults() {
 		s.ExperimentalEnableHardenedMode = NewBool(false)
 	}
 
-	if s.ExperimentalLimitClientConfig == nil {
-		s.ExperimentalLimitClientConfig = NewBool(false)
+	if s.DisableLegacyMFA == nil {
+		s.DisableLegacyMFA = NewBool(false)
+	}
+
+	if s.ExperimentalLdapGroupSync == nil {
+		s.ExperimentalLdapGroupSync = NewBool(false)
 	}
 }
 
@@ -609,8 +666,10 @@ func (s *MetricsSettings) SetDefaults() {
 }
 
 type ExperimentalSettings struct {
-	ClientSideCertEnable *bool
-	ClientSideCertCheck  *string
+	ClientSideCertEnable            *bool
+	ClientSideCertCheck             *string
+	DisablePostMetadata             *bool
+	LinkMetadataTimeoutMilliseconds *int64
 }
 
 func (s *ExperimentalSettings) SetDefaults() {
@@ -620,6 +679,14 @@ func (s *ExperimentalSettings) SetDefaults() {
 
 	if s.ClientSideCertCheck == nil {
 		s.ClientSideCertCheck = NewString(CLIENT_SIDE_CERT_CHECK_SECONDARY_AUTH)
+	}
+
+	if s.DisablePostMetadata == nil {
+		s.DisablePostMetadata = NewBool(false)
+	}
+
+	if s.LinkMetadataTimeoutMilliseconds == nil {
+		s.LinkMetadataTimeoutMilliseconds = NewInt64(EXPERIMENTAL_SETTINGS_DEFAULT_LINK_METADATA_TIMEOUT_MILLISECONDS)
 	}
 }
 
@@ -644,17 +711,16 @@ type SSOSettings struct {
 }
 
 type SqlSettings struct {
-	DriverName                          *string
-	DataSource                          *string
-	DataSourceReplicas                  []string
-	DataSourceSearchReplicas            []string
-	MaxIdleConns                        *int
-	ConnMaxLifetimeMilliseconds         *int
-	MaxOpenConns                        *int
-	Trace                               bool
-	AtRestEncryptKey                    string
-	QueryTimeout                        *int
-	EnablePublicChannelsMaterialization *bool
+	DriverName                  *string
+	DataSource                  *string
+	DataSourceReplicas          []string
+	DataSourceSearchReplicas    []string
+	MaxIdleConns                *int
+	ConnMaxLifetimeMilliseconds *int
+	MaxOpenConns                *int
+	Trace                       bool
+	AtRestEncryptKey            string
+	QueryTimeout                *int
 }
 
 func (s *SqlSettings) SetDefaults() {
@@ -684,10 +750,6 @@ func (s *SqlSettings) SetDefaults() {
 
 	if s.QueryTimeout == nil {
 		s.QueryTimeout = NewInt(30)
-	}
-
-	if s.EnablePublicChannelsMaterialization == nil {
-		s.EnablePublicChannelsMaterialization = NewBool(true)
 	}
 }
 
@@ -939,21 +1001,6 @@ func (s *EmailSettings) SetDefaults() {
 	}
 }
 
-type ExtensionSettings struct {
-	EnableExperimentalExtensions *bool
-	AllowedExtensionsIDs         []string
-}
-
-func (s *ExtensionSettings) SetDefaults() {
-	if s.EnableExperimentalExtensions == nil {
-		s.EnableExperimentalExtensions = NewBool(false)
-	}
-
-	if s.AllowedExtensionsIDs == nil {
-		s.AllowedExtensionsIDs = []string{}
-	}
-}
-
 type RateLimitSettings struct {
 	Enable           *bool
 	PerSec           *int
@@ -996,13 +1043,14 @@ type PrivacySettings struct {
 }
 
 type SupportSettings struct {
-	TermsOfServiceLink          *string
-	PrivacyPolicyLink           *string
-	AboutLink                   *string
-	HelpLink                    *string
-	ReportAProblemLink          *string
-	SupportEmail                *string
-	CustomTermsOfServiceEnabled *bool
+	TermsOfServiceLink                     *string
+	PrivacyPolicyLink                      *string
+	AboutLink                              *string
+	HelpLink                               *string
+	ReportAProblemLink                     *string
+	SupportEmail                           *string
+	CustomTermsOfServiceEnabled            *bool
+	CustomTermsOfServiceReAcceptancePeriod *int
 }
 
 func (s *SupportSettings) SetDefaults() {
@@ -1052,6 +1100,10 @@ func (s *SupportSettings) SetDefaults() {
 
 	if s.CustomTermsOfServiceEnabled == nil {
 		s.CustomTermsOfServiceEnabled = NewBool(false)
+	}
+
+	if s.CustomTermsOfServiceReAcceptancePeriod == nil {
+		s.CustomTermsOfServiceReAcceptancePeriod = NewInt(SUPPORT_SETTINGS_DEFAULT_RE_ACCEPTANCE_PERIOD)
 	}
 }
 
@@ -1111,37 +1163,37 @@ func (s *ThemeSettings) SetDefaults() {
 }
 
 type TeamSettings struct {
-	SiteName                            string
-	MaxUsersPerTeam                     *int
-	EnableTeamCreation                  *bool
-	EnableUserCreation                  *bool
-	EnableOpenServer                    *bool
-	EnableUserDeactivation              *bool
-	RestrictCreationToDomains           string
-	EnableCustomBrand                   *bool
-	CustomBrandText                     *string
-	CustomDescriptionText               *string
-	RestrictDirectMessage               *string
-	RestrictTeamInvite                  *string
-	RestrictPublicChannelManagement     *string
-	RestrictPrivateChannelManagement    *string
-	RestrictPublicChannelCreation       *string
-	RestrictPrivateChannelCreation      *string
-	RestrictPublicChannelDeletion       *string
-	RestrictPrivateChannelDeletion      *string
-	RestrictPrivateChannelManageMembers *string
-	EnableXToLeaveChannelsFromLHS       *bool
-	UserStatusAwayTimeout               *int64
-	MaxChannelsPerTeam                  *int64
-	MaxNotificationsPerChannel          *int64
-	EnableConfirmNotificationsToChannel *bool
-	TeammateNameDisplay                 *string
-	ExperimentalViewArchivedChannels    *bool
-	ExperimentalEnableAutomaticReplies  *bool
-	ExperimentalHideTownSquareinLHS     *bool
-	ExperimentalTownSquareIsReadOnly    *bool
-	ExperimentalPrimaryTeam             *string
-	ExperimentalDefaultChannels         []string
+	SiteName                                                  string
+	MaxUsersPerTeam                                           *int
+	DEPRECATED_DO_NOT_USE_EnableTeamCreation                  *bool `json:"EnableTeamCreation"` // This field is deprecated and must not be used.
+	EnableUserCreation                                        *bool
+	EnableOpenServer                                          *bool
+	EnableUserDeactivation                                    *bool
+	RestrictCreationToDomains                                 string
+	EnableCustomBrand                                         *bool
+	CustomBrandText                                           *string
+	CustomDescriptionText                                     *string
+	RestrictDirectMessage                                     *string
+	DEPRECATED_DO_NOT_USE_RestrictTeamInvite                  *string `json:"RestrictTeamInvite"`                  // This field is deprecated and must not be used.
+	DEPRECATED_DO_NOT_USE_RestrictPublicChannelManagement     *string `json:"RestrictPublicChannelManagement"`     // This field is deprecated and must not be used.
+	DEPRECATED_DO_NOT_USE_RestrictPrivateChannelManagement    *string `json:"RestrictPrivateChannelManagement"`    // This field is deprecated and must not be used.
+	DEPRECATED_DO_NOT_USE_RestrictPublicChannelCreation       *string `json:"RestrictPublicChannelCreation"`       // This field is deprecated and must not be used.
+	DEPRECATED_DO_NOT_USE_RestrictPrivateChannelCreation      *string `json:"RestrictPrivateChannelCreation"`      // This field is deprecated and must not be used.
+	DEPRECATED_DO_NOT_USE_RestrictPublicChannelDeletion       *string `json:"RestrictPublicChannelDeletion"`       // This field is deprecated and must not be used.
+	DEPRECATED_DO_NOT_USE_RestrictPrivateChannelDeletion      *string `json:"RestrictPrivateChannelDeletion"`      // This field is deprecated and must not be used.
+	DEPRECATED_DO_NOT_USE_RestrictPrivateChannelManageMembers *string `json:"RestrictPrivateChannelManageMembers"` // This field is deprecated and must not be used.
+	EnableXToLeaveChannelsFromLHS                             *bool
+	UserStatusAwayTimeout                                     *int64
+	MaxChannelsPerTeam                                        *int64
+	MaxNotificationsPerChannel                                *int64
+	EnableConfirmNotificationsToChannel                       *bool
+	TeammateNameDisplay                                       *string
+	ExperimentalViewArchivedChannels                          *bool
+	ExperimentalEnableAutomaticReplies                        *bool
+	ExperimentalHideTownSquareinLHS                           *bool
+	ExperimentalTownSquareIsReadOnly                          *bool
+	ExperimentalPrimaryTeam                                   *string
+	ExperimentalDefaultChannels                               []string
 }
 
 func (s *TeamSettings) SetDefaults() {
@@ -1173,49 +1225,49 @@ func (s *TeamSettings) SetDefaults() {
 		s.RestrictDirectMessage = NewString(DIRECT_MESSAGE_ANY)
 	}
 
-	if s.RestrictTeamInvite == nil {
-		s.RestrictTeamInvite = NewString(PERMISSIONS_ALL)
+	if s.DEPRECATED_DO_NOT_USE_RestrictTeamInvite == nil {
+		s.DEPRECATED_DO_NOT_USE_RestrictTeamInvite = NewString(PERMISSIONS_ALL)
 	}
 
-	if s.RestrictPublicChannelManagement == nil {
-		s.RestrictPublicChannelManagement = NewString(PERMISSIONS_ALL)
+	if s.DEPRECATED_DO_NOT_USE_RestrictPublicChannelManagement == nil {
+		s.DEPRECATED_DO_NOT_USE_RestrictPublicChannelManagement = NewString(PERMISSIONS_ALL)
 	}
 
-	if s.RestrictPrivateChannelManagement == nil {
-		s.RestrictPrivateChannelManagement = NewString(PERMISSIONS_ALL)
+	if s.DEPRECATED_DO_NOT_USE_RestrictPrivateChannelManagement == nil {
+		s.DEPRECATED_DO_NOT_USE_RestrictPrivateChannelManagement = NewString(PERMISSIONS_ALL)
 	}
 
-	if s.RestrictPublicChannelCreation == nil {
-		s.RestrictPublicChannelCreation = new(string)
+	if s.DEPRECATED_DO_NOT_USE_RestrictPublicChannelCreation == nil {
+		s.DEPRECATED_DO_NOT_USE_RestrictPublicChannelCreation = new(string)
 		// If this setting does not exist, assume migration from <3.6, so use management setting as default.
-		if *s.RestrictPublicChannelManagement == PERMISSIONS_CHANNEL_ADMIN {
-			*s.RestrictPublicChannelCreation = PERMISSIONS_TEAM_ADMIN
+		if *s.DEPRECATED_DO_NOT_USE_RestrictPublicChannelManagement == PERMISSIONS_CHANNEL_ADMIN {
+			*s.DEPRECATED_DO_NOT_USE_RestrictPublicChannelCreation = PERMISSIONS_TEAM_ADMIN
 		} else {
-			*s.RestrictPublicChannelCreation = *s.RestrictPublicChannelManagement
+			*s.DEPRECATED_DO_NOT_USE_RestrictPublicChannelCreation = *s.DEPRECATED_DO_NOT_USE_RestrictPublicChannelManagement
 		}
 	}
 
-	if s.RestrictPrivateChannelCreation == nil {
+	if s.DEPRECATED_DO_NOT_USE_RestrictPrivateChannelCreation == nil {
 		// If this setting does not exist, assume migration from <3.6, so use management setting as default.
-		if *s.RestrictPrivateChannelManagement == PERMISSIONS_CHANNEL_ADMIN {
-			s.RestrictPrivateChannelCreation = NewString(PERMISSIONS_TEAM_ADMIN)
+		if *s.DEPRECATED_DO_NOT_USE_RestrictPrivateChannelManagement == PERMISSIONS_CHANNEL_ADMIN {
+			s.DEPRECATED_DO_NOT_USE_RestrictPrivateChannelCreation = NewString(PERMISSIONS_TEAM_ADMIN)
 		} else {
-			s.RestrictPrivateChannelCreation = NewString(*s.RestrictPrivateChannelManagement)
+			s.DEPRECATED_DO_NOT_USE_RestrictPrivateChannelCreation = NewString(*s.DEPRECATED_DO_NOT_USE_RestrictPrivateChannelManagement)
 		}
 	}
 
-	if s.RestrictPublicChannelDeletion == nil {
+	if s.DEPRECATED_DO_NOT_USE_RestrictPublicChannelDeletion == nil {
 		// If this setting does not exist, assume migration from <3.6, so use management setting as default.
-		s.RestrictPublicChannelDeletion = NewString(*s.RestrictPublicChannelManagement)
+		s.DEPRECATED_DO_NOT_USE_RestrictPublicChannelDeletion = NewString(*s.DEPRECATED_DO_NOT_USE_RestrictPublicChannelManagement)
 	}
 
-	if s.RestrictPrivateChannelDeletion == nil {
+	if s.DEPRECATED_DO_NOT_USE_RestrictPrivateChannelDeletion == nil {
 		// If this setting does not exist, assume migration from <3.6, so use management setting as default.
-		s.RestrictPrivateChannelDeletion = NewString(*s.RestrictPrivateChannelManagement)
+		s.DEPRECATED_DO_NOT_USE_RestrictPrivateChannelDeletion = NewString(*s.DEPRECATED_DO_NOT_USE_RestrictPrivateChannelManagement)
 	}
 
-	if s.RestrictPrivateChannelManageMembers == nil {
-		s.RestrictPrivateChannelManageMembers = NewString(PERMISSIONS_ALL)
+	if s.DEPRECATED_DO_NOT_USE_RestrictPrivateChannelManageMembers == nil {
+		s.DEPRECATED_DO_NOT_USE_RestrictPrivateChannelManageMembers = NewString(PERMISSIONS_ALL)
 	}
 
 	if s.EnableXToLeaveChannelsFromLHS == nil {
@@ -1258,8 +1310,8 @@ func (s *TeamSettings) SetDefaults() {
 		s.ExperimentalDefaultChannels = []string{}
 	}
 
-	if s.EnableTeamCreation == nil {
-		s.EnableTeamCreation = NewBool(true)
+	if s.DEPRECATED_DO_NOT_USE_EnableTeamCreation == nil {
+		s.DEPRECATED_DO_NOT_USE_EnableTeamCreation = NewBool(true)
 	}
 
 	if s.EnableUserCreation == nil {
@@ -1292,7 +1344,12 @@ type LdapSettings struct {
 	BindPassword       *string
 
 	// Filtering
-	UserFilter *string
+	UserFilter  *string
+	GroupFilter *string
+
+	// Group Mapping
+	GroupDisplayNameAttribute *string
+	GroupIdAttribute          *string
 
 	// User Mapping
 	FirstNameAttribute *string
@@ -1356,6 +1413,18 @@ func (s *LdapSettings) SetDefaults() {
 
 	if s.UserFilter == nil {
 		s.UserFilter = NewString("")
+	}
+
+	if s.GroupFilter == nil {
+		s.GroupFilter = NewString("")
+	}
+
+	if s.GroupDisplayNameAttribute == nil {
+		s.GroupDisplayNameAttribute = NewString(LDAP_SETTINGS_DEFAULT_GROUP_DISPLAY_NAME_ATTRIBUTE)
+	}
+
+	if s.GroupIdAttribute == nil {
+		s.GroupIdAttribute = NewString(LDAP_SETTINGS_DEFAULT_GROUP_ID_ATTRIBUTE)
 	}
 
 	if s.FirstNameAttribute == nil {
@@ -1624,51 +1693,6 @@ func (s *NativeAppSettings) SetDefaults() {
 	}
 }
 
-type WebrtcSettings struct {
-	Enable              *bool
-	GatewayWebsocketUrl *string
-	GatewayAdminUrl     *string
-	GatewayAdminSecret  *string
-	StunURI             *string
-	TurnURI             *string
-	TurnUsername        *string
-	TurnSharedKey       *string
-}
-
-func (s *WebrtcSettings) SetDefaults() {
-	if s.Enable == nil {
-		s.Enable = NewBool(false)
-	}
-
-	if s.GatewayWebsocketUrl == nil {
-		s.GatewayWebsocketUrl = NewString("")
-	}
-
-	if s.GatewayAdminUrl == nil {
-		s.GatewayAdminUrl = NewString("")
-	}
-
-	if s.GatewayAdminSecret == nil {
-		s.GatewayAdminSecret = NewString("")
-	}
-
-	if s.StunURI == nil {
-		s.StunURI = NewString(WEBRTC_SETTINGS_DEFAULT_STUN_URI)
-	}
-
-	if s.TurnURI == nil {
-		s.TurnURI = NewString(WEBRTC_SETTINGS_DEFAULT_TURN_URI)
-	}
-
-	if s.TurnUsername == nil {
-		s.TurnUsername = NewString("")
-	}
-
-	if s.TurnSharedKey == nil {
-		s.TurnSharedKey = NewString("")
-	}
-}
-
 type ElasticsearchSettings struct {
 	ConnectionUrl                 *string
 	Username                      *string
@@ -1886,14 +1910,6 @@ func (s *MessageExportSettings) SetDefaults() {
 		s.ExportFromTimestamp = NewInt64(0)
 	}
 
-	if s.EnableExport != nil && *s.EnableExport && *s.ExportFromTimestamp == int64(0) {
-		// when the feature is enabled via the System Console, use the current timestamp as the start time for future exports
-		s.ExportFromTimestamp = NewInt64(GetMillis())
-	} else if s.EnableExport != nil && !*s.EnableExport {
-		// when the feature is disabled, reset the timestamp so that the timestamp will be set if the feature is re-enabled
-		s.ExportFromTimestamp = NewInt64(0)
-	}
-
 	if s.BatchSize == nil {
 		s.BatchSize = NewInt(10000)
 	}
@@ -1905,14 +1921,14 @@ func (s *MessageExportSettings) SetDefaults() {
 }
 
 type DisplaySettings struct {
-	CustomUrlSchemes     *[]string
+	CustomUrlSchemes     []string
 	ExperimentalTimezone *bool
 }
 
 func (s *DisplaySettings) SetDefaults() {
 	if s.CustomUrlSchemes == nil {
 		customUrlSchemes := []string{}
-		s.CustomUrlSchemes = &customUrlSchemes
+		s.CustomUrlSchemes = customUrlSchemes
 	}
 
 	if s.ExperimentalTimezone == nil {
@@ -1930,6 +1946,47 @@ func (s *TimezoneSettings) SetDefaults() {
 	}
 }
 
+type ImageProxySettings struct {
+	Enable                  *bool
+	ImageProxyType          *string
+	RemoteImageProxyURL     *string
+	RemoteImageProxyOptions *string
+}
+
+func (ips *ImageProxySettings) SetDefaults(ss ServiceSettings) {
+	if ips.Enable == nil {
+		if ss.DEPRECATED_DO_NOT_USE_ImageProxyType == nil || *ss.DEPRECATED_DO_NOT_USE_ImageProxyType == "" {
+			ips.Enable = NewBool(false)
+		} else {
+			ips.Enable = NewBool(true)
+		}
+	}
+
+	if ips.ImageProxyType == nil {
+		if ss.DEPRECATED_DO_NOT_USE_ImageProxyType == nil || *ss.DEPRECATED_DO_NOT_USE_ImageProxyType == "" {
+			ips.ImageProxyType = NewString(IMAGE_PROXY_TYPE_LOCAL)
+		} else {
+			ips.ImageProxyType = ss.DEPRECATED_DO_NOT_USE_ImageProxyType
+		}
+	}
+
+	if ips.RemoteImageProxyURL == nil {
+		if ss.DEPRECATED_DO_NOT_USE_ImageProxyURL == nil {
+			ips.RemoteImageProxyURL = NewString("")
+		} else {
+			ips.RemoteImageProxyURL = ss.DEPRECATED_DO_NOT_USE_ImageProxyURL
+		}
+	}
+
+	if ips.RemoteImageProxyOptions == nil {
+		if ss.DEPRECATED_DO_NOT_USE_ImageProxyOptions == nil {
+			ips.RemoteImageProxyOptions = NewString("")
+		} else {
+			ips.RemoteImageProxyOptions = ss.DEPRECATED_DO_NOT_USE_ImageProxyOptions
+		}
+	}
+}
+
 type ConfigFunc func() *Config
 
 type Config struct {
@@ -1941,7 +1998,6 @@ type Config struct {
 	PasswordSettings      PasswordSettings
 	FileSettings          FileSettings
 	EmailSettings         EmailSettings
-	ExtensionSettings     ExtensionSettings
 	RateLimitSettings     RateLimitSettings
 	PrivacySettings       PrivacySettings
 	SupportSettings       SupportSettings
@@ -1959,7 +2015,6 @@ type Config struct {
 	MetricsSettings       MetricsSettings
 	ExperimentalSettings  ExperimentalSettings
 	AnalyticsSettings     AnalyticsSettings
-	WebrtcSettings        WebrtcSettings
 	ElasticsearchSettings ElasticsearchSettings
 	DataRetentionSettings DataRetentionSettings
 	MessageExportSettings MessageExportSettings
@@ -1967,6 +2022,7 @@ type Config struct {
 	PluginSettings        PluginSettings
 	DisplaySettings       DisplaySettings
 	TimezoneSettings      TimezoneSettings
+	ImageProxySettings    ImageProxySettings
 }
 
 func (o *Config) Clone() *Config {
@@ -2035,11 +2091,10 @@ func (o *Config) SetDefaults() {
 	o.RateLimitSettings.SetDefaults()
 	o.LogSettings.SetDefaults()
 	o.JobSettings.SetDefaults()
-	o.WebrtcSettings.SetDefaults()
 	o.MessageExportSettings.SetDefaults()
 	o.TimezoneSettings.SetDefaults()
 	o.DisplaySettings.SetDefaults()
-	o.ExtensionSettings.SetDefaults()
+	o.ImageProxySettings.SetDefaults(o.ServiceSettings)
 }
 
 func (o *Config) IsValid() *AppError {
@@ -2087,10 +2142,6 @@ func (o *Config) IsValid() *AppError {
 		return err
 	}
 
-	if err := o.WebrtcSettings.isValid(); err != nil {
-		return err
-	}
-
 	if err := o.ServiceSettings.isValid(); err != nil {
 		return err
 	}
@@ -2112,6 +2163,10 @@ func (o *Config) IsValid() *AppError {
 	}
 
 	if err := o.DisplaySettings.isValid(); err != nil {
+		return err
+	}
+
+	if err := o.ImageProxySettings.isValid(); err != nil {
 		return err
 	}
 
@@ -2322,34 +2377,35 @@ func (ss *SamlSettings) isValid() *AppError {
 	return nil
 }
 
-func (ws *WebrtcSettings) isValid() *AppError {
-	if *ws.Enable {
-		if len(*ws.GatewayWebsocketUrl) == 0 || !IsValidWebsocketUrl(*ws.GatewayWebsocketUrl) {
-			return NewAppError("Config.IsValid", "model.config.is_valid.webrtc_gateway_ws_url.app_error", nil, "", http.StatusBadRequest)
-		} else if len(*ws.GatewayAdminUrl) == 0 || !IsValidHttpUrl(*ws.GatewayAdminUrl) {
-			return NewAppError("Config.IsValid", "model.config.is_valid.webrtc_gateway_admin_url.app_error", nil, "", http.StatusBadRequest)
-		} else if len(*ws.GatewayAdminSecret) == 0 {
-			return NewAppError("Config.IsValid", "model.config.is_valid.webrtc_gateway_admin_secret.app_error", nil, "", http.StatusBadRequest)
-		} else if len(*ws.StunURI) != 0 && !IsValidTurnOrStunServer(*ws.StunURI) {
-			return NewAppError("Config.IsValid", "model.config.is_valid.webrtc_stun_uri.app_error", nil, "", http.StatusBadRequest)
-		} else if len(*ws.TurnURI) != 0 {
-			if !IsValidTurnOrStunServer(*ws.TurnURI) {
-				return NewAppError("Config.IsValid", "model.config.is_valid.webrtc_turn_uri.app_error", nil, "", http.StatusBadRequest)
-			}
-			if len(*ws.TurnUsername) == 0 {
-				return NewAppError("Config.IsValid", "model.config.is_valid.webrtc_turn_username.app_error", nil, "", http.StatusBadRequest)
-			} else if len(*ws.TurnSharedKey) == 0 {
-				return NewAppError("Config.IsValid", "model.config.is_valid.webrtc_turn_shared_key.app_error", nil, "", http.StatusBadRequest)
-			}
-		}
-	}
-
-	return nil
-}
-
 func (ss *ServiceSettings) isValid() *AppError {
 	if !(*ss.ConnectionSecurity == CONN_SECURITY_NONE || *ss.ConnectionSecurity == CONN_SECURITY_TLS) {
 		return NewAppError("Config.IsValid", "model.config.is_valid.webserver_security.app_error", nil, "", http.StatusBadRequest)
+	}
+
+	if *ss.ConnectionSecurity == CONN_SECURITY_TLS && *ss.UseLetsEncrypt == false {
+		appErr := NewAppError("Config.IsValid", "model.config.is_valid.tls_cert_file.app_error", nil, "", http.StatusBadRequest)
+
+		if *ss.TLSCertFile == "" {
+			return appErr
+		} else if _, err := os.Stat(*ss.TLSCertFile); os.IsNotExist(err) {
+			return appErr
+		}
+
+		appErr = NewAppError("Config.IsValid", "model.config.is_valid.tls_key_file.app_error", nil, "", http.StatusBadRequest)
+
+		if *ss.TLSKeyFile == "" {
+			return appErr
+		} else if _, err := os.Stat(*ss.TLSKeyFile); os.IsNotExist(err) {
+			return appErr
+		}
+	}
+
+	if len(ss.TLSOverwriteCiphers) > 0 {
+		for _, cipher := range ss.TLSOverwriteCiphers {
+			if _, ok := ServerTLSSupportedCiphers[cipher]; !ok {
+				return NewAppError("Config.IsValid", "model.config.is_valid.tls_overwrite_cipher.app_error", map[string]interface{}{"name": cipher}, "", http.StatusBadRequest)
+			}
+		}
 	}
 
 	if *ss.ReadTimeout <= 0 {
@@ -2396,16 +2452,6 @@ func (ss *ServiceSettings) isValid() *AppError {
 		*ss.ExperimentalGroupUnreadChannels != GROUP_UNREAD_CHANNELS_DEFAULT_ON &&
 		*ss.ExperimentalGroupUnreadChannels != GROUP_UNREAD_CHANNELS_DEFAULT_OFF {
 		return NewAppError("Config.IsValid", "model.config.is_valid.group_unread_channels.app_error", nil, "", http.StatusBadRequest)
-	}
-
-	switch *ss.ImageProxyType {
-	case "":
-	case "atmos/camo":
-		if *ss.ImageProxyOptions == "" {
-			return NewAppError("Config.IsValid", "model.config.is_valid.atmos_camo_image_proxy_options.app_error", nil, "", http.StatusBadRequest)
-		}
-	default:
-		return NewAppError("Config.IsValid", "model.config.is_valid.image_proxy_type.app_error", nil, "", http.StatusBadRequest)
 	}
 
 	return nil
@@ -2508,10 +2554,10 @@ func (mes *MessageExportSettings) isValid(fs FileSettings) *AppError {
 }
 
 func (ds *DisplaySettings) isValid() *AppError {
-	if len(*ds.CustomUrlSchemes) != 0 {
+	if len(ds.CustomUrlSchemes) != 0 {
 		validProtocolPattern := regexp.MustCompile(`(?i)^\s*[a-z][a-z0-9-]*\s*$`)
 
-		for _, scheme := range *ds.CustomUrlSchemes {
+		for _, scheme := range ds.CustomUrlSchemes {
 			if !validProtocolPattern.MatchString(scheme) {
 				return NewAppError(
 					"Config.IsValid",
@@ -2521,6 +2567,27 @@ func (ds *DisplaySettings) isValid() *AppError {
 					http.StatusBadRequest,
 				)
 			}
+		}
+	}
+
+	return nil
+}
+
+func (ips *ImageProxySettings) isValid() *AppError {
+	if *ips.Enable {
+		switch *ips.ImageProxyType {
+		case IMAGE_PROXY_TYPE_LOCAL:
+			// No other settings to validate
+		case IMAGE_PROXY_TYPE_ATMOS_CAMO:
+			if *ips.RemoteImageProxyURL == "" {
+				return NewAppError("Config.IsValid", "model.config.is_valid.atmos_camo_image_proxy_url.app_error", nil, "", http.StatusBadRequest)
+			}
+
+			if *ips.RemoteImageProxyOptions == "" {
+				return NewAppError("Config.IsValid", "model.config.is_valid.atmos_camo_image_proxy_options.app_error", nil, "", http.StatusBadRequest)
+			}
+		default:
+			return NewAppError("Config.IsValid", "model.config.is_valid.image_proxy_type.app_error", nil, "", http.StatusBadRequest)
 		}
 	}
 

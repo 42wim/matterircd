@@ -8,7 +8,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/mattermost/platform/model"
+	"github.com/mattermost/mattermost-server/model"
 )
 
 type CommandHandler interface {

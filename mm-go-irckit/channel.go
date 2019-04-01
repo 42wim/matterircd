@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mattermost/platform/model"
+	"github.com/mattermost/mattermost-server/model"
 	"github.com/sorcix/irc"
 )
 

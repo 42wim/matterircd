@@ -29,6 +29,9 @@ const (
 	CHANNEL_HEADER_MAX_RUNES       = 1024
 	CHANNEL_PURPOSE_MAX_RUNES      = 250
 	CHANNEL_CACHE_SIZE             = 25000
+
+	CHANNEL_SORT_BY_USERNAME = "username"
+	CHANNEL_SORT_BY_STATUS   = "status"
 )
 
 type Channel struct {
@@ -48,6 +51,13 @@ type Channel struct {
 	CreatorId     string                 `json:"creator_id"`
 	SchemeId      *string                `json:"scheme_id"`
 	Props         map[string]interface{} `json:"props" db:"-"`
+}
+
+type ChannelWithTeamData struct {
+	Channel
+	TeamDisplayName string `json:"team_display_name"`
+	TeamName        string `json:"team_name"`
+	TeamUpdateAt    int64  `json:"team_update_at"`
 }
 
 type ChannelPatch struct {
