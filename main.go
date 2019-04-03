@@ -53,7 +53,7 @@ func main() {
 	// migrate config settings to mattermost settings
 	cfg = *config.Migrate(cfg)
 	// Attempt to load values from the config file
-	if _, err = os.Stat(*flagConfig); err == nil {
+	if _, err := os.Stat(*flagConfig); err == nil {
 		cfg = *config.LoadConfig(*flagConfig, cfg)
 	}
 
