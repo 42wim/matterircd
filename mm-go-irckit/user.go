@@ -156,7 +156,7 @@ func (user *User) Decode() {
 	stop := make(chan struct{})
 	bufferTimeout := user.Cfg.PasteBufferTimeout
 	// we need at least 100
-	if bufferTimeout == 0 {
+	if bufferTimeout < 100 {
 		bufferTimeout = 100
 	}
 	logger.Debugf("using paste buffer timeout: %#v\n", bufferTimeout)

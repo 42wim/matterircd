@@ -29,7 +29,7 @@ func main() {
 
 	// config related. instantiate a new config.Config to store flags
 	cfg = config.Config{}
-	flagConfig := flag.String("conf", "/usr/local/etc/matterircd/matterircd.toml", "config file")
+	flagConfig := flag.String("conf", "matterircd.toml", "config file")
 
 	// bools for showing version/enabling debug
 	flagVersion := flag.Bool("version", false, "show version")
