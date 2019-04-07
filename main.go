@@ -29,7 +29,7 @@ func main() {
 
 	// config related. instantiate a new config.Config to store flags
 	cfg = config.Config{}
-	flagConfig := flag.String("conf", "", "config file")
+	flagConfig := flag.String("conf", "matterircd.toml", "config file")
 
 	// bools for showing version/enabling debug
 	flagVersion := flag.Bool("version", false, "show version")
@@ -52,8 +52,8 @@ func main() {
 
 	// migrate config settings to mattermost settings
 	cfg = *config.Migrate(cfg)
-	// if -config was set, load the config file (overrides args)
-	if *flagConfig != "" {
+	// Attempt to load values from the config file
+	if _, err := os.Stat(*flagConfig); err == nil {
 		cfg = *config.LoadConfig(*flagConfig, cfg)
 	}
 
