@@ -380,7 +380,6 @@ func (u *User) handleWsActionPost(rmsg *model.WebSocketEvent) {
 			}
 			return
 		}
-
 		if ghost == nil {
 			return
 		}
@@ -391,6 +390,17 @@ func (u *User) handleWsActionPost(rmsg *model.WebSocketEvent) {
 			// TODO use u.handleWsActionUserRemoved()
 			//u.handleWsActionUserRemoved(data)
 			ch.Part(ghost, "")
+		}
+		return
+	}
+
+	if data.Type == "system_header_change" {
+		ch = u.Srv.Channel(data.ChannelId)
+		if topic, ok := extraProps["new_header"].(string); ok {
+			if topicuser, ok := extraProps["username"].(string); ok {
+				tu, _ := u.Srv.HasUser(topicuser)
+				ch.Topic(tu, topic)
+			}
 		}
 		return
 	}
