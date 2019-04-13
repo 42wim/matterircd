@@ -474,7 +474,16 @@ func (u *User) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		logger.Debugf("files detected")
 		for _, fname := range u.mc.GetFileLinks(data.FileIds) {
 			if props["channel_type"] == "D" {
-				u.MsgSpoofUser(u, spoofUsername, "download file - "+fname)
+				if data.UserId == u.mc.User.Id {
+					// we have to look in the mention to see who we are sending a message to
+					mentions := model.ArrayFromJson(strings.NewReader(props["mentions"].(string)))
+					if len(mentions) > 0 {
+						spoofUsername = u.mc.GetUserName(mentions[0])
+						u.MsgSpoofUser(u, spoofUsername, "download file -"+fname)
+					}
+				} else {
+					u.MsgSpoofUser(ghost, spoofUsername, "download file -"+fname)
+				}
 			} else {
 				ch.SpoofMessage(spoofUsername, "download file - "+fname)
 			}
