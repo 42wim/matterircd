@@ -1,3 +1,17 @@
+# v0.19.2
+## Enhancement
+* general: Add a default value matterirc.toml for the '-conf' flag (#240)
+* slack: library updated
+* mattermost: library updated
+* mattermost: Add support for channel created/deleted events
+
+## Bugfix
+* mattermost: Remove ourselves from the channel when removed in mattermost. Fixes #233
+* mattermost: Add/remove ourselves to the channel if we join using the GUI. #239
+* mattermost: Update topics in mattermost. Closes #241
+* mattermost: Fix pastes and attachments in direct message. Closes #228
+* mattermost: Update channels if not known on join yet
+
 # v0.19.1
 ## New features
 * mattermost: Added support for disabling of automatic view flag updates (#226). See DisableAutoView in matterircd.toml.example
