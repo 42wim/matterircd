@@ -270,6 +270,10 @@ func (u *User) handleWsMessage() {
 			u.handleWsActionUserRemoved(message.Raw)
 		case model.WEBSOCKET_EVENT_USER_ADDED:
 			u.handleWsActionUserAdded(message.Raw)
+		case model.WEBSOCKET_EVENT_CHANNEL_CREATED:
+			u.handleWsActionChannelCreated(message.Raw)
+		case model.WEBSOCKET_EVENT_CHANNEL_DELETED:
+			u.handleWsActionChannelDeleted(message.Raw)
 		}
 	}
 }
@@ -527,6 +531,27 @@ func (u *User) handleWsActionUserAdded(rmsg *model.WebSocketEvent) {
 		return
 	}
 	u.addUserToChannel(u.mc.GetUser(userId), "#"+u.mc.GetChannelName(rmsg.Broadcast.ChannelId), rmsg.Broadcast.ChannelId)
+}
+
+func (u *User) handleWsActionChannelCreated(rmsg *model.WebSocketEvent) {
+	channelId, ok := rmsg.Data["channel_id"].(string)
+	if !ok {
+		return
+	}
+	u.mc.UpdateChannels()
+	logger.Debugf("ACTION_CHANNEL_CREATED adding myself to %s (%s)", u.mc.GetChannelName(channelId), channelId)
+	u.syncMMChannel(channelId, u.mc.GetChannelName(channelId))
+}
+
+func (u *User) handleWsActionChannelDeleted(rmsg *model.WebSocketEvent) {
+	channelId, ok := rmsg.Data["channel_id"].(string)
+	if !ok {
+		return
+	}
+	ch := u.Srv.Channel(channelId)
+	// remove ourselves from the channel
+	logger.Debugf("ACTION_CHANNEL_DELETED removing myself from %s (%s)", u.mc.GetChannelName(channelId), channelId)
+	ch.Part(u, "")
 }
 
 func (u *User) checkWsActionMessage(rmsg *model.WebSocketEvent, throttle <-chan time.Time) {
