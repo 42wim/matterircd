@@ -533,6 +533,9 @@ func (u *User) handleWsActionUserAdded(rmsg *model.WebSocketEvent) {
 
 	// add ourselves to the channel
 	if userId == u.mc.User.Id {
+		if u.mc.GetChannelName(rmsg.Broadcast.ChannelId) == "" {
+			u.mc.UpdateChannels()
+		}
 		logger.Debugf("ACTION_USER_ADDED adding myself to %s (%s)", u.mc.GetChannelName(rmsg.Broadcast.ChannelId), rmsg.Broadcast.ChannelId)
 		u.syncMMChannel(rmsg.Broadcast.ChannelId, u.mc.GetChannelName(rmsg.Broadcast.ChannelId))
 		ch := u.Srv.Channel(rmsg.Broadcast.ChannelId)
