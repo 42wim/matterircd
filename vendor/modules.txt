@@ -1,4 +1,4 @@
-# github.com/42wim/matterbridge v1.14.2-0.20190401221558-17cc14a9d235
+# github.com/42wim/matterbridge v1.14.3-0.20190413195239-4db34b0506cc
 github.com/42wim/matterbridge/matterclient
 # github.com/BurntSushi/toml v0.3.1
 github.com/BurntSushi/toml
@@ -42,7 +42,7 @@ github.com/nicksnyder/go-i18n/i18n/translation
 # github.com/nlopes/slack v0.5.0
 github.com/nlopes/slack
 github.com/nlopes/slack/slackutilsx
-# github.com/pborman/uuid v0.0.0-20170612153648-e790cca94e6c
+# github.com/pborman/uuid v0.0.0-20160216163710-c55201b03606
 github.com/pborman/uuid
 # github.com/pelletier/go-toml v1.2.0
 github.com/pelletier/go-toml
