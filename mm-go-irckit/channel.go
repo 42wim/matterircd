@@ -168,7 +168,6 @@ func (ch *channel) Part(u *User, text string) {
 	}
 	u.Encode(msg)
 	delete(ch.usersIdx, u)
-	ch.mu.Unlock()
 	u.Lock()
 	delete(u.channels, ch)
 	u.Unlock()
@@ -178,6 +177,7 @@ func (ch *channel) Part(u *User, text string) {
 			to.Encode(msg)
 		}
 	}
+	ch.mu.Unlock()
 }
 
 // Unlink will disassociate the Channel from the Server.
