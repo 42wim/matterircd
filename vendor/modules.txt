@@ -1,4 +1,4 @@
-# github.com/42wim/matterbridge v1.14.3-0.20190413195239-4db34b0506cc
+# github.com/42wim/matterbridge v1.14.3-0.20190420210606-9f5f0047259f
 github.com/42wim/matterbridge/matterclient
 # github.com/BurntSushi/toml v0.3.1
 github.com/BurntSushi/toml
