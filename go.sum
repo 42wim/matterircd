@@ -1,7 +1,7 @@
 github.com/42wim/go-gitter v0.0.0-20170828205020-017310c2d557 h1:IZtuWGfzQnKnCSu+vl8WGLhpVQ5Uvy3rlSwqXSg+sQg=
 github.com/42wim/go-gitter v0.0.0-20170828205020-017310c2d557/go.mod h1:jL0YSXMs/txjtGJ4PWrmETOk6KUHMDPMshgQZlTeB3Y=
-github.com/42wim/matterbridge v1.14.3-0.20190420210606-9f5f0047259f h1:O6SO0F/sbJYyHf9WyPKhH1sV22FU2KrbzU6qIAUBIn8=
-github.com/42wim/matterbridge v1.14.3-0.20190420210606-9f5f0047259f/go.mod h1:F9IgjUs61MFehV9JmtlPYt2EZ1J88O31co9rZi2hr0M=
+github.com/42wim/matterbridge v1.14.3-0.20190501224649-1b2feb19e506 h1:2xVTRigdivkjEImD8d1mJnPvOWefM898ByeXLLzRxRM=
+github.com/42wim/matterbridge v1.14.3-0.20190501224649-1b2feb19e506/go.mod h1:F9IgjUs61MFehV9JmtlPYt2EZ1J88O31co9rZi2hr0M=
 github.com/Baozisoftware/qrcode-terminal-go v0.0.0-20170407111555-c0650d8dff0f h1:2dk3eOnYllh+wUOuDhOoC2vUVoJF/5z478ryJ+wzEII=
 github.com/Baozisoftware/qrcode-terminal-go v0.0.0-20170407111555-c0650d8dff0f/go.mod h1:4a58ifQTEe2uwwsaqbh3i2un5/CBPg+At/qHpt18Tmk=
 github.com/BurntSushi/toml v0.0.0-20170318202913-d94612f9fc14/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
