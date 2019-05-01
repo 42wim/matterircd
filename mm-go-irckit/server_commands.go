@@ -182,7 +182,9 @@ func CmdJoin(s Server, u *User, msg *irc.Message) error {
 		}
 		// if we joined, remove channel from exclude and add to include
 		u.Cfg.JoinExclude = removeStringInSlice(channel, u.Cfg.JoinExclude)
-		u.Cfg.JoinInclude = append(u.Cfg.JoinInclude, channel)
+		if len(u.Cfg.JoinInclude) > 0 {
+			u.Cfg.JoinInclude = append(u.Cfg.JoinInclude, channel)
+		}
 		ch := s.Channel(channelId)
 		ch.Topic(u, topic)
 		sync(channelId, channelName)
