@@ -611,10 +611,25 @@ func (u *User) MsgSpoofUser(sender *User, rcvuser string, msg string) {
 // sync IRC with mattermost channel state
 func (u *User) syncMMChannel(id string, name string) {
 	srv := u.Srv
-	mmusers, resp := u.mc.Client.GetUsersInChannel(id, 0, 50000, "")
+
+	idx := 0
+	max := 200
+	var mmusers []*model.User
+	mmusersPaged, resp := u.mc.Client.GetUsersInChannel(id, idx, max, "")
 	if resp.Error != nil {
 		return
 	}
+	for len(mmusersPaged) > 0 {
+		mmusersPaged, resp = u.mc.Client.GetUsersInChannel(id, idx, max, "")
+		if resp.Error != nil {
+			return
+		}
+		idx++
+		time.Sleep(time.Millisecond * 200)
+		mmusers = append(mmusers, mmusersPaged...)
+	}
+	logger.Debugf("found %d users in channel %s", len(mmusers), name)
+
 	for _, user := range mmusers {
 		if user.Id != u.mc.User.Id {
 			u.addUserToChannel(user, "#"+name, id)
