@@ -453,12 +453,14 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 			}
 		}
 		if ch.Service() == "mattermost" {
-			props := make(map[string]interface{})
-			props["matterircd_"+u.mc.User.Id] = true
-			post := &model.Post{ChannelId: ch.ID(), Message: msg.Trailing, Props: props}
-			_, resp := u.mc.Client.CreatePost(post)
-			if resp.Error != nil {
-				u.MsgSpoofUser(u, "mattermost", "msg: "+msg.Trailing+" could not be send: "+resp.Error.Error())
+			if u.mc != nil {
+				props := make(map[string]interface{})
+				props["matterircd_"+u.mc.User.Id] = true
+				post := &model.Post{ChannelId: ch.ID(), Message: msg.Trailing, Props: props}
+				_, resp := u.mc.Client.CreatePost(post)
+				if resp.Error != nil {
+					u.MsgSpoofUser(u, "mattermost", "msg: "+msg.Trailing+" could not be send: "+resp.Error.Error())
+				}
 			}
 		}
 	} else if toUser, exists := s.HasUser(query); exists {
