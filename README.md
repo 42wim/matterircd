@@ -155,6 +155,12 @@ Scrollback
 /msg mattermost scrollback <channel> <limit>
 e.g. /msg mattermost scrollback #bugs 100 shows the last 100 messages of #bugs
 ```
+
+Mark messages in a channel/from a user as read (when DisableAutoView is set).
+```
+/msg mattermost updatelastviewed <channel>
+/msg mattermost updatelastviewed <username>
+```
 ## Slack user commands
 Get a slack token on https://api.slack.com/custom-integrations/legacy-tokens
 
