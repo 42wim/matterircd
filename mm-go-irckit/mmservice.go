@@ -287,7 +287,7 @@ func updatelastviewed(u *User, toUser *User, args []string, service string) {
 	} else if updateUser, exists := u.Srv.HasUser(args[0]); exists && updateUser.MmGhostUser {
 		dc, resp := u.mc.Client.CreateDirectChannel(u.mc.User.Id, updateUser.User)
 		if resp.Error != nil {
-			u.MsgUser("CreateDirectChannel to %#v failed: %s", updateUser.User, resp.Error)
+			u.MsgUser(toUser, fmt.Sprintf("CreateDirectChannel to %#v failed: %s", updateUser.User, resp.Error))
 			return
 		}
 		channelId = dc.Id
