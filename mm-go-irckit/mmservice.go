@@ -266,12 +266,46 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 
 }
 
+func updatelastviewed(u *User, toUser *User, args []string, service string) {
+	if service == "slack" {
+		u.MsgUser(toUser, "not implemented")
+		return
+	}
+	channelId := ""
+	if len(args) != 1 {
+		u.MsgUser(toUser, "need UPDATELASTVIEWED <channel>")
+		u.MsgUser(toUser, "e.g. UPDATELASTVIEWED #bugs")
+		return
+	}
+	if strings.Contains(args[0], "#") {
+		args[0] = strings.Replace(args[0], "#", "", -1)
+		channelId = u.mc.GetChannelId(args[0], u.mc.Team.Id)
+		if channelId == "" {
+			u.MsgUser(toUser, "channel does not exist")
+			return
+		}
+	} else if updateUser, exists := u.Srv.HasUser(args[0]); exists && updateUser.MmGhostUser {
+		dc, resp := u.mc.Client.CreateDirectChannel(u.mc.User.Id, updateUser.User)
+		if resp.Error != nil {
+			u.MsgUser("CreateDirectChannel to %#v failed: %s", updateUser.User, resp.Error)
+			return
+		}
+		channelId = dc.Id
+	} else {
+		u.MsgUser(toUser, fmt.Sprintf("user %s does not exist", args[0]))
+		return
+	}
+	u.mc.UpdateLastViewed(channelId)
+	u.MsgUser(toUser, fmt.Sprintf("set viewed for %s", args[0]))
+}
+
 var cmds = map[string]Command{
-	"logout":      {handler: logout, login: true, minParams: 0, maxParams: 0},
-	"login":       {handler: login, minParams: 2, maxParams: 4},
-	"search":      {handler: search, login: true, minParams: 1, maxParams: -1},
-	"searchusers": {handler: searchUsers, login: true, minParams: 1, maxParams: -1},
-	"scrollback":  {handler: scrollback, login: true, minParams: 2, maxParams: 2},
+	"logout":           {handler: logout, login: true, minParams: 0, maxParams: 0},
+	"login":            {handler: login, minParams: 2, maxParams: 4},
+	"search":           {handler: search, login: true, minParams: 1, maxParams: -1},
+	"searchusers":      {handler: searchUsers, login: true, minParams: 1, maxParams: -1},
+	"scrollback":       {handler: scrollback, login: true, minParams: 2, maxParams: 2},
+	"updatelastviewed": {handler: updatelastviewed, login: true, minParams: 1, maxParams: 1},
 }
 
 func (u *User) handleServiceBot(service string, toUser *User, msg string) {
