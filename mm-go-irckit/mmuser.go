@@ -244,7 +244,9 @@ func (u *User) addUserToChannelWorker(channels <-chan *model.Channel, throttle <
 				}
 			}
 		}
-		u.mc.UpdateLastViewed(mmchannel.Id)
+		if !u.Cfg.DisableAutoView {
+			u.mc.UpdateLastViewed(mmchannel.Id)
+		}
 	}
 }
 
