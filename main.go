@@ -93,6 +93,7 @@ func main() {
 			socket, err := net.Listen("tcp", cfg.Bind)
 			if err != nil {
 				logger.Errorf("Can not listen on %s: %v", cfg.Bind, err)
+				os.Exit(1)
 			}
 			logger.Infof("Listening on %s", cfg.Bind)
 			defer socket.Close()
