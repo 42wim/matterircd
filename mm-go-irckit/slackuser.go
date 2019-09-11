@@ -339,7 +339,7 @@ func (u *User) handleSlackActionMisc(userid string, channel string, message stri
 
 	user, err := u.rtm.GetUserInfo(userid)
 	if err != nil {
-    return
+		return
 	}
 
 	// create new "ghost" user
@@ -358,8 +358,7 @@ func (u *User) handleSlackActionMisc(userid string, channel string, message stri
 	}
 
 	msgs := []string{}
-  msgs = append(msgs, message)
-
+	msgs = append(msgs, message)
 
 	// direct message
 	ch = u.Srv.Channel(channel)
@@ -378,7 +377,6 @@ func (u *User) handleSlackActionMisc(userid string, channel string, message stri
 			ch.Join(u)
 		}
 	}
-
 
 	spoofUsername = strings.Replace(spoofUsername, " ", "_", -1)
 	for _, m := range msgs {
