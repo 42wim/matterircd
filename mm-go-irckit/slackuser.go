@@ -357,8 +357,7 @@ func (u *User) handleSlackActionMisc(userid string, channel string, message stri
 		}
 	}
 
-	msgs := []string{}
-	msgs = append(msgs, message)
+	msgs := strings.Split(message, "\n")
 
 	// direct message
 	ch = u.Srv.Channel(channel)
