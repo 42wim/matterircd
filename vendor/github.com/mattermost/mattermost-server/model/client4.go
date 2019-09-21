@@ -27,6 +27,7 @@ const (
 	HEADER_REAL_IP            = "X-Real-IP"
 	HEADER_FORWARDED_PROTO    = "X-Forwarded-Proto"
 	HEADER_TOKEN              = "token"
+	HEADER_CSRF_TOKEN         = "X-CSRF-Token"
 	HEADER_BEARER             = "BEARER"
 	HEADER_AUTH               = "Authorization"
 	HEADER_REQUESTED_WITH     = "X-Requested-With"
@@ -147,6 +148,14 @@ func (c *Client4) GetUserByUsernameRoute(userName string) string {
 
 func (c *Client4) GetUserByEmailRoute(email string) string {
 	return fmt.Sprintf(c.GetUsersRoute()+"/email/%v", email)
+}
+
+func (c *Client4) GetBotsRoute() string {
+	return fmt.Sprintf("/bots")
+}
+
+func (c *Client4) GetBotRoute(botUserId string) string {
+	return fmt.Sprintf("%s/%s", c.GetBotsRoute(), botUserId)
 }
 
 func (c *Client4) GetTeamsRoute() string {
@@ -439,6 +448,10 @@ func (c *Client4) doApiPostBytes(url string, data []byte) (*http.Response, *AppE
 
 func (c *Client4) DoApiPut(url string, data string) (*http.Response, *AppError) {
 	return c.DoApiRequest(http.MethodPut, c.ApiUrl+url, data, "")
+}
+
+func (c *Client4) doApiPutBytes(url string, data []byte) (*http.Response, *AppError) {
+	return c.doApiRequestBytes(http.MethodPut, c.ApiUrl+url, data, "")
 }
 
 func (c *Client4) DoApiDelete(url string) (*http.Response, *AppError) {
@@ -1334,6 +1347,111 @@ func (c *Client4) EnableUserAccessToken(tokenId string) (bool, *Response) {
 	return CheckStatusOK(r), BuildResponse(r)
 }
 
+// Bots section
+
+// CreateBot creates a bot in the system based on the provided bot struct.
+func (c *Client4) CreateBot(bot *Bot) (*Bot, *Response) {
+	r, err := c.doApiPostBytes(c.GetBotsRoute(), bot.ToJson())
+	if err != nil {
+		return nil, BuildErrorResponse(r, err)
+	}
+	defer closeBody(r)
+	return BotFromJson(r.Body), BuildResponse(r)
+}
+
+// PatchBot partially updates a bot. Any missing fields are not updated.
+func (c *Client4) PatchBot(userId string, patch *BotPatch) (*Bot, *Response) {
+	r, err := c.doApiPutBytes(c.GetBotRoute(userId), patch.ToJson())
+	if err != nil {
+		return nil, BuildErrorResponse(r, err)
+	}
+	defer closeBody(r)
+	return BotFromJson(r.Body), BuildResponse(r)
+}
+
+// GetBot fetches the given, undeleted bot.
+func (c *Client4) GetBot(userId string, etag string) (*Bot, *Response) {
+	r, err := c.DoApiGet(c.GetBotRoute(userId), etag)
+	if err != nil {
+		return nil, BuildErrorResponse(r, err)
+	}
+	defer closeBody(r)
+	return BotFromJson(r.Body), BuildResponse(r)
+}
+
+// GetBot fetches the given bot, even if it is deleted.
+func (c *Client4) GetBotIncludeDeleted(userId string, etag string) (*Bot, *Response) {
+	r, err := c.DoApiGet(c.GetBotRoute(userId)+"?include_deleted=true", etag)
+	if err != nil {
+		return nil, BuildErrorResponse(r, err)
+	}
+	defer closeBody(r)
+	return BotFromJson(r.Body), BuildResponse(r)
+}
+
+// GetBots fetches the given page of bots, excluding deleted.
+func (c *Client4) GetBots(page, perPage int, etag string) ([]*Bot, *Response) {
+	query := fmt.Sprintf("?page=%v&per_page=%v", page, perPage)
+	r, err := c.DoApiGet(c.GetBotsRoute()+query, etag)
+	if err != nil {
+		return nil, BuildErrorResponse(r, err)
+	}
+	defer closeBody(r)
+	return BotListFromJson(r.Body), BuildResponse(r)
+}
+
+// GetBotsIncludeDeleted fetches the given page of bots, including deleted.
+func (c *Client4) GetBotsIncludeDeleted(page, perPage int, etag string) ([]*Bot, *Response) {
+	query := fmt.Sprintf("?page=%v&per_page=%v&include_deleted=true", page, perPage)
+	r, err := c.DoApiGet(c.GetBotsRoute()+query, etag)
+	if err != nil {
+		return nil, BuildErrorResponse(r, err)
+	}
+	defer closeBody(r)
+	return BotListFromJson(r.Body), BuildResponse(r)
+}
+
+// GetBotsOrphaned fetches the given page of bots, only including orphanded bots.
+func (c *Client4) GetBotsOrphaned(page, perPage int, etag string) ([]*Bot, *Response) {
+	query := fmt.Sprintf("?page=%v&per_page=%v&only_orphaned=true", page, perPage)
+	r, err := c.DoApiGet(c.GetBotsRoute()+query, etag)
+	if err != nil {
+		return nil, BuildErrorResponse(r, err)
+	}
+	defer closeBody(r)
+	return BotListFromJson(r.Body), BuildResponse(r)
+}
+
+// DisableBot disables the given bot in the system.
+func (c *Client4) DisableBot(botUserId string) (*Bot, *Response) {
+	r, err := c.doApiPostBytes(c.GetBotRoute(botUserId)+"/disable", nil)
+	if err != nil {
+		return nil, BuildErrorResponse(r, err)
+	}
+	defer closeBody(r)
+	return BotFromJson(r.Body), BuildResponse(r)
+}
+
+// EnableBot disables the given bot in the system.
+func (c *Client4) EnableBot(botUserId string) (*Bot, *Response) {
+	r, err := c.doApiPostBytes(c.GetBotRoute(botUserId)+"/enable", nil)
+	if err != nil {
+		return nil, BuildErrorResponse(r, err)
+	}
+	defer closeBody(r)
+	return BotFromJson(r.Body), BuildResponse(r)
+}
+
+// AssignBot assigns the given bot to the given user
+func (c *Client4) AssignBot(botUserId, newOwnerId string) (*Bot, *Response) {
+	r, err := c.doApiPostBytes(c.GetBotRoute(botUserId)+"/assign/"+newOwnerId, nil)
+	if err != nil {
+		return nil, BuildErrorResponse(r, err)
+	}
+	defer closeBody(r)
+	return BotFromJson(r.Body), BuildResponse(r)
+}
+
 // Team Section
 
 // CreateTeam creates a team in the system based on the provided team struct.
@@ -1452,6 +1570,16 @@ func (c *Client4) UpdateTeam(team *Team) (*Team, *Response) {
 // PatchTeam partially updates a team. Any missing fields are not updated.
 func (c *Client4) PatchTeam(teamId string, patch *TeamPatch) (*Team, *Response) {
 	r, err := c.DoApiPut(c.GetTeamRoute(teamId)+"/patch", patch.ToJson())
+	if err != nil {
+		return nil, BuildErrorResponse(r, err)
+	}
+	defer closeBody(r)
+	return TeamFromJson(r.Body), BuildResponse(r)
+}
+
+// RegenerateTeamInviteId requests a new invite ID to be generated.
+func (c *Client4) RegenerateTeamInviteId(teamId string) (*Team, *Response) {
+	r, err := c.DoApiPost(c.GetTeamRoute(teamId)+"/regenerate_invite_id", "")
 	if err != nil {
 		return nil, BuildErrorResponse(r, err)
 	}
@@ -1646,6 +1774,16 @@ func (c *Client4) ImportTeam(data []byte, filesize int, importFrom, filename, te
 // InviteUsersToTeam invite users by email to the team.
 func (c *Client4) InviteUsersToTeam(teamId string, userEmails []string) (bool, *Response) {
 	r, err := c.DoApiPost(c.GetTeamRoute(teamId)+"/invite/email", ArrayToJson(userEmails))
+	if err != nil {
+		return false, BuildErrorResponse(r, err)
+	}
+	defer closeBody(r)
+	return CheckStatusOK(r), BuildResponse(r)
+}
+
+// InvalidateEmailInvites will invalidate active email invitations that have not been accepted by the user.
+func (c *Client4) InvalidateEmailInvites() (bool, *Response) {
+	r, err := c.DoApiDelete(c.GetTeamsRoute() + "/invites/email")
 	if err != nil {
 		return false, BuildErrorResponse(r, err)
 	}
@@ -2332,6 +2470,23 @@ func (c *Client4) DoPostAction(postId, actionId string) (bool, *Response) {
 	return CheckStatusOK(r), BuildResponse(r)
 }
 
+// DoPostActionWithCookie performs a post action with extra arguments
+func (c *Client4) DoPostActionWithCookie(postId, actionId, selected, cookieStr string) (bool, *Response) {
+	var body []byte
+	if selected != "" || cookieStr != "" {
+		body, _ = json.Marshal(DoPostActionRequest{
+			SelectedOption: selected,
+			Cookie:         cookieStr,
+		})
+	}
+	r, err := c.DoApiPost(c.GetPostRoute(postId)+"/actions/"+actionId, string(body))
+	if err != nil {
+		return false, BuildErrorResponse(r, err)
+	}
+	defer closeBody(r)
+	return CheckStatusOK(r), BuildResponse(r)
+}
+
 // OpenInteractiveDialog sends a WebSocket event to a user's clients to
 // open interactive dialogs, based on the provided trigger ID and other
 // provided data. Used with interactive message buttons, menus and
@@ -2944,6 +3099,7 @@ func samlFileToMultipart(data []byte, filename string) ([]byte, *multipart.Write
 }
 
 // UploadSamlIdpCertificate will upload an IDP certificate for SAML and set the config to use it.
+// The filename parameter is deprecated and ignored: the server will pick a hard-coded filename when writing to disk.
 func (c *Client4) UploadSamlIdpCertificate(data []byte, filename string) (bool, *Response) {
 	body, writer, err := samlFileToMultipart(data, filename)
 	if err != nil {
@@ -2955,6 +3111,7 @@ func (c *Client4) UploadSamlIdpCertificate(data []byte, filename string) (bool, 
 }
 
 // UploadSamlPublicCertificate will upload a public certificate for SAML and set the config to use it.
+// The filename parameter is deprecated and ignored: the server will pick a hard-coded filename when writing to disk.
 func (c *Client4) UploadSamlPublicCertificate(data []byte, filename string) (bool, *Response) {
 	body, writer, err := samlFileToMultipart(data, filename)
 	if err != nil {
@@ -2966,6 +3123,7 @@ func (c *Client4) UploadSamlPublicCertificate(data []byte, filename string) (boo
 }
 
 // UploadSamlPrivateCertificate will upload a private key for SAML and set the config to use it.
+// The filename parameter is deprecated and ignored: the server will pick a hard-coded filename when writing to disk.
 func (c *Client4) UploadSamlPrivateCertificate(data []byte, filename string) (bool, *Response) {
 	body, writer, err := samlFileToMultipart(data, filename)
 	if err != nil {
