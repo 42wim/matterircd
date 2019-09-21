@@ -529,13 +529,15 @@ func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
 	}
 
 	if msghandled {
-		if rmsg.ThreadTimestamp != "" {
+		if rmsg.ThreadTimestamp != "" && len(msgs) > 0 {
 			msgs[0] = "[T " + formatTs(rmsg.ThreadTimestamp) + "] " + msgs[0]
 		}
 	}
 	if rmsg.SubType == "message_changed" {
 		msgs = append(msgs, strings.Split(rmsg.SubMessage.Text, "\n")...)
-		msgs[0] = "[C " + formatTs(rmsg.SubMessage.Timestamp) + "] " + msgs[0]
+		if len(msgs) > 0 {
+			msgs[0] = "[C " + formatTs(rmsg.SubMessage.Timestamp) + "] " + msgs[0]
+		}
 		msghandled = true
 	}
 
