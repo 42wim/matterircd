@@ -264,17 +264,6 @@ func (u *User) addSlackUserToChannelWorker(channels <-chan interface{}, throttle
 		// post everything to the channel you haven't seen yet
 	}
 }
-func formatTs(unixts string) string {
-	var targetts, targetus int64
-	fmt.Sscanf(unixts, "%d.%d", &targetts, &targetus)
-	ts := time.Unix(targetts, targetus*1000)
-
-	if ts.YearDay() != time.Now().YearDay() {
-		return ts.Format("2.1. 15:04:05")
-	} else {
-		return ts.Format("15:04:05")
-	}
-}
 
 func formatTs(unixts string) string {
 	var targetts, targetus int64
