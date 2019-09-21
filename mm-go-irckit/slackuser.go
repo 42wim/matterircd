@@ -264,6 +264,17 @@ func (u *User) addSlackUserToChannelWorker(channels <-chan interface{}, throttle
 		// post everything to the channel you haven't seen yet
 	}
 }
+func formatTs(unixts string) string {
+	var targetts, targetus int64
+	fmt.Sscanf(unixts, "%d.%d", &targetts, &targetus)
+	ts := time.Unix(targetts, targetus*1000)
+
+	if ts.YearDay() != time.Now().YearDay() {
+		return ts.Format("2.1. 15:04:05")
+	} else {
+		return ts.Format("15:04:05")
+	}
+}
 
 func (u *User) handleSlack() {
 	for {
@@ -282,6 +293,11 @@ func (u *User) handleSlack() {
 				}
 				if ev.SubType == "channel_join" {
 					u.syncSlackChannel(ev.Channel, "")
+				}
+				if ev.SubType == "message_deleted" {
+					ts := formatTs(ev.DeletedTimestamp)
+					msg := "[M " + ts + "] Message deleted"
+					u.handleSlackActionMisc("USLACKBOT", ev.Channel, msg)
 				}
 				u.handleSlackActionPost(ev)
 			case *slack.DisconnectedEvent:
@@ -315,6 +331,8 @@ func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
 	switch rmsg.SubType {
 	case "channel_join":
 		return
+	case "message_deleted":
+		return
 	}
 	if len(rmsg.Attachments) > 0 {
 		// skip messages we made ourselves
@@ -323,7 +341,12 @@ func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
 		}
 	}
 
-	user, err := u.rtm.GetUserInfo(rmsg.User)
+	usr := rmsg.User
+	if rmsg.SubType == "message_changed" {
+		usr = rmsg.SubMessage.User
+	}
+	user, err := u.rtm.GetUserInfo(usr)
+
 	if err != nil {
 		if rmsg.BotID == "" {
 			return
@@ -353,8 +376,8 @@ func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
 		if ghost != nil {
 			spoofUsername = ghost.Nick
 			if ghost.DisplayName != "" && ghost.DisplayName != ghost.Nick && u.MmInfo.Cfg.SlackSettings.UseDisplayName {
-				spoofUsername = "|"
-				//	spoofUsername = ghost.DisplayName
+				// spoofUsername = "|"
+				spoofUsername = ghost.DisplayName
 			}
 		}
 	}
@@ -417,19 +440,13 @@ func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
 
 	if msghandled {
 		if rmsg.ThreadTimestamp != "" {
-			var threadts, threadus int64
-			fmt.Sscanf(rmsg.ThreadTimestamp, "%d.%d", &threadts, &threadus)
-			ts := time.Unix(threadts, threadus*1000)
-
-			threadtime := ""
-			if ts.YearDay() != time.Now().YearDay() {
-				threadtime = ts.Format("2.1. 15:04:05")
-			} else {
-				threadtime = ts.Format("15:04:05")
-			}
-
-			msgs[0] = "[T " + threadtime + "] " + msgs[0]
+			msgs[0] = "[T " + formatTs(rmsg.ThreadTimestamp) + "] " + msgs[0]
 		}
+	}
+	if rmsg.SubType == "message_changed" {
+		msgs = append(msgs, strings.Split(rmsg.SubMessage.Text, "\n")...)
+		msgs[0] = "[C " + formatTs(rmsg.SubMessage.Timestamp) + "] " + msgs[0]
+		msghandled = true
 	}
 
 	spoofUsername = strings.Replace(spoofUsername, " ", "_", -1)
