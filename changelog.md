@@ -1,3 +1,25 @@
+# v0.19.3
+
+## Enhancement
+
+* general: Add UPDATELASTVIEWED command, and make DisableAutoView work consistently (#255)
+* slack: Handle message edits and deletion (#260)
+* slack: Add handling of reactions, stars and pins (#229)
+
+## Bugfix
+
+* mattermost: Fix a panic #247
+* mattermost: Fixes incorrect users because of paging. #244
+* mattermost: Fix outdated channel issue
+* mattermost: Add paging so we can see > 200 users in a channel #248
+* mattermost: Fix expired session panic #259
+* general: Fix datarace #246
+* general: Fix empty JoinInclude
+* general: Fix panic #257
+
+This release couldn't exist without the following contributors:
+@Aketzu, @bucko909, @42wim
+
 # v0.19.2
 ## Enhancement
 * general: Add a default value matterirc.toml for the '-conf' flag (#240)
