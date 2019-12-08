@@ -1,3 +1,11 @@
+# v0.19.4
+
+## Bugfix
+
+- slack: fix regression with slack library (#264)
+- slack: fix an unexpected panic (#263)
+
+
 # v0.19.3
 
 ## Enhancement
