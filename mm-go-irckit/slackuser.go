@@ -557,6 +557,10 @@ func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
 		}
 
 		if strings.HasPrefix(rmsg.Channel, "D") {
+			if u == nil || ghost == nil {
+				logger.Error("%#v or %#v is nil with msg %#v. Shouldn't happen", u, ghost, rmsg)
+				return
+			}
 			if u.Nick == ghost.Nick {
 				members, _, _ := u.sc.GetUsersInConversation(&slack.GetUsersInConversationParameters{ChannelID: rmsg.Channel})
 				for _, member := range members {
