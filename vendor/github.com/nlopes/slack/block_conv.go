@@ -60,8 +60,11 @@ func (b *Blocks) UnmarshalJSON(data []byte) error {
 			block = &ImageBlock{}
 		case "section":
 			block = &SectionBlock{}
+		case "rich_text":
+			// for now ignore the (complex) content of rich_text blocks until we can fully support it
+			continue
 		default:
-			return errors.New("unsupported block type")
+			block = &UnknownBlock{}
 		}
 
 		err = json.Unmarshal(r, block)
@@ -127,7 +130,7 @@ func (b *BlockElements) UnmarshalJSON(data []byte) error {
 		case "static_select", "external_select", "users_select", "conversations_select", "channels_select":
 			blockElement = &SelectBlockElement{}
 		default:
-			return errors.New("unsupported block element type")
+			blockElement = &UnknownBlockElement{}
 		}
 
 		err = json.Unmarshal(r, blockElement)

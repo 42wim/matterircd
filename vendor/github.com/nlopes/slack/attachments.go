@@ -75,7 +75,7 @@ type Attachment struct {
 	Title     string `json:"title,omitempty"`
 	TitleLink string `json:"title_link,omitempty"`
 	Pretext   string `json:"pretext,omitempty"`
-	Text      string `json:"text"`
+	Text      string `json:"text,omitempty"`
 
 	ImageURL string `json:"image_url,omitempty"`
 	ThumbURL string `json:"thumb_url,omitempty"`
@@ -83,6 +83,8 @@ type Attachment struct {
 	Fields     []AttachmentField  `json:"fields,omitempty"`
 	Actions    []AttachmentAction `json:"actions,omitempty"`
 	MarkdownIn []string           `json:"mrkdwn_in,omitempty"`
+
+	Blocks []Block `json:"blocks,omitempty"`
 
 	Footer     string `json:"footer,omitempty"`
 	FooterIcon string `json:"footer_icon,omitempty"`
