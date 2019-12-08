@@ -150,6 +150,8 @@ github.com/matterbridge/gozulipbot v0.0.0-20190212232658-7aa251978a18 h1:fLhwXtW
 github.com/matterbridge/gozulipbot v0.0.0-20190212232658-7aa251978a18/go.mod h1:yAjnZ34DuDyPHMPHHjOsTk/FefW4JJjoMMCGt/8uuQA=
 github.com/matterbridge/logrus-prefixed-formatter v0.0.0-20180806162718-01618749af61 h1:R/MgM/eUyRBQx2FiH6JVmXck8PaAuKfe2M1tWIzW7nE=
 github.com/matterbridge/logrus-prefixed-formatter v0.0.0-20180806162718-01618749af61/go.mod h1:iXGEotOvwI1R1SjLxRc+BF5rUORTMtE0iMZBT2lxqAU=
+github.com/matterbridge/slack v0.1.1-0.20191208194820-95190f11bfb6 h1:UvXXR9tHYqJUXZVEtiK2qkEWBXfFneicate5kOshVFk=
+github.com/matterbridge/slack v0.1.1-0.20191208194820-95190f11bfb6/go.mod h1:2uCJim0Ct2z1Uj+XQq47KCLLC1b/9UTYaZOvDtbZfK4=
 github.com/mattermost/gorp v2.0.0+incompatible h1:/aLYsuWjk4kSVP3P3kn3zTGNUQxaCB6DjTejmwddKEs=
 github.com/mattermost/gorp v2.0.0+incompatible/go.mod h1:0kX1qa3DOpaPJyOdMLeo7TcBN0QmUszj9a/VygOhDe0=
 github.com/mattermost/mattermost-server v5.5.0+incompatible h1:0wcLGgYtd+YImtLDPf2AOfpBHxbU4suATx+6XKw1XbU=
@@ -184,6 +186,8 @@ github.com/nicksnyder/go-i18n v1.9.0 h1:p6IgYlHtynxFjBJsriZWoldnpU/ibnYNwzmYz0ja
 github.com/nicksnyder/go-i18n v1.9.0/go.mod h1:HrK7VCrbOvQoUAQ7Vpy7i87N7JZZZ7R2xBGjv0j365Q=
 github.com/nlopes/slack v0.6.0 h1:jt0jxVQGhssx1Ib7naAOZEZcGdtIhTzkP0nopK0AsRA=
 github.com/nlopes/slack v0.6.0/go.mod h1:JzQ9m3PMAqcpeCam7UaHSuBuupz7CmpjehYMayT6YOk=
+github.com/nlopes/slack v0.6.1-0.20191106133607-d06c2a2b3249 h1:Pr5gZa2VcmktVwq0lyC39MsN5tz356vC/pQHKvq+QBo=
+github.com/nlopes/slack v0.6.1-0.20191106133607-d06c2a2b3249/go.mod h1:JzQ9m3PMAqcpeCam7UaHSuBuupz7CmpjehYMayT6YOk=
 github.com/oklog/ulid v1.3.1/go.mod h1:CirwcVhetQ6Lv90oh/F+FBtV6XMibvdAFo93nm5qn4U=
 github.com/onsi/ginkgo v1.6.0 h1:Ix8l273rp3QzYgXSR+c8d1fTG7UPgYkOSELPhiY/YGw=
 github.com/onsi/ginkgo v1.6.0/go.mod h1:lLunBs/Ym6LB5Z9jYTR76FiuTmxDTDusOGeTQH+WWjE=
