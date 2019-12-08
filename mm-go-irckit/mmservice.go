@@ -42,12 +42,12 @@ func login(u *User, toUser *User, args []string, service string) {
 	}
 	if service == "slack" {
 		var err error
-		fmt.Println(len(args))
+		//fmt.Println(len(args))
 		if len(args) != 1 && len(args) != 3 {
 			u.MsgUser(toUser, "need LOGIN <team> <login> <pass> or LOGIN <token>")
 			return
 		}
-		fmt.Println(len(args))
+		//fmt.Println(len(args))
 		if len(args) == 1 {
 			u.Token = args[len(args)-1]
 		}

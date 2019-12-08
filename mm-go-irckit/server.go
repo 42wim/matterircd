@@ -399,7 +399,7 @@ func (s *server) handshake(u *User) error {
 	i := handshakeMsgTolerance
 	// Read messages until we filled in USER details.
 	for msg := range u.DecodeCh {
-		fmt.Printf("in handshake %#v\n", msg)
+		//fmt.Printf("in handshake %#v\n", msg)
 		i--
 		// Consume N messages then give up.
 		if i == 0 {
