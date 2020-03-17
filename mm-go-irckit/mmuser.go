@@ -67,6 +67,7 @@ func NewUserMM(c net.Conn, srv Server, cfg *MmCfg) *User {
 	u.idleStop = make(chan struct{})
 	// used for login
 	u.createService("mattermost", "loginservice")
+	u.createService("nickserv", "loginservice")
 	u.createService("slack", "loginservice")
 	return u
 }
@@ -582,13 +583,16 @@ func (u *User) checkWsActionMessage(rmsg *model.WebSocketEvent, throttle <-chan 
 	}
 }
 
-func (u *User) MsgUser(toUser *User, msg string) {
-	u.Encode(&irc.Message{
-		Prefix:   toUser.Prefix(),
-		Command:  irc.PRIVMSG,
-		Params:   []string{u.Nick},
-		Trailing: msg,
-	})
+func (u *User) MsgUser(toUser *User, msg string, cmd string) {
+  u.Encode(&irc.Message{
+    Prefix:   toUser.Prefix(),
+    Command:  cmd,
+    Params:   []string{u.Nick},
+    Trailing: msg,
+  })
+  if cmd == irc.ERROR {
+    defer s.Srv.Quit(u, msg)
+  }
 }
 
 func (u *User) MsgSpoofUser(sender *User, rcvuser string, msg string) {
