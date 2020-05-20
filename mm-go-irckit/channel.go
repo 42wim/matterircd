@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/mattermost/mattermost-server/model"
+	"github.com/muesli/reflow/wordwrap"
 	"github.com/sorcix/irc"
 )
 
@@ -120,31 +121,26 @@ func (ch *channel) ID() string {
 }
 
 func (ch *channel) Message(from *User, text string) {
-	for len(text) > 400 {
+	text = wordwrap.String(text, 440)
+	lines := strings.Split(text, "\n")
+	for _, l := range lines {
+		l = strings.TrimSpace(l)
+		if len(l) == 0 {
+			continue
+		}
+
 		msg := &irc.Message{
 			Prefix:   from.Prefix(),
 			Command:  irc.PRIVMSG,
 			Params:   []string{ch.name},
-			Trailing: text[:400] + "\n",
+			Trailing: l + "\n",
 		}
 		ch.mu.RLock()
 		for to := range ch.usersIdx {
 			to.Encode(msg)
 		}
 		ch.mu.RUnlock()
-		text = text[400:]
 	}
-	msg := &irc.Message{
-		Prefix:   from.Prefix(),
-		Command:  irc.PRIVMSG,
-		Params:   []string{ch.name},
-		Trailing: text,
-	}
-	ch.mu.RLock()
-	for to := range ch.usersIdx {
-		to.Encode(msg)
-	}
-	ch.mu.RUnlock()
 }
 
 // Quit will remove the user from the channel and emit a PART message.

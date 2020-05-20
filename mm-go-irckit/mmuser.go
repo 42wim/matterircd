@@ -10,6 +10,7 @@ import (
 	"github.com/42wim/matterbridge/matterclient"
 	"github.com/42wim/matterircd/config"
 	"github.com/mattermost/mattermost-server/model"
+	"github.com/muesli/reflow/wordwrap"
 	"github.com/sorcix/irc"
 )
 
@@ -592,22 +593,21 @@ func (u *User) MsgUser(toUser *User, msg string) {
 }
 
 func (u *User) MsgSpoofUser(sender *User, rcvuser string, msg string) {
-	for len(msg) > 400 {
+	msg = wordwrap.String(msg, 440)
+	lines := strings.Split(msg, "\n")
+	for _, l := range lines {
+		l = strings.TrimSpace(l)
+		if len(l) == 0 {
+			continue
+		}
+
 		u.Encode(&irc.Message{
 			Prefix:   &irc.Prefix{Name: sender.Nick, User: sender.Nick, Host: sender.Host},
 			Command:  irc.PRIVMSG,
 			Params:   []string{rcvuser},
-			Trailing: msg[:400] + "\n",
+			Trailing: l + "\n",
 		})
-		msg = msg[400:]
 	}
-	u.Encode(&irc.Message{
-		Prefix:   &irc.Prefix{Name: sender.Nick, User: sender.Nick, Host: sender.Host},
-		Command:  irc.PRIVMSG,
-		Params:   []string{rcvuser},
-		Trailing: msg,
-	})
-
 }
 
 // sync IRC with mattermost channel state
