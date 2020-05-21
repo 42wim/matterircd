@@ -33,8 +33,13 @@ github.com/mattermost/mattermost-server/utils/markdown
 github.com/mattn/go-colorable
 # github.com/mattn/go-isatty v0.0.9
 github.com/mattn/go-isatty
+# github.com/mattn/go-runewidth v0.0.7
+github.com/mattn/go-runewidth
 # github.com/mgutz/ansi v0.0.0-20170206155736-9520e82c474b
 github.com/mgutz/ansi
+# github.com/muesli/reflow v0.1.0
+github.com/muesli/reflow/ansi
+github.com/muesli/reflow/wordwrap
 # github.com/nicksnyder/go-i18n v1.9.0
 github.com/nicksnyder/go-i18n/i18n
 github.com/nicksnyder/go-i18n/i18n/bundle
