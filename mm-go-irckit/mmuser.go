@@ -237,11 +237,13 @@ func (u *User) addUserToChannelWorker(channels <-chan *model.Channel, throttle <
 			for _, post := range strings.Split(p.Message, "\n") {
 				if user, ok := u.mc.Users[p.UserId]; ok {
 					date := ts.Format("2006-01-02")
+					if ((time.Now()-ts)/int64(time.Millisecond)) < 86400 {
 					if date != prevDate {
 						spoof("matterircd", fmt.Sprintf("Replaying since %s", date))
 						prevDate = date
 					}
 					spoof(user.Username, fmt.Sprintf("[%s] %s", ts.Format("15:04"), post))
+					}
 				}
 			}
 		}
@@ -591,7 +593,7 @@ func (u *User) MsgUser(toUser *User, msg string, cmd string) {
     Trailing: msg,
   })
   if cmd == irc.ERROR {
-    defer s.Srv.Quit(u, msg)
+    defer u.Srv.Quit(u, msg)
   }
 }
 
