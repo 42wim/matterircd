@@ -43,6 +43,7 @@ type Settings struct {
 	PrefixMainTeam  bool
 	DisableAutoView bool
 	PreferNickname  bool
+	HideReplies     bool
 }
 
 func Migrate(defaultcfg Config) *Config {
