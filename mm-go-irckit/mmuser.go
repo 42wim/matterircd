@@ -237,7 +237,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *model.Channel, throttle <
 			for _, post := range strings.Split(p.Message, "\n") {
 				if user, ok := u.mc.Users[p.UserId]; ok {
 					date := ts.Format("2006-01-02")
-					if ((time.Now()-ts)/int64(time.Millisecond)) < 86400 {
+					if (time.Now().Unix()-ts.Unix()) < 86400 {
 					if date != prevDate {
 						spoof("matterircd", fmt.Sprintf("Replaying since %s", date))
 						prevDate = date
