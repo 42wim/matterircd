@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/mattermost/mattermost-server/model"
 	"github.com/nlopes/slack"
@@ -452,16 +453,21 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 				return err
 			}
 		}
-		if ch.Service() == "mattermost" {
+		if ch.Service() == "mattermost" || ch.Service() == "nickserv" {
 			if u.mc != nil {
-				props := make(map[string]interface{})
-				props["matterircd_"+u.mc.User.Id] = true
-				post := &model.Post{ChannelId: ch.ID(), Message: msg.Trailing, Props: props}
-				_, resp := u.mc.Client.CreatePost(post)
-				if resp.Error != nil {
-					u.MsgSpoofUser(u, "mattermost", "msg: "+msg.Trailing+" could not be send: "+resp.Error.Error())
-				}
-			}
+        for true {
+				  props := make(map[string]interface{})
+				  props["matterircd_"+u.mc.User.Id] = true
+				  post := &model.Post{ChannelId: ch.ID(), Message: msg.Trailing, Props: props}
+				  _, resp := u.mc.Client.CreatePost(post)
+				  if resp.Error != nil {
+					  s.EncodeMessage(u, irc.ERROR, []string{}, "msg: "+msg.Trailing+" could not be send: "+resp.Error.Error())
+            time.Sleep(1000 * time.Millisecond)
+            continue
+				  }
+          break
+			  }
+		  }
 		}
 	} else if toUser, exists := s.HasUser(query); exists {
 		if query == "mattermost" {

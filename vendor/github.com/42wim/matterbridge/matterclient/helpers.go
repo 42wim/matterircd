@@ -282,14 +282,14 @@ func (m *MMClient) sendWSRequest(action string, data map[string]interface{}) err
 }
 
 func supportedVersion(version string) bool {
-	if strings.HasPrefix(version, "3.8.0") ||
-		strings.HasPrefix(version, "3.9.0") ||
-		strings.HasPrefix(version, "3.10.0") ||
-		strings.HasPrefix(version, "4.") ||
-		strings.HasPrefix(version, "5.") {
+//	if strings.HasPrefix(version, "3.8.0") ||
+//		strings.HasPrefix(version, "3.9.0") ||
+//		strings.HasPrefix(version, "3.10.0") ||
+//		strings.HasPrefix(version, "4.") ||
+//		strings.HasPrefix(version, "5.") {
 		return true
-	}
-	return false
+//	}
+//	return false
 }
 
 func digestString(s string) string {

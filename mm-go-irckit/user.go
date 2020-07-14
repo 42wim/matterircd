@@ -199,10 +199,10 @@ func (user *User) Decode() {
 		msg, err := user.Conn.Decode()
 		if err == nil && msg != nil {
 			dmsg := fmt.Sprintf("<- %s", msg)
-			if msg.Command == "PRIVMSG" && msg.Params != nil && (msg.Params[0] == "slack" || msg.Params[0] == "mattermost") {
+			if msg.Command == "PRIVMSG" && msg.Params != nil && (msg.Params[0] == "slack" || msg.Params[0] == "mattermost" || msg.Params[0] == "nickserv") {
 				// Don't log sensitive information
 				trail := strings.Split(msg.Trailing, " ")
-				if (msg.Trailing != "" && trail[0] == "login") || (len(msg.Params) > 1 && msg.Params[1] == "login") {
+				if (msg.Trailing != "" && (trail[0] == "login" || trail[0] == "identify")) || (len(msg.Params) > 1 && (msg.Params[1] == "login" || msg.Params[0] == "identify")) {
 					dmsg = fmt.Sprintf("<- PRIVMSG %s :login [redacted]", msg.Params[0])
 				}
 			}

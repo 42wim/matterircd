@@ -67,6 +67,7 @@ func NewUserMM(c net.Conn, srv Server, cfg *MmCfg) *User {
 	u.idleStop = make(chan struct{})
 	// used for login
 	u.createService("mattermost", "loginservice")
+	u.createService("nickserv", "loginservice")
 	u.createService("slack", "loginservice")
 	return u
 }
@@ -236,11 +237,13 @@ func (u *User) addUserToChannelWorker(channels <-chan *model.Channel, throttle <
 			for _, post := range strings.Split(p.Message, "\n") {
 				if user, ok := u.mc.Users[p.UserId]; ok {
 					date := ts.Format("2006-01-02")
+					if (time.Now().Unix()-ts.Unix()) < 86400 {
 					if date != prevDate {
 						spoof("matterircd", fmt.Sprintf("Replaying since %s", date))
 						prevDate = date
 					}
 					spoof(user.Username, fmt.Sprintf("[%s] %s", ts.Format("15:04"), post))
+					}
 				}
 			}
 		}
@@ -582,13 +585,16 @@ func (u *User) checkWsActionMessage(rmsg *model.WebSocketEvent, throttle <-chan 
 	}
 }
 
-func (u *User) MsgUser(toUser *User, msg string) {
-	u.Encode(&irc.Message{
-		Prefix:   toUser.Prefix(),
-		Command:  irc.PRIVMSG,
-		Params:   []string{u.Nick},
-		Trailing: msg,
-	})
+func (u *User) MsgUser(toUser *User, msg string, cmd string) {
+  u.Encode(&irc.Message{
+    Prefix:   toUser.Prefix(),
+    Command:  cmd,
+    Params:   []string{u.Nick},
+    Trailing: msg,
+  })
+  if cmd == irc.ERROR {
+    defer u.Srv.Quit(u, msg)
+  }
 }
 
 func (u *User) MsgSpoofUser(sender *User, rcvuser string, msg string) {
