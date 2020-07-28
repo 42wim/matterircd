@@ -465,7 +465,7 @@ func (u *User) handleWsActionPost(rmsg *model.WebSocketEvent) {
 			}
 			continue
 		}
-		if strings.Contains(data.Message, "@channel") || strings.Contains(data.Message, "@here") {
+		if strings.Contains(data.Message, "@channel") || strings.Contains(data.Message, "@here") || strings.Contains(data.Message, "@all") {
 			ch.SpoofNotice(spoofUsername, m)
 			continue
 		}
