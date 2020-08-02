@@ -191,8 +191,14 @@ func search(u *User, toUser *User, args []string, service string) {
 		}
 		timestamp := time.Unix(postlist.Posts[postlist.Order[i]].CreateAt/1000, 0).Format("January 02, 2006 15:04")
 		channelname := u.mc.GetChannelName(postlist.Posts[postlist.Order[i]].ChannelId)
-		u.MsgUser(toUser, "#"+channelname+" <"+u.mc.GetUser(postlist.Posts[postlist.Order[i]].UserId).Username+"> "+timestamp)
-		u.MsgUser(toUser, strings.Repeat("=", len("#"+channelname+" <"+u.mc.GetUser(postlist.Posts[postlist.Order[i]].UserId).Username+"> "+timestamp)))
+
+		nick := u.mc.GetUser(postlist.Posts[postlist.Order[i]].UserId).Username
+		if (u.Cfg.PreferNickname &&
+		    u.isValidNick(u.mc.GetUser(postlist.Posts[postlist.Order[i]].UserId).Nickname)) {
+			nick = u.mc.GetUser(postlist.Posts[postlist.Order[i]].UserId).Nickname
+		}
+		u.MsgUser(toUser, "#"+channelname+" <"+nick+"> "+timestamp)
+		u.MsgUser(toUser, strings.Repeat("=", len("#"+channelname+" <"+nick+"> "+timestamp)))
 		for _, post := range strings.Split(postlist.Posts[postlist.Order[i]].Message, "\n") {
 			if post != "" {
 				u.MsgUser(toUser, post)
@@ -252,6 +258,10 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 	}
 	for i := len(postlist.Order) - 1; i >= 0; i-- {
 		nick := u.mc.GetUser(postlist.Posts[postlist.Order[i]].UserId).Username
+		if (u.Cfg.PreferNickname &&
+		    u.isValidNick(u.mc.GetUser(postlist.Posts[postlist.Order[i]].UserId).Nickname)) {
+			nick = u.mc.GetUser(postlist.Posts[postlist.Order[i]].UserId).Nickname
+		}
 		for _, post := range strings.Split(postlist.Posts[postlist.Order[i]].Message, "\n") {
 			if post != "" {
 				u.MsgUser(toUser, "<"+nick+"> "+post)
