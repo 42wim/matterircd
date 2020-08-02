@@ -193,8 +193,8 @@ func search(u *User, toUser *User, args []string, service string) {
 		channelname := u.mc.GetChannelName(postlist.Posts[postlist.Order[i]].ChannelId)
 
 		nick := u.mc.GetUser(postlist.Posts[postlist.Order[i]].UserId).Username
-		if (u.Cfg.PreferNickname &&
-		    u.isValidNick(u.mc.GetUser(postlist.Posts[postlist.Order[i]].UserId).Nickname)) {
+		if u.Cfg.PreferNickname &&
+			u.isValidNick(u.mc.GetUser(postlist.Posts[postlist.Order[i]].UserId).Nickname) {
 			nick = u.mc.GetUser(postlist.Posts[postlist.Order[i]].UserId).Nickname
 		}
 		u.MsgUser(toUser, "#"+channelname+" <"+nick+"> "+timestamp)
@@ -258,8 +258,8 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 	}
 	for i := len(postlist.Order) - 1; i >= 0; i-- {
 		nick := u.mc.GetUser(postlist.Posts[postlist.Order[i]].UserId).Username
-		if (u.Cfg.PreferNickname &&
-		    u.isValidNick(u.mc.GetUser(postlist.Posts[postlist.Order[i]].UserId).Nickname)) {
+		if u.Cfg.PreferNickname &&
+			u.isValidNick(u.mc.GetUser(postlist.Posts[postlist.Order[i]].UserId).Nickname) {
 			nick = u.mc.GetUser(postlist.Posts[postlist.Order[i]].UserId).Nickname
 		}
 		for _, post := range strings.Split(postlist.Posts[postlist.Order[i]].Message, "\n") {
