@@ -42,6 +42,7 @@ type Settings struct {
 	UseDisplayName  bool
 	PrefixMainTeam  bool
 	DisableAutoView bool
+	PreferNickname  bool
 }
 
 func Migrate(defaultcfg Config) *Config {

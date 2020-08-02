@@ -70,6 +70,11 @@ PrefixMainTeam = false
 #(anti-idle support is turned off) (default false)
 DisableAutoView = false
 
+# If users set a Nickname, matterircd could either choose that or the Username
+# to display in the IRC client. The option PreferNickname controls that, the
+# default being to show the Username. (default false)
+PreferNickname = false
+
 #############################
 ##### SLACK EXAMPLE #########
 #############################
