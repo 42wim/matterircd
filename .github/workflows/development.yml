@@ -1,0 +1,57 @@
+name: Development
+on: [push, pull_request]
+jobs:
+  lint:
+    name: golangci-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          fetch-depth: 20
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v2
+        with:
+          version: v1.29
+          args: "-v --new-from-rev HEAD~5"
+  test-build-upload:
+    strategy:
+      matrix:
+        go-version: [1.13.x, 1.14.x]
+        platform: [ubuntu-latest]
+    runs-on: ${{ matrix.platform }}
+    steps:
+    - name: Install Go
+      uses: actions/setup-go@v2
+      with:
+        go-version: ${{ matrix.go-version }}
+    - name: Checkout code
+      uses: actions/checkout@v2
+      with:
+          fetch-depth: 0
+    - name: Test
+      run: go test ./... -mod=vendor
+    - name: Build
+      run: |
+        mkdir -p output/{win,lin,arm,mac}
+        VERSION=$(git describe --tags)
+        GOOS=linux GOARCH=amd64 go build -mod=vendor -ldflags "-s -X main.githash=$(git log --pretty=format:'%h' -n 1)" -o output/lin/matterircd-$VERSION-linux-amd64
+        GOOS=windows GOARCH=amd64 go build -mod=vendor -ldflags "-s -X main.githash=$(git log --pretty=format:'%h' -n 1)" -o output/win/matterircd-$VERSION-windows-amd64.exe
+        GOOS=darwin GOARCH=amd64 go build -mod=vendor -ldflags "-s -X main.githash=$(git log --pretty=format:'%h' -n 1)" -o output/mac/matterircd-$VERSION-darwin-amd64
+    - name: Upload linux 64-bit
+      if: startsWith(matrix.go-version,'1.14')
+      uses: actions/upload-artifact@v2
+      with:
+        name: matterircd-linux-64bit
+        path: output/lin
+    - name: Upload windows 64-bit
+      if: startsWith(matrix.go-version,'1.14')
+      uses: actions/upload-artifact@v2
+      with:
+        name: matterircd-windows-64bit
+        path: output/win
+    - name: Upload darwin 64-bit
+      if: startsWith(matrix.go-version,'1.14')
+      uses: actions/upload-artifact@v2
+      with:
+        name: matterircd-darwin-64bit
+        path: output/mac
