@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/mattermost/mattermost-server/model"
-	"github.com/nlopes/slack"
+	"github.com/slack-go/slack"
 	"github.com/sorcix/irc"
 )
 
