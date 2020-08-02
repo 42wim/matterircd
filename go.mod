@@ -1,7 +1,7 @@
 module github.com/42wim/matterircd
 
 require (
-	github.com/42wim/matterbridge v1.16.1-0.20190921223437-da3868c104f9
+	github.com/42wim/matterbridge v1.18.0
 	github.com/BurntSushi/toml v0.3.1
 	github.com/Masterminds/squirrel v1.1.0 // indirect
 	github.com/blang/semver v3.5.1+incompatible // indirect
@@ -17,15 +17,15 @@ require (
 	github.com/mattn/go-sqlite3 v1.11.0 // indirect
 	github.com/muesli/reflow v0.1.0
 	github.com/nicksnyder/go-i18n v1.9.0 // indirect
-	github.com/nlopes/slack v0.6.0
-	github.com/sirupsen/logrus v1.4.2
-	github.com/sorcix/irc v0.0.0-20160513142731-d007bfcbaef1
-	github.com/stretchr/testify v1.4.0
+	github.com/sirupsen/logrus v1.6.0
+	github.com/slack-go/slack v0.6.5
+	github.com/sorcix/irc v1.1.4
+	github.com/stretchr/testify v1.5.1
 	github.com/ziutek/mymysql v1.5.4 // indirect
-	golang.org/x/crypto v0.0.0-20190911031432-227b76d455e7
+	golang.org/x/crypto v0.0.0-20200728195943-123391ffb6de // indirect
 	gopkg.in/asn1-ber.v1 v1.0.0-20181015200546-f715ec2f112d // indirect
 )
 
-replace github.com/nlopes/slack v0.6.0 => github.com/matterbridge/slack v0.1.1-0.20191208194820-95190f11bfb6
+//replace github.com/nlopes/slack v0.6.0 => github.com/matterbridge/slack v0.1.1-0.20191208194820-95190f11bfb6
 
 go 1.13
