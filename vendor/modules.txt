@@ -1,4 +1,4 @@
-# github.com/42wim/matterbridge v1.16.1-0.20190921223437-da3868c104f9
+# github.com/42wim/matterbridge v1.18.0
 github.com/42wim/matterbridge/matterclient
 # github.com/BurntSushi/toml v0.3.1
 github.com/BurntSushi/toml
@@ -12,16 +12,16 @@ github.com/desertbit/timer
 github.com/dyatlov/go-opengraph/opengraph
 # github.com/go-ldap/ldap v3.0.3+incompatible
 github.com/go-ldap/ldap
-# github.com/gorilla/websocket v1.4.1
+# github.com/gorilla/websocket v1.4.2
 github.com/gorilla/websocket
-# github.com/hashicorp/golang-lru v0.5.3
+# github.com/hashicorp/golang-lru v0.5.4
 github.com/hashicorp/golang-lru
 github.com/hashicorp/golang-lru/simplelru
-# github.com/jpillora/backoff v0.0.0-20180909062703-3050d21c67d7
+# github.com/jpillora/backoff v1.0.0
 github.com/jpillora/backoff
-# github.com/konsorten/go-windows-terminal-sequences v1.0.1
+# github.com/konsorten/go-windows-terminal-sequences v1.0.3
 github.com/konsorten/go-windows-terminal-sequences
-# github.com/matterbridge/logrus-prefixed-formatter v0.0.0-20180806162718-01618749af61
+# github.com/matterbridge/logrus-prefixed-formatter v0.5.3-0.20200523233437-d971309a77ba
 github.com/matterbridge/logrus-prefixed-formatter
 # github.com/mattermost/mattermost-server v5.11.1+incompatible
 github.com/mattermost/mattermost-server/mlog
@@ -29,11 +29,11 @@ github.com/mattermost/mattermost-server/model
 github.com/mattermost/mattermost-server/services/timezones
 github.com/mattermost/mattermost-server/utils/jsonutils
 github.com/mattermost/mattermost-server/utils/markdown
-# github.com/mattn/go-colorable v0.1.2
+# github.com/mattn/go-colorable v0.1.6
 github.com/mattn/go-colorable
-# github.com/mattn/go-isatty v0.0.9
+# github.com/mattn/go-isatty v0.0.12
 github.com/mattn/go-isatty
-# github.com/mattn/go-runewidth v0.0.7
+# github.com/mattn/go-runewidth v0.0.8
 github.com/mattn/go-runewidth
 # github.com/mgutz/ansi v0.0.0-20170206155736-9520e82c474b
 github.com/mgutz/ansi
@@ -45,11 +45,6 @@ github.com/nicksnyder/go-i18n/i18n
 github.com/nicksnyder/go-i18n/i18n/bundle
 github.com/nicksnyder/go-i18n/i18n/language
 github.com/nicksnyder/go-i18n/i18n/translation
-# github.com/nlopes/slack v0.6.0 => github.com/matterbridge/slack v0.1.1-0.20191208194820-95190f11bfb6
-github.com/nlopes/slack
-github.com/nlopes/slack/internal/errorsx
-github.com/nlopes/slack/internal/timex
-github.com/nlopes/slack/slackutilsx
 # github.com/pborman/uuid v0.0.0-20160216163710-c55201b03606
 github.com/pborman/uuid
 # github.com/pelletier/go-toml v1.2.0
@@ -58,11 +53,16 @@ github.com/pelletier/go-toml
 github.com/pkg/errors
 # github.com/pmezard/go-difflib v1.0.0
 github.com/pmezard/go-difflib/difflib
-# github.com/sirupsen/logrus v1.4.2
+# github.com/sirupsen/logrus v1.6.0
 github.com/sirupsen/logrus
-# github.com/sorcix/irc v0.0.0-20160513142731-d007bfcbaef1
+# github.com/slack-go/slack v0.6.5
+github.com/slack-go/slack
+github.com/slack-go/slack/internal/errorsx
+github.com/slack-go/slack/internal/timex
+github.com/slack-go/slack/slackutilsx
+# github.com/sorcix/irc v1.1.4
 github.com/sorcix/irc
-# github.com/stretchr/testify v1.4.0
+# github.com/stretchr/testify v1.5.1
 github.com/stretchr/testify/assert
 # go.uber.org/atomic v1.4.0
 go.uber.org/atomic
@@ -75,14 +75,15 @@ go.uber.org/zap/internal/bufferpool
 go.uber.org/zap/internal/color
 go.uber.org/zap/internal/exit
 go.uber.org/zap/zapcore
-# golang.org/x/crypto v0.0.0-20190911031432-227b76d455e7
+# golang.org/x/crypto v0.0.0-20200728195943-123391ffb6de
 golang.org/x/crypto/bcrypt
 golang.org/x/crypto/blowfish
 golang.org/x/crypto/ssh/terminal
-# golang.org/x/net v0.0.0-20190813141303-74dc4d7220e7
+# golang.org/x/net v0.0.0-20200324143707-d3edc9973b7e
 golang.org/x/net/html
 golang.org/x/net/html/atom
-# golang.org/x/sys v0.0.0-20190813064441-fde4db37ae7a
+# golang.org/x/sys v0.0.0-20200515095857-1151b9dac4a9
+golang.org/x/sys/internal/unsafeheader
 golang.org/x/sys/unix
 golang.org/x/sys/windows
 # golang.org/x/text v0.3.2
@@ -94,5 +95,5 @@ golang.org/x/text/language
 gopkg.in/asn1-ber.v1
 # gopkg.in/natefinch/lumberjack.v2 v2.0.0
 gopkg.in/natefinch/lumberjack.v2
-# gopkg.in/yaml.v2 v2.2.2
+# gopkg.in/yaml.v2 v2.2.8
 gopkg.in/yaml.v2
