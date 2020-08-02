@@ -15,6 +15,7 @@ require (
 	github.com/mattermost/gorp v2.0.0+incompatible // indirect
 	github.com/mattermost/mattermost-server v5.11.1+incompatible
 	github.com/mattn/go-sqlite3 v1.11.0 // indirect
+	github.com/muesli/reflow v0.1.0
 	github.com/nicksnyder/go-i18n v1.9.0 // indirect
 	github.com/nlopes/slack v0.6.0
 	github.com/sirupsen/logrus v1.4.2
