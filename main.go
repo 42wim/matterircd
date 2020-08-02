@@ -36,7 +36,7 @@ func main() {
 	flag.BoolVar(&cfg.Debug, "debug", false, "enable debug logging")
 
 	// bind related cfg
-	flag.StringVar(&cfg.Bind, "bind", "127.0.0.1:6667", "interface:port to bind to.")
+	flag.StringVar(&cfg.Bind, "bind", "127.0.0.1:6667", "interface:port to bind to, or a path to bind to a Unix socket.")
 
 	// mattermost related cfg
 	flag.StringVar(&cfg.Restrict, "restrict", "", "only allow connection to specified mattermost server/instances. Space delimited")
@@ -90,7 +90,13 @@ func main() {
 
 	if cfg.Bind != "" {
 		go func() {
-			socket, err := net.Listen("tcp", cfg.Bind)
+			var network string
+			if strings.ContainsRune(cfg.Bind, os.PathSeparator) {
+				network = "unix"
+			} else {
+				network = "tcp"
+			}
+			socket, err := net.Listen(network, cfg.Bind)
 			if err != nil {
 				logger.Errorf("Can not listen on %s: %v", cfg.Bind, err)
 				os.Exit(1)
