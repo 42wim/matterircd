@@ -558,7 +558,7 @@ func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
 
 		if strings.HasPrefix(rmsg.Channel, "D") {
 			if u == nil || ghost == nil {
-				logger.Error("%#v or %#v is nil with msg %#v. Shouldn't happen", u, ghost, rmsg)
+				logger.Errorf("%#v or %#v is nil with msg %#v. Shouldn't happen", u, ghost, rmsg)
 				return
 			}
 			if u.Nick == ghost.Nick {

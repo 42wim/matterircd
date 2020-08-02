@@ -122,7 +122,7 @@ func (u *User) isValidNick(s string) bool {
 	 * IRC nicks, but modern clients allow more than that. Let's
 	 * use a "sane" big value, the triple of the spec.
 	 */
-	if (len(s) < 1 || len(s) > 27) {
+	if len(s) < 1 || len(s) > 27 {
 		return false
 	}
 
@@ -138,13 +138,13 @@ func (u *User) isValidNick(s string) bool {
 	 * [0] RFC 2812 (tools.ietf.org/html/rfc2812)
 	 */
 
-	if (s[0] != 59 && (s[0] < 65 || s[0] > 125)) {
+	if s[0] != 59 && (s[0] < 65 || s[0] > 125) {
 		return false
 	}
 
 	for i := 1; i < len(s); i++ {
-		if (s[i] != 45 && s[i] != 59 && (s[i] < 65 || s[i] > 125)) {
-			if (s[i] < 48 || s[i] > 57) {
+		if s[i] != 45 && s[i] != 59 && (s[i] < 65 || s[i] > 125) {
+			if s[i] < 48 || s[i] > 57 {
 				return false
 			}
 		}
@@ -159,7 +159,7 @@ func (u *User) createMMUser(mmuser *model.User) *User {
 	}
 
 	nick := mmuser.Username
-	if (u.Cfg.PreferNickname && u.isValidNick(mmuser.Nickname)) {
+	if u.Cfg.PreferNickname && u.isValidNick(mmuser.Nickname) {
 		nick = mmuser.Nickname
 	}
 
@@ -287,7 +287,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *model.Channel, throttle <
 						prevDate = date
 					}
 					nick := user.Username
-					if (u.Cfg.PreferNickname && u.isValidNick(user.Nickname)) {
+					if u.Cfg.PreferNickname && u.isValidNick(user.Nickname) {
 						nick = user.Nickname
 					}
 					spoof(nick, fmt.Sprintf("[%s] %s", ts.Format("15:04"), post))
@@ -353,7 +353,7 @@ func (u *User) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	if data.ParentId != "" {
 		parentPost, resp := u.mc.Client.GetPost(data.ParentId, "")
 		if resp.Error != nil {
-			logger.Debugf("Unable to get parent post for", data)
+			logger.Debugf("Unable to get parent post for %#v", data)
 		} else {
 			parentGhost := u.createMMUser(u.mc.GetUser(parentPost.UserId))
 			data.Message = fmt.Sprintf("%s (re @%s: %s)", data.Message, parentGhost.Nick, parentPost.Message)
