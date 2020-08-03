@@ -460,7 +460,16 @@ func (u *User) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		ch = u.Srv.Channel(data.ChannelId)
 		if topic, ok := extraProps["new_header"].(string); ok {
 			if topicuser, ok := extraProps["username"].(string); ok {
-				tu, _ := u.Srv.HasUser(topicuser)
+				tu, valid := u.Srv.HasUser(topicuser)
+				if !valid {
+					logger.Debugf("Detected invalid user/nick: %s/%s",
+						u.mc.GetUserName(data.UserId), u.mc.GetNickName(data.UserId))
+					tu, _ = u.Srv.HasUser(u.mc.GetUserName(data.UserId))
+					if tu == nil {
+						logger.Warnf("Ugh, detected NIL, returning")
+						return
+					}
+				}
 				ch.Topic(tu, topic)
 			}
 		}
