@@ -45,6 +45,7 @@ type MmCfg struct {
 	PasteBufferTimeout int
 	DisableAutoView    bool
 	PreferNickname     bool
+	HideReplies        bool
 }
 
 func NewUserMM(c net.Conn, srv Server, cfg *MmCfg) *User {
@@ -66,6 +67,7 @@ func NewUserMM(c net.Conn, srv Server, cfg *MmCfg) *User {
 	u.MmInfo.Cfg.PrefixMainTeam = cfg.MattermostSettings.PrefixMainTeam
 	u.MmInfo.Cfg.DisableAutoView = cfg.MattermostSettings.DisableAutoView
 	u.MmInfo.Cfg.PreferNickname = cfg.MattermostSettings.PreferNickname
+	u.MmInfo.Cfg.HideReplies = cfg.MattermostSettings.HideReplies
 
 	u.idleStop = make(chan struct{})
 	// used for login
@@ -356,7 +358,11 @@ func (u *User) handleWsActionPost(rmsg *model.WebSocketEvent) {
 			logger.Debugf("Unable to get parent post for %#v", data)
 		} else {
 			parentGhost := u.createMMUser(u.mc.GetUser(parentPost.UserId))
-			data.Message = fmt.Sprintf("%s (re @%s: %s)", data.Message, parentGhost.Nick, parentPost.Message)
+			if u.Cfg.HideReplies {
+				data.Message = fmt.Sprintf("%s (re @%s)", data.Message, parentGhost.Nick)
+			} else {
+				data.Message = fmt.Sprintf("%s (re @%s: %s)", data.Message, parentGhost.Nick, parentPost.Message)
+			}
 		}
 	}
 	// create new "ghost" user

@@ -75,6 +75,9 @@ DisableAutoView = false
 # default being to show the Username. (default false)
 PreferNickname = false
 
+# Disable showing parent post / replies
+HideReplies = false
+
 #############################
 ##### SLACK EXAMPLE #########
 #############################
