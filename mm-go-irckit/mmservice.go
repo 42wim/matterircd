@@ -27,12 +27,7 @@ func logout(u *User, toUser *User, args []string, service string) {
 		u.MsgUser(toUser, "login or logout in progress. Please wait")
 		return
 	}
-	switch service {
-	case "mattermost":
-		u.logoutFromMattermost()
-	case "slack":
-		u.logoutFromSlack()
-	}
+	u.br.Logout()
 }
 
 func login(u *User, toUser *User, args []string, service string) {
@@ -40,21 +35,24 @@ func login(u *User, toUser *User, args []string, service string) {
 		u.MsgUser(toUser, "login or logout in progress. Please wait")
 		return
 	}
+
 	if service == "slack" {
 		var err error
-		//fmt.Println(len(args))
+
 		if len(args) != 1 && len(args) != 3 {
 			u.MsgUser(toUser, "need LOGIN <team> <login> <pass> or LOGIN <token>")
 			return
 		}
-		//fmt.Println(len(args))
+
 		if len(args) == 1 {
-			u.Token = args[len(args)-1]
+			u.Credentials.Token = args[len(args)-1]
 		}
-		if u.Token == "help" {
+
+		if u.Credentials != nil && u.Credentials.Token == "help" {
 			u.MsgUser(toUser, "need LOGIN <team> <login> <pass> or LOGIN <token>")
 			return
 		}
+
 		if len(args) == 3 {
 			cred := &MmCredentials{}
 			cred.Team = args[0]
@@ -62,45 +60,45 @@ func login(u *User, toUser *User, args []string, service string) {
 			cred.Pass = args[2]
 			u.Credentials = cred
 		}
-		if u.sc != nil {
-			fmt.Println("login, starting logout")
-			err := u.logoutFromSlack()
+
+		if u.br != nil {
+			err = u.br.Logout()
 			if err != nil {
 				u.MsgUser(toUser, err.Error())
 				return
 			}
 		}
-		if u.mc != nil {
-			err := u.logoutFromMattermost()
-			if err != nil {
-				u.MsgUser(toUser, err.Error())
-				return
-			}
-		}
+
 		u.inprogress = true
 		defer func() { u.inprogress = false }()
-		u.sc, err = u.loginToSlack()
+
+		err = u.loginToSlack()
 		if err != nil {
 			u.MsgUser(toUser, err.Error())
 			return
 		}
+
 		u.MsgUser(toUser, "login OK")
-		if u.Credentials != nil && u.Token != "" {
-			u.MsgUser(toUser, "token used: "+u.Token)
+		if u.Credentials != nil && u.Credentials.Token != "" {
+			u.MsgUser(toUser, "token used: "+u.Credentials.Token)
 		}
+
 		return
 	}
 
 	cred := &MmCredentials{}
 	datalen := 4
+
 	if u.Cfg.DefaultTeam != "" {
 		cred.Team = u.Cfg.DefaultTeam
 		datalen--
 	}
+
 	if u.Cfg.DefaultServer != "" {
 		cred.Server = u.Cfg.DefaultServer
 		datalen--
 	}
+
 	if len(args) == datalen {
 		cred.Pass = args[len(args)-1]
 		cred.Login = args[len(args)-2]
@@ -108,37 +106,36 @@ func login(u *User, toUser *User, args []string, service string) {
 		if cred.Server == "" && cred.Team == "" {
 			cred.Server = args[len(args)-4]
 		}
+
 		if cred.Team == "" {
 			cred.Team = args[len(args)-3]
 		}
+
 		if cred.Server == "" {
 			cred.Server = args[len(args)-3]
 		}
-
 	}
 
 	// incorrect arguments
 	if len(args) != datalen {
+		switch {
 		// no server or team
-		if cred.Team != "" && cred.Server != "" {
+		case cred.Team != "" && cred.Server != "":
 			u.MsgUser(toUser, "need LOGIN <login> <pass>")
 			u.MsgUser(toUser, "when using a personal token replace <pass> with token=<yourtoken>")
-			return
-		}
 		// server missing
-		if cred.Team != "" {
+		case cred.Team != "":
 			u.MsgUser(toUser, "need LOGIN <server> <login> <pass>")
 			u.MsgUser(toUser, "when using a personal token replace <pass> with token=<yourtoken>")
-			return
-		}
 		// team missing
-		if cred.Server != "" {
+		case cred.Server != "":
 			u.MsgUser(toUser, "need LOGIN <team> <login> <pass>")
 			u.MsgUser(toUser, "when using a personal token replace <pass> with token=<yourtoken>")
-			return
+		default:
+			u.MsgUser(toUser, "need LOGIN <server> <team> <login> <pass>")
+			u.MsgUser(toUser, "when using a personal token replace <pass> with token=<yourtoken>")
 		}
-		u.MsgUser(toUser, "need LOGIN <server> <team> <login> <pass>")
-		u.MsgUser(toUser, "when using a personal token replace <pass> with token=<yourtoken>")
+
 		return
 	}
 
@@ -147,32 +144,23 @@ func login(u *User, toUser *User, args []string, service string) {
 		return
 	}
 
-	if u.sc != nil {
-		fmt.Println("login, starting logout")
-		err := u.logoutFromSlack()
+	if u.br != nil {
+		err := u.br.Logout()
 		if err != nil {
 			u.MsgUser(toUser, err.Error())
 			return
 		}
 	}
-	if u.mc != nil {
-		err := u.logoutFromMattermost()
-		if err != nil {
-			u.MsgUser(toUser, err.Error())
-			return
-		}
-	}
+
 	u.Credentials = cred
-	var err error
-	u.mc, err = u.loginToMattermost()
+
+	err := u.loginToMattermost()
 	if err != nil {
 		u.MsgUser(toUser, err.Error())
 		return
 	}
-	u.mc.OnWsConnect = u.addUsersToChannels
-	go u.mc.StatusLoop()
-	u.MsgUser(toUser, "login OK")
 
+	u.MsgUser(toUser, "login OK")
 }
 
 func search(u *User, toUser *User, args []string, service string) {
@@ -180,35 +168,40 @@ func search(u *User, toUser *User, args []string, service string) {
 		u.MsgUser(toUser, "not implemented")
 		return
 	}
-	postlist := u.mc.SearchPosts(strings.Join(args, " "))
-	if postlist == nil || len(postlist.Order) == 0 {
+
+	list := u.br.SearchPosts(strings.Join(args, " "))
+	if list == nil || len(list.(*model.PostList).Order) == 0 {
 		u.MsgUser(toUser, "no results")
 		return
 	}
+
+	postlist := list.(*model.PostList)
+
 	for i := len(postlist.Order) - 1; i >= 0; i-- {
 		if postlist.Posts[postlist.Order[i]].DeleteAt > postlist.Posts[postlist.Order[i]].CreateAt {
 			continue
 		}
-		timestamp := time.Unix(postlist.Posts[postlist.Order[i]].CreateAt/1000, 0).Format("January 02, 2006 15:04")
-		channelname := u.mc.GetChannelName(postlist.Posts[postlist.Order[i]].ChannelId)
 
-		nick := u.mc.GetUser(postlist.Posts[postlist.Order[i]].UserId).Username
-		if u.Cfg.PreferNickname &&
-			u.isValidNick(u.mc.GetUser(postlist.Posts[postlist.Order[i]].UserId).Nickname) {
-			nick = u.mc.GetUser(postlist.Posts[postlist.Order[i]].UserId).Nickname
-		}
+		timestamp := time.Unix(postlist.Posts[postlist.Order[i]].CreateAt/1000, 0).Format("January 02, 2006 15:04")
+		channelname := u.br.GetChannelName(postlist.Posts[postlist.Order[i]].ChannelId)
+
+		nick := u.br.GetUser(postlist.Posts[postlist.Order[i]].UserId).Nick
+
 		u.MsgUser(toUser, "#"+channelname+" <"+nick+"> "+timestamp)
 		u.MsgUser(toUser, strings.Repeat("=", len("#"+channelname+" <"+nick+"> "+timestamp)))
+
 		for _, post := range strings.Split(postlist.Posts[postlist.Order[i]].Message, "\n") {
 			if post != "" {
 				u.MsgUser(toUser, post)
 			}
 		}
+
 		if len(postlist.Posts[postlist.Order[i]].FileIds) > 0 {
-			for _, fname := range u.mc.GetFileLinks(postlist.Posts[postlist.Order[i]].FileIds) {
+			for _, fname := range u.br.GetFileLinks(postlist.Posts[postlist.Order[i]].FileIds) {
 				u.MsgUser(toUser, "download file - "+fname)
 			}
 		}
+
 		u.MsgUser(toUser, "")
 		u.MsgUser(toUser, "")
 	}
@@ -219,13 +212,15 @@ func searchUsers(u *User, toUser *User, args []string, service string) {
 		u.MsgUser(toUser, "not implemented")
 		return
 	}
-	users, resp := u.mc.Client.SearchUsers(&model.UserSearch{Term: strings.Join(args, " ")})
-	if resp.Error != nil {
-		u.MsgUser(toUser, fmt.Sprint("Error", resp.Error))
+
+	users, err := u.br.SearchUsers(strings.Join(args, " "))
+	if err != nil {
+		u.MsgUser(toUser, fmt.Sprint("Error", err.Error()))
 		return
 	}
+
 	for _, user := range users {
-		u.MsgUser(toUser, fmt.Sprint(user.Nickname, user.FirstName, user.LastName))
+		u.MsgUser(toUser, fmt.Sprint(user.Nick, user.FirstName, user.LastName))
 	}
 }
 
@@ -234,46 +229,51 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 		u.MsgUser(toUser, "not implemented")
 		return
 	}
+
 	if len(args) != 2 {
 		u.MsgUser(toUser, "need SCROLLBACK <channel> <lines>")
 		u.MsgUser(toUser, "e.g. SCROLLBACK #bugs 10 (show last 10 lines from #bugs)")
 		return
 	}
+
 	limit, err := strconv.Atoi(args[1])
 	if err != nil {
 		u.MsgUser(toUser, "need SCROLLBACK <channel> <lines>")
 		u.MsgUser(toUser, "e.g. SCROLLBACK #bugs 10 (show last 10 lines from #bugs)")
 		return
 	}
+
 	if !strings.Contains(args[0], "#") {
 		u.MsgUser(toUser, "need SCROLLBACK <channel> <lines>")
 		u.MsgUser(toUser, "e.g. SCROLLBACK #bugs 10 (show last 10 lines from #bugs)")
 		return
 	}
-	args[0] = strings.Replace(args[0], "#", "", -1)
-	postlist := u.mc.GetPosts(u.mc.GetChannelId(args[0], u.mc.Team.Id), limit)
-	if postlist == nil || len(postlist.Order) == 0 {
+
+	args[0] = strings.ReplaceAll(args[0], "#", "")
+
+	list := u.br.GetPosts(u.br.GetChannelID(args[0], u.br.GetMe().TeamID), limit)
+	if list == nil || len(list.(*model.PostList).Order) == 0 {
 		u.MsgUser(toUser, "no results")
 		return
 	}
+
+	postlist := list.(*model.PostList)
+
 	for i := len(postlist.Order) - 1; i >= 0; i-- {
-		nick := u.mc.GetUser(postlist.Posts[postlist.Order[i]].UserId).Username
-		if u.Cfg.PreferNickname &&
-			u.isValidNick(u.mc.GetUser(postlist.Posts[postlist.Order[i]].UserId).Nickname) {
-			nick = u.mc.GetUser(postlist.Posts[postlist.Order[i]].UserId).Nickname
-		}
+		nick := u.br.GetUser(postlist.Posts[postlist.Order[i]].UserId).Nick
+
 		for _, post := range strings.Split(postlist.Posts[postlist.Order[i]].Message, "\n") {
 			if post != "" {
 				u.MsgUser(toUser, "<"+nick+"> "+post)
 			}
 		}
+
 		if len(postlist.Posts[postlist.Order[i]].FileIds) > 0 {
-			for _, fname := range u.mc.GetFileLinks(postlist.Posts[postlist.Order[i]].FileIds) {
+			for _, fname := range u.br.GetFileLinks(postlist.Posts[postlist.Order[i]].FileIds) {
 				u.MsgUser(toUser, "<"+nick+"> download file - "+fname)
 			}
 		}
 	}
-
 }
 
 func updatelastviewed(u *User, toUser *User, args []string, service string) {
@@ -281,31 +281,36 @@ func updatelastviewed(u *User, toUser *User, args []string, service string) {
 		u.MsgUser(toUser, "not implemented")
 		return
 	}
-	channelId := ""
+
+	channelID := ""
+
 	if len(args) != 1 {
 		u.MsgUser(toUser, "need UPDATELASTVIEWED <channel>")
 		u.MsgUser(toUser, "e.g. UPDATELASTVIEWED #bugs")
 		return
 	}
+
 	if strings.Contains(args[0], "#") {
-		args[0] = strings.Replace(args[0], "#", "", -1)
-		channelId = u.mc.GetChannelId(args[0], u.mc.Team.Id)
-		if channelId == "" {
+		args[0] = strings.ReplaceAll(args[0], "#", "")
+
+		channelID = u.br.GetChannelID(args[0], u.br.GetMe().TeamID)
+		if channelID == "" {
 			u.MsgUser(toUser, "channel does not exist")
 			return
 		}
-	} else if updateUser, exists := u.Srv.HasUser(args[0]); exists && updateUser.MmGhostUser {
-		dc, resp := u.mc.Client.CreateDirectChannel(u.mc.User.Id, updateUser.User)
-		if resp.Error != nil {
-			u.MsgUser(toUser, fmt.Sprintf("CreateDirectChannel to %#v failed: %s", updateUser.User, resp.Error))
+	} else if updateUser, exists := u.Srv.HasUser(args[0]); exists && updateUser.Ghost {
+		err := u.br.UpdateLastViewedUser(updateUser.User)
+		if err != nil {
+			u.MsgUser(toUser, fmt.Sprintf("updatelastviewed for %#v failed: %s", updateUser.User, err))
 			return
 		}
-		channelId = dc.Id
+		return
 	} else {
 		u.MsgUser(toUser, fmt.Sprintf("user %s does not exist", args[0]))
 		return
 	}
-	u.mc.UpdateLastViewed(channelId)
+
+	u.br.UpdateLastViewed(channelID)
 	u.MsgUser(toUser, fmt.Sprintf("set viewed for %s", args[0]))
 }
 
@@ -319,13 +324,13 @@ var cmds = map[string]Command{
 }
 
 func (u *User) handleServiceBot(service string, toUser *User, msg string) {
-
-	//func (u *User) handleMMServiceBot(toUser *User, msg string) {
+	// func (u *User) handleMMServiceBot(toUser *User, msg string) {
 	commands, err := parseCommandString(msg)
 	if err != nil {
 		u.MsgUser(toUser, fmt.Sprintf("\"%s\" is improperly formatted", msg))
 		return
 	}
+
 	cmd, ok := cmds[strings.ToLower(commands[0])]
 	if !ok {
 		keys := make([]string, 0)
@@ -336,18 +341,11 @@ func (u *User) handleServiceBot(service string, toUser *User, msg string) {
 		u.MsgUser(toUser, "<command> help for more info")
 		return
 	}
+
 	if cmd.login {
-		switch service {
-		case "mattermost":
-			if u.mc == nil {
-				u.MsgUser(toUser, "You're not logged in. Use LOGIN first.")
-				return
-			}
-		case "slack":
-			if u.sc == nil {
-				u.MsgUser(toUser, "You're not logged in. Use LOGIN first.")
-				return
-			}
+		if u.br == nil {
+			u.MsgUser(toUser, "You're not logged in. Use LOGIN first.")
+			return
 		}
 	}
 	/*
@@ -360,6 +358,7 @@ func (u *User) handleServiceBot(service string, toUser *User, msg string) {
 		u.MsgUser(toUser, fmt.Sprintf("%s takes at most %v arguments", commands[0], cmd.maxParams))
 		return
 	}
+
 	cmd.handler(u, toUser, commands[1:], service)
 }
 
@@ -371,7 +370,6 @@ func parseCommandString(line string) ([]string, error) {
 	got := false
 
 	for _, r := range line {
-
 		// If the string is escaped
 		if escaped {
 			buf += string(r)
@@ -420,6 +418,7 @@ func parseCommandString(line string) ([]string, error) {
 	if got {
 		args = append(args, buf)
 	}
+
 	if escaped || singleQuoted || doubleQuoted {
 		return nil, errors.New("invalid command line string")
 	}

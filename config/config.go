@@ -1,9 +1,10 @@
 package config
 
 import (
+	"strings"
+
 	"github.com/BurntSushi/toml"
 	"github.com/sirupsen/logrus"
-	"strings"
 )
 
 var Logger *logrus.Entry

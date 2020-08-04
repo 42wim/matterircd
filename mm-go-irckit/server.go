@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/42wim/matterircd/bridge"
 	"github.com/sorcix/irc"
 )
 
@@ -198,51 +199,24 @@ func (s *server) RenameUser(u *User, newNick string) bool {
 }
 
 // HasChannel returns whether a given channel already exists.
-func (s *server) HasChannel(channelId string) (Channel, bool) {
+func (s *server) HasChannel(channelID string) (Channel, bool) {
 	s.RLock()
-	ch, exists := s.channels[channelId]
+	ch, exists := s.channels[channelID]
 	s.RUnlock()
 	return ch, exists
 }
 
 // Channel returns an existing or new channel with the give name.
-func (s *server) Channel(channelId string) Channel {
+func (s *server) Channel(channelID string) Channel {
 	s.Lock()
-	ch, ok := s.channels[channelId]
+	ch, ok := s.channels[channelID]
 	if !ok {
-		var name, service string
-		if s.u.sc != nil {
-			info, err := s.u.sc.GetConversationInfo(channelId, false)
-			if err != nil {
-				name = channelId
-			} else {
-				name = "#" + info.Name
-			}
-			service = "slack"
-		}
-		if s.u.mc != nil {
-			channelName := s.u.mc.GetChannelName(channelId)
-			teamId := s.u.mc.GetTeamFromChannel(channelId)
-			teamName := s.u.mc.GetTeamName(teamId)
-
-			if channelName != "" {
-				if (teamName != "" && teamId != s.u.mc.Team.Id) || s.u.Cfg.PrefixMainTeam {
-					name = "#" + teamName + "/" + channelName
-				}
-				if teamId == s.u.mc.Team.Id && !s.u.Cfg.PrefixMainTeam {
-					name = "#" + channelName
-				}
-				if teamId == "G" {
-					name = "#" + channelName
-				}
-			} else {
-				name = channelId
-			}
-			service = "mattermost"
-		}
+		service := s.u.br.Protocol()
+		name := s.u.br.GetChannelName(channelID)
 		newFn := s.config.NewChannel
-		ch = newFn(s, channelId, name, service)
-		s.channels[channelId] = ch
+		ch = newFn(s, channelID, name, service)
+		fmt.Println("new channel id:", channelID, "name:", name)
+		s.channels[channelID] = ch
 		s.channels[name] = ch
 		s.Unlock()
 	} else {
@@ -280,17 +254,8 @@ func (s *server) Quit(u *User, message string) {
 	s.Lock()
 	delete(s.users, u.ID())
 	s.Unlock()
-	if u.mc != nil {
-		u.mc.Logout()
-	}
-}
 
-func (s *server) guestNick() string {
-	s.Lock()
-	defer s.Unlock()
-
-	s.count++
-	return fmt.Sprintf("Guest%d", s.count)
+	u.br.Logout()
 }
 
 // Len returns the number of users connected to the server.
@@ -361,7 +326,7 @@ func (s *server) handle(u *User) {
 			// Ignore empty messages
 			continue
 		}
-		go func() {
+		go func(msg *irc.Message) {
 			err := s.commands.Run(s, u, msg)
 			logger.Debugf("Executed %#v %#v", msg, err)
 			if err == ErrUnknownCommand {
@@ -369,7 +334,7 @@ func (s *server) handle(u *User) {
 			} else if err != nil {
 				logger.Errorf("handler error for %s: %s", u.ID(), err.Error())
 			}
-		}()
+		}(msg)
 	}
 }
 
@@ -399,7 +364,7 @@ func (s *server) handshake(u *User) error {
 	i := handshakeMsgTolerance
 	// Read messages until we filled in USER details.
 	for msg := range u.DecodeCh {
-		//fmt.Printf("in handshake %#v\n", msg)
+		// fmt.Printf("in handshake %#v\n", msg)
 		i--
 		// Consume N messages then give up.
 		if i == 0 {
@@ -450,9 +415,40 @@ func (s *server) handshake(u *User) error {
 			if len(u.Pass) == 1 {
 				service = "slack"
 			}
-			login(u, &User{Nick: service, User: service, Real: service, Host: "service", channels: map[Channel]struct{}{}}, u.Pass, service)
+			login(u, &User{
+				UserInfo: &bridge.UserInfo{
+					Nick: service,
+					User: service,
+					Real: service,
+					Host: "service",
+				},
+				channels: map[Channel]struct{}{},
+			},
+				u.Pass,
+				service)
 		}
 		return err
 	}
 	return ErrHandshakeFailed
+}
+
+func (s *server) Logout(user *User) {
+	channels := user.Channels()
+	for _, ch := range channels {
+		for _, other := range ch.Users() {
+			s.Lock()
+			delete(s.users, other.ID())
+			s.Unlock()
+		}
+		ch.Part(user, "")
+		ch.Unlink()
+	}
+}
+
+func (s *server) ChannelCount() int {
+	return len(s.channels)
+}
+
+func (s *server) UserCount() int {
+	return len(s.users)
 }
