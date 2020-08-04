@@ -12,6 +12,10 @@ github.com/desertbit/timer
 github.com/dyatlov/go-opengraph/opengraph
 # github.com/go-ldap/ldap v3.0.3+incompatible
 github.com/go-ldap/ldap
+# github.com/google/gops v0.3.10
+github.com/google/gops/agent
+github.com/google/gops/internal
+github.com/google/gops/signal
 # github.com/gorilla/websocket v1.4.2
 github.com/gorilla/websocket
 # github.com/hashicorp/golang-lru v0.5.4
@@ -53,6 +57,8 @@ github.com/pelletier/go-toml
 github.com/pkg/errors
 # github.com/pmezard/go-difflib v1.0.0
 github.com/pmezard/go-difflib/difflib
+# github.com/schollz/logger v1.2.0
+github.com/schollz/logger
 # github.com/sirupsen/logrus v1.6.0
 github.com/sirupsen/logrus
 # github.com/slack-go/slack v0.6.5

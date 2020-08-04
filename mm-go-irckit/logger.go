@@ -4,8 +4,10 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-var logger *logrus.Entry
-var LogLevel string
+var (
+	logger   *logrus.Entry
+	LogLevel string
+)
 
 func SetLogger(l *logrus.Entry) {
 	logger = l
@@ -16,8 +18,5 @@ func SetLogLevel(level string) {
 }
 
 func IsDebugLevel() bool {
-	if LogLevel == "debug" {
-		return true
-	}
-	return false
+	return LogLevel == "debug"
 }
