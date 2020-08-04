@@ -13,6 +13,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/42wim/matterircd/bridge"
+	ircslack "github.com/42wim/matterircd/bridge/slack"
 	"github.com/slack-go/slack"
 )
 
@@ -24,6 +26,7 @@ type SlackInfo struct {
 	susers     map[string]slack.User
 	connected  bool
 	inprogress bool
+	//br         bridge.Bridger
 	sync.RWMutex
 }
 
@@ -107,6 +110,8 @@ func (u *User) loginToSlack() (*slack.Client, error) {
 		}
 	}
 
+	u.br = ircslack.New(u.sc, u.sinfo)
+
 	// we only know which server we are connecting to when we actually are connected.
 	// disconnect if we're not allowed
 	if len(u.MmInfo.Cfg.SlackSettings.Restrict) > 0 {
@@ -162,12 +167,26 @@ func (u *User) createSlackUser(slackuser *slack.User) *User {
 	if slackuser == nil {
 		return nil
 	}
+
 	if ghost, ok := u.Srv.HasUser(slackuser.Name); ok {
 		return ghost
 	}
-	ghost := &User{Nick: slackuser.Name, User: slackuser.ID, Real: slackuser.RealName, Host: "host", Roles: "", channels: map[Channel]struct{}{}, DisplayName: slackuser.Profile.DisplayName}
-	ghost.MmGhostUser = true
+
+	ghost := &User{
+		UserInfo: &bridge.UserInfo{
+			Nick:        slackuser.Name,
+			User:        slackuser.ID,
+			Real:        slackuser.RealName,
+			Host:        "host",
+			Roles:       "",
+			DisplayName: slackuser.Profile.DisplayName,
+			Ghost:       true,
+		},
+		channels: map[Channel]struct{}{},
+	}
+
 	u.Srv.Add(ghost)
+
 	return ghost
 }
 

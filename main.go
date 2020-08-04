@@ -4,12 +4,14 @@ import (
 	"crypto/tls"
 	"flag"
 	"fmt"
-	"github.com/42wim/matterircd/config"
-	"github.com/42wim/matterircd/mm-go-irckit"
-	"github.com/sirupsen/logrus"
 	"net"
 	"os"
 	"strings"
+
+	"github.com/42wim/matterircd/bridge/mattermost"
+	"github.com/42wim/matterircd/config"
+	irckit "github.com/42wim/matterircd/mm-go-irckit"
+	"github.com/sirupsen/logrus"
 )
 
 var (
@@ -134,7 +136,7 @@ func start(socket net.Listener) {
 		}
 
 		go func() {
-			irccfg := &irckit.MmCfg{Insecure: cfg.Insecure, SkipTLSVerify: cfg.SkipTLSVerify,
+			irccfg := &mattermost.MmCfg{Insecure: cfg.Insecure, SkipTLSVerify: cfg.SkipTLSVerify,
 				SlackSettings: cfg.Slack, MattermostSettings: cfg.Mattermost, PasteBufferTimeout: cfg.PasteBufferTimeout}
 			newsrv := irckit.ServerConfig{Name: "matterircd", Version: version}.Server()
 			logger.Infof("New connection: %s", conn.RemoteAddr())

@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/42wim/matterircd/bridge"
 	"github.com/sorcix/irc"
 )
 
@@ -210,38 +211,11 @@ func (s *server) Channel(channelId string) Channel {
 	s.Lock()
 	ch, ok := s.channels[channelId]
 	if !ok {
-		var name, service string
-		if s.u.sc != nil {
-			info, err := s.u.sc.GetConversationInfo(channelId, false)
-			if err != nil {
-				name = channelId
-			} else {
-				name = "#" + info.Name
-			}
-			service = "slack"
-		}
-		if s.u.mc != nil {
-			channelName := s.u.mc.GetChannelName(channelId)
-			teamId := s.u.mc.GetTeamFromChannel(channelId)
-			teamName := s.u.mc.GetTeamName(teamId)
-
-			if channelName != "" {
-				if (teamName != "" && teamId != s.u.mc.Team.Id) || s.u.Cfg.PrefixMainTeam {
-					name = "#" + teamName + "/" + channelName
-				}
-				if teamId == s.u.mc.Team.Id && !s.u.Cfg.PrefixMainTeam {
-					name = "#" + channelName
-				}
-				if teamId == "G" {
-					name = "#" + channelName
-				}
-			} else {
-				name = channelId
-			}
-			service = "mattermost"
-		}
+		service := s.u.br.Protocol()
+		name := s.u.br.GetChannelName(channelId)
 		newFn := s.config.NewChannel
 		ch = newFn(s, channelId, name, service)
+		fmt.Println("new channel id:", channelId, "name:", name)
 		s.channels[channelId] = ch
 		s.channels[name] = ch
 		s.Unlock()
@@ -280,9 +254,8 @@ func (s *server) Quit(u *User, message string) {
 	s.Lock()
 	delete(s.users, u.ID())
 	s.Unlock()
-	if u.mc != nil {
-		u.mc.Logout()
-	}
+
+	u.br.Logout()
 }
 
 func (s *server) guestNick() string {
@@ -450,7 +423,17 @@ func (s *server) handshake(u *User) error {
 			if len(u.Pass) == 1 {
 				service = "slack"
 			}
-			login(u, &User{Nick: service, User: service, Real: service, Host: "service", channels: map[Channel]struct{}{}}, u.Pass, service)
+			login(u, &User{
+				UserInfo: &bridge.UserInfo{
+					Nick: service,
+					User: service,
+					Real: service,
+					Host: "service",
+				},
+				channels: map[Channel]struct{}{},
+			},
+				u.Pass,
+				service)
 		}
 		return err
 	}

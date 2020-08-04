@@ -10,6 +10,7 @@ import (
 func (ch *channel) Spoof(from string, text string, cmd string) {
 	text = wordwrap.String(text, 440)
 	lines := strings.Split(text, "\n")
+
 	for _, l := range lines {
 		l = strings.TrimSpace(l)
 		if len(l) == 0 {
@@ -22,10 +23,12 @@ func (ch *channel) Spoof(from string, text string, cmd string) {
 			Params:   []string{ch.name},
 			Trailing: l + "\n",
 		}
+
 		ch.mu.RLock()
 		for to := range ch.usersIdx {
 			to.Encode(msg)
 		}
+
 		ch.mu.RUnlock()
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/42wim/matterircd/bridge"
 	"github.com/desertbit/timer"
 	"github.com/sorcix/irc"
 )
@@ -14,8 +15,10 @@ import (
 // NewUser creates a *User, wrapping a connection with metadata we need for our server.
 func NewUser(c Conn) *User {
 	return &User{
-		Conn:     c,
-		Host:     "*",
+		Conn: c,
+		UserInfo: &bridge.UserInfo{
+			Host: "*",
+		},
 		channels: map[Channel]struct{}{},
 		DecodeCh: make(chan *irc.Message),
 	}
@@ -36,13 +39,15 @@ type User struct {
 	Conn
 
 	sync.RWMutex
-	Nick        string   // From NICK command
-	User        string   // From USER command
-	Real        string   // From USER command
-	Pass        []string // From PASS command
-	Host        string
-	Roles       string
-	DisplayName string
+	*bridge.UserInfo
+	/*	Nick        string   // From NICK command
+		User        string   // From USER command
+		Real        string   // From USER command
+		Pass        []string // From PASS command
+		Host        string
+		Roles       string
+		DisplayName string
+	*/
 	BufferedMsg *irc.Message
 	DecodeCh    chan *irc.Message
 
@@ -124,7 +129,7 @@ func (u *User) VisibleTo() []*User {
 
 // Encode and send each msg until an error occurs, then returns.
 func (user *User) Encode(msgs ...*irc.Message) (err error) {
-	if user.MmGhostUser {
+	if user.Ghost {
 		return nil
 	}
 	for _, msg := range msgs {
@@ -147,7 +152,7 @@ func (user *User) Encode(msgs ...*irc.Message) (err error) {
 
 // Decode will receive and return a decoded message, or an error.
 func (user *User) Decode() {
-	if user.MmGhostUser {
+	if user.Ghost {
 		// block
 		c := make(chan struct{})
 		<-c

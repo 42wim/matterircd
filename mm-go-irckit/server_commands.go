@@ -6,8 +6,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/mattermost/mattermost-server/model"
-	"github.com/slack-go/slack"
 	"github.com/sorcix/irc"
 )
 
@@ -37,21 +35,14 @@ func DefaultCommands() Commands {
 }
 
 func CmdAway(s Server, u *User, msg *irc.Message) error {
-	if u.mc != nil {
-		u.mc.UpdateStatus(u.mc.User.Id, "online")
-	}
-	if u.sc != nil {
-		u.sc.SetUserPresence("auto")
-	}
+	u.br.SetStatus("online")
+
 	if msg.Trailing == "" {
 		return s.EncodeMessage(u, irc.RPL_UNAWAY, []string{u.Nick}, "You are no longer marked as being away")
 	}
-	if u.mc != nil {
-		u.mc.UpdateStatus(u.mc.User.Id, "away")
-	}
-	if u.sc != nil {
-		u.sc.SetUserPresence("away")
-	}
+
+	u.br.SetStatus("away")
+
 	return s.EncodeMessage(u, irc.RPL_NOWAWAY, []string{u.Nick}, "You have been marked as being away")
 }
 
@@ -63,21 +54,11 @@ func CmdInvite(s Server, u *User, msg *irc.Message) error {
 		return nil
 	}
 
-	if u.mc != nil {
-		channelName := strings.Replace(channel, "#", "", 1)
-		id := u.mc.GetChannelId(channelName, u.mc.Team.Id)
-		if id == "" {
-			return nil
-		}
-		_, resp := u.mc.Client.AddChannelMember(id, other.User)
-		if resp.Error != nil {
-			return resp.Error
-		}
-	}
-	if u.sc != nil {
-		if ch, exists := s.HasChannel(channel); exists {
-			logger.Debugf("inviting %s to %s", other.User, strings.ToUpper(ch.ID()))
-			u.sc.InviteUsersToConversation(strings.ToUpper(ch.ID()), other.User)
+	if ch, exists := s.HasChannel(channel); exists {
+		logger.Debugf("inviting %s to %s", other.User, ch.ID())
+		err := u.br.Invite(ch.ID(), other.User)
+		if err != nil {
+			return err
 		}
 	}
 
@@ -115,81 +96,54 @@ func CmdKick(s Server, u *User, msg *irc.Message) error {
 	if !ok {
 		return nil
 	}
-	channelName := strings.Replace(channel, "#", "", 1)
-	if u.mc != nil {
-		id := u.mc.GetChannelId(channelName, u.mc.Team.Id)
-		if id == "" {
-			return nil
-		}
-		_, resp := u.mc.Client.RemoveUserFromChannel(id, other.User)
-		if resp.Error != nil {
-			return resp.Error
+
+	if ch, exists := s.HasChannel(channel); exists {
+		err := u.br.Kick(ch.ID(), other.User)
+		if err != nil {
+			return err
 		}
 	}
-	if u.sc != nil {
-		if ch, exists := s.HasChannel(channel); exists {
-			u.sc.KickUserFromConversation(strings.ToUpper(ch.ID()), other.User)
-		}
-	}
+
 	return nil
 }
 
 // CmdJoin is a handler for the /JOIN command.
 func CmdJoin(s Server, u *User, msg *irc.Message) error {
-	var (
-		channelId string
-		topic     string
-		sync      func(string, string)
-	)
+	var sync func(string, string)
 
 	channels := strings.Split(msg.Params[0], ",")
 	for _, channel := range channels {
 		channelName := strings.Replace(channel, "#", "", 1)
 		// you can only join existing channels
-		if u.mc != nil {
-			teamId := ""
-			sp := strings.Split(channelName, "/")
-			if len(sp) > 1 {
-				team, _ := u.mc.Client.GetTeamByName(sp[0], "")
-				if team == nil {
-					s.EncodeMessage(u, irc.ERR_INVITEONLYCHAN, []string{u.Nick, channel}, "Cannot join channel (+i)")
-					continue
-				}
-				teamId = team.Id
-				channelName = sp[1]
-			}
-			channelId = u.mc.GetChannelId(channelName, teamId)
-			err := u.mc.JoinChannel(channelId)
-			logger.Debugf("Join channel %s, id %s, err: %v", channelName, channelId, err)
-			if err != nil {
-				s.EncodeMessage(u, irc.ERR_INVITEONLYCHAN, []string{u.Nick, channel}, "Cannot join channel (+i)")
-				continue
-			}
-			topic = u.mc.GetChannelHeader(channelId)
-			sync = u.syncMMChannel
+		var err error
+
+		channelId, topic, err := u.br.Join(channelName)
+		if err != nil {
+			fmt.Println(err)
 		}
-		if u.sc != nil {
-			//TODO: handle warnings
-			mychan, _, _, err := u.sc.JoinConversation(channelName)
-			if err != nil {
-				s.EncodeMessage(u, irc.ERR_INVITEONLYCHAN, []string{u.Nick, channel}, "Cannot join channel (+i)")
-				continue
-			}
-			channelId = mychan.ID
-			logger.Debugf("Join channel %s, id %s, err: %v", channelName, channelId, err)
-			topic = mychan.Topic.Value
+
+		logger.Debugf("Join channel %s, id %s, err: %v", channelName, channelId, err)
+
+		if u.br.Protocol() == "mattermost" {
+			sync = u.syncMMChannel
+		} else {
 			sync = u.syncSlackChannel
 		}
+
 		// if we joined, remove channel from exclude and add to include
 		u.Cfg.JoinExclude = removeStringInSlice(channel, u.Cfg.JoinExclude)
 		if len(u.Cfg.JoinInclude) > 0 {
 			u.Cfg.JoinInclude = append(u.Cfg.JoinInclude, channel)
 		}
+
 		ch := s.Channel(channelId)
 		ch.Topic(u, topic)
+
 		sync(channelId, channelName)
+
 		ch.Join(u)
 	}
+
 	return nil
 }
 
@@ -202,50 +156,21 @@ func CmdList(s Server, u *User, msg *irc.Message) error {
 		Params:   []string{u.Nick},
 		Trailing: "Channel Users Topic",
 	})
-	if u.mc != nil {
-		for _, channel := range append(u.mc.GetChannels(), u.mc.GetMoreChannels()...) {
-			// FIXME: This needs to be broken up into multiple messages to fit <510 chars
-			if strings.Contains(channel.Name, "__") {
-				continue
-			}
-			channelName := "#" + channel.Name
-			// prefix channels outside of our team with team name
-			if channel.TeamId != u.mc.Team.Id {
-				channelName = u.mc.GetTeamName(channel.TeamId) + "/" + channel.Name
-			}
-			r = append(r, &irc.Message{
-				Prefix:   s.Prefix(),
-				Command:  irc.RPL_LIST,
-				Params:   []string{u.Nick, channelName, "0", strings.Replace(channel.Header, "\n", " | ", -1)},
-				Trailing: "",
-			})
-		}
-	}
-	if u.sc != nil {
-		params := slack.GetConversationsParameters{
-			Cursor:          "",
-			ExcludeArchived: "true",
-			Limit:           100,
-			Types:           []string{"public_channel", "private_channel", "mpim"},
-		}
 
-		for {
-			conversations, nextCursor, _ := u.sc.GetConversations(&params)
-			params.Cursor = nextCursor
-			for _, channel := range conversations {
-				channelName := "#" + channel.Name
-				r = append(r, &irc.Message{
-					Prefix:   s.Prefix(),
-					Command:  irc.RPL_LIST,
-					Params:   []string{u.Nick, channelName, "0", strings.Replace(channel.Topic.Value, "\n", " | ", -1)},
-					Trailing: "",
-				})
-				if nextCursor == "" {
-					break
-				}
-			}
-		}
+	info, err := u.br.List()
+	if err != nil {
+		return err
 	}
+
+	for channelName, topic := range info {
+		r = append(r, &irc.Message{
+			Prefix:   s.Prefix(),
+			Command:  irc.RPL_LIST,
+			Params:   []string{u.Nick, channelName, "0", topic},
+			Trailing: "",
+		})
+	}
+
 	r = append(r, &irc.Message{
 		Prefix:   s.Prefix(),
 		Params:   []string{u.Nick},
@@ -341,13 +266,12 @@ func CmdNames(s Server, u *User, msg *irc.Message) error {
 // CmdNick is a handler for the /NICK command.
 func CmdNick(s Server, u *User, msg *irc.Message) error {
 	// only update mattermost nick if we're logged in
-	if u.mc != nil {
-		err := u.mc.UpdateUserNick(msg.Params[0])
-		if err != nil {
-			s.EncodeMessage(u, irc.ERR_ERRONEUSNICKNAME, []string{u.Nick}, "Erroneus nickname")
-			return err
-		}
+	err := u.br.Nick(msg.Params[0])
+	if err != nil {
+		s.EncodeMessage(u, irc.ERR_ERRONEUSNICKNAME, []string{u.Nick}, "Erroneus nickname")
+		return err
 	}
+
 	s.RenameUser(u, msg.Params[0])
 	return nil
 }
@@ -355,12 +279,14 @@ func CmdNick(s Server, u *User, msg *irc.Message) error {
 // CmdPart is a handler for the /PART command.
 func CmdPart(s Server, u *User, msg *irc.Message) error {
 	var err error
+
 	channels := strings.Split(msg.Params[0], ",")
 	for _, chName := range channels {
 		// we can not leave & channels
 		if strings.HasPrefix(chName, "&") {
 			continue
 		}
+
 		ch, exists := s.HasChannel(chName)
 		if !exists {
 			err = s.EncodeMessage(u, irc.ERR_NOSUCHCHANNEL, []string{chName}, "No such channel")
@@ -370,11 +296,9 @@ func CmdPart(s Server, u *User, msg *irc.Message) error {
 		ch.Part(u, msg.Trailing)
 		// now part on mattermost
 		if !u.Cfg.PartFake {
-			if u.mc != nil {
-				u.mc.Client.RemoveUserFromChannel(ch.ID(), u.mc.User.Id)
-			}
-			if u.sc != nil {
-				u.sc.LeaveConversation(strings.ToUpper(ch.ID()))
+			err := u.br.Part(ch.ID())
+			if err != nil {
+				return err
 			}
 		}
 		// part all other (ghost)users on the channel
@@ -384,9 +308,9 @@ func CmdPart(s Server, u *User, msg *irc.Message) error {
 			u.Cfg.JoinInclude = removeStringInSlice(chName, u.Cfg.JoinInclude)
 		}
 	}
-	if u.mc != nil {
-		u.mc.UpdateChannels()
-	}
+
+	u.br.UpdateChannels()
+
 	return err
 }
 
@@ -436,32 +360,9 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 	msg.Trailing = re.ReplaceAllString(msg.Trailing, "")
 
 	if ch, exists := s.HasChannel(query); exists {
-		if ch.Service() == "slack" {
-			var attachments []slack.Attachment
-			np := slack.NewPostMessageParameters()
-			np.AsUser = true
-			np.LinkNames = 1
-			np.Username = u.User
-			attachments = append(attachments, slack.Attachment{CallbackID: "matterircd_" + u.sinfo.User.ID})
-			var opts []slack.MsgOption
-			opts = append(opts, slack.MsgOptionAttachments(attachments...))
-			opts = append(opts, slack.MsgOptionPostMessageParameters(np))
-			opts = append(opts, slack.MsgOptionText(msg.Trailing, false))
-			_, _, err := u.sc.PostMessage(strings.ToUpper(ch.ID()), opts...)
-			if err != nil {
-				return err
-			}
-		}
-		if ch.Service() == "mattermost" {
-			if u.mc != nil {
-				props := make(map[string]interface{})
-				props["matterircd_"+u.mc.User.Id] = true
-				post := &model.Post{ChannelId: ch.ID(), Message: msg.Trailing, Props: props}
-				_, resp := u.mc.Client.CreatePost(post)
-				if resp.Error != nil {
-					u.MsgSpoofUser(u, "mattermost", "msg: "+msg.Trailing+" could not be send: "+resp.Error.Error())
-				}
-			}
+		err := u.br.MsgChannel(ch.ID(), msg.Trailing)
+		if err != nil {
+			u.MsgSpoofUser(u, "mattermost", "msg: "+msg.Trailing+" could not be send: "+err.Error())
 		}
 	} else if toUser, exists := s.HasUser(query); exists {
 		if query == "mattermost" {
@@ -469,43 +370,27 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 			msg.Trailing = "<redacted>"
 			return nil
 		}
+
 		if query == "slack" {
 			go u.handleServiceBot(query, toUser, msg.Trailing)
 			msg.Trailing = "<redacted>"
 			return nil
 		}
-		if toUser.MmGhostUser {
-			if u.sc != nil {
-				_, _, dchannel, err := u.sc.OpenIMChannel(toUser.User)
-				if err != nil {
-					return err
-				}
-				np := slack.NewPostMessageParameters()
-				np.AsUser = true
-				np.Username = u.User
-				var attachments []slack.Attachment
-				attachments = append(attachments, slack.Attachment{CallbackID: "matterircd_" + u.sinfo.User.ID})
-				var opts []slack.MsgOption
-				opts = append(opts, slack.MsgOptionAttachments(attachments...))
-				opts = append(opts, slack.MsgOptionPostMessageParameters(np))
-				opts = append(opts, slack.MsgOptionText(msg.Trailing, false))
-				_, _, err = u.sc.PostMessage(dchannel, opts...)
-				//_, _, err = u.sc.PostMessage(dchannel, msg.Trailing, np)
-				if err != nil {
-					return err
-				}
+
+		if toUser.Ghost {
+			err := u.br.MsgUser(toUser.User, msg.Trailing)
+			if err != nil {
+				return err
 			}
-			if u.mc != nil {
-				props := make(map[string]interface{})
-				props["matterircd_"+u.mc.User.Id] = true
-				u.mc.SendDirectMessageProps(toUser.User, msg.Trailing, "", props)
-			}
+
 			return nil
 		}
+
 		err = s.EncodeMessage(u, irc.PRIVMSG, []string{toUser.Nick}, msg.Trailing)
 	} else {
 		err = s.EncodeMessage(u, irc.ERR_NOSUCHNICK, msg.Params, "No such nick/channel")
 	}
+
 	return err
 }
 
@@ -514,11 +399,12 @@ func CmdQuit(s Server, u *User, msg *irc.Message) error {
 	partMsg := msg.Trailing
 	s.EncodeMessage(u, irc.QUIT, []string{}, partMsg)
 	s.EncodeMessage(u, irc.ERROR, []string{}, "You will be missed.")
-	if u.mc != nil {
-		if u.mc.WsClient != nil {
-			u.logoutFromMattermost()
-		}
+
+	u.br.Logout()
+	if u.br.Protocol() == "mattermost" {
+		u.logoutFromMattermost2()
 	}
+
 	u.Conn.Close()
 	return nil
 }
@@ -527,16 +413,13 @@ func CmdQuit(s Server, u *User, msg *irc.Message) error {
 func CmdTopic(s Server, u *User, msg *irc.Message) error {
 	channelname := msg.Params[0]
 	ch := s.Channel(channelname)
+
 	if msg.Trailing != "" {
 		ch.Topic(u, msg.Trailing)
-		if u.mc != nil {
-			u.mc.UpdateChannelHeader(ch.ID(), msg.Trailing)
-		}
-		if u.sc != nil {
-			u.sc.SetTopicOfConversation(strings.ToUpper(ch.ID()), msg.Trailing)
-		}
+		u.br.SetTopic(ch.ID(), msg.Trailing)
 	} else {
 		r := make([]*irc.Message, 0, ch.Len()+1)
+
 		t := ch.GetTopic()
 		if t == "" {
 			r = append(r, &irc.Message{
@@ -553,8 +436,10 @@ func CmdTopic(s Server, u *User, msg *irc.Message) error {
 				Trailing: t,
 			})
 		}
+
 		return u.Encode(r...)
 	}
+
 	return nil
 }
 
@@ -568,14 +453,11 @@ func CmdWho(s Server, u *User, msg *irc.Message) error {
 	ch, exists := s.HasChannel(mask)
 	if !exists {
 		return nil
-		//return u.Encode(endMsg)
 	}
 
 	r := make([]*irc.Message, 0, ch.Len()+1)
-	statuses := make(map[string]string)
-	if u.sc == nil {
-		statuses = u.mc.GetStatuses()
-	}
+
+	statuses, _ := u.br.StatusUsers()
 
 	for _, other := range ch.Users() {
 		status := "H"
@@ -625,21 +507,9 @@ func CmdWhois(s Server, u *User, msg *irc.Message) error {
 			Command:  irc.RPL_WHOISCHANNELS,
 			Trailing: chlist,
 		})
-		var status string
-		if u.sc == nil {
-			status = u.mc.GetStatus(other.User)
-		}
-		/*
-			if status != "" {
-				idle := (model.GetMillis() - lastActivityAt/1000)
-				r = append(r, &irc.Message{
-					Prefix:   s.Prefix(),
-					Params:   []string{u.Nick, other.Nick, strconv.FormatInt(idle, 10), "0"},
-					Command:  irc.RPL_WHOISIDLE,
-					Trailing: "seconds idle, signon time",
-				})
-			}
-		*/
+
+		status, _ := u.br.StatusUser(other.User)
+
 		if status != "online" {
 			r = append(r, &irc.Message{
 				Prefix:   s.Prefix(),

@@ -19,5 +19,6 @@ func IsDebugLevel() bool {
 	if LogLevel == "debug" {
 		return true
 	}
+
 	return false
 }
