@@ -48,7 +48,7 @@ type Credentials struct {
 	Server string
 }
 
-func New(cfg *MmCfg, cred Credentials, eventChan chan *bridge.Event) (bridge.Bridger, *matterclient.MMClient, error) {
+func New(cfg *MmCfg, cred Credentials, eventChan chan *bridge.Event, onWsConnect func()) (bridge.Bridger, *matterclient.MMClient, error) {
 	m := &Mattermost{
 		cfg:         cfg,
 		credentials: cred,
@@ -59,6 +59,9 @@ func New(cfg *MmCfg, cred Credentials, eventChan chan *bridge.Event) (bridge.Bri
 	if err != nil {
 		return nil, nil, err
 	}
+
+	m.mc.OnWsConnect = onWsConnect
+	go mc.StatusLoop()
 
 	m.mc = mc
 
@@ -245,6 +248,9 @@ func (m *Mattermost) Logout() error {
 		if err != nil {
 			logger.Error("logout failed")
 		}
+		logger.Info("logout succeeded")
+
+		m.idleStop <- struct{}{}
 	}
 
 	return nil
@@ -419,6 +425,8 @@ func (m *Mattermost) GetUserByUsername(username string) *bridge.UserInfo {
 }
 
 func (m *Mattermost) createUser(mmuser *model.User) *bridge.UserInfo {
+	teamID := ""
+
 	if mmuser == nil {
 		return &bridge.UserInfo{}
 	}
@@ -432,17 +440,21 @@ func (m *Mattermost) createUser(mmuser *model.User) *bridge.UserInfo {
 
 	if mmuser.Id == m.mc.User.Id {
 		me = true
+		teamID = m.mc.Team.Id
 	}
 
 	info := bridge.UserInfo{
-		Nick:     nick,
-		User:     mmuser.Id,
-		Real:     mmuser.FirstName + " " + mmuser.LastName,
-		Host:     m.mc.Client.Url,
-		Roles:    mmuser.Roles,
-		Ghost:    true,
-		Me:       me,
-		Username: mmuser.Username,
+		Nick:      nick,
+		User:      mmuser.Id,
+		Real:      mmuser.FirstName + " " + mmuser.LastName,
+		Host:      m.mc.Client.Url,
+		Roles:     mmuser.Roles,
+		Ghost:     true,
+		Me:        me,
+		TeamID:    teamID,
+		Username:  mmuser.Username,
+		FirstName: mmuser.FirstName,
+		LastName:  mmuser.LastName,
 	}
 
 	return &info
@@ -871,4 +883,60 @@ func (m *Mattermost) handleWsActionChannelDeleted(rmsg *model.WebSocketEvent) {
 	}
 
 	m.eventChan <- event
+}
+
+func (m *Mattermost) GetTeamName(teamID string) string {
+	return m.mc.GetTeamName(teamID)
+}
+
+func (m *Mattermost) GetLastViewedAt(channelID string) int64 {
+	return m.mc.GetLastViewedAt(channelID)
+}
+
+func (m *Mattermost) GetPostsSince(channelID string, since int64) interface{} {
+	return m.mc.GetPostsSince(channelID, since)
+}
+
+func (m *Mattermost) UpdateLastViewed(channelID string) {
+	m.mc.UpdateLastViewed(channelID)
+}
+
+func (m *Mattermost) UpdateLastViewedUser(userID string) error {
+	dc, resp := m.mc.Client.CreateDirectChannel(m.mc.User.Id, userID)
+	if resp.Error != nil {
+		return resp.Error
+	}
+
+	return m.mc.UpdateLastViewed(dc.Id)
+}
+
+func (m *Mattermost) SearchPosts(search string) interface{} {
+	return m.mc.SearchPosts(search)
+}
+
+func (m *Mattermost) GetFileLinks(fileIDs []string) []string {
+	return m.mc.GetFileLinks(fileIDs)
+}
+
+func (m *Mattermost) SearchUsers(query string) ([]*bridge.UserInfo, error) {
+	users, resp := m.mc.Client.SearchUsers(&model.UserSearch{Term: query})
+	if resp.Error != nil {
+		return nil, resp.Error
+	}
+
+	var brusers []*bridge.UserInfo
+
+	for _, u := range users {
+		brusers = append(brusers, m.createUser(u))
+	}
+
+	return brusers, nil
+}
+
+func (m *Mattermost) GetPosts(channelID string, limit int) interface{} {
+	return m.mc.GetPosts(channelID, limit)
+}
+
+func (m *Mattermost) GetChannelID(name, teamID string) string {
+	return m.mc.GetChannelId(name, teamID)
 }

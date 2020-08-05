@@ -51,7 +51,7 @@ func (cmds commands) Run(s Server, u *User, msg *irc.Message) error {
 		return cmd.Call(s, u, msg)
 	}
 	// check if we're logged in
-	if cmd.LoggedIn && (u.mc == nil || u.mc.User == nil) {
+	if cmd.LoggedIn && u.br == nil {
 		return nil
 	}
 	return cmd.Call(s, u, msg)

@@ -21,9 +21,9 @@ type MmInfo struct {
 	Srv         Server
 	Credentials *MmCredentials
 	Cfg         *mattermost.MmCfg
-	mc          *matterclient.MMClient
-	idleStop    chan struct{}
-	br          bridge.Bridger
+	//mc          *matterclient.MMClient
+	idleStop chan struct{}
+	br       bridge.Bridger
 }
 
 type MmCredentials struct {
@@ -271,7 +271,7 @@ func (u *User) loginToMattermost() (*matterclient.MMClient, error) {
 	}
 
 	eventChan := make(chan *bridge.Event)
-	br, mc, err := mattermost.New(u.MmInfo.Cfg, cred, eventChan)
+	br, mc, err := mattermost.New(u.MmInfo.Cfg, cred, eventChan, u.addUsersToChannels)
 	if err != nil {
 		return nil, err
 	}
@@ -284,29 +284,6 @@ func (u *User) loginToMattermost() (*matterclient.MMClient, error) {
 
 	return mc, nil
 
-}
-
-func (u *User) logoutFromMattermost2() error {
-	u.Srv.Logout(u)
-	u.idleStop <- struct{}{}
-
-	return nil
-}
-
-func (u *User) logoutFromMattermost() error {
-	logger.Infof("logout as %s (team: %s) on %s", u.Credentials.Login, u.Credentials.Team, u.Credentials.Server)
-	err := u.mc.Logout()
-	if err != nil {
-		logger.Error("logout failed")
-	}
-
-	logger.Info("logout succeeded")
-
-	u.Srv.Logout(u)
-
-	u.idleStop <- struct{}{}
-
-	return nil
 }
 
 func (u *User) createService(nick string, what string) {
@@ -415,8 +392,8 @@ func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(string, string) {
 
 	channelName := mmchannel.Name
 
-	if mmchannel.TeamID != u.mc.Team.Id || u.Cfg.PrefixMainTeam {
-		channelName = u.mc.GetTeamName(mmchannel.TeamID) + "/" + mmchannel.Name
+	if mmchannel.TeamID != u.br.GetMe().TeamID || u.Cfg.PrefixMainTeam {
+		channelName = u.br.GetTeamName(mmchannel.TeamID) + "/" + mmchannel.Name
 	}
 
 	u.syncMMChannel(mmchannel.ID, channelName)
@@ -433,16 +410,16 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 		// exclude direct messages
 		spoof := u.createSpoof(brchannel)
 
-		since := u.mc.GetLastViewedAt(brchannel.ID)
+		since := u.br.GetLastViewedAt(brchannel.ID)
 		// ignore invalid/deleted/old channels
 		if since == 0 {
 			continue
 		}
 		// post everything to the channel you haven't seen yet
-		postlist := u.mc.GetPostsSince(brchannel.ID, since)
+		postlist := u.br.GetPostsSince(brchannel.ID, since)
 		if postlist == nil {
 			// if the channel is not from the primary team id, we can't get posts
-			if brchannel.TeamID == u.mc.Team.Id {
+			if brchannel.TeamID == u.br.GetMe().TeamID {
 				logger.Errorf("something wrong with getPostsSince for channel %s (%s)", brchannel.ID, brchannel.Name)
 			}
 			continue
@@ -450,9 +427,10 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 
 		var prevDate string
 
+		mmPostList := postlist.(*model.PostList)
 		// traverse the order in reverse
-		for i := len(postlist.Order) - 1; i >= 0; i-- {
-			p := postlist.Posts[postlist.Order[i]]
+		for i := len(mmPostList.Order) - 1; i >= 0; i-- {
+			p := mmPostList.Posts[mmPostList.Order[i]]
 			if p.Type == model.POST_JOIN_LEAVE {
 				continue
 			}
@@ -464,25 +442,21 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			ts := time.Unix(0, p.CreateAt*int64(time.Millisecond))
 
 			for _, post := range strings.Split(p.Message, "\n") {
-				if user, ok := u.mc.Users[p.UserId]; ok {
-					date := ts.Format("2006-01-02")
-					if date != prevDate {
-						spoof("matterircd", fmt.Sprintf("Replaying since %s", date))
-						prevDate = date
-					}
-
-					nick := user.Username
-					if u.Cfg.PreferNickname && isValidNick(user.Nickname) {
-						nick = user.Nickname
-					}
-
-					spoof(nick, fmt.Sprintf("[%s] %s", ts.Format("15:04"), post))
+				user := u.br.GetUser(p.UserId)
+				date := ts.Format("2006-01-02")
+				if date != prevDate {
+					spoof("matterircd", fmt.Sprintf("Replaying since %s", date))
+					prevDate = date
 				}
+
+				nick := user.Nick
+
+				spoof(nick, fmt.Sprintf("[%s] %s", ts.Format("15:04"), post))
 			}
 		}
 
 		if !u.Cfg.DisableAutoView {
-			u.mc.UpdateLastViewed(brchannel.ID)
+			u.br.UpdateLastViewed(brchannel.ID)
 		}
 	}
 }

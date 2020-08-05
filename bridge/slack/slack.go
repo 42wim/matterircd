@@ -200,3 +200,43 @@ func (s *Slack) GetMe() *bridge.UserInfo {
 func (s *Slack) GetUserByUsername(username string) *bridge.UserInfo {
 	return nil
 }
+
+func (s *Slack) GetTeamName(teamID string) string {
+	return ""
+}
+
+func (s *Slack) GetLastViewedAt(channelID string) int64 {
+	return 0
+}
+
+func (s *Slack) GetPostsSince(channelID string, since int64) interface{} {
+	return nil
+}
+
+func (s *Slack) SearchPosts(search string) interface{} {
+	return nil
+}
+
+func (s *Slack) UpdateLastViewed(channelID string) {
+
+}
+
+func (s *Slack) UpdateLastViewedUser(userID string) error {
+	return nil
+}
+
+func (s *Slack) GetFileLinks(fileIDs []string) []string {
+	return []string{}
+}
+
+func (s *Slack) SearchUsers(query string) ([]*bridge.UserInfo, error) {
+	return nil, nil
+}
+
+func (s *Slack) GetPosts(channelID string, limit int) interface{} {
+	return nil
+}
+
+func (s *Slack) GetChannelID(name, teamID string) string {
+	return ""
+}

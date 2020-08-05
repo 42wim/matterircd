@@ -23,13 +23,27 @@ type Bridger interface {
 	SetStatus(status string) error
 
 	Protocol() string
+
+	GetChannels() []*ChannelInfo
 	GetChannelName(channelID string) string
+	GetLastViewedAt(channelID string) int64
+	UpdateLastViewed(channelID string)
+	UpdateLastViewedUser(userID string) error
+	GetChannelID(name, teamID string) string
+
 	GetChannelUsers(channelID string) ([]*UserInfo, error)
 	GetUsers() []*UserInfo
 	GetUser(userID string) *UserInfo
 	GetMe() *UserInfo
 	GetUserByUsername(username string) *UserInfo
-	GetChannels() []*ChannelInfo
+	SearchUsers(query string) ([]*UserInfo, error)
+
+	GetTeamName(teamID string) string
+
+	GetPostsSince(channelID string, since int64) interface{}
+	GetPosts(channelID string, limit int) interface{}
+	SearchPosts(search string) interface{}
+	GetFileLinks(fileIDs []string) []string
 }
 
 type ChannelInfo struct {
@@ -49,6 +63,9 @@ type UserInfo struct {
 	Ghost       bool
 	Me          bool
 	Username    string
+	TeamID      string
+	FirstName   string
+	LastName    string
 }
 
 type Event struct {
