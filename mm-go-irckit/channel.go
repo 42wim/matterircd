@@ -181,7 +181,7 @@ func (ch *channel) Part(u *User, text string) {
 	u.Unlock()
 
 	for to := range ch.usersIdx {
-		if to.Ghost == false {
+		if !to.Ghost {
 			to.Encode(msg)
 		}
 	}
@@ -229,8 +229,8 @@ func (ch *channel) Topic(from Prefixer, text string) {
 
 	ch.topic = text
 	// no newlines in topic
-	ch.topic = strings.Replace(ch.topic, "\n", " ", -1)
-	ch.topic = strings.Replace(ch.topic, "\r", " ", -1)
+	ch.topic = strings.ReplaceAll(ch.topic, "\n", " ")
+	ch.topic = strings.ReplaceAll(ch.topic, "\r", " ")
 
 	msg := &irc.Message{
 		Prefix:   from.Prefix(),
@@ -241,7 +241,7 @@ func (ch *channel) Topic(from Prefixer, text string) {
 
 	// only send join messages to real users
 	for to := range ch.usersIdx {
-		if to.Ghost == false {
+		if !to.Ghost {
 			to.Encode(msg)
 		}
 	}
@@ -326,7 +326,7 @@ func (ch *channel) Join(u *User) error {
 
 	for to := range ch.usersIdx {
 		// only send join messages to real users
-		if to.Ghost == false {
+		if !to.Ghost {
 			to.Encode(msg)
 		}
 	}

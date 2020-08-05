@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/42wim/matterbridge/matterclient"
 	"github.com/42wim/matterircd/bridge"
 	"github.com/42wim/matterircd/bridge/mattermost"
 	"github.com/42wim/matterircd/config"
@@ -17,13 +16,12 @@ import (
 )
 
 type MmInfo struct {
-	//MmGhostUser bool
+	// MmGhostUser bool
 	Srv         Server
 	Credentials *MmCredentials
 	Cfg         *mattermost.MmCfg
-	//mc          *matterclient.MMClient
-	idleStop chan struct{}
-	br       bridge.Bridger
+	// mc          *matterclient.MMClient
+	br bridge.Bridger // nolint:structcheck
 }
 
 type MmCredentials struct {
@@ -86,7 +84,6 @@ func NewUserMM(c net.Conn, srv Server, cfg *mattermost.MmCfg) *User {
 	u.MmInfo.Cfg.PreferNickname = cfg.MattermostSettings.PreferNickname
 	u.MmInfo.Cfg.HideReplies = cfg.MattermostSettings.HideReplies
 
-	u.idleStop = make(chan struct{})
 	// used for login
 	u.createService("mattermost", "loginservice")
 	u.createService("slack", "loginservice")
@@ -166,13 +163,12 @@ func (u *User) handleChannelRemoveEvent(event *bridge.ChannelRemoveEvent) {
 		} else {
 			ch.SpoofMessage("system", "removed "+removed.Nick+" from the channel")
 		}
-
 	}
 }
 
 func (u *User) getMessageChannel(channelID, channelType string, sender *bridge.UserInfo) Channel {
-	//event *bridge.ChannelMessageEvent) Channel {
-	//ghost *User, props map[string]interface{}, data *model.Post) Channel {
+	// event *bridge.ChannelMessageEvent) Channel {
+	// ghost *User, props map[string]interface{}, data *model.Post) Channel {
 	ch := u.Srv.Channel(channelID)
 	// in an group
 	if channelType == "G" {
@@ -186,7 +182,7 @@ func (u *User) getMessageChannel(channelID, channelType string, sender *bridge.U
 	// join if not in channel
 	if !ch.HasUser(ghost) {
 		logger.Debugf("User %s is not in channel %s. Joining now", ghost.Nick, ch.String())
-		//ch = u.Srv.Channel("&messages")
+		// ch = u.Srv.Channel("&messages")
 		ch.Join(ghost)
 	}
 	// excluded channel
@@ -262,7 +258,7 @@ func (u *User) handleChannelDeleteEvent(event *bridge.ChannelDeleteEvent) {
 	ch.Part(u, "")
 }
 
-func (u *User) loginToMattermost() (*matterclient.MMClient, error) {
+func (u *User) loginToMattermost() error {
 	cred := mattermost.Credentials{
 		Login:  u.Credentials.Login,
 		Pass:   u.Credentials.Pass,
@@ -271,19 +267,20 @@ func (u *User) loginToMattermost() (*matterclient.MMClient, error) {
 	}
 
 	eventChan := make(chan *bridge.Event)
-	br, mc, err := mattermost.New(u.MmInfo.Cfg, cred, eventChan, u.addUsersToChannels)
+	br, _, err := mattermost.New(u.MmInfo.Cfg, cred, eventChan, u.addUsersToChannels)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	u.br = br
 
 	go u.handleEventChan(eventChan)
 
-	//go u.handleWsMessage()
+	// go u.handleWsMessage()
 
-	return mc, nil
+	// return mc, nil
 
+	return nil
 }
 
 func (u *User) createService(nick string, what string) {
@@ -316,7 +313,7 @@ func (u *User) createUserFromInfo(info *bridge.UserInfo) *User {
 	return ghost
 }
 
-func (u *User) addRealUserToChannel(ghost *User, channel string, channelId string) {
+func (u *User) addRealUserToChannel(ghost *User, channel string, channelID string) {
 	if ghost == nil {
 		return
 	}
@@ -327,19 +324,19 @@ func (u *User) addRealUserToChannel(ghost *User, channel string, channelId strin
 
 	logger.Debugf("adding %s to %s", ghost.Nick, channel)
 
-	ch := u.Srv.Channel(channelId)
+	ch := u.Srv.Channel(channelID)
 
 	ch.Join(ghost)
 }
 
-func (u *User) addUserToChannel(ghost *User, channel string, channelId string) {
+func (u *User) addUserToChannel(ghost *User, channel string, channelID string) {
 	if ghost == nil {
 		return
 	}
 
 	logger.Debugf("adding %s to %s", ghost.Nick, channel)
 
-	ch := u.Srv.Channel(channelId)
+	ch := u.Srv.Channel(channelID)
 
 	ch.Join(ghost)
 }
@@ -382,8 +379,8 @@ func (u *User) addUsersToChannels() {
 
 func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(string, string) {
 	if strings.Contains(mmchannel.Name, "__") {
-		userId := strings.Split(mmchannel.Name, "__")[0]
-		u.createUserFromInfo(u.br.GetUser(userId))
+		userID := strings.Split(mmchannel.Name, "__")[0]
+		u.createUserFromInfo(u.br.GetUser(userID))
 		// wrap MsgSpoofser here
 		return func(spoofUsername string, msg string) {
 			u.MsgSpoofUser(u, spoofUsername, msg)
@@ -461,49 +458,6 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 	}
 }
 
-func (u *User) wsActionPostGetChannel(ghost *User, props map[string]interface{}, data *model.Post) Channel {
-	ch := u.Srv.Channel(data.ChannelId)
-	// in an group
-	if props["channel_type"] == "G" {
-		myself := u.createUserFromInfo(u.br.GetMe())
-		if !ch.HasUser(myself) {
-			ch.Join(myself)
-			u.syncMMChannel(data.ChannelId, u.br.GetChannelName(data.ChannelId))
-		}
-	}
-	// join if not in channel
-	if !ch.HasUser(ghost) {
-		logger.Debugf("User %s is not in channel %s. Joining now", ghost.Nick, ch.String())
-		//ch = u.Srv.Channel("&messages")
-		ch.Join(ghost)
-	}
-	// excluded channel
-	if stringInSlice(ch.String(), u.Cfg.JoinExclude) {
-		logger.Debugf("channel %s is in JoinExclude, send to &messages", ch.String())
-		ch = u.Srv.Channel("&messages")
-	}
-	// not in included channel
-	if len(u.Cfg.JoinInclude) > 0 && !stringInSlice(ch.String(), u.Cfg.JoinInclude) {
-		logger.Debugf("channel %s is not in JoinInclude, send to &messages", ch.String())
-		ch = u.Srv.Channel("&messages")
-	}
-
-	return ch
-}
-
-func (u *User) checkWsActionMessage(rmsg *model.WebSocketEvent, throttle <-chan time.Time) {
-	if u.br.GetChannelName(rmsg.Broadcast.ChannelId) != "" {
-		return
-	}
-
-	select {
-	case <-throttle:
-		logger.Debugf("Updating channels for %#v", rmsg.Broadcast)
-		go u.br.UpdateChannels()
-	default:
-	}
-}
-
 func (u *User) MsgUser(toUser *User, msg string) {
 	u.Encode(&irc.Message{
 		Prefix:   toUser.Prefix(),
@@ -538,7 +492,6 @@ func (u *User) MsgSpoofUser(sender *User, rcvuser string, msg string) {
 
 // sync IRC with mattermost channel state
 func (u *User) syncMMChannel(id string, name string) {
-
 	users, err := u.br.GetChannelUsers(id)
 	if err != nil {
 		fmt.Println(err)

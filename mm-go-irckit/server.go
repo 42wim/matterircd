@@ -199,24 +199,24 @@ func (s *server) RenameUser(u *User, newNick string) bool {
 }
 
 // HasChannel returns whether a given channel already exists.
-func (s *server) HasChannel(channelId string) (Channel, bool) {
+func (s *server) HasChannel(channelID string) (Channel, bool) {
 	s.RLock()
-	ch, exists := s.channels[channelId]
+	ch, exists := s.channels[channelID]
 	s.RUnlock()
 	return ch, exists
 }
 
 // Channel returns an existing or new channel with the give name.
-func (s *server) Channel(channelId string) Channel {
+func (s *server) Channel(channelID string) Channel {
 	s.Lock()
-	ch, ok := s.channels[channelId]
+	ch, ok := s.channels[channelID]
 	if !ok {
 		service := s.u.br.Protocol()
-		name := s.u.br.GetChannelName(channelId)
+		name := s.u.br.GetChannelName(channelID)
 		newFn := s.config.NewChannel
-		ch = newFn(s, channelId, name, service)
-		fmt.Println("new channel id:", channelId, "name:", name)
-		s.channels[channelId] = ch
+		ch = newFn(s, channelID, name, service)
+		fmt.Println("new channel id:", channelID, "name:", name)
+		s.channels[channelID] = ch
 		s.channels[name] = ch
 		s.Unlock()
 	} else {
@@ -372,7 +372,7 @@ func (s *server) handshake(u *User) error {
 	i := handshakeMsgTolerance
 	// Read messages until we filled in USER details.
 	for msg := range u.DecodeCh {
-		//fmt.Printf("in handshake %#v\n", msg)
+		// fmt.Printf("in handshake %#v\n", msg)
 		i--
 		// Consume N messages then give up.
 		if i == 0 {

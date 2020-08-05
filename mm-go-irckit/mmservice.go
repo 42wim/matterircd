@@ -37,12 +37,12 @@ func login(u *User, toUser *User, args []string, service string) {
 	}
 	if service == "slack" {
 		var err error
-		//fmt.Println(len(args))
+		// fmt.Println(len(args))
 		if len(args) != 1 && len(args) != 3 {
 			u.MsgUser(toUser, "need LOGIN <team> <login> <pass> or LOGIN <token>")
 			return
 		}
-		//fmt.Println(len(args))
+		// fmt.Println(len(args))
 		if len(args) == 1 {
 			u.Token = args[len(args)-1]
 		}
@@ -153,11 +153,7 @@ func login(u *User, toUser *User, args []string, service string) {
 
 	u.Credentials = cred
 
-	u.loginToMattermost()
-
-	var err error
-
-	_, err = u.loginToMattermost()
+	err := u.loginToMattermost()
 	if err != nil {
 		u.MsgUser(toUser, err.Error())
 		return
@@ -257,7 +253,7 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 		return
 	}
 
-	args[0] = strings.Replace(args[0], "#", "", -1)
+	args[0] = strings.ReplaceAll(args[0], "#", "")
 
 	list := u.br.GetPosts(u.br.GetChannelID(args[0], u.br.GetMe().TeamID), limit)
 	if list == nil || len(list.(*model.PostList).Order) == 0 {
@@ -282,7 +278,6 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 			}
 		}
 	}
-
 }
 
 func updatelastviewed(u *User, toUser *User, args []string, service string) {
@@ -291,7 +286,7 @@ func updatelastviewed(u *User, toUser *User, args []string, service string) {
 		return
 	}
 
-	channelId := ""
+	channelID := ""
 
 	if len(args) != 1 {
 		u.MsgUser(toUser, "need UPDATELASTVIEWED <channel>")
@@ -300,10 +295,10 @@ func updatelastviewed(u *User, toUser *User, args []string, service string) {
 	}
 
 	if strings.Contains(args[0], "#") {
-		args[0] = strings.Replace(args[0], "#", "", -1)
+		args[0] = strings.ReplaceAll(args[0], "#", "")
 
-		channelId = u.br.GetChannelID(args[0], u.br.GetMe().TeamID)
-		if channelId == "" {
+		channelID = u.br.GetChannelID(args[0], u.br.GetMe().TeamID)
+		if channelID == "" {
 			u.MsgUser(toUser, "channel does not exist")
 			return
 		}
@@ -319,7 +314,7 @@ func updatelastviewed(u *User, toUser *User, args []string, service string) {
 		return
 	}
 
-	u.br.UpdateLastViewed(channelId)
+	u.br.UpdateLastViewed(channelID)
 	u.MsgUser(toUser, fmt.Sprintf("set viewed for %s", args[0]))
 }
 
@@ -333,8 +328,7 @@ var cmds = map[string]Command{
 }
 
 func (u *User) handleServiceBot(service string, toUser *User, msg string) {
-
-	//func (u *User) handleMMServiceBot(toUser *User, msg string) {
+	// func (u *User) handleMMServiceBot(toUser *User, msg string) {
 	commands, err := parseCommandString(msg)
 	if err != nil {
 		u.MsgUser(toUser, fmt.Sprintf("\"%s\" is improperly formatted", msg))

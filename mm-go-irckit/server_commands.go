@@ -117,12 +117,12 @@ func CmdJoin(s Server, u *User, msg *irc.Message) error {
 		// you can only join existing channels
 		var err error
 
-		channelId, topic, err := u.br.Join(channelName)
+		channelID, topic, err := u.br.Join(channelName)
 		if err != nil {
 			fmt.Println(err)
 		}
 
-		logger.Debugf("Join channel %s, id %s, err: %v", channelName, channelId, err)
+		logger.Debugf("Join channel %s, id %s, err: %v", channelName, channelID, err)
 
 		if u.br.Protocol() == "mattermost" {
 			sync = u.syncMMChannel
@@ -136,10 +136,10 @@ func CmdJoin(s Server, u *User, msg *irc.Message) error {
 			u.Cfg.JoinInclude = append(u.Cfg.JoinInclude, channel)
 		}
 
-		ch := s.Channel(channelId)
+		ch := s.Channel(channelID)
 		ch.Topic(u, topic)
 
-		sync(channelId, channelName)
+		sync(channelID, channelName)
 
 		ch.Join(u)
 	}
@@ -196,23 +196,19 @@ func CmdMode(s Server, u *User, msg *irc.Message) error {
 	}
 	switch modetype {
 	case "":
-		{
-			r = append(r, &irc.Message{
-				Prefix:   s.Prefix(),
-				Command:  irc.RPL_CHANNELMODEIS,
-				Params:   []string{u.Nick, channel},
-				Trailing: " " + " ",
-			})
-		}
+		r = append(r, &irc.Message{
+			Prefix:   s.Prefix(),
+			Command:  irc.RPL_CHANNELMODEIS,
+			Params:   []string{u.Nick, channel},
+			Trailing: " " + " ",
+		})
 	case "b":
-		{
-			r = append(r, &irc.Message{
-				Prefix:   s.Prefix(),
-				Command:  irc.RPL_ENDOFBANLIST,
-				Params:   []string{u.Nick, channel},
-				Trailing: "End of channel ban list",
-			})
-		}
+		r = append(r, &irc.Message{
+			Prefix:   s.Prefix(),
+			Command:  irc.RPL_ENDOFBANLIST,
+			Params:   []string{u.Nick, channel},
+			Trailing: "End of channel ban list",
+		})
 	}
 	return u.Encode(r...)
 }
@@ -296,7 +292,7 @@ func CmdPart(s Server, u *User, msg *irc.Message) error {
 		ch.Part(u, msg.Trailing)
 		// now part on mattermost
 		if !u.Cfg.PartFake {
-			err := u.br.Part(ch.ID())
+			err = u.br.Part(ch.ID())
 			if err != nil {
 				return err
 			}
@@ -329,7 +325,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 	if len(msg.Params) > 1 {
 		tr := strings.Join(msg.Params[1:], " ")
 		msg.Params = []string{msg.Params[0]}
-		msg.Trailing = msg.Trailing + tr
+		msg.Trailing += tr
 	}
 	// empty message
 	if msg.Trailing == "" {
@@ -340,8 +336,8 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 	}
 	query := msg.Params[0]
 
-	//p := strings.Replace(query, "#", "", -1)
-	msg.Trailing = strings.Replace(msg.Trailing, "\r", "", -1)
+	// p := strings.Replace(query, "#", "", -1)
+	msg.Trailing = strings.ReplaceAll(msg.Trailing, "\r", "")
 	// fix non-rfc clients
 	if !strings.HasPrefix(msg.Trailing, ":") {
 		if len(msg.Params) == 2 {
@@ -350,17 +346,17 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 	}
 	// CTCP ACTION (/me)
 	if strings.HasPrefix(msg.Trailing, "\x01ACTION ") {
-		msg.Trailing = strings.Replace(msg.Trailing, "\x01ACTION ", "", -1)
-		msg.Trailing = strings.Replace(msg.Trailing, "\x01", "", -1)
+		msg.Trailing = strings.ReplaceAll(msg.Trailing, "\x01ACTION ", "")
+		msg.Trailing = strings.ReplaceAll(msg.Trailing, "\x01", "")
 		msg.Trailing = "*" + msg.Trailing + "*"
 	}
 	// strip IRC colors
 	re := regexp.MustCompile(`\x03([019]?[0-9](,[019]?[0-9])?)?`)
-	//re := regexp.MustCompile(`[[:cntrl:]](?:\d{1,2}(?:,\d{1,2})?)?`)
+	// re := regexp.MustCompile(`[[:cntrl:]](?:\d{1,2}(?:,\d{1,2})?)?`)
 	msg.Trailing = re.ReplaceAllString(msg.Trailing, "")
 
 	if ch, exists := s.HasChannel(query); exists {
-		err := u.br.MsgChannel(ch.ID(), msg.Trailing)
+		err = u.br.MsgChannel(ch.ID(), msg.Trailing)
 		if err != nil {
 			u.MsgSpoofUser(u, "mattermost", "msg: "+msg.Trailing+" could not be send: "+err.Error())
 		}
@@ -378,7 +374,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 		}
 
 		if toUser.Ghost {
-			err := u.br.MsgUser(toUser.User, msg.Trailing)
+			err = u.br.MsgUser(toUser.User, msg.Trailing)
 			if err != nil {
 				return err
 			}
@@ -446,7 +442,7 @@ func CmdTopic(s Server, u *User, msg *irc.Message) error {
 // CmdWho is a handler for the /WHO command.
 func CmdWho(s Server, u *User, msg *irc.Message) error {
 	// TODO: Use opFilter
-	//opFilter := len(msg.Params) >= 2 && msg.Params[1] == "o"
+	// opFilter := len(msg.Params) >= 2 && msg.Params[1] == "o"
 	mask := msg.Params[0]
 
 	// TODO: Handle arbitrary masks, not just channels

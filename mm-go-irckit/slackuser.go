@@ -26,7 +26,7 @@ type SlackInfo struct {
 	susers     map[string]slack.User
 	connected  bool
 	inprogress bool
-	//br         bridge.Bridger
+	// br         bridge.Bridger
 	sync.RWMutex
 }
 
@@ -97,7 +97,7 @@ func (u *User) loginToSlack() (*slack.Client, error) {
 	u.susers = make(map[string]slack.User)
 	u.Unlock()
 	go u.rtm.ManageConnection()
-	//time.Sleep(time.Second * 2)
+	// time.Sleep(time.Second * 2)
 	u.sinfo = u.rtm.GetInfo()
 	count := 0
 	for u.sinfo == nil {
@@ -278,8 +278,8 @@ func (u *User) addSlackUserToChannelWorker(channels <-chan interface{}, throttle
 
 		}
 		// exclude direct messages
-		//var spoof func(string, string)
-		//ch := u.Srv.Channel(mmchannel.ID)
+		// var spoof func(string, string)
+		// ch := u.Srv.Channel(mmchannel.ID)
 		// post everything to the channel you haven't seen yet
 	}
 }
@@ -322,7 +322,7 @@ func (u *User) handleSlack() {
 				u.handleSlackActionPost(ev)
 			case *slack.DisconnectedEvent:
 				logger.Debug("disconnected event received, we should reconnect now..")
-				//return
+				// return
 			case *slack.ReactionAddedEvent:
 				logger.Debugf("ReactionAdded msg %#v", ev)
 				ts := formatTs(ev.Item.Timestamp)
@@ -436,7 +436,7 @@ func (u *User) handleSlackActionMisc(userid string, channel string, message stri
 func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
 	var ch Channel
 	logger.Debugf("handleSlackActionPost() receiving msg %#v", rmsg)
-	//ignore specific subtypes
+	// ignore specific subtypes
 	switch rmsg.SubType {
 	case "channel_join":
 		return
@@ -455,7 +455,6 @@ func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
 		usr = rmsg.SubMessage.User
 	}
 	user, err := u.rtm.GetUserInfo(usr)
-
 	if err != nil {
 		if rmsg.BotID == "" {
 			return
@@ -571,7 +570,7 @@ func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
 
 		// still no text, ignore this message
 		if !msghandled {
-			//continue
+			// continue
 			m = fmt.Sprintf("Empty: %#v", rmsg)
 		}
 
@@ -629,7 +628,7 @@ func (u *User) syncSlackChannel(id string, name string) {
 		params.Cursor = nextCursor
 		for _, user := range members {
 			if u.sinfo.User.ID != user {
-				//slackuser, _ := u.sc.GetUserInfo(user)
+				// slackuser, _ := u.sc.GetUserInfo(user)
 				slackuser := u.getSlackUser(user)
 				if slackuser != nil {
 					u.addSlackUserToChannel(slackuser, "#"+name, id)
@@ -641,7 +640,7 @@ func (u *User) syncSlackChannel(id string, name string) {
 		}
 	}
 
-	//Add slackbot to all channels
+	// Add slackbot to all channels
 	slackuser := u.getSlackUser("USLACKBOT")
 	if slackuser != nil {
 		u.addSlackUserToChannel(slackuser, "#"+name, id)
@@ -670,7 +669,7 @@ func (u *User) syncSlackGroup(id string, name string) {
 
 	for _, user := range info.Members {
 		if u.sinfo.User.ID != user {
-			//slackuser, _ := u.sc.GetUserInfo(user)
+			// slackuser, _ := u.sc.GetUserInfo(user)
 			slackuser := u.getSlackUser(user)
 			if slackuser != nil {
 				u.addSlackUserToChannel(slackuser, "#"+name, id)
@@ -678,7 +677,7 @@ func (u *User) syncSlackGroup(id string, name string) {
 		}
 	}
 
-	//Add slackbot to all channels
+	// Add slackbot to all channels
 	slackuser := u.getSlackUser("USLACKBOT")
 	if slackuser != nil {
 		u.addSlackUserToChannel(slackuser, "#"+name, id)

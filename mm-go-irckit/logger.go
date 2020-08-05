@@ -4,8 +4,10 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-var logger *logrus.Entry
-var LogLevel string
+var (
+	logger   *logrus.Entry
+	LogLevel string
+)
 
 func SetLogger(l *logrus.Entry) {
 	logger = l

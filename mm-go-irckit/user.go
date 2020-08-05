@@ -128,21 +128,21 @@ func (u *User) VisibleTo() []*User {
 }
 
 // Encode and send each msg until an error occurs, then returns.
-func (user *User) Encode(msgs ...*irc.Message) (err error) {
-	if user.Ghost {
+func (u *User) Encode(msgs ...*irc.Message) (err error) {
+	if u.Ghost {
 		return nil
 	}
 	for _, msg := range msgs {
 		if msg.Command == "PRIVMSG" && (msg.Prefix.Name == "slack" || msg.Prefix.Name == "mattermost") && msg.Prefix.Host == "service" && strings.Contains(msg.Trailing, "token") {
 			logger.Debugf("-> %s %s %s", msg.Command, msg.Prefix.Name, "[token redacted]")
-			err := user.Conn.Encode(msg)
+			err := u.Conn.Encode(msg)
 			if err != nil {
 				return err
 			}
 			continue
 		}
 		logger.Debugf("-> %s", msg)
-		err := user.Conn.Encode(msg)
+		err := u.Conn.Encode(msg)
 		if err != nil {
 			return err
 		}
