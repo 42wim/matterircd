@@ -223,7 +223,7 @@ func searchUsers(u *User, toUser *User, args []string, service string) {
 
 	users, err := u.br.SearchUsers(strings.Join(args, " "))
 	if err != nil {
-		u.MsgUser(toUser, fmt.Sprint("Error", err.Error))
+		u.MsgUser(toUser, fmt.Sprint("Error", err.Error()))
 		return
 	}
 

@@ -537,7 +537,11 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 			logger.Debugf("Unable to get parent post for %#v", data)
 		} else {
 			parentGhost := m.GetUser(parentPost.UserId)
-			data.Message = fmt.Sprintf("%s (re @%s: %s)", data.Message, parentGhost.Nick, parentPost.Message)
+			if m.cfg.HideReplies {
+				data.Message = fmt.Sprintf("%s (re @%s)", data.Message, parentGhost.Nick)
+			} else {
+				data.Message = fmt.Sprintf("%s (re @%s: %s)", data.Message, parentGhost.Nick, parentPost.Message)
+			}
 		}
 	}
 
