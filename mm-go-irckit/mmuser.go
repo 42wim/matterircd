@@ -29,6 +29,7 @@ type MmCredentials struct {
 	Team   string
 	Pass   string
 	Server string
+	Token  string
 }
 
 type MmCfg struct {
@@ -275,10 +276,6 @@ func (u *User) loginToMattermost() error {
 	u.br = br
 
 	go u.handleEventChan(eventChan)
-
-	// go u.handleWsMessage()
-
-	// return mc, nil
 
 	return nil
 }
@@ -527,7 +524,7 @@ func (u *User) syncMMChannel(id string, name string) {
 
 		ch.Join(u)
 
-		svc, _ := srv.HasUser("mattermost")
+		svc, _ := srv.HasUser(u.br.Protocol())
 
 		ch.Topic(svc, u.br.Topic(ch.ID()))
 	}

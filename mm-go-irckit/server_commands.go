@@ -124,11 +124,13 @@ func CmdJoin(s Server, u *User, msg *irc.Message) error {
 
 		logger.Debugf("Join channel %s, id %s, err: %v", channelName, channelID, err)
 
-		if u.br.Protocol() == "mattermost" {
-			sync = u.syncMMChannel
-		} else {
-			sync = u.syncSlackChannel
-		}
+		sync = u.syncMMChannel
+		/*		if u.br.Protocol() == "mattermost" {
+					sync = u.syncMMChannel
+				} else {
+					sync = u.syncSlackChannel
+				}
+		*/
 
 		// if we joined, remove channel from exclude and add to include
 		u.Cfg.JoinExclude = removeStringInSlice(channel, u.Cfg.JoinExclude)

@@ -1,37 +1,28 @@
 package irckit
 
 import (
-	"encoding/json"
-	"errors"
-	"fmt"
-	"html"
-	"io/ioutil"
-	"net/http"
-	"net/url"
-	"regexp"
-	"strings"
-	"sync"
-	"time"
-
 	"github.com/42wim/matterircd/bridge"
-	ircslack "github.com/42wim/matterircd/bridge/slack"
-	"github.com/slack-go/slack"
+	"github.com/42wim/matterircd/bridge/slack"
+	//"github.com/slack-go/slack"
 )
 
 type SlackInfo struct {
-	Token      string
-	sc         *slack.Client
-	rtm        *slack.RTM
-	sinfo      *slack.Info
-	susers     map[string]slack.User
-	connected  bool
 	inprogress bool
-	// br         bridge.Bridger
-	sync.RWMutex
+	/*	Token      string
+		sc         *slack.Client
+		rtm        *slack.RTM
+		sinfo      *slack.Info
+		susers     map[string]slack.User
+		connected  bool
+		inprogress bool
+		// br         bridge.Bridger
+		sync.RWMutex
+	*/
 }
 
 // code taken from tanya project
 // see https://github.com/nolanlum/tanya/blob/master/LICENSE
+/*
 func (u *User) getSlackToken() (string, error) {
 	type findTeamResponseFull struct {
 		SSO    bool   `json:"sso"`
@@ -44,6 +35,9 @@ func (u *User) getSlackToken() (string, error) {
 	}
 
 	resp, err := http.PostForm("https://slack.com/api/auth.findTeam", url.Values{"domain": {u.Credentials.Team}})
+	if err != nil {
+		return "", err
+	}
 	defer resp.Body.Close()
 
 	body, err := ioutil.ReadAll(resp.Body)
@@ -82,8 +76,32 @@ func (u *User) getSlackToken() (string, error) {
 	}
 	return loginResponse.Token, nil
 }
+*/
 
-func (u *User) loginToSlack() (*slack.Client, error) {
+func (u *User) loginToSlack() error {
+	cred := slack.Credentials{
+		Login:  u.Credentials.Login,
+		Pass:   u.Credentials.Pass,
+		Team:   u.Credentials.Team,
+		Server: u.Credentials.Server,
+		Token:  u.Credentials.Token,
+	}
+
+	eventChan := make(chan *bridge.Event)
+	br, err := slack.New(u.MmInfo.Cfg, cred, eventChan, u.addUsersToChannels)
+	if err != nil {
+		return err
+	}
+
+	u.br = br
+
+	go u.handleEventChan(eventChan)
+
+	return nil
+}
+
+/*
+
 	var err error
 	if u.Credentials != nil {
 		u.Token, err = u.getSlackToken()
@@ -148,21 +166,14 @@ func (u *User) loginToSlack() (*slack.Client, error) {
 	u.connected = true
 	return u.sc, nil
 }
+*/
 
 func (u *User) logoutFromSlack() error {
-	logger.Debug("calling logout from slack")
-	err := u.rtm.Disconnect()
-	if err != nil {
-		logger.Debug("logoutfrom slack", err)
-		return err
-	}
 	u.Srv.Logout(u)
-	u.sc = nil
-	logger.Info("logout succeeded")
-	u.connected = false
 	return nil
 }
 
+/*
 func (u *User) createSlackUser(slackuser *slack.User) *User {
 	if slackuser == nil {
 		return nil
@@ -189,7 +200,9 @@ func (u *User) createSlackUser(slackuser *slack.User) *User {
 
 	return ghost
 }
+*/
 
+/*
 func (u *User) addSlackUserToChannel(user *slack.User, channel string, channelId string) {
 	if user == nil {
 		return
@@ -204,7 +217,9 @@ func (u *User) addSlackUserToChannel(user *slack.User, channel string, channelId
 	logger.Debugf("channel: %#v %#v", ch.String(), ch.ID())
 	ch.Join(ghost)
 }
+*/
 
+/*
 func (u *User) addSlackUsersToChannels() {
 	srv := u.Srv
 	throttle := time.Tick(time.Millisecond * 100)
@@ -255,6 +270,9 @@ func (u *User) addSlackUsersToChannels() {
 	}
 	close(channels)
 }
+*/
+
+/*
 
 func (u *User) addSlackUserToChannelWorker(channels <-chan interface{}, throttle <-chan time.Time) {
 	var ID, name string
@@ -284,6 +302,7 @@ func (u *User) addSlackUserToChannelWorker(channels <-chan interface{}, throttle
 	}
 }
 
+
 func formatTs(unixts string) string {
 	var targetts, targetus int64
 	fmt.Sscanf(unixts, "%d.%d", &targetts, &targetus)
@@ -295,15 +314,10 @@ func formatTs(unixts string) string {
 		return ts.Format("15:04:05")
 	}
 }
-
+*/
+/*
 func (u *User) handleSlack() {
 	for {
-		/*
-			if u.mc.WsQuit {
-				logger.Debug("exiting handleWsMessage")
-				return
-			}
-		*/
 		logger.Debug("in handleSlack")
 		for msg := range u.rtm.IncomingEvents {
 			switch ev := msg.Data.(type) {
@@ -357,7 +371,9 @@ func (u *User) handleSlack() {
 		}
 	}
 }
+*/
 
+/*
 func (u *User) handleSlackActionMisc(userid string, channel string, message string) {
 	var ch Channel
 
@@ -600,8 +616,9 @@ func (u *User) handleSlackActionPost(rmsg *slack.MessageEvent) {
 		}
 	}
 }
-
+*/
 // sync IRC with mattermost channel state
+/*
 func (u *User) syncSlackChannel(id string, name string) {
 	srv := u.Srv
 	info, err := u.sc.GetConversationInfo(id, false)
@@ -654,8 +671,10 @@ func (u *User) syncSlackChannel(id string, name string) {
 		ch.Join(u)
 	}
 }
+*/
 
 // sync IRC with mattermost channel state
+/*
 func (u *User) syncSlackGroup(id string, name string) {
 	srv := u.Srv
 	info, err := u.sc.GetGroupInfo(id)
@@ -691,7 +710,9 @@ func (u *User) syncSlackGroup(id string, name string) {
 		ch.Join(u)
 	}
 }
+*/
 
+/*
 // @see https://api.slack.com/docs/message-formatting#linking_to_channels_and_users
 func (u *User) replaceMention(text string) string {
 	results := regexp.MustCompile(`<@([a-zA-z0-9]+)>`).FindAllStringSubmatch(text, -1)
@@ -758,7 +779,10 @@ func (u *User) userName(id string) string {
 	}
 	return ""
 }
+*/
 
+/*
 func (u *User) isConnected() bool {
 	return u.connected
 }
+*/

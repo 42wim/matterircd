@@ -110,7 +110,7 @@ func (m *Mattermost) loginToMattermost() (*matterclient.MMClient, error) {
 
 func (m *Mattermost) handleWsMessage() {
 	fmt.Println("HANDLEWSMESSAGE")
-	updateChannelsThrottle := time.Tick(time.Second * 60)
+	updateChannelsThrottle := time.NewTicker(time.Second * 60)
 
 	for {
 		if m.mc.WsQuit {
@@ -129,7 +129,6 @@ func (m *Mattermost) handleWsMessage() {
 		fmt.Printf("MSGEVENT %#v\n", message.Raw)
 
 		switch message.Raw.Event {
-
 		case model.WEBSOCKET_EVENT_POSTED:
 			m.handleWsActionPost(message.Raw)
 		case model.WEBSOCKET_EVENT_POST_EDITED:
@@ -146,13 +145,13 @@ func (m *Mattermost) handleWsMessage() {
 	}
 }
 
-func (m *Mattermost) checkWsActionMessage(rmsg *model.WebSocketEvent, throttle <-chan time.Time) {
+func (m *Mattermost) checkWsActionMessage(rmsg *model.WebSocketEvent, throttle *time.Ticker) {
 	if m.GetChannelName(rmsg.Broadcast.ChannelId) != "" {
 		return
 	}
 
 	select {
-	case <-throttle:
+	case <-throttle.C:
 		logger.Debugf("Updating channels for %#v", rmsg.Broadcast)
 		go m.UpdateChannels()
 	default:
@@ -160,7 +159,7 @@ func (m *Mattermost) checkWsActionMessage(rmsg *model.WebSocketEvent, throttle <
 }
 
 // antiIdle does a lastviewed every 60 seconds so that the user is shown as online instead of away
-func (m *Mattermost) antiIdle(channelId string) {
+func (m *Mattermost) antiIdle(channelID string) {
 	ticker := time.NewTicker(time.Second * 60)
 
 	for {
@@ -169,7 +168,7 @@ func (m *Mattermost) antiIdle(channelId string) {
 			logger.Debug("stopping antiIdle loop")
 			return
 		case <-ticker.C:
-			m.mc.UpdateLastViewed(channelId)
+			m.mc.UpdateLastViewed(channelID)
 		}
 	}
 }
@@ -184,31 +183,31 @@ func (m *Mattermost) Invite(channelID, username string) error {
 }
 
 func (m *Mattermost) Join(channelName string) (string, string, error) {
-	teamId := ""
+	teamID := ""
 
 	sp := strings.Split(channelName, "/")
 	if len(sp) > 1 {
 		team, _ := m.mc.Client.GetTeamByName(sp[0], "")
 		if team == nil {
-			return "", "", fmt.Errorf("Cannot join channel (+i)")
+			return "", "", fmt.Errorf("cannot join channel (+i)")
 		}
 
-		teamId = team.Id
+		teamID = team.Id
 		channelName = sp[1]
 	}
 
-	channelId := m.mc.GetChannelId(channelName, teamId)
+	channelID := m.mc.GetChannelId(channelName, teamID)
 
-	err := m.mc.JoinChannel(channelId)
-	logger.Debugf("Join channel %s, id %s, err: %v", channelName, channelId, err)
+	err := m.mc.JoinChannel(channelID)
+	logger.Debugf("Join channel %s, id %s, err: %v", channelName, channelID, err)
 	if err != nil {
-		return "", "", fmt.Errorf("Cannot join channel (+i)")
+		return "", "", fmt.Errorf("cannot join channel (+i)")
 	}
 
-	topic := m.mc.GetChannelHeader(channelId)
-	//sync = m.syncMMChannel
+	topic := m.mc.GetChannelHeader(channelID)
+	// sync = m.syncMMChannel
 
-	return channelId, topic, nil
+	return channelID, topic, nil
 }
 
 func (m *Mattermost) List() (map[string]string, error) {
@@ -226,7 +225,7 @@ func (m *Mattermost) List() (map[string]string, error) {
 			channelName = m.mc.GetTeamName(channel.TeamId) + "/" + channel.Name
 		}
 
-		channelinfo[channelName] = strings.Replace(channel.Header, "\n", " | ", -1)
+		channelinfo[channelName] = strings.ReplaceAll(channel.Header, "\n", " | ")
 	}
 
 	return channelinfo, nil
@@ -443,7 +442,7 @@ func (m *Mattermost) createUser(mmuser *model.User) *bridge.UserInfo {
 		teamID = m.mc.Team.Id
 	}
 
-	info := bridge.UserInfo{
+	info := &bridge.UserInfo{
 		Nick:      nick,
 		User:      mmuser.Id,
 		Real:      mmuser.FirstName + " " + mmuser.LastName,
@@ -457,7 +456,7 @@ func (m *Mattermost) createUser(mmuser *model.User) *bridge.UserInfo {
 		LastName:  mmuser.LastName,
 	}
 
-	return &info
+	return info
 }
 
 func isValidNick(s string) bool {
@@ -500,7 +499,7 @@ func (m *Mattermost) wsActionPostSkip(rmsg *model.WebSocketEvent) bool {
 	data := model.PostFromJson(strings.NewReader(rmsg.Data["post"].(string)))
 	extraProps := model.StringInterfaceFromJson(strings.NewReader(rmsg.Data["post"].(string)))["props"].(map[string]interface{})
 
-	if rmsg.Event == model.WEBSOCKET_EVENT_POST_EDITED && data.HasReactions == true {
+	if rmsg.Event == model.WEBSOCKET_EVENT_POST_EDITED && data.HasReactions {
 		logger.Debugf("edit post with reactions, do not relay. We don't know if a reaction is added or the post has been edited")
 		return true
 	}
@@ -800,7 +799,7 @@ func (m *Mattermost) wsActionPostJoinLeave(data *model.Post, extraProps map[stri
 
 func (m *Mattermost) handleWsActionUserAdded(rmsg *model.WebSocketEvent) {
 	spew.Dump(rmsg)
-	userId, ok := rmsg.Data["user_id"].(string)
+	userID, ok := rmsg.Data["user_id"].(string)
 	if !ok {
 		return
 	}
@@ -809,7 +808,7 @@ func (m *Mattermost) handleWsActionUserAdded(rmsg *model.WebSocketEvent) {
 		Type: "channel_add",
 		Data: &bridge.ChannelAddEvent{
 			Added: []*bridge.UserInfo{
-				m.GetUser(userId),
+				m.GetUser(userID),
 			},
 			Adder: &bridge.UserInfo{
 				Nick: "system",
@@ -857,7 +856,7 @@ func (m *Mattermost) handleWsActionUserRemoved(rmsg *model.WebSocketEvent) {
 
 func (m *Mattermost) handleWsActionChannelCreated(rmsg *model.WebSocketEvent) {
 	spew.Dump(rmsg)
-	channelId, ok := rmsg.Data["channel_id"].(string)
+	channelID, ok := rmsg.Data["channel_id"].(string)
 	if !ok {
 		return
 	}
@@ -865,7 +864,7 @@ func (m *Mattermost) handleWsActionChannelCreated(rmsg *model.WebSocketEvent) {
 	event := &bridge.Event{
 		Type: "channel_create",
 		Data: &bridge.ChannelCreateEvent{
-			ChannelID: channelId,
+			ChannelID: channelID,
 		},
 	}
 
@@ -874,7 +873,7 @@ func (m *Mattermost) handleWsActionChannelCreated(rmsg *model.WebSocketEvent) {
 
 func (m *Mattermost) handleWsActionChannelDeleted(rmsg *model.WebSocketEvent) {
 	spew.Dump(rmsg)
-	channelId, ok := rmsg.Data["channel_id"].(string)
+	channelID, ok := rmsg.Data["channel_id"].(string)
 	if !ok {
 		return
 	}
@@ -882,7 +881,7 @@ func (m *Mattermost) handleWsActionChannelDeleted(rmsg *model.WebSocketEvent) {
 	event := &bridge.Event{
 		Type: "channel_delete",
 		Data: &bridge.ChannelDeleteEvent{
-			ChannelID: channelId,
+			ChannelID: channelID,
 		},
 	}
 

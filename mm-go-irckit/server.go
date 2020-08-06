@@ -334,7 +334,7 @@ func (s *server) handle(u *User) {
 			// Ignore empty messages
 			continue
 		}
-		go func() {
+		go func(msg *irc.Message) {
 			err := s.commands.Run(s, u, msg)
 			logger.Debugf("Executed %#v %#v", msg, err)
 			if err == ErrUnknownCommand {
@@ -342,7 +342,7 @@ func (s *server) handle(u *User) {
 			} else if err != nil {
 				logger.Errorf("handler error for %s: %s", u.ID(), err.Error())
 			}
-		}()
+		}(msg)
 	}
 }
 

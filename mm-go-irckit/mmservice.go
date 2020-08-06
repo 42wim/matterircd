@@ -44,10 +44,11 @@ func login(u *User, toUser *User, args []string, service string) {
 		}
 		// fmt.Println(len(args))
 		if len(args) == 1 {
-			u.Token = args[len(args)-1]
+			u.Credentials.Token = args[len(args)-1]
 		}
 
-		if u.Token == "help" {
+		//if u.Credentials != nil && u.Credentials.Token == "help" {
+		if u.Credentials.Token == "help" {
 			u.MsgUser(toUser, "need LOGIN <team> <login> <pass> or LOGIN <token>")
 			return
 		}
@@ -69,15 +70,15 @@ func login(u *User, toUser *User, args []string, service string) {
 		u.inprogress = true
 		defer func() { u.inprogress = false }()
 
-		u.sc, err = u.loginToSlack()
+		err = u.loginToSlack()
 		if err != nil {
 			u.MsgUser(toUser, err.Error())
 			return
 		}
 
 		u.MsgUser(toUser, "login OK")
-		if u.Credentials != nil && u.Token != "" {
-			u.MsgUser(toUser, "token used: "+u.Token)
+		if u.Credentials != nil && u.Credentials.Token != "" {
+			u.MsgUser(toUser, "token used: "+u.Credentials.Token)
 		}
 
 		return

@@ -18,6 +18,7 @@ require (
 	github.com/mattn/go-sqlite3 v1.11.0 // indirect
 	github.com/muesli/reflow v0.1.0
 	github.com/nicksnyder/go-i18n v1.9.0 // indirect
+	github.com/schollz/logger v1.2.0
 	github.com/sirupsen/logrus v1.6.0
 	github.com/slack-go/slack v0.6.5
 	github.com/sorcix/irc v1.1.4
