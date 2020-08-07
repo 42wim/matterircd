@@ -324,21 +324,20 @@ func CmdPing(s Server, u *User, msg *irc.Message) error {
 // CmdPrivMsg is a handler for the /PRIVMSG command.
 func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 	var err error
+
 	if len(msg.Params) > 1 {
 		tr := strings.Join(msg.Params[1:], " ")
 		msg.Params = []string{msg.Params[0]}
 		msg.Trailing += tr
 	}
-	// empty message
-	if msg.Trailing == "" {
-		return nil
-	}
-	if msg.Params[0] == "&users" {
-		return nil
-	}
+
 	query := msg.Params[0]
 
-	// p := strings.Replace(query, "#", "", -1)
+	// empty message or in &users channel
+	if msg.Trailing == "" || query == "&users" {
+		return nil
+	}
+
 	msg.Trailing = strings.ReplaceAll(msg.Trailing, "\r", "")
 	// fix non-rfc clients
 	if !strings.HasPrefix(msg.Trailing, ":") {
@@ -354,42 +353,37 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 	}
 	// strip IRC colors
 	re := regexp.MustCompile(`\x03([019]?[0-9](,[019]?[0-9])?)?`)
-	// re := regexp.MustCompile(`[[:cntrl:]](?:\d{1,2}(?:,\d{1,2})?)?`)
+
 	msg.Trailing = re.ReplaceAllString(msg.Trailing, "")
 
+	// are we sending to a channel
 	if ch, exists := s.HasChannel(query); exists {
 		err = u.br.MsgChannel(ch.ID(), msg.Trailing)
 		if err != nil {
-			u.MsgSpoofUser(u, "mattermost", "msg: "+msg.Trailing+" could not be send: "+err.Error())
+			u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+msg.Trailing+" could not be send: "+err.Error())
 		}
-	} else if toUser, exists := s.HasUser(query); exists {
-		if query == "mattermost" {
+		return nil
+	}
+
+	// or a user
+	if toUser, exists := s.HasUser(query); exists {
+		switch {
+		case query == "mattermost" || query == "slack":
 			go u.handleServiceBot(query, toUser, msg.Trailing)
 			msg.Trailing = "<redacted>"
-			return nil
-		}
-
-		if query == "slack" {
-			go u.handleServiceBot(query, toUser, msg.Trailing)
-			msg.Trailing = "<redacted>"
-			return nil
-		}
-
-		if toUser.Ghost {
+		case toUser.Ghost:
 			err = u.br.MsgUser(toUser.User, msg.Trailing)
 			if err != nil {
 				return err
 			}
-
-			return nil
+		default:
+			err = s.EncodeMessage(u, irc.PRIVMSG, []string{toUser.Nick}, msg.Trailing)
 		}
-
-		err = s.EncodeMessage(u, irc.PRIVMSG, []string{toUser.Nick}, msg.Trailing)
-	} else {
-		err = s.EncodeMessage(u, irc.ERR_NOSUCHNICK, msg.Params, "No such nick/channel")
+		return err
 	}
 
-	return err
+	// no channel or user
+	return s.EncodeMessage(u, irc.ERR_NOSUCHNICK, msg.Params, "No such nick/channel")
 }
 
 // CmdQuit is a handler for the /QUIT command.

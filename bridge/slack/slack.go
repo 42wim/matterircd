@@ -22,7 +22,6 @@ type Slack struct {
 	rtm          *slack.RTM
 	sinfo        *slack.Info
 	susers       map[string]slack.User
-	susersID     map[string]slack.User
 	connected    bool
 	userlistdone bool
 	credentials  Credentials
@@ -74,8 +73,6 @@ func New(cfg *mattermost.MmCfg, cred Credentials, eventChan chan *bridge.Event, 
 		return nil, err
 	}
 
-	// large slacks take a long time, get all users in the background
-	//go func() {
 	users, _ := s.sc.GetUsers()
 	for _, mmuser := range users {
 		// do not add our own nick
@@ -85,7 +82,6 @@ func New(cfg *mattermost.MmCfg, cred Credentials, eventChan chan *bridge.Event, 
 		s.susers[mmuser.ID] = mmuser
 	}
 	s.userlistdone = true
-	//}()
 
 	return s, nil
 }
@@ -96,10 +92,9 @@ func (s *Slack) Invite(channelID, username string) error {
 }
 
 func (s *Slack) Join(channelName string) (string, string, error) {
-	//TODO: handle warnings
 	mychan, _, _, err := s.sc.JoinConversation(channelName)
 	if err != nil {
-		return "", "", fmt.Errorf("Cannot join channel (+i): %s", err)
+		return "", "", fmt.Errorf("cannot join channel (+i): %s", err)
 	}
 
 	return mychan.ID, mychan.Topic.Value, nil
@@ -121,12 +116,11 @@ OUTER:
 		params.Cursor = nextCursor
 
 		for _, channel := range conversations {
-			channelinfo["#"+channel.Name] = strings.Replace(channel.Topic.Value, "\n", " | ", -1)
+			channelinfo["#"+channel.Name] = strings.ReplaceAll(channel.Topic.Value, "\n", " | ")
 			if nextCursor == "" {
 				break OUTER
 			}
 		}
-
 	}
 
 	return channelinfo, nil
@@ -162,7 +156,7 @@ func (s *Slack) MsgUser(username, text string) error {
 
 	np := slack.NewPostMessageParameters()
 	np.AsUser = true
-	//np.Username = u.User
+	// np.Username = u.User
 	var attachments []slack.Attachment
 	attachments = append(attachments, slack.Attachment{CallbackID: "matterircd_" + s.sinfo.User.ID})
 
@@ -184,7 +178,7 @@ func (s *Slack) MsgChannel(channelID, text string) error {
 	np := slack.NewPostMessageParameters()
 	np.AsUser = true
 	np.LinkNames = 1
-	//np.Username = u.User
+	// np.Username = u.User
 	attachments = append(attachments, slack.Attachment{CallbackID: "matterircd_" + s.sinfo.User.ID})
 
 	var opts []slack.MsgOption
@@ -310,6 +304,7 @@ func (s *Slack) GetUsers() []*bridge.UserInfo {
 	s.RLock()
 
 	for _, user := range s.susers {
+		user := user
 		users = append(users, s.createSlackUser(&user))
 	}
 
@@ -401,7 +396,6 @@ func (s *Slack) SearchPosts(search string) interface{} {
 }
 
 func (s *Slack) UpdateLastViewed(channelID string) {
-
 }
 
 func (s *Slack) UpdateLastViewedUser(userID string) error {
@@ -455,9 +449,6 @@ func (s *Slack) loginToSlack() (*slack.Client, error) {
 			return nil, errors.New("couldn't connect in 10 seconds. Check your credentials")
 		}
 	}
-
-	//s.br = ircslack.New(s.sc, s.sinfo)
-
 	// we only know which server we are connecting to when we actually are connected.
 	// disconnect if we're not allowed
 	if len(s.cfg.SlackSettings.Restrict) > 0 {
@@ -485,14 +476,15 @@ func (s *Slack) loginToSlack() (*slack.Client, error) {
 		}
 		if ok {
 			s.rtm.Disconnect()
-			return nil, errors.New("Not allowed to connect")
+			return nil, errors.New("not allowed to connect")
 		}
 	}
 
 	go s.handleSlack()
 	go s.onConnect()
-	//s.addSlackUsersToChannels()
+
 	s.connected = true
+
 	return s.sc, nil
 }
 
@@ -512,32 +504,32 @@ func (s *Slack) handleSlack() {
 				// return
 			case *slack.ReactionAddedEvent:
 				logger.Debugf("ReactionAdded msg %#v", ev)
-				ts := formatTs(ev.Item.Timestamp)
+				ts := formatTS(ev.Item.Timestamp)
 				msg := "[M " + ts + "] Added reaction :" + ev.Reaction + ":"
 				s.handleActionMisc(ev.User, ev.Item.Channel, msg)
 			case *slack.ReactionRemovedEvent:
 				logger.Debugf("ReactionRemoved msg %#v", ev)
-				ts := formatTs(ev.Item.Timestamp)
+				ts := formatTS(ev.Item.Timestamp)
 				msg := "[M " + ts + "] Removed reaction :" + ev.Reaction + ":"
 				s.handleActionMisc(ev.User, ev.Item.Channel, msg)
 			case *slack.StarAddedEvent:
 				logger.Debugf("StarAdded msg %#v", ev)
-				ts := formatTs(ev.Item.Message.Timestamp)
+				ts := formatTS(ev.Item.Message.Timestamp)
 				msg := "[M " + ts + "] Message starred (" + ev.Item.Message.Text + ")"
 				s.handleActionMisc(ev.User, ev.Item.Channel, msg)
 			case *slack.StarRemovedEvent:
 				logger.Debugf("StarRemoved msg %#v", ev)
-				ts := formatTs(ev.Item.Message.Timestamp)
+				ts := formatTS(ev.Item.Message.Timestamp)
 				msg := "[M " + ts + "] Message unstarred (" + ev.Item.Message.Text + ")"
 				s.handleActionMisc(ev.User, ev.Item.Channel, msg)
 			case *slack.PinAddedEvent:
 				logger.Debugf("PinAdded msg %#v", ev)
-				ts := formatTs(ev.Item.Message.Timestamp)
+				ts := formatTS(ev.Item.Message.Timestamp)
 				msg := "[M " + ts + "] Message pinned (" + ev.Item.Message.Text + ")"
 				s.handleActionMisc(ev.User, ev.Item.Channel, msg)
 			case *slack.PinRemovedEvent:
 				logger.Debugf("PinRemoved msg %#v", ev)
-				ts := formatTs(ev.Item.Message.Timestamp)
+				ts := formatTS(ev.Item.Message.Timestamp)
 				msg := "[M " + ts + "] Message unpinned (" + ev.Item.Message.Text + ")"
 				s.handleActionMisc(ev.User, ev.Item.Channel, msg)
 			}
@@ -553,10 +545,6 @@ func (s *Slack) handleActionMisc(userID, channelID, msg string) {
 
 	// create new "ghost" user
 	ghost := s.createSlackUser(suser)
-
-	spoofUsername := ghost.Nick
-
-	spoofUsername = strings.Replace(spoofUsername, " ", "_", -1)
 
 	// direct message
 	switch {
@@ -634,7 +622,7 @@ func (s *Slack) handleSlackActionPost(rmsg *slack.MessageEvent) {
 	}
 
 	if rmsg.SubType == "message_deleted" {
-		ts := formatTs(rmsg.DeletedTimestamp)
+		ts := formatTS(rmsg.DeletedTimestamp)
 		rmsg.Text = "[M " + ts + "] Message deleted"
 		usr = "USLACKBOT"
 		//		u.handleSlackActionMisc("USLACKBOT", ev.Channel, msg)
@@ -705,19 +693,18 @@ func (s *Slack) handleSlackActionPost(rmsg *slack.MessageEvent) {
 
 	if msghandled {
 		if rmsg.ThreadTimestamp != "" && len(msgs) > 0 {
-			msgs[0] = "[T " + formatTs(rmsg.ThreadTimestamp) + "] " + msgs[0]
+			msgs[0] = "[T " + formatTS(rmsg.ThreadTimestamp) + "] " + msgs[0]
 		}
 	}
 
 	if rmsg.SubType == "message_changed" {
 		msgs = append(msgs, strings.Split(rmsg.SubMessage.Text, "\n")...)
 		if len(msgs) > 0 {
-			msgs[0] = "[C " + formatTs(rmsg.SubMessage.Timestamp) + "] " + msgs[0]
+			msgs[0] = "[C " + formatTS(rmsg.SubMessage.Timestamp) + "] " + msgs[0]
 		}
 		msghandled = true
 	}
 
-	spoofUsername = strings.Replace(spoofUsername, " ", "_", -1)
 	for _, msg := range msgs {
 		// cleanup the message
 		msg = s.replaceMention(msg)
@@ -735,7 +722,7 @@ func (s *Slack) handleSlackActionPost(rmsg *slack.MessageEvent) {
 		// direct message
 		switch {
 		case strings.HasPrefix(rmsg.Channel, "D"):
-			spoofUsername := ghost.Nick
+			spoofUsername = ghost.Nick
 			event := &bridge.Event{
 				Type: "direct_message",
 			}
@@ -763,6 +750,9 @@ func (s *Slack) handleSlackActionPost(rmsg *slack.MessageEvent) {
 
 			s.eventChan <- event
 		default:
+			// could be a bot
+			ghost.Nick = spoofUsername
+
 			event := &bridge.Event{
 				Type: "channel_message",
 				Data: &bridge.ChannelMessageEvent{
@@ -817,7 +807,7 @@ func (s *Slack) createSlackUser(slackuser *slack.User) *bridge.UserInfo {
 func (s *Slack) replaceMention(text string) string {
 	results := regexp.MustCompile(`<@([a-zA-z0-9]+)>`).FindAllStringSubmatch(text, -1)
 	for _, r := range results {
-		text = strings.Replace(text, "<@"+r[1]+">", "@"+s.userName(r[1]), -1)
+		text = strings.ReplaceAll(text, "<@"+r[1]+">", "@"+s.userName(r[1]))
 	}
 
 	return text
@@ -827,7 +817,7 @@ func (s *Slack) replaceMention(text string) string {
 func (s *Slack) replaceChannel(text string) string {
 	results := regexp.MustCompile(`<#[a-zA-Z0-9]+\|(.+?)>`).FindAllStringSubmatch(text, -1)
 	for _, r := range results {
-		text = strings.Replace(text, r[0], "#"+r[1], -1)
+		text = strings.ReplaceAll(text, r[0], "#"+r[1])
 	}
 
 	return text
@@ -838,9 +828,9 @@ func (s *Slack) replaceVariable(text string) string {
 	results := regexp.MustCompile(`<!((?:subteam\^)?[a-zA-Z0-9]+)(?:\|@?(.+?))?>`).FindAllStringSubmatch(text, -1)
 	for _, r := range results {
 		if r[2] != "" {
-			text = strings.Replace(text, r[0], "@"+r[2], -1)
+			text = strings.ReplaceAll(text, r[0], "@"+r[2])
 		} else {
-			text = strings.Replace(text, r[0], "@"+r[1], -1)
+			text = strings.ReplaceAll(text, r[0], "@"+r[1])
 		}
 	}
 
@@ -851,7 +841,7 @@ func (s *Slack) replaceVariable(text string) string {
 func (s *Slack) replaceURL(text string) string {
 	results := regexp.MustCompile(`<(.*?)(\|.*?)?>`).FindAllStringSubmatch(text, -1)
 	for _, r := range results {
-		text = strings.Replace(text, r[0], r[1], -1)
+		text = strings.ReplaceAll(text, r[0], r[1])
 	}
 
 	return text
@@ -876,17 +866,6 @@ func (s *Slack) userName(id string) string {
 	}
 
 	return ""
-}
-
-func (s *Slack) getSlackUserByName(name string) *slack.User {
-	s.RLock()
-	defer s.RUnlock()
-
-	if user, ok := s.susers[name]; ok {
-		return &user
-	}
-
-	return nil
 }
 
 func (s *Slack) getSlackUser(userID string) *slack.User {

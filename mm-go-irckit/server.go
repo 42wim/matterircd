@@ -258,14 +258,6 @@ func (s *server) Quit(u *User, message string) {
 	u.br.Logout()
 }
 
-func (s *server) guestNick() string {
-	s.Lock()
-	defer s.Unlock()
-
-	s.count++
-	return fmt.Sprintf("Guest%d", s.count)
-}
-
 // Len returns the number of users connected to the server.
 func (s *server) Len() int {
 	s.RLock()
@@ -438,4 +430,25 @@ func (s *server) handshake(u *User) error {
 		return err
 	}
 	return ErrHandshakeFailed
+}
+
+func (s *server) Logout(user *User) {
+	channels := user.Channels()
+	for _, ch := range channels {
+		for _, other := range ch.Users() {
+			s.Lock()
+			delete(s.users, other.ID())
+			s.Unlock()
+		}
+		ch.Part(user, "")
+		ch.Unlink()
+	}
+}
+
+func (s *server) ChannelCount() int {
+	return len(s.channels)
+}
+
+func (s *server) UserCount() int {
+	return len(s.users)
 }

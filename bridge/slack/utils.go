@@ -110,14 +110,15 @@ func isValidNick(s string) bool {
 	return true
 }
 
-func formatTs(unixts string) string {
+func formatTS(unixts string) string {
 	var targetts, targetus int64
+
 	fmt.Sscanf(unixts, "%d.%d", &targetts, &targetus)
 	ts := time.Unix(targetts, targetus*1000)
 
 	if ts.YearDay() != time.Now().YearDay() {
 		return ts.Format("2.1. 15:04:05")
-	} else {
-		return ts.Format("15:04:05")
 	}
+
+	return ts.Format("15:04:05")
 }

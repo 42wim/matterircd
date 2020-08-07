@@ -35,14 +35,15 @@ func login(u *User, toUser *User, args []string, service string) {
 		u.MsgUser(toUser, "login or logout in progress. Please wait")
 		return
 	}
+
 	if service == "slack" {
 		var err error
-		// fmt.Println(len(args))
+
 		if len(args) != 1 && len(args) != 3 {
 			u.MsgUser(toUser, "need LOGIN <team> <login> <pass> or LOGIN <token>")
 			return
 		}
-		// fmt.Println(len(args))
+
 		if len(args) == 1 {
 			u.Credentials.Token = args[len(args)-1]
 		}
@@ -117,26 +118,24 @@ func login(u *User, toUser *User, args []string, service string) {
 
 	// incorrect arguments
 	if len(args) != datalen {
+		switch {
 		// no server or team
-		if cred.Team != "" && cred.Server != "" {
+		case cred.Team != "" && cred.Server != "":
 			u.MsgUser(toUser, "need LOGIN <login> <pass>")
 			u.MsgUser(toUser, "when using a personal token replace <pass> with token=<yourtoken>")
-			return
-		}
 		// server missing
-		if cred.Team != "" {
+		case cred.Team != "":
 			u.MsgUser(toUser, "need LOGIN <server> <login> <pass>")
 			u.MsgUser(toUser, "when using a personal token replace <pass> with token=<yourtoken>")
-			return
-		}
 		// team missing
-		if cred.Server != "" {
+		case cred.Server != "":
 			u.MsgUser(toUser, "need LOGIN <team> <login> <pass>")
 			u.MsgUser(toUser, "when using a personal token replace <pass> with token=<yourtoken>")
-			return
+		default:
+			u.MsgUser(toUser, "need LOGIN <server> <team> <login> <pass>")
+			u.MsgUser(toUser, "when using a personal token replace <pass> with token=<yourtoken>")
 		}
-		u.MsgUser(toUser, "need LOGIN <server> <team> <login> <pass>")
-		u.MsgUser(toUser, "when using a personal token replace <pass> with token=<yourtoken>")
+
 		return
 	}
 
@@ -160,11 +159,6 @@ func login(u *User, toUser *User, args []string, service string) {
 		u.MsgUser(toUser, err.Error())
 		return
 	}
-
-	/*u.mc.OnWsConnect = u.addUsersToChannels
-
-	go u.mc.StatusLoop()
-	*/
 
 	u.MsgUser(toUser, "login OK")
 }
@@ -376,7 +370,6 @@ func parseCommandString(line string) ([]string, error) {
 	got := false
 
 	for _, r := range line {
-
 		// If the string is escaped
 		if escaped {
 			buf += string(r)

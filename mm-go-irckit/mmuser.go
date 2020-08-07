@@ -313,41 +313,12 @@ func (u *User) createUserFromInfo(info *bridge.UserInfo) *User {
 	return ghost
 }
 
-func (u *User) addRealUserToChannel(ghost *User, channel string, channelID string) {
-	if ghost == nil {
-		return
-	}
-
-	if _, ok := u.Srv.HasUser(ghost.Nick); !ok {
-		u.Srv.Add(ghost)
-	}
-
-	logger.Debugf("adding %s to %s", ghost.Nick, channel)
-
-	ch := u.Srv.Channel(channelID)
-
-	ch.Join(ghost)
-}
-
 func (u *User) addUsersToChannel(users []*User, channel string, channelID string) {
-	logger.Debugf("adding %s to %s", len(users), channel)
+	logger.Debugf("adding %d to %s", len(users), channel)
 
 	ch := u.Srv.Channel(channelID)
 
 	ch.BatchJoin(users)
-	//	ch.Join(ghost)
-}
-
-func (u *User) addUserToChannel(ghost *User, channel string, channelID string) {
-	if ghost == nil {
-		return
-	}
-
-	logger.Debugf("adding %s to %s", ghost.Nick, channel)
-
-	ch := u.Srv.Channel(channelID)
-
-	ch.Join(ghost)
 }
 
 func (u *User) addUsersToChannels() {
@@ -356,7 +327,7 @@ func (u *User) addUsersToChannels() {
 	}
 
 	srv := u.Srv
-	throttle := time.Tick(time.Millisecond * 50)
+	throttle := time.NewTicker(time.Millisecond * 50)
 
 	logger.Debug("in addUsersToChannels()")
 	// add all users, also who are not on channels
@@ -417,11 +388,11 @@ func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(string, string) {
 	return ch.SpoofMessage
 }
 
-func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throttle <-chan time.Time) {
+func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throttle *time.Ticker) {
 	for brchannel := range channels {
 		logger.Debug("addUserToChannelWorker", brchannel)
 
-		<-throttle
+		<-throttle.C
 		// exclude direct messages
 		spoof := u.createSpoof(brchannel)
 

@@ -86,11 +86,11 @@ type channel struct {
 }
 
 // NewChannel returns a Channel implementation for a given Server.
-func NewChannel(server Server, channelId string, name string, service string) Channel {
+func NewChannel(server Server, channelID string, name string, service string) Channel {
 	return &channel{
 		created:  time.Now(),
 		server:   server,
-		id:       channelId,
+		id:       channelID,
 		name:     name,
 		service:  service,
 		usersIdx: map[*User]struct{}{},
@@ -427,4 +427,38 @@ func (ch *channel) Len() int {
 	defer ch.mu.RUnlock()
 
 	return len(ch.usersIdx)
+}
+
+func (ch *channel) Spoof(from string, text string, cmd string) {
+	text = wordwrap.String(text, 440)
+	lines := strings.Split(text, "\n")
+
+	for _, l := range lines {
+		l = strings.TrimSpace(l)
+		if len(l) == 0 {
+			continue
+		}
+
+		msg := &irc.Message{
+			Prefix:   &irc.Prefix{Name: from, User: from, Host: from},
+			Command:  cmd,
+			Params:   []string{ch.name},
+			Trailing: l + "\n",
+		}
+
+		ch.mu.RLock()
+		for to := range ch.usersIdx {
+			to.Encode(msg)
+		}
+
+		ch.mu.RUnlock()
+	}
+}
+
+func (ch *channel) SpoofMessage(from string, text string) {
+	ch.Spoof(from, text, irc.PRIVMSG)
+}
+
+func (ch *channel) SpoofNotice(from string, text string) {
+	ch.Spoof(from, text, irc.NOTICE)
 }

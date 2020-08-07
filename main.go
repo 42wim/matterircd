@@ -122,13 +122,16 @@ func tlsbind() net.Listener {
 		logger.Errorf("could not load TLS, incorrect directory? Error: %s", err)
 		os.Exit(1)
 	}
-	config := tls.Config{Certificates: []tls.Certificate{cert}}
-	listenerTLS, err := tls.Listen("tcp", cfg.TLSBind, &config)
+
+	tlsConfig := tls.Config{Certificates: []tls.Certificate{cert}}
+	listenerTLS, err := tls.Listen("tcp", cfg.TLSBind, &tlsConfig)
 	if err != nil {
 		logger.Errorf("Can not listen on %s: %v\n", cfg.TLSBind, err)
 		os.Exit(1)
 	}
+
 	logger.Info("TLS listening on ", cfg.TLSBind)
+
 	return listenerTLS
 }
 
@@ -141,10 +144,17 @@ func start(socket net.Listener) {
 		}
 
 		go func() {
-			irccfg := &mattermost.MmCfg{Insecure: cfg.Insecure, SkipTLSVerify: cfg.SkipTLSVerify,
-				SlackSettings: cfg.Slack, MattermostSettings: cfg.Mattermost, PasteBufferTimeout: cfg.PasteBufferTimeout}
+			irccfg := &mattermost.MmCfg{
+				Insecure:           cfg.Insecure,
+				SkipTLSVerify:      cfg.SkipTLSVerify,
+				SlackSettings:      cfg.Slack,
+				MattermostSettings: cfg.Mattermost,
+				PasteBufferTimeout: cfg.PasteBufferTimeout,
+			}
 			newsrv := irckit.ServerConfig{Name: "matterircd", Version: version}.Server()
+
 			logger.Infof("New connection: %s", conn.RemoteAddr())
+
 			err = newsrv.Connect(irckit.NewUserMM(conn, newsrv, irccfg))
 			if err != nil {
 				logger.Errorf("Failed to join: %v", err)
