@@ -296,8 +296,10 @@ func (s *Slack) GetChannelUsers(channelID string) ([]*bridge.UserInfo, error) {
 	}
 
 	// Add slackbot to all channels
-	slackuser := s.getSlackUser("USLACKBOT")
+	slackuser := s.getSlackUserByName("USLACKBOT")
 	users = append(users, s.createSlackUser(slackuser))
+
+	users = append(users, s.GetMe())
 
 	return users, nil
 }
@@ -372,8 +374,8 @@ func (s *Slack) GetUser(userID string) *bridge.UserInfo {
 }
 
 func (s *Slack) GetMe() *bridge.UserInfo {
-
-	return nil
+	me, _ := s.sc.GetUserInfo(s.sinfo.User.ID)
+	return s.createSlackUser(me)
 }
 
 func (s *Slack) GetUserByUsername(username string) *bridge.UserInfo {
@@ -381,7 +383,7 @@ func (s *Slack) GetUserByUsername(username string) *bridge.UserInfo {
 }
 
 func (s *Slack) GetTeamName(teamID string) string {
-	return ""
+	return s.sinfo.Team.Name
 }
 
 func (s *Slack) GetLastViewedAt(channelID string) int64 {
@@ -486,7 +488,7 @@ func (s *Slack) loginToSlack() (*slack.Client, error) {
 	}
 
 	go s.handleSlack()
-	s.onConnect()
+	go s.onConnect()
 	//s.addSlackUsersToChannels()
 	s.connected = true
 	return s.sc, nil
@@ -803,6 +805,7 @@ func (s *Slack) createSlackUser(slackuser *slack.User) *bridge.UserInfo {
 		Username:    slackuser.Profile.RealName,
 		FirstName:   slackuser.Profile.FirstName,
 		LastName:    slackuser.Profile.LastName,
+		TeamID:      s.sinfo.Team.ID,
 	}
 
 	return info
@@ -873,7 +876,7 @@ func (s *Slack) userName(id string) string {
 	return ""
 }
 
-func (s *Slack) getSlackUser(name string) *slack.User {
+func (s *Slack) getSlackUserByName(name string) *slack.User {
 	s.RLock()
 	defer s.RUnlock()
 
@@ -882,4 +885,22 @@ func (s *Slack) getSlackUser(name string) *slack.User {
 	}
 
 	return nil
+}
+
+func (s *Slack) getSlackUser(userID string) *slack.User {
+	s.RLock()
+	defer s.RUnlock()
+
+	for _, user := range s.susers {
+		if user.ID == userID {
+			return &user
+		}
+	}
+
+	user, err := s.sc.GetUserInfo(userID)
+	if err != nil {
+		return nil
+	}
+
+	return user
 }

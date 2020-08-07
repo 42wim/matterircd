@@ -21,7 +21,8 @@ type MmInfo struct {
 	Credentials *MmCredentials
 	Cfg         *mattermost.MmCfg
 	// mc          *matterclient.MMClient
-	br bridge.Bridger // nolint:structcheck
+	br        bridge.Bridger // nolint:structcheck
+	connected bool
 }
 
 type MmCredentials struct {
@@ -275,6 +276,8 @@ func (u *User) loginToMattermost() error {
 
 	u.br = br
 
+	u.connected = true
+
 	go u.handleEventChan(eventChan)
 
 	return nil
@@ -339,6 +342,10 @@ func (u *User) addUserToChannel(ghost *User, channel string, channelID string) {
 }
 
 func (u *User) addUsersToChannels() {
+	for !u.connected {
+		time.Sleep(time.Millisecond * 500)
+	}
+
 	srv := u.Srv
 	throttle := time.Tick(time.Millisecond * 50)
 

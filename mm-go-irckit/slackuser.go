@@ -94,6 +94,7 @@ func (u *User) loginToSlack() error {
 	}
 
 	u.br = br
+	u.connected = true
 
 	go u.handleEventChan(eventChan)
 

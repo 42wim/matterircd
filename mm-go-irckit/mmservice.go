@@ -47,8 +47,7 @@ func login(u *User, toUser *User, args []string, service string) {
 			u.Credentials.Token = args[len(args)-1]
 		}
 
-		//if u.Credentials != nil && u.Credentials.Token == "help" {
-		if u.Credentials.Token == "help" {
+		if u.Credentials != nil && u.Credentials.Token == "help" {
 			u.MsgUser(toUser, "need LOGIN <team> <login> <pass> or LOGIN <token>")
 			return
 		}
@@ -61,10 +60,12 @@ func login(u *User, toUser *User, args []string, service string) {
 			u.Credentials = cred
 		}
 
-		err = u.br.Logout()
-		if err != nil {
-			u.MsgUser(toUser, err.Error())
-			return
+		if u.br != nil {
+			err = u.br.Logout()
+			if err != nil {
+				u.MsgUser(toUser, err.Error())
+				return
+			}
 		}
 
 		u.inprogress = true
