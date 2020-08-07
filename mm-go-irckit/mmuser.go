@@ -329,6 +329,15 @@ func (u *User) addRealUserToChannel(ghost *User, channel string, channelID strin
 	ch.Join(ghost)
 }
 
+func (u *User) addUsersToChannel(users []*User, channel string, channelID string) {
+	logger.Debugf("adding %s to %s", len(users), channel)
+
+	ch := u.Srv.Channel(channelID)
+
+	ch.BatchJoin(users)
+	//	ch.Join(ghost)
+}
+
 func (u *User) addUserToChannel(ghost *User, channel string, channelID string) {
 	if ghost == nil {
 		return
@@ -353,14 +362,19 @@ func (u *User) addUsersToChannels() {
 	// add all users, also who are not on channels
 	ch := srv.Channel("&users")
 
+	var batchJoins []*User
+
 	for _, bruser := range u.br.GetUsers() {
 		if bruser.Me {
 			continue
 		}
 
-		ghost := u.createUserFromInfo(bruser)
-		u.addUserToChannel(ghost, "&users", "&users")
+		batchJoins = append(batchJoins, u.createUserFromInfo(bruser))
+		//		ghost := u.createUserFromInfo(bruser)
+		//		u.addUserToChannel(ghost, "&users", "&users")
 	}
+
+	u.addUsersToChannel(batchJoins, "&users", "&users")
 
 	ch.Join(u)
 
@@ -504,13 +518,18 @@ func (u *User) syncMMChannel(id string, name string) {
 
 	srv := u.Srv
 
+	var batchUsers []*User
+
 	for _, ghost := range users {
 		if ghost.Me {
 			continue
 		}
 
-		u.addRealUserToChannel(u.createUserFromInfo(ghost), "#"+name, id)
+		batchUsers = append(batchUsers, u.createUserFromInfo(ghost))
+		//		u.addRealUserToChannel(u.createUserFromInfo(ghost), "#"+name, id)
 	}
+
+	u.addUsersToChannel(batchUsers, "#"+name, id)
 
 	for _, ghost := range users {
 		if !ghost.Me {

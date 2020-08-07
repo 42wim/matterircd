@@ -39,6 +39,9 @@ type Channel interface {
 	// Join introduces the User to the channel (handler for JOIN).
 	Join(u *User) error
 
+	// BatchJoin
+	BatchJoin(users []*User) error
+
 	// Part removes the User from the channel (handler for PART).
 	Part(u *User, text string)
 
@@ -287,6 +290,32 @@ func (ch *channel) SendNamesResponse(u *User) error {
 	})
 
 	return u.Encode(msgs...)
+}
+
+func (ch *channel) BatchJoin(inputusers []*User) error {
+	// TODO: Check if user is already here?
+	var users []*User
+
+	ch.mu.Lock()
+
+	for _, u := range inputusers {
+		if _, exists := ch.usersIdx[u]; !exists {
+			users = append(users, u)
+		}
+	}
+
+	ch.mu.Unlock()
+
+	for _, u := range users {
+		ch.mu.Lock()
+		ch.usersIdx[u] = struct{}{}
+		ch.mu.Unlock()
+		u.Lock()
+		u.channels[ch] = struct{}{}
+		u.Unlock()
+	}
+
+	return nil
 }
 
 // Join introduces a User to the channel (sends relevant messages, stores).

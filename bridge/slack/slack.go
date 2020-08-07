@@ -12,6 +12,7 @@ import (
 	"github.com/42wim/matterircd/bridge"
 	"github.com/42wim/matterircd/bridge/mattermost"
 	"github.com/42wim/matterircd/config"
+	"github.com/davecgh/go-spew/spew"
 	"github.com/schollz/logger"
 	"github.com/slack-go/slack"
 )
@@ -21,6 +22,7 @@ type Slack struct {
 	rtm          *slack.RTM
 	sinfo        *slack.Info
 	susers       map[string]slack.User
+	susersID     map[string]slack.User
 	connected    bool
 	userlistdone bool
 	credentials  Credentials
@@ -73,19 +75,17 @@ func New(cfg *mattermost.MmCfg, cred Credentials, eventChan chan *bridge.Event, 
 	}
 
 	// large slacks take a long time, get all users in the background
-	go func() {
-		users, _ := s.sc.GetUsers()
-		for _, mmuser := range users {
-			// do not add our own nick
-			if mmuser.ID == s.sinfo.User.ID {
-				continue
-			}
-			s.Lock()
-			s.susers[mmuser.ID] = mmuser
-			s.Unlock()
+	//go func() {
+	users, _ := s.sc.GetUsers()
+	for _, mmuser := range users {
+		// do not add our own nick
+		if mmuser.ID == s.sinfo.User.ID {
+			continue
 		}
-		s.userlistdone = true
-	}()
+		s.susers[mmuser.ID] = mmuser
+	}
+	s.userlistdone = true
+	//}()
 
 	return s, nil
 }
@@ -296,7 +296,7 @@ func (s *Slack) GetChannelUsers(channelID string) ([]*bridge.UserInfo, error) {
 	}
 
 	// Add slackbot to all channels
-	slackuser := s.getSlackUserByName("USLACKBOT")
+	slackuser := s.getSlackUser("USLACKBOT")
 	users = append(users, s.createSlackUser(slackuser))
 
 	users = append(users, s.GetMe())
@@ -315,22 +315,24 @@ func (s *Slack) GetUsers() []*bridge.UserInfo {
 
 	s.RUnlock()
 
-	go func() {
-		if !s.userlistdone {
-			return
-		}
-		users, _ := s.sc.GetUsers()
-		for _, mmuser := range users {
-			// do not add our own nick
-			if mmuser.ID == s.sinfo.User.ID {
-				continue
+	/*
+		go func() {
+			if !s.userlistdone {
+				return
 			}
-			s.Lock()
-			s.susers[mmuser.ID] = mmuser
-			s.Unlock()
-		}
-		s.userlistdone = true
-	}()
+			users, _ := s.sc.GetUsers()
+			for _, mmuser := range users {
+				// do not add our own nick
+				if mmuser.ID == s.sinfo.User.ID {
+					continue
+				}
+				s.Lock()
+				s.susers[mmuser.ID] = mmuser
+				s.Unlock()
+			}
+			s.userlistdone = true
+		}()
+	*/
 
 	return users
 }
@@ -432,7 +434,7 @@ func (s *Slack) loginToSlack() (*slack.Client, error) {
 		}
 	}
 
-	s.sc = slack.New(s.credentials.Token)
+	s.sc = slack.New(s.credentials.Token, slack.OptionDebug(true))
 	s.rtm = s.sc.NewRTM()
 
 	s.Lock()
@@ -891,16 +893,23 @@ func (s *Slack) getSlackUser(userID string) *slack.User {
 	s.RLock()
 	defer s.RUnlock()
 
-	for _, user := range s.susers {
-		if user.ID == userID {
-			return &user
-		}
+	if user, ok := s.susers[userID]; ok {
+		user := user
+		return &user
 	}
 
+	fmt.Println("asking about", userID)
 	user, err := s.sc.GetUserInfo(userID)
 	if err != nil {
+		spew.Dump(userID, user, err)
 		return nil
 	}
 
 	return user
+}
+
+func (s *Slack) ratelimitCheck(err error) {
+	if rateLimitedError, ok := err.(*slack.RateLimitedError); ok {
+		time.Sleep(rateLimitedError.RetryAfter)
+	}
 }

@@ -12,6 +12,7 @@ require (
 	github.com/go-ldap/ldap v3.0.3+incompatible // indirect
 	github.com/go-redis/redis v6.15.5+incompatible // indirect
 	github.com/go-sql-driver/mysql v1.4.1 // indirect
+	github.com/google/gops v0.3.10
 	github.com/lib/pq v1.2.0 // indirect
 	github.com/mattermost/gorp v2.0.0+incompatible // indirect
 	github.com/mattermost/mattermost-server v5.11.1+incompatible

@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"flag"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/42wim/matterircd/bridge/mattermost"
 	"github.com/42wim/matterircd/config"
 	irckit "github.com/42wim/matterircd/mm-go-irckit"
+	"github.com/google/gops/agent"
 	"github.com/sirupsen/logrus"
 )
 
@@ -24,6 +26,9 @@ var (
 )
 
 func main() {
+	if err := agent.Listen(agent.Options{}); err != nil {
+		log.Fatal(err)
+	}
 	ourlog := logrus.New()
 	ourlog.Formatter = &logrus.TextFormatter{FullTimestamp: true}
 	logger = ourlog.WithFields(logrus.Fields{"module": "matterircd"})
