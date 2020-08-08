@@ -10,6 +10,7 @@ import (
 	"github.com/42wim/matterircd/bridge"
 	"github.com/desertbit/timer"
 	"github.com/sorcix/irc"
+	"github.com/spf13/viper"
 )
 
 // NewUser creates a *User, wrapping a connection with metadata we need for our server.
@@ -40,21 +41,16 @@ type User struct {
 
 	sync.RWMutex
 	*bridge.UserInfo
-	/*	Nick        string   // From NICK command
-		User        string   // From USER command
-		Real        string   // From USER command
-		Pass        []string // From PASS command
-		Host        string
-		Roles       string
-		DisplayName string
-	*/
+
 	BufferedMsg *irc.Message
 	DecodeCh    chan *irc.Message
 
 	channels map[Channel]struct{}
 
-	MmInfo
-	SlackInfo
+	v *viper.Viper
+
+	Info
+	//	SlackInfo
 }
 
 func (u *User) ID() string {
@@ -132,25 +128,32 @@ func (u *User) Encode(msgs ...*irc.Message) (err error) {
 	if u.Ghost {
 		return nil
 	}
+
 	for _, msg := range msgs {
 		if msg.Command == "PRIVMSG" && (msg.Prefix.Name == "slack" || msg.Prefix.Name == "mattermost") && msg.Prefix.Host == "service" && strings.Contains(msg.Trailing, "token") {
 			logger.Debugf("-> %s %s %s", msg.Command, msg.Prefix.Name, "[token redacted]")
+
 			err := u.Conn.Encode(msg)
 			if err != nil {
 				return err
 			}
+
 			continue
 		}
+
 		logger.Debugf("-> %s", msg)
+
 		err := u.Conn.Encode(msg)
 		if err != nil {
 			return err
 		}
 	}
+
 	return nil
 }
 
 // Decode will receive and return a decoded message, or an error.
+// nolint:funlen,gocognit,gocyclo
 func (u *User) Decode() {
 	if u.Ghost {
 		// block
@@ -159,7 +162,7 @@ func (u *User) Decode() {
 	}
 	buffer := make(chan *irc.Message)
 	stop := make(chan struct{})
-	bufferTimeout := u.Cfg.PasteBufferTimeout
+	bufferTimeout := u.v.GetInt("PasteBufferTimeout")
 	// we need at least 100
 	if bufferTimeout < 100 {
 		bufferTimeout = 100

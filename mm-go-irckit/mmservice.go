@@ -8,6 +8,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/42wim/matterircd/bridge"
 	"github.com/mattermost/mattermost-server/model"
 )
 
@@ -48,17 +49,17 @@ func login(u *User, toUser *User, args []string, service string) {
 			u.Credentials.Token = args[len(args)-1]
 		}
 
-		if u.Credentials != nil && u.Credentials.Token == "help" {
+		if u.Credentials.Token == "help" {
 			u.MsgUser(toUser, "need LOGIN <team> <login> <pass> or LOGIN <token>")
 			return
 		}
 
 		if len(args) == 3 {
-			cred := &MmCredentials{}
-			cred.Team = args[0]
-			cred.Login = args[1]
-			cred.Pass = args[2]
-			u.Credentials = cred
+			u.Credentials = bridge.Credentials{
+				Team:  args[0],
+				Login: args[1],
+				Pass:  args[2],
+			}
 		}
 
 		if u.br != nil {
@@ -79,23 +80,23 @@ func login(u *User, toUser *User, args []string, service string) {
 		}
 
 		u.MsgUser(toUser, "login OK")
-		if u.Credentials != nil && u.Credentials.Token != "" {
+		if u.Credentials.Token != "" {
 			u.MsgUser(toUser, "token used: "+u.Credentials.Token)
 		}
 
 		return
 	}
 
-	cred := &MmCredentials{}
+	cred := bridge.Credentials{}
 	datalen := 4
 
-	if u.Cfg.DefaultTeam != "" {
-		cred.Team = u.Cfg.DefaultTeam
+	if u.v.GetString("mattermost.DefaultTeam") != "" {
+		cred.Team = u.v.GetString("mattermost.DefaultTeam")
 		datalen--
 	}
 
-	if u.Cfg.DefaultServer != "" {
-		cred.Server = u.Cfg.DefaultServer
+	if u.v.GetString("mattermost.DefaultServer") != "" {
+		cred.Server = u.v.GetString("mattermost.DefaultServer")
 		datalen--
 	}
 
