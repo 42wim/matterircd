@@ -81,7 +81,7 @@ func (u *User) handleChannelAddEvent(event *bridge.ChannelAddEvent) {
 
 	for _, added := range event.Added {
 		if added.Me {
-			u.syncMMChannel(event.ChannelID, u.br.GetChannelName(event.ChannelID))
+			u.syncChannel(event.ChannelID, u.br.GetChannelName(event.ChannelID))
 			continue
 		}
 
@@ -115,15 +115,13 @@ func (u *User) handleChannelRemoveEvent(event *bridge.ChannelRemoveEvent) {
 }
 
 func (u *User) getMessageChannel(channelID, channelType string, sender *bridge.UserInfo) Channel {
-	// event *bridge.ChannelMessageEvent) Channel {
-	// ghost *User, props map[string]interface{}, data *model.Post) Channel {
 	ch := u.Srv.Channel(channelID)
 	// in an group
 	if channelType == "G" {
 		myself := u.createUserFromInfo(u.br.GetMe())
 		if !ch.HasUser(myself) {
 			ch.Join(myself)
-			u.syncMMChannel(channelID, u.br.GetChannelName(channelID))
+			u.syncChannel(channelID, u.br.GetChannelName(channelID))
 		}
 	}
 	ghost := u.createUserFromInfo(sender)
@@ -195,7 +193,7 @@ func (u *User) handleChannelCreateEvent(event *bridge.ChannelCreateEvent) {
 
 	logger.Debugf("ACTION_CHANNEL_CREATED adding myself to %s (%s)", u.br.GetChannelName(event.ChannelID), event.ChannelID)
 
-	u.syncMMChannel(event.ChannelID, u.br.GetChannelName(event.ChannelID))
+	u.syncChannel(event.ChannelID, u.br.GetChannelName(event.ChannelID))
 }
 
 func (u *User) handleChannelDeleteEvent(event *bridge.ChannelDeleteEvent) {
@@ -315,7 +313,7 @@ func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(string, string) {
 		channelName = u.br.GetTeamName(mmchannel.TeamID) + "/" + mmchannel.Name
 	}
 
-	u.syncMMChannel(mmchannel.ID, channelName)
+	u.syncChannel(mmchannel.ID, channelName)
 	ch := u.Srv.Channel(mmchannel.ID)
 
 	return ch.SpoofMessage
@@ -413,7 +411,7 @@ func (u *User) MsgSpoofUser(sender *User, rcvuser string, msg string) {
 }
 
 // sync IRC with mattermost channel state
-func (u *User) syncMMChannel(id string, name string) {
+func (u *User) syncChannel(id string, name string) {
 	users, err := u.br.GetChannelUsers(id)
 	if err != nil {
 		fmt.Println(err)

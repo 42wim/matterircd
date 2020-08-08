@@ -124,7 +124,7 @@ func CmdJoin(s Server, u *User, msg *irc.Message) error {
 
 		logger.Debugf("Join channel %s, id %s, err: %v", channelName, channelID, err)
 
-		sync = u.syncMMChannel
+		sync = u.syncChannel
 
 		/*u.v.GetStringSlice(u.br.Protocol()+".joinexclude")
 		u.v.Set(key string, value interface{})
