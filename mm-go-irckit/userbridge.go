@@ -134,13 +134,15 @@ func (u *User) getMessageChannel(channelID, channelType string, sender *bridge.U
 		ch.Join(ghost)
 	}
 
+	je := u.v.GetStringSlice(u.br.Protocol() + ".joinexclude")
+	ji := u.v.GetStringSlice(u.br.Protocol() + ".joininclude")
 	// excluded channel
-	if stringInSlice(ch.String(), u.v.GetStringSlice(u.br.Protocol()+".joinexclude")) {
+	if stringInSlice(ch.String(), je) {
 		logger.Debugf("channel %s is in JoinExclude, send to &messages", ch.String())
 		ch = u.Srv.Channel("&messages")
 	}
 	// not in included channel
-	if !stringInSlice(ch.String(), u.v.GetStringSlice(u.br.Protocol()+".joininclude")) {
+	if !stringInSlice(ch.String(), ji) && len(ji) > 0 {
 		logger.Debugf("channel %s is not in JoinInclude, send to &messages", ch.String())
 		ch = u.Srv.Channel("&messages")
 	}
