@@ -2,7 +2,6 @@ module github.com/42wim/matterircd
 
 require (
 	github.com/42wim/matterbridge v1.18.0
-	github.com/BurntSushi/toml v0.3.1
 	github.com/Masterminds/squirrel v1.1.0 // indirect
 	github.com/blang/semver v3.5.1+incompatible // indirect
 	github.com/davecgh/go-spew v1.1.1
@@ -23,6 +22,8 @@ require (
 	github.com/sirupsen/logrus v1.6.0
 	github.com/slack-go/slack v0.6.5
 	github.com/sorcix/irc v1.1.4
+	github.com/spf13/pflag v1.0.3
+	github.com/spf13/viper v1.7.0
 	github.com/stretchr/testify v1.5.1
 	github.com/ziutek/mymysql v1.5.4 // indirect
 	golang.org/x/crypto v0.0.0-20200728195943-123391ffb6de // indirect

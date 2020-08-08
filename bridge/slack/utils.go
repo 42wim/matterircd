@@ -4,9 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io/ioutil"
 	"net/http"
 	"net/url"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/slack-go/slack"
@@ -121,4 +124,58 @@ func formatTS(unixts string) string {
 	}
 
 	return ts.Format("15:04:05")
+}
+
+// @see https://api.slack.com/docs/message-formatting#linking_to_channels_and_users
+func (s *Slack) replaceMention(text string) string {
+	results := regexp.MustCompile(`<@([a-zA-z0-9]+)>`).FindAllStringSubmatch(text, -1)
+	for _, r := range results {
+		text = strings.ReplaceAll(text, "<@"+r[1]+">", "@"+s.userName(r[1]))
+	}
+
+	return text
+}
+
+// @see https://api.slack.com/docs/message-formatting#linking_to_channels_and_users
+func replaceChannel(text string) string {
+	results := regexp.MustCompile(`<#[a-zA-Z0-9]+\|(.+?)>`).FindAllStringSubmatch(text, -1)
+	for _, r := range results {
+		text = strings.ReplaceAll(text, r[0], "#"+r[1])
+	}
+
+	return text
+}
+
+// @see https://api.slack.com/docs/message-formatting#variables
+func replaceVariable(text string) string {
+	results := regexp.MustCompile(`<!((?:subteam\^)?[a-zA-Z0-9]+)(?:\|@?(.+?))?>`).FindAllStringSubmatch(text, -1)
+	for _, r := range results {
+		if r[2] != "" {
+			text = strings.ReplaceAll(text, r[0], "@"+r[2])
+		} else {
+			text = strings.ReplaceAll(text, r[0], "@"+r[1])
+		}
+	}
+
+	return text
+}
+
+// @see https://api.slack.com/docs/message-formatting#linking_to_urls
+func replaceURL(text string) string {
+	results := regexp.MustCompile(`<(.*?)(\|.*?)?>`).FindAllStringSubmatch(text, -1)
+	for _, r := range results {
+		text = strings.ReplaceAll(text, r[0], r[1])
+	}
+
+	return text
+}
+
+func (s *Slack) cleanupMessage(msg string) string {
+	msg = s.replaceMention(msg)
+	msg = replaceVariable(msg)
+	msg = replaceChannel(msg)
+	msg = replaceURL(msg)
+	msg = html.UnescapeString(msg)
+
+	return msg
 }

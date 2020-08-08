@@ -3,18 +3,14 @@ package slack
 import (
 	"errors"
 	"fmt"
-	"html"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/42wim/matterircd/bridge"
-	"github.com/42wim/matterircd/bridge/mattermost"
-	"github.com/42wim/matterircd/config"
-	"github.com/davecgh/go-spew/spew"
 	"github.com/schollz/logger"
 	"github.com/slack-go/slack"
+	"github.com/spf13/viper"
 )
 
 type Slack struct {
@@ -24,46 +20,19 @@ type Slack struct {
 	susers       map[string]slack.User
 	connected    bool
 	userlistdone bool
-	credentials  Credentials
-	cfg          *mattermost.MmCfg
+	credentials  bridge.Credentials
 	eventChan    chan *bridge.Event
 	onConnect    func()
 	sync.RWMutex
+	v *viper.Viper
 }
 
-type MmCfg struct {
-	AllowedServers     []string
-	SlackSettings      config.Settings
-	MattermostSettings config.Settings
-	DefaultServer      string
-	DefaultTeam        string
-	Insecure           bool
-	SkipTLSVerify      bool
-	JoinExclude        []string
-	JoinInclude        []string
-	PartFake           bool
-	PrefixMainTeam     bool
-	PasteBufferTimeout int
-	DisableAutoView    bool
-	PreferNickname     bool
-	LogLevel           string
-	HideReplies        bool
-}
-
-type Credentials struct {
-	Login  string
-	Team   string
-	Pass   string
-	Server string
-	Token  string
-}
-
-func New(cfg *mattermost.MmCfg, cred Credentials, eventChan chan *bridge.Event, onConnect func()) (bridge.Bridger, error) {
+func New(v *viper.Viper, cred bridge.Credentials, eventChan chan *bridge.Event, onConnect func()) (bridge.Bridger, error) {
 	s := &Slack{
-		cfg:         cfg,
 		credentials: cred,
 		eventChan:   eventChan,
 		onConnect:   onConnect,
+		v:           v,
 	}
 
 	var err error
@@ -79,8 +48,10 @@ func New(cfg *mattermost.MmCfg, cred Credentials, eventChan chan *bridge.Event, 
 		if mmuser.ID == s.sinfo.User.ID {
 			continue
 		}
+
 		s.susers[mmuser.ID] = mmuser
 	}
+
 	s.userlistdone = true
 
 	return s, nil
@@ -137,23 +108,23 @@ func (s *Slack) UpdateChannels() error {
 
 func (s *Slack) Logout() error {
 	logger.Debug("calling logout from slack")
+
 	err := s.rtm.Disconnect()
 	if err != nil {
 		logger.Debug("logoutfrom slack", err)
 		return err
 	}
+
 	s.sc = nil
+
 	logger.Info("logout succeeded")
+
 	s.connected = false
+
 	return nil
 }
 
-func (s *Slack) MsgUser(username, text string) error {
-	_, _, dchannel, err := s.sc.OpenIMChannel(username)
-	if err != nil {
-		return err
-	}
-
+func (s *Slack) createSlackMsgOption(text string) []slack.MsgOption {
 	np := slack.NewPostMessageParameters()
 	np.AsUser = true
 	// np.Username = u.User
@@ -164,6 +135,17 @@ func (s *Slack) MsgUser(username, text string) error {
 	opts = append(opts, slack.MsgOptionAttachments(attachments...))
 	opts = append(opts, slack.MsgOptionPostMessageParameters(np))
 	opts = append(opts, slack.MsgOptionText(text, false))
+
+	return opts
+}
+
+func (s *Slack) MsgUser(username, text string) error {
+	_, _, dchannel, err := s.sc.OpenIMChannel(username)
+	if err != nil {
+		return err
+	}
+
+	opts := s.createSlackMsgOption(text)
 
 	_, _, err = s.sc.PostMessage(dchannel, opts...)
 	if err != nil {
@@ -173,18 +155,7 @@ func (s *Slack) MsgUser(username, text string) error {
 }
 
 func (s *Slack) MsgChannel(channelID, text string) error {
-	var attachments []slack.Attachment
-
-	np := slack.NewPostMessageParameters()
-	np.AsUser = true
-	np.LinkNames = 1
-	// np.Username = u.User
-	attachments = append(attachments, slack.Attachment{CallbackID: "matterircd_" + s.sinfo.User.ID})
-
-	var opts []slack.MsgOption
-	opts = append(opts, slack.MsgOptionAttachments(attachments...))
-	opts = append(opts, slack.MsgOptionPostMessageParameters(np))
-	opts = append(opts, slack.MsgOptionText(text, false))
+	opts := s.createSlackMsgOption(text)
 
 	_, _, err := s.sc.PostMessage(strings.ToUpper(channelID), opts...)
 	if err != nil {
@@ -277,11 +248,12 @@ func (s *Slack) GetChannelUsers(channelID string) ([]*bridge.UserInfo, error) {
 		params.Cursor = nextCursor
 
 		for _, user := range members {
-			if s.sinfo.User.ID != user {
-				// slackuser, _ := u.sc.GetUserInfo(user)
-				suser := s.getSlackUser(user)
-				users = append(users, s.createSlackUser(suser))
+			if s.sinfo.User.ID == user {
+				continue
 			}
+
+			suser := s.getSlackUser(user)
+			users = append(users, s.createSlackUser(suser))
 		}
 
 		if nextCursor == "" {
@@ -291,9 +263,7 @@ func (s *Slack) GetChannelUsers(channelID string) ([]*bridge.UserInfo, error) {
 
 	// Add slackbot to all channels
 	slackuser := s.getSlackUser("USLACKBOT")
-	users = append(users, s.createSlackUser(slackuser))
-
-	users = append(users, s.GetMe())
+	users = append(users, s.createSlackUser(slackuser), s.GetMe())
 
 	return users, nil
 }
@@ -309,25 +279,6 @@ func (s *Slack) GetUsers() []*bridge.UserInfo {
 	}
 
 	s.RUnlock()
-
-	/*
-		go func() {
-			if !s.userlistdone {
-				return
-			}
-			users, _ := s.sc.GetUsers()
-			for _, mmuser := range users {
-				// do not add our own nick
-				if mmuser.ID == s.sinfo.User.ID {
-					continue
-				}
-				s.Lock()
-				s.susers[mmuser.ID] = mmuser
-				s.Unlock()
-			}
-			s.userlistdone = true
-		}()
-	*/
 
 	return users
 }
@@ -346,18 +297,22 @@ func (s *Slack) GetChannels() []*bridge.ChannelInfo {
 		mmchannels, nextCursor, _ := s.sc.GetConversations(&params)
 		params.Cursor = nextCursor
 		for _, mmchannel := range mmchannels {
-			if mmchannel.IsMember {
-				if mmchannel.IsMpIM && s.cfg.SlackSettings.JoinMpImOnTalk {
-					continue
-				}
-				logger.Debug("Adding channel", mmchannel)
-				channels = append(channels, &bridge.ChannelInfo{
-					Name:   mmchannel.Name,
-					ID:     mmchannel.ID,
-					TeamID: s.sinfo.Team.ID,
-				})
+			if !mmchannel.IsMember {
+				continue
 			}
+
+			if mmchannel.IsMpIM && s.v.GetBool("slack.joinMpImOnTalk") {
+				continue
+			}
+
+			logger.Debug("Adding channel", mmchannel)
+			channels = append(channels, &bridge.ChannelInfo{
+				Name:   mmchannel.Name,
+				ID:     mmchannel.ID,
+				TeamID: s.sinfo.Team.ID,
+			})
 		}
+
 		if nextCursor == "" {
 			break
 		}
@@ -418,6 +373,41 @@ func (s *Slack) GetChannelID(name, teamID string) string {
 	return ""
 }
 
+func (s *Slack) allowedLogin() error {
+	// we only know which server we are connecting to when we actually are connected.
+	// disconnect if we're not allowed
+	if len(s.v.GetStringSlice("slack.restrict")) > 0 {
+		ok := false
+		for _, domain := range s.v.GetStringSlice("slack.restrict") {
+			if domain == s.sinfo.Team.Domain {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			s.rtm.Disconnect()
+			return errors.New("Not allowed to connect to " + s.sinfo.Team.Domain + " slack")
+		}
+	}
+	// we only know which user we are when we actually are connected.
+	// disconnect if we're not allowed
+	if len(s.v.GetStringSlice("slack.BlackListUser")) > 0 {
+		ok := false
+		for _, user := range s.v.GetStringSlice("slack.BlackListUser") {
+			if user == s.sinfo.User.Name {
+				ok = true
+				break
+			}
+		}
+		if ok {
+			s.rtm.Disconnect()
+			return errors.New("not allowed to connect")
+		}
+	}
+
+	return nil
+}
+
 func (s *Slack) loginToSlack() (*slack.Client, error) {
 	var err error
 
@@ -430,16 +420,13 @@ func (s *Slack) loginToSlack() (*slack.Client, error) {
 
 	s.sc = slack.New(s.credentials.Token, slack.OptionDebug(true))
 	s.rtm = s.sc.NewRTM()
-
-	s.Lock()
 	s.susers = make(map[string]slack.User)
-	s.Unlock()
 
 	go s.rtm.ManageConnection()
-	// time.Sleep(time.Second * 2)
-	s.sinfo = s.rtm.GetInfo()
+
 	count := 0
 
+	s.sinfo = s.rtm.GetInfo()
 	for s.sinfo == nil {
 		time.Sleep(time.Millisecond * 500)
 		logger.Debug("still waiting for sinfo")
@@ -449,35 +436,10 @@ func (s *Slack) loginToSlack() (*slack.Client, error) {
 			return nil, errors.New("couldn't connect in 10 seconds. Check your credentials")
 		}
 	}
-	// we only know which server we are connecting to when we actually are connected.
-	// disconnect if we're not allowed
-	if len(s.cfg.SlackSettings.Restrict) > 0 {
-		ok := false
-		for _, domain := range s.cfg.SlackSettings.Restrict {
-			if domain == s.sinfo.Team.Domain {
-				ok = true
-				break
-			}
-		}
-		if !ok {
-			s.rtm.Disconnect()
-			return nil, errors.New("Not allowed to connect to " + s.sinfo.Team.Domain + " slack")
-		}
-	}
-	// we only know which user we are when we actually are connected.
-	// disconnect if we're not allowed
-	if len(s.cfg.SlackSettings.BlackListUser) > 0 {
-		ok := false
-		for _, user := range s.cfg.SlackSettings.BlackListUser {
-			if user == s.sinfo.User.Name {
-				ok = true
-				break
-			}
-		}
-		if ok {
-			s.rtm.Disconnect()
-			return nil, errors.New("not allowed to connect")
-		}
+
+	err = s.allowedLogin()
+	if err != nil {
+		return nil, err
 	}
 
 	go s.handleSlack()
@@ -489,50 +451,46 @@ func (s *Slack) loginToSlack() (*slack.Client, error) {
 }
 
 func (s *Slack) handleSlack() {
-	for {
-		logger.Debug("in handleSlack")
-		for msg := range s.rtm.IncomingEvents {
-			switch ev := msg.Data.(type) {
-			case *slack.MessageEvent:
-				if ev.SubType == "group_join" || ev.SubType == "channel_join" || ev.SubType == "member_joined_channel" {
-					s.handleActionJoin(ev)
-				} else {
-					s.handleSlackActionPost(ev)
-				}
-			case *slack.DisconnectedEvent:
-				logger.Debug("disconnected event received, we should reconnect now..")
-				// return
-			case *slack.ReactionAddedEvent:
-				logger.Debugf("ReactionAdded msg %#v", ev)
-				ts := formatTS(ev.Item.Timestamp)
-				msg := "[M " + ts + "] Added reaction :" + ev.Reaction + ":"
-				s.handleActionMisc(ev.User, ev.Item.Channel, msg)
-			case *slack.ReactionRemovedEvent:
-				logger.Debugf("ReactionRemoved msg %#v", ev)
-				ts := formatTS(ev.Item.Timestamp)
-				msg := "[M " + ts + "] Removed reaction :" + ev.Reaction + ":"
-				s.handleActionMisc(ev.User, ev.Item.Channel, msg)
-			case *slack.StarAddedEvent:
-				logger.Debugf("StarAdded msg %#v", ev)
-				ts := formatTS(ev.Item.Message.Timestamp)
-				msg := "[M " + ts + "] Message starred (" + ev.Item.Message.Text + ")"
-				s.handleActionMisc(ev.User, ev.Item.Channel, msg)
-			case *slack.StarRemovedEvent:
-				logger.Debugf("StarRemoved msg %#v", ev)
-				ts := formatTS(ev.Item.Message.Timestamp)
-				msg := "[M " + ts + "] Message unstarred (" + ev.Item.Message.Text + ")"
-				s.handleActionMisc(ev.User, ev.Item.Channel, msg)
-			case *slack.PinAddedEvent:
-				logger.Debugf("PinAdded msg %#v", ev)
-				ts := formatTS(ev.Item.Message.Timestamp)
-				msg := "[M " + ts + "] Message pinned (" + ev.Item.Message.Text + ")"
-				s.handleActionMisc(ev.User, ev.Item.Channel, msg)
-			case *slack.PinRemovedEvent:
-				logger.Debugf("PinRemoved msg %#v", ev)
-				ts := formatTS(ev.Item.Message.Timestamp)
-				msg := "[M " + ts + "] Message unpinned (" + ev.Item.Message.Text + ")"
-				s.handleActionMisc(ev.User, ev.Item.Channel, msg)
+	for msg := range s.rtm.IncomingEvents {
+		switch ev := msg.Data.(type) {
+		case *slack.MessageEvent:
+			if ev.SubType == "group_join" || ev.SubType == "channel_join" || ev.SubType == "member_joined_channel" {
+				s.handleActionJoin(ev)
+			} else {
+				s.handleSlackActionPost(ev)
 			}
+		case *slack.DisconnectedEvent:
+			logger.Debug("disconnected event received, we should reconnect now..")
+		case *slack.ReactionAddedEvent:
+			logger.Debugf("ReactionAdded msg %#v", ev)
+			ts := formatTS(ev.Item.Timestamp)
+			msg := "[M " + ts + "] Added reaction :" + ev.Reaction + ":"
+			s.handleActionMisc(ev.User, ev.Item.Channel, msg)
+		case *slack.ReactionRemovedEvent:
+			logger.Debugf("ReactionRemoved msg %#v", ev)
+			ts := formatTS(ev.Item.Timestamp)
+			msg := "[M " + ts + "] Removed reaction :" + ev.Reaction + ":"
+			s.handleActionMisc(ev.User, ev.Item.Channel, msg)
+		case *slack.StarAddedEvent:
+			logger.Debugf("StarAdded msg %#v", ev)
+			ts := formatTS(ev.Item.Message.Timestamp)
+			msg := "[M " + ts + "] Message starred (" + ev.Item.Message.Text + ")"
+			s.handleActionMisc(ev.User, ev.Item.Channel, msg)
+		case *slack.StarRemovedEvent:
+			logger.Debugf("StarRemoved msg %#v", ev)
+			ts := formatTS(ev.Item.Message.Timestamp)
+			msg := "[M " + ts + "] Message unstarred (" + ev.Item.Message.Text + ")"
+			s.handleActionMisc(ev.User, ev.Item.Channel, msg)
+		case *slack.PinAddedEvent:
+			logger.Debugf("PinAdded msg %#v", ev)
+			ts := formatTS(ev.Item.Message.Timestamp)
+			msg := "[M " + ts + "] Message pinned (" + ev.Item.Message.Text + ")"
+			s.handleActionMisc(ev.User, ev.Item.Channel, msg)
+		case *slack.PinRemovedEvent:
+			logger.Debugf("PinRemoved msg %#v", ev)
+			ts := formatTS(ev.Item.Message.Timestamp)
+			msg := "[M " + ts + "] Message unpinned (" + ev.Item.Message.Text + ")"
+			s.handleActionMisc(ev.User, ev.Item.Channel, msg)
 		}
 	}
 }
@@ -606,39 +564,9 @@ func (s *Slack) handleActionJoin(rmsg *slack.MessageEvent) {
 	s.eventChan <- event
 }
 
-func (s *Slack) handleSlackActionPost(rmsg *slack.MessageEvent) {
-	logger.Debugf("handleSlackActionPost() receiving msg %#v", rmsg)
-
-	if len(rmsg.Attachments) > 0 {
-		// skip messages we made ourselves
-		if rmsg.Attachments[0].CallbackID == "matterircd_"+s.sinfo.User.ID {
-			return
-		}
-	}
-
-	usr := rmsg.User
-	if rmsg.SubType == "message_changed" {
-		usr = rmsg.SubMessage.User
-	}
-
-	if rmsg.SubType == "message_deleted" {
-		ts := formatTS(rmsg.DeletedTimestamp)
-		rmsg.Text = "[M " + ts + "] Message deleted"
-		usr = "USLACKBOT"
-		//		u.handleSlackActionMisc("USLACKBOT", ev.Channel, msg)
-	}
-
-	suser, err := s.rtm.GetUserInfo(usr)
-	if err != nil {
-		if rmsg.BotID == "" {
-			return
-		}
-	}
-
-	msghandled := false
-
-	// handle bot messages
+func (s *Slack) getBotname(rmsg *slack.MessageEvent) string {
 	botname := ""
+
 	if rmsg.User == "" && rmsg.BotID != "" {
 		botname = rmsg.Username
 		if botname == "" {
@@ -649,11 +577,99 @@ func (s *Slack) handleSlackActionPost(rmsg *slack.MessageEvent) {
 		}
 	}
 
+	return botname
+}
+
+func (s *Slack) getSlackUserFromMessage(rmsg *slack.MessageEvent) *slack.User {
+	usr := rmsg.User
+	if rmsg.SubType == "message_changed" {
+		usr = rmsg.SubMessage.User
+	}
+
+	if rmsg.SubType == "message_deleted" {
+		usr = "USLACKBOT"
+	}
+
+	suser, err := s.rtm.GetUserInfo(usr)
+	if err != nil {
+		if rmsg.BotID == "" {
+			return nil
+		}
+	}
+
+	return suser
+}
+
+func (s *Slack) sendDirectMessage(ghost *bridge.UserInfo, msg string, channelID string) {
+	spoofUsername := ghost.Nick
+	event := &bridge.Event{
+		Type: "direct_message",
+	}
+
+	d := &bridge.DirectMessageEvent{
+		Text: msg,
+	}
+
+	if !ghost.Me {
+		d.Sender = ghost
+	} else {
+		members, _, _ := s.sc.GetUsersInConversation(&slack.GetUsersInConversationParameters{ChannelID: channelID})
+		for _, member := range members {
+			if member != s.sinfo.User.ID {
+				other, _ := s.rtm.GetUserInfo(member)
+				otheruser := s.createSlackUser(other)
+				spoofUsername = otheruser.Nick
+				break
+			}
+		}
+	}
+
+	d.Receiver = spoofUsername
+
+	s.eventChan <- event
+}
+
+func (s *Slack) sendPublicMessage(ghost *bridge.UserInfo, msg, channelID string) {
+	event := &bridge.Event{
+		Type: "channel_message",
+		Data: &bridge.ChannelMessageEvent{
+			Text:      msg,
+			ChannelID: channelID,
+			Sender:    ghost,
+		},
+	}
+
+	s.eventChan <- event
+}
+
+// nolint:funlen,gocognit,gocyclo
+func (s *Slack) handleSlackActionPost(rmsg *slack.MessageEvent) {
+	logger.Debugf("handleSlackActionPost() receiving msg %#v", rmsg)
+
+	if len(rmsg.Attachments) > 0 {
+		// skip messages we made ourselves
+		if rmsg.Attachments[0].CallbackID == "matterircd_"+s.sinfo.User.ID {
+			return
+		}
+	}
+
+	if rmsg.SubType == "message_deleted" {
+		ts := formatTS(rmsg.DeletedTimestamp)
+		rmsg.Text = "[M " + ts + "] Message deleted"
+	}
+
+	// TODO: cache userinfo
+	suser := s.getSlackUserFromMessage(rmsg)
+
+	msghandled := false
+
+	// handle bot messages
+	botname := s.getBotname(rmsg)
+
 	// create new "ghost" user
 	ghost := s.createSlackUser(suser)
 
 	spoofUsername := ghost.Nick
-
 	// if we have a botname, use it
 	if botname != "" {
 		spoofUsername = strings.TrimSpace(botname)
@@ -672,15 +688,18 @@ func (s *Slack) handleSlackActionPost(rmsg *slack.MessageEvent) {
 			msgs = append(msgs, strings.Split(attach.Pretext, "\n")...)
 		}
 
-		if attach.Text != "" {
-			for i, row := range strings.Split(attach.Text, "\n") {
-				msgs = append(msgs, "> "+row)
-				if i > 4 {
-					msgs = append(msgs, "> ...")
-					break
-				}
+		if attach.Text == "" {
+			continue
+		}
+
+		for i, row := range strings.Split(attach.Text, "\n") {
+			msgs = append(msgs, "> "+row)
+			if i > 4 {
+				msgs = append(msgs, "> ...")
+				break
 			}
 		}
+
 		msghandled = true
 	}
 
@@ -705,66 +724,25 @@ func (s *Slack) handleSlackActionPost(rmsg *slack.MessageEvent) {
 		msghandled = true
 	}
 
+	channelID := rmsg.Channel
+
 	for _, msg := range msgs {
 		// cleanup the message
-		msg = s.replaceMention(msg)
-		msg = s.replaceVariable(msg)
-		msg = s.replaceChannel(msg)
-		msg = s.replaceURL(msg)
-		msg = html.UnescapeString(msg)
+		msg = s.cleanupMessage(msg)
 
 		// still no text, ignore this message
 		if !msghandled {
-			// continue
 			msg = fmt.Sprintf("Empty: %#v", rmsg)
 		}
 
 		// direct message
 		switch {
 		case strings.HasPrefix(rmsg.Channel, "D"):
-			spoofUsername = ghost.Nick
-			event := &bridge.Event{
-				Type: "direct_message",
-			}
-
-			d := &bridge.DirectMessageEvent{
-				Text: msg,
-			}
-
-			if !ghost.Me {
-				d.Sender = ghost
-			} else {
-				members, _, _ := s.sc.GetUsersInConversation(&slack.GetUsersInConversationParameters{ChannelID: rmsg.Channel})
-				for _, member := range members {
-					if member != s.sinfo.User.ID {
-						other, _ := s.rtm.GetUserInfo(member)
-						otheruser := s.createSlackUser(other)
-						spoofUsername = otheruser.Nick
-						break
-						//						s.MsgSpoofUser(s, ghost.Nick, msg)
-					}
-				}
-			}
-
-			d.Receiver = spoofUsername
-
-			s.eventChan <- event
+			s.sendDirectMessage(ghost, msg, channelID)
 		default:
 			// could be a bot
 			ghost.Nick = spoofUsername
-
-			event := &bridge.Event{
-				Type: "channel_message",
-				Data: &bridge.ChannelMessageEvent{
-					Text:      msg,
-					ChannelID: rmsg.Channel,
-					Sender:    ghost,
-					//					ChannelType: channelType,
-					//					Files:       m.getFilesFromData(data),
-				},
-			}
-
-			s.eventChan <- event
+			s.sendPublicMessage(ghost, msg, channelID)
 		}
 	}
 }
@@ -775,7 +753,7 @@ func (s *Slack) createSlackUser(slackuser *slack.User) *bridge.UserInfo {
 	}
 
 	nick := slackuser.Name
-	if (s.cfg.PreferNickname || s.cfg.SlackSettings.UseDisplayName) && isValidNick(slackuser.Profile.DisplayName) {
+	if (s.v.GetBool("slack.PreferNickname") || s.v.GetBool("slack.UseDisplayName")) && isValidNick(slackuser.Profile.DisplayName) {
 		nick = slackuser.Profile.DisplayName
 	}
 
@@ -803,62 +781,16 @@ func (s *Slack) createSlackUser(slackuser *slack.User) *bridge.UserInfo {
 	return info
 }
 
-// @see https://api.slack.com/docs/message-formatting#linking_to_channels_and_users
-func (s *Slack) replaceMention(text string) string {
-	results := regexp.MustCompile(`<@([a-zA-z0-9]+)>`).FindAllStringSubmatch(text, -1)
-	for _, r := range results {
-		text = strings.ReplaceAll(text, "<@"+r[1]+">", "@"+s.userName(r[1]))
-	}
-
-	return text
-}
-
-// @see https://api.slack.com/docs/message-formatting#linking_to_channels_and_users
-func (s *Slack) replaceChannel(text string) string {
-	results := regexp.MustCompile(`<#[a-zA-Z0-9]+\|(.+?)>`).FindAllStringSubmatch(text, -1)
-	for _, r := range results {
-		text = strings.ReplaceAll(text, r[0], "#"+r[1])
-	}
-
-	return text
-}
-
-// @see https://api.slack.com/docs/message-formatting#variables
-func (s *Slack) replaceVariable(text string) string {
-	results := regexp.MustCompile(`<!((?:subteam\^)?[a-zA-Z0-9]+)(?:\|@?(.+?))?>`).FindAllStringSubmatch(text, -1)
-	for _, r := range results {
-		if r[2] != "" {
-			text = strings.ReplaceAll(text, r[0], "@"+r[2])
-		} else {
-			text = strings.ReplaceAll(text, r[0], "@"+r[1])
-		}
-	}
-
-	return text
-}
-
-// @see https://api.slack.com/docs/message-formatting#linking_to_urls
-func (s *Slack) replaceURL(text string) string {
-	results := regexp.MustCompile(`<(.*?)(\|.*?)?>`).FindAllStringSubmatch(text, -1)
-	for _, r := range results {
-		text = strings.ReplaceAll(text, r[0], r[1])
-	}
-
-	return text
-}
-
 func (s *Slack) userName(id string) string {
 	s.RLock()
 	defer s.RUnlock()
 	// TODO dynamically update when new users are joining slack
 	for _, us := range s.susers {
-		if us.ID == id {
-			if us.Profile.DisplayName != "" {
-				return us.Profile.DisplayName
-			}
-
-			return us.Name
+		if us.ID == id && us.Profile.DisplayName != "" {
+			return us.Profile.DisplayName
 		}
+
+		return us.Name
 	}
 
 	if id == s.sinfo.User.ID {
@@ -877,16 +809,18 @@ func (s *Slack) getSlackUser(userID string) *slack.User {
 		return &user
 	}
 
-	fmt.Println("asking about", userID)
+	logger.Debugf("user %s not in cache, asking slack", userID)
 	user, err := s.sc.GetUserInfo(userID)
 	if err != nil {
-		spew.Dump(userID, user, err)
 		return nil
 	}
+
+	s.susers[user.ID] = *user
 
 	return user
 }
 
+// nolint:unused
 func (s *Slack) ratelimitCheck(err error) {
 	if rateLimitedError, ok := err.(*slack.RateLimitedError); ok {
 		time.Sleep(rateLimitedError.RetryAfter)

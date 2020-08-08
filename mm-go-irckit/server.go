@@ -62,6 +62,7 @@ type Server interface {
 	UnlinkChannel(Channel)
 
 	Add(u *User) bool
+	BatchAdd(users []*User)
 	Handle(u *User)
 	Logout(u *User)
 	ChannelCount() int
@@ -335,6 +336,18 @@ func (s *server) handle(u *User) {
 				logger.Errorf("handler error for %s: %s", u.ID(), err.Error())
 			}
 		}(msg)
+	}
+}
+
+func (s *server) BatchAdd(users []*User) {
+	s.Lock()
+	defer s.Unlock()
+
+	for _, u := range users {
+		id := u.ID()
+		if _, exists := s.users[id]; !exists {
+			s.users[id] = u
+		}
 	}
 }
 
