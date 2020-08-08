@@ -16,6 +16,7 @@ type CommandHandler interface {
 	handle(u *User, c *Command, args []string, service string)
 }
 
+// nolint:structcheck
 type Command struct {
 	handler   func(u *User, toUser *User, args []string, service string)
 	minParams int

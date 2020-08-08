@@ -459,6 +459,7 @@ func (u *User) loginTo(protocol string) error {
 	return nil
 }
 
+// nolint:unparam,unused
 func (u *User) logoutFrom(protocol string) error {
 	logger.Debug("logging out from", protocol)
 
