@@ -128,13 +128,20 @@ func (s *Slack) createSlackMsgOption(text string) []slack.MsgOption {
 	np := slack.NewPostMessageParameters()
 	np.AsUser = true
 	// np.Username = u.User
-	var attachments []slack.Attachment
-	attachments = append(attachments, slack.Attachment{CallbackID: "matterircd_" + s.sinfo.User.ID})
 
 	var opts []slack.MsgOption
-	opts = append(opts, slack.MsgOptionAttachments(attachments...))
-	opts = append(opts, slack.MsgOptionPostMessageParameters(np))
-	opts = append(opts, slack.MsgOptionText(text, false))
+	opts = append(opts,
+		slack.MsgOptionPostMessageParameters(np),
+		// provide regular text field (fallback used in Slack notifications, etc.)
+		slack.MsgOptionText(text, false),
+
+		// add a callback ID so we can see we created it
+		slack.MsgOptionBlocks(slack.NewSectionBlock(
+			slack.NewTextBlockObject(slack.MarkdownType, text, false, false),
+			nil, nil,
+			slack.SectionBlockOptionBlockID("matterircd_"+s.sinfo.User.ID),
+		)),
+	)
 
 	return opts
 }
@@ -646,11 +653,19 @@ func (s *Slack) sendPublicMessage(ghost *bridge.UserInfo, msg, channelID string)
 func (s *Slack) handleSlackActionPost(rmsg *slack.MessageEvent) {
 	logger.Debugf("handleSlackActionPost() receiving msg %#v", rmsg)
 
-	if len(rmsg.Attachments) > 0 {
-		// skip messages we made ourselves
-		if rmsg.Attachments[0].CallbackID == "matterircd_"+s.sinfo.User.ID {
-			return
-		}
+	hasOurCallbackID := false
+	if len(rmsg.Blocks.BlockSet) == 1 {
+		block, ok := rmsg.Blocks.BlockSet[0].(*slack.SectionBlock)
+		hasOurCallbackID = ok && block.BlockID == "matterircd_"+s.sinfo.User.ID
+	}
+
+	if rmsg.SubMessage != nil && len(rmsg.SubMessage.Blocks.BlockSet) == 1 {
+		block, ok := rmsg.SubMessage.Blocks.BlockSet[0].(*slack.SectionBlock)
+		hasOurCallbackID = ok && block.BlockID == "matterircd_"+s.sinfo.User.ID
+	}
+
+	if hasOurCallbackID {
+		return
 	}
 
 	if rmsg.SubType == "message_deleted" {
