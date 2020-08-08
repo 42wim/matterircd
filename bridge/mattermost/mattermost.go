@@ -171,10 +171,14 @@ func (m *Mattermost) Join(channelName string) (string, string, error) {
 		channelName = sp[1]
 	}
 
+	if teamID == "" {
+		teamID = m.mc.Team.Id
+	}
+
 	channelID := m.mc.GetChannelId(channelName, teamID)
 
 	err := m.mc.JoinChannel(channelID)
-	logger.Debugf("Join channel %s, id %s, err: %v", channelName, channelID, err)
+	logger.Debugf("mm: Join channel %s, id %s, err: %v", channelName, channelID, err)
 	if err != nil {
 		return "", "", fmt.Errorf("cannot join channel (+i)")
 	}
