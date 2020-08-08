@@ -1,6 +1,8 @@
 package bridge
 
-import "time"
+import (
+	"time"
+)
 
 type Bridger interface {
 	Invite(channelID, username string) error
@@ -68,14 +70,17 @@ type UserInfo struct {
 	LastName    string
 }
 
+type Credentials struct {
+	Login  string
+	Team   string
+	Pass   string
+	Server string
+	Token  string
+}
+
 type Event struct {
 	Type string
 	Data interface{}
-	/*
-		UserInfo []*bridge.UserInfo
-		Event    string
-		Msg      []Message
-	*/
 }
 
 type ChannelAddEvent struct {

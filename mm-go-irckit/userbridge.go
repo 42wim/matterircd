@@ -8,83 +8,30 @@ import (
 
 	"github.com/42wim/matterircd/bridge"
 	"github.com/42wim/matterircd/bridge/mattermost"
-	"github.com/42wim/matterircd/config"
+	"github.com/42wim/matterircd/bridge/slack"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/mattermost/mattermost-server/model"
 	"github.com/muesli/reflow/wordwrap"
 	"github.com/sorcix/irc"
+	"github.com/spf13/viper"
 )
 
-type MmInfo struct {
-	// MmGhostUser bool
+type UserBridge struct {
 	Srv         Server
-	Credentials *MmCredentials
-	Cfg         *mattermost.MmCfg
-	// mc          *matterclient.MMClient
-	br        bridge.Bridger // nolint:structcheck
-	connected bool
+	Credentials bridge.Credentials
+	br          bridge.Bridger // nolint:structcheck
+	inprogress  bool           //nolint:structcheck
 }
 
-type MmCredentials struct {
-	Login  string
-	Team   string
-	Pass   string
-	Server string
-	Token  string
-}
-
-type MmCfg struct {
-	AllowedServers     []string
-	SlackSettings      config.Settings
-	MattermostSettings config.Settings
-	DefaultServer      string
-	DefaultTeam        string
-	Insecure           bool
-	SkipTLSVerify      bool
-	JoinExclude        []string
-	JoinInclude        []string
-	PartFake           bool
-	PrefixMainTeam     bool
-	PasteBufferTimeout int
-	DisableAutoView    bool
-	PreferNickname     bool
-	HideReplies        bool
-}
-
-func NewUserBridge(c net.Conn, srv Server, cfg *mattermost.MmCfg) *User {
+func NewUserBridge(c net.Conn, srv Server, cfg *viper.Viper) *User {
 	u := NewUser(&conn{
 		Conn:    c,
 		Encoder: irc.NewEncoder(c),
 		Decoder: irc.NewDecoder(c),
 	})
+
 	u.Srv = srv
-
-	u.createService("mattermost", "loginservice")
-	u.createService("slack", "loginservice")
-
-	return u
-}
-
-func NewUserMM(c net.Conn, srv Server, cfg *mattermost.MmCfg) *User {
-	u := NewUser(&conn{
-		Conn:    c,
-		Encoder: irc.NewEncoder(c),
-		Decoder: irc.NewDecoder(c),
-	})
-	u.Srv = srv
-	u.MmInfo.Cfg = cfg
-	u.MmInfo.Cfg.AllowedServers = cfg.MattermostSettings.Restrict
-	u.MmInfo.Cfg.DefaultServer = cfg.MattermostSettings.DefaultServer
-	u.MmInfo.Cfg.DefaultTeam = cfg.MattermostSettings.DefaultTeam
-	u.MmInfo.Cfg.JoinInclude = cfg.MattermostSettings.JoinInclude
-	u.MmInfo.Cfg.JoinExclude = cfg.MattermostSettings.JoinExclude
-	u.MmInfo.Cfg.PartFake = cfg.MattermostSettings.PartFake
-	u.MmInfo.Cfg.Insecure = cfg.MattermostSettings.Insecure
-	u.MmInfo.Cfg.SkipTLSVerify = cfg.MattermostSettings.SkipTLSVerify
-	u.MmInfo.Cfg.PrefixMainTeam = cfg.MattermostSettings.PrefixMainTeam
-	u.MmInfo.Cfg.DisableAutoView = cfg.MattermostSettings.DisableAutoView
-	u.MmInfo.Cfg.PreferNickname = cfg.MattermostSettings.PreferNickname
-	u.MmInfo.Cfg.HideReplies = cfg.MattermostSettings.HideReplies
+	u.v = cfg
 
 	// used for login
 	u.createService("mattermost", "loginservice")
@@ -135,7 +82,7 @@ func (u *User) handleChannelAddEvent(event *bridge.ChannelAddEvent) {
 
 	for _, added := range event.Added {
 		if added.Me {
-			u.syncMMChannel(event.ChannelID, u.br.GetChannelName(event.ChannelID))
+			u.syncChannel(event.ChannelID, u.br.GetChannelName(event.ChannelID))
 			continue
 		}
 
@@ -169,15 +116,13 @@ func (u *User) handleChannelRemoveEvent(event *bridge.ChannelRemoveEvent) {
 }
 
 func (u *User) getMessageChannel(channelID, channelType string, sender *bridge.UserInfo) Channel {
-	// event *bridge.ChannelMessageEvent) Channel {
-	// ghost *User, props map[string]interface{}, data *model.Post) Channel {
 	ch := u.Srv.Channel(channelID)
 	// in an group
 	if channelType == "G" {
 		myself := u.createUserFromInfo(u.br.GetMe())
 		if !ch.HasUser(myself) {
 			ch.Join(myself)
-			u.syncMMChannel(channelID, u.br.GetChannelName(channelID))
+			u.syncChannel(channelID, u.br.GetChannelName(channelID))
 		}
 	}
 	ghost := u.createUserFromInfo(sender)
@@ -188,12 +133,12 @@ func (u *User) getMessageChannel(channelID, channelType string, sender *bridge.U
 		ch.Join(ghost)
 	}
 	// excluded channel
-	if stringInSlice(ch.String(), u.Cfg.JoinExclude) {
+	if stringInSlice(ch.String(), u.v.GetStringSlice(u.br.Protocol()+".joinexclude")) {
 		logger.Debugf("channel %s is in JoinExclude, send to &messages", ch.String())
 		ch = u.Srv.Channel("&messages")
 	}
 	// not in included channel
-	if len(u.Cfg.JoinInclude) > 0 && !stringInSlice(ch.String(), u.Cfg.JoinInclude) {
+	if len(u.v.GetStringSlice(u.br.Protocol()+".joininclude")) > 0 && !stringInSlice(ch.String(), u.v.GetStringSlice(u.br.Protocol()+".joininclude")) {
 		logger.Debugf("channel %s is not in JoinInclude, send to &messages", ch.String())
 		ch = u.Srv.Channel("&messages")
 	}
@@ -249,7 +194,7 @@ func (u *User) handleChannelCreateEvent(event *bridge.ChannelCreateEvent) {
 
 	logger.Debugf("ACTION_CHANNEL_CREATED adding myself to %s (%s)", u.br.GetChannelName(event.ChannelID), event.ChannelID)
 
-	u.syncMMChannel(event.ChannelID, u.br.GetChannelName(event.ChannelID))
+	u.syncChannel(event.ChannelID, u.br.GetChannelName(event.ChannelID))
 }
 
 func (u *User) handleChannelDeleteEvent(event *bridge.ChannelDeleteEvent) {
@@ -260,42 +205,25 @@ func (u *User) handleChannelDeleteEvent(event *bridge.ChannelDeleteEvent) {
 	ch.Part(u, "")
 }
 
-func (u *User) loginToMattermost() error {
-	cred := mattermost.Credentials{
-		Login:  u.Credentials.Login,
-		Pass:   u.Credentials.Pass,
-		Team:   u.Credentials.Team,
-		Server: u.Credentials.Server,
-	}
-
-	eventChan := make(chan *bridge.Event)
-	br, _, err := mattermost.New(u.MmInfo.Cfg, cred, eventChan, u.addUsersToChannels)
-	if err != nil {
-		return err
-	}
-
-	u.br = br
-
-	u.connected = true
-
-	go u.handleEventChan(eventChan)
-
-	return nil
+func (u *User) CreateUserFromInfo(info *bridge.UserInfo) *User {
+	return u.createUserFromInfo(info)
 }
 
-func (u *User) createService(nick string, what string) {
-	service := &User{
-		UserInfo: &bridge.UserInfo{
-			Nick:  nick,
-			User:  nick,
-			Real:  what,
-			Host:  "service",
-			Ghost: true,
-		},
-		channels: map[Channel]struct{}{},
+func (u *User) CreateUsersFromInfo(info []*bridge.UserInfo) []*User {
+	var users []*User
+
+	for _, userinfo := range info {
+		if userinfo.Me {
+			continue
+		}
+
+		userinfo := userinfo
+		ghost := NewUser(u.Conn)
+		ghost.UserInfo = userinfo
+		users = append(users, ghost)
 	}
 
-	u.Srv.Add(service)
+	return users
 }
 
 func (u *User) createUserFromInfo(info *bridge.UserInfo) *User {
@@ -322,10 +250,6 @@ func (u *User) addUsersToChannel(users []*User, channel string, channelID string
 }
 
 func (u *User) addUsersToChannels() {
-	for !u.connected {
-		time.Sleep(time.Millisecond * 500)
-	}
-
 	srv := u.Srv
 	throttle := time.NewTicker(time.Millisecond * 50)
 
@@ -333,20 +257,12 @@ func (u *User) addUsersToChannels() {
 	// add all users, also who are not on channels
 	ch := srv.Channel("&users")
 
-	var batchJoins []*User
+	// create and join the users
+	users := u.CreateUsersFromInfo(u.br.GetUsers())
+	srv.BatchAdd(users)
+	u.addUsersToChannel(users, "&users", "&users")
 
-	for _, bruser := range u.br.GetUsers() {
-		if bruser.Me {
-			continue
-		}
-
-		batchJoins = append(batchJoins, u.createUserFromInfo(bruser))
-		//		ghost := u.createUserFromInfo(bruser)
-		//		u.addUserToChannel(ghost, "&users", "&users")
-	}
-
-	u.addUsersToChannel(batchJoins, "&users", "&users")
-
+	// join ourself
 	ch.Join(u)
 
 	// channel that receives messages from channels not joined on irc
@@ -378,11 +294,11 @@ func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(string, string) {
 
 	channelName := mmchannel.Name
 
-	if mmchannel.TeamID != u.br.GetMe().TeamID || u.Cfg.PrefixMainTeam {
+	if mmchannel.TeamID != u.br.GetMe().TeamID || u.v.GetBool(u.br.Protocol()+".prefixmainteam") {
 		channelName = u.br.GetTeamName(mmchannel.TeamID) + "/" + mmchannel.Name
 	}
 
-	u.syncMMChannel(mmchannel.ID, channelName)
+	u.syncChannel(mmchannel.ID, channelName)
 	ch := u.Srv.Channel(mmchannel.ID)
 
 	return ch.SpoofMessage
@@ -441,7 +357,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			}
 		}
 
-		if !u.Cfg.DisableAutoView {
+		if !u.v.GetBool(u.br.Protocol() + ".disableautoview") {
 			u.br.UpdateLastViewed(brchannel.ID)
 		}
 	}
@@ -479,8 +395,7 @@ func (u *User) MsgSpoofUser(sender *User, rcvuser string, msg string) {
 	}
 }
 
-// sync IRC with mattermost channel state
-func (u *User) syncMMChannel(id string, name string) {
+func (u *User) syncChannel(id string, name string) {
 	users, err := u.br.GetChannelUsers(id)
 	if err != nil {
 		fmt.Println(err)
@@ -489,56 +404,65 @@ func (u *User) syncMMChannel(id string, name string) {
 
 	srv := u.Srv
 
-	var batchUsers []*User
-
-	for _, ghost := range users {
-		if ghost.Me {
-			continue
-		}
-
-		batchUsers = append(batchUsers, u.createUserFromInfo(ghost))
-		//		u.addRealUserToChannel(u.createUserFromInfo(ghost), "#"+name, id)
-	}
-
+	// create and join the users
+	batchUsers := u.CreateUsersFromInfo(users)
+	srv.BatchAdd(batchUsers)
+	u.addUsersToChannel(batchUsers, "&users", "&users")
 	u.addUsersToChannel(batchUsers, "#"+name, id)
 
-	for _, ghost := range users {
-		if !ghost.Me {
-			continue
-		}
-
-		ch := srv.Channel(id)
-		// only join when we're not yet on the channel
-		if ch.HasUser(u) {
-			break
-		}
-
+	// add myself
+	ch := srv.Channel(id)
+	if !ch.HasUser(u) {
 		logger.Debugf("syncMMChannel adding myself to %s (id: %s)", name, id)
-
-		if stringInSlice(ch.String(), u.Cfg.JoinExclude) {
-			continue
+		if !stringInSlice(ch.String(), u.v.GetStringSlice(u.br.Protocol()+".joinexclude")) {
+			ch.Join(u)
+			svc, _ := srv.HasUser(u.br.Protocol())
+			ch.Topic(svc, u.br.Topic(ch.ID()))
 		}
-
-		ch.Join(u)
-
-		svc, _ := srv.HasUser(u.br.Protocol())
-
-		ch.Topic(svc, u.br.Topic(ch.ID()))
 	}
 }
 
-func (u *User) isValidMMServer(server string) bool {
-	if len(u.Cfg.AllowedServers) == 0 {
+func (u *User) isValidServer(server, protocol string) bool {
+	if len(u.v.GetStringSlice(protocol+".restrict")) == 0 {
 		return true
 	}
 
-	logger.Debugf("allowedservers: %s", u.Cfg.AllowedServers)
+	logger.Debugf("restrict: %s", u.v.GetStringSlice(protocol+".restrict"))
 
-	for _, srv := range u.Cfg.AllowedServers {
+	for _, srv := range u.v.GetStringSlice(protocol + ".restrict") {
 		if srv == server {
 			return true
 		}
 	}
 
 	return false
+}
+
+func (u *User) loginTo(protocol string) error {
+	var err error
+
+	eventChan := make(chan *bridge.Event)
+
+	switch protocol {
+	case "slack":
+		u.br, err = slack.New(u.v, u.Credentials, eventChan, u.addUsersToChannels)
+	case "mattermost":
+		u.br, _, err = mattermost.New(u.v, u.Credentials, eventChan, u.addUsersToChannels)
+	}
+
+	if err != nil {
+		return err
+	}
+
+	go u.handleEventChan(eventChan)
+
+	return nil
+}
+
+// nolint:unparam,unused
+func (u *User) logoutFrom(protocol string) error {
+	logger.Debug("logging out from", protocol)
+
+	u.Srv.Logout(u)
+	return nil
 }

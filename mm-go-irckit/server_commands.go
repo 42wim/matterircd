@@ -124,18 +124,18 @@ func CmdJoin(s Server, u *User, msg *irc.Message) error {
 
 		logger.Debugf("Join channel %s, id %s, err: %v", channelName, channelID, err)
 
-		sync = u.syncMMChannel
-		/*		if u.br.Protocol() == "mattermost" {
-					sync = u.syncMMChannel
-				} else {
-					sync = u.syncSlackChannel
-				}
-		*/
+		sync = u.syncChannel
 
+		/*u.v.GetStringSlice(u.br.Protocol()+".joinexclude")
+		u.v.Set(key string, value interface{})
+		*/
 		// if we joined, remove channel from exclude and add to include
-		u.Cfg.JoinExclude = removeStringInSlice(channel, u.Cfg.JoinExclude)
-		if len(u.Cfg.JoinInclude) > 0 {
-			u.Cfg.JoinInclude = append(u.Cfg.JoinInclude, channel)
+		u.v.Set(u.br.Protocol()+".joinexclude", removeStringInSlice(channel, u.v.GetStringSlice(u.br.Protocol()+".joinexclude")))
+
+		if len(u.v.GetStringSlice(u.br.Protocol()+".joininclude")) > 0 {
+			channels := u.v.GetStringSlice(u.br.Protocol() + ".joininclude")
+			channels = append(channels, channel)
+			u.v.Set(u.br.Protocol()+".joininclude", channels)
 		}
 
 		ch := s.Channel(channelID)
@@ -292,8 +292,8 @@ func CmdPart(s Server, u *User, msg *irc.Message) error {
 		}
 		// first part on irc
 		ch.Part(u, msg.Trailing)
-		// now part on mattermost
-		if !u.Cfg.PartFake {
+		// now part on mattermost/slack
+		if !u.v.GetBool(u.br.Protocol() + ".PartFake") {
 			err = u.br.Part(ch.ID())
 			if err != nil {
 				return err
@@ -303,7 +303,8 @@ func CmdPart(s Server, u *User, msg *irc.Message) error {
 		for _, k := range ch.Users() {
 			ch.Part(k, "")
 			// if we parted, remove channel from include
-			u.Cfg.JoinInclude = removeStringInSlice(chName, u.Cfg.JoinInclude)
+			u.v.Set(u.br.Protocol()+".joininclude",
+				removeStringInSlice(chName, u.v.GetStringSlice(u.br.Protocol()+".joininclude")))
 		}
 	}
 
