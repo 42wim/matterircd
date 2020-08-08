@@ -12,7 +12,7 @@ var Logger *logrus.Entry
 
 func LoadConfig(cfgfile string) (*viper.Viper, error) {
 	v := viper.New()
-	viper.SetConfigFile(cfgfile)
+	v.SetConfigFile(cfgfile)
 
 	v.SetEnvPrefix("matterircd")
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_", "-", "_"))
