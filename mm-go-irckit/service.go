@@ -73,7 +73,7 @@ func login(u *User, toUser *User, args []string, service string) {
 		u.inprogress = true
 		defer func() { u.inprogress = false }()
 
-		err = u.loginToSlack()
+		err = u.loginTo("slack")
 		if err != nil {
 			u.MsgUser(toUser, err.Error())
 			return
@@ -140,7 +140,7 @@ func login(u *User, toUser *User, args []string, service string) {
 		return
 	}
 
-	if !u.isValidMMServer(cred.Server) {
+	if !u.isValidServer(cred.Server, service) {
 		u.MsgUser(toUser, "not allowed to connect to "+cred.Server)
 		return
 	}
@@ -155,7 +155,7 @@ func login(u *User, toUser *User, args []string, service string) {
 
 	u.Credentials = cred
 
-	err := u.loginToMattermost()
+	err := u.loginTo("mattermost")
 	if err != nil {
 		u.MsgUser(toUser, err.Error())
 		return

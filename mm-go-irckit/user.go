@@ -49,8 +49,7 @@ type User struct {
 
 	v *viper.Viper
 
-	Info
-	//	SlackInfo
+	UserBridge
 }
 
 func (u *User) ID() string {
@@ -234,4 +233,15 @@ func (u *User) Decode() {
 			u.DecodeCh <- msg
 		}
 	}
+}
+
+func (u *User) createService(nick string, what string) {
+	u.CreateUserFromInfo(
+		&bridge.UserInfo{
+			Nick:  nick,
+			User:  nick,
+			Real:  what,
+			Host:  "service",
+			Ghost: true,
+		})
 }

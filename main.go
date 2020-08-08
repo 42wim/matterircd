@@ -148,7 +148,8 @@ func start(socket net.Listener) {
 
 			logger.Infof("New connection: %s", conn.RemoteAddr())
 
-			err = newsrv.Connect(irckit.NewUserBridge(conn, newsrv, v))
+			user := irckit.NewUserBridge(conn, newsrv, v)
+			err = newsrv.Connect(user)
 			if err != nil {
 				logger.Errorf("Failed to join: %v", err)
 				return

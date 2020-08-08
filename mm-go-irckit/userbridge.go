@@ -8,6 +8,7 @@ import (
 
 	"github.com/42wim/matterircd/bridge"
 	"github.com/42wim/matterircd/bridge/mattermost"
+	"github.com/42wim/matterircd/bridge/slack"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/mattermost/mattermost-server/model"
 	"github.com/muesli/reflow/wordwrap"
@@ -15,7 +16,7 @@ import (
 	"github.com/spf13/viper"
 )
 
-type Info struct {
+type UserBridge struct {
 	Srv         Server
 	Credentials bridge.Credentials
 	br          bridge.Bridger // nolint:structcheck
@@ -204,33 +205,25 @@ func (u *User) handleChannelDeleteEvent(event *bridge.ChannelDeleteEvent) {
 	ch.Part(u, "")
 }
 
-func (u *User) loginToMattermost() error {
-	eventChan := make(chan *bridge.Event)
-	br, _, err := mattermost.New(u.v, u.Credentials, eventChan, u.addUsersToChannels)
-	if err != nil {
-		return err
-	}
-
-	u.br = br
-
-	go u.handleEventChan(eventChan)
-
-	return nil
+func (u *User) CreateUserFromInfo(info *bridge.UserInfo) *User {
+	return u.createUserFromInfo(info)
 }
 
-func (u *User) createService(nick string, what string) {
-	service := &User{
-		UserInfo: &bridge.UserInfo{
-			Nick:  nick,
-			User:  nick,
-			Real:  what,
-			Host:  "service",
-			Ghost: true,
-		},
-		channels: map[Channel]struct{}{},
+func (u *User) CreateUsersFromInfo(info []*bridge.UserInfo) []*User {
+	var users []*User
+
+	for _, userinfo := range info {
+		if userinfo.Me {
+			continue
+		}
+
+		userinfo := userinfo
+		ghost := NewUser(u.Conn)
+		ghost.UserInfo = userinfo
+		users = append(users, ghost)
 	}
 
-	u.Srv.Add(service)
+	return users
 }
 
 func (u *User) createUserFromInfo(info *bridge.UserInfo) *User {
@@ -264,20 +257,12 @@ func (u *User) addUsersToChannels() {
 	// add all users, also who are not on channels
 	ch := srv.Channel("&users")
 
-	var batchJoins []*User
+	// create and join the users
+	users := u.CreateUsersFromInfo(u.br.GetUsers())
+	srv.BatchAdd(users)
+	u.addUsersToChannel(users, "&users", "&users")
 
-	for _, bruser := range u.br.GetUsers() {
-		if bruser.Me {
-			continue
-		}
-
-		batchJoins = append(batchJoins, u.createUserFromInfo(bruser))
-		//		ghost := u.createUserFromInfo(bruser)
-		//		u.addUserToChannel(ghost, "&users", "&users")
-	}
-
-	u.addUsersToChannel(batchJoins, "&users", "&users")
-
+	// join ourself
 	ch.Join(u)
 
 	// channel that receives messages from channels not joined on irc
@@ -410,7 +395,6 @@ func (u *User) MsgSpoofUser(sender *User, rcvuser string, msg string) {
 	}
 }
 
-// sync IRC with mattermost channel state
 func (u *User) syncChannel(id string, name string) {
 	users, err := u.br.GetChannelUsers(id)
 	if err != nil {
@@ -420,56 +404,64 @@ func (u *User) syncChannel(id string, name string) {
 
 	srv := u.Srv
 
-	var batchUsers []*User
-
-	for _, ghost := range users {
-		if ghost.Me {
-			continue
-		}
-
-		batchUsers = append(batchUsers, u.createUserFromInfo(ghost))
-		//		u.addRealUserToChannel(u.createUserFromInfo(ghost), "#"+name, id)
-	}
-
+	// create and join the users
+	batchUsers := u.CreateUsersFromInfo(users)
+	srv.BatchAdd(batchUsers)
+	u.addUsersToChannel(batchUsers, "&users", "&users")
 	u.addUsersToChannel(batchUsers, "#"+name, id)
 
-	for _, ghost := range users {
-		if !ghost.Me {
-			continue
-		}
-
-		ch := srv.Channel(id)
-		// only join when we're not yet on the channel
-		if ch.HasUser(u) {
-			break
-		}
-
+	// add myself
+	ch := srv.Channel(id)
+	if !ch.HasUser(u) {
 		logger.Debugf("syncMMChannel adding myself to %s (id: %s)", name, id)
-
-		if stringInSlice(ch.String(), u.v.GetStringSlice(u.br.Protocol()+".joinexclude")) {
-			continue
+		if !stringInSlice(ch.String(), u.v.GetStringSlice(u.br.Protocol()+".joinexclude")) {
+			ch.Join(u)
+			svc, _ := srv.HasUser(u.br.Protocol())
+			ch.Topic(svc, u.br.Topic(ch.ID()))
 		}
-
-		ch.Join(u)
-
-		svc, _ := srv.HasUser(u.br.Protocol())
-
-		ch.Topic(svc, u.br.Topic(ch.ID()))
 	}
 }
 
-func (u *User) isValidMMServer(server string) bool {
-	if len(u.v.GetStringSlice("allowedservers")) == 0 {
+func (u *User) isValidServer(server, protocol string) bool {
+	if len(u.v.GetStringSlice(protocol+".restrict")) == 0 {
 		return true
 	}
 
-	logger.Debugf("allowedservers: %s", u.v.GetStringSlice("allowedservers"))
+	logger.Debugf("restrict: %s", u.v.GetStringSlice(protocol+".restrict"))
 
-	for _, srv := range u.v.GetStringSlice("allowedservers") {
+	for _, srv := range u.v.GetStringSlice(protocol + ".restrict") {
 		if srv == server {
 			return true
 		}
 	}
 
 	return false
+}
+
+func (u *User) loginTo(protocol string) error {
+	var err error
+
+	eventChan := make(chan *bridge.Event)
+
+	switch protocol {
+	case "slack":
+		u.br, err = slack.New(u.v, u.Credentials, eventChan, u.addUsersToChannels)
+	case "mattermost":
+		u.br, _, err = mattermost.New(u.v, u.Credentials, eventChan, u.addUsersToChannels)
+	}
+
+	if err != nil {
+		return err
+	}
+
+	go u.handleEventChan(eventChan)
+
+	return nil
+}
+
+func (u *User) logoutFrom(protocol string) error {
+	logger.Debug("logging out from", protocol)
+
+	u.Srv.Logout(u)
+	return nil
 }
