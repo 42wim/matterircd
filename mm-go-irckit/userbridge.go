@@ -127,18 +127,20 @@ func (u *User) getMessageChannel(channelID, channelType string, sender *bridge.U
 	}
 	ghost := u.createUserFromInfo(sender)
 	// join if not in channel
-	if !ch.HasUser(ghost) {
+
+	if !ch.HasUser(ghost) && !ghost.Me {
 		logger.Debugf("User %s is not in channel %s. Joining now", ghost.Nick, ch.String())
 		// ch = u.Srv.Channel("&messages")
 		ch.Join(ghost)
 	}
+
 	// excluded channel
 	if stringInSlice(ch.String(), u.v.GetStringSlice(u.br.Protocol()+".joinexclude")) {
 		logger.Debugf("channel %s is in JoinExclude, send to &messages", ch.String())
 		ch = u.Srv.Channel("&messages")
 	}
 	// not in included channel
-	if len(u.v.GetStringSlice(u.br.Protocol()+".joininclude")) > 0 && !stringInSlice(ch.String(), u.v.GetStringSlice(u.br.Protocol()+".joininclude")) {
+	if !stringInSlice(ch.String(), u.v.GetStringSlice(u.br.Protocol()+".joininclude")) {
 		logger.Debugf("channel %s is not in JoinInclude, send to &messages", ch.String())
 		ch = u.Srv.Channel("&messages")
 	}
@@ -153,16 +155,22 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		        CHANNEL_DIRECT                 = "D"
 				CHANNEL_GROUP                  = "G"
 	*/
+	nick := event.Sender.Nick
+	logger.Debug("in handleChannelMessageEvent")
 	ch := u.getMessageChannel(event.ChannelID, event.ChannelType, event.Sender)
 	if event.Sender.Me {
-		event.Sender.Nick = u.Nick
+		nick = u.Nick
+	}
+
+	if event.ChannelType != "D" && ch.ID() == "&messages" {
+		nick += "/" + u.Srv.Channel(event.ChannelID).String()
 	}
 
 	switch event.MessageType {
 	case "notice":
-		ch.SpoofNotice(event.Sender.Nick, event.Text)
+		ch.SpoofNotice(nick, event.Text)
 	default:
-		ch.SpoofMessage(event.Sender.Nick, event.Text)
+		ch.SpoofMessage(nick, event.Text)
 	}
 }
 
@@ -412,14 +420,38 @@ func (u *User) syncChannel(id string, name string) {
 
 	// add myself
 	ch := srv.Channel(id)
-	if !ch.HasUser(u) {
-		logger.Debugf("syncMMChannel adding myself to %s (id: %s)", name, id)
-		if !stringInSlice(ch.String(), u.v.GetStringSlice(u.br.Protocol()+".joinexclude")) {
-			ch.Join(u)
-			svc, _ := srv.HasUser(u.br.Protocol())
-			ch.Topic(svc, u.br.Topic(ch.ID()))
-		}
+	if !ch.HasUser(u) && u.mayJoin(id) {
+		logger.Debugf("syncChannel adding myself to %s (id: %s)", name, id)
+		ch.Join(u)
+		svc, _ := srv.HasUser(u.br.Protocol())
+		ch.Topic(svc, u.br.Topic(ch.ID()))
 	}
+}
+
+func (u *User) mayJoin(channelID string) bool {
+	ch := u.Srv.Channel(channelID)
+
+	ji := u.v.GetStringSlice(u.br.Protocol() + ".joininclude")
+	je := u.v.GetStringSlice(u.br.Protocol() + ".joinexclude")
+
+	// are we in the joininclude we always are allowed to join
+	if stringInSlice(ch.String(), ji) {
+		return true
+	}
+
+	// if we are not in excluded and we don't have included specified we are always
+	// allowed to join
+	if !stringInSlice(ch.String(), je) && len(ji) == 0 {
+		return true
+	}
+
+	// if we don't have anything specified to include we are allowed
+	if len(ji) == 0 || len(je) == 0 {
+		return true
+	}
+
+	// we are not in the joininclude or in the exclude
+	return false
 }
 
 func (u *User) isValidServer(server, protocol string) bool {
