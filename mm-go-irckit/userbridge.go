@@ -258,6 +258,11 @@ func (u *User) addUsersToChannel(users []*User, channel string, channelID string
 }
 
 func (u *User) addUsersToChannels() {
+	// wait until the bridge is ready
+	for u.br == nil {
+		time.Sleep(time.Millisecond * 500)
+	}
+
 	srv := u.Srv
 	throttle := time.NewTicker(time.Millisecond * 50)
 
