@@ -1,7 +1,5 @@
 # github.com/42wim/matterbridge v1.18.0
 github.com/42wim/matterbridge/matterclient
-# github.com/BurntSushi/toml v0.3.1
-github.com/BurntSushi/toml
 # github.com/blang/semver v3.5.1+incompatible
 github.com/blang/semver
 # github.com/davecgh/go-spew v1.1.1
@@ -10,6 +8,8 @@ github.com/davecgh/go-spew/spew
 github.com/desertbit/timer
 # github.com/dyatlov/go-opengraph v0.0.0-20180429202543-816b6608b3c8
 github.com/dyatlov/go-opengraph/opengraph
+# github.com/fsnotify/fsnotify v1.4.9
+github.com/fsnotify/fsnotify
 # github.com/go-ldap/ldap v3.0.3+incompatible
 github.com/go-ldap/ldap
 # github.com/google/gops v0.3.10
@@ -21,10 +21,23 @@ github.com/gorilla/websocket
 # github.com/hashicorp/golang-lru v0.5.4
 github.com/hashicorp/golang-lru
 github.com/hashicorp/golang-lru/simplelru
+# github.com/hashicorp/hcl v1.0.0
+github.com/hashicorp/hcl
+github.com/hashicorp/hcl/hcl/ast
+github.com/hashicorp/hcl/hcl/parser
+github.com/hashicorp/hcl/hcl/printer
+github.com/hashicorp/hcl/hcl/scanner
+github.com/hashicorp/hcl/hcl/strconv
+github.com/hashicorp/hcl/hcl/token
+github.com/hashicorp/hcl/json/parser
+github.com/hashicorp/hcl/json/scanner
+github.com/hashicorp/hcl/json/token
 # github.com/jpillora/backoff v1.0.0
 github.com/jpillora/backoff
 # github.com/konsorten/go-windows-terminal-sequences v1.0.3
 github.com/konsorten/go-windows-terminal-sequences
+# github.com/magiconair/properties v1.8.1
+github.com/magiconair/properties
 # github.com/matterbridge/logrus-prefixed-formatter v0.5.3-0.20200523233437-d971309a77ba
 github.com/matterbridge/logrus-prefixed-formatter
 # github.com/mattermost/mattermost-server v5.11.1+incompatible
@@ -41,6 +54,8 @@ github.com/mattn/go-isatty
 github.com/mattn/go-runewidth
 # github.com/mgutz/ansi v0.0.0-20170206155736-9520e82c474b
 github.com/mgutz/ansi
+# github.com/mitchellh/mapstructure v1.1.2
+github.com/mitchellh/mapstructure
 # github.com/muesli/reflow v0.1.0
 github.com/muesli/reflow/ansi
 github.com/muesli/reflow/wordwrap
@@ -68,8 +83,21 @@ github.com/slack-go/slack/internal/timex
 github.com/slack-go/slack/slackutilsx
 # github.com/sorcix/irc v1.1.4
 github.com/sorcix/irc
+# github.com/spf13/afero v1.1.2
+github.com/spf13/afero
+github.com/spf13/afero/mem
+# github.com/spf13/cast v1.3.0
+github.com/spf13/cast
+# github.com/spf13/jwalterweatherman v1.0.0
+github.com/spf13/jwalterweatherman
+# github.com/spf13/pflag v1.0.3
+github.com/spf13/pflag
+# github.com/spf13/viper v1.7.0
+github.com/spf13/viper
 # github.com/stretchr/testify v1.5.1
 github.com/stretchr/testify/assert
+# github.com/subosito/gotenv v1.2.0
+github.com/subosito/gotenv
 # go.uber.org/atomic v1.4.0
 go.uber.org/atomic
 # go.uber.org/multierr v1.1.0
@@ -97,8 +125,12 @@ golang.org/x/text/internal/language
 golang.org/x/text/internal/language/compact
 golang.org/x/text/internal/tag
 golang.org/x/text/language
+golang.org/x/text/transform
+golang.org/x/text/unicode/norm
 # gopkg.in/asn1-ber.v1 v1.0.0-20181015200546-f715ec2f112d
 gopkg.in/asn1-ber.v1
+# gopkg.in/ini.v1 v1.51.0
+gopkg.in/ini.v1
 # gopkg.in/natefinch/lumberjack.v2 v2.0.0
 gopkg.in/natefinch/lumberjack.v2
 # gopkg.in/yaml.v2 v2.2.8
