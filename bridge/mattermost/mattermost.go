@@ -8,51 +8,25 @@ import (
 
 	"github.com/42wim/matterbridge/matterclient"
 	"github.com/42wim/matterircd/bridge"
-	"github.com/42wim/matterircd/config"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/mattermost/mattermost-server/model"
 	logger "github.com/sirupsen/logrus"
+	"github.com/spf13/viper"
 )
 
 type Mattermost struct {
 	mc          *matterclient.MMClient
-	cfg         *MmCfg
-	credentials Credentials
+	credentials bridge.Credentials
 	idleStop    chan struct{}
 	eventChan   chan *bridge.Event
+	v           *viper.Viper
 }
 
-type MmCfg struct {
-	AllowedServers     []string
-	SlackSettings      config.Settings
-	MattermostSettings config.Settings
-	DefaultServer      string
-	DefaultTeam        string
-	Insecure           bool
-	SkipTLSVerify      bool
-	JoinExclude        []string
-	JoinInclude        []string
-	PartFake           bool
-	PrefixMainTeam     bool
-	PasteBufferTimeout int
-	DisableAutoView    bool
-	PreferNickname     bool
-	LogLevel           string
-	HideReplies        bool
-}
-
-type Credentials struct {
-	Login  string
-	Team   string
-	Pass   string
-	Server string
-}
-
-func New(cfg *MmCfg, cred Credentials, eventChan chan *bridge.Event, onWsConnect func()) (bridge.Bridger, *matterclient.MMClient, error) {
+func New(v *viper.Viper, cred bridge.Credentials, eventChan chan *bridge.Event, onWsConnect func()) (bridge.Bridger, *matterclient.MMClient, error) {
 	m := &Mattermost{
-		cfg:         cfg,
 		credentials: cred,
 		eventChan:   eventChan,
+		v:           v,
 	}
 
 	mc, err := m.loginToMattermost()
@@ -70,14 +44,15 @@ func New(cfg *MmCfg, cred Credentials, eventChan chan *bridge.Event, onWsConnect
 
 func (m *Mattermost) loginToMattermost() (*matterclient.MMClient, error) {
 	mc := matterclient.New(m.credentials.Login, m.credentials.Pass, m.credentials.Team, m.credentials.Server)
-	if m.cfg.Insecure {
+	if m.v.GetBool("mattermost.Insecure") {
 		mc.Credentials.NoTLS = true
 	}
 
-	mc.Credentials.SkipTLSVerify = m.cfg.SkipTLSVerify
+	mc.Credentials.SkipTLSVerify = m.v.GetBool("mattermost.SkipTLSVerify")
 
-	mc.SetLogLevel(m.cfg.LogLevel)
-	mc.SetLogLevel("debug")
+	if m.v.GetBool("debug") {
+		mc.SetLogLevel("debug")
+	}
 
 	logger.Infof("login as %s (team: %s) on %s", m.credentials.Login, m.credentials.Team, m.credentials.Server)
 
@@ -99,7 +74,7 @@ func (m *Mattermost) loginToMattermost() (*matterclient.MMClient, error) {
 	// do anti idle on town-square, every installation should have this channel
 	channels := m.mc.GetChannels()
 	for _, channel := range channels {
-		if channel.Name == "town-square" && !m.cfg.DisableAutoView {
+		if channel.Name == "town-square" && !m.v.GetBool("mattermost.DisableAutoView") {
 			go m.antiIdle(channel.Id)
 			continue
 		}
@@ -332,10 +307,10 @@ func (m *Mattermost) GetChannelName(channelID string) string {
 	teamName := m.mc.GetTeamName(teamID)
 
 	if channelName != "" {
-		if (teamName != "" && teamID != m.mc.Team.Id) || m.cfg.PrefixMainTeam {
+		if (teamName != "" && teamID != m.mc.Team.Id) || m.v.GetBool("mattermost.PrefixMainTeam") {
 			name = "#" + teamName + "/" + channelName
 		}
-		if teamID == m.mc.Team.Id && !m.cfg.PrefixMainTeam {
+		if teamID == m.mc.Team.Id && !m.v.GetBool("mattermost.PrefixMainTeam") {
 			name = "#" + channelName
 		}
 		if teamID == "G" {
@@ -431,7 +406,7 @@ func (m *Mattermost) createUser(mmuser *model.User) *bridge.UserInfo {
 	}
 
 	nick := mmuser.Username
-	if m.cfg.PreferNickname && isValidNick(mmuser.Nickname) {
+	if m.v.GetBool("mattermost.PreferNickname") && isValidNick(mmuser.Nickname) {
 		nick = mmuser.Nickname
 	}
 
@@ -519,6 +494,7 @@ func (m *Mattermost) wsActionPostSkip(rmsg *model.WebSocketEvent) bool {
 	return false
 }
 
+// nolint:funlen,gocognit,gocyclo
 func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	data := model.PostFromJson(strings.NewReader(rmsg.Data["post"].(string)))
 	props := rmsg.Data
@@ -530,13 +506,14 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		return
 	}
 
+	// nolint:nestif
 	if data.ParentId != "" {
 		parentPost, resp := m.mc.Client.GetPost(data.ParentId, "")
 		if resp.Error != nil {
 			logger.Debugf("Unable to get parent post for %#v", data)
 		} else {
 			parentGhost := m.GetUser(parentPost.UserId)
-			if m.cfg.HideReplies {
+			if m.v.GetBool("mattermost.HideReplies") {
 				data.Message = fmt.Sprintf("%s (re @%s)", data.Message, parentGhost.Nick)
 			} else {
 				data.Message = fmt.Sprintf("%s (re @%s: %s)", data.Message, parentGhost.Nick, parentPost.Message)
@@ -700,7 +677,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	logger.Debugf("%#v", data)
 
 	// updatelastviewed
-	if !m.cfg.DisableAutoView {
+	if !m.v.GetBool("mattermost.DisableAutoView") {
 		m.mc.UpdateLastViewed(data.ChannelId)
 	}
 }
