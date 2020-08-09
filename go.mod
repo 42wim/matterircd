@@ -1,7 +1,7 @@
 module github.com/42wim/matterircd
 
 require (
-	github.com/42wim/matterbridge v1.18.0
+	github.com/42wim/matterbridge v1.18.1-0.20200809194645-dfdffa002733
 	github.com/Masterminds/squirrel v1.1.0 // indirect
 	github.com/blang/semver v3.5.1+incompatible // indirect
 	github.com/davecgh/go-spew v1.1.1
@@ -16,6 +16,7 @@ require (
 	github.com/mattermost/gorp v2.0.0+incompatible // indirect
 	github.com/mattermost/mattermost-server v5.11.1+incompatible
 	github.com/mattn/go-sqlite3 v1.11.0 // indirect
+	github.com/mitchellh/mapstructure v1.1.2
 	github.com/muesli/reflow v0.1.0
 	github.com/nicksnyder/go-i18n v1.9.0 // indirect
 	github.com/schollz/logger v1.2.0
@@ -31,5 +32,6 @@ require (
 )
 
 //replace github.com/nlopes/slack v0.6.0 => github.com/matterbridge/slack v0.1.1-0.20191208194820-95190f11bfb6
+//replace github.com/42wim/matterbridge => ../matterbridge
 
 go 1.13

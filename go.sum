@@ -13,8 +13,8 @@ cloud.google.com/go/storage v1.0.0/go.mod h1:IhtSnM/ZTZV8YYJWCY8RULGVqBDmpoyjwiy
 dmitri.shuralyov.com/gpu/mtl v0.0.0-20190408044501-666a987793e9/go.mod h1:H6x//7gZCb22OMCxBHrMx7a5I7Hp++hsVxbQ4BYO7hU=
 github.com/42wim/go-gitter v0.0.0-20170828205020-017310c2d557 h1:IZtuWGfzQnKnCSu+vl8WGLhpVQ5Uvy3rlSwqXSg+sQg=
 github.com/42wim/go-gitter v0.0.0-20170828205020-017310c2d557/go.mod h1:jL0YSXMs/txjtGJ4PWrmETOk6KUHMDPMshgQZlTeB3Y=
-github.com/42wim/matterbridge v1.18.0 h1:DQ8m8qiZXxrL+ymGBa0OFL+2kGT9Ld8Q9mQBQsdjD04=
-github.com/42wim/matterbridge v1.18.0/go.mod h1:pI0C+DvxlZ2SdxHVUhxcZlL4aUNjO6yZOFj6ZUilN+E=
+github.com/42wim/matterbridge v1.18.1-0.20200809194645-dfdffa002733 h1:nV304Kku444kEf9phTKPi41y7B7N0Ru1jYe1R9qT3As=
+github.com/42wim/matterbridge v1.18.1-0.20200809194645-dfdffa002733/go.mod h1:rEZ16B8bwBt26RaqrQz7hOFRYj3P7DewsUrRP8dzQ8g=
 github.com/Baozisoftware/qrcode-terminal-go v0.0.0-20170407111555-c0650d8dff0f h1:2dk3eOnYllh+wUOuDhOoC2vUVoJF/5z478ryJ+wzEII=
 github.com/Baozisoftware/qrcode-terminal-go v0.0.0-20170407111555-c0650d8dff0f/go.mod h1:4a58ifQTEe2uwwsaqbh3i2un5/CBPg+At/qHpt18Tmk=
 github.com/BurntSushi/toml v0.3.1 h1:WXkYYl6Yr3qBf1K79EBnL4mak0OimBfB0XUf9Vl28OQ=
@@ -86,6 +86,7 @@ github.com/go-redis/redis v6.15.5+incompatible/go.mod h1:NAIEuMOZ/fxfXJIrKDQDz8w
 github.com/go-sql-driver/mysql v1.4.1 h1:g24URVg0OFbNUTx9qqY1IRZ9D9z3iPyi5zKhQZpNwpA=
 github.com/go-sql-driver/mysql v1.4.1/go.mod h1:zAC/RDZ24gD3HViQzih4MyKcchzm+sOG5ZlKdlhCg5w=
 github.com/go-stack/stack v1.8.0/go.mod h1:v0f6uXyyMGvRgIKkXu+yp6POWl0qKG85gN/melR3HDY=
+github.com/go-telegram-bot-api/telegram-bot-api v1.0.1-0.20200524105306-7434b0456e81 h1:FdZThbRF0R+2qgyBl3KCVNWWBmKm68E+stT3rnQ02Ww=
 github.com/go-telegram-bot-api/telegram-bot-api v1.0.1-0.20200524105306-7434b0456e81/go.mod h1:lDm2E64X4OjFdBUA4hlN4mEvbSitvhJdKw7rsA8KHgI=
 github.com/go-test/deep v1.0.4 h1:u2CU3YKy9I2pmu9pX0eq50wCgjfGIt539SqR7FbHiho=
 github.com/go-test/deep v1.0.4/go.mod h1:wGDj63lr65AM2AQyKZd/NYHGb0R+1RLqB8NKt3aSFNA=
@@ -509,8 +510,8 @@ golang.org/x/tools v0.0.0-20200529172331-a64b76657301/go.mod h1:EkVYQZoAsY45+roY
 golang.org/x/xerrors v0.0.0-20190717185122-a985d3407aa7/go.mod h1:I/5z698sn9Ka8TeJc9MKroUUfqBBauWjQqLJ2OPfmY0=
 golang.org/x/xerrors v0.0.0-20191011141410-1b5146add898/go.mod h1:I/5z698sn9Ka8TeJc9MKroUUfqBBauWjQqLJ2OPfmY0=
 golang.org/x/xerrors v0.0.0-20191204190536-9bdfabe68543/go.mod h1:I/5z698sn9Ka8TeJc9MKroUUfqBBauWjQqLJ2OPfmY0=
-gomod.garykim.dev/nc-talk v0.0.1 h1:6mgjcAf5/HMkV0CFGeXVfYHG7FAUCQcGR8eg9oM6fCc=
-gomod.garykim.dev/nc-talk v0.0.1/go.mod h1:0/Ksg0osAYmnWKs1OcCG+gBQ4HU1xiF1699g9B6jWZw=
+gomod.garykim.dev/nc-talk v0.0.2 h1:QagJzL1Ie/sJDachAC42fEXlIh2mK8IDk1/ue0u8IcI=
+gomod.garykim.dev/nc-talk v0.0.2/go.mod h1:0/Ksg0osAYmnWKs1OcCG+gBQ4HU1xiF1699g9B6jWZw=
 google.golang.org/api v0.4.0/go.mod h1:8k5glujaEP+g9n7WNsDg8QP6cUVNI86fCNMcbazEtwE=
 google.golang.org/api v0.7.0/go.mod h1:WtwebWUNSVBH/HAw79HIFXZNqEvBhG+Ra+ax0hx3E3M=
 google.golang.org/api v0.8.0/go.mod h1:o4eAsZoiT+ibD93RtjEohWalFOjRDx6CVaqeizhEnKg=
