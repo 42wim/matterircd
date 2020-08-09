@@ -10,6 +10,7 @@ import (
 	"github.com/42wim/matterircd/bridge"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/mattermost/mattermost-server/model"
+	"github.com/mitchellh/mapstructure"
 	logger "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 )
@@ -33,6 +34,8 @@ func New(v *viper.Viper, cred bridge.Credentials, eventChan chan *bridge.Event, 
 	if err != nil {
 		return nil, nil, err
 	}
+
+	mc.EnableAllEvents()
 
 	m.mc.OnWsConnect = onWsConnect
 	go mc.StatusLoop()
@@ -116,6 +119,8 @@ func (m *Mattermost) handleWsMessage() {
 			m.handleWsActionChannelCreated(message.Raw)
 		case model.WEBSOCKET_EVENT_CHANNEL_DELETED:
 			m.handleWsActionChannelDeleted(message.Raw)
+		case model.WEBSOCKET_EVENT_USER_UPDATED:
+			m.handleWsActionUserUpdated(message.Raw)
 		}
 	}
 }
@@ -835,6 +840,26 @@ func (m *Mattermost) handleWsActionUserRemoved(rmsg *model.WebSocketEvent) {
 	m.eventChan <- event
 }
 
+func (m *Mattermost) handleWsActionUserUpdated(rmsg *model.WebSocketEvent) {
+	spew.Dump(rmsg)
+	var info model.User
+
+	err := Decode(rmsg.Data["user"], &info)
+	if err != nil {
+		fmt.Println("decode", err)
+		return
+	}
+
+	event := &bridge.Event{
+		Type: "user_updated",
+		Data: &bridge.UserUpdateEvent{
+			User: m.createUser(&info),
+		},
+	}
+
+	m.eventChan <- event
+}
+
 func (m *Mattermost) handleWsActionChannelCreated(rmsg *model.WebSocketEvent) {
 	spew.Dump(rmsg)
 	channelID, ok := rmsg.Data["channel_id"].(string)
@@ -923,4 +948,19 @@ func (m *Mattermost) GetPosts(channelID string, limit int) interface{} {
 
 func (m *Mattermost) GetChannelID(name, teamID string) string {
 	return m.mc.GetChannelId(name, teamID)
+}
+
+func Decode(input interface{}, output interface{}) error {
+	config := &mapstructure.DecoderConfig{
+		Metadata: nil,
+		Result:   output,
+		TagName:  "json",
+	}
+
+	decoder, err := mapstructure.NewDecoder(config)
+	if err != nil {
+		return err
+	}
+
+	return decoder.Decode(input)
 }

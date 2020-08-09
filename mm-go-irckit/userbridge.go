@@ -59,6 +59,8 @@ func (u *User) handleEventChan(events chan *bridge.Event) {
 			u.handleChannelCreateEvent(e)
 		case *bridge.ChannelDeleteEvent:
 			u.handleChannelDeleteEvent(e)
+		case *bridge.UserUpdateEvent:
+			u.handleUserUpdateEvent(e)
 		}
 	}
 }
@@ -217,6 +219,10 @@ func (u *User) handleChannelDeleteEvent(event *bridge.ChannelDeleteEvent) {
 	ch.Part(u, "")
 }
 
+func (u *User) handleUserUpdateEvent(event *bridge.UserUpdateEvent) {
+	u.updateUserFromInfo(event.User)
+}
+
 func (u *User) CreateUserFromInfo(info *bridge.UserInfo) *User {
 	return u.createUserFromInfo(info)
 }
@@ -238,15 +244,37 @@ func (u *User) CreateUsersFromInfo(info []*bridge.UserInfo) []*User {
 	return users
 }
 
-func (u *User) createUserFromInfo(info *bridge.UserInfo) *User {
-	if ghost, ok := u.Srv.HasUser(info.Nick); ok {
+func (u *User) updateUserFromInfo(info *bridge.UserInfo) *User {
+	if ghost, ok := u.Srv.HasUserID(info.User); ok {
+		if ghost.Nick != info.Nick {
+			changeMsg := &irc.Message{
+				Prefix:  ghost.Prefix(),
+				Command: irc.NICK,
+				Params:  []string{info.Nick},
+			}
+			u.Encode(changeMsg)
+		}
+
+		ghost.UserInfo = info
+
 		return ghost
 	}
 
-	ghost := &User{
-		UserInfo: info,
-		channels: map[Channel]struct{}{},
+	ghost := NewUser(u.Conn)
+	ghost.UserInfo = info
+
+	u.Srv.Add(ghost)
+
+	return ghost
+}
+
+func (u *User) createUserFromInfo(info *bridge.UserInfo) *User {
+	if ghost, ok := u.Srv.HasUserID(info.User); ok {
+		return ghost
 	}
+
+	ghost := NewUser(u.Conn)
+	ghost.UserInfo = info
 
 	u.Srv.Add(ghost)
 
