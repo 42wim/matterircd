@@ -1,4 +1,4 @@
-# github.com/42wim/matterbridge v1.18.0
+# github.com/42wim/matterbridge v1.18.1-0.20200809194645-dfdffa002733
 github.com/42wim/matterbridge/matterclient
 # github.com/blang/semver v3.5.1+incompatible
 github.com/blang/semver
