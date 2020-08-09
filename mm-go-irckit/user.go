@@ -53,7 +53,8 @@ type User struct {
 }
 
 func (u *User) ID() string {
-	return strings.ToLower(u.Nick)
+	// return strings.ToLower(u.Nick)
+	return strings.ToLower(u.User)
 }
 
 func (u *User) Prefix() *irc.Prefix {
