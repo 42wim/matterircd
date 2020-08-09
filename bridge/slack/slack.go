@@ -174,8 +174,9 @@ func (s *Slack) MsgChannel(channelID, text string) error {
 }
 
 func (s *Slack) Topic(channelID string) string {
-	info, err := s.sc.GetConversationInfo(channelID, false)
+	info, err := s.sc.GetConversationInfo(strings.ToUpper(channelID), false)
 	if err != nil {
+		logger.Errorf("error getting topic of %s: %s", channelID, err)
 		return ""
 	}
 
