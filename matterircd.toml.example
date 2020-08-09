@@ -4,6 +4,9 @@ Bind = "127.0.0.1:6667"
 #enable debug logging (default false)
 Debug = false
 
+#enable trace logging (default false)
+Trace = false
+
 #interface:port to bind to. (e.g 127.0.0.1:6697) (deault "")
 TLSBind = "127.0.0.1:6697"
 
@@ -84,9 +87,9 @@ HideReplies = false
 [slack]
 #deny specific users from connecting.
 #As we only connect using tokens, this will first do a ccnnection to see what username the token is from. If this
-#username is on the denylist the user will be disconnected.
+#username is on the DenyUsers the user will be disconnected.
 #Array, default empty 
-DenyListUser = ["username"]
+DenyUsers = ["username"]
 
 #https://get.slack.help/hc/en-us/articles/212281468-Direct-messages-and-group-DMs
 #Only join multiple person Direct messages when someone talks. This stops from cluttering your 
