@@ -67,6 +67,12 @@ func main() {
 		irckit.SetLogLevel("debug")
 	}
 
+	if v.GetBool("trace") {
+		logger.Info("enabling trace")
+		ourlog.Level = logrus.TraceLevel
+		irckit.SetLogLevel("trace")
+	}
+
 	if v.GetBool("version") {
 		fmt.Printf("version: %s %s\n", version, githash)
 		return
