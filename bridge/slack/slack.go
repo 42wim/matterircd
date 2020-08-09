@@ -9,7 +9,7 @@ import (
 
 	"github.com/42wim/matterircd/bridge"
 	"github.com/davecgh/go-spew/spew"
-	"github.com/schollz/logger"
+	logger "github.com/sirupsen/logrus"
 	"github.com/slack-go/slack"
 	"github.com/spf13/viper"
 )
@@ -37,6 +37,14 @@ func New(v *viper.Viper, cred bridge.Credentials, eventChan chan *bridge.Event, 
 	}
 
 	var err error
+
+	if v.GetBool("debug") {
+		logger.SetLevel(logger.DebugLevel)
+	}
+
+	if v.GetBool("trace") {
+		logger.SetLevel(logger.TraceLevel)
+	}
 
 	s.sc, err = s.loginToSlack()
 	if err != nil {
@@ -464,6 +472,7 @@ func (s *Slack) loginToSlack() (*slack.Client, error) {
 
 func (s *Slack) handleSlack() {
 	for msg := range s.rtm.IncomingEvents {
+		logger.Tracef("handleSlack %s", spew.Sdump(msg))
 		switch ev := msg.Data.(type) {
 		case *slack.MessageEvent:
 			switch ev.SubType {

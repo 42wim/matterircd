@@ -30,6 +30,16 @@ func New(v *viper.Viper, cred bridge.Credentials, eventChan chan *bridge.Event, 
 		v:           v,
 	}
 
+	if v.GetBool("debug") {
+		logger.SetLevel(logger.DebugLevel)
+	}
+
+	if v.GetBool("trace") {
+		logger.SetLevel(logger.TraceLevel)
+	}
+
+	fmt.Println("loggerlevel:", logger.GetLevel())
+
 	mc, err := m.loginToMattermost()
 	if err != nil {
 		return nil, nil, err
@@ -53,9 +63,11 @@ func (m *Mattermost) loginToMattermost() (*matterclient.MMClient, error) {
 
 	mc.Credentials.SkipTLSVerify = m.v.GetBool("mattermost.SkipTLSVerify")
 
-	if m.v.GetBool("debug") {
-		mc.SetLogLevel("debug")
-	}
+	/*
+		if m.v.GetBool("debug") {
+			mc.SetLogLevel("debug")
+		}
+	*/
 
 	logger.Infof("login as %s (team: %s) on %s", m.credentials.Login, m.credentials.Team, m.credentials.Server)
 
@@ -87,7 +99,6 @@ func (m *Mattermost) loginToMattermost() (*matterclient.MMClient, error) {
 }
 
 func (m *Mattermost) handleWsMessage() {
-	fmt.Println("HANDLEWSMESSAGE")
 	updateChannelsThrottle := time.NewTicker(time.Second * 60)
 
 	for {
@@ -101,10 +112,9 @@ func (m *Mattermost) handleWsMessage() {
 		message := <-m.mc.MessageChan
 
 		logger.Debugf("MMUser WsReceiver: %#v", message.Raw)
+		logger.Tracef("handleWsMessage %s", spew.Sdump(message))
 		// check if we have the users/channels in our cache. If not update
 		m.checkWsActionMessage(message.Raw, updateChannelsThrottle)
-
-		fmt.Printf("MSGEVENT %#v\n", message.Raw)
 
 		switch message.Raw.Event {
 		case model.WEBSOCKET_EVENT_POSTED:
@@ -183,13 +193,12 @@ func (m *Mattermost) Join(channelName string) (string, string, error) {
 	channelID := m.mc.GetChannelId(channelName, teamID)
 
 	err := m.mc.JoinChannel(channelID)
-	logger.Debugf("mm: Join channel %s, id %s, err: %v", channelName, channelID, err)
+	logger.Debugf("join channel %s, id %s, err: %v", channelName, channelID, err)
 	if err != nil {
 		return "", "", fmt.Errorf("cannot join channel (+i)")
 	}
 
 	topic := m.mc.GetChannelHeader(channelID)
-	// sync = m.syncMMChannel
 
 	return channelID, topic, nil
 }
@@ -508,7 +517,6 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	data := model.PostFromJson(strings.NewReader(rmsg.Data["post"].(string)))
 	props := rmsg.Data
 	extraProps := model.StringInterfaceFromJson(strings.NewReader(rmsg.Data["post"].(string)))["props"].(map[string]interface{})
-	spew.Dump(data)
 
 	logger.Debugf("handleWsActionPost() receiving userid %s", data.UserId)
 	if m.wsActionPostSkip(rmsg) {
@@ -519,7 +527,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	if data.ParentId != "" {
 		parentPost, resp := m.mc.Client.GetPost(data.ParentId, "")
 		if resp.Error != nil {
-			logger.Debugf("Unable to get parent post for %#v", data)
+			logger.Errorf("Unable to get parent post for %#v", data)
 		} else {
 			parentGhost := m.GetUser(parentPost.UserId)
 			if m.v.GetBool("mattermost.HideReplies") {
@@ -589,14 +597,6 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	}
 
 	msgs := strings.Split(data.Message, "\n")
-
-	// append channel name where messages are sent from
-
-	/*
-		if props["channel_type"] != "D" && ch.ID() == "&messages" {
-			spoofUsername += "/" + u.Srv.Channel(data.ChannelId).String()
-		}
-	*/
 
 	channelType := ""
 	if t, ok := props["channel_type"].(string); ok {
@@ -784,7 +784,6 @@ func (m *Mattermost) wsActionPostJoinLeave(data *model.Post, extraProps map[stri
 }
 
 func (m *Mattermost) handleWsActionUserAdded(rmsg *model.WebSocketEvent) {
-	spew.Dump(rmsg)
 	userID, ok := rmsg.Data["user_id"].(string)
 	if !ok {
 		return
@@ -807,7 +806,6 @@ func (m *Mattermost) handleWsActionUserAdded(rmsg *model.WebSocketEvent) {
 }
 
 func (m *Mattermost) handleWsActionUserRemoved(rmsg *model.WebSocketEvent) {
-	spew.Dump(rmsg)
 	userID, ok := rmsg.Data["user_id"].(string)
 	if !ok {
 		userID = rmsg.Broadcast.UserId
@@ -835,13 +833,10 @@ func (m *Mattermost) handleWsActionUserRemoved(rmsg *model.WebSocketEvent) {
 		},
 	}
 
-	spew.Dump("event before", event)
-
 	m.eventChan <- event
 }
 
 func (m *Mattermost) handleWsActionUserUpdated(rmsg *model.WebSocketEvent) {
-	spew.Dump(rmsg)
 	var info model.User
 
 	err := Decode(rmsg.Data["user"], &info)
@@ -861,7 +856,6 @@ func (m *Mattermost) handleWsActionUserUpdated(rmsg *model.WebSocketEvent) {
 }
 
 func (m *Mattermost) handleWsActionChannelCreated(rmsg *model.WebSocketEvent) {
-	spew.Dump(rmsg)
 	channelID, ok := rmsg.Data["channel_id"].(string)
 	if !ok {
 		return
@@ -878,7 +872,6 @@ func (m *Mattermost) handleWsActionChannelCreated(rmsg *model.WebSocketEvent) {
 }
 
 func (m *Mattermost) handleWsActionChannelDeleted(rmsg *model.WebSocketEvent) {
-	spew.Dump(rmsg)
 	channelID, ok := rmsg.Data["channel_id"].(string)
 	if !ok {
 		return
