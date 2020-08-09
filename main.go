@@ -46,7 +46,6 @@ func main() {
 	// TLS related cfg
 	flag.String("tlsbind", "", "interface:port to bind to. (e.g 127.0.0.1:6697)")
 	flag.String("tlsdir", ".", "directory to look for key.pem and cert.pem.")
-	flag.Parse()
 
 	// Attempt to load values from the config file
 	if _, err := os.Stat(*flagConfig); err == nil {
