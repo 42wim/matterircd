@@ -45,6 +45,9 @@ type Server interface {
 	// HasUser returns an existing User with a given Nick.
 	HasUser(string) (*User, bool)
 
+	// HasUserID returns an existing User with a given ID
+	HasUserID(string) (*User, bool)
+
 	// RenameUser changes the Nick of a User if the new name is available.
 	// Returns whether the rename was was successful.
 	RenameUser(*User, string) bool
@@ -163,7 +166,20 @@ func (s *server) Prefix() *irc.Prefix {
 // HasUser returns whether a given user is in the server.
 func (s *server) HasUser(nick string) (*User, bool) {
 	s.RLock()
-	u, exists := s.users[ID(nick)]
+	defer s.RUnlock()
+	for _, u := range s.users {
+		u := u
+		if u.Nick == nick {
+			return u, true
+		}
+	}
+	//	u, exists := s.users[ID(nick)]
+	return nil, false
+}
+
+func (s *server) HasUserID(userID string) (*User, bool) {
+	s.RLock()
+	u, exists := s.users[strings.ToLower(userID)]
 	s.RUnlock()
 	return u, exists
 }

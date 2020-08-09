@@ -133,6 +133,10 @@ type FileEvent struct {
 	Files       []*File
 }
 
+type UserUpdateEvent struct {
+	User *UserInfo
+}
+
 type File struct {
 	Name string
 }
