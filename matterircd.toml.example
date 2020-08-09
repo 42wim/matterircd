@@ -82,11 +82,11 @@ HideReplies = false
 ##### SLACK EXAMPLE #########
 #############################
 [slack]
-#Blacklist specific users from connecting.
+#deny specific users from connecting.
 #As we only connect using tokens, this will first do a ccnnection to see what username the token is from. If this
-#username is on the blacklist the user will be disconnected.
+#username is on the denylist the user will be disconnected.
 #Array, default empty 
-BlackListUser = ["username"]
+DenyListUser = ["username"]
 
 #https://get.slack.help/hc/en-us/articles/212281468-Direct-messages-and-group-DMs
 #Only join multiple person Direct messages when someone talks. This stops from cluttering your 

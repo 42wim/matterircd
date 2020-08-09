@@ -87,9 +87,12 @@ func (u *User) handleChannelAddEvent(event *bridge.ChannelAddEvent) {
 		}
 
 		ghost := u.createUserFromInfo(added)
+
 		ch.Join(ghost)
 
-		ch.SpoofMessage("system", "added "+added.Nick+" to the channel by "+event.Adder.Nick)
+		if event.Adder != nil {
+			ch.SpoofMessage("system", "added "+added.Nick+" to the channel by "+event.Adder.Nick)
+		}
 	}
 }
 
@@ -107,10 +110,9 @@ func (u *User) handleChannelRemoveEvent(event *bridge.ChannelRemoveEvent) {
 		ghost := u.createUserFromInfo(removed)
 
 		ch.Part(ghost, "")
+
 		if event.Remover != nil {
 			ch.SpoofMessage("system", "removed "+removed.Nick+" from the channel by "+event.Remover.Nick)
-		} else {
-			ch.SpoofMessage("system", "removed "+removed.Nick+" from the channel")
 		}
 	}
 }

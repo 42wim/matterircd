@@ -82,7 +82,7 @@ type channel struct {
 
 	mu       sync.RWMutex
 	topic    string
-	usersIdx map[*User]struct{}
+	usersIdx map[string]*User
 }
 
 // NewChannel returns a Channel implementation for a given Server.
@@ -93,7 +93,7 @@ func NewChannel(server Server, channelID string, name string, service string) Ch
 		id:       channelID,
 		name:     name,
 		service:  service,
-		usersIdx: map[*User]struct{}{},
+		usersIdx: make(map[string]*User),
 	}
 }
 
@@ -141,7 +141,7 @@ func (ch *channel) Message(from *User, text string) {
 
 		ch.mu.RLock()
 
-		for to := range ch.usersIdx {
+		for _, to := range ch.usersIdx {
 			to.Encode(msg)
 		}
 
@@ -160,7 +160,7 @@ func (ch *channel) Part(u *User, text string) {
 
 	ch.mu.Lock()
 
-	if _, ok := ch.usersIdx[u]; !ok {
+	if _, ok := ch.usersIdx[u.ID()]; !ok {
 		ch.mu.Unlock()
 
 		u.Encode(&irc.Message{
@@ -175,7 +175,7 @@ func (ch *channel) Part(u *User, text string) {
 
 	u.Encode(msg)
 
-	delete(ch.usersIdx, u)
+	delete(ch.usersIdx, u.ID())
 
 	u.Lock()
 
@@ -183,7 +183,7 @@ func (ch *channel) Part(u *User, text string) {
 
 	u.Unlock()
 
-	for to := range ch.usersIdx {
+	for _, to := range ch.usersIdx {
 		if !to.Ghost {
 			to.Encode(msg)
 		}
@@ -201,7 +201,7 @@ func (ch *channel) Unlink() {
 func (ch *channel) Close() error {
 	ch.mu.Lock()
 
-	for to := range ch.usersIdx {
+	for _, to := range ch.usersIdx {
 		to.Encode(&irc.Message{
 			Prefix:  to.Prefix(),
 			Command: irc.PART,
@@ -209,7 +209,7 @@ func (ch *channel) Close() error {
 		})
 	}
 
-	ch.usersIdx = map[*User]struct{}{}
+	ch.usersIdx = make(map[string]*User)
 
 	ch.mu.Unlock()
 
@@ -243,7 +243,7 @@ func (ch *channel) Topic(from Prefixer, text string) {
 	}
 
 	// only send join messages to real users
-	for to := range ch.usersIdx {
+	for _, to := range ch.usersIdx {
 		if !to.Ghost {
 			to.Encode(msg)
 		}
@@ -299,7 +299,7 @@ func (ch *channel) BatchJoin(inputusers []*User) error {
 	ch.mu.Lock()
 
 	for _, u := range inputusers {
-		if _, exists := ch.usersIdx[u]; !exists {
+		if _, exists := ch.usersIdx[u.ID()]; !exists {
 			users = append(users, u)
 		}
 	}
@@ -308,7 +308,7 @@ func (ch *channel) BatchJoin(inputusers []*User) error {
 
 	for _, u := range users {
 		ch.mu.Lock()
-		ch.usersIdx[u] = struct{}{}
+		ch.usersIdx[u.ID()] = u
 		ch.mu.Unlock()
 		u.Lock()
 		u.channels[ch] = struct{}{}
@@ -323,14 +323,14 @@ func (ch *channel) Join(u *User) error {
 	// TODO: Check if user is already here?
 	ch.mu.Lock()
 
-	if _, exists := ch.usersIdx[u]; exists {
+	if _, exists := ch.usersIdx[u.ID()]; exists {
 		ch.mu.Unlock()
 		return nil
 	}
 
 	topic := ch.topic
 
-	ch.usersIdx[u] = struct{}{}
+	ch.usersIdx[u.ID()] = u
 
 	ch.mu.Unlock()
 	u.Lock()
@@ -353,7 +353,7 @@ func (ch *channel) Join(u *User) error {
 	// send regular users a notification of the join
 	ch.mu.RLock()
 
-	for to := range ch.usersIdx {
+	for _, to := range ch.usersIdx {
 		// only send join messages to real users
 		if !to.Ghost {
 			to.Encode(msg)
@@ -381,7 +381,7 @@ func (ch *channel) Join(u *User) error {
 func (ch *channel) HasUser(u *User) bool {
 	ch.mu.RLock()
 
-	_, ok := ch.usersIdx[u]
+	_, ok := ch.usersIdx[u.ID()]
 
 	ch.mu.RUnlock()
 
@@ -393,7 +393,7 @@ func (ch *channel) Users() []*User {
 	ch.mu.RLock()
 
 	users := make([]*User, 0, len(ch.usersIdx))
-	for u := range ch.usersIdx {
+	for _, u := range ch.usersIdx {
 		users = append(users, u)
 	}
 
@@ -447,7 +447,7 @@ func (ch *channel) Spoof(from string, text string, cmd string) {
 		}
 
 		ch.mu.RLock()
-		for to := range ch.usersIdx {
+		for _, to := range ch.usersIdx {
 			to.Encode(msg)
 		}
 

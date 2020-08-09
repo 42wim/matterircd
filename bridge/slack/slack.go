@@ -261,7 +261,7 @@ func (s *Slack) GetChannelUsers(channelID string) ([]*bridge.UserInfo, error) {
 			}
 
 			suser := s.getSlackUser(user)
-			users = append(users, s.createSlackUser(suser))
+			users = append(users, s.createUser(suser))
 		}
 
 		if nextCursor == "" {
@@ -271,7 +271,7 @@ func (s *Slack) GetChannelUsers(channelID string) ([]*bridge.UserInfo, error) {
 
 	// Add slackbot to all channels
 	slackuser := s.getSlackUser("USLACKBOT")
-	users = append(users, s.createSlackUser(slackuser), s.GetMe())
+	users = append(users, s.createUser(slackuser), s.GetMe())
 
 	return users, nil
 }
@@ -283,7 +283,7 @@ func (s *Slack) GetUsers() []*bridge.UserInfo {
 
 	for _, user := range s.susers {
 		user := user
-		users = append(users, s.createSlackUser(&user))
+		users = append(users, s.createUser(&user))
 	}
 
 	s.RUnlock()
@@ -333,12 +333,12 @@ func (s *Slack) GetChannels() []*bridge.ChannelInfo {
 }
 
 func (s *Slack) GetUser(userID string) *bridge.UserInfo {
-	return s.createSlackUser(s.getSlackUser(userID))
+	return s.createUser(s.getSlackUser(userID))
 }
 
 func (s *Slack) GetMe() *bridge.UserInfo {
 	me, _ := s.sc.GetUserInfo(s.sinfo.User.ID)
-	return s.createSlackUser(me)
+	return s.createUser(me)
 }
 
 func (s *Slack) GetUserByUsername(username string) *bridge.UserInfo {
@@ -402,9 +402,9 @@ func (s *Slack) allowedLogin() error {
 	}
 	// we only know which user we are when we actually are connected.
 	// disconnect if we're not allowed
-	if len(s.v.GetStringSlice("slack.BlackListUser")) > 0 {
+	if len(s.v.GetStringSlice("slack.DenyListUser")) > 0 {
 		ok := false
-		for _, user := range s.v.GetStringSlice("slack.BlackListUser") {
+		for _, user := range s.v.GetStringSlice("slack.DenyListUser") {
 			if user == s.sinfo.User.Name {
 				ok = true
 				break
@@ -465,11 +465,15 @@ func (s *Slack) handleSlack() {
 	for msg := range s.rtm.IncomingEvents {
 		switch ev := msg.Data.(type) {
 		case *slack.MessageEvent:
-			if ev.SubType == "group_join" || ev.SubType == "channel_join" || ev.SubType == "member_joined_channel" {
-				s.handleActionJoin(ev)
-			} else {
+			switch ev.SubType {
+			case "group_join", "channel_join", "group_leave", "channel_leave":
+			default:
 				s.handleSlackActionPost(ev)
 			}
+		case *slack.MemberLeftChannelEvent:
+			s.handleMemberLeftChannel(ev)
+		case *slack.MemberJoinedChannelEvent:
+			s.handleMemberJoinedChannel(ev)
 		case *slack.DisconnectedEvent:
 			logger.Debug("disconnected event received, we should reconnect now..")
 		case *slack.ReactionAddedEvent:
@@ -513,7 +517,7 @@ func (s *Slack) handleActionMisc(userID, channelID, msg string) {
 	}
 
 	// create new "ghost" user
-	ghost := s.createSlackUser(suser)
+	ghost := s.createUser(suser)
 
 	// direct message
 	switch {
@@ -534,7 +538,7 @@ func (s *Slack) handleActionMisc(userID, channelID, msg string) {
 			for _, member := range members {
 				if member != s.sinfo.User.ID {
 					other, _ := s.rtm.GetUserInfo(member)
-					otheruser := s.createSlackUser(other)
+					otheruser := s.createUser(other)
 					spoofUsername = otheruser.Nick
 					break
 				}
@@ -558,20 +562,39 @@ func (s *Slack) handleActionMisc(userID, channelID, msg string) {
 	}
 }
 
-func (s *Slack) handleActionJoin(rmsg *slack.MessageEvent) {
+func (s *Slack) handleMemberLeftChannel(rmsg *slack.MemberLeftChannelEvent) {
+	event := &bridge.Event{
+		Type: "channel_remove",
+		Data: &bridge.ChannelRemoveEvent{
+			Removed: []*bridge.UserInfo{
+				s.GetUser(rmsg.User),
+			},
+			ChannelID: rmsg.Channel,
+		},
+	}
+
+	s.eventChan <- event
+}
+
+func (s *Slack) handleMemberJoinedChannel(rmsg *slack.MemberJoinedChannelEvent) {
+	var adder *bridge.UserInfo
+
+	if rmsg.Inviter != "" {
+		adder = &bridge.UserInfo{
+			Nick: s.GetUser(rmsg.Inviter).Nick,
+		}
+	}
+
 	event := &bridge.Event{
 		Type: "channel_add",
 		Data: &bridge.ChannelAddEvent{
 			Added: []*bridge.UserInfo{
 				s.GetUser(rmsg.User),
 			},
-			Adder: &bridge.UserInfo{
-				Nick: rmsg.Inviter,
-			},
+			Adder:     adder,
 			ChannelID: rmsg.Channel,
 		},
 	}
-
 	s.eventChan <- event
 }
 
@@ -626,7 +649,7 @@ func (s *Slack) sendDirectMessage(ghost *bridge.UserInfo, msg string, channelID 
 		for _, member := range members {
 			if member != s.sinfo.User.ID {
 				other, _ := s.rtm.GetUserInfo(member)
-				otheruser := s.createSlackUser(other)
+				otheruser := s.createUser(other)
 				spoofUsername = otheruser.Nick
 				break
 			}
@@ -688,7 +711,7 @@ func (s *Slack) handleSlackActionPost(rmsg *slack.MessageEvent) {
 	botname := s.getBotname(rmsg)
 
 	// create new "ghost" user
-	ghost := s.createSlackUser(suser)
+	ghost := s.createUser(suser)
 
 	spoofUsername := ghost.Nick
 	// if we have a botname, use it
@@ -768,7 +791,7 @@ func (s *Slack) handleSlackActionPost(rmsg *slack.MessageEvent) {
 	}
 }
 
-func (s *Slack) createSlackUser(slackuser *slack.User) *bridge.UserInfo {
+func (s *Slack) createUser(slackuser *slack.User) *bridge.UserInfo {
 	if slackuser == nil {
 		return &bridge.UserInfo{}
 	}
