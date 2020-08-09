@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/42wim/matterircd/bridge"
+	"github.com/davecgh/go-spew/spew"
 	"github.com/schollz/logger"
 	"github.com/slack-go/slack"
 	"github.com/spf13/viper"
@@ -301,7 +302,10 @@ func (s *Slack) GetChannels() []*bridge.ChannelInfo {
 	}
 
 	for {
-		mmchannels, nextCursor, _ := s.sc.GetConversations(&params)
+		mmchannels, nextCursor, err := s.sc.GetConversations(&params)
+		if err != nil {
+			logger.Error("GetChannels", err)
+		}
 		params.Cursor = nextCursor
 		for _, mmchannel := range mmchannels {
 			if !mmchannel.IsMember {
@@ -587,7 +591,7 @@ func (s *Slack) getBotname(rmsg *slack.MessageEvent) string {
 	return botname
 }
 
-func (s *Slack) getSlackUserFromMessage(rmsg *slack.MessageEvent) *slack.User {
+func (s *Slack) getSlackUserFromMessage(rmsg *slack.MessageEvent) (*slack.User, error) {
 	usr := rmsg.User
 	if rmsg.SubType == "message_changed" {
 		usr = rmsg.SubMessage.User
@@ -599,12 +603,10 @@ func (s *Slack) getSlackUserFromMessage(rmsg *slack.MessageEvent) *slack.User {
 
 	suser, err := s.rtm.GetUserInfo(usr)
 	if err != nil {
-		if rmsg.BotID == "" {
-			return nil
-		}
+		return nil, err
 	}
 
-	return suser
+	return suser, nil
 }
 
 func (s *Slack) sendDirectMessage(ghost *bridge.UserInfo, msg string, channelID string) {
@@ -674,7 +676,11 @@ func (s *Slack) handleSlackActionPost(rmsg *slack.MessageEvent) {
 	}
 
 	// TODO: cache userinfo
-	suser := s.getSlackUserFromMessage(rmsg)
+	suser, err := s.getSlackUserFromMessage(rmsg)
+	if err != nil {
+		logger.Errorf("couldn't find user in message %#v: %s", spew.Sdump(rmsg), err)
+		return
+	}
 
 	msghandled := false
 
