@@ -13,10 +13,10 @@ This release will probably also have annoying bugs, please report them.
 
 ## New features
 
-- general: New option `trace` to give even more output as `debug`. See matterircd.toml.example
-- general: Allow binding to a Unix socket #276
-- mattermost: Add option to use Nickname instead of Username #273 (See matterircd.toml.example)
-- mattermost: Add option to disable showing replies/parent posts #283 (See matterircd.toml.example)
+- general: New option `trace` to give even more output as `debug`. See matterircd.toml.example.
+- general: Allow binding to a Unix socket #276.
+- mattermost: Add option to use Nickname instead of Username #273 (See matterircd.toml.example).
+- mattermost: Add option to disable showing replies/parent posts #283 (See matterircd.toml.example).
 
 ## Enhancement
 
@@ -24,15 +24,17 @@ This release will probably also have annoying bugs, please report them.
 - slack: speed-up on large slack installations.
 - general: massive speedups on joining large channels.
 - general: less memory/CPU usage on large slacks/mattermost.
-- general: Break longer messages at word boundaries #270
-- mattermost: make `@ALL` messages also notices #288
-- mattermost: add support for updateuser event (realtime nick changes)
+- general: Break longer messages at word boundaries #270.
+- mattermost: make `@ALL` messages also notices #288.
+- mattermost: add support for updateuser event (realtime nick changes).
 
 ## Bugfix
 
-- mattermost: Changing topic also changes channel display name #284
-- mattermost: Images/links in private messages now are on the correct channel
-- slack: fix double messages on irc because of slack API changes, now using slack blocks
+- mattermost: Changing topic also changes channel display name #284.
+- mattermost: Images/links in private messages now are on the correct channel.
+- mattermost: Ignore user join messages #280
+- slack: fix double messages on irc because of slack API changes, now using slack blocks.
+- mattermost: Make mattermost away work. Fix #277"
 
 # v0.19.4
 
