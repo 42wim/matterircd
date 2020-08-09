@@ -9,7 +9,7 @@ import (
 	"github.com/42wim/matterbridge/matterclient"
 	"github.com/42wim/matterircd/bridge"
 	"github.com/davecgh/go-spew/spew"
-	"github.com/mattermost/mattermost-server/model"
+	"github.com/mattermost/mattermost-server/v5/model"
 	"github.com/mitchellh/mapstructure"
 	logger "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
@@ -311,11 +311,12 @@ func (m *Mattermost) Kick(channelID, username string) error {
 }
 
 func (m *Mattermost) SetStatus(status string) error {
-	switch status {
-	case "online":
-		return m.mc.UpdateStatus(m.mc.User.Id, "online")
-	case "away":
-		return m.mc.UpdateStatus(m.mc.User.Id, "away")
+	_, resp := m.mc.Client.UpdateUserStatus(m.mc.User.Id, &model.Status{
+		Status: status,
+		UserId: m.mc.User.Id,
+	})
+	if resp.Error != nil {
+		return resp.Error
 	}
 
 	return nil
