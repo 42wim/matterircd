@@ -41,7 +41,7 @@ func NewUserBridge(c net.Conn, srv Server, cfg *viper.Viper) *User {
 
 func (u *User) handleEventChan(events chan *bridge.Event) {
 	for event := range events {
-		spew.Dump("receiving", event)
+		logger.Tracef("eventchan %s", spew.Sdump(event))
 		switch e := event.Data.(type) {
 		case *bridge.ChannelMessageEvent:
 			u.handleChannelMessageEvent(e)
