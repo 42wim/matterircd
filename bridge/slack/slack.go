@@ -411,9 +411,9 @@ func (s *Slack) allowedLogin() error {
 	}
 	// we only know which user we are when we actually are connected.
 	// disconnect if we're not allowed
-	if len(s.v.GetStringSlice("slack.DenyListUser")) > 0 {
+	if len(s.v.GetStringSlice("slack.DenyUsers")) > 0 {
 		ok := false
-		for _, user := range s.v.GetStringSlice("slack.DenyListUser") {
+		for _, user := range s.v.GetStringSlice("slack.DenyUsers") {
 			if user == s.sinfo.User.Name {
 				ok = true
 				break
