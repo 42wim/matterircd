@@ -276,7 +276,15 @@ func (m *Mattermost) Topic(channelID string) string {
 }
 
 func (m *Mattermost) SetTopic(channelID, text string) error {
-	m.mc.UpdateChannelHeader(channelID, text)
+	logger.Debugf("updating channelheader %#v, %#v", channelID, text)
+	patch := &model.ChannelPatch{
+		Header: &text,
+	}
+
+	_, resp := m.mc.Client.PatchChannel(channelID, patch)
+	if resp.Error != nil {
+		return resp.Error
+	}
 
 	return nil
 }
