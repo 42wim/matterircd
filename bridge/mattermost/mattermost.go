@@ -131,6 +131,8 @@ func (m *Mattermost) handleWsMessage() {
 			m.handleWsActionChannelDeleted(message.Raw)
 		case model.WEBSOCKET_EVENT_USER_UPDATED:
 			m.handleWsActionUserUpdated(message.Raw)
+		case model.WEBSOCKET_EVENT_STATUS_CHANGE:
+			m.handleStatusChangeEvent(message.Raw)
 		}
 	}
 }
@@ -289,8 +291,8 @@ func (m *Mattermost) SetTopic(channelID, text string) error {
 	return nil
 }
 
-func (m *Mattermost) StatusUser(name string) (string, error) {
-	return m.mc.GetStatus(name), nil
+func (m *Mattermost) StatusUser(userID string) (string, error) {
+	return m.mc.GetStatus(userID), nil
 }
 
 func (m *Mattermost) StatusUsers() (map[string]string, error) {
@@ -890,6 +892,27 @@ func (m *Mattermost) handleWsActionChannelDeleted(rmsg *model.WebSocketEvent) {
 		Type: "channel_delete",
 		Data: &bridge.ChannelDeleteEvent{
 			ChannelID: channelID,
+		},
+	}
+
+	m.eventChan <- event
+}
+
+func (m *Mattermost) handleStatusChangeEvent(rmsg *model.WebSocketEvent) {
+	var info model.Status
+
+	err := Decode(rmsg.Data, &info)
+	if err != nil {
+		fmt.Println("decode", err)
+
+		return
+	}
+
+	event := &bridge.Event{
+		Type: "status_change",
+		Data: &bridge.StatusChangeEvent{
+			UserID: info.UserId,
+			Status: info.Status,
 		},
 	}
 

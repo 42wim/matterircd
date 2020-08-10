@@ -61,6 +61,8 @@ func (u *User) handleEventChan(events chan *bridge.Event) {
 			u.handleChannelDeleteEvent(e)
 		case *bridge.UserUpdateEvent:
 			u.handleUserUpdateEvent(e)
+		case *bridge.StatusChangeEvent:
+			u.handleStatusChangeEvent(e)
 		}
 	}
 }
@@ -221,6 +223,20 @@ func (u *User) handleChannelDeleteEvent(event *bridge.ChannelDeleteEvent) {
 
 func (u *User) handleUserUpdateEvent(event *bridge.UserUpdateEvent) {
 	u.updateUserFromInfo(event.User)
+}
+
+func (u *User) handleStatusChangeEvent(event *bridge.StatusChangeEvent) {
+	fmt.Println(event.UserID, u.br.GetMe().User)
+	if event.UserID == u.br.GetMe().User {
+		switch event.Status {
+		case "online":
+			logger.Debug("setting myself online")
+			u.Srv.EncodeMessage(u, irc.RPL_UNAWAY, []string{u.Nick}, "You are no longer marked as being away")
+		default:
+			logger.Debug("setting myself away")
+			u.Srv.EncodeMessage(u, irc.RPL_NOWAWAY, []string{u.Nick}, "You have been marked as being away")
+		}
+	}
 }
 
 func (u *User) CreateUserFromInfo(info *bridge.UserInfo) *User {
@@ -521,6 +537,11 @@ func (u *User) loginTo(protocol string) error {
 
 	if err != nil {
 		return err
+	}
+
+	status, _ := u.br.StatusUser(u.br.GetMe().User)
+	if status == "away" {
+		u.Srv.EncodeMessage(u, irc.RPL_NOWAWAY, []string{u.Nick}, "You have been marked as being away")
 	}
 
 	go u.handleEventChan(eventChan)
