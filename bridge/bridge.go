@@ -20,7 +20,7 @@ type Bridger interface {
 	MsgUser(username, text string) error
 	MsgChannel(channelID, text string) error
 
-	StatusUser(name string) (string, error)
+	StatusUser(userID string) (string, error)
 	StatusUsers() (map[string]string, error)
 	SetStatus(status string) error
 
@@ -135,6 +135,11 @@ type FileEvent struct {
 
 type UserUpdateEvent struct {
 	User *UserInfo
+}
+
+type StatusChangeEvent struct {
+	UserID string
+	Status string
 }
 
 type File struct {
