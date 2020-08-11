@@ -47,6 +47,9 @@ func main() {
 	flag.String("tlsbind", "", "interface:port to bind to. (e.g 127.0.0.1:6697)")
 	flag.String("tlsdir", ".", "directory to look for key.pem and cert.pem.")
 
+	pflag.CommandLine.AddGoFlagSet(flag.CommandLine)
+	pflag.Parse()
+
 	// Attempt to load values from the config file
 	if _, err := os.Stat(*flagConfig); err == nil {
 		v, err = config.LoadConfig(*flagConfig)
@@ -57,8 +60,6 @@ func main() {
 		v = viper.New()
 	}
 
-	pflag.CommandLine.AddGoFlagSet(flag.CommandLine)
-	pflag.Parse()
 	v.BindPFlags(pflag.CommandLine)
 
 	if v.GetBool("debug") {
