@@ -633,7 +633,6 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		switch {
 		// DirectMessage
 		case channelType == "D":
-			spoofUsername := ghost.Nick
 			event := &bridge.Event{
 				Type: "direct_message",
 			}
@@ -643,19 +642,8 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 				Files: m.getFilesFromData(data),
 			}
 
-			// if it's not from us
-			if data.UserId != m.mc.User.Id {
-				d.Sender = ghost
-			} else {
-				// we have to look in the mention to see who we are sending a message to
-				mentions := model.ArrayFromJson(strings.NewReader(props["mentions"].(string)))
-				if len(mentions) > 0 {
-					spoofUsername = m.GetUser(mentions[0]).Username
-					d.Sender = m.GetMe()
-				}
-			}
-
-			d.Receiver = spoofUsername
+			d.Sender = ghost
+			d.Receiver = m.GetMe()
 
 			event.Data = d
 
@@ -721,7 +709,7 @@ func (m *Mattermost) handleFileEvent(channelType string, ghost *bridge.UserInfo,
 
 	fileEvent := &bridge.FileEvent{
 		Sender:      ghost,
-		Receiver:    ghost.Nick,
+		Receiver:    ghost,
 		ChannelType: channelType,
 		ChannelID:   data.ChannelId,
 	}
@@ -737,22 +725,10 @@ func (m *Mattermost) handleFileEvent(channelType string, ghost *bridge.UserInfo,
 	if len(fileEvent.Files) > 0 {
 		switch {
 		case channelType == "D":
-			spoofUsername := ghost.Nick
-			// if it's not from us
-			if data.UserId != m.mc.User.Id {
-				fileEvent.Sender = ghost
-			} else {
-				// we have to look in the mention to see who we are sending a message to
-				mentions := model.ArrayFromJson(strings.NewReader(props["mentions"].(string)))
-				if len(mentions) > 0 {
-					spoofUsername = m.GetUser(mentions[0]).Username
-					fileEvent.Sender = m.GetMe()
-				}
-			}
+			fileEvent.Sender = ghost
+			fileEvent.Receiver = m.GetMe()
 
-			fileEvent.Receiver = spoofUsername
 			m.eventChan <- event
-
 		default:
 			m.eventChan <- event
 		}

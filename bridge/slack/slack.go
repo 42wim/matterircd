@@ -532,32 +532,7 @@ func (s *Slack) handleActionMisc(userID, channelID, msg string) {
 	// direct message
 	switch {
 	case strings.HasPrefix(channelID, "D"):
-		spoofUsername := ghost.Nick
-		event := &bridge.Event{
-			Type: "direct_message",
-		}
-
-		d := &bridge.DirectMessageEvent{
-			Text: msg,
-		}
-
-		if !ghost.Me {
-			d.Sender = ghost
-		} else {
-			members, _, _ := s.sc.GetUsersInConversation(&slack.GetUsersInConversationParameters{ChannelID: channelID})
-			for _, member := range members {
-				if member != s.sinfo.User.ID {
-					other, _ := s.rtm.GetUserInfo(member)
-					otheruser := s.createUser(other)
-					spoofUsername = otheruser.Nick
-					break
-				}
-			}
-		}
-
-		d.Receiver = spoofUsername
-
-		s.eventChan <- event
+		s.sendDirectMessage(ghost, msg, channelID)
 	default:
 		event := &bridge.Event{
 			Type: "channel_message",
@@ -643,7 +618,6 @@ func (s *Slack) getSlackUserFromMessage(rmsg *slack.MessageEvent) (*slack.User, 
 }
 
 func (s *Slack) sendDirectMessage(ghost *bridge.UserInfo, msg string, channelID string) {
-	spoofUsername := ghost.Nick
 	event := &bridge.Event{
 		Type: "direct_message",
 	}
@@ -652,21 +626,10 @@ func (s *Slack) sendDirectMessage(ghost *bridge.UserInfo, msg string, channelID 
 		Text: msg,
 	}
 
-	if !ghost.Me {
-		d.Sender = ghost
-	} else {
-		members, _, _ := s.sc.GetUsersInConversation(&slack.GetUsersInConversationParameters{ChannelID: channelID})
-		for _, member := range members {
-			if member != s.sinfo.User.ID {
-				other, _ := s.rtm.GetUserInfo(member)
-				otheruser := s.createUser(other)
-				spoofUsername = otheruser.Nick
-				break
-			}
-		}
-	}
+	d.Sender = ghost
+	d.Receiver = s.GetMe()
 
-	d.Receiver = spoofUsername
+	event.Data = d
 
 	s.eventChan <- event
 }
