@@ -372,7 +372,8 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 		case query == "mattermost" || query == "slack":
 			go u.handleServiceBot(query, toUser, msg.Trailing)
 			msg.Trailing = "<redacted>"
-		case toUser.Ghost:
+		case toUser.Ghost, toUser.Me:
+			logger.Tracef("sending message %s to user %s", msg.Trailing, toUser.User)
 			err = u.br.MsgUser(toUser.User, msg.Trailing)
 			if err != nil {
 				return err

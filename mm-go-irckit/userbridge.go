@@ -75,9 +75,9 @@ func (u *User) handleChannelTopicEvent(event *bridge.ChannelTopicEvent) {
 
 func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 	if event.Sender.Me {
-		u.MsgSpoofUser(u, event.Receiver, event.Text)
+		u.MsgSpoofUser(u, u.Nick, event.Text)
 	} else {
-		u.MsgSpoofUser(u.createUserFromInfo(event.Sender), event.Receiver, event.Text)
+		u.MsgSpoofUser(u.createUserFromInfo(event.Sender), event.Receiver.Nick, event.Text)
 	}
 }
 
@@ -189,9 +189,13 @@ func (u *User) handleFileEvent(event *bridge.FileEvent) {
 	case "D":
 		for _, fname := range event.Files {
 			if event.Sender.Me {
-				u.MsgSpoofUser(u, event.Receiver, "download file -"+fname.Name)
+				if event.Receiver.Me {
+					u.MsgSpoofUser(u, u.Nick, "download file -"+fname.Name)
+				} else {
+					u.MsgSpoofUser(u, event.Receiver.Nick, "download file -"+fname.Name)
+				}
 			} else {
-				u.MsgSpoofUser(u.createUserFromInfo(event.Sender), event.Receiver, "download file -"+fname.Name)
+				u.MsgSpoofUser(u.createUserFromInfo(event.Sender), event.Receiver.Nick, "download file -"+fname.Name)
 			}
 		}
 	default:
@@ -543,6 +547,10 @@ func (u *User) loginTo(protocol string) error {
 	if status == "away" {
 		u.Srv.EncodeMessage(u, irc.RPL_NOWAWAY, []string{u.Nick}, "You have been marked as being away")
 	}
+
+	info := u.br.GetMe()
+	u.Me = true
+	u.User = info.User
 
 	go u.handleEventChan(eventChan)
 
