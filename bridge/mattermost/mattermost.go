@@ -160,6 +160,11 @@ func (m *Mattermost) antiIdle(channelID string) {
 			logger.Debug("stopping antiIdle loop")
 			return
 		case <-ticker.C:
+			if m.mc == nil {
+				logger.Error("antiidle: don't have a connection, exiting loop.")
+				return
+			}
+
 			m.mc.UpdateLastViewed(channelID)
 		}
 	}
