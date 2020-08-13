@@ -94,7 +94,7 @@ func (u *User) handleChannelAddEvent(event *bridge.ChannelAddEvent) {
 
 		ch.Join(ghost)
 
-		if event.Adder != nil {
+		if event.Adder != nil && added.Nick != event.Adder.Nick && event.Adder.Nick != "system" {
 			ch.SpoofMessage("system", "added "+added.Nick+" to the channel by "+event.Adder.Nick)
 		}
 	}
@@ -115,7 +115,7 @@ func (u *User) handleChannelRemoveEvent(event *bridge.ChannelRemoveEvent) {
 
 		ch.Part(ghost, "")
 
-		if event.Remover != nil {
+		if event.Remover != nil && removed.Nick != event.Remover.Nick && event.Remover.Nick != "system" {
 			ch.SpoofMessage("system", "removed "+removed.Nick+" from the channel by "+event.Remover.Nick)
 		}
 	}
