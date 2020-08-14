@@ -429,10 +429,17 @@ func (m *Mattermost) GetChannels() []*bridge.ChannelInfo {
 	var channels []*bridge.ChannelInfo
 
 	for _, mmchannel := range m.mc.GetChannels() {
+		dm := false
+
+		if mmchannel.Type == "D" || mmchannel.Type == "G" {
+			dm = true
+		}
+
 		channels = append(channels, &bridge.ChannelInfo{
 			Name:   mmchannel.Name,
 			ID:     mmchannel.Id,
 			TeamID: mmchannel.TeamId,
+			DM:     dm,
 		})
 	}
 

@@ -53,6 +53,7 @@ type ChannelInfo struct {
 	Name   string
 	ID     string
 	TeamID string
+	DM     bool
 }
 
 type UserInfo struct {

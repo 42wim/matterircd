@@ -322,12 +322,10 @@ func (s *Slack) GetChannels() []*bridge.ChannelInfo {
 		}
 		params.Cursor = nextCursor
 		for _, mmchannel := range mmchannels {
-			if !mmchannel.IsMember {
-				continue
-			}
+			dm := false
 
-			if mmchannel.IsMpIM && s.v.GetBool("slack.joinMpImOnTalk") {
-				continue
+			if !mmchannel.IsIM || mmchannel.IsMpIM {
+				dm = true
 			}
 
 			logger.Debug("Adding channel", mmchannel)
@@ -335,6 +333,7 @@ func (s *Slack) GetChannels() []*bridge.ChannelInfo {
 				Name:   mmchannel.Name,
 				ID:     mmchannel.ID,
 				TeamID: s.sinfo.Team.ID,
+				DM:     dm,
 			})
 		}
 

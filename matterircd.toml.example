@@ -81,6 +81,11 @@ PreferNickname = false
 # Disable showing parent post / replies
 HideReplies = false
 
+#Only join direct/group messages when someone talks. This stops from cluttering your 
+#irc client with lots of windows.
+JoinDM = false
+
+
 #############################
 ##### SLACK EXAMPLE #########
 #############################
@@ -92,9 +97,9 @@ HideReplies = false
 DenyUsers = ["username"]
 
 #https://get.slack.help/hc/en-us/articles/212281468-Direct-messages-and-group-DMs
-#Only join multiple person Direct messages when someone talks. This stops from cluttering your 
+#Only join direct/group messages when someone talks. This stops from cluttering your 
 #irc client with lots of windows.
-JoinMpImOnTalk = false
+JoinDM = false
 
 #only allow connection to specific slack sites. (eg for myslack.slack.com just specify myslack)
 #As we only connect using tokens, this will first do a ccnnection to see what team the token is from. If this
