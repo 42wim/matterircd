@@ -10,6 +10,7 @@ This release will probably also have annoying bugs, please report them.
 - Switched to viper for cmdline parsing, which does not support "short" flags. You'll need to use `--flag` instead of `-flag`. Eg `./matterircd --debug`
 - Bridge specific configuration is now only in configuration file. This means the following flags have been removed: `-restrict`,`-mmteam`,`-mmserver`,`-mminsecure`,`-mmskiptlsverify`. You can set those in `matterircd.toml`, see the example file.
 - `BlacklistUser` feature for slack has been renamed to `DenyUsers`.
+- `JoinMpImOnTalk` feature has been renamed to `JoinDM` and is available for slack/mattermost
 
 ## New features
 
@@ -17,6 +18,7 @@ This release will probably also have annoying bugs, please report them.
 - general: Allow binding to a Unix socket #276.
 - mattermost: Add option to use Nickname instead of Username #273 (See matterircd.toml.example).
 - mattermost: Add option to disable showing replies/parent posts #283 (See matterircd.toml.example).
+- mattermost: `JoinDM` option to enable groups/dm joining on startup
 
 ## Enhancement
 
@@ -34,7 +36,11 @@ This release will probably also have annoying bugs, please report them.
 - mattermost: Images/links in private messages now are on the correct channel.
 - mattermost: Ignore user join messages #280
 - slack: fix double messages on irc because of slack API changes, now using slack blocks.
-- mattermost: Make mattermost away work. Fix #277"
+- mattermost: Make mattermost away work. Fix #277
+- mattermost: Fix goroutine leaks on multiple login/logout
+- mattermost: Fix crash on quit without login #300
+- general: Refactor DMs and fix messages to self. Fixes #293
+
 
 # v0.19.4
 
