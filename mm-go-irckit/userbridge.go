@@ -343,6 +343,14 @@ func (u *User) addUsersToChannels() {
 
 	for _, brchannel := range u.br.GetChannels() {
 		logger.Debugf("Adding channel %#v", brchannel)
+
+		// only joindm when specified
+		if brchannel.DM && !u.v.GetBool(u.br.Protocol()+".joindm") {
+			logger.Debugf("Skipping IM channel %s", brchannel.Name)
+
+			continue
+		}
+
 		channels <- brchannel
 	}
 
