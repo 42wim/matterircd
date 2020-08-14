@@ -16,6 +16,7 @@ type Bridger interface {
 
 	UpdateChannels() error
 	Logout() error
+	Connected() bool
 
 	MsgUser(username, text string) error
 	MsgChannel(channelID, text string) error
@@ -141,6 +142,8 @@ type StatusChangeEvent struct {
 	UserID string
 	Status string
 }
+
+type LogoutEvent struct{}
 
 type File struct {
 	Name string

@@ -18,9 +18,10 @@ import (
 type Mattermost struct {
 	mc          *matterclient.MMClient
 	credentials bridge.Credentials
-	idleStop    chan struct{}
+	quitChan    []chan struct{}
 	eventChan   chan *bridge.Event
 	v           *viper.Viper
+	connected   bool
 }
 
 func New(v *viper.Viper, cred bridge.Credentials, eventChan chan *bridge.Event, onWsConnect func()) (bridge.Bridger, *matterclient.MMClient, error) {
@@ -51,6 +52,8 @@ func New(v *viper.Viper, cred bridge.Credentials, eventChan chan *bridge.Event, 
 	go mc.StatusLoop()
 
 	m.mc = mc
+
+	m.connected = true
 
 	return m, mc, nil
 }
@@ -84,13 +87,19 @@ func (m *Mattermost) loginToMattermost() (*matterclient.MMClient, error) {
 	m.mc.WsQuit = false
 
 	go mc.WsReceiver()
-	go m.handleWsMessage()
+
+	quitChan := make(chan struct{})
+	m.quitChan = append(m.quitChan, quitChan)
+
+	go m.handleWsMessage(quitChan)
 
 	// do anti idle on town-square, every installation should have this channel
 	channels := m.mc.GetChannels()
 	for _, channel := range channels {
 		if channel.Name == "town-square" && !m.v.GetBool("mattermost.DisableAutoView") {
-			go m.antiIdle(channel.Id)
+			idleChan := make(chan struct{})
+			m.quitChan = append(m.quitChan, idleChan)
+			go m.antiIdle(channel.Id, idleChan)
 			continue
 		}
 	}
@@ -98,7 +107,7 @@ func (m *Mattermost) loginToMattermost() (*matterclient.MMClient, error) {
 	return mc, nil
 }
 
-func (m *Mattermost) handleWsMessage() {
+func (m *Mattermost) handleWsMessage(quitChan chan struct{}) {
 	updateChannelsThrottle := time.NewTicker(time.Second * 60)
 
 	for {
@@ -109,30 +118,34 @@ func (m *Mattermost) handleWsMessage() {
 
 		logger.Debug("in handleWsMessage", len(m.mc.MessageChan))
 
-		message := <-m.mc.MessageChan
+		select {
+		case <-quitChan:
+			logger.Debug("exiting handleWsMessage")
+			return
+		case message := <-m.mc.MessageChan:
+			logger.Debugf("MMUser WsReceiver: %#v", message.Raw)
+			logger.Tracef("handleWsMessage %s", spew.Sdump(message))
+			// check if we have the users/channels in our cache. If not update
+			m.checkWsActionMessage(message.Raw, updateChannelsThrottle)
 
-		logger.Debugf("MMUser WsReceiver: %#v", message.Raw)
-		logger.Tracef("handleWsMessage %s", spew.Sdump(message))
-		// check if we have the users/channels in our cache. If not update
-		m.checkWsActionMessage(message.Raw, updateChannelsThrottle)
-
-		switch message.Raw.Event {
-		case model.WEBSOCKET_EVENT_POSTED:
-			m.handleWsActionPost(message.Raw)
-		case model.WEBSOCKET_EVENT_POST_EDITED:
-			m.handleWsActionPost(message.Raw)
-		case model.WEBSOCKET_EVENT_USER_REMOVED:
-			m.handleWsActionUserRemoved(message.Raw)
-		case model.WEBSOCKET_EVENT_USER_ADDED:
-			m.handleWsActionUserAdded(message.Raw)
-		case model.WEBSOCKET_EVENT_CHANNEL_CREATED:
-			m.handleWsActionChannelCreated(message.Raw)
-		case model.WEBSOCKET_EVENT_CHANNEL_DELETED:
-			m.handleWsActionChannelDeleted(message.Raw)
-		case model.WEBSOCKET_EVENT_USER_UPDATED:
-			m.handleWsActionUserUpdated(message.Raw)
-		case model.WEBSOCKET_EVENT_STATUS_CHANGE:
-			m.handleStatusChangeEvent(message.Raw)
+			switch message.Raw.Event {
+			case model.WEBSOCKET_EVENT_POSTED:
+				m.handleWsActionPost(message.Raw)
+			case model.WEBSOCKET_EVENT_POST_EDITED:
+				m.handleWsActionPost(message.Raw)
+			case model.WEBSOCKET_EVENT_USER_REMOVED:
+				m.handleWsActionUserRemoved(message.Raw)
+			case model.WEBSOCKET_EVENT_USER_ADDED:
+				m.handleWsActionUserAdded(message.Raw)
+			case model.WEBSOCKET_EVENT_CHANNEL_CREATED:
+				m.handleWsActionChannelCreated(message.Raw)
+			case model.WEBSOCKET_EVENT_CHANNEL_DELETED:
+				m.handleWsActionChannelDeleted(message.Raw)
+			case model.WEBSOCKET_EVENT_USER_UPDATED:
+				m.handleWsActionUserUpdated(message.Raw)
+			case model.WEBSOCKET_EVENT_STATUS_CHANGE:
+				m.handleStatusChangeEvent(message.Raw)
+			}
 		}
 	}
 }
@@ -151,13 +164,13 @@ func (m *Mattermost) checkWsActionMessage(rmsg *model.WebSocketEvent, throttle *
 }
 
 // antiIdle does a lastviewed every 60 seconds so that the user is shown as online instead of away
-func (m *Mattermost) antiIdle(channelID string) {
+func (m *Mattermost) antiIdle(channelID string, quitChan chan struct{}) {
 	ticker := time.NewTicker(time.Second * 60)
 
 	for {
 		select {
-		case <-m.idleStop:
-			logger.Debug("stopping antiIdle loop")
+		case <-quitChan:
+			logger.Debugf("stopping antiIdle loop for %s", channelID)
 			return
 		case <-ticker.C:
 			if m.mc == nil {
@@ -249,8 +262,19 @@ func (m *Mattermost) Logout() error {
 		}
 		logger.Info("logout succeeded")
 
-		m.idleStop <- struct{}{}
+		m.eventChan <- &bridge.Event{
+			Type: "logout",
+			Data: &bridge.LogoutEvent{},
+		}
+
+		m.mc.WsQuit = true
+
+		for _, c := range m.quitChan {
+			c <- struct{}{}
+		}
 	}
+
+	m.connected = false
 
 	return nil
 }
@@ -954,6 +978,10 @@ func (m *Mattermost) GetPosts(channelID string, limit int) interface{} {
 
 func (m *Mattermost) GetChannelID(name, teamID string) string {
 	return m.mc.GetChannelId(name, teamID)
+}
+
+func (m *Mattermost) Connected() bool {
+	return m.connected
 }
 
 func Decode(input interface{}, output interface{}) error {

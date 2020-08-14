@@ -30,6 +30,7 @@ func logout(u *User, toUser *User, args []string, service string) {
 		return
 	}
 	u.br.Logout()
+	u.logoutFrom(u.br.Protocol())
 }
 
 func login(u *User, toUser *User, args []string, service string) {
@@ -63,7 +64,7 @@ func login(u *User, toUser *User, args []string, service string) {
 			}
 		}
 
-		if u.br != nil {
+		if u.br != nil && u.br.Connected() {
 			err = u.br.Logout()
 			if err != nil {
 				u.MsgUser(toUser, err.Error())
@@ -146,7 +147,7 @@ func login(u *User, toUser *User, args []string, service string) {
 		return
 	}
 
-	if u.br != nil {
+	if u.br != nil && u.br.Connected() {
 		err := u.br.Logout()
 		if err != nil {
 			u.MsgUser(toUser, err.Error())
