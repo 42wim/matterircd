@@ -128,6 +128,11 @@ func (s *Slack) Logout() error {
 
 	logger.Info("logout succeeded")
 
+	s.eventChan <- &bridge.Event{
+		Type: "logout",
+		Data: &bridge.LogoutEvent{},
+	}
+
 	s.connected = false
 
 	return nil
@@ -842,4 +847,8 @@ func (s *Slack) ratelimitCheck(err error) {
 	if rateLimitedError, ok := err.(*slack.RateLimitedError); ok {
 		time.Sleep(rateLimitedError.RetryAfter)
 	}
+}
+
+func (s *Slack) Connected() bool {
+	return s.connected
 }

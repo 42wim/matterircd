@@ -63,6 +63,8 @@ func (u *User) handleEventChan(events chan *bridge.Event) {
 			u.handleUserUpdateEvent(e)
 		case *bridge.StatusChangeEvent:
 			u.handleStatusChangeEvent(e)
+		case *bridge.LogoutEvent:
+			return
 		}
 	}
 }
