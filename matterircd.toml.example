@@ -35,19 +35,29 @@ DefaultTeam = "mycompany"
 #use http connection to mattermost (default false)
 Insecure = false
 
-#an array of channels that only will be joined on IRC.
+#an array of channels that only will be joined on IRC. JoinExlude and JoinInclude will not be checked
+#regexp is supported
 #If it's empty, it means all channels get joined (except those defined in JoinExclude)
 #Messages that get sent to unjoined channels (but you're joined on mattermost) will
 #get sent to the &messages channel.
 #default ""
-JoinInclude = ["#devops"]
+JoinOnly = ["#onlythischannel"]
 
 #an array of channels that won't be joined on IRC.
+#regexp is supported
 #Messages that get sent to unjoined channels (but you're joined on mattermost) will
 #get sent to the &messages channel.
 #You can still /JOIN exclude channels.
 #default ""
-JoinExclude = ["#town-square","#boringchannel"]
+JoinExclude = ["#town-square","#boringchannel","#.*marketing.*"]
+
+#an array of channels that will override the settings in JoinExclude
+#regexp is supported
+#If it's empty, it means all channels get joined (except those defined in JoinExclude)
+#Messages that get sent to unjoined channels (but you're joined on mattermost) will
+#get sent to the &messages channel.
+#default ""
+JoinInclude = ["#devops","#myteam-marketing"]
 
 #PartFake: a bool that defines if you do a /LEAVE or /PART on IRC it will also
 #actually leave the channel on mattermost.
@@ -111,6 +121,30 @@ Restrict = ["myslack"]
 # More info about username/displayname see https://api.slack.com/changelog/2017-09-the-one-about-usernames
 # Default false
 UseDisplayName = false
+
+#an array of channels that only will be joined on IRC. JoinExlude and JoinInclude will not be checked
+#regexp is supported
+#If it's empty, it means all channels get joined (except those defined in JoinExclude)
+#Messages that get sent to unjoined channels (but you're joined on mattermost) will
+#get sent to the &messages channel.
+#default ""
+JoinOnly = ["#onlythischannel"]
+
+#an array of channels that won't be joined on IRC.
+#regexp is supported
+#Messages that get sent to unjoined channels (but you're joined on mattermost) will
+#get sent to the &messages channel.
+#You can still /JOIN exclude channels.
+#default ""
+JoinExclude = ["#town-square","#boringchannel","#.*marketing.*"]
+
+#an array of channels that will override the settings in JoinExclude
+#regexp is supported
+#If it's empty, it means all channels get joined (except those defined in JoinExclude)
+#Messages that get sent to unjoined channels (but you're joined on mattermost) will
+#get sent to the &messages channel.
+#default ""
+JoinInclude = ["#devops","#myteam-marketing"]
 
 
 
