@@ -145,12 +145,12 @@ func (u *User) getMessageChannel(channelID, channelType string, sender *bridge.U
 	je := u.v.GetStringSlice(u.br.Protocol() + ".joinexclude")
 	ji := u.v.GetStringSlice(u.br.Protocol() + ".joininclude")
 	// excluded channel
-	if stringInSlice(ch.String(), je) {
+	if stringInRegexp(ch.String(), je) {
 		logger.Debugf("channel %s is in JoinExclude, send to &messages", ch.String())
 		ch = u.Srv.Channel("&messages")
 	}
 	// not in included channel
-	if !stringInSlice(ch.String(), ji) && len(ji) > 0 {
+	if !stringInRegexp(ch.String(), ji) && len(ji) > 0 {
 		logger.Debugf("channel %s is not in JoinInclude, send to &messages", ch.String())
 		ch = u.Srv.Channel("&messages")
 	}
@@ -498,26 +498,43 @@ func (u *User) syncChannel(id string, name string) {
 func (u *User) mayJoin(channelID string) bool {
 	ch := u.Srv.Channel(channelID)
 
+	jo := u.v.GetStringSlice(u.br.Protocol() + ".joinonly")
 	ji := u.v.GetStringSlice(u.br.Protocol() + ".joininclude")
 	je := u.v.GetStringSlice(u.br.Protocol() + ".joinexclude")
 
-	// are we in the joininclude we always are allowed to join
-	if stringInSlice(ch.String(), ji) {
+	switch {
+	// if we have joinonly channels specified we are only allowed to join those
+	case len(jo) != 0 && !stringInRegexp(ch.String(), jo):
+		logger.Tracef("mayjoin 0 %t ch: %s, match: %s", false, ch.String(), jo)
+		return false
+	// we only have exclude, do not join if in exclude
+	case len(ji) == 0 && len(je) != 0:
+		mayjoin := stringInRegexp(ch.String(), je)
+		logger.Tracef("mayjoin 1 %t ch: %s, match: %s", mayjoin, ch.String(), je)
+		return mayjoin
+	// nothing specified, everything may join
+	case len(ji) == 0 && len(je) == 0:
+		logger.Tracef("mayjoin 2 %t ch: %s, both empty", true, ch.String())
 		return true
+	// if we don't have joinexclude, then joininclude behaves as joinonly
+	case len(ji) != 0 && len(je) == 0:
+		logger.Tracef("mayjoin 3 %t ch: %s, match: %s", true, ch.String(), ji)
+		return true
+	// joininclude overrides the joinexclude
+	case len(je) != 0 && len(ji) != 0:
+		if stringInRegexp(ch.String(), je) && stringInRegexp(ch.String(), ji) {
+			logger.Tracef("mayjoin 4 %t ch: %s, ji: %s, je: %s", true, ch.String(), ji, je)
+			return true
+		}
+		// if we don't have it in joinexclude, join
+		if !stringInRegexp(ch.String(), je) {
+			logger.Tracef("mayjoin 5 %t ch: %s, ji: %s, je: %s", true, ch.String(), ji, je)
+			return true
+		}
 	}
 
-	// if we are not in excluded and we don't have included specified we are always
-	// allowed to join
-	if !stringInSlice(ch.String(), je) && len(ji) == 0 {
-		return true
-	}
+	logger.Tracef("mayjoin default %t ch: %s, ji: %s, je: %s", false, ch.String(), ji, je)
 
-	// if we don't have anything specified to include we are allowed
-	if len(ji) == 0 || len(je) == 0 {
-		return true
-	}
-
-	// we are not in the joininclude or in the exclude
 	return false
 }
 

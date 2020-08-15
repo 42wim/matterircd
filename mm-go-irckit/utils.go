@@ -1,11 +1,15 @@
 package irckit
 
-func stringInSlice(a string, list []string) bool {
-	for _, b := range list {
-		if b == a {
+import "regexp"
+
+func stringInRegexp(a string, list []string) bool {
+	for _, entry := range list {
+		re := regexp.MustCompile(entry)
+		if re.MatchString(a) {
 			return true
 		}
 	}
+
 	return false
 }
 
