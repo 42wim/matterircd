@@ -93,6 +93,7 @@ HideReplies = false
 
 #Only join direct/group messages when someone talks. This stops from cluttering your 
 #irc client with lots of windows.
+#If set to true dm/group messages will be joined on startup and not only on talk in the channel.
 JoinDM = false
 
 
@@ -109,6 +110,7 @@ DenyUsers = ["username"]
 #https://get.slack.help/hc/en-us/articles/212281468-Direct-messages-and-group-DMs
 #Only join direct/group messages when someone talks. This stops from cluttering your 
 #irc client with lots of windows.
+#If set to true dm/group messages will be joined on startup and not only on talk in the channel.
 JoinDM = false
 
 #only allow connection to specific slack sites. (eg for myslack.slack.com just specify myslack)
