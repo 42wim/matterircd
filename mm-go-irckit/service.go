@@ -263,17 +263,20 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 	postlist := list.(*model.PostList)
 
 	for i := len(postlist.Order) - 1; i >= 0; i-- {
-		nick := u.br.GetUser(postlist.Posts[postlist.Order[i]].UserId).Nick
+		p := postlist.Posts[postlist.Order[i]]
+		ts := time.Unix(0, p.CreateAt*int64(time.Millisecond))
 
-		for _, post := range strings.Split(postlist.Posts[postlist.Order[i]].Message, "\n") {
+		nick := u.br.GetUser(p.UserId).Nick
+
+		for _, post := range strings.Split(p.Message, "\n") {
 			if post != "" {
-				u.MsgUser(toUser, "<"+nick+"> "+post)
+				u.MsgUser(toUser, "["+ts.Format("2006-01-02 15:04")+"]"+" <"+nick+"> "+post)
 			}
 		}
 
-		if len(postlist.Posts[postlist.Order[i]].FileIds) > 0 {
-			for _, fname := range u.br.GetFileLinks(postlist.Posts[postlist.Order[i]].FileIds) {
-				u.MsgUser(toUser, "<"+nick+"> download file - "+fname)
+		if len(p.FileIds) > 0 {
+			for _, fname := range u.br.GetFileLinks(p.FileIds) {
+				u.MsgUser(toUser, "["+ts.Format("2006-01-02 15:04")+"]"+" <"+nick+"> download file - "+fname)
 			}
 		}
 	}
