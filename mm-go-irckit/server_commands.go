@@ -419,8 +419,12 @@ func CmdTopic(s Server, u *User, msg *irc.Message) error {
 	ch := s.Channel(channelname)
 
 	if msg.Trailing != "" {
+		err := u.br.SetTopic(ch.ID(), msg.Trailing)
+		if err != nil {
+			return s.EncodeMessage(u, irc.ERR_CHANOPRIVSNEEDED, msg.Params, err.Error())
+		}
+
 		ch.Topic(u, msg.Trailing)
-		u.br.SetTopic(ch.ID(), msg.Trailing)
 	} else {
 		r := make([]*irc.Message, 0, ch.Len()+1)
 

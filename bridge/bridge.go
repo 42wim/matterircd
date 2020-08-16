@@ -119,7 +119,7 @@ type ChannelMessageEvent struct {
 type ChannelTopicEvent struct {
 	Text      string
 	ChannelID string
-	Sender    string
+	UserID    string
 }
 
 type DirectMessageEvent struct {

@@ -71,9 +71,20 @@ func (u *User) handleEventChan(events chan *bridge.Event) {
 }
 
 func (u *User) handleChannelTopicEvent(event *bridge.ChannelTopicEvent) {
-	tu, _ := u.Srv.HasUser(event.Sender)
-	ch := u.Srv.Channel(event.ChannelID)
-	ch.Topic(tu, event.Text)
+	tu, ok := u.Srv.HasUserID(event.UserID)
+	if event.UserID == u.User {
+		ok = true
+		tu = u
+	}
+
+	if ok {
+		ch := u.Srv.Channel(event.ChannelID)
+		ch.Topic(tu, event.Text)
+
+		return
+	}
+
+	logger.Errorf("topic change failure: userID %s not found", event.UserID)
 }
 
 func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {

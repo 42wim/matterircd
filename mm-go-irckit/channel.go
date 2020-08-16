@@ -234,6 +234,11 @@ func (ch *channel) Invite(from Prefixer, u *User) error {
 func (ch *channel) Topic(from Prefixer, text string) {
 	ch.mu.RLock()
 
+	// this probably an echo
+	if ch.topic == text {
+		return
+	}
+
 	ch.topic = text
 	// no newlines in topic
 	ch.topic = strings.ReplaceAll(ch.topic, "\n", " ")
