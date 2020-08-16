@@ -36,6 +36,7 @@ func NewUserBridge(c net.Conn, srv Server, cfg *viper.Viper) *User {
 	// used for login
 	u.createService("mattermost", "loginservice")
 	u.createService("slack", "loginservice")
+	u.createService("matterircd", "systemservice")
 	return u
 }
 
@@ -359,11 +360,12 @@ func (u *User) addUsersToChannels() {
 
 func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(string, string) {
 	if strings.Contains(mmchannel.Name, "__") {
-		userID := strings.Split(mmchannel.Name, "__")[0]
-		u.createUserFromInfo(u.br.GetUser(userID))
-		// wrap MsgSpoofser here
-		return func(spoofUsername string, msg string) {
-			u.MsgSpoofUser(u, spoofUsername, msg)
+		return func(nick string, msg string) {
+			if usr, ok := u.Srv.HasUser(nick); ok {
+				u.MsgSpoofUser(usr, u.Nick, msg)
+			} else {
+				logger.Errorf("%s not found for replay msg", nick)
+			}
 		}
 	}
 
@@ -420,13 +422,16 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 
 			for _, post := range strings.Split(p.Message, "\n") {
 				user := u.br.GetUser(p.UserId)
-				date := ts.Format("2006-01-02")
+				nick := user.Nick
+				date := ts.Format("2006-01-02 15:04:05")
 				if date != prevDate {
-					spoof("matterircd", fmt.Sprintf("Replaying since %s", date))
+					if brchannel.DM {
+						spoof(nick, fmt.Sprintf("Replaying since %s", date))
+					} else {
+						spoof("matterircd", fmt.Sprintf("Replaying since %s", date))
+					}
 					prevDate = date
 				}
-
-				nick := user.Nick
 
 				spoof(nick, fmt.Sprintf("[%s] %s", ts.Format("15:04"), post))
 			}
