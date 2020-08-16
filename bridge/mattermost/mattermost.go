@@ -428,11 +428,19 @@ func (m *Mattermost) GetUsers() []*bridge.UserInfo {
 func (m *Mattermost) GetChannels() []*bridge.ChannelInfo {
 	var channels []*bridge.ChannelInfo
 
+	chanMap := make(map[string]bool)
+
 	for _, mmchannel := range m.mc.GetChannels() {
 		dm := false
 
 		if mmchannel.Type == "D" || mmchannel.Type == "G" {
 			dm = true
+		}
+
+		// don't add the same channel twice
+		// the same direct messages channels get listed for each team
+		if chanMap[mmchannel.Id] {
+			continue
 		}
 
 		channels = append(channels, &bridge.ChannelInfo{
@@ -441,6 +449,8 @@ func (m *Mattermost) GetChannels() []*bridge.ChannelInfo {
 			TeamID: mmchannel.TeamId,
 			DM:     dm,
 		})
+
+		chanMap[mmchannel.Id] = true
 	}
 
 	return channels
