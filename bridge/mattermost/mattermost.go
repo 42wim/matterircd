@@ -178,6 +178,7 @@ func (m *Mattermost) antiIdle(channelID string, quitChan chan struct{}) {
 				return
 			}
 
+			logger.Tracef("antiIdle %s", channelID)
 			m.mc.UpdateLastViewed(channelID)
 		}
 	}
@@ -729,11 +730,6 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 
 	logger.Debugf("handleWsActionPost() user %s sent %s", m.mc.GetUser(data.UserId).Username, data.Message)
 	logger.Debugf("%#v", data)
-
-	// updatelastviewed
-	if !m.v.GetBool("mattermost.DisableAutoView") {
-		m.mc.UpdateLastViewed(data.ChannelId)
-	}
 }
 
 func (m *Mattermost) getFilesFromData(data *model.Post) []*bridge.File {
@@ -946,7 +942,10 @@ func (m *Mattermost) GetTeamName(teamID string) string {
 }
 
 func (m *Mattermost) GetLastViewedAt(channelID string) int64 {
-	return m.mc.GetLastViewedAt(channelID)
+	x := m.mc.GetLastViewedAt(channelID)
+	logger.Tracef("getLastViewedAt %s: %#v", channelID, x)
+
+	return x
 }
 
 func (m *Mattermost) GetPostsSince(channelID string, since int64) interface{} {
@@ -954,7 +953,11 @@ func (m *Mattermost) GetPostsSince(channelID string, since int64) interface{} {
 }
 
 func (m *Mattermost) UpdateLastViewed(channelID string) {
-	m.mc.UpdateLastViewed(channelID)
+	logger.Tracef("Updatelastviewed %s", channelID)
+	err := m.mc.UpdateLastViewed(channelID)
+	if err != nil {
+		logger.Errorf("updateLastViewed failed: %s", err)
+	}
 }
 
 func (m *Mattermost) UpdateLastViewedUser(userID string) error {
