@@ -101,6 +101,10 @@ func (u *User) handleChannelAddEvent(event *bridge.ChannelAddEvent) {
 			ch.SpoofMessage("system", "added "+added.Nick+" to the channel by "+event.Adder.Nick)
 		}
 	}
+
+	if !u.v.GetBool(u.br.Protocol() + ".disableautoview") {
+		u.br.UpdateLastViewed(event.ChannelID)
+	}
 }
 
 func (u *User) handleChannelRemoveEvent(event *bridge.ChannelRemoveEvent) {
@@ -182,6 +186,10 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		ch.SpoofNotice(nick, event.Text)
 	default:
 		ch.SpoofMessage(nick, event.Text)
+	}
+
+	if !u.v.GetBool(u.br.Protocol() + ".disableautoview") {
+		u.br.UpdateLastViewed(event.ChannelID)
 	}
 }
 
@@ -319,7 +327,7 @@ func (u *User) addUsersToChannels() {
 	}
 
 	srv := u.Srv
-	throttle := time.NewTicker(time.Millisecond * 50)
+	throttle := time.NewTicker(time.Millisecond * 200)
 
 	logger.Debug("in addUsersToChannels()")
 	// add all users, also who are not on channels
