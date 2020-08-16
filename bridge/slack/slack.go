@@ -322,6 +322,10 @@ func (s *Slack) GetChannels() []*bridge.ChannelInfo {
 		}
 		params.Cursor = nextCursor
 		for _, mmchannel := range mmchannels {
+			if !mmchannel.IsMember {
+				continue
+			}
+
 			logger.Debug("Adding channel", mmchannel)
 
 			channels = append(channels, &bridge.ChannelInfo{
