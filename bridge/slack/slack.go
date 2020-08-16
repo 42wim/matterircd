@@ -322,18 +322,14 @@ func (s *Slack) GetChannels() []*bridge.ChannelInfo {
 		}
 		params.Cursor = nextCursor
 		for _, mmchannel := range mmchannels {
-			dm := false
-
-			if !mmchannel.IsIM || mmchannel.IsMpIM {
-				dm = true
-			}
-
 			logger.Debug("Adding channel", mmchannel)
+
 			channels = append(channels, &bridge.ChannelInfo{
-				Name:   mmchannel.Name,
-				ID:     mmchannel.ID,
-				TeamID: s.sinfo.Team.ID,
-				DM:     dm,
+				Name:    mmchannel.Name,
+				ID:      mmchannel.ID,
+				TeamID:  s.sinfo.Team.ID,
+				DM:      mmchannel.IsIM || mmchannel.IsMpIM,
+				Private: !mmchannel.IsOpen,
 			})
 		}
 
@@ -343,6 +339,17 @@ func (s *Slack) GetChannels() []*bridge.ChannelInfo {
 	}
 
 	return channels
+}
+
+func (s *Slack) GetChannel(channelID string) (*bridge.ChannelInfo, error) {
+	channels := s.GetChannels()
+	for _, channel := range channels {
+		if channel.ID == channelID {
+			return channel, nil
+		}
+	}
+
+	return nil, errors.New("channel not found")
 }
 
 func (s *Slack) GetUser(userID string) *bridge.UserInfo {

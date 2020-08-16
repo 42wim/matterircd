@@ -71,6 +71,8 @@ type Channel interface {
 
 	// Spoof notice
 	SpoofNotice(from string, text string)
+
+	IsPrivate() bool
 }
 
 type channel struct {
@@ -79,6 +81,7 @@ type channel struct {
 	server  Server
 	id      string
 	service string
+	private bool
 
 	mu       sync.RWMutex
 	topic    string
@@ -86,13 +89,14 @@ type channel struct {
 }
 
 // NewChannel returns a Channel implementation for a given Server.
-func NewChannel(server Server, channelID string, name string, service string) Channel {
+func NewChannel(server Server, channelID string, name string, service string, modes map[string]bool) Channel {
 	return &channel{
 		created:  time.Now(),
 		server:   server,
 		id:       channelID,
 		name:     name,
 		service:  service,
+		private:  modes["p"],
 		usersIdx: make(map[string]*User),
 	}
 }
@@ -461,4 +465,11 @@ func (ch *channel) SpoofMessage(from string, text string) {
 
 func (ch *channel) SpoofNotice(from string, text string) {
 	ch.Spoof(from, text, irc.NOTICE)
+}
+
+func (ch *channel) IsPrivate() bool {
+	ch.mu.RLock()
+	defer ch.mu.RUnlock()
+
+	return ch.private
 }
