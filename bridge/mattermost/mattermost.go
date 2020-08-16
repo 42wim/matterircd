@@ -1,6 +1,7 @@
 package mattermost
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -432,12 +433,6 @@ func (m *Mattermost) GetChannels() []*bridge.ChannelInfo {
 	chanMap := make(map[string]bool)
 
 	for _, mmchannel := range m.mc.GetChannels() {
-		dm := false
-
-		if mmchannel.Type == "D" || mmchannel.Type == "G" {
-			dm = true
-		}
-
 		// don't add the same channel twice
 		// the same direct messages channels get listed for each team
 		if chanMap[mmchannel.Id] {
@@ -445,16 +440,27 @@ func (m *Mattermost) GetChannels() []*bridge.ChannelInfo {
 		}
 
 		channels = append(channels, &bridge.ChannelInfo{
-			Name:   mmchannel.Name,
-			ID:     mmchannel.Id,
-			TeamID: mmchannel.TeamId,
-			DM:     dm,
+			Name:    mmchannel.Name,
+			ID:      mmchannel.Id,
+			TeamID:  mmchannel.TeamId,
+			DM:      mmchannel.IsGroupOrDirect(),
+			Private: !mmchannel.IsOpen(),
 		})
 
 		chanMap[mmchannel.Id] = true
 	}
 
 	return channels
+}
+
+func (m *Mattermost) GetChannel(channelID string) (*bridge.ChannelInfo, error) {
+	for _, channel := range m.GetChannels() {
+		if channel.ID == channelID {
+			return channel, nil
+		}
+	}
+
+	return nil, errors.New("channel not found")
 }
 
 func (m *Mattermost) GetUser(userID string) *bridge.UserInfo {

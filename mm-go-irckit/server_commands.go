@@ -192,6 +192,13 @@ func CmdLusers(s Server, u *User, msg *irc.Message) error {
 func CmdMode(s Server, u *User, msg *irc.Message) error {
 	modetype := ""
 	channel := msg.Params[0]
+	mode := ""
+
+	if s.Channel(channel).IsPrivate() {
+		mode = "p"
+		fmt.Println(mode)
+	}
+
 	r := []*irc.Message{}
 	if len(msg.Params) > 1 {
 		modetype = msg.Params[1]
@@ -202,7 +209,7 @@ func CmdMode(s Server, u *User, msg *irc.Message) error {
 			Prefix:   s.Prefix(),
 			Command:  irc.RPL_CHANNELMODEIS,
 			Params:   []string{u.Nick, channel},
-			Trailing: " " + " ",
+			Trailing: " " + mode,
 		})
 	case "b":
 		r = append(r, &irc.Message{

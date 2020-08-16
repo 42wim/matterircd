@@ -89,7 +89,7 @@ type ServerConfig struct {
 	// DiscardEmpty setting will start a goroutine to discard empty channels.
 	DiscardEmpty bool
 	// NewChannel overrides the constructor for a new Channel in a given Server and Name.
-	NewChannel func(s Server, channelId string, name string, service string) Channel
+	NewChannel func(s Server, channelId string, name string, service string, modes map[string]bool) Channel
 	// Commands is the handler registry to use (default: DefaultCommands())
 	Commands Commands
 }
@@ -230,9 +230,21 @@ func (s *server) Channel(channelID string) Channel {
 	if !ok {
 		service := s.u.br.Protocol()
 		name := s.u.br.GetChannelName(channelID)
+
+		info, err := s.u.br.GetChannel(channelID)
+		if err != nil {
+			logger.Errorf("didn't find channel %s: %s", channelID, err)
+			info = &bridge.ChannelInfo{}
+		}
+
+		modes := make(map[string]bool)
+		modes["p"] = info.Private
+
 		newFn := s.config.NewChannel
-		ch = newFn(s, channelID, name, service)
-		fmt.Println("new channel id:", channelID, "name:", name)
+		ch = newFn(s, channelID, name, service, modes)
+
+		logger.Debugf("new channel id: %s, name: %s", channelID, name)
+
 		s.channels[channelID] = ch
 		s.channels[name] = ch
 		s.Unlock()

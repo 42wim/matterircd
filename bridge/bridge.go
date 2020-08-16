@@ -28,6 +28,7 @@ type Bridger interface {
 	Protocol() string
 
 	GetChannels() []*ChannelInfo
+	GetChannel(channelID string) (*ChannelInfo, error)
 	GetChannelName(channelID string) string
 	GetLastViewedAt(channelID string) int64
 	UpdateLastViewed(channelID string)
@@ -50,10 +51,11 @@ type Bridger interface {
 }
 
 type ChannelInfo struct {
-	Name   string
-	ID     string
-	TeamID string
-	DM     bool
+	Name    string
+	ID      string
+	TeamID  string
+	DM      bool
+	Private bool
 }
 
 type UserInfo struct {
