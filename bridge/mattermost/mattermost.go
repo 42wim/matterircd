@@ -646,18 +646,18 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 
 	if data.Type == "system_header_change" {
 		if topic, ok := extraProps["new_header"].(string); ok {
-			if topicuser, ok := extraProps["username"].(string); ok {
-				event := &bridge.Event{
-					Type: "channel_topic",
-					Data: &bridge.ChannelTopicEvent{
-						Text:      topic,
-						ChannelID: data.ChannelId,
-						Sender:    topicuser,
-					},
-				}
-				m.eventChan <- event
+			event := &bridge.Event{
+				Type: "channel_topic",
+				Data: &bridge.ChannelTopicEvent{
+					Text:      topic,
+					ChannelID: data.ChannelId,
+					UserID:    data.UserId,
+				},
 			}
+			m.eventChan <- event
 		}
+
+		return
 	}
 
 	msgs := strings.Split(data.Message, "\n")
