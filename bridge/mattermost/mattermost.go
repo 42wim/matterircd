@@ -690,6 +690,12 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 				Type: "direct_message",
 			}
 
+			if data.Type == "me" {
+				msg = strings.TrimLeft(msg, "*")
+				msg = strings.TrimRight(msg, "*")
+				msg = "\x01ACTION " + msg + " \x01"
+			}
+
 			d := &bridge.DirectMessageEvent{
 				Text:  msg,
 				Files: m.getFilesFromData(data),
@@ -701,6 +707,10 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 			event.Data = d
 
 			m.eventChan <- event
+
+			if data.Type == "me" {
+				break
+			}
 		case strings.Contains(data.Message, "@channel") || strings.Contains(data.Message, "@here") ||
 			strings.Contains(data.Message, "@all"):
 			event := &bridge.Event{
@@ -717,6 +727,12 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 
 			m.eventChan <- event
 		default:
+			if data.Type == "me" {
+				msg = strings.TrimLeft(msg, "*")
+				msg = strings.TrimRight(msg, "*")
+				msg = "\x01ACTION " + msg + " \x01"
+			}
+
 			event := &bridge.Event{
 				Type: "channel_message",
 				Data: &bridge.ChannelMessageEvent{
@@ -729,6 +745,10 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 			}
 
 			m.eventChan <- event
+
+			if data.Type == "me" {
+				break
+			}
 		}
 	}
 
