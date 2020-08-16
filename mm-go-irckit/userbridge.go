@@ -442,14 +442,15 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			for _, post := range strings.Split(p.Message, "\n") {
 				user := u.br.GetUser(p.UserId)
 				nick := user.Nick
+				shortdate := ts.Format("2006-01-02")
 				date := ts.Format("2006-01-02 15:04:05")
-				if date != prevDate {
+				if shortdate != prevDate {
 					if brchannel.DM {
 						spoof(nick, fmt.Sprintf("Replaying since %s", date))
 					} else {
 						spoof("matterircd", fmt.Sprintf("Replaying since %s", date))
 					}
-					prevDate = date
+					prevDate = shortdate
 				}
 
 				spoof(nick, fmt.Sprintf("[%s] %s", ts.Format("15:04"), post))
