@@ -363,6 +363,12 @@ func (m *Mattermost) GetChannelName(channelID string) string {
 	var name string
 
 	channelName := m.mc.GetChannelName(channelID)
+
+	// return DM channels immediately
+	if strings.Contains(channelName, "__") {
+		return channelName
+	}
+
 	teamID := m.mc.GetTeamFromChannel(channelID)
 	teamName := m.mc.GetTeamName(teamID)
 
@@ -667,6 +673,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		channelType = t
 	}
 
+	dmchannel, _ := rmsg.Data["channel_name"].(string)
 	// add an edited string when messages are edited
 	if len(msgs) > 0 && rmsg.Event == model.WEBSOCKET_EVENT_POST_EDITED {
 		msgs[len(msgs)-1] = msgs[len(msgs)-1] + " (edited)"
@@ -676,6 +683,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		if strings.Contains(name, "__") {
 			channelType = "D"
 		}
+		dmchannel = name
 	}
 
 	for _, msg := range msgs {
@@ -701,8 +709,18 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 				Files: m.getFilesFromData(data),
 			}
 
-			d.Sender = ghost
-			d.Receiver = m.GetMe()
+			if ghost.Me {
+				d.Sender = ghost
+				d.Receiver = m.getDMUser(dmchannel)
+			} else {
+				d.Sender = m.getDMUser(dmchannel)
+				d.Receiver = ghost
+			}
+
+			if d.Sender == nil || d.Receiver == nil {
+				logger.Errorf("dm: couldn't resolve sender or receiver: %#v", rmsg)
+				return
+			}
 
 			event.Data = d
 
@@ -752,7 +770,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		}
 	}
 
-	m.handleFileEvent(channelType, ghost, data, props)
+	m.handleFileEvent(channelType, ghost, data, rmsg)
 
 	logger.Debugf("handleWsActionPost() user %s sent %s", m.mc.GetUser(data.UserId).Username, data.Message)
 	logger.Debugf("%#v", data)
@@ -770,7 +788,7 @@ func (m *Mattermost) getFilesFromData(data *model.Post) []*bridge.File {
 	return files
 }
 
-func (m *Mattermost) handleFileEvent(channelType string, ghost *bridge.UserInfo, data *model.Post, props map[string]interface{}) {
+func (m *Mattermost) handleFileEvent(channelType string, ghost *bridge.UserInfo, data *model.Post, rmsg *model.WebSocketEvent) {
 	event := &bridge.Event{
 		Type: "file_event",
 	}
@@ -793,8 +811,18 @@ func (m *Mattermost) handleFileEvent(channelType string, ghost *bridge.UserInfo,
 	if len(fileEvent.Files) > 0 {
 		switch {
 		case channelType == "D":
-			fileEvent.Sender = ghost
-			fileEvent.Receiver = m.GetMe()
+			if ghost.Me {
+				fileEvent.Sender = ghost
+				fileEvent.Receiver = m.getDMUser(rmsg.Data["channel_name"])
+			} else {
+				fileEvent.Sender = m.getDMUser(rmsg.Data["channel_name"])
+				fileEvent.Receiver = ghost
+			}
+
+			if fileEvent.Sender == nil || fileEvent.Receiver == nil {
+				logger.Errorf("filedm: couldn't resolve sender or receiver: %#v", rmsg)
+				return
+			}
 
 			m.eventChan <- event
 		default:
@@ -1043,4 +1071,28 @@ func Decode(input interface{}, output interface{}) error {
 	}
 
 	return decoder.Decode(input)
+}
+
+func (m *Mattermost) getDMUser(name interface{}) *bridge.UserInfo {
+	if channel, ok := name.(string); ok {
+		channelmembers := strings.Split(channel, "__")
+		if len(channelmembers) != 2 {
+			logger.Errorf("not a DM message, incorrect channelID: %s", channel)
+			return nil
+		}
+
+		// ourself
+		if channelmembers[0] == channelmembers[1] {
+			return m.createUser(m.mc.User)
+		}
+
+		otheruser := m.GetUser(channelmembers[1])
+		if channelmembers[1] == m.mc.User.Id {
+			otheruser = m.GetUser(channelmembers[0])
+		}
+
+		return otheruser
+	}
+
+	return nil
 }

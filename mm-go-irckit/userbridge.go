@@ -89,7 +89,11 @@ func (u *User) handleChannelTopicEvent(event *bridge.ChannelTopicEvent) {
 
 func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 	if event.Sender.Me {
-		u.MsgSpoofUser(u, u.Nick, event.Text)
+		if event.Receiver.Me {
+			u.MsgSpoofUser(u, u.Nick, event.Text)
+		} else {
+			u.MsgSpoofUser(u, event.Receiver.Nick, event.Text)
+		}
 	} else {
 		u.MsgSpoofUser(u.createUserFromInfo(event.Sender), event.Receiver.Nick, event.Text)
 	}
