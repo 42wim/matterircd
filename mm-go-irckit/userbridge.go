@@ -543,19 +543,14 @@ func (u *User) mayJoin(channelID string) bool {
 		return true
 	// if we don't have joinexclude, then joininclude behaves as joinonly
 	case len(ji) != 0 && len(je) == 0:
-		logger.Tracef("mayjoin 3 %t ch: %s, match: %s", true, ch.String(), ji)
-		return true
+		mayjoin := stringInRegexp(ch.String(), ji)
+		logger.Tracef("mayjoin 3 %t ch: %s, match: %s", mayjoin, ch.String(), ji)
+		return mayjoin
 	// joininclude overrides the joinexclude
-	case len(je) != 0 && len(ji) != 0:
-		if stringInRegexp(ch.String(), je) && stringInRegexp(ch.String(), ji) {
-			logger.Tracef("mayjoin 4 %t ch: %s, ji: %s, je: %s", true, ch.String(), ji, je)
-			return true
-		}
-		// if we don't have it in joinexclude, join
-		if !stringInRegexp(ch.String(), je) {
-			logger.Tracef("mayjoin 5 %t ch: %s, ji: %s, je: %s", true, ch.String(), ji, je)
-			return true
-		}
+	case len(ji) != 0 && len(je) != 0:
+		mayjoin := stringInRegexp(ch.String(), ji)
+		logger.Tracef("mayjoin 4 %t ch: %s, match: %s", mayjoin, ch.String(), ji)
+		return mayjoin
 	}
 
 	logger.Tracef("mayjoin default %t ch: %s, ji: %s, je: %s", false, ch.String(), ji, je)
