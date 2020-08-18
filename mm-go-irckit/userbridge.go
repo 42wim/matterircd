@@ -97,6 +97,10 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 	} else {
 		u.MsgSpoofUser(u.createUserFromInfo(event.Sender), event.Receiver.Nick, event.Text)
 	}
+
+	if !u.v.GetBool(u.br.Protocol() + ".disableautoview") {
+		u.br.UpdateLastViewed(event.ChannelID)
+	}
 }
 
 func (u *User) handleChannelAddEvent(event *bridge.ChannelAddEvent) {

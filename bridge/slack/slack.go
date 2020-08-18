@@ -638,7 +638,8 @@ func (s *Slack) sendDirectMessage(ghost *bridge.UserInfo, msg string, channelID 
 	}
 
 	d := &bridge.DirectMessageEvent{
-		Text: msg,
+		Text:      msg,
+		ChannelID: channelID,
 	}
 
 	d.Sender = ghost
