@@ -123,10 +123,11 @@ type ChannelTopicEvent struct {
 }
 
 type DirectMessageEvent struct {
-	Text     string
-	Receiver *UserInfo
-	Sender   *UserInfo
-	Files    []*File
+	Text      string
+	ChannelID string
+	Receiver  *UserInfo
+	Sender    *UserInfo
+	Files     []*File
 }
 
 type FileEvent struct {

@@ -705,8 +705,9 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 			}
 
 			d := &bridge.DirectMessageEvent{
-				Text:  msg,
-				Files: m.getFilesFromData(data),
+				Text:      msg,
+				Files:     m.getFilesFromData(data),
+				ChannelID: data.ChannelId,
 			}
 
 			if ghost.Me {
