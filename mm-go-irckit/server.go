@@ -233,7 +233,10 @@ func (s *server) Channel(channelID string) Channel {
 
 		info, err := s.u.br.GetChannel(channelID)
 		if err != nil {
-			logger.Errorf("didn't find channel %s: %s", channelID, err)
+			// don't error on our special channels
+			if !strings.HasPrefix(channelID, "&") {
+				logger.Errorf("didn't find channel %s: %s", channelID, err)
+			}
 			info = &bridge.ChannelInfo{}
 		}
 
