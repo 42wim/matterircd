@@ -637,10 +637,12 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	// check if we have a override_username (from webhooks) and use it
 	overrideUsername, _ := extraProps["override_username"].(string)
 	if overrideUsername != "" {
+		logger.Debugf("found override username %s", overrideUsername)
 		// only allow valid irc nicks
 		re := regexp.MustCompile("^[a-zA-Z0-9_]*$")
 		if re.MatchString(overrideUsername) {
 			ghost.Nick = overrideUsername
+			ghost.Me = false
 		}
 	}
 
