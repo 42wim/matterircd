@@ -49,6 +49,10 @@ func New(v *viper.Viper, cred bridge.Credentials, eventChan chan *bridge.Event, 
 
 	mc.EnableAllEvents()
 
+	if v.GetBool("debug") {
+		mc.SetLogLevel("debug")
+	}
+
 	m.mc.OnWsConnect = onWsConnect
 	go mc.StatusLoop()
 
