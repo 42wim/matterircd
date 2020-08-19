@@ -196,7 +196,6 @@ func CmdMode(s Server, u *User, msg *irc.Message) error {
 
 	if s.Channel(channel).IsPrivate() {
 		mode = "p"
-		fmt.Println(mode)
 	}
 
 	r := []*irc.Message{}
