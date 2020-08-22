@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/42wim/matterbridge/matterclient"
 	"github.com/42wim/matterircd/bridge"
+	"github.com/42wim/matterircd/pkg/matterclient"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/mattermost/mattermost-server/v5/model"
 	"github.com/mitchellh/mapstructure"
@@ -17,7 +17,7 @@ import (
 )
 
 type Mattermost struct {
-	mc          *matterclient.MMClient
+	mc          *matterclient.Client
 	credentials bridge.Credentials
 	quitChan    []chan struct{}
 	eventChan   chan *bridge.Event
@@ -25,7 +25,7 @@ type Mattermost struct {
 	connected   bool
 }
 
-func New(v *viper.Viper, cred bridge.Credentials, eventChan chan *bridge.Event, onWsConnect func()) (bridge.Bridger, *matterclient.MMClient, error) {
+func New(v *viper.Viper, cred bridge.Credentials, eventChan chan *bridge.Event, onWsConnect func()) (bridge.Bridger, *matterclient.Client, error) {
 	m := &Mattermost{
 		credentials: cred,
 		eventChan:   eventChan,
@@ -42,31 +42,31 @@ func New(v *viper.Viper, cred bridge.Credentials, eventChan chan *bridge.Event, 
 
 	fmt.Println("loggerlevel:", logger.GetLevel())
 
-	mc, err := m.loginToMattermost()
+	mc, err := m.loginToMattermost(onWsConnect)
 	if err != nil {
 		return nil, nil, err
 	}
-
-	mc.EnableAllEvents()
 
 	if v.GetBool("debug") {
 		mc.SetLogLevel("debug")
 	}
 
-	m.mc.OnWsConnect = onWsConnect
-	go mc.StatusLoop()
-
 	m.mc = mc
-
 	m.connected = true
 
 	return m, mc, nil
 }
 
-func (m *Mattermost) loginToMattermost() (*matterclient.MMClient, error) {
+func (m *Mattermost) loginToMattermost(onWsConnect func()) (*matterclient.Client, error) {
 	mc := matterclient.New(m.credentials.Login, m.credentials.Pass, m.credentials.Team, m.credentials.Server)
 	if m.v.GetBool("mattermost.Insecure") {
 		mc.Credentials.NoTLS = true
+	}
+
+	mc.OnWsConnect = onWsConnect
+
+	if m.v.GetBool("debug") {
+		mc.SetLogLevel("debug")
 	}
 
 	mc.Credentials.SkipTLSVerify = m.v.GetBool("mattermost.SkipTLSVerify")
@@ -88,10 +88,7 @@ func (m *Mattermost) loginToMattermost() (*matterclient.MMClient, error) {
 	logger.Info("login succeeded")
 
 	m.mc = mc
-
 	m.mc.WsQuit = false
-
-	go mc.WsReceiver()
 
 	quitChan := make(chan struct{})
 	m.quitChan = append(m.quitChan, quitChan)
@@ -213,10 +210,10 @@ func (m *Mattermost) Join(channelName string) (string, string, error) {
 	}
 
 	if teamID == "" {
-		teamID = m.mc.Team.Id
+		teamID = m.mc.Team.ID
 	}
 
-	channelID := m.mc.GetChannelId(channelName, teamID)
+	channelID := m.mc.GetChannelID(channelName, teamID)
 
 	err := m.mc.JoinChannel(channelID)
 	logger.Debugf("join channel %s, id %s, err: %v", channelName, channelID, err)
@@ -240,7 +237,7 @@ func (m *Mattermost) List() (map[string]string, error) {
 
 		channelName := "#" + channel.Name
 		// prefix channels outside of our team with team name
-		if channel.TeamId != m.mc.Team.Id {
+		if channel.TeamId != m.mc.Team.ID {
 			channelName = m.mc.GetTeamName(channel.TeamId) + "/" + channel.Name
 		}
 
@@ -377,10 +374,10 @@ func (m *Mattermost) GetChannelName(channelID string) string {
 	teamName := m.mc.GetTeamName(teamID)
 
 	if channelName != "" {
-		if (teamName != "" && teamID != m.mc.Team.Id) || m.v.GetBool("mattermost.PrefixMainTeam") {
+		if (teamName != "" && teamID != m.mc.Team.ID) || m.v.GetBool("mattermost.PrefixMainTeam") {
 			name = "#" + teamName + "/" + channelName
 		}
-		if teamID == m.mc.Team.Id && !m.v.GetBool("mattermost.PrefixMainTeam") {
+		if teamID == m.mc.Team.ID && !m.v.GetBool("mattermost.PrefixMainTeam") {
 			name = "#" + channelName
 		}
 		if teamID == "G" {
@@ -506,7 +503,7 @@ func (m *Mattermost) createUser(mmuser *model.User) *bridge.UserInfo {
 
 	if mmuser.Id == m.mc.User.Id {
 		me = true
-		teamID = m.mc.Team.Id
+		teamID = m.mc.Team.ID
 	}
 
 	info := &bridge.UserInfo{
@@ -1058,7 +1055,7 @@ func (m *Mattermost) GetPosts(channelID string, limit int) interface{} {
 }
 
 func (m *Mattermost) GetChannelID(name, teamID string) string {
-	return m.mc.GetChannelId(name, teamID)
+	return m.mc.GetChannelID(name, teamID)
 }
 
 func (m *Mattermost) Connected() bool {
