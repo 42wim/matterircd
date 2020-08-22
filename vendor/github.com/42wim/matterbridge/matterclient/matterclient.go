@@ -184,6 +184,14 @@ func (m *MMClient) Logout() error {
 	return nil
 }
 
+func (m *MMClient) WsRead(quitChan) ([]byte, error) {
+	if _, rawMsg, err = m.WsClient.ReadMessage(); err != nil {
+		m.logger.Error("error:", err)
+		// reconnect
+		m.wsConnect()
+	}
+}
+
 // WsReceiver implements the core loop that manages the connection to the chat server. In
 // case of a disconnect it will try to reconnect. A call to this method is blocking until
 // the 'WsQuite' field of the MMClient object is set to 'true'.
