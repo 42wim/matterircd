@@ -236,6 +236,7 @@ func (ch *channel) Topic(from Prefixer, text string) {
 
 	// this probably an echo
 	if ch.topic == text {
+		ch.mu.RUnlock()
 		return
 	}
 
