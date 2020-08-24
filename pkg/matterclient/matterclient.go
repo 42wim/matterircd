@@ -72,6 +72,7 @@ type Client struct {
 	lruCache    *lru.Cache
 	aliveChan   chan bool
 	loginCancel context.CancelFunc
+	lastPong    time.Time
 }
 
 func New(login string, pass string, team string, server string) *Client {
@@ -480,6 +481,8 @@ func (m *Client) wsConnect() {
 
 	m.WsClient.Listen()
 
+	m.lastPong = time.Now()
+
 	m.logger.Debug("WsClient: connected")
 
 	// only start to parse WS messages when login is completely done
@@ -490,6 +493,12 @@ func (m *Client) doCheckAlive() error {
 	_, resp := m.Client.GetMe("")
 	if resp.Error != nil {
 		return resp.Error
+	}
+
+	m.WsClient.SendMessage("ping", nil)
+
+	if time.Since(m.lastPong) > 90*time.Second {
+		return errors.New("no pong received in 90 seconds")
 	}
 
 	return nil
@@ -568,6 +577,13 @@ func (m *Client) WsReceiver(ctx context.Context) {
 			}
 
 			m.logger.Debugf("WsReceiver response: %#v", response)
+
+			if text, ok := response.Data["text"].(string); ok {
+				if text == "pong" {
+					m.lastPong = time.Now()
+				}
+			}
+
 			m.parseResponse(response)
 		case <-m.WsClient.PingTimeoutChannel:
 			m.logger.Error("got a ping timeout")
