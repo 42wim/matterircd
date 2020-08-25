@@ -1,17 +1,24 @@
 #interface:port to bind to. (default "127.0.0.1:6667")
-Bind = "127.0.0.1:6667"
+bind = "127.0.0.1:6667"
 
 #enable debug logging (default false)
-Debug = false
+debug = false
 
 #enable trace logging (default false)
-Trace = false
+trace = false
+
+#enable gops agent (https://github.com/google/gops)
+#used to track down memory leaks/cpu profiling
+#default false
+gops = false
 
 #interface:port to bind to. (e.g 127.0.0.1:6697) (deault "")
-TLSBind = "127.0.0.1:6697"
+#
+#TLSBind = "127.0.0.1:6697"
 
 #directory to look for key.pem and cert.pem. (default ".")
-TLSDir = "/etc/pki/tls/matermost/"
+#
+#TLSDir = "/etc/pki/tls/matermost/"
 
 #PasteBufferTimeout specifies the amount of time in milliseconds that
 #messages get kept in matterircd internal buffer before being sent to
@@ -27,10 +34,12 @@ PasteBufferTimeout = 2500
 ##################################
 [mattermost]
 #specify default mattermost server/instance (default "")
-DefaultServer = "chat.mycompany.com"
+#
+#DefaultServer = "chat.mycompany.com"
 
 #specify default mattermost team (default "")
-DefaultTeam = "mycompany"
+#
+#DefaultTeam = "mycompany"
 
 #use http connection to mattermost (default false)
 Insecure = false
@@ -41,7 +50,8 @@ Insecure = false
 #Messages that get sent to unjoined channels (but you're joined on mattermost) will
 #get sent to the &messages channel.
 #default ""
-JoinOnly = ["#onlythischannel"]
+#
+#JoinOnly = ["#onlythischannel"]
 
 #an array of channels that won't be joined on IRC.
 #regexp is supported
@@ -49,7 +59,8 @@ JoinOnly = ["#onlythischannel"]
 #get sent to the &messages channel.
 #You can still /JOIN exclude channels.
 #default ""
-JoinExclude = ["#town-square","#boringchannel","#.*marketing.*"]
+#
+#JoinExclude = ["#town-square","#boringchannel","#.*marketing.*"]
 
 #an array of channels that will override the settings in JoinExclude
 #regexp is supported
@@ -57,7 +68,8 @@ JoinExclude = ["#town-square","#boringchannel","#.*marketing.*"]
 #Messages that get sent to unjoined channels (but you're joined on mattermost) will
 #get sent to the &messages channel.
 #default ""
-JoinInclude = ["#devops","#myteam-marketing"]
+#
+#JoinInclude = ["#devops","#myteam-marketing"]
 
 #PartFake: a bool that defines if you do a /LEAVE or /PART on IRC it will also
 #actually leave the channel on mattermost.
@@ -65,11 +77,13 @@ JoinInclude = ["#devops","#myteam-marketing"]
 #if true it removes the channel from irc, but you're still joined on mattermost, messages
 #of this channel will be sent to &messages channel
 #Default false
+#
 PartFake = true
 
 #only allow connection to specified mattermost server/instances. 
 #Array, default empty
-Restrict = ["chat.mycompany.com"]
+#
+#Restrict = ["chat.mycompany.com"]
 
 #skip verification of mattermost certificate chain and hostname (default false)
 SkipTLSVerify = false
@@ -105,7 +119,8 @@ JoinDM = false
 #As we only connect using tokens, this will first do a ccnnection to see what username the token is from. If this
 #username is on the DenyUsers the user will be disconnected.
 #Array, default empty 
-DenyUsers = ["username"]
+#
+#DenyUsers = ["username"]
 
 #https://get.slack.help/hc/en-us/articles/212281468-Direct-messages-and-group-DMs
 #Only join direct/group messages when someone talks. This stops from cluttering your 
@@ -117,7 +132,8 @@ JoinDM = false
 #As we only connect using tokens, this will first do a ccnnection to see what team the token is from. If this
 #team isn't in the Restrict list, the user will be disconnected.
 #Array, default empty 
-Restrict = ["myslack"]
+#
+#Restrict = ["myslack"]
 
 # This will add the slack DisplayName as prefix to every message if the DisplayName differs from the Username
 # More info about username/displayname see https://api.slack.com/changelog/2017-09-the-one-about-usernames
@@ -130,7 +146,8 @@ UseDisplayName = false
 #Messages that get sent to unjoined channels (but you're joined on mattermost) will
 #get sent to the &messages channel.
 #default ""
-JoinOnly = ["#onlythischannel"]
+#
+#JoinOnly = ["#onlythischannel"]
 
 #an array of channels that won't be joined on IRC.
 #regexp is supported
@@ -138,7 +155,8 @@ JoinOnly = ["#onlythischannel"]
 #get sent to the &messages channel.
 #You can still /JOIN exclude channels.
 #default ""
-JoinExclude = ["#town-square","#boringchannel","#.*marketing.*"]
+#
+#JoinExclude = ["#town-square","#boringchannel","#.*marketing.*"]
 
 #an array of channels that will override the settings in JoinExclude
 #regexp is supported
@@ -146,7 +164,8 @@ JoinExclude = ["#town-square","#boringchannel","#.*marketing.*"]
 #Messages that get sent to unjoined channels (but you're joined on mattermost) will
 #get sent to the &messages channel.
 #default ""
-JoinInclude = ["#devops","#myteam-marketing"]
+#
+#JoinInclude = ["#devops","#myteam-marketing"]
 
 
 
