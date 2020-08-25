@@ -25,9 +25,7 @@ var (
 )
 
 func main() {
-	if err := agent.Listen(agent.Options{}); err != nil {
-		log.Fatal(err)
-	}
+
 	ourlog := logrus.New()
 	ourlog.Formatter = &logrus.TextFormatter{FullTimestamp: true}
 	logger = ourlog.WithFields(logrus.Fields{"module": "matterircd"})
@@ -72,6 +70,12 @@ func main() {
 		logger.Info("enabling trace")
 		ourlog.Level = logrus.TraceLevel
 		irckit.SetLogLevel("trace")
+	}
+
+	if v.GetBool("gops") {
+		if err := agent.Listen(agent.Options{}); err != nil {
+			log.Fatal(err)
+		}
 	}
 
 	if v.GetBool("version") {
