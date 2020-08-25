@@ -135,6 +135,8 @@ func (m *Mattermost) handleWsMessage(quitChan chan struct{}) {
 				m.handleWsActionPost(message.Raw)
 			case model.WEBSOCKET_EVENT_POST_EDITED:
 				m.handleWsActionPost(message.Raw)
+			case model.WEBSOCKET_EVENT_POST_DELETED:
+				m.handleWsActionPost(message.Raw)
 			case model.WEBSOCKET_EVENT_USER_REMOVED:
 				m.handleWsActionUserRemoved(message.Raw)
 			case model.WEBSOCKET_EVENT_USER_ADDED:
@@ -677,9 +679,17 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	}
 
 	dmchannel, _ := rmsg.Data["channel_name"].(string)
-	// add an edited string when messages are edited
-	if len(msgs) > 0 && rmsg.Event == model.WEBSOCKET_EVENT_POST_EDITED {
-		msgs[len(msgs)-1] = msgs[len(msgs)-1] + " (edited)"
+
+	// add an edited/deleted string when messages are edited/deleted
+	if len(msgs) > 0 && (rmsg.Event == model.WEBSOCKET_EVENT_POST_EDITED ||
+		rmsg.Event == model.WEBSOCKET_EVENT_POST_DELETED) {
+		postfix := " (edited)"
+
+		if rmsg.Event == model.WEBSOCKET_EVENT_POST_DELETED {
+			postfix = " (deleted)"
+		}
+
+		msgs[len(msgs)-1] = msgs[len(msgs)-1] + postfix
 
 		// check if we have an edited direct message (channels have __)
 		name := m.GetChannelName(data.ChannelId)
