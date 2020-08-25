@@ -495,7 +495,13 @@ func (m *Client) doCheckAlive() error {
 		return resp.Error
 	}
 
-	m.WsClient.SendMessage("ping", nil)
+	if m.WsClient.ListenError == nil {
+		m.WsClient.SendMessage("ping", nil)
+	} else {
+		m.logger.Errorf("got a listen error: %#v", m.WsClient.ListenError)
+
+		return m.WsClient.ListenError
+	}
 
 	if time.Since(m.lastPong) > 90*time.Second {
 		return errors.New("no pong received in 90 seconds")
