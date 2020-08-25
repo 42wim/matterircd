@@ -25,7 +25,6 @@ var (
 )
 
 func main() {
-
 	ourlog := logrus.New()
 	ourlog.Formatter = &logrus.TextFormatter{FullTimestamp: true}
 	logger = ourlog.WithFields(logrus.Fields{"module": "matterircd"})
