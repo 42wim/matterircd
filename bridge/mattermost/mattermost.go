@@ -367,6 +367,12 @@ func (m *Mattermost) GetChannelName(channelID string) string {
 
 	channelName := m.mc.GetChannelName(channelID)
 
+	if channelName == "" {
+		m.mc.UpdateChannels()
+	}
+
+	channelName = m.mc.GetChannelName(channelID)
+
 	// return DM channels immediately
 	if strings.Contains(channelName, "__") {
 		return channelName
@@ -463,6 +469,14 @@ func (m *Mattermost) GetChannels() []*bridge.ChannelInfo {
 }
 
 func (m *Mattermost) GetChannel(channelID string) (*bridge.ChannelInfo, error) {
+	for _, channel := range m.GetChannels() {
+		if channel.ID == channelID {
+			return channel, nil
+		}
+	}
+
+	m.UpdateChannels()
+
 	for _, channel := range m.GetChannels() {
 		if channel.ID == channelID {
 			return channel, nil
