@@ -819,7 +819,11 @@ func (s *Slack) userName(id string) string {
 	defer s.RUnlock()
 	// TODO dynamically update when new users are joining slack
 	for _, us := range s.susers {
-		if us.ID == id && us.Profile.DisplayName != "" {
+		if us.ID != id {
+			continue
+		}
+
+		if us.Profile.DisplayName != "" {
 			return us.Profile.DisplayName
 		}
 
