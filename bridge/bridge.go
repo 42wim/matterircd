@@ -142,6 +142,16 @@ type FileEvent struct {
 	Files       []*File
 }
 
+type ReactionAddEvent struct {
+	Sender      *UserInfo
+	ChannelID   string
+	MessageID   string
+	Reaction    string
+	ChannelType string
+}
+
+type ReactionRemoveEvent ReactionAddEvent
+
 type UserUpdateEvent struct {
 	User *UserInfo
 }
