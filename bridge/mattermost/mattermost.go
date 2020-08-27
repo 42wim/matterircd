@@ -149,6 +149,8 @@ func (m *Mattermost) handleWsMessage(quitChan chan struct{}) {
 				m.handleWsActionUserUpdated(message.Raw)
 			case model.WEBSOCKET_EVENT_STATUS_CHANGE:
 				m.handleStatusChangeEvent(message.Raw)
+			case model.WEBSOCKET_EVENT_REACTION_ADDED, model.WEBSOCKET_EVENT_REACTION_REMOVED:
+				m.handleReactionEvent(message.Raw)
 			}
 		}
 	}
@@ -1020,6 +1022,46 @@ func (m *Mattermost) handleStatusChangeEvent(rmsg *model.WebSocketEvent) {
 			UserID: info.UserId,
 			Status: info.Status,
 		},
+	}
+
+	m.eventChan <- event
+}
+
+func (m *Mattermost) handleReactionEvent(rmsg *model.WebSocketEvent) {
+	reaction := model.ReactionFromJson(strings.NewReader(rmsg.Data["reaction"].(string)))
+
+	var event *bridge.Event
+
+	channelType := ""
+
+	name := m.GetChannelName(rmsg.Broadcast.ChannelId)
+	if strings.Contains(name, "__") {
+		channelType = "D"
+	}
+
+	switch rmsg.Event {
+	case model.WEBSOCKET_EVENT_REACTION_ADDED:
+		event = &bridge.Event{
+			Type: "reaction_add",
+			Data: &bridge.ReactionAddEvent{
+				ChannelID:   rmsg.Broadcast.ChannelId,
+				MessageID:   reaction.PostId,
+				Sender:      m.GetUser(reaction.UserId),
+				Reaction:    reaction.EmojiName,
+				ChannelType: channelType,
+			},
+		}
+	case model.WEBSOCKET_EVENT_REACTION_REMOVED:
+		event = &bridge.Event{
+			Type: "reaction_remove",
+			Data: &bridge.ReactionRemoveEvent{
+				ChannelID:   rmsg.Broadcast.ChannelId,
+				MessageID:   reaction.PostId,
+				Sender:      m.GetUser(reaction.UserId),
+				Reaction:    reaction.EmojiName,
+				ChannelType: channelType,
+			},
+		}
 	}
 
 	m.eventChan <- event

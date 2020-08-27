@@ -68,6 +68,8 @@ func (u *User) handleEventChan(events chan *bridge.Event) {
 			u.handleUserUpdateEvent(e)
 		case *bridge.StatusChangeEvent:
 			u.handleStatusChangeEvent(e)
+		case *bridge.ReactionAddEvent, *bridge.ReactionRemoveEvent:
+			u.handleReactionEvent(e)
 		case *bridge.LogoutEvent:
 			return
 		}
@@ -211,7 +213,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 	}
 
 	if u.v.GetBool(u.br.Protocol() + ".prefixcontext") {
-		prefix := u.prefixContext(event.Sender.User, event.MessageID, event.Event)
+		prefix := u.prefixContext(event.ChannelID, event.MessageID, event.Event)
 
 		event.Text = prefix + event.Text
 	}
@@ -276,7 +278,6 @@ func (u *User) handleUserUpdateEvent(event *bridge.UserUpdateEvent) {
 }
 
 func (u *User) handleStatusChangeEvent(event *bridge.StatusChangeEvent) {
-	fmt.Println(event.UserID, u.br.GetMe().User)
 	if event.UserID == u.br.GetMe().User {
 		switch event.Status {
 		case "online":
@@ -287,6 +288,56 @@ func (u *User) handleStatusChangeEvent(event *bridge.StatusChangeEvent) {
 			u.Srv.EncodeMessage(u, irc.RPL_NOWAWAY, []string{u.Nick}, "You have been marked as being away")
 		}
 	}
+}
+
+func (u *User) handleReactionEvent(event interface{}) {
+	var (
+		text, channelID, messageID, channelType, reaction string
+		sender                                            *bridge.UserInfo
+	)
+
+	switch e := event.(type) {
+	case *bridge.ReactionAddEvent:
+		text = "added reaction: "
+		channelID = e.ChannelID
+		messageID = e.MessageID
+		sender = e.Sender
+		channelType = e.ChannelType
+		reaction = e.Reaction
+	case *bridge.ReactionRemoveEvent:
+		text = "removed reaction: "
+		channelID = e.ChannelID
+		messageID = e.MessageID
+		sender = e.Sender
+		channelType = e.ChannelType
+		reaction = e.Reaction
+	}
+
+	if channelType == "D" {
+		e := &bridge.DirectMessageEvent{
+			Text:      text + reaction,
+			ChannelID: channelID,
+			Receiver:  u.UserInfo,
+			Sender:    sender,
+			MessageID: messageID,
+			Event:     "reaction",
+		}
+
+		u.handleDirectMessageEvent(e)
+
+		return
+	}
+
+	e := &bridge.ChannelMessageEvent{
+		Text:        text + reaction,
+		ChannelID:   channelID,
+		ChannelType: channelType,
+		Sender:      sender,
+		MessageID:   messageID,
+		Event:       "reaction",
+	}
+
+	u.handleChannelMessageEvent(e)
 }
 
 func (u *User) CreateUserFromInfo(info *bridge.UserInfo) *User {
@@ -640,7 +691,12 @@ func (u *User) logoutFrom(protocol string) error {
 func (u *User) prefixContext(channelID, messageID, event string) string {
 	var currentcount int
 
-	if event != "post_edited" && event != "post_deleted" {
+	defer func() {
+		spew.Dump(u.msgMap)
+		spew.Dump(u.msgCounter)
+	}()
+
+	if event != "post_edited" && event != "post_deleted" && event != "reaction" {
 		u.msgCounter[channelID]++
 
 		// max 4096 entries
