@@ -110,6 +110,10 @@ HideReplies = false
 #If set to true dm/group messages will be joined on startup and not only on talk in the channel.
 JoinDM = false
 
+#This will add a number between 000 and fff to each message
+#This number will be referenced when a message is edited/deleted/threaded/reaction
+PrefixContext = false
+
 
 #############################
 ##### SLACK EXAMPLE #########
@@ -167,5 +171,8 @@ UseDisplayName = false
 #
 #JoinInclude = ["#devops","#myteam-marketing"]
 
+#This will add a number between 000 and fff to each message
+#This number will be referenced when a message is edited/deleted/threaded/reaction
+PrefixContext = false
 
 

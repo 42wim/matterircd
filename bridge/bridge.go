@@ -114,6 +114,8 @@ type ChannelMessageEvent struct {
 	MessageType string
 	ChannelType string
 	Files       []*File
+	MessageID   string
+	Event       string
 }
 
 type ChannelTopicEvent struct {
@@ -128,6 +130,8 @@ type DirectMessageEvent struct {
 	Receiver  *UserInfo
 	Sender    *UserInfo
 	Files     []*File
+	MessageID string
+	Event     string
 }
 
 type FileEvent struct {
