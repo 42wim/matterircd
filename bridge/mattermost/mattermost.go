@@ -735,6 +735,8 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 				Text:      msg,
 				Files:     m.getFilesFromData(data),
 				ChannelID: data.ChannelId,
+				MessageID: data.Id,
+				Event:     rmsg.Event,
 			}
 
 			if ghost.Me {
@@ -768,6 +770,8 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 					MessageType: "notice",
 					ChannelType: channelType,
 					Files:       m.getFilesFromData(data),
+					MessageID:   data.Id,
+					Event:       rmsg.Event,
 				},
 			}
 
@@ -787,6 +791,8 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 					Sender:      ghost,
 					ChannelType: channelType,
 					Files:       m.getFilesFromData(data),
+					MessageID:   data.Id,
+					Event:       rmsg.Event,
 				},
 			}
 

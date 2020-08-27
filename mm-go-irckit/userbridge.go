@@ -21,6 +21,8 @@ type UserBridge struct {
 	Credentials bridge.Credentials
 	br          bridge.Bridger // nolint:structcheck
 	inprogress  bool           //nolint:structcheck
+	msgMap      map[string]map[string]int
+	msgCounter  map[string]int //nolint:structcheck
 }
 
 func NewUserBridge(c net.Conn, srv Server, cfg *viper.Viper) *User {
@@ -32,6 +34,8 @@ func NewUserBridge(c net.Conn, srv Server, cfg *viper.Viper) *User {
 
 	u.Srv = srv
 	u.v = cfg
+	u.msgMap = make(map[string]map[string]int)
+	u.msgCounter = make(map[string]int)
 
 	// used for login
 	u.createService("mattermost", "loginservice")
@@ -88,6 +92,12 @@ func (u *User) handleChannelTopicEvent(event *bridge.ChannelTopicEvent) {
 }
 
 func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
+	if u.v.GetBool(u.br.Protocol() + ".prefixcontext") {
+		prefix := u.prefixContext(event.Sender.User, event.MessageID, event.Event)
+
+		event.Text = prefix + event.Text
+	}
+
 	if event.Sender.Me {
 		if event.Receiver.Me {
 			u.MsgSpoofUser(u, u.Nick, event.Text)
@@ -198,6 +208,12 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 
 	if event.ChannelType != "D" && ch.ID() == "&messages" {
 		nick += "/" + u.Srv.Channel(event.ChannelID).String()
+	}
+
+	if u.v.GetBool(u.br.Protocol() + ".prefixcontext") {
+		prefix := u.prefixContext(event.Sender.User, event.MessageID, event.Event)
+
+		event.Text = prefix + event.Text
 	}
 
 	switch event.MessageType {
@@ -619,4 +635,45 @@ func (u *User) logoutFrom(protocol string) error {
 
 	u.Srv.Logout(u)
 	return nil
+}
+
+func (u *User) prefixContext(channelID, messageID, event string) string {
+	var currentcount int
+
+	if event != "post_edited" && event != "post_deleted" {
+		u.msgCounter[channelID]++
+
+		// max 4096 entries
+		if u.msgCounter[channelID] == 4095 {
+			u.msgCounter[channelID] = 0
+		}
+
+		if _, ok := u.msgMap[channelID]; !ok {
+			u.msgMap[channelID] = make(map[string]int)
+		}
+
+		u.msgMap[channelID][messageID] = u.msgCounter[channelID]
+
+		currentcount = u.msgCounter[channelID]
+
+		return fmt.Sprintf("[%03x] ", currentcount)
+	}
+
+	var ok bool
+	if _, ok = u.msgMap[channelID]; !ok {
+		u.msgMap[channelID] = make(map[string]int)
+	}
+
+	if currentcount, ok = u.msgMap[channelID][messageID]; !ok {
+		u.msgCounter[channelID]++
+
+		// max 4096 entries
+		if u.msgCounter[channelID] == 4095 {
+			u.msgCounter[channelID] = 0
+		}
+
+		currentcount = u.msgCounter[channelID]
+	}
+
+	return fmt.Sprintf("[%03x] ", currentcount)
 }
