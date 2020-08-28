@@ -365,6 +365,10 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 
 	// are we sending to a channel
 	if ch, exists := s.HasChannel(query); exists {
+		if threadMsgChannel(u, msg, ch.ID()) {
+			return nil
+		}
+
 		err = u.br.MsgChannel(ch.ID(), msg.Trailing)
 		if err != nil {
 			u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+msg.Trailing+" could not be send: "+err.Error())
@@ -380,6 +384,10 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 			msg.Trailing = "<redacted>"
 		case toUser.Ghost, toUser.Me:
 			logger.Tracef("sending message %s to user %s", msg.Trailing, toUser.User)
+			if threadMsgUser(u, toUser.User, msg) {
+				return nil
+			}
+
 			err = u.br.MsgUser(toUser.User, msg.Trailing)
 			if err != nil {
 				return err
@@ -392,6 +400,58 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 
 	// no channel or user
 	return s.EncodeMessage(u, irc.ERR_NOSUCHNICK, msg.Params, "No such nick/channel")
+}
+
+func parseThreadID(u *User, msg *irc.Message, channelID string) (string, string) {
+	re := regexp.MustCompile(`^\@\@([0-9a-f]{3})`)
+	matches := re.FindStringSubmatch(msg.Trailing)
+
+	if len(matches) == 2 {
+		msg.Trailing = strings.Replace(msg.Trailing, matches[0], "", 1)
+
+		id, err := strconv.ParseInt(matches[1], 16, 0)
+		if err != nil {
+			logger.Errorf("couldn't parseint %s: %s", matches[1], err)
+		}
+
+		m := u.msgMap[channelID]
+
+		for k, v := range m {
+			if v == int(id) {
+				return k, msg.Trailing
+			}
+		}
+	}
+
+	return "", ""
+}
+
+func threadMsgChannel(u *User, msg *irc.Message, channelID string) bool {
+	msgID, text := parseThreadID(u, msg, channelID)
+	if msgID == "" {
+		return false
+	}
+
+	err := u.br.MsgChannelThread(channelID, msgID, text)
+	if err != nil {
+		u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+text+" could not be send: "+err.Error())
+	}
+
+	return true
+}
+
+func threadMsgUser(u *User, toUser string, msg *irc.Message) bool {
+	msgID, text := parseThreadID(u, msg, toUser)
+	if msgID == "" {
+		return false
+	}
+
+	err := u.br.MsgUserThread(toUser, msgID, text)
+	if err != nil {
+		u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+text+" could not be send: "+err.Error())
+	}
+
+	return true
 }
 
 // CmdQuit is a handler for the /QUIT command.
