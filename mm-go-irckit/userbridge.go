@@ -139,8 +139,6 @@ func (u *User) handleChannelAddEvent(event *bridge.ChannelAddEvent) {
 }
 
 func (u *User) handleChannelRemoveEvent(event *bridge.ChannelRemoveEvent) {
-	spew.Dump(event)
-
 	ch := u.Srv.Channel(event.ChannelID)
 
 	for _, removed := range event.Removed {
@@ -690,11 +688,6 @@ func (u *User) logoutFrom(protocol string) error {
 
 func (u *User) prefixContext(channelID, messageID, event string) string {
 	var currentcount int
-
-	defer func() {
-		spew.Dump(u.msgMap)
-		spew.Dump(u.msgCounter)
-	}()
 
 	if event != "post_edited" && event != "post_deleted" && event != "reaction" {
 		u.msgCounter[channelID]++
