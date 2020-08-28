@@ -116,6 +116,7 @@ type ChannelMessageEvent struct {
 	Files       []*File
 	MessageID   string
 	Event       string
+	ParentID    string
 }
 
 type ChannelTopicEvent struct {
@@ -132,6 +133,7 @@ type DirectMessageEvent struct {
 	Files     []*File
 	MessageID string
 	Event     string
+	ParentID  string
 }
 
 type FileEvent struct {
