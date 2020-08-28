@@ -18,10 +18,10 @@ type Bridger interface {
 	Logout() error
 	Connected() bool
 
-	MsgUser(username, text string) error
-	MsgUserThread(username, parentID, text string) error
-	MsgChannel(channelID, text string) error
-	MsgChannelThread(channelID, parentID, text string) error
+	MsgUser(userID, text string) (string, error)
+	MsgUserThread(userID, parentID, text string) (string, error)
+	MsgChannel(channelID, text string) (string, error)
+	MsgChannelThread(channelID, parentID, text string) (string, error)
 
 	StatusUser(userID string) (string, error)
 	StatusUsers() (map[string]string, error)
@@ -49,6 +49,7 @@ type Bridger interface {
 	GetPostsSince(channelID string, since int64) interface{}
 	GetPosts(channelID string, limit int) interface{}
 	SearchPosts(search string) interface{}
+	ModifyPost(msgID, text string) error
 	GetFileLinks(fileIDs []string) []string
 }
 

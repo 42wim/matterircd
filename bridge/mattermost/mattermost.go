@@ -286,39 +286,47 @@ func (m *Mattermost) Logout() error {
 	return nil
 }
 
-func (m *Mattermost) MsgUser(username, text string) error {
-	props := make(map[string]interface{})
-
-	props["matterircd_"+m.mc.User.Id] = true
-	m.mc.SendDirectMessageProps(username, text, "", props)
-
-	return nil
+func (m *Mattermost) MsgUser(userID, text string) (string, error) {
+	return m.MsgUserThread(userID, "", text)
 }
 
-func (m *Mattermost) MsgUserThread(username, parentID, text string) error {
+func (m *Mattermost) MsgUserThread(userID, parentID, text string) (string, error) {
 	props := make(map[string]interface{})
 
 	props["matterircd_"+m.mc.User.Id] = true
-	m.mc.SendDirectMessageProps(username, text, parentID, props)
 
-	return nil
-}
-
-func (m *Mattermost) MsgChannel(channelID, text string) error {
-	props := make(map[string]interface{})
-	props["matterircd_"+m.mc.User.Id] = true
-
-	post := &model.Post{ChannelId: channelID, Message: text, Props: props}
-	_, resp := m.mc.Client.CreatePost(post)
-
+	// create DM channel (only happens on first message)
+	_, resp := m.mc.Client.CreateDirectChannel(m.mc.User.Id, userID)
 	if resp.Error != nil {
-		return resp.Error
+		return "", resp.Error
 	}
 
-	return nil
+	channelName := model.GetDMNameFromIds(userID, m.mc.User.Id)
+
+	// build & send the message
+	text = strings.ReplaceAll(text, "\r", "")
+	post := &model.Post{
+		ChannelId: m.GetChannelID(channelName, m.mc.Team.ID),
+		Message:   text,
+		RootId:    parentID,
+	}
+
+	post.SetProps(props)
+
+	rp, resp := m.mc.Client.CreatePost(post)
+
+	if resp.Error != nil {
+		return "", resp.Error
+	}
+
+	return rp.Id, nil
 }
 
-func (m *Mattermost) MsgChannelThread(channelID, parentID, text string) error {
+func (m *Mattermost) MsgChannel(channelID, text string) (string, error) {
+	return m.MsgChannelThread(channelID, "", text)
+}
+
+func (m *Mattermost) MsgChannelThread(channelID, parentID, text string) (string, error) {
 	props := make(map[string]interface{})
 	props["matterircd_"+m.mc.User.Id] = true
 
@@ -330,7 +338,28 @@ func (m *Mattermost) MsgChannelThread(channelID, parentID, text string) error {
 
 	post.SetProps(props)
 
-	_, resp := m.mc.Client.CreatePost(post)
+	rp, resp := m.mc.Client.CreatePost(post)
+
+	if resp.Error != nil {
+		return "", resp.Error
+	}
+
+	return rp.Id, nil
+}
+
+func (m *Mattermost) ModifyPost(msgID, text string) error {
+	if text == "" {
+		_, resp := m.mc.Client.DeletePost(msgID)
+		if resp.Error != nil {
+			return resp.Error
+		}
+
+		return nil
+	}
+
+	_, resp := m.mc.Client.PatchPost(msgID, &model.PostPatch{
+		Message: &text,
+	})
 
 	if resp.Error != nil {
 		return resp.Error
