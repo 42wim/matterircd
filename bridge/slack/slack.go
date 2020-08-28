@@ -160,30 +160,31 @@ func (s *Slack) createSlackMsgOption(text string) []slack.MsgOption {
 	return opts
 }
 
-func (s *Slack) MsgUser(username, text string) error {
+func (s *Slack) MsgUser(username, text string) (string, error) {
 	_, _, dchannel, err := s.sc.OpenIMChannel(username)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	opts := s.createSlackMsgOption(text)
 
 	_, _, err = s.sc.PostMessage(dchannel, opts...)
 	if err != nil {
-		return err
+		return "", err
 	}
-	return nil
+
+	return "", nil
 }
 
-func (s *Slack) MsgChannel(channelID, text string) error {
+func (s *Slack) MsgChannel(channelID, text string) (string, error) {
 	opts := s.createSlackMsgOption(text)
 
 	_, _, err := s.sc.PostMessage(strings.ToUpper(channelID), opts...)
 	if err != nil {
-		return err
+		return "", err
 	}
 
-	return nil
+	return "", nil
 }
 
 func (s *Slack) Topic(channelID string) string {
@@ -868,10 +869,14 @@ func (s *Slack) Connected() bool {
 	return s.connected
 }
 
-func (s *Slack) MsgUserThread(username, parentID, text string) error {
-	return nil
+func (s *Slack) MsgUserThread(username, parentID, text string) (string, error) {
+	return "", nil
 }
 
-func (s *Slack) MsgChannelThread(username, parentID, text string) error {
+func (s *Slack) MsgChannelThread(username, parentID, text string) (string, error) {
+	return "", nil
+}
+
+func (s *Slack) ModifyPost(channelID, text string) error {
 	return nil
 }

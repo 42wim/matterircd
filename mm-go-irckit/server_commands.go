@@ -369,10 +369,19 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 			return nil
 		}
 
-		err = u.br.MsgChannel(ch.ID(), msg.Trailing)
-		if err != nil {
+		if parseModifyMsg(u, msg, ch.ID()) {
+			return nil
+		}
+
+		msgID, err2 := u.br.MsgChannel(ch.ID(), msg.Trailing)
+		if err2 != nil {
 			u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+msg.Trailing+" could not be send: "+err.Error())
 		}
+
+		if u.v.GetBool(u.br.Protocol() + ".prefixcontext") {
+			u.prefixContext(ch.ID(), msgID, "", "")
+		}
+
 		return nil
 	}
 
@@ -388,10 +397,19 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 				return nil
 			}
 
-			err = u.br.MsgUser(toUser.User, msg.Trailing)
-			if err != nil {
+			if parseModifyMsg(u, msg, toUser.User) {
+				return nil
+			}
+
+			msgID, err2 := u.br.MsgUser(toUser.User, msg.Trailing)
+			if err2 != nil {
 				return err
 			}
+
+			if u.v.GetBool(u.br.Protocol() + ".prefixcontext") {
+				u.prefixContext(toUser.User, msgID, "", "")
+			}
+
 		default:
 			err = s.EncodeMessage(u, irc.PRIVMSG, []string{toUser.Nick}, msg.Trailing)
 		}
@@ -400,6 +418,57 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 
 	// no channel or user
 	return s.EncodeMessage(u, irc.ERR_NOSUCHNICK, msg.Params, "No such nick/channel")
+}
+
+func parseModifyMsg(u *User, msg *irc.Message, channelID string) bool {
+	re := regexp.MustCompile(`^s\/([0-9a-f]{3})\/(.*)`)
+	matches := re.FindStringSubmatch(msg.Trailing)
+	text := msg.Trailing
+
+	// only two so s/xxx/ which means a delete
+	if len(matches) != 2 && len(matches) != 3 {
+		return false
+	}
+
+	switch len(matches) {
+	case 2:
+		text = ""
+	case 3:
+		text = matches[2]
+	}
+
+	id, err := strconv.ParseInt(matches[1], 16, 0)
+	if err != nil {
+		logger.Errorf("couldn't parseint %s: %s", matches[1], err)
+	}
+
+	u.msgMapMutex.RLock()
+	defer u.msgMapMutex.RUnlock()
+
+	m := u.msgMap[channelID]
+
+	msgID := ""
+
+	for k, v := range m {
+		if v == int(id) {
+			msgID = k
+		}
+	}
+
+	if msgID == "" {
+		return false
+	}
+
+	err = u.br.ModifyPost(msgID, text)
+	if err != nil {
+		// probably a wrong id, just put it through as normally
+		if strings.Contains(err.Error(), "permissions") {
+			return false
+		}
+		u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+text+" could not be modified: "+err.Error())
+	}
+
+	return true
 }
 
 func parseThreadID(u *User, msg *irc.Message, channelID string) (string, string) {
@@ -435,7 +504,7 @@ func threadMsgChannel(u *User, msg *irc.Message, channelID string) bool {
 		return false
 	}
 
-	err := u.br.MsgChannelThread(channelID, msgID, text)
+	_, err := u.br.MsgChannelThread(channelID, msgID, text)
 	if err != nil {
 		u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+text+" could not be send: "+err.Error())
 	}
@@ -449,7 +518,7 @@ func threadMsgUser(u *User, toUser string, msg *irc.Message) bool {
 		return false
 	}
 
-	err := u.br.MsgUserThread(toUser, msgID, text)
+	_, err := u.br.MsgUserThread(toUser, msgID, text)
 	if err != nil {
 		u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+text+" could not be send: "+err.Error())
 	}
