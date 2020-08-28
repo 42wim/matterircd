@@ -295,11 +295,41 @@ func (m *Mattermost) MsgUser(username, text string) error {
 	return nil
 }
 
+func (m *Mattermost) MsgUserThread(username, parentID, text string) error {
+	props := make(map[string]interface{})
+
+	props["matterircd_"+m.mc.User.Id] = true
+	m.mc.SendDirectMessageProps(username, text, parentID, props)
+
+	return nil
+}
+
 func (m *Mattermost) MsgChannel(channelID, text string) error {
 	props := make(map[string]interface{})
 	props["matterircd_"+m.mc.User.Id] = true
 
 	post := &model.Post{ChannelId: channelID, Message: text, Props: props}
+	_, resp := m.mc.Client.CreatePost(post)
+
+	if resp.Error != nil {
+		return resp.Error
+	}
+
+	return nil
+}
+
+func (m *Mattermost) MsgChannelThread(channelID, parentID, text string) error {
+	props := make(map[string]interface{})
+	props["matterircd_"+m.mc.User.Id] = true
+
+	post := &model.Post{
+		ChannelId: channelID,
+		Message:   text,
+		RootId:    parentID,
+	}
+
+	post.SetProps(props)
+
 	_, resp := m.mc.Client.CreatePost(post)
 
 	if resp.Error != nil {

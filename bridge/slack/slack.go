@@ -867,3 +867,11 @@ func (s *Slack) ratelimitCheck(err error) {
 func (s *Slack) Connected() bool {
 	return s.connected
 }
+
+func (s *Slack) MsgUserThread(username, parentID, text string) error {
+	return nil
+}
+
+func (s *Slack) MsgChannelThread(username, parentID, text string) error {
+	return nil
+}

@@ -19,7 +19,9 @@ type Bridger interface {
 	Connected() bool
 
 	MsgUser(username, text string) error
+	MsgUserThread(username, parentID, text string) error
 	MsgChannel(channelID, text string) error
+	MsgChannelThread(channelID, parentID, text string) error
 
 	StatusUser(userID string) (string, error)
 	StatusUsers() (map[string]string, error)
