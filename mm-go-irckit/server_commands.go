@@ -414,6 +414,9 @@ func parseThreadID(u *User, msg *irc.Message, channelID string) (string, string)
 			logger.Errorf("couldn't parseint %s: %s", matches[1], err)
 		}
 
+		u.msgMapMutex.RLock()
+		defer u.msgMapMutex.RUnlock()
+
 		m := u.msgMap[channelID]
 
 		for k, v := range m {

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/42wim/matterircd/bridge"
@@ -23,6 +24,7 @@ type UserBridge struct {
 	inprogress  bool           //nolint:structcheck
 	msgMap      map[string]map[string]int
 	msgCounter  map[string]int //nolint:structcheck
+	msgMapMutex sync.RWMutex   //nolint:structcheck
 }
 
 func NewUserBridge(c net.Conn, srv Server, cfg *viper.Viper) *User {
@@ -717,6 +719,9 @@ func (u *User) prefixContextModified(channelID, messageID string) string {
 }
 
 func (u *User) prefixContext(channelID, messageID, parentID, event string) string {
+	u.msgMapMutex.Lock()
+	defer u.msgMapMutex.Unlock()
+
 	if event == "post_edited" || event == "post_deleted" || event == "reaction" {
 		return u.prefixContextModified(channelID, messageID)
 	}
