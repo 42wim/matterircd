@@ -613,7 +613,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	}
 
 	// nolint:nestif
-	if data.ParentId != "" {
+	if !m.v.GetBool("mattermost.prefixContext") && data.ParentId != "" {
 		parentPost, resp := m.mc.Client.GetPost(data.ParentId, "")
 		if resp.Error != nil {
 			logger.Errorf("Unable to get parent post for %#v", data)
@@ -739,6 +739,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 				ChannelID: data.ChannelId,
 				MessageID: data.Id,
 				Event:     rmsg.Event,
+				ParentID:  data.ParentId,
 			}
 
 			if ghost.Me {
@@ -774,6 +775,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 					Files:       m.getFilesFromData(data),
 					MessageID:   data.Id,
 					Event:       rmsg.Event,
+					ParentID:    data.ParentId,
 				},
 			}
 
@@ -795,6 +797,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 					Files:       m.getFilesFromData(data),
 					MessageID:   data.Id,
 					Event:       rmsg.Event,
+					ParentID:    data.ParentId,
 				},
 			}
 

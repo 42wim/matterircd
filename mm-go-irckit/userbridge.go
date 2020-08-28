@@ -95,7 +95,7 @@ func (u *User) handleChannelTopicEvent(event *bridge.ChannelTopicEvent) {
 
 func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 	if u.v.GetBool(u.br.Protocol() + ".prefixcontext") {
-		prefix := u.prefixContext(event.Sender.User, event.MessageID, event.Event)
+		prefix := u.prefixContext(event.Sender.User, event.MessageID, event.ParentID, event.Event)
 
 		event.Text = prefix + event.Text
 	}
@@ -211,7 +211,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 	}
 
 	if u.v.GetBool(u.br.Protocol() + ".prefixcontext") {
-		prefix := u.prefixContext(event.ChannelID, event.MessageID, event.Event)
+		prefix := u.prefixContext(event.ChannelID, event.MessageID, event.ParentID, event.Event)
 
 		event.Text = prefix + event.Text
 	}
@@ -686,42 +686,65 @@ func (u *User) logoutFrom(protocol string) error {
 	return nil
 }
 
-func (u *User) prefixContext(channelID, messageID, event string) string {
-	var currentcount int
+func (u *User) increaseMsgCounter(channelID string) int {
+	u.msgCounter[channelID]++
 
-	if event != "post_edited" && event != "post_deleted" && event != "reaction" {
-		u.msgCounter[channelID]++
-
-		// max 4096 entries
-		if u.msgCounter[channelID] == 4095 {
-			u.msgCounter[channelID] = 0
-		}
-
-		if _, ok := u.msgMap[channelID]; !ok {
-			u.msgMap[channelID] = make(map[string]int)
-		}
-
-		u.msgMap[channelID][messageID] = u.msgCounter[channelID]
-
-		currentcount = u.msgCounter[channelID]
-
-		return fmt.Sprintf("[%03x] ", currentcount)
+	// max 4096 entries
+	if u.msgCounter[channelID] == 4095 {
+		u.msgCounter[channelID] = 0
 	}
 
-	var ok bool
+	return u.msgCounter[channelID]
+}
+
+func (u *User) prefixContextModified(channelID, messageID string) string {
+	var (
+		ok           bool
+		currentcount int
+	)
+
 	if _, ok = u.msgMap[channelID]; !ok {
 		u.msgMap[channelID] = make(map[string]int)
 	}
 
+	// check if we already have a counter for this messageID otherwise
+	// increase counter and create it
 	if currentcount, ok = u.msgMap[channelID][messageID]; !ok {
-		u.msgCounter[channelID]++
+		currentcount = u.increaseMsgCounter(channelID)
+	}
 
-		// max 4096 entries
-		if u.msgCounter[channelID] == 4095 {
-			u.msgCounter[channelID] = 0
+	return fmt.Sprintf("[%03x] ", currentcount)
+}
+
+func (u *User) prefixContext(channelID, messageID, parentID, event string) string {
+	if event == "post_edited" || event == "post_deleted" || event == "reaction" {
+		return u.prefixContextModified(channelID, messageID)
+	}
+
+	var (
+		currentcount, parentcount int
+		ok                        bool
+	)
+
+	if parentID != "" {
+		if _, ok = u.msgMap[channelID][parentID]; !ok {
+			u.increaseMsgCounter(channelID)
+			u.msgMap[channelID][parentID] = u.msgCounter[channelID]
 		}
 
-		currentcount = u.msgCounter[channelID]
+		parentcount = u.msgMap[channelID][parentID]
+	}
+
+	currentcount = u.increaseMsgCounter(channelID)
+
+	if _, ok = u.msgMap[channelID]; !ok {
+		u.msgMap[channelID] = make(map[string]int)
+	}
+
+	u.msgMap[channelID][messageID] = u.msgCounter[channelID]
+
+	if parentID != "" {
+		return fmt.Sprintf("[%03x->%03x] ", currentcount, parentcount)
 	}
 
 	return fmt.Sprintf("[%03x] ", currentcount)
