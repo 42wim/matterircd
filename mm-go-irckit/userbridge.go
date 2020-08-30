@@ -503,6 +503,9 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 		var prevDate string
 
 		mmPostList := postlist.(*model.PostList)
+		if mmPostList == nil {
+			continue
+		}
 		// traverse the order in reverse
 		for i := len(mmPostList.Order) - 1; i >= 0; i-- {
 			p := mmPostList.Posts[mmPostList.Order[i]]
@@ -763,7 +766,7 @@ func (u *User) prefixContext(channelID, messageID, parentID, event string) strin
 func (u *User) updateLastViewed(channelID string) {
 	go func() {
 		rand.Seed(time.Now().UnixNano())
-		r := rand.Intn(3000) //nolint:gosec
+		r := rand.Intn(3000)
 		time.Sleep(time.Duration(r) * time.Millisecond)
 		u.br.UpdateLastViewed(channelID)
 	}()
