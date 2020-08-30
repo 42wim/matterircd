@@ -569,7 +569,7 @@ func (m *Mattermost) GetMe() *bridge.UserInfo {
 func (m *Mattermost) GetUserByUsername(username string) *bridge.UserInfo {
 	for {
 		mmuser, resp := m.mc.Client.GetUserByUsername(username, "")
-		if resp.Error != nil {
+		if resp.Error == nil {
 			return m.createUser(mmuser)
 		}
 
