@@ -614,7 +614,7 @@ func (u *User) mayJoin(channelID string) bool {
 		return false
 	// we only have exclude, do not join if in exclude
 	case len(ji) == 0 && len(je) != 0:
-		mayjoin := stringInRegexp(ch.String(), je)
+		mayjoin := !stringInRegexp(ch.String(), je)
 		logger.Tracef("mayjoin 1 %t ch: %s, match: %s", mayjoin, ch.String(), je)
 		return mayjoin
 	// nothing specified, everything may join
@@ -628,6 +628,7 @@ func (u *User) mayJoin(channelID string) bool {
 		return mayjoin
 	// joininclude overrides the joinexclude
 	case len(ji) != 0 && len(je) != 0:
+		// if explicit in ji we also may join
 		mayjoin := stringInRegexp(ch.String(), ji)
 		logger.Tracef("mayjoin 4 %t ch: %s, match: %s", mayjoin, ch.String(), ji)
 		return mayjoin
