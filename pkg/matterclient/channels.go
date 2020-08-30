@@ -1,7 +1,6 @@
 package matterclient
 
 import (
-	"errors"
 	"strings"
 
 	"github.com/mattermost/mattermost-server/v5/model"
@@ -122,12 +121,16 @@ func (m *Client) GetLastViewedAt(channelID string) int64 {
 	m.RLock()
 	defer m.RUnlock()
 
-	res, resp := m.Client.GetChannelMember(channelID, m.User.Id, "")
-	if resp.Error != nil {
-		return model.GetMillis()
-	}
+	for {
+		res, resp := m.Client.GetChannelMember(channelID, m.User.Id, "")
+		if resp.Error == nil {
+			return res.LastViewedAt
+		}
 
-	return res.LastViewedAt
+		if err := m.HandleRatelimit("GetChannelMember", resp); err != nil {
+			return model.GetMillis()
+		}
+	}
 }
 
 // GetMoreChannels returns existing channels where we're not a member off.
@@ -196,9 +199,20 @@ func (m *Client) JoinChannel(channelID string) error {
 }
 
 func (m *Client) UpdateChannelsTeam(teamID string) error {
-	mmchannels, resp := m.Client.GetChannelsForTeamForUser(teamID, m.User.Id, false, "")
-	if resp.Error != nil {
-		return errors.New(resp.Error.DetailedError)
+	var (
+		mmchannels []*model.Channel
+		resp       *model.Response
+	)
+
+	for {
+		mmchannels, resp = m.Client.GetChannelsForTeamForUser(teamID, m.User.Id, false, "")
+		if resp.Error == nil {
+			break
+		}
+
+		if err := m.HandleRatelimit("GetChannelsForTeamForUser", resp); err != nil {
+			return err
+		}
 	}
 
 	for idx, t := range m.OtherTeams {
@@ -209,9 +223,15 @@ func (m *Client) UpdateChannelsTeam(teamID string) error {
 		}
 	}
 
-	mmchannels, resp = m.Client.GetPublicChannelsForTeam(teamID, 0, 5000, "")
-	if resp.Error != nil {
-		return errors.New(resp.Error.DetailedError)
+	for {
+		mmchannels, resp = m.Client.GetPublicChannelsForTeam(teamID, 0, 5000, "")
+		if resp.Error == nil {
+			break
+		}
+
+		if err := m.HandleRatelimit("GetPublicChannelsForTeam", resp); err != nil {
+			return err
+		}
 	}
 
 	for idx, t := range m.OtherTeams {
@@ -254,12 +274,16 @@ func (m *Client) UpdateLastViewed(channelID string) error {
 
 	view := &model.ChannelView{ChannelId: channelID}
 
-	_, resp := m.Client.ViewChannel(m.User.Id, view)
-	if resp.Error != nil {
-		m.logger.Errorf("ChannelView update for %s failed: %s", channelID, resp.Error)
+	for {
+		_, resp := m.Client.ViewChannel(m.User.Id, view)
+		if resp.Error == nil {
+			return nil
+		}
 
-		return resp.Error
+		if err := m.HandleRatelimit("ViewChannel", resp); err != nil {
+			m.logger.Errorf("ChannelView update for %s failed: %s", channelID, err)
+
+			return err
+		}
 	}
-
-	return nil
 }

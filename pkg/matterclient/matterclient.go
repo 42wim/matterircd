@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -662,4 +663,21 @@ func (m *Client) SetLogLevel(level string) {
 	} else {
 		m.rootLogger.SetLevel(l)
 	}
+}
+
+func (m *Client) HandleRatelimit(name string, resp *model.Response) error {
+	if resp.StatusCode != 429 {
+		return resp.Error
+	}
+
+	waitTime, err := strconv.Atoi(resp.Header.Get("X-RateLimit-Reset"))
+	if err != nil {
+		return err
+	}
+
+	m.logger.Warnf("Ratelimited on %s for %d", name, waitTime)
+
+	time.Sleep(time.Duration(waitTime) * time.Second)
+
+	return nil
 }

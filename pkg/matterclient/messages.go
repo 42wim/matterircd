@@ -53,21 +53,29 @@ func (m *Client) GetFileLinks(filenames []string) []string {
 }
 
 func (m *Client) GetPosts(channelID string, limit int) *model.PostList {
-	res, resp := m.Client.GetPostsForChannel(channelID, 0, limit, "")
-	if resp.Error != nil {
-		return nil
-	}
+	for {
+		res, resp := m.Client.GetPostsForChannel(channelID, 0, limit, "")
+		if resp.Error == nil {
+			return res
+		}
 
-	return res
+		if err := m.HandleRatelimit("GetPostsForChannel", resp); err != nil {
+			return nil
+		}
+	}
 }
 
 func (m *Client) GetPostsSince(channelID string, time int64) *model.PostList {
-	res, resp := m.Client.GetPostsSince(channelID, time)
-	if resp.Error != nil {
-		return nil
-	}
+	for {
+		res, resp := m.Client.GetPostsSince(channelID, time)
+		if resp.Error == nil {
+			return res
+		}
 
-	return res
+		if err := m.HandleRatelimit("GetPostsSince", resp); err != nil {
+			return nil
+		}
+	}
 }
 
 func (m *Client) GetPublicLink(filename string) string {
@@ -95,25 +103,42 @@ func (m *Client) GetPublicLinks(filenames []string) []string {
 }
 
 func (m *Client) PostMessage(channelID string, text string, rootID string) (string, error) {
-	post := &model.Post{ChannelId: channelID, Message: text, RootId: rootID}
-
-	res, resp := m.Client.CreatePost(post)
-	if resp.Error != nil {
-		return "", resp.Error
+	post := &model.Post{
+		ChannelId: channelID,
+		Message:   text,
+		RootId:    rootID,
 	}
 
-	return res.Id, nil
+	for {
+		res, resp := m.Client.CreatePost(post)
+		if resp.Error == nil {
+			return res.Id, nil
+		}
+
+		if err := m.HandleRatelimit("CreatePost", resp); err != nil {
+			return "", err
+		}
+	}
 }
 
 func (m *Client) PostMessageWithFiles(channelID string, text string, rootID string, fileIds []string) (string, error) {
-	post := &model.Post{ChannelId: channelID, Message: text, RootId: rootID, FileIds: fileIds}
-
-	res, resp := m.Client.CreatePost(post)
-	if resp.Error != nil {
-		return "", resp.Error
+	post := &model.Post{
+		ChannelId: channelID,
+		Message:   text,
+		RootId:    rootID,
+		FileIds:   fileIds,
 	}
 
-	return res.Id, nil
+	for {
+		res, resp := m.Client.CreatePost(post)
+		if resp.Error == nil {
+			return res.Id, nil
+		}
+
+		if err := m.HandleRatelimit("CreatePost", resp); err != nil {
+			return "", err
+		}
+	}
 }
 
 func (m *Client) SearchPosts(query string) *model.PostList {
@@ -126,18 +151,25 @@ func (m *Client) SearchPosts(query string) *model.PostList {
 }
 
 // SendDirectMessage sends a direct message to specified user
-func (m *Client) SendDirectMessage(toUserID string, msg string, rootID string) {
-	m.SendDirectMessageProps(toUserID, msg, rootID, nil)
+func (m *Client) SendDirectMessage(toUserID string, msg string, rootID string) error {
+	return m.SendDirectMessageProps(toUserID, msg, rootID, nil)
 }
 
-func (m *Client) SendDirectMessageProps(toUserID string, msg string, rootID string, props map[string]interface{}) {
+func (m *Client) SendDirectMessageProps(toUserID string, msg string, rootID string, props map[string]interface{}) error {
 	m.logger.Debugf("SendDirectMessage to %s, msg %s", toUserID, msg)
-	// create DM channel (only happens on first message)
-	_, resp := m.Client.CreateDirectChannel(m.User.Id, toUserID)
-	if resp.Error != nil {
-		m.logger.Debugf("SendDirectMessage to %#v failed: %s", toUserID, resp.Error)
 
-		return
+	for {
+		// create DM channel (only happens on first message)
+		_, resp := m.Client.CreateDirectChannel(m.User.Id, toUserID)
+		if resp.Error == nil {
+			break
+		}
+
+		if err := m.HandleRatelimit("CreateDirectChannel", resp); err != nil {
+			m.logger.Debugf("SendDirectMessage to %#v failed: %s", toUserID, err)
+
+			return err
+		}
 	}
 
 	channelName := model.GetDMNameFromIds(toUserID, m.User.Id)
@@ -153,10 +185,20 @@ func (m *Client) SendDirectMessageProps(toUserID string, msg string, rootID stri
 		ChannelId: m.GetChannelID(channelName, m.Team.ID),
 		Message:   msg,
 		RootId:    rootID,
-		Props:     props,
 	}
 
-	m.Client.CreatePost(post)
+	post.SetProps(props)
+
+	for {
+		_, resp := m.Client.CreatePost(post)
+		if resp.Error == nil {
+			return nil
+		}
+
+		if err := m.HandleRatelimit("CreatePost", resp); err != nil {
+			return err
+		}
+	}
 }
 
 func (m *Client) UploadFile(data []byte, channelID string, filename string) (string, error) {
