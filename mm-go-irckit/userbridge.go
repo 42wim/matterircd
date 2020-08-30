@@ -732,6 +732,10 @@ func (u *User) prefixContext(channelID, messageID, parentID, event string) strin
 	)
 
 	if parentID != "" {
+		if _, ok = u.msgMap[channelID]; !ok {
+			u.msgMap[channelID] = make(map[string]int)
+		}
+
 		if _, ok = u.msgMap[channelID][parentID]; !ok {
 			u.increaseMsgCounter(channelID)
 			u.msgMap[channelID][parentID] = u.msgCounter[channelID]
