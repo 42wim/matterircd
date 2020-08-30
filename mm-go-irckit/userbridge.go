@@ -162,37 +162,27 @@ func (u *User) handleChannelRemoveEvent(event *bridge.ChannelRemoveEvent) {
 
 func (u *User) getMessageChannel(channelID, channelType string, sender *bridge.UserInfo) Channel {
 	ch := u.Srv.Channel(channelID)
-	// in an group
-	if channelType == "G" {
-		myself := u.createUserFromInfo(u.br.GetMe())
-		if !ch.HasUser(myself) {
-			ch.Join(myself)
-			u.syncChannel(channelID, u.br.GetChannelName(channelID))
-		}
-	}
 	ghost := u.createUserFromInfo(sender)
-	// join if not in channel
 
-	if !ch.HasUser(ghost) && !ghost.Me {
+	// if it's another user, let them join
+	if !ghost.Me && !ch.HasUser(ghost) {
 		logger.Debugf("User %s is not in channel %s. Joining now", ghost.Nick, ch.String())
-		// ch = u.Srv.Channel("&messages")
 		ch.Join(ghost)
 	}
 
-	je := u.v.GetStringSlice(u.br.Protocol() + ".joinexclude")
-	ji := u.v.GetStringSlice(u.br.Protocol() + ".joininclude")
-	// excluded channel
-	if stringInRegexp(ch.String(), je) {
-		logger.Debugf("channel %s is in JoinExclude, send to &messages", ch.String())
-		ch = u.Srv.Channel("&messages")
-	}
-	// not in included channel
-	if !stringInRegexp(ch.String(), ji) && len(ji) > 0 {
-		logger.Debugf("channel %s is not in JoinInclude, send to &messages", ch.String())
-		ch = u.Srv.Channel("&messages")
+	// if it's ourselves and we're already there return the channel
+	if ch.HasUser(u) {
+		return ch
 	}
 
-	return ch
+	// join the channel if we are not there and we're allowed
+	if u.mayJoin(channelID) {
+		u.syncChannel(channelID, u.br.GetChannelName(channelID))
+
+		return ch
+	}
+
+	return u.Srv.Channel("&messages")
 }
 
 func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
@@ -471,7 +461,7 @@ func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(string, string) {
 		channelName = u.br.GetTeamName(mmchannel.TeamID) + "/" + mmchannel.Name
 	}
 
-	u.syncChannel(mmchannel.ID, channelName)
+	u.syncChannel(mmchannel.ID, "#"+channelName)
 	ch := u.Srv.Channel(mmchannel.ID)
 
 	return ch.SpoofMessage
@@ -588,7 +578,7 @@ func (u *User) syncChannel(id string, name string) {
 	batchUsers := u.CreateUsersFromInfo(users)
 	srv.BatchAdd(batchUsers)
 	u.addUsersToChannel(batchUsers, "&users", "&users")
-	u.addUsersToChannel(batchUsers, "#"+name, id)
+	u.addUsersToChannel(batchUsers, name, id)
 
 	// add myself
 	ch := srv.Channel(id)

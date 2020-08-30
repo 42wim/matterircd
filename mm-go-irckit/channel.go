@@ -333,6 +333,12 @@ func (ch *channel) Join(u *User) error {
 	// TODO: Check if user is already here?
 	ch.mu.Lock()
 
+	if u.ID() == "" {
+		ch.mu.Unlock()
+
+		return nil
+	}
+
 	if _, exists := ch.usersIdx[u.ID()]; exists {
 		ch.mu.Unlock()
 		return nil
