@@ -548,7 +548,23 @@ func (s *Slack) handleActionMisc(userID, channelID, msg string) {
 	// direct message
 	switch {
 	case strings.HasPrefix(channelID, "D"):
-		s.sendDirectMessage(ghost, msg, channelID)
+		sender := ghost
+		receiver := ghost
+		if ghost.Me {
+			members, _, _ := s.sc.GetUsersInConversation(&slack.GetUsersInConversationParameters{
+				ChannelID: channelID,
+			})
+			for _, member := range members {
+				if member == s.GetMe().User {
+					continue
+				}
+
+				ghostuser, _ := s.rtm.GetUserInfo(member)
+				receiver = s.createUser(ghostuser)
+			}
+		}
+
+		s.sendDirectMessage(sender, receiver, msg, channelID)
 	default:
 		event := &bridge.Event{
 			Type: "channel_message",
@@ -633,7 +649,7 @@ func (s *Slack) getSlackUserFromMessage(rmsg *slack.MessageEvent) (*slack.User, 
 	return suser, nil
 }
 
-func (s *Slack) sendDirectMessage(ghost *bridge.UserInfo, msg string, channelID string) {
+func (s *Slack) sendDirectMessage(sender, receiver *bridge.UserInfo, msg string, channelID string) {
 	event := &bridge.Event{
 		Type: "direct_message",
 	}
@@ -643,8 +659,8 @@ func (s *Slack) sendDirectMessage(ghost *bridge.UserInfo, msg string, channelID 
 		ChannelID: channelID,
 	}
 
-	d.Sender = ghost
-	d.Receiver = s.GetMe()
+	d.Sender = sender
+	d.Receiver = receiver
 
 	event.Data = d
 
@@ -772,7 +788,24 @@ func (s *Slack) handleSlackActionPost(rmsg *slack.MessageEvent) {
 		// direct message
 		switch {
 		case strings.HasPrefix(rmsg.Channel, "D"):
-			s.sendDirectMessage(ghost, msg, channelID)
+
+			sender := ghost
+			receiver := ghost
+			if ghost.Me {
+				members, _, _ := s.sc.GetUsersInConversation(&slack.GetUsersInConversationParameters{
+					ChannelID: channelID,
+				})
+				for _, member := range members {
+					if member == s.GetMe().User {
+						continue
+					}
+
+					ghostuser, _ := s.rtm.GetUserInfo(member)
+					receiver = s.createUser(ghostuser)
+				}
+			}
+
+			s.sendDirectMessage(sender, receiver, msg, channelID)
 		default:
 			// could be a bot
 			ghost.Nick = spoofUsername
