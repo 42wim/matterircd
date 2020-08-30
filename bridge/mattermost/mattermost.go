@@ -945,6 +945,7 @@ func (m *Mattermost) handleFileEvent(channelType string, ghost *bridge.UserInfo,
 }
 
 func (m *Mattermost) wsActionPostJoinLeave(data *model.Post, extraProps map[string]interface{}) {
+	logger.Debugf("wsActionPostJoinLeave: extraProps: %#v", extraProps)
 	switch data.Type {
 	case "system_add_to_channel":
 		if added, ok := extraProps["addedUsername"].(string); ok {
@@ -974,6 +975,7 @@ func (m *Mattermost) wsActionPostJoinLeave(data *model.Post, extraProps map[stri
 					ChannelID: data.ChannelId,
 				},
 			}
+
 			m.eventChan <- event
 		}
 	}

@@ -327,8 +327,6 @@ func (s *Slack) GetChannels() []*bridge.ChannelInfo {
 				continue
 			}
 
-			logger.Debug("Adding channel", mmchannel)
-
 			channels = append(channels, &bridge.ChannelInfo{
 				Name:    mmchannel.Name,
 				ID:      mmchannel.ID,
