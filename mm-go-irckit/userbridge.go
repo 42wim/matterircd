@@ -2,6 +2,7 @@ package irckit
 
 import (
 	"fmt"
+	"math/rand"
 	"net"
 	"strings"
 	"sync"
@@ -113,7 +114,7 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 	}
 
 	if !u.v.GetBool(u.br.Protocol() + ".disableautoview") {
-		u.br.UpdateLastViewed(event.ChannelID)
+		u.updateLastViewed(event.ChannelID)
 	}
 }
 
@@ -136,7 +137,7 @@ func (u *User) handleChannelAddEvent(event *bridge.ChannelAddEvent) {
 	}
 
 	if !u.v.GetBool(u.br.Protocol() + ".disableautoview") {
-		u.br.UpdateLastViewed(event.ChannelID)
+		u.updateLastViewed(event.ChannelID)
 	}
 }
 
@@ -226,7 +227,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 	}
 
 	if !u.v.GetBool(u.br.Protocol() + ".disableautoview") {
-		u.br.UpdateLastViewed(event.ChannelID)
+		u.updateLastViewed(event.ChannelID)
 	}
 }
 
@@ -534,7 +535,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 		}
 
 		if !u.v.GetBool(u.br.Protocol() + ".disableautoview") {
-			u.br.UpdateLastViewed(brchannel.ID)
+			u.updateLastViewed(brchannel.ID)
 		}
 	}
 }
@@ -757,4 +758,13 @@ func (u *User) prefixContext(channelID, messageID, parentID, event string) strin
 	}
 
 	return fmt.Sprintf("[%03x] ", currentcount)
+}
+
+func (u *User) updateLastViewed(channelID string) {
+	go func() {
+		rand.Seed(time.Now().UnixNano())
+		r := rand.Intn(3000) //nolint:gosec
+		time.Sleep(time.Duration(r) * time.Millisecond)
+		u.br.UpdateLastViewed(channelID)
+	}()
 }
