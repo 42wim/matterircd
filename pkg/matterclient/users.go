@@ -1,9 +1,6 @@
 package matterclient
 
 import (
-	"errors"
-	"time"
-
 	"github.com/mattermost/mattermost-server/v5/model"
 )
 
@@ -121,9 +118,20 @@ func (m *Client) UpdateUsers() error {
 	idx := 0
 	max := 200
 
-	mmusers, resp := m.Client.GetUsers(idx, max, "")
-	if resp.Error != nil {
-		return errors.New(resp.Error.DetailedError)
+	var (
+		mmusers []*model.User
+		resp    *model.Response
+	)
+
+	for {
+		mmusers, resp = m.Client.GetUsers(idx, max, "")
+		if resp.Error == nil {
+			break
+		}
+
+		if err := m.HandleRatelimit("GetUsers", resp); err != nil {
+			return err
+		}
 	}
 
 	for len(mmusers) > 0 {
@@ -135,15 +143,18 @@ func (m *Client) UpdateUsers() error {
 
 		m.Unlock()
 
-		mmusers, resp = m.Client.GetUsers(idx, max, "")
+		for {
+			mmusers, resp = m.Client.GetUsers(idx, max, "")
+			if resp.Error == nil {
+				idx++
 
-		time.Sleep(time.Millisecond * 300)
+				break
+			}
 
-		if resp.Error != nil {
-			return errors.New(resp.Error.DetailedError)
+			if err := m.HandleRatelimit("GetUsers", resp); err != nil {
+				return err
+			}
 		}
-
-		idx++
 	}
 
 	return nil

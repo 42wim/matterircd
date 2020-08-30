@@ -461,29 +461,40 @@ func (m *Mattermost) GetChannelName(channelID string) string {
 
 func (m *Mattermost) GetChannelUsers(channelID string) ([]*bridge.UserInfo, error) {
 	var (
-		mmusers []*model.User
-		users   []*bridge.UserInfo
+		mmusers, mmusersPaged []*model.User
+		users                 []*bridge.UserInfo
+		resp                  *model.Response
 	)
 
 	idx := 0
 	max := 200
 
-	mmusersPaged, resp := m.mc.Client.GetUsersInChannel(channelID, idx, max, "")
-	if resp.Error != nil {
-		return nil, resp.Error
+	for {
+		mmusersPaged, resp = m.mc.Client.GetUsersInChannel(channelID, idx, max, "")
+		if resp.Error == nil {
+			break
+		}
+
+		if err := m.mc.HandleRatelimit("GetUsersInChannel", resp); err != nil {
+			return nil, err
+		}
 	}
 
 	for len(mmusersPaged) > 0 {
-		mmusersPaged, resp = m.mc.Client.GetUsersInChannel(channelID, idx, max, "")
-		if resp.Error != nil {
-			return nil, resp.Error
+		for {
+			mmusersPaged, resp = m.mc.Client.GetUsersInChannel(channelID, idx, max, "")
+			if resp.Error == nil {
+				idx++
+				time.Sleep(time.Millisecond * 200)
+				mmusers = append(mmusers, mmusersPaged...)
+
+				break
+			}
+
+			if err := m.mc.HandleRatelimit("GetUsersInChannel", resp); err != nil {
+				return nil, err
+			}
 		}
-
-		idx++
-
-		time.Sleep(time.Millisecond * 200)
-
-		mmusers = append(mmusers, mmusersPaged...)
 	}
 
 	for _, mmuser := range mmusers {
@@ -556,12 +567,16 @@ func (m *Mattermost) GetMe() *bridge.UserInfo {
 }
 
 func (m *Mattermost) GetUserByUsername(username string) *bridge.UserInfo {
-	mmuser, resp := m.mc.Client.GetUserByUsername(username, "")
-	if resp.Error != nil {
-		return &bridge.UserInfo{}
-	}
+	for {
+		mmuser, resp := m.mc.Client.GetUserByUsername(username, "")
+		if resp.Error != nil {
+			return m.createUser(mmuser)
+		}
 
-	return m.createUser(mmuser)
+		if err := m.mc.HandleRatelimit("GetUserByUsername", resp); err != nil {
+			return &bridge.UserInfo{}
+		}
+	}
 }
 
 func (m *Mattermost) createUser(mmuser *model.User) *bridge.UserInfo {
@@ -1153,12 +1168,16 @@ func (m *Mattermost) UpdateLastViewed(channelID string) {
 }
 
 func (m *Mattermost) UpdateLastViewedUser(userID string) error {
-	dc, resp := m.mc.Client.CreateDirectChannel(m.mc.User.Id, userID)
-	if resp.Error != nil {
-		return resp.Error
-	}
+	for {
+		dc, resp := m.mc.Client.CreateDirectChannel(m.mc.User.Id, userID)
+		if resp.Error == nil {
+			return m.mc.UpdateLastViewed(dc.Id)
+		}
 
-	return m.mc.UpdateLastViewed(dc.Id)
+		if err := m.mc.HandleRatelimit("CreateDirectChannel", resp); err != nil {
+			return err
+		}
+	}
 }
 
 func (m *Mattermost) SearchPosts(search string) interface{} {
