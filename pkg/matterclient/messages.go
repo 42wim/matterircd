@@ -7,7 +7,7 @@ import (
 )
 
 func (m *Client) parseResponse(rmsg *model.WebSocketResponse) {
-	m.logger.Infof("getting response: %#v", rmsg)
+	m.logger.Debugf("getting response: %#v", rmsg)
 }
 
 func (m *Client) DeleteMessage(postID string) error {
