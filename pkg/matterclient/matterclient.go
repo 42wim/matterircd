@@ -512,7 +512,7 @@ func (m *Client) doCheckAlive() error {
 }
 
 func (m *Client) checkAlive(ctx context.Context) {
-	ticker := time.NewTicker(time.Second * 60)
+	ticker := time.NewTicker(time.Second * 45)
 
 	for {
 		select {
