@@ -19,13 +19,14 @@ import (
 )
 
 type UserBridge struct {
-	Srv         Server
-	Credentials bridge.Credentials
-	br          bridge.Bridger // nolint:structcheck
-	inprogress  bool           //nolint:structcheck
-	msgMap      map[string]map[string]int
-	msgCounter  map[string]int //nolint:structcheck
-	msgMapMutex sync.RWMutex   //nolint:structcheck
+	Srv           Server
+	Credentials   bridge.Credentials
+	br            bridge.Bridger // nolint:structcheck
+	inprogress    bool           //nolint:structcheck
+	msgMap        map[string]map[string]int
+	msgCounter    map[string]int       //nolint:structcheck
+	msgMapMutex   sync.RWMutex         //nolint:structcheck
+	updateCounter map[string]time.Time //nolint:structcheck
 }
 
 func NewUserBridge(c net.Conn, srv Server, cfg *viper.Viper) *User {
@@ -39,6 +40,7 @@ func NewUserBridge(c net.Conn, srv Server, cfg *viper.Viper) *User {
 	u.v = cfg
 	u.msgMap = make(map[string]map[string]int)
 	u.msgCounter = make(map[string]int)
+	u.updateCounter = make(map[string]time.Time)
 
 	// used for login
 	u.createService("mattermost", "loginservice")
@@ -755,6 +757,14 @@ func (u *User) prefixContext(channelID, messageID, parentID, event string) strin
 }
 
 func (u *User) updateLastViewed(channelID string) {
+	if t, ok := u.updateCounter[channelID]; ok {
+		if time.Since(t) < time.Second*5 {
+			return
+		}
+	}
+
+	u.updateCounter[channelID] = time.Now()
+
 	go func() {
 		rand.Seed(time.Now().UnixNano())
 		r := rand.Intn(3000)
