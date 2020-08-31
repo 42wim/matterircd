@@ -172,13 +172,14 @@ func (u *User) getMessageChannel(channelID, channelType string, sender *bridge.U
 		ch.Join(ghost)
 	}
 
-	// if it's ourselves and we're already there return the channel
-	if ch.HasUser(u) {
-		return ch
-	}
-
-	// join the channel if we are not there and we're allowed
+	// check if we mayjoin this channel
 	if u.mayJoin(channelID) {
+		// if we are on it, just return it
+		if ch.HasUser(u) {
+			return ch
+		}
+
+		// otherwise first sync it
 		u.syncChannel(channelID, u.br.GetChannelName(channelID))
 
 		return ch
