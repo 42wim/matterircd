@@ -102,7 +102,11 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 	if u.v.GetBool(u.br.Protocol() + ".prefixcontext") {
 		prefix := u.prefixContext(event.Sender.User, event.MessageID, event.ParentID, event.Event)
 
-		event.Text = prefix + event.Text
+		if strings.HasPrefix(event.Text, "\x01") {
+			event.Text = strings.Replace(event.Text, "\x01ACTION ", "\x01ACTION "+prefix, 1)
+		} else {
+			event.Text = prefix + event.Text
+		}
 	}
 
 	if event.Sender.Me {
@@ -209,7 +213,11 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 	if u.v.GetBool(u.br.Protocol() + ".prefixcontext") {
 		prefix := u.prefixContext(event.ChannelID, event.MessageID, event.ParentID, event.Event)
 
-		event.Text = prefix + event.Text
+		if strings.HasPrefix(event.Text, "\x01") {
+			event.Text = strings.Replace(event.Text, "\x01ACTION ", "\x01ACTION "+prefix, 1)
+		} else {
+			event.Text = prefix + event.Text
+		}
 	}
 
 	switch event.MessageType {
