@@ -99,6 +99,18 @@ func (u *User) handleChannelTopicEvent(event *bridge.ChannelTopicEvent) {
 }
 
 func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
+	if u.v.GetBool(u.br.Protocol() + ".showmentions") {
+		for _, m := range u.MentionKeys {
+			if m == u.Nick {
+				continue
+			}
+
+			if strings.Contains(event.Text, m) {
+				event.Text = event.Text + " (mention " + u.Nick + ")"
+			}
+		}
+	}
+
 	if u.v.GetBool(u.br.Protocol() + ".prefixcontext") {
 		prefix := u.prefixContext(event.Sender.User, event.MessageID, event.ParentID, event.Event)
 
@@ -208,6 +220,18 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 
 	if event.ChannelType != "D" && ch.ID() == "&messages" {
 		nick += "/" + u.Srv.Channel(event.ChannelID).String()
+	}
+
+	if u.v.GetBool(u.br.Protocol() + ".showmentions") {
+		for _, m := range u.MentionKeys {
+			if m == u.Nick {
+				continue
+			}
+
+			if strings.Contains(event.Text, m) {
+				event.Text = event.Text + " (mention " + u.Nick + ")"
+			}
+		}
 	}
 
 	if u.v.GetBool(u.br.Protocol() + ".prefixcontext") {
@@ -680,6 +704,7 @@ func (u *User) loginTo(protocol string) error {
 	info := u.br.GetMe()
 	u.Me = true
 	u.User = info.User
+	u.MentionKeys = info.MentionKeys
 
 	go u.handleEventChan(eventChan)
 

@@ -28,6 +28,7 @@ This release will probably also have annoying bugs, please report them.
 - mattermost: Add thread replies to prefixcontext.
 - mattermost: Add support for thread reply using prefixcontext.
 - mattermost: Add support for deleting/modifying own messages.
+- mattermost: Add support for "words that trigger mentions" (See matterircd.toml.example)
 - mattermost/slack: `JoinOnly` option to only join these specific channels (see matterircd.toml.example).
 - mattermost/slack: `JoinInclude`, `JoinExclude` now support regexp (see matterircd.toml.example).
 
