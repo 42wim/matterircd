@@ -14,7 +14,6 @@
     - [FreeBSD](#freebsd)
     - [FAQ](#faq)
         - [mattermost login with sso/gitlab](#mattermost-login-with-ssogitlab)
-    - [Examples](#examples)
     - [Guides](#guides)
 
 <!-- /TOC -->
@@ -32,22 +31,28 @@ Master branch of matterircd should always work against latest STABLE mattermost 
 
 ## Features
 
-- support direct messages / private channels / edited messages
+- support direct messages / private channels / edited messages / deleted messages / reactions
 - auto-join/leave to same channels as on mattermost
 - reconnects with backoff on mattermost restarts
 - support multiple users
 - support channel/direct message backlog (messages when you're disconnected from IRC/mattermost)
 - search messages (/msg mattermost search query)
 - scrollback support (/msg mattermost scrollback #channel limit)
+- away support
 - restrict to specified mattermost instances
 - set default team/server
 - WHOIS, WHO, JOIN, LEAVE, NICK, LIST, ISON, PRIVMSG, MODE, TOPIC, LUSERS, AWAY, KICK, INVITE support
 - support TLS (ssl)
+- support unix sockets
 - support LDAP logins (mattermost enterprise) (use your ldap account/pass to login)
 - &users channel that contains members of all teams (if mattermost is so configured) for easy messaging
+- support for including/excluding channels from showing up in irc
 - supports mattermost roles (shows admins with @ status for now)
 - gitlab auth hack by using mmtoken cookie (see <https://github.com/42wim/matterircd/issues/29>)
 - mattermost personal token support
+- support multiline pasting
+- prefixcontext option for mattermost (see <https://github.com/42wim/matterircd/blob/master/prefixcontext.md>)
+- ....
 
 ## Binaries
 
@@ -55,7 +60,7 @@ You can find the binaries [here](https://github.com/42wim/matterircd/releases/la
 
 ## Building
 
-Go 1.13+ is required
+Go 1.14+ is required
 
 ```bash
 go get github.com/42wim/matterircd
@@ -187,23 +192,6 @@ Now login with `/msg mattermost login <username> MMAUTHTOKEN=<mytoken>`
 See <https://github.com/42wim/matterircd/issues/29> for more information
 
 Also see [#98](https://github.com/42wim/matterircd/issues/98#issuecomment-307308876) for a script that fetches it for you.
-
-## Examples
-
-1. Login to your favorite mattermost service by sending a message to the mattermost user
-![login](http://snag.gy/aAop5.jpg)
-
-2. You'll be auto-joined to all the channels you're a member of
-![channel](http://snag.gy/IzlXR.jpg)
-
-3. Chat away
-![chat](http://snag.gy/JyFd7.jpg)
-![mmchat](http://snag.gy/3qMd1.jpg)
-
-Also works with windows ;-)
-![windows](http://snag.gy/cGSCA.jpg)
-
-If you use chrome, you can easily test with [circ](https://chrome.google.com/webstore/detail/circ/bebigdkelppomhhjaaianniiifjbgocn?hl=en-US)
 
 ## Guides
 
