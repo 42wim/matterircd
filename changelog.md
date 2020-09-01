@@ -1,9 +1,9 @@
 # v0.20.0-dev
 
 The refactor edition.
-This release will probably also have annoying bugs, please report them.
+Be sure to look into the new [prefixcontext.md](https://github.com/42wim/matterircd/blob/master/prefixcontext.md) option for mattermost.
 
-Thanks a lot to @cjwatson, @muesli, @hloeung, @vmiklos and @guilhermepiccoli for contributing to and testing this release!
+Thanks a lot to @cjwatson, @muesli, @hloeung, @vmiklos and @guilhermepiccoli for contributing and testing this release!
 
 ## Breaking changes
 
@@ -23,7 +23,7 @@ Thanks a lot to @cjwatson, @muesli, @hloeung, @vmiklos and @guilhermepiccoli for
 - general: New option `trace` to give even more output as `debug`. See matterircd.toml.example.
 - general: New option `gops` to activate [gops](https://github.com/google/gops) for debugging.
 - general: Allow binding to a Unix socket #276.
-- mattermost: Add prefixcontext option (see matterircd.toml.example)
+- mattermost: Add prefixcontext option which supports edits/deletes/reactions/threads (see matterircd.toml.example) and ([prefixcontext.md](https://github.com/42wim/matterircd/blob/master/prefixcontext.md))
 - mattermost: Add option to use Nickname instead of Username #273 (See matterircd.toml.example).
 - mattermost: Add option to disable showing replies/parent posts #283 (See matterircd.toml.example).
 - mattermost: `JoinDM` option to enable groups/dm joining on startup.
