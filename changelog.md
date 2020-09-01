@@ -3,6 +3,8 @@
 The refactor edition.
 This release will probably also have annoying bugs, please report them.
 
+Thanks a lot to @cjwatson, @muesli, @hloeung, @vmiklos and @guilhermepiccoli for contributing to and testing this release!
+
 ## Breaking changes
 
 ### Commandline switches
