@@ -14,38 +14,53 @@ This release will probably also have annoying bugs, please report them.
 
 - `BlacklistUser` feature for slack has been renamed to `DenyUsers`.
 - `JoinMpImOnTalk` feature has been renamed to `JoinDM` and is available for slack/mattermost
+- `JoinInclude`, `JoinExclude` now support regexp (see matterircd.toml.example)
 
 ## New features
 
 - general: New option `trace` to give even more output as `debug`. See matterircd.toml.example.
+- general: New option `gops` to activate [gops](https://github.com/google/gops) for debugging.
 - general: Allow binding to a Unix socket #276.
+- mattermost: Add prefixcontext option (see matterircd.toml.example)
 - mattermost: Add option to use Nickname instead of Username #273 (See matterircd.toml.example).
 - mattermost: Add option to disable showing replies/parent posts #283 (See matterircd.toml.example).
-- mattermost: `JoinDM` option to enable groups/dm joining on startup
-- mattermost/slack: `JoinOnly` option to only join these specific channels (see matterircd.toml.example)
-- mattermost/slack: `JoinInclude`, `JoinExclude` now support regexp (see matterircd.toml.example)
+- mattermost: `JoinDM` option to enable groups/dm joining on startup.
+- mattermost: Add thread replies to prefixcontext.
+- mattermost: Add support for thread reply using prefixcontext.
+- mattermost: Add support for deleting/modifying own messages.
+- mattermost/slack: `JoinOnly` option to only join these specific channels (see matterircd.toml.example).
+- mattermost/slack: `JoinInclude`, `JoinExclude` now support regexp (see matterircd.toml.example).
 
 ## Enhancement
 
 - general: Refactor using interfaces, will make it easier to update and add new bridges.
-- slack: speed-up on large slack installations.
 - general: massive speedups on joining large channels.
 - general: less memory/CPU usage on large slacks/mattermost.
 - general: Break longer messages at word boundaries #270.
+- general: Move matterclient to pkg and refactor.
+- general: Batch lastviewed updates.
+- mattermost: Handle ratelimiting on frequent used paths.
+- mattermost: Rewritten mattermost connection logic fixing goroutine leaks.
 - mattermost: make `@ALL` messages also notices #288.
 - mattermost: add support for updateuser event (realtime nick changes).
+- mattermost: private channels are now shown with +p in irc
+- mattermost: Convert /me commands from mattermost to irc /me. Closes #281
+- mattermost: Handle deleted messages in mattermost.
+- mattermost: Add reaction events (using prefixContext).
+- slack: speed-up on large slack installations.
 
 ## Bugfix
 
+- general: Refactor DMs and fix messages to self. Fixes #293
+- general: Fix topic messages and check permissions. Closing #294
+- general: Fix too many replay messages.
 - mattermost: Changing topic also changes channel display name #284.
 - mattermost: Images/links in private messages now are on the correct channel.
 - mattermost: Ignore user join messages #280
-- slack: fix double messages on irc because of slack API changes, now using slack blocks.
 - mattermost: Make mattermost away work. Fix #277
 - mattermost: Fix goroutine leaks on multiple login/logout
 - mattermost: Fix crash on quit without login #300
-- general: Refactor DMs and fix messages to self. Fixes #293
-
+- slack: fix double messages on irc because of slack API changes, now using slack blocks.
 
 # v0.19.4
 
