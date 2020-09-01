@@ -1,4 +1,4 @@
-# v0.20.0-dev
+# v0.20.0
 
 The refactor edition.
 Be sure to look into the new [prefixcontext.md](https://github.com/42wim/matterircd/blob/master/prefixcontext.md) option for mattermost.
