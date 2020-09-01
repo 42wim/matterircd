@@ -12,7 +12,7 @@ github.com/francoispqt/gojay
 github.com/fsnotify/fsnotify
 # github.com/go-asn1-ber/asn1-ber v1.4.1
 github.com/go-asn1-ber/asn1-ber
-# github.com/google/gops v0.3.10
+# github.com/google/gops v0.3.11
 github.com/google/gops/agent
 github.com/google/gops/internal
 github.com/google/gops/signal
@@ -78,7 +78,7 @@ github.com/pkg/errors
 github.com/pmezard/go-difflib/difflib
 # github.com/sirupsen/logrus v1.6.0
 github.com/sirupsen/logrus
-# github.com/slack-go/slack v0.6.5
+# github.com/slack-go/slack v0.6.6
 github.com/slack-go/slack
 github.com/slack-go/slack/internal/errorsx
 github.com/slack-go/slack/internal/timex

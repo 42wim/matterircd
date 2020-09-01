@@ -3,7 +3,7 @@ module github.com/42wim/matterircd
 require (
 	github.com/davecgh/go-spew v1.1.1
 	github.com/desertbit/timer v0.0.0-20180107155436-c41aec40b27f
-	github.com/google/gops v0.3.10
+	github.com/google/gops v0.3.11
 	github.com/gorilla/websocket v1.4.2
 	github.com/hashicorp/golang-lru v0.5.4
 	github.com/jpillora/backoff v1.0.0
@@ -15,7 +15,7 @@ require (
 	github.com/muesli/reflow v0.1.0
 	github.com/onsi/gomega v1.5.0 // indirect
 	github.com/sirupsen/logrus v1.6.0
-	github.com/slack-go/slack v0.6.5
+	github.com/slack-go/slack v0.6.6
 	github.com/sorcix/irc v1.1.4
 	github.com/spf13/pflag v1.0.5
 	github.com/spf13/viper v1.7.0
