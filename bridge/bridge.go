@@ -75,6 +75,7 @@ type UserInfo struct {
 	TeamID      string
 	FirstName   string
 	LastName    string
+	MentionKeys []string
 }
 
 type Credentials struct {

@@ -598,18 +598,21 @@ func (m *Mattermost) createUser(mmuser *model.User) *bridge.UserInfo {
 		teamID = m.mc.Team.ID
 	}
 
+	mentionkeys := mmuser.NotifyProps["mention_keys"]
+
 	info := &bridge.UserInfo{
-		Nick:      nick,
-		User:      mmuser.Id,
-		Real:      mmuser.FirstName + " " + mmuser.LastName,
-		Host:      m.mc.Client.Url,
-		Roles:     mmuser.Roles,
-		Ghost:     true,
-		Me:        me,
-		TeamID:    teamID,
-		Username:  mmuser.Username,
-		FirstName: mmuser.FirstName,
-		LastName:  mmuser.LastName,
+		Nick:        nick,
+		User:        mmuser.Id,
+		Real:        mmuser.FirstName + " " + mmuser.LastName,
+		Host:        m.mc.Client.Url,
+		Roles:       mmuser.Roles,
+		Ghost:       true,
+		Me:          me,
+		TeamID:      teamID,
+		Username:    mmuser.Username,
+		FirstName:   mmuser.FirstName,
+		LastName:    mmuser.LastName,
+		MentionKeys: strings.Split(mentionkeys, ","),
 	}
 
 	return info
