@@ -12,6 +12,7 @@
         - [Slack user commands](#slack-user-commands)
     - [Docker](#docker)
     - [FreeBSD](#freebsd)
+    - [Support/questions](#supportquestions)
     - [FAQ](#faq)
         - [mattermost login with sso/gitlab](#mattermost-login-with-ssogitlab)
     - [Guides](#guides)
@@ -179,6 +180,10 @@ Start the service.
 ```
 # service matterircd start
 ```
+
+## Support/questions
+
+We're also on the `#matterircd` channel on irc.freenode.net
 
 ## FAQ
 
