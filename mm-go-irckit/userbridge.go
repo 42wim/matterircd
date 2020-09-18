@@ -121,7 +121,11 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 				event.Text = prefix + " " + event.Text
 			}
 		} else {
-			event.Text = event.Text + " " + prefix
+			if strings.HasSuffix(event.Text, "\x01") {
+				event.Text = strings.Replace(event.Text, " \x01", " "+prefix+" \x01", 1)
+			} else {
+				event.Text = event.Text + " " + prefix
+			}
 		}
 	}
 
@@ -248,7 +252,11 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 				event.Text = prefix + " " + event.Text
 			}
 		} else {
-			event.Text = event.Text + " " + prefix
+			if strings.HasSuffix(event.Text, "\x01") {
+				event.Text = strings.Replace(event.Text, " \x01", " "+prefix+" \x01", 1)
+			} else {
+				event.Text = event.Text + " " + prefix
+			}
 		}
 	}
 
