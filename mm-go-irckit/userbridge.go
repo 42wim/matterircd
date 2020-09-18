@@ -111,7 +111,7 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 		}
 	}
 
-	if u.v.GetBool(u.br.Protocol() + ".prefixcontext") || u.v.GetBool(u.br.Protocol() + ".suffixcontext") {
+	if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
 		prefix := u.prefixContext(event.Sender.User, event.MessageID, event.ParentID, event.Event)
 
 		if u.v.GetBool(u.br.Protocol() + ".prefixcontext") {
@@ -242,7 +242,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		}
 	}
 
-	if u.v.GetBool(u.br.Protocol() + ".prefixcontext") || u.v.GetBool(u.br.Protocol() + ".suffixcontext") {
+	if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
 		prefix := u.prefixContext(event.ChannelID, event.MessageID, event.ParentID, event.Event)
 
 		if u.v.GetBool(u.br.Protocol() + ".prefixcontext") {
