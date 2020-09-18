@@ -111,6 +111,7 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 		}
 	}
 
+	// nolint:nestif
 	if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
 		prefix := u.prefixContext(event.Sender.User, event.MessageID, event.ParentID, event.Event)
 
@@ -242,6 +243,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		}
 	}
 
+	// nolint:nestif
 	if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
 		prefix := u.prefixContext(event.ChannelID, event.MessageID, event.ParentID, event.Event)
 
