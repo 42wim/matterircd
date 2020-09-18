@@ -690,7 +690,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	}
 
 	// nolint:nestif
-	if !m.v.GetBool("mattermost.prefixContext") && data.ParentId != "" {
+	if !(m.v.GetBool("mattermost.prefixContext") || m.v.GetBool("mattermost.suffixContext")) && data.ParentId != "" {
 		parentPost, resp := m.mc.Client.GetPost(data.ParentId, "")
 		if resp.Error != nil {
 			logger.Errorf("Unable to get parent post for %#v", data)
