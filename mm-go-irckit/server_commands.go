@@ -378,7 +378,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 			u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+msg.Trailing+" could not be send: "+err.Error())
 		}
 
-		if u.v.GetBool(u.br.Protocol() + ".prefixcontext") || u.v.GetBool(u.br.Protocol() + ".suffixcontext") {
+		if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
 			u.prefixContext(ch.ID(), msgID, "", "")
 		}
 
@@ -406,7 +406,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 				return err
 			}
 
-			if u.v.GetBool(u.br.Protocol() + ".prefixcontext") || u.v.GetBool(u.br.Protocol() + ".suffixcontext") {
+			if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
 				u.prefixContext(toUser.User, msgID, "", "")
 			}
 
