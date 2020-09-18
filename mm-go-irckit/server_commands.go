@@ -480,25 +480,39 @@ func parseModifyMsg(u *User, msg *irc.Message, channelID string) bool {
 }
 
 func parseThreadID(u *User, msg *irc.Message, channelID string) (string, string) {
-	re := regexp.MustCompile(`^\@\@([0-9a-f]{3})`)
-	matches := re.FindStringSubmatch(msg.Trailing)
+	if u.v.GetBool(u.br.Protocol() + ".threadsupport") {
+		threadRe := regexp.MustCompile(`^\@\@([0-9a-z]{26})`)
+		matches := threadRe.FindStringSubmatch(msg.Trailing)
 
-	if len(matches) == 2 {
-		msg.Trailing = strings.Replace(msg.Trailing, matches[0], "", 1)
-
-		id, err := strconv.ParseInt(matches[1], 16, 0)
-		if err != nil {
-			logger.Errorf("couldn't parseint %s: %s", matches[1], err)
+		if len(matches) == 2 {
+			msg.Trailing = strings.Replace(msg.Trailing, matches[0], "", 1)
+			parentID := matches[1]
+			return parentID, msg.Trailing
 		}
+	}
 
-		u.msgMapMutex.RLock()
-		defer u.msgMapMutex.RUnlock()
+	// nolint:nestif
+	if u.v.GetBool(u.br.Protocol() + ".prefixcontext") {
+		prefixRe := regexp.MustCompile(`^\@\@([0-9a-f]{3})`)
+		matches := prefixRe.FindStringSubmatch(msg.Trailing)
 
-		m := u.msgMap[channelID]
+		if len(matches) == 2 {
+			msg.Trailing = strings.Replace(msg.Trailing, matches[0], "", 1)
 
-		for k, v := range m {
-			if v == int(id) {
-				return k, msg.Trailing
+			id, err := strconv.ParseInt(matches[1], 16, 0)
+			if err != nil {
+				logger.Errorf("couldn't parseint %s: %s", matches[1], err)
+			}
+
+			u.msgMapMutex.RLock()
+			defer u.msgMapMutex.RUnlock()
+
+			m := u.msgMap[channelID]
+
+			for k, v := range m {
+				if v == int(id) {
+					return k, msg.Trailing
+				}
 			}
 		}
 	}

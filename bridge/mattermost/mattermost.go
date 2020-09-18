@@ -330,6 +330,14 @@ func (m *Mattermost) MsgChannelThread(channelID, parentID, text string) (string,
 	props := make(map[string]interface{})
 	props["matterircd_"+m.mc.User.Id] = true
 
+	if parentID != "" {
+		_, resp := m.mc.Client.GetPost(parentID, "")
+		if resp.Error != nil {
+			logger.Errorf("Unable to get parent post %s", parentID)
+			parentID = ""
+		}
+	}
+
 	post := &model.Post{
 		ChannelId: channelID,
 		Message:   text,
@@ -696,11 +704,15 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 			logger.Errorf("Unable to get parent post for %#v", data)
 		} else {
 			parentGhost := m.GetUser(parentPost.UserId)
+			parentIDString := ""
+			if m.v.GetBool("mattermost.ThreadSupport") {
+				parentIDString = fmt.Sprintf(" (@@%s)", data.ParentId)
+			}
 			// Include parent userid / IRC nicks so hilights still work when people reply to our messages.
 			if m.v.GetBool("mattermost.HideReplies") || m.v.GetBool("mattermost.prefixContext") || m.v.GetBool("mattermost.suffixContext") {
-				data.Message = fmt.Sprintf("%s (re @%s (@@%s))", data.Message, parentGhost.Nick, data.ParentId)
+				data.Message = fmt.Sprintf("%s (re @%s%s)", data.Message, parentGhost.Nick, parentIDString)
 			} else {
-				data.Message = fmt.Sprintf("%s (re @%s: %s (@@%s))", data.Message, parentGhost.Nick, parentPost.Message, data.ParentId)
+				data.Message = fmt.Sprintf("%s (re @%s: %s%s)", data.Message, parentGhost.Nick, parentPost.Message, parentIDString)
 			}
 		}
 	}

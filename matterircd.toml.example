@@ -121,6 +121,9 @@ SuffixContext = false
 #in your mattermost "word that trigger mentions" notifications.
 ShowMentions = false
 
+#Enable support for replying to threads
+ThreadSupport = false
+
 #############################
 ##### SLACK EXAMPLE #########
 #############################
