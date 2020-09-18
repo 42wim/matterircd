@@ -111,22 +111,21 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 		}
 	}
 
-	// nolint:nestif
-	if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
+	if u.v.GetBool(u.br.Protocol() + ".prefixcontext") {
 		prefix := u.prefixContext(event.Sender.User, event.MessageID, event.ParentID, event.Event)
 
-		if u.v.GetBool(u.br.Protocol() + ".prefixcontext") {
-			if strings.HasPrefix(event.Text, "\x01") {
-				event.Text = strings.Replace(event.Text, "\x01ACTION ", "\x01ACTION "+prefix+" ", 1)
-			} else {
-				event.Text = prefix + " " + event.Text
-			}
+		if strings.HasPrefix(event.Text, "\x01") {
+			event.Text = strings.Replace(event.Text, "\x01ACTION ", "\x01ACTION "+prefix+" ", 1)
 		} else {
-			if strings.HasSuffix(event.Text, "\x01") {
-				event.Text = strings.Replace(event.Text, " \x01", " "+prefix+" \x01", 1)
-			} else {
-				event.Text = event.Text + " " + prefix
-			}
+			event.Text = prefix + " " + event.Text
+		}
+	} else if u.v.GetBool(u.br.Protocol() + ".suffixcontext") {
+		prefix := u.prefixContext(event.Sender.User, event.MessageID, event.ParentID, event.Event)
+
+		if strings.HasSuffix(event.Text, "\x01") {
+			event.Text = strings.Replace(event.Text, " \x01", " "+prefix+" \x01", 1)
+		} else {
+			event.Text = event.Text + " " + prefix
 		}
 	}
 
@@ -243,22 +242,21 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		}
 	}
 
-	// nolint:nestif
-	if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
+	if u.v.GetBool(u.br.Protocol() + ".prefixcontext") {
 		prefix := u.prefixContext(event.ChannelID, event.MessageID, event.ParentID, event.Event)
 
-		if u.v.GetBool(u.br.Protocol() + ".prefixcontext") {
-			if strings.HasPrefix(event.Text, "\x01") {
-				event.Text = strings.Replace(event.Text, "\x01ACTION ", "\x01ACTION "+prefix+" ", 1)
-			} else {
-				event.Text = prefix + " " + event.Text
-			}
+		if strings.HasPrefix(event.Text, "\x01") {
+			event.Text = strings.Replace(event.Text, "\x01ACTION ", "\x01ACTION "+prefix+" ", 1)
 		} else {
-			if strings.HasSuffix(event.Text, "\x01") {
-				event.Text = strings.Replace(event.Text, " \x01", " "+prefix+" \x01", 1)
-			} else {
-				event.Text = event.Text + " " + prefix
-			}
+			event.Text = prefix + " " + event.Text
+		}
+	} else if u.v.GetBool(u.br.Protocol() + ".suffixcontext") {
+		prefix := u.prefixContext(event.ChannelID, event.MessageID, event.ParentID, event.Event)
+
+		if strings.HasSuffix(event.Text, "\x01") {
+			event.Text = strings.Replace(event.Text, " \x01", " "+prefix+" \x01", 1)
+		} else {
+			event.Text = event.Text + " " + prefix
 		}
 	}
 
