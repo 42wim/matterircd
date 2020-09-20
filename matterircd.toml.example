@@ -114,6 +114,8 @@ JoinDM = false
 #This number will be referenced when a message is edited/deleted/threaded/reaction
 #For more information see prefixcontext.md
 PrefixContext = false
+# Same as PrefixContext but with the message context at the end.
+SuffixContenxt = false
 
 #This will show (mention yournick) after a message if it contains one of the words configured
 #in your mattermost "word that trigger mentions" notifications.

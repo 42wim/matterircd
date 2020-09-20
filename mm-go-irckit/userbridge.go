@@ -115,9 +115,17 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 		prefix := u.prefixContext(event.Sender.User, event.MessageID, event.ParentID, event.Event)
 
 		if strings.HasPrefix(event.Text, "\x01") {
-			event.Text = strings.Replace(event.Text, "\x01ACTION ", "\x01ACTION "+prefix, 1)
+			event.Text = strings.Replace(event.Text, "\x01ACTION ", "\x01ACTION "+prefix+" ", 1)
 		} else {
-			event.Text = prefix + event.Text
+			event.Text = prefix + " " + event.Text
+		}
+	} else if u.v.GetBool(u.br.Protocol() + ".suffixcontext") {
+		prefix := u.prefixContext(event.Sender.User, event.MessageID, event.ParentID, event.Event)
+
+		if strings.HasSuffix(event.Text, "\x01") {
+			event.Text = strings.Replace(event.Text, " \x01", " "+prefix+" \x01", 1)
+		} else {
+			event.Text = event.Text + " " + prefix
 		}
 	}
 
@@ -238,9 +246,17 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		prefix := u.prefixContext(event.ChannelID, event.MessageID, event.ParentID, event.Event)
 
 		if strings.HasPrefix(event.Text, "\x01") {
-			event.Text = strings.Replace(event.Text, "\x01ACTION ", "\x01ACTION "+prefix, 1)
+			event.Text = strings.Replace(event.Text, "\x01ACTION ", "\x01ACTION "+prefix+" ", 1)
 		} else {
-			event.Text = prefix + event.Text
+			event.Text = prefix + " " + event.Text
+		}
+	} else if u.v.GetBool(u.br.Protocol() + ".suffixcontext") {
+		prefix := u.prefixContext(event.ChannelID, event.MessageID, event.ParentID, event.Event)
+
+		if strings.HasSuffix(event.Text, "\x01") {
+			event.Text = strings.Replace(event.Text, " \x01", " "+prefix+" \x01", 1)
+		} else {
+			event.Text = event.Text + " " + prefix
 		}
 	}
 
@@ -746,7 +762,7 @@ func (u *User) prefixContextModified(channelID, messageID string) string {
 		currentcount = u.increaseMsgCounter(channelID)
 	}
 
-	return fmt.Sprintf("[%03x] ", currentcount)
+	return fmt.Sprintf("[%03x]", currentcount)
 }
 
 func (u *User) prefixContext(channelID, messageID, parentID, event string) string {
@@ -784,10 +800,10 @@ func (u *User) prefixContext(channelID, messageID, parentID, event string) strin
 	u.msgMap[channelID][messageID] = u.msgCounter[channelID]
 
 	if parentID != "" {
-		return fmt.Sprintf("[%03x->%03x] ", currentcount, parentcount)
+		return fmt.Sprintf("[%03x->%03x]", currentcount, parentcount)
 	}
 
-	return fmt.Sprintf("[%03x] ", currentcount)
+	return fmt.Sprintf("[%03x]", currentcount)
 }
 
 func (u *User) updateLastViewed(channelID string) {
