@@ -690,13 +690,14 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	}
 
 	// nolint:nestif
-	if !m.v.GetBool("mattermost.prefixContext") && data.ParentId != "" {
+	if data.ParentId != "" {
 		parentPost, resp := m.mc.Client.GetPost(data.ParentId, "")
 		if resp.Error != nil {
 			logger.Errorf("Unable to get parent post for %#v", data)
 		} else {
 			parentGhost := m.GetUser(parentPost.UserId)
-			if m.v.GetBool("mattermost.HideReplies") {
+			// Include parent userid / IRC nicks so hilights still work when people reply to our messages.
+			if m.v.GetBool("mattermost.HideReplies") || m.v.GetBool("mattermost.prefixContext") || m.v.GetBool("mattermost.suffixContext") {
 				data.Message = fmt.Sprintf("%s (re @%s)", data.Message, parentGhost.Nick)
 			} else {
 				data.Message = fmt.Sprintf("%s (re @%s: %s)", data.Message, parentGhost.Nick, parentPost.Message)
