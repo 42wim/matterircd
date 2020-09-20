@@ -365,6 +365,10 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 
 	// are we sending to a channel
 	if ch, exists := s.HasChannel(query); exists {
+		if ch.ID() == "&messages" || ch.ID() == "&users" {
+			return nil
+		}
+
 		if threadMsgChannel(u, msg, ch.ID()) {
 			return nil
 		}
