@@ -496,6 +496,10 @@ func (m *Client) doCheckAlive() error {
 		return resp.Error
 	}
 
+	if m.reconnectBusy {
+		return nil
+	}
+
 	if m.WsClient.ListenError == nil {
 		m.WsClient.SendMessage("ping", nil)
 	} else {
