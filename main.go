@@ -18,7 +18,7 @@ import (
 )
 
 var (
-	version = "0.20.0"
+	version = "0.20.1-dev"
 	githash string
 	logger  *logrus.Entry
 	v       *viper.Viper
