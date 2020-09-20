@@ -111,20 +111,21 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 		}
 	}
 
-	if u.v.GetBool(u.br.Protocol() + ".prefixcontext") {
-		prefix := u.prefixContext(event.Sender.User, event.MessageID, event.ParentID, event.Event)
+	if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
+		prefixUser := event.Sender.User
 
-		if strings.HasPrefix(event.Text, "\x01") {
-			event.Text = strings.Replace(event.Text, "\x01ACTION ", "\x01ACTION "+prefix+" ", 1)
-		} else {
-			event.Text = prefix + " " + event.Text
+		if event.Sender.Me {
+			prefixUser = event.Receiver.User
 		}
-	} else if u.v.GetBool(u.br.Protocol() + ".suffixcontext") {
-		prefix := u.prefixContext(event.Sender.User, event.MessageID, event.ParentID, event.Event)
 
-		if strings.HasSuffix(event.Text, "\x01") {
+		prefix := u.prefixContext(prefixUser, event.MessageID, event.ParentID, event.Event)
+
+		switch {
+		case u.v.GetBool(u.br.Protocol() + ".prefixcontext"):
+			event.Text = strings.Replace(event.Text, "\x01ACTION ", "\x01ACTION "+prefix+" ", 1)
+			event.Text = prefix + " " + event.Text
+		case u.v.GetBool(u.br.Protocol() + ".suffixcontext"):
 			event.Text = strings.Replace(event.Text, " \x01", " "+prefix+" \x01", 1)
-		} else {
 			event.Text = event.Text + " " + prefix
 		}
 	}
