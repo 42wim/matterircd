@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	logger "github.com/sirupsen/logrus"
 	"github.com/slack-go/slack"
 )
 
@@ -178,4 +179,54 @@ func (s *Slack) cleanupMessage(msg string) string {
 	msg = html.UnescapeString(msg)
 
 	return msg
+}
+
+// passwordToTokenAndCookie parses the password specified by the user into a
+// Slack token and optionally a cookie Auth cookies can be specified by
+// appending a "|" symbol and the base64-encoded auth cookie to the Slack token.
+// taken from https://github.com/insomniacslk/irc-slack/blob/master/pkg/ircslack/irc_server.go
+func passwordToTokenAndCookie(p string) (string, string, error) {
+	parts := strings.Split(p, "|")
+
+	switch len(parts) {
+	case 1:
+		// XXX should check that the token starts with xoxp- ?
+		return parts[0], "", nil
+	case 2:
+		if !strings.HasPrefix(parts[0], "xoxc-") {
+			return "", "", errors.New("auth cookie is set, but token does not start with xoxc-")
+		}
+		if parts[1] == "" {
+			return "", "", errors.New("auth cookie is empty")
+		}
+		if !strings.HasPrefix(parts[1], "d=") || !strings.HasSuffix(parts[1], ";") {
+			return "", "", errors.New("auth cookie must have the format 'd=XXX;'")
+		}
+
+		return parts[0], parts[1], nil
+	default:
+		return "", "", fmt.Errorf("failed to parse password into token and cookie, got %d components, want 1 or 2", len(parts))
+	}
+}
+
+// custom HTTP client used to set the auth cookie if requested, and only over
+// TLS.
+// taken from https://github.com/insomniacslk/irc-slack/blob/master/pkg/ircslack/irc_server.go
+type httpClient struct {
+	c      http.Client
+	cookie string
+}
+
+// taken from https://github.com/insomniacslk/irc-slack/blob/master/pkg/ircslack/irc_server.go
+func (hc httpClient) Do(req *http.Request) (*http.Response, error) {
+	if hc.cookie != "" {
+		logger.Debug("Setting auth cookie")
+		if strings.ToLower(req.URL.Scheme) == "https" {
+			req.Header.Add("Cookie", hc.cookie)
+		} else {
+			logger.Warning("Cookie is set but connection is not HTTPS, skipping")
+		}
+	}
+
+	return hc.c.Do(req)
 }

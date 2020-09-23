@@ -452,7 +452,20 @@ func (s *Slack) loginToSlack() (*slack.Client, error) {
 		}
 	}
 
-	s.sc = slack.New(s.credentials.Token, slack.OptionDebug(true))
+	var cookie string
+	if strings.HasPrefix(s.credentials.Token, "xoxc") {
+		_, cookie, err = passwordToTokenAndCookie(s.credentials.Token)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if cookie == "" {
+		s.sc = slack.New(s.credentials.Token, slack.OptionDebug(true))
+	} else {
+		s.sc = slack.New(s.credentials.Token, slack.OptionDebug(true), slack.OptionHTTPClient(&httpClient{cookie: cookie}))
+	}
+
 	s.rtm = s.sc.NewRTM()
 	s.susers = make(map[string]slack.User)
 
