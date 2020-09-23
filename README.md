@@ -15,6 +15,7 @@
     - [Support/questions](#supportquestions)
     - [FAQ](#faq)
         - [mattermost login with sso/gitlab](#mattermost-login-with-ssogitlab)
+        - [slack sso login / xoxc tokens](#slack-sso-login--xoxc-tokens)
     - [Guides](#guides)
 
 <!-- /TOC -->
@@ -197,6 +198,19 @@ Now login with `/msg mattermost login <username> MMAUTHTOKEN=<mytoken>`
 See <https://github.com/42wim/matterircd/issues/29> for more information
 
 Also see [#98](https://github.com/42wim/matterircd/issues/98#issuecomment-307308876) for a script that fetches it for you.
+
+### slack sso login / xoxc tokens
+
+Taken from: <https://github.com/insomniacslk/irc-slack>
+
+Log via browser on the Slack team, open the browser's network tab in the developer tools, and look for an XHR transaction. Then look for the token (it starts with xoxc-) in the request data the auth cookie, contained in the d key-value in the request cookies (it looks like d=XXXX;)
+
+Then concatenate the token and the auth cookie using a | character, like this:
+
+`xoxc-XXXX|d=XXXX;`
+and use the above as your token with slack login
+
+`/msg slack login xoxc-XXXX|d=XXXX;`
 
 ## Guides
 
