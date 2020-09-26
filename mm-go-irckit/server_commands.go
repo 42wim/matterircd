@@ -383,7 +383,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 
 		msgID, err2 := u.br.MsgChannel(ch.ID(), msg.Trailing)
 		if err2 != nil {
-			u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+msg.Trailing+" could not be send: "+err.Error())
+			u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+msg.Trailing+" could not be send: "+err2.Error())
 		}
 
 		if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
