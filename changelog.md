@@ -1,3 +1,22 @@
+# v0.20.1
+
+## New features
+
+- slack: support SSO/SAML logins using xoxc-token and cookies. See <https://github.com/42wim/matterircd#slack-sso-login--xoxc-tokens>
+- mattermost: Support for adding message/thread context at the end (#319). see matterircd.toml.example
+
+## Bugfix
+
+- general: Fix panic on nick change when not logged in
+- general: Fix panic on sending to messages/users channels
+- mattermost: Do not check alive while reconnecting. Fixes #318
+- mattermost: Use always other user as channelID in DM for prefixcontext. Fixes #317
+- slack: fix possible panic when self-message #321
+
+This release couldn't exist without the following contributors:
+@hloeung, @42wim
+
+
 # v0.20.0
 
 The refactor edition.
