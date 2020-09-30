@@ -678,6 +678,25 @@ func (m *Mattermost) wsActionPostSkip(rmsg *model.WebSocketEvent) bool {
 	return false
 }
 
+func shortenMessage(msg string) string {
+	if len(msg) < 24 {
+		return msg
+	}
+	newMsg := ""
+	for _, word := range strings.Split(msg, " ") {
+		if newMsg == "" {
+			newMsg = word
+			continue
+		}
+		if len(newMsg) < 20 {
+			newMsg = fmt.Sprintf("%s %s", newMsg, word)
+			continue
+		}
+		break
+	}
+	return fmt.Sprintf("%s ...", newMsg)
+}
+
 // nolint:funlen,gocognit,gocyclo
 func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	data := model.PostFromJson(strings.NewReader(rmsg.Data["post"].(string)))
@@ -700,7 +719,11 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 			if m.v.GetBool("mattermost.HideReplies") || m.v.GetBool("mattermost.prefixContext") || m.v.GetBool("mattermost.suffixContext") {
 				data.Message = fmt.Sprintf("%s (re @%s)", data.Message, parentGhost.Nick)
 			} else {
-				data.Message = fmt.Sprintf("%s (re @%s: %s)", data.Message, parentGhost.Nick, parentPost.Message)
+				if m.v.GetBool("mattermost.ShortenReplies") {
+					data.Message = fmt.Sprintf("%s (re @%s: %s)", data.Message, parentGhost.Nick, shortenMessage(parentPost.Message))
+				} else {
+					data.Message = fmt.Sprintf("%s (re @%s: %s)", data.Message, parentGhost.Nick, parentPost.Message)
+				}
 			}
 		}
 	}
