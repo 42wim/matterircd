@@ -678,17 +678,17 @@ func (m *Mattermost) wsActionPostSkip(rmsg *model.WebSocketEvent) bool {
 	return false
 }
 
-func shortenMessage(msg string) string {
-	if len(msg) < 24 {
+func maybeShorten(msg string, newLen int) string {
+	if newLen == 0 || len(msg) < newLen {
 		return msg
 	}
 	newMsg := ""
-	for _, word := range strings.Split(msg, " ") {
+	for _, word := range strings.Split(strings.ReplaceAll(msg, "\n", " "), " ") {
 		if newMsg == "" {
 			newMsg = word
 			continue
 		}
-		if len(newMsg) < 20 {
+		if len(newMsg) < newLen {
 			newMsg = fmt.Sprintf("%s %s", newMsg, word)
 			continue
 		}
@@ -719,11 +719,8 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 			if m.v.GetBool("mattermost.HideReplies") || m.v.GetBool("mattermost.prefixContext") || m.v.GetBool("mattermost.suffixContext") {
 				data.Message = fmt.Sprintf("%s (re @%s)", data.Message, parentGhost.Nick)
 			} else {
-				if m.v.GetBool("mattermost.ShortenReplies") {
-					data.Message = fmt.Sprintf("%s (re @%s: %s)", data.Message, parentGhost.Nick, shortenMessage(parentPost.Message))
-				} else {
-					data.Message = fmt.Sprintf("%s (re @%s: %s)", data.Message, parentGhost.Nick, parentPost.Message)
-				}
+				parentMessage := maybeShorten(parentPost.Message, m.v.GetInt("mattermost.ShortenRepliesTo"))
+				data.Message = fmt.Sprintf("%s (re @%s: %s)", data.Message, parentGhost.Nick, parentMessage)
 			}
 		}
 	}
