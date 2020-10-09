@@ -706,7 +706,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 			parentGhost := m.GetUser(parentPost.UserId)
 			parentIDString := ""
 			if m.v.GetBool("mattermost.ThreadSupport") {
-				parentIDString = fmt.Sprintf(" (@@%s)", data.ParentId)
+				parentIDString = fmt.Sprintf(" @@%s", data.ParentId)
 			}
 			// Include parent userid / IRC nicks so hilights still work when people reply to our messages.
 			if m.v.GetBool("mattermost.HideReplies") || m.v.GetBool("mattermost.prefixContext") || m.v.GetBool("mattermost.suffixContext") {
@@ -715,6 +715,8 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 				data.Message = fmt.Sprintf("%s (re @%s: %s%s)", data.Message, parentGhost.Nick, parentPost.Message, parentIDString)
 			}
 		}
+	} else if m.v.GetBool("mattermost.ThreadSupport") {
+		data.Message = fmt.Sprintf("%s (@@%s)", data.Message, data.Id)
 	}
 
 	// create new "ghost" user
