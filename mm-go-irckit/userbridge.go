@@ -575,7 +575,15 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 					prevDate = shortdate
 				}
 
-				spoof(nick, fmt.Sprintf("[%s] %s", ts.Format("15:04"), post))
+				threadIDString := ""
+				if u.v.GetBool(u.br.Protocol() + ".threadsupport") {
+					threadID := p.Id
+					if p.ParentId != "" {
+						threadID = p.ParentId
+					}
+					threadIDString = fmt.Sprintf(" (@@%s)", threadID)
+				}
+				spoof(nick, fmt.Sprintf("[%s] %s%s", ts.Format("15:04"), post, threadIDString))
 			}
 		}
 
