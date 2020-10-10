@@ -356,9 +356,15 @@ func (u *User) handleReactionEvent(event interface{}) {
 		reaction = e.Reaction
 	}
 
+	reactionText := text + reaction
+	if u.v.GetBool(u.br.Protocol() + ".threadsupport") {
+		messageIDString := fmt.Sprintf(" (@@%s)", messageID)
+		reactionText = text + reaction + messageIDString
+	}
+
 	if channelType == "D" {
 		e := &bridge.DirectMessageEvent{
-			Text:      text + reaction,
+			Text:      reactionText,
 			ChannelID: channelID,
 			Receiver:  u.UserInfo,
 			Sender:    sender,
@@ -372,7 +378,7 @@ func (u *User) handleReactionEvent(event interface{}) {
 	}
 
 	e := &bridge.ChannelMessageEvent{
-		Text:        text + reaction,
+		Text:        reactionText,
 		ChannelID:   channelID,
 		ChannelType: channelType,
 		Sender:      sender,
