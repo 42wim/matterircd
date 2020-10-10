@@ -487,7 +487,8 @@ func parseThreadID(u *User, msg *irc.Message, channelID string) (string, string)
 		if len(matches) == 2 {
 			msg.Trailing = strings.Replace(msg.Trailing, matches[0], "", 1)
 			parentID := matches[1]
-			return parentID, msg.Trailing
+			// Also strip separator in message.
+			return parentID, msg.Trailing[1:]
 		}
 	}
 
