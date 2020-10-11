@@ -692,14 +692,22 @@ func maybeShorten(msg string, newLen int, uncounted string) string {
 			continue
 		}
 		if len(newMsg) < newLen {
-			newMsg = fmt.Sprintf("%s %s", newMsg, word)
+			skipped := false
 			if uncounted != "" && strings.HasPrefix(word, uncounted) {
 				newLen += len(word) + 1
+				skipped = true
 			}
+			// Truncate very long words, but only if they were not skipped, on the
+			// assumption that such words are important enough to be preserved whole.
+			if !skipped && len(word) > newLen {
+				word = fmt.Sprintf("%s[...]", word[0:(newLen*2/3)])
+			}
+			newMsg = fmt.Sprintf("%s %s", newMsg, word)
 			continue
 		}
 		break
 	}
+
 	return fmt.Sprintf("%s ...", newMsg)
 }
 
