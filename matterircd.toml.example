@@ -105,6 +105,9 @@ PreferNickname = false
 # Disable showing parent post / replies
 HideReplies = false
 
+# Shorten replies to approximately this length
+ShortenRepliesTo = 0
+
 #Only join direct/group messages when someone talks. This stops from cluttering your 
 #irc client with lots of windows.
 #If set to true dm/group messages will be joined on startup and not only on talk in the channel.

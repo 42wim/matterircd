@@ -678,6 +678,39 @@ func (m *Mattermost) wsActionPostSkip(rmsg *model.WebSocketEvent) bool {
 	return false
 }
 
+// maybeShorten returns a prefix of msg that is approximately newLen
+// characters long, followed by "...".  Words that start with uncounted
+// are included in the result but are not reckoned against newLen.
+func maybeShorten(msg string, newLen int, uncounted string) string {
+	if newLen == 0 || len(msg) < newLen {
+		return msg
+	}
+	newMsg := ""
+	for _, word := range strings.Split(strings.ReplaceAll(msg, "\n", " "), " ") {
+		if newMsg == "" {
+			newMsg = word
+			continue
+		}
+		if len(newMsg) < newLen {
+			skipped := false
+			if uncounted != "" && strings.HasPrefix(word, uncounted) {
+				newLen += len(word) + 1
+				skipped = true
+			}
+			// Truncate very long words, but only if they were not skipped, on the
+			// assumption that such words are important enough to be preserved whole.
+			if !skipped && len(word) > newLen {
+				word = fmt.Sprintf("%s[...]", word[0:(newLen*2/3)])
+			}
+			newMsg = fmt.Sprintf("%s %s", newMsg, word)
+			continue
+		}
+		break
+	}
+
+	return fmt.Sprintf("%s ...", newMsg)
+}
+
 // nolint:funlen,gocognit,gocyclo
 func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	data := model.PostFromJson(strings.NewReader(rmsg.Data["post"].(string)))
@@ -700,7 +733,8 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 			if m.v.GetBool("mattermost.HideReplies") || m.v.GetBool("mattermost.prefixContext") || m.v.GetBool("mattermost.suffixContext") {
 				data.Message = fmt.Sprintf("%s (re @%s)", data.Message, parentGhost.Nick)
 			} else {
-				data.Message = fmt.Sprintf("%s (re @%s: %s)", data.Message, parentGhost.Nick, parentPost.Message)
+				parentMessage := maybeShorten(parentPost.Message, m.v.GetInt("mattermost.ShortenRepliesTo"), "@")
+				data.Message = fmt.Sprintf("%s (re @%s: %s)", data.Message, parentGhost.Nick, parentMessage)
 			}
 		}
 	}
