@@ -63,6 +63,7 @@ type Client struct {
 	Users         map[string]*model.User
 	MessageChan   chan *Message
 	WsClient      *model.WebSocketClient
+	AntiIdle      bool
 	WsQuit        bool
 	WsConnected   bool
 	OnWsConnect   func()
@@ -160,6 +161,17 @@ func (m *Client) Login() error {
 	}
 
 	go m.checkConnection(ctx)
+
+	if m.AntiIdle {
+		channels := m.GetChannels()
+		for _, channel := range channels {
+			if channel.Name == "town-square" {
+				go m.antiIdle(ctx, channel.Id)
+
+				continue
+			}
+		}
+	}
 
 	return nil
 }
@@ -684,4 +696,23 @@ func (m *Client) HandleRatelimit(name string, resp *model.Response) error {
 	time.Sleep(time.Duration(waitTime) * time.Second)
 
 	return nil
+}
+
+func (m *Client) antiIdle(ctx context.Context, channelID string) {
+	m.logger.Debugf("starting antiIdle for %s", channelID)
+
+	ticker := time.NewTicker(time.Second * 60)
+
+	for {
+		select {
+		case <-ctx.Done():
+			m.logger.Debugf("antiIlde: ctx.Done() triggered, exiting for %s", channelID)
+
+			return
+		case <-ticker.C:
+			m.logger.Tracef("antiIdle %s", channelID)
+
+			m.UpdateLastViewed(channelID)
+		}
+	}
 }
