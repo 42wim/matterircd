@@ -51,6 +51,10 @@ func New(v *viper.Viper, cred bridge.Credentials, eventChan chan *bridge.Event, 
 		mc.SetLogLevel("debug")
 	}
 
+	if v.GetBool("trace") {
+		mc.SetLogLevel("trace")
+	}
+
 	m.mc = mc
 	m.connected = true
 
@@ -63,6 +67,8 @@ func (m *Mattermost) loginToMattermost(onWsConnect func()) (*matterclient.Client
 		mc.Credentials.NoTLS = true
 	}
 
+	// do anti idle on town-square, every installation should have this channel
+	mc.AntiIdle = !m.v.GetBool("mattermost.DisableAutoView")
 	mc.OnWsConnect = onWsConnect
 
 	if m.v.GetBool("debug") {
@@ -94,17 +100,6 @@ func (m *Mattermost) loginToMattermost(onWsConnect func()) (*matterclient.Client
 	m.quitChan = append(m.quitChan, quitChan)
 
 	go m.handleWsMessage(quitChan)
-
-	// do anti idle on town-square, every installation should have this channel
-	channels := m.mc.GetChannels()
-	for _, channel := range channels {
-		if channel.Name == "town-square" && !m.v.GetBool("mattermost.DisableAutoView") {
-			idleChan := make(chan struct{})
-			m.quitChan = append(m.quitChan, idleChan)
-			go m.antiIdle(channel.Id, idleChan)
-			continue
-		}
-	}
 
 	return mc, nil
 }
