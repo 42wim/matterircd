@@ -655,6 +655,31 @@ func (s *Slack) getSlackUserFromMessage(rmsg *slack.MessageEvent) (*slack.User, 
 		usr = "USLACKBOT"
 	}
 
+	if rmsg.SubType == "bot_message" {
+		suser := &slack.User{
+			ID:     rmsg.BotID,
+			TeamID: s.sinfo.Team.ID,
+			Profile: slack.UserProfile{
+				FirstName: "bot",
+				LastName:  "bot",
+				RealName:  "bot",
+			},
+		}
+
+		if rmsg.Username == "" {
+			bot, err := s.rtm.GetBotInfo(rmsg.BotID)
+			if err != nil {
+				suser.Profile.DisplayName = "bot"
+				suser.Name = "bot"
+			}
+
+			suser.Profile.DisplayName = bot.Name
+			suser.Name = bot.Name
+		}
+
+		return suser, nil
+	}
+
 	suser, err := s.rtm.GetUserInfo(usr)
 	if err != nil {
 		return nil, err
@@ -727,17 +752,10 @@ func (s *Slack) handleSlackActionPost(rmsg *slack.MessageEvent) {
 
 	msghandled := false
 
-	// handle bot messages
-	botname := s.getBotname(rmsg)
-
 	// create new "ghost" user
 	ghost := s.createUser(suser)
 
 	spoofUsername := ghost.Nick
-	// if we have a botname, use it
-	if botname != "" {
-		spoofUsername = strings.TrimSpace(botname)
-	}
 
 	msgs := []string{}
 
