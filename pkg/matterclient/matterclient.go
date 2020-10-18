@@ -353,6 +353,7 @@ func (m *Client) doLogin(firstConnection bool, b *backoff.Backoff) error {
 		appErr *model.AppError
 		logmsg = "trying login"
 		err    error
+		user   *model.User
 	)
 
 	for {
@@ -364,7 +365,7 @@ func (m *Client) doLogin(firstConnection bool, b *backoff.Backoff) error {
 				return err
 			}
 		} else {
-			m.User, resp = m.Client.Login(m.Credentials.Login, m.Credentials.Pass)
+			user, resp = m.Client.Login(m.Credentials.Login, m.Credentials.Pass)
 		}
 
 		appErr = resp.Error
@@ -388,6 +389,8 @@ func (m *Client) doLogin(firstConnection bool, b *backoff.Backoff) error {
 
 			continue
 		}
+
+		m.User = user
 
 		break
 	}
