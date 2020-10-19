@@ -664,6 +664,7 @@ func (s *Slack) getSlackUserFromMessage(rmsg *slack.MessageEvent) (*slack.User, 
 				LastName:  "bot",
 				RealName:  "bot",
 			},
+			Name: rmsg.Username,
 		}
 
 		if rmsg.Username == "" {
@@ -768,6 +769,7 @@ func (s *Slack) handleSlackActionPost(rmsg *slack.MessageEvent) {
 	for _, attach := range rmsg.Attachments {
 		if attach.Pretext != "" {
 			msgs = append(msgs, strings.Split(attach.Pretext, "\n")...)
+			msghandled = true
 		}
 
 		if attach.Text == "" {
