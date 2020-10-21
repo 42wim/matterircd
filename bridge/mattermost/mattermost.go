@@ -291,17 +291,15 @@ func (m *Mattermost) MsgUserThread(userID, parentID, text string) (string, error
 	props["matterircd_"+m.mc.User.Id] = true
 
 	// create DM channel (only happens on first message)
-	_, resp := m.mc.Client.CreateDirectChannel(m.mc.User.Id, userID)
+	dchannel, resp := m.mc.Client.CreateDirectChannel(m.mc.User.Id, userID)
 	if resp.Error != nil {
 		return "", resp.Error
 	}
 
-	channelName := model.GetDMNameFromIds(userID, m.mc.User.Id)
-
 	// build & send the message
 	text = strings.ReplaceAll(text, "\r", "")
 	post := &model.Post{
-		ChannelId: m.GetChannelID(channelName, m.mc.Team.ID),
+		ChannelId: dchannel.Id,
 		Message:   text,
 		RootId:    parentID,
 	}
