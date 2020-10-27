@@ -51,6 +51,10 @@ func New(v *viper.Viper, cred bridge.Credentials, eventChan chan *bridge.Event, 
 		mc.SetLogLevel("debug")
 	}
 
+	if v.GetBool("trace") {
+		mc.SetLogLevel("trace")
+	}
+
 	m.mc = mc
 	m.connected = true
 
@@ -63,6 +67,8 @@ func (m *Mattermost) loginToMattermost(onWsConnect func()) (*matterclient.Client
 		mc.Credentials.NoTLS = true
 	}
 
+	// do anti idle on town-square, every installation should have this channel
+	mc.AntiIdle = !m.v.GetBool("mattermost.DisableAutoView")
 	mc.OnWsConnect = onWsConnect
 
 	if m.v.GetBool("debug") {
@@ -94,17 +100,6 @@ func (m *Mattermost) loginToMattermost(onWsConnect func()) (*matterclient.Client
 	m.quitChan = append(m.quitChan, quitChan)
 
 	go m.handleWsMessage(quitChan)
-
-	// do anti idle on town-square, every installation should have this channel
-	channels := m.mc.GetChannels()
-	for _, channel := range channels {
-		if channel.Name == "town-square" && !m.v.GetBool("mattermost.DisableAutoView") {
-			idleChan := make(chan struct{})
-			m.quitChan = append(m.quitChan, idleChan)
-			go m.antiIdle(channel.Id, idleChan)
-			continue
-		}
-	}
 
 	return mc, nil
 }
@@ -296,17 +291,15 @@ func (m *Mattermost) MsgUserThread(userID, parentID, text string) (string, error
 	props["matterircd_"+m.mc.User.Id] = true
 
 	// create DM channel (only happens on first message)
-	_, resp := m.mc.Client.CreateDirectChannel(m.mc.User.Id, userID)
+	dchannel, resp := m.mc.Client.CreateDirectChannel(m.mc.User.Id, userID)
 	if resp.Error != nil {
 		return "", resp.Error
 	}
 
-	channelName := model.GetDMNameFromIds(userID, m.mc.User.Id)
-
 	// build & send the message
 	text = strings.ReplaceAll(text, "\r", "")
 	post := &model.Post{
-		ChannelId: m.GetChannelID(channelName, m.mc.Team.ID),
+		ChannelId: dchannel.Id,
 		Message:   text,
 		RootId:    parentID,
 	}
@@ -686,6 +679,39 @@ func (m *Mattermost) wsActionPostSkip(rmsg *model.WebSocketEvent) bool {
 	return false
 }
 
+// maybeShorten returns a prefix of msg that is approximately newLen
+// characters long, followed by "...".  Words that start with uncounted
+// are included in the result but are not reckoned against newLen.
+func maybeShorten(msg string, newLen int, uncounted string) string {
+	if newLen == 0 || len(msg) < newLen {
+		return msg
+	}
+	newMsg := ""
+	for _, word := range strings.Split(strings.ReplaceAll(msg, "\n", " "), " ") {
+		if newMsg == "" {
+			newMsg = word
+			continue
+		}
+		if len(newMsg) < newLen {
+			skipped := false
+			if uncounted != "" && strings.HasPrefix(word, uncounted) {
+				newLen += len(word) + 1
+				skipped = true
+			}
+			// Truncate very long words, but only if they were not skipped, on the
+			// assumption that such words are important enough to be preserved whole.
+			if !skipped && len(word) > newLen {
+				word = fmt.Sprintf("%s[...]", word[0:(newLen*2/3)])
+			}
+			newMsg = fmt.Sprintf("%s %s", newMsg, word)
+			continue
+		}
+		break
+	}
+
+	return fmt.Sprintf("%s ...", newMsg)
+}
+
 // nolint:funlen,gocognit,gocyclo
 func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	data := model.PostFromJson(strings.NewReader(rmsg.Data["post"].(string)))
@@ -706,13 +732,14 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 			parentGhost := m.GetUser(parentPost.UserId)
 			parentIDString := ""
 			if m.v.GetBool("mattermost.ThreadSupport") {
-				parentIDString = fmt.Sprintf(" @@%s", data.ParentId)
+				parentIDString = fmt.Sprintf("@@%s ", data.ParentId)
 			}
 			// Include parent userid / IRC nicks so hilights still work when people reply to our messages.
 			if m.v.GetBool("mattermost.HideReplies") || m.v.GetBool("mattermost.prefixContext") || m.v.GetBool("mattermost.suffixContext") {
-				data.Message = fmt.Sprintf("%s (re @%s%s)", data.Message, parentGhost.Nick, parentIDString)
+				data.Message = fmt.Sprintf("%s (re %s@%s)", data.Message, parentIDString, parentGhost.Nick)
 			} else {
-				data.Message = fmt.Sprintf("%s (re @%s: %s%s)", data.Message, parentGhost.Nick, parentPost.Message, parentIDString)
+				parentMessage := maybeShorten(parentPost.Message, m.v.GetInt("mattermost.ShortenRepliesTo"), "@")
+				data.Message = fmt.Sprintf("%s (re %s@%s: %s)", data.Message, parentIDString, parentGhost.Nick, parentMessage)
 			}
 		}
 	} else if m.v.GetBool("mattermost.ThreadSupport") {

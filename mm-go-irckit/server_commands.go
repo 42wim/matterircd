@@ -401,6 +401,10 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 			msg.Trailing = "<redacted>"
 		case toUser.Ghost, toUser.Me:
 			logger.Tracef("sending message %s to user %s", msg.Trailing, toUser.User)
+			// no messages when we're not logged in
+			if u.br == nil {
+				return nil
+			}
 			if threadMsgUser(u, toUser.User, msg) {
 				return nil
 			}

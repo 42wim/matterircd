@@ -19,14 +19,15 @@ import (
 )
 
 type UserBridge struct {
-	Srv           Server
-	Credentials   bridge.Credentials
-	br            bridge.Bridger // nolint:structcheck
-	inprogress    bool           //nolint:structcheck
-	msgMap        map[string]map[string]int
-	msgCounter    map[string]int       //nolint:structcheck
-	msgMapMutex   sync.RWMutex         //nolint:structcheck
-	updateCounter map[string]time.Time //nolint:structcheck
+	Srv                Server
+	Credentials        bridge.Credentials
+	br                 bridge.Bridger //nolint:structcheck
+	inprogress         bool           //nolint:structcheck
+	msgMap             map[string]map[string]int
+	msgCounter         map[string]int       //nolint:structcheck
+	msgMapMutex        sync.RWMutex         //nolint:structcheck
+	updateCounter      map[string]time.Time //nolint:structcheck
+	updateCounterMutex sync.Mutex           //nolint:structcheck
 }
 
 func NewUserBridge(c net.Conn, srv Server, cfg *viper.Viper) *User {
@@ -822,6 +823,8 @@ func (u *User) prefixContext(channelID, messageID, parentID, event string) strin
 }
 
 func (u *User) updateLastViewed(channelID string) {
+	u.updateCounterMutex.Lock()
+	defer u.updateCounterMutex.Unlock()
 	if t, ok := u.updateCounter[channelID]; ok {
 		if time.Since(t) < time.Second*5 {
 			return

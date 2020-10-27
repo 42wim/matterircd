@@ -63,6 +63,7 @@ type Client struct {
 	Users         map[string]*model.User
 	MessageChan   chan *Message
 	WsClient      *model.WebSocketClient
+	AntiIdle      bool
 	WsQuit        bool
 	WsConnected   bool
 	OnWsConnect   func()
@@ -160,6 +161,17 @@ func (m *Client) Login() error {
 	}
 
 	go m.checkConnection(ctx)
+
+	if m.AntiIdle {
+		channels := m.GetChannels()
+		for _, channel := range channels {
+			if channel.Name == "town-square" {
+				go m.antiIdle(ctx, channel.Id)
+
+				continue
+			}
+		}
+	}
 
 	return nil
 }
@@ -341,18 +353,19 @@ func (m *Client) doLogin(firstConnection bool, b *backoff.Backoff) error {
 		appErr *model.AppError
 		logmsg = "trying login"
 		err    error
+		user   *model.User
 	)
 
 	for {
 		m.logger.Debugf("%s %s %s %s", logmsg, m.Credentials.Team, m.Credentials.Login, m.Credentials.Server)
 
 		if m.Credentials.Token != "" {
-			resp, err = m.doLoginToken()
+			user, resp, err = m.doLoginToken()
 			if err != nil {
 				return err
 			}
 		} else {
-			m.User, resp = m.Client.Login(m.Credentials.Login, m.Credentials.Pass)
+			user, resp = m.Client.Login(m.Credentials.Login, m.Credentials.Pass)
 		}
 
 		appErr = resp.Error
@@ -377,6 +390,8 @@ func (m *Client) doLogin(firstConnection bool, b *backoff.Backoff) error {
 			continue
 		}
 
+		m.User = user
+
 		break
 	}
 	// reset timer
@@ -385,10 +400,11 @@ func (m *Client) doLogin(firstConnection bool, b *backoff.Backoff) error {
 	return nil
 }
 
-func (m *Client) doLoginToken() (*model.Response, error) {
+func (m *Client) doLoginToken() (*model.User, *model.Response, error) {
 	var (
 		resp   *model.Response
 		logmsg = "trying login"
+		user   *model.User
 	)
 
 	m.Client.AuthType = model.HEADER_BEARER
@@ -401,18 +417,18 @@ func (m *Client) doLoginToken() (*model.Response, error) {
 		m.logger.Debugf(logmsg + " with personal token")
 	}
 
-	m.User, resp = m.Client.GetMe("")
+	user, resp = m.Client.GetMe("")
 	if resp.Error != nil {
-		return resp, resp.Error
+		return user, resp, resp.Error
 	}
 
-	if m.User == nil {
+	if user == nil {
 		m.logger.Errorf("LOGIN TOKEN: %s is invalid", m.Credentials.Pass)
 
-		return resp, errors.New("invalid token")
+		return user, resp, errors.New("invalid token")
 	}
 
-	return resp, nil
+	return user, resp, nil
 }
 
 func (m *Client) createCookieJar(token string) *cookiejar.Jar {
@@ -684,4 +700,23 @@ func (m *Client) HandleRatelimit(name string, resp *model.Response) error {
 	time.Sleep(time.Duration(waitTime) * time.Second)
 
 	return nil
+}
+
+func (m *Client) antiIdle(ctx context.Context, channelID string) {
+	m.logger.Debugf("starting antiIdle for %s", channelID)
+
+	ticker := time.NewTicker(time.Second * 60)
+
+	for {
+		select {
+		case <-ctx.Done():
+			m.logger.Debugf("antiIlde: ctx.Done() triggered, exiting for %s", channelID)
+
+			return
+		case <-ticker.C:
+			m.logger.Tracef("antiIdle %s", channelID)
+
+			m.UpdateLastViewed(channelID)
+		}
+	}
 }
