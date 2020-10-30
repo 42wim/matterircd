@@ -1,3 +1,24 @@
+# v0.20.2
+
+## New features
+
+- mattermost: Add ShortenReplies (#322). see matterircd.toml.example
+
+## Bugfix
+
+- general: Ignore private messages when not logged in (#331)
+- general: Lock updateCounter against concurrent updates (#328)
+- general: Ignore empty channels and non-channels for TOPIC (#339)
+- mattermost: Move antiIdle to matterclient package. Fixes #327 (#329)
+- mattermost: Update user after error checking (#330)
+- mattermost: Fix nil User when using tokens (mattermost) (#334)
+- mattermost: Use channel id from CreateDirectChannel (mattermost). Fixes #336 (#337)
+- slack: Create a fake user when getting a botmessage (slack) (#333)
+- slack: Fix missing botname, fix attachments without text (slack) (#335)
+
+This release couldn't exist without the following contributors:
+@Aketzu, @jetpackdanger
+
 # v0.20.1
 
 ## New features
