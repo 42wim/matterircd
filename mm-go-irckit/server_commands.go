@@ -559,6 +559,10 @@ func CmdQuit(s Server, u *User, msg *irc.Message) error {
 // CmdTopic is a handler for the /TOPIC command.
 func CmdTopic(s Server, u *User, msg *irc.Message) error {
 	channelname := msg.Params[0]
+	if channelname == "" || !strings.HasPrefix(channelname, "#") {
+		return nil
+	}
+
 	ch := s.Channel(channelname)
 
 	if msg.Trailing != "" {
