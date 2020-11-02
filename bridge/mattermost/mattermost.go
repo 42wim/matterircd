@@ -323,6 +323,14 @@ func (m *Mattermost) MsgChannelThread(channelID, parentID, text string) (string,
 	props := make(map[string]interface{})
 	props["matterircd_"+m.mc.User.Id] = true
 
+	if parentID != "" {
+		_, resp := m.mc.Client.GetPost(parentID, "")
+		if resp.Error != nil {
+			logger.Errorf("Unable to get parent post %s", parentID)
+			parentID = ""
+		}
+	}
+
 	post := &model.Post{
 		ChannelId: channelID,
 		Message:   text,
