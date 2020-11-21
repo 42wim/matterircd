@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"runtime"
 	"strings"
 
 	"github.com/sirupsen/logrus"
@@ -24,7 +25,9 @@ func LoadConfig(cfgfile string) (*viper.Viper, error) {
 	}
 
 	// reload config on file changes
-	v.WatchConfig()
+	if runtime.GOOS != "illumos" {
+		v.WatchConfig()
+	}
 
 	return v, nil
 }
