@@ -126,8 +126,18 @@ func main() {
 }
 
 func tlsbind() net.Listener {
+	certPath := v.GetString("tlsdir") + "/cert.pem"
+	keyPath := v.GetString("tlsdir") + "/key.pem"
 
-	kpr, err := NewKeypairReloader(v.GetString("tlsdir")+"/cert.pem", v.GetString("tlsdir")+"/key.pem")
+	if v.GetString("tlscert") != "" {
+		certPath = v.GetString("tlscert")
+	}
+
+	if v.GetString("tlskey") != "" {
+		keyPath = v.GetString("tlskey")
+	}
+
+	kpr, err := NewKeypairReloader(certPath, keyPath)
 	if err != nil {
 		logger.Errorf("could not load TLS, incorrect directory? Error: %s", err)
 		os.Exit(1)

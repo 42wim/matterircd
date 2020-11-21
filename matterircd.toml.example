@@ -18,7 +18,11 @@ gops = false
 
 #directory to look for key.pem and cert.pem. (default ".")
 #
-#TLSDir = "/etc/pki/tls/matermost/"
+#TLSDir = "/etc/pki/tls/matterircd/"
+
+# Specify the full path for your key and cert
+#TLSKey = "/etc/pki/tls/matterircd/key.pem"
+#TLSCert = "/etc/pki/tls/matterircd/cer.pem"
 
 #PasteBufferTimeout specifies the amount of time in milliseconds that
 #messages get kept in matterircd internal buffer before being sent to
