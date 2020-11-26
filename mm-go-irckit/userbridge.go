@@ -582,7 +582,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 					prevDate = shortdate
 				}
 
-				if u.v.GetString(u.br.Protocol()+".threadcontext") == "parentid" {
+				if u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" {
 					threadID := p.Id
 					if p.ParentId != "" {
 						threadID = p.ParentId
@@ -788,7 +788,7 @@ func (u *User) prefixContextModified(channelID, messageID string) string {
 }
 
 func (u *User) prefixContext(channelID, messageID, parentID, event string) string {
-	if u.v.GetString(u.br.Protocol()+".threadcontext") == "parentid" {
+	if u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" {
 		threadID := messageID
 		if parentID != "" {
 			threadID = parentID
