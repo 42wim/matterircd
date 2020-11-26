@@ -582,7 +582,21 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 					prevDate = shortdate
 				}
 
-				spoof(nick, fmt.Sprintf("[%s] %s", ts.Format("15:04"), post))
+				if u.v.GetString(u.br.Protocol()+".threadcontext") == "parentid" {
+					threadID := p.Id
+					if p.ParentId != "" {
+						threadID = p.ParentId
+					}
+
+					switch {
+					case u.v.GetBool(u.br.Protocol() + ".prefixcontext"):
+						spoof(nick, fmt.Sprintf("[%s] [@@%s] %s", ts.Format("15:04"), threadID, post))
+					case u.v.GetBool(u.br.Protocol() + ".suffixcontext"):
+						spoof(nick, fmt.Sprintf("[%s] %s [@@%s]", ts.Format("15:04"), post, threadID))
+					}
+				} else {
+					spoof(nick, fmt.Sprintf("[%s] %s", ts.Format("15:04"), post))
+				}
 			}
 		}
 
