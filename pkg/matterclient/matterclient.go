@@ -31,6 +31,7 @@ type Credentials struct {
 	NoTLS            bool
 	SkipTLSVerify    bool
 	SkipVersionCheck bool
+	MFAToken         string
 }
 
 type Team struct {
@@ -77,7 +78,7 @@ type Client struct {
 	lastPong    time.Time
 }
 
-func New(login string, pass string, team string, server string) *Client {
+func New(login string, pass string, team string, server string, mfatoken string) *Client {
 	rootLogger := logrus.New()
 	rootLogger.SetFormatter(&prefixed.TextFormatter{
 		PrefixPadding: 13,
@@ -85,10 +86,11 @@ func New(login string, pass string, team string, server string) *Client {
 	})
 
 	cred := &Credentials{
-		Login:  login,
-		Pass:   pass,
-		Team:   team,
-		Server: server,
+		Login:    login,
+		Pass:     pass,
+		Team:     team,
+		Server:   server,
+		MFAToken: mfatoken,
 	}
 
 	cache, _ := lru.New(500)
@@ -364,6 +366,10 @@ func (m *Client) doLogin(firstConnection bool, b *backoff.Backoff) error {
 			if err != nil {
 				return err
 			}
+		}
+		if m.Credentials.MFAToken != "" {
+			user, resp = m.Client.LoginWithMFA(m.Credentials.Login, m.Credentials.Pass, m.Credentials.MFAToken)
+
 		} else {
 			user, resp = m.Client.Login(m.Credentials.Login, m.Credentials.Pass)
 		}

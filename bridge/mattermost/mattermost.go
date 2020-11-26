@@ -62,7 +62,7 @@ func New(v *viper.Viper, cred bridge.Credentials, eventChan chan *bridge.Event, 
 }
 
 func (m *Mattermost) loginToMattermost(onWsConnect func()) (*matterclient.Client, error) {
-	mc := matterclient.New(m.credentials.Login, m.credentials.Pass, m.credentials.Team, m.credentials.Server)
+	mc := matterclient.New(m.credentials.Login, m.credentials.Pass, m.credentials.Team, m.credentials.Server, m.credentials.MFAToken)
 	if m.v.GetBool("mattermost.Insecure") {
 		mc.Credentials.NoTLS = true
 	}

@@ -64,6 +64,15 @@ func login(u *User, toUser *User, args []string, service string) {
 			}
 		}
 
+		if len(args) == 4 {
+			u.Credentials = bridge.Credentials{
+				Team:  args[0],
+				Login: args[1],
+				Pass:  args[2],
+				MFAToken:  args[3],
+			}
+		}
+
 		if u.br != nil && u.br.Connected() {
 			err = u.br.Logout()
 			if err != nil {
@@ -90,7 +99,7 @@ func login(u *User, toUser *User, args []string, service string) {
 	}
 
 	cred := bridge.Credentials{}
-	datalen := 4
+	datalen := 5
 
 	if u.v.GetString("mattermost.DefaultTeam") != "" {
 		cred.Team = u.v.GetString("mattermost.DefaultTeam")
@@ -102,41 +111,55 @@ func login(u *User, toUser *User, args []string, service string) {
 		datalen--
 	}
 
-	if len(args) == datalen {
-		cred.Pass = args[len(args)-1]
-		cred.Login = args[len(args)-2]
+	if len(args) >= datalen {
+		logger.Debugf("args_len: %d", len(args))
+		logger.Debugf("team: %d", cred.Team)
+		logger.Debugf("srv: %d", cred.Server)
+		if strings.Contains(args[len(args)-1], "MFAToken=") {
+			var MFAToken_str = strings.Split(args[len(args)-1], "=")
+			cred.MFAToken = MFAToken_str[1]
+			cred.Pass = args[len(args)-2]
+			cred.Login = args[len(args)-3]
+		} else {
+			cred.Pass = args[len(args)-1]
+			cred.Login = args[len(args)-2]
+		}
 		// no default server or team specified
 		if cred.Server == "" && cred.Team == "" {
-			cred.Server = args[len(args)-4]
+			cred.Server = args[0]
 		}
 
 		if cred.Team == "" {
-			cred.Team = args[len(args)-3]
+			cred.Team = args[1]
 		}
 
 		if cred.Server == "" {
-			cred.Server = args[len(args)-3]
+			cred.Server = args[0]
 		}
 	}
 
 	// incorrect arguments
-	if len(args) != datalen {
+	if len(args) < datalen {
 		switch {
 		// no server or team
 		case cred.Team != "" && cred.Server != "":
 			u.MsgUser(toUser, "need LOGIN <login> <pass>")
 			u.MsgUser(toUser, "when using a personal token replace <pass> with token=<yourtoken>")
+            u.MsgUser(toUser, "when using a mfa token use LOGIN <login> <pass> MFAToken=<yourmfatoken>")
 		// server missing
 		case cred.Team != "":
 			u.MsgUser(toUser, "need LOGIN <server> <login> <pass>")
 			u.MsgUser(toUser, "when using a personal token replace <pass> with token=<yourtoken>")
+            u.MsgUser(toUser, "when using a mfa token use LOGIN <server> <login> <pass> MFAToken=<yourmfatoken>")
 		// team missing
 		case cred.Server != "":
 			u.MsgUser(toUser, "need LOGIN <team> <login> <pass>")
 			u.MsgUser(toUser, "when using a personal token replace <pass> with token=<yourtoken>")
+            u.MsgUser(toUser, "when using a mfa token use LOGIN <team> <login> <pass> MFAToken=<yourmfatoken>")
 		default:
 			u.MsgUser(toUser, "need LOGIN <server> <team> <login> <pass>")
 			u.MsgUser(toUser, "when using a personal token replace <pass> with token=<yourtoken>")
+            u.MsgUser(toUser, "when using a mfa token use LOGIN <server> <team> <login> <pass> MFAToken=<yourmfatoken>")
 		}
 
 		return
@@ -322,7 +345,7 @@ func updatelastviewed(u *User, toUser *User, args []string, service string) {
 
 var cmds = map[string]Command{
 	"logout":           {handler: logout, login: true, minParams: 0, maxParams: 0},
-	"login":            {handler: login, minParams: 2, maxParams: 4},
+	"login":            {handler: login, minParams: 2, maxParams: 5},
 	"search":           {handler: search, login: true, minParams: 1, maxParams: -1},
 	"searchusers":      {handler: searchUsers, login: true, minParams: 1, maxParams: -1},
 	"scrollback":       {handler: scrollback, login: true, minParams: 2, maxParams: 2},
