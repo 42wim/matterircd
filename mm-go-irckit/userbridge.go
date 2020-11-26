@@ -774,6 +774,14 @@ func (u *User) prefixContextModified(channelID, messageID string) string {
 }
 
 func (u *User) prefixContext(channelID, messageID, parentID, event string) string {
+	if u.v.GetString(u.br.Protocol()+".threadcontext") == "parentid" {
+		threadID := messageID
+		if parentID != "" {
+			threadID = parentID
+		}
+		return fmt.Sprintf("[@@%s]", threadID)
+	}
+
 	u.msgMapMutex.Lock()
 	defer u.msgMapMutex.Unlock()
 
