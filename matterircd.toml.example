@@ -123,6 +123,9 @@ JoinDM = false
 PrefixContext = false
 # Same as PrefixContext but with the message context at the end.
 SuffixContext = false
+# If either PrefixContext or SuffixContext specify which thread ID to use. Default is the
+# matterircd generated @@([0-9][a-f]){3}. Uncomment to use Mattermost's message/parent thread IDs instead.
+#ThreadContext = "mattermost"
 
 #This will show (mention yournick) after a message if it contains one of the words configured
 #in your mattermost "word that trigger mentions" notifications.
