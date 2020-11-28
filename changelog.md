@@ -1,3 +1,20 @@
+# v0.21.0
+
+## New features
+
+- general: Reload certs using SIGHUP. Fixes #110
+- general: Add a tlskey and tlscert configuration option
+- mattermost: Support replying to old mattermost threads (#344)
+- mattermost: Allow showing parent thread or message ID with PrefixContext / SuffixContext (#348)
+
+## Bugfix
+
+- general: Disable watchconfig on illumos. Fixes #345
+- mattermost: Use override_username when available in backlog (mattermost) (#343)
+
+This release couldn't exist without the following contributor:
+@hloeung
+
 # v0.20.2
 
 ## New features
