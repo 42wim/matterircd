@@ -723,7 +723,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		} else {
 			parentGhost := m.GetUser(parentPost.UserId)
 			// Include parent userid / IRC nicks so hilights still work when people reply to our messages.
-			if m.v.GetBool("mattermost.HideReplies") || m.v.GetBool("mattermost.prefixContext") || m.v.GetBool("mattermost.suffixContext") {
+			if m.v.GetBool("mattermost.HideReplies") {
 				data.Message = fmt.Sprintf("%s (re @%s)", data.Message, parentGhost.Nick)
 			} else {
 				parentMessage := maybeShorten(parentPost.Message, m.v.GetInt("mattermost.ShortenRepliesTo"), "@")
