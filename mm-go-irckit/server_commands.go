@@ -384,6 +384,8 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 		msgID, err2 := u.br.MsgChannel(ch.ID(), msg.Trailing)
 		if err2 != nil {
 			u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+msg.Trailing+" could not be send: "+err2.Error())
+		} else {
+			u.msgLast[ch.ID()] = msgID
 		}
 
 		if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
@@ -417,6 +419,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 			if err2 != nil {
 				return err
 			}
+			u.msgLast[toUser.User] = msgID
 
 			if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
 				u.prefixContext(toUser.User, msgID, "", "")
@@ -433,7 +436,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 }
 
 func parseModifyMsg(u *User, msg *irc.Message, channelID string) bool {
-	re := regexp.MustCompile(`^s\/([0-9a-f]{3})\/(.*)`)
+	re := regexp.MustCompile(`^s(\/(?:[0-9a-f]{3}|[0-9a-z]{26}|!!)?\/)(.*)`)
 	matches := re.FindStringSubmatch(msg.Trailing)
 	text := msg.Trailing
 
@@ -449,21 +452,35 @@ func parseModifyMsg(u *User, msg *irc.Message, channelID string) bool {
 		text = matches[2]
 	}
 
-	id, err := strconv.ParseInt(matches[1], 16, 0)
-	if err != nil {
-		logger.Errorf("couldn't parseint %s: %s", matches[1], err)
-	}
-
-	u.msgMapMutex.RLock()
-	defer u.msgMapMutex.RUnlock()
-
-	m := u.msgMap[channelID]
-
 	msgID := ""
 
-	for k, v := range m {
-		if v == int(id) {
-			msgID = k
+	switch {
+	// last message from user. Also support '!!' like shell's history
+	// substitution for previous command.
+	case matches[1] == "//" || matches[1] == "/!!/":
+		msgLast, ok := u.msgLast[channelID]
+		if ok {
+			msgID = msgLast
+		}
+	// Mattermost message/thread ID (e.g. 'cfrakpwix7y8pgzux6ta76pm9c')
+	case len(matches[1]) == 28:
+		msgID = strings.ReplaceAll(matches[1], "/", "")
+	// matterircd message/thread ID (e.g. '004' and 'a12')
+	case len(matches[1]) == 5:
+		id, err := strconv.ParseInt(strings.ReplaceAll(matches[1], "/", ""), 16, 0)
+		if err != nil {
+			logger.Errorf("couldn't parseint %s: %s", matches[1], err)
+		}
+
+		u.msgMapMutex.RLock()
+		defer u.msgMapMutex.RUnlock()
+
+		m := u.msgMap[channelID]
+
+		for k, v := range m {
+			if v == int(id) {
+				msgID = k
+			}
 		}
 	}
 
@@ -471,7 +488,7 @@ func parseModifyMsg(u *User, msg *irc.Message, channelID string) bool {
 		return false
 	}
 
-	err = u.br.ModifyPost(msgID, text)
+	err := u.br.ModifyPost(msgID, text)
 	if err != nil {
 		// probably a wrong id, just put it through as normally
 		if strings.Contains(err.Error(), "permissions") {
@@ -528,9 +545,11 @@ func threadMsgChannel(u *User, msg *irc.Message, channelID string) bool {
 		return false
 	}
 
-	_, err := u.br.MsgChannelThread(channelID, msgID, text)
+	msgID, err := u.br.MsgChannelThread(channelID, msgID, text)
 	if err != nil {
 		u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+text+" could not be send: "+err.Error())
+	} else {
+		u.msgLast[channelID] = msgID
 	}
 
 	return true
@@ -542,9 +561,11 @@ func threadMsgUser(u *User, toUser string, msg *irc.Message) bool {
 		return false
 	}
 
-	_, err := u.br.MsgUserThread(toUser, msgID, text)
+	msgID, err := u.br.MsgUserThread(toUser, msgID, text)
 	if err != nil {
 		u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+text+" could not be send: "+err.Error())
+	} else {
+		u.msgLast[toUser] = msgID
 	}
 
 	return true
