@@ -79,11 +79,12 @@ type UserInfo struct {
 }
 
 type Credentials struct {
-	Login  string
-	Team   string
-	Pass   string
-	Server string
-	Token  string
+	Login    string
+	Team     string
+	Pass     string
+	Server   string
+	Token    string
+	MFAToken string
 }
 
 type Event struct {

@@ -112,6 +112,12 @@ Login with personal token
 /msg mattermost login <server> <team> <username/email> token=<yourpersonaltoken>
 ```
 
+Login with MFA token
+
+```
+/msg mattermost login <server> <team> <username/email> <password> MFAToken=<mfatoken>
+```
+
 Search
 ```
 /msg mattermost search query
