@@ -722,10 +722,8 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 			logger.Errorf("Unable to get parent post for %#v", data)
 		} else {
 			parentGhost := m.GetUser(parentPost.UserId)
-			// Include parent userid / IRC nicks so hilights still work when people reply to our messages.
-			if m.v.GetBool("mattermost.HideReplies") {
-				data.Message = fmt.Sprintf("%s (re @%s)", data.Message, parentGhost.Nick)
-			} else {
+
+			if !m.v.GetBool("mattermost.hidereplies") {
 				parentMessage := maybeShorten(parentPost.Message, m.v.GetInt("mattermost.ShortenRepliesTo"), "@")
 				data.Message = fmt.Sprintf("%s (re @%s: %s)", data.Message, parentGhost.Nick, parentMessage)
 			}
