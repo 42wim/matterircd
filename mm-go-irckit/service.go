@@ -111,7 +111,7 @@ func login(u *User, toUser *User, args []string, service string) {
 		datalen--
 	}
 
-	if len(args) >= datalen {
+	if len(args) >= datalen { // nolint:nestif
 		logger.Debugf("args_len: %d", len(args))
 		logger.Debugf("team: %s", cred.Team)
 		logger.Debugf("server: %s", cred.Server)
