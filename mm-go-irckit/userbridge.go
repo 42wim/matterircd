@@ -24,6 +24,7 @@ type UserBridge struct {
 	br                 bridge.Bridger    //nolint:structcheck
 	inprogress         bool              //nolint:structcheck
 	msgLast            map[string]string //nolint:structcheck
+	msgLastMutex       sync.RWMutex      //nolint:structcheck
 	msgMap             map[string]map[string]int
 	msgCounter         map[string]int       //nolint:structcheck
 	msgMapMutex        sync.RWMutex         //nolint:structcheck

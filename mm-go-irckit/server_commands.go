@@ -385,6 +385,8 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 		if err2 != nil {
 			u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+msg.Trailing+" could not be send: "+err2.Error())
 		} else {
+			u.msgLastMutex.Lock()
+			defer u.msgLastMutex.Unlock()
 			u.msgLast[ch.ID()] = msgID
 		}
 
@@ -419,6 +421,8 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 			if err2 != nil {
 				return err
 			}
+			u.msgLastMutex.Lock()
+			defer u.msgLastMutex.Unlock()
 			u.msgLast[toUser.User] = msgID
 
 			if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
@@ -458,6 +462,8 @@ func parseModifyMsg(u *User, msg *irc.Message, channelID string) bool {
 	// last message from user. Also support '!!' like shell's history
 	// substitution for previous command.
 	case matches[1] == "//" || matches[1] == "/!!/":
+		u.msgLastMutex.RLock()
+		defer u.msgLastMutex.RUnlock()
 		msgLast, ok := u.msgLast[channelID]
 		if ok {
 			msgID = msgLast
@@ -549,6 +555,8 @@ func threadMsgChannel(u *User, msg *irc.Message, channelID string) bool {
 	if err != nil {
 		u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+text+" could not be send: "+err.Error())
 	} else {
+		u.msgLastMutex.Lock()
+		defer u.msgLastMutex.Unlock()
 		u.msgLast[channelID] = msgID
 	}
 
@@ -565,6 +573,8 @@ func threadMsgUser(u *User, toUser string, msg *irc.Message) bool {
 	if err != nil {
 		u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+text+" could not be send: "+err.Error())
 	} else {
+		u.msgLastMutex.Lock()
+		defer u.msgLastMutex.Unlock()
 		u.msgLast[toUser] = msgID
 	}
 
