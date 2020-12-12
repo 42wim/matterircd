@@ -386,12 +386,11 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 			u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+msg.Trailing+" could not be send: "+err2.Error())
 			return err2
 		}
-		
+
 		u.msgLastMutex.Lock()
 		defer u.msgLastMutex.Unlock()
-		
+
 		u.msgLast[ch.ID()] = msgID
-		}
 
 		if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
 			u.prefixContext(ch.ID(), msgID, "", "")
@@ -467,7 +466,7 @@ func parseModifyMsg(u *User, msg *irc.Message, channelID string) bool {
 	case matches[1] == "//" || matches[1] == "/!!/":
 		u.msgLastMutex.RLock()
 		defer u.msgLastMutex.RUnlock()
-		if msgLast, ok := u.msgLast[channelID];ok {
+		if msgLast, ok := u.msgLast[channelID]; ok {
 			msgID = msgLast
 		}
 	// Mattermost message/thread ID (e.g. 'cfrakpwix7y8pgzux6ta76pm9c')
@@ -492,12 +491,12 @@ func parseModifyMsg(u *User, msg *irc.Message, channelID string) bool {
 			if v != int(id) {
 				continue
 			}
-			
+
 			msgID = k
-			
+
 			u.msgLastMutex.Lock()
 			defer u.msgLastMutex.Unlock()
-			
+
 			u.msgLast[channelID] = msgID
 		}
 	}
@@ -571,7 +570,7 @@ func threadMsgChannel(u *User, msg *irc.Message, channelID string) bool {
 
 	u.msgLastMutex.Lock()
 	defer u.msgLastMutex.Unlock()
-	
+
 	u.msgLast[channelID] = msgID
 
 	if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
@@ -592,10 +591,10 @@ func threadMsgUser(u *User, msg *irc.Message, toUser string) bool {
 		u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+text+" could not be send: "+err.Error())
 		return false
 	}
-	
+
 	u.msgLastMutex.Lock()
 	defer u.msgLastMutex.Unlock()
-	
+
 	u.msgLast[toUser] = msgID
 
 	if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
