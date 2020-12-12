@@ -21,8 +21,10 @@ import (
 type UserBridge struct {
 	Srv                Server
 	Credentials        bridge.Credentials
-	br                 bridge.Bridger //nolint:structcheck
-	inprogress         bool           //nolint:structcheck
+	br                 bridge.Bridger    //nolint:structcheck
+	inprogress         bool              //nolint:structcheck
+	msgLast            map[string]string //nolint:structcheck
+	msgLastMutex       sync.RWMutex      //nolint:structcheck
 	msgMap             map[string]map[string]int
 	msgCounter         map[string]int       //nolint:structcheck
 	msgMapMutex        sync.RWMutex         //nolint:structcheck
@@ -39,6 +41,7 @@ func NewUserBridge(c net.Conn, srv Server, cfg *viper.Viper) *User {
 
 	u.Srv = srv
 	u.v = cfg
+	u.msgLast = make(map[string]string)
 	u.msgMap = make(map[string]map[string]int)
 	u.msgCounter = make(map[string]int)
 	u.updateCounter = make(map[string]time.Time)

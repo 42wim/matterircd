@@ -87,3 +87,16 @@ To delete the message just set the newtext empty `s/number/`
 23:25 < wimirc> s/003/hello how are you
 23:25 <@wim> [004] fine
 ```
+
+You can also modify or delete the last message you sent.
+
+```irc
+23:25 <@wim> [001] hi
+23:25 <@wim> [002] something
+23:25 < wimirc> hllo how are you
+23:25 < wimirc> s//hello how are you
+23:25 < wimirc> s/!!/hello, how are you?
+23:25 <@wim> [004] fine
+23:25 < wimirc> good
+23:25 < wimirc> s//
+```
