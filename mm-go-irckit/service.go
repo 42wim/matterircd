@@ -99,7 +99,11 @@ func login(u *User, toUser *User, args []string, service string) {
 	}
 
 	cred := bridge.Credentials{}
-	datalen := 5
+	datalen := 4
+
+	if len(args) > 1 && strings.Contains(args[len(args)-1], "MFAToken=") {
+		datalen = 5
+	}
 
 	if u.v.GetString("mattermost.DefaultTeam") != "" {
 		cred.Team = u.v.GetString("mattermost.DefaultTeam")
@@ -116,6 +120,7 @@ func login(u *User, toUser *User, args []string, service string) {
 		logger.Debugf("team: %s", cred.Team)
 		logger.Debugf("server: %s", cred.Server)
 		if strings.Contains(args[len(args)-1], "MFAToken=") {
+			logger.Debug("found MFAToken")
 			MFAToken := strings.Split(args[len(args)-1], "=")
 			cred.MFAToken = MFAToken[1]
 			cred.Pass = args[len(args)-2]
@@ -127,10 +132,11 @@ func login(u *User, toUser *User, args []string, service string) {
 		// no default server or team specified
 		if cred.Server == "" && cred.Team == "" {
 			cred.Server = args[0]
+			cred.Team = args[1]
 		}
 
 		if cred.Team == "" {
-			cred.Team = args[1]
+			cred.Team = args[0]
 		}
 
 		if cred.Server == "" {
