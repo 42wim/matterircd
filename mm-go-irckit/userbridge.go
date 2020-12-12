@@ -43,6 +43,7 @@ func NewUserBridge(c net.Conn, srv Server, cfg *viper.Viper) *User {
 
 	u.Srv = srv
 	u.v = cfg
+	u.lastViewedAt = make(map[string]int64)
 	u.msgLast = make(map[string]string)
 	u.msgMap = make(map[string]map[string]int)
 	u.msgCounter = make(map[string]int)
