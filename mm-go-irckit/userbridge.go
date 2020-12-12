@@ -549,10 +549,10 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 		}
 		// We used to stored last viewed at if present.
 		u.lastViewedAtMutex.RLock()
-		defer u.lastViewedAtMutex.RUnlock()
 		if lastViewedAt, ok := u.lastViewedAt[brchannel.ID]; ok {
 			since = lastViewedAt
 		}
+		u.lastViewedAtMutex.RUnlock()
 		// post everything to the channel you haven't seen yet
 		postlist := u.br.GetPostsSince(brchannel.ID, since)
 		if postlist == nil {
@@ -624,8 +624,8 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			u.updateLastViewed(brchannel.ID)
 		}
 		u.lastViewedAtMutex.Lock()
-		defer u.lastViewedAtMutex.Unlock()
 		u.lastViewedAt[brchannel.ID] = model.GetMillis()
+		u.lastViewedAtMutex.Unlock()
 	}
 }
 
