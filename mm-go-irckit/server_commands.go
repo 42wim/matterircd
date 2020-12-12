@@ -409,7 +409,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 			if u.br == nil {
 				return nil
 			}
-			if threadMsgUser(u, toUser.User, msg) {
+			if threadMsgUser(u, msg, toUser.User) {
 				return nil
 			}
 
@@ -566,10 +566,14 @@ func threadMsgChannel(u *User, msg *irc.Message, channelID string) bool {
 		u.msgLast[channelID] = msgID
 	}
 
+	if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
+		u.prefixContext(channelID, msgID, "", "")
+	}
+
 	return true
 }
 
-func threadMsgUser(u *User, toUser string, msg *irc.Message) bool {
+func threadMsgUser(u *User, msg *irc.Message, toUser string) bool {
 	msgID, text := parseThreadID(u, msg, toUser)
 	if msgID == "" {
 		return false
@@ -582,6 +586,10 @@ func threadMsgUser(u *User, toUser string, msg *irc.Message) bool {
 		u.msgLastMutex.Lock()
 		defer u.msgLastMutex.Unlock()
 		u.msgLast[toUser] = msgID
+	}
+
+	if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
+		u.prefixContext(toUser, msgID, "", "")
 	}
 
 	return true
