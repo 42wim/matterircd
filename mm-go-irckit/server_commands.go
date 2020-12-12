@@ -471,6 +471,9 @@ func parseModifyMsg(u *User, msg *irc.Message, channelID string) bool {
 	// Mattermost message/thread ID (e.g. 'cfrakpwix7y8pgzux6ta76pm9c')
 	case len(matches[1]) == 28:
 		msgID = strings.ReplaceAll(matches[1], "/", "")
+		u.msgLastMutex.Lock()
+		defer u.msgLastMutex.Unlock()
+		u.msgLast[channelID] = msgID
 	// matterircd message/thread ID (e.g. '004' and 'a12')
 	case len(matches[1]) == 5:
 		id, err := strconv.ParseInt(strings.ReplaceAll(matches[1], "/", ""), 16, 0)
@@ -486,6 +489,9 @@ func parseModifyMsg(u *User, msg *irc.Message, channelID string) bool {
 		for k, v := range m {
 			if v == int(id) {
 				msgID = k
+				u.msgLastMutex.Lock()
+				defer u.msgLastMutex.Unlock()
+				u.msgLast[channelID] = msgID
 			}
 		}
 	}
