@@ -108,9 +108,10 @@ PreferNickname = false
 
 # Disable showing parent post / replies
 HideReplies = false
-
 # Shorten replies to approximately this length
 ShortenRepliesTo = 0
+# Enable Unicode.
+Unicode = false
 
 #Only join direct/group messages when someone talks. This stops from cluttering your 
 #irc client with lots of windows.
