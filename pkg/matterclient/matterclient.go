@@ -366,8 +366,7 @@ func (m *Client) doLogin(firstConnection bool, b *backoff.Backoff) error {
 			if err != nil {
 				return err
 			}
-		}
-		if m.Credentials.MFAToken != "" {
+		} else if m.Credentials.MFAToken != "" {
 			user, resp = m.Client.LoginWithMFA(m.Credentials.Login, m.Credentials.Pass, m.Credentials.MFAToken)
 		} else {
 			user, resp = m.Client.Login(m.Credentials.Login, m.Credentials.Pass)
