@@ -390,7 +390,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 		u.msgLastMutex.Lock()
 		defer u.msgLastMutex.Unlock()
 
-		u.msgLast[ch.ID()] = msgID
+		u.msgLast[ch.ID()] = [2]string{msgID, ""}
 
 		if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
 			u.prefixContext(ch.ID(), msgID, "", "")
@@ -425,7 +425,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 			}
 			u.msgLastMutex.Lock()
 			defer u.msgLastMutex.Unlock()
-			u.msgLast[toUser.User] = msgID
+			u.msgLast[toUser.User] = [2]string{msgID, ""}
 
 			if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
 				u.prefixContext(toUser.User, msgID, "", "")
@@ -467,14 +467,14 @@ func parseModifyMsg(u *User, msg *irc.Message, channelID string) bool {
 		u.msgLastMutex.RLock()
 		defer u.msgLastMutex.RUnlock()
 		if msgLast, ok := u.msgLast[channelID]; ok {
-			msgID = msgLast
+			msgID = msgLast[0]
 		}
 	// Mattermost message/thread ID (e.g. 'cfrakpwix7y8pgzux6ta76pm9c')
 	case len(matches[1]) == 28:
 		msgID = strings.ReplaceAll(matches[1], "/", "")
 		u.msgLastMutex.Lock()
 		defer u.msgLastMutex.Unlock()
-		u.msgLast[channelID] = msgID
+		u.msgLast[channelID] = [2]string{msgID, ""}
 	// matterircd message/thread ID (e.g. '004' and 'a12')
 	case len(matches[1]) == 5:
 		id, err := strconv.ParseInt(strings.ReplaceAll(matches[1], "/", ""), 16, 0)
@@ -497,7 +497,7 @@ func parseModifyMsg(u *User, msg *irc.Message, channelID string) bool {
 			u.msgLastMutex.Lock()
 			defer u.msgLastMutex.Unlock()
 
-			u.msgLast[channelID] = msgID
+			u.msgLast[channelID] = [2]string{msgID, ""}
 		}
 	}
 
@@ -541,9 +541,10 @@ func parseThreadID(u *User, msg *irc.Message, channelID string) (string, string)
 		if !ok {
 			return "", ""
 		}
-		parentID := msgLast
-		// TODO: Check last message/post to see if it's a reply to an
-		// existing thread and use the parentID of that.
+		parentID := msgLast[0]
+		if msgLast[1] != "" {
+			parentID = msgLast[1]
+		}
 		newMessage := msg.Trailing
 		// Also strip separator in message.
 		if len(newMessage) > 1 {
@@ -578,12 +579,12 @@ func parseThreadID(u *User, msg *irc.Message, channelID string) (string, string)
 }
 
 func threadMsgChannel(u *User, msg *irc.Message, channelID string) bool {
-	msgID, text := parseThreadID(u, msg, channelID)
-	if msgID == "" {
+	threadID, text := parseThreadID(u, msg, channelID)
+	if threadID == "" {
 		return false
 	}
 
-	msgID, err := u.br.MsgChannelThread(channelID, msgID, text)
+	msgID, err := u.br.MsgChannelThread(channelID, threadID, text)
 	if err != nil {
 		u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+text+" could not be send: "+err.Error())
 		return false
@@ -592,7 +593,7 @@ func threadMsgChannel(u *User, msg *irc.Message, channelID string) bool {
 	u.msgLastMutex.Lock()
 	defer u.msgLastMutex.Unlock()
 
-	u.msgLast[channelID] = msgID
+	u.msgLast[channelID] = [2]string{msgID, threadID}
 
 	if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
 		u.prefixContext(channelID, msgID, "", "")
@@ -602,12 +603,12 @@ func threadMsgChannel(u *User, msg *irc.Message, channelID string) bool {
 }
 
 func threadMsgUser(u *User, msg *irc.Message, toUser string) bool {
-	msgID, text := parseThreadID(u, msg, toUser)
-	if msgID == "" {
+	threadID, text := parseThreadID(u, msg, toUser)
+	if threadID == "" {
 		return false
 	}
 
-	msgID, err := u.br.MsgUserThread(toUser, msgID, text)
+	msgID, err := u.br.MsgUserThread(toUser, threadID, text)
 	if err != nil {
 		u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+text+" could not be send: "+err.Error())
 		return false
@@ -616,7 +617,7 @@ func threadMsgUser(u *User, msg *irc.Message, toUser string) bool {
 	u.msgLastMutex.Lock()
 	defer u.msgLastMutex.Unlock()
 
-	u.msgLast[toUser] = msgID
+	u.msgLast[toUser] = [2]string{msgID, threadID}
 
 	if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
 		u.prefixContext(toUser, msgID, "", "")
