@@ -531,6 +531,27 @@ func parseThreadID(u *User, msg *irc.Message, channelID string) (string, string)
 		return parentID, newMessage
 	}
 
+	re = regexp.MustCompile(`^\@\@!!`)
+	matches = re.FindStringSubmatch(msg.Trailing)
+	if len(matches) == 1 {
+		msg.Trailing = strings.Replace(msg.Trailing, matches[0], "", 1)
+		u.msgLastMutex.RLock()
+		defer u.msgLastMutex.RUnlock()
+		msgLast, ok := u.msgLast[channelID]
+		if !ok {
+			return "", ""
+		}
+		parentID := msgLast
+		// TODO: Check last message/post to see if it's a reply to an
+		// existing thread and use the parentID of that.
+		newMessage := msg.Trailing
+		// Also strip separator in message.
+		if len(newMessage) > 1 {
+			newMessage = newMessage[1:]
+		}
+		return parentID, newMessage
+	}
+
 	re = regexp.MustCompile(`^\@\@([0-9a-f]{3})`)
 	matches = re.FindStringSubmatch(msg.Trailing)
 	if len(matches) == 2 {
