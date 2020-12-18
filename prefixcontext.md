@@ -108,5 +108,5 @@ Or start a thread with the last message you sent.
 23:25 <@wim> [002] something
 23:25 < wimirc> hello
 23:25 < wimirc> @@!! how are you?
-23:25 < wimirc> [005->003] good
+23:25 <@wim> [005->003] good
 ```
