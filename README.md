@@ -17,6 +17,7 @@
         - [mattermost login with sso/gitlab](#mattermost-login-with-ssogitlab)
         - [slack sso login / xoxc tokens](#slack-sso-login--xoxc-tokens)
     - [Guides](#guides)
+    - [Related](#related)
 
 <!-- /TOC -->
 
@@ -224,3 +225,7 @@ Here are some external guides and documentation that might help you get up and
 running more quickly:
 
 - [Breaking out of the Slack walled garden](https://purpleidea.com/blog/2018/06/22/breaking-out-of-the-slack-walled-garden/)
+
+## Related
+
+- [matterircd-complete](https://github.com/hloeung/matterircd-complete) - better irssi/mattermost/matterircd integration
