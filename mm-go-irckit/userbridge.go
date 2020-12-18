@@ -23,6 +23,8 @@ type UserBridge struct {
 	Credentials        bridge.Credentials
 	br                 bridge.Bridger    //nolint:structcheck
 	inprogress         bool              //nolint:structcheck
+	lastViewedAt       map[string]int64  //nolint:structcheck
+	lastViewedAtMutex  sync.RWMutex      //nolint:structcheck
 	msgLast            map[string]string //nolint:structcheck
 	msgLastMutex       sync.RWMutex      //nolint:structcheck
 	msgMap             map[string]map[string]int
@@ -41,6 +43,7 @@ func NewUserBridge(c net.Conn, srv Server, cfg *viper.Viper) *User {
 
 	u.Srv = srv
 	u.v = cfg
+	u.lastViewedAt = make(map[string]int64)
 	u.msgLast = make(map[string]string)
 	u.msgMap = make(map[string]map[string]int)
 	u.msgCounter = make(map[string]int)
@@ -147,6 +150,9 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 	if !u.v.GetBool(u.br.Protocol() + ".disableautoview") {
 		u.updateLastViewed(event.ChannelID)
 	}
+	u.lastViewedAtMutex.Lock()
+	defer u.lastViewedAtMutex.Unlock()
+	u.lastViewedAt[event.ChannelID] = model.GetMillis()
 }
 
 func (u *User) handleChannelAddEvent(event *bridge.ChannelAddEvent) {
@@ -170,6 +176,9 @@ func (u *User) handleChannelAddEvent(event *bridge.ChannelAddEvent) {
 	if !u.v.GetBool(u.br.Protocol() + ".disableautoview") {
 		u.updateLastViewed(event.ChannelID)
 	}
+	u.lastViewedAtMutex.Lock()
+	defer u.lastViewedAtMutex.Unlock()
+	u.lastViewedAt[event.ChannelID] = model.GetMillis()
 }
 
 func (u *User) handleChannelRemoveEvent(event *bridge.ChannelRemoveEvent) {
@@ -275,6 +284,9 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 	if !u.v.GetBool(u.br.Protocol() + ".disableautoview") {
 		u.updateLastViewed(event.ChannelID)
 	}
+	u.lastViewedAtMutex.Lock()
+	defer u.lastViewedAtMutex.Unlock()
+	u.lastViewedAt[event.ChannelID] = model.GetMillis()
 }
 
 func (u *User) handleFileEvent(event *bridge.FileEvent) {
@@ -536,6 +548,12 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 		if since == 0 {
 			continue
 		}
+		// We used to stored last viewed at if present.
+		u.lastViewedAtMutex.RLock()
+		if lastViewedAt, ok := u.lastViewedAt[brchannel.ID]; ok {
+			since = lastViewedAt
+		}
+		u.lastViewedAtMutex.RUnlock()
 		// post everything to the channel you haven't seen yet
 		postlist := u.br.GetPostsSince(brchannel.ID, since)
 		if postlist == nil {
@@ -606,6 +624,9 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 		if !u.v.GetBool(u.br.Protocol() + ".disableautoview") {
 			u.updateLastViewed(brchannel.ID)
 		}
+		u.lastViewedAtMutex.Lock()
+		u.lastViewedAt[brchannel.ID] = model.GetMillis()
+		u.lastViewedAtMutex.Unlock()
 	}
 }
 
