@@ -83,6 +83,7 @@ func New(login string, pass string, team string, server string, mfatoken string)
 	rootLogger.SetFormatter(&prefixed.TextFormatter{
 		PrefixPadding: 13,
 		DisableColors: true,
+		FullTimestamp: true,
 	})
 
 	cred := &Credentials{

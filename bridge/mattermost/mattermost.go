@@ -32,6 +32,7 @@ func New(v *viper.Viper, cred bridge.Credentials, eventChan chan *bridge.Event, 
 		v:           v,
 	}
 
+	logger.SetFormatter(&logger.TextFormatter{FullTimestamp: true})
 	if v.GetBool("debug") {
 		logger.SetLevel(logger.DebugLevel)
 	}
