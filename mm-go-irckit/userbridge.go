@@ -21,17 +21,17 @@ import (
 type UserBridge struct {
 	Srv                Server
 	Credentials        bridge.Credentials
-	br                 bridge.Bridger    //nolint:structcheck
-	inprogress         bool              //nolint:structcheck
-	lastViewedAt       map[string]int64  //nolint:structcheck
-	lastViewedAtMutex  sync.RWMutex      //nolint:structcheck
-	msgLast            map[string]string //nolint:structcheck
-	msgLastMutex       sync.RWMutex      //nolint:structcheck
-	msgMap             map[string]map[string]int
-	msgCounter         map[string]int       //nolint:structcheck
-	msgMapMutex        sync.RWMutex         //nolint:structcheck
-	updateCounter      map[string]time.Time //nolint:structcheck
-	updateCounterMutex sync.Mutex           //nolint:structcheck
+	br                 bridge.Bridger            //nolint:structcheck
+	inprogress         bool                      //nolint:structcheck
+	lastViewedAt       map[string]int64          //nolint:structcheck
+	lastViewedAtMutex  sync.RWMutex              //nolint:structcheck
+	msgCounter         map[string]int            //nolint:structcheck
+	msgLast            map[string][2]string      //nolint:structcheck
+	msgLastMutex       sync.RWMutex              //nolint:structcheck
+	msgMap             map[string]map[string]int //nolint:structcheck
+	msgMapMutex        sync.RWMutex              //nolint:structcheck
+	updateCounter      map[string]time.Time      //nolint:structcheck
+	updateCounterMutex sync.Mutex                //nolint:structcheck
 }
 
 func NewUserBridge(c net.Conn, srv Server, cfg *viper.Viper) *User {
@@ -44,7 +44,7 @@ func NewUserBridge(c net.Conn, srv Server, cfg *viper.Viper) *User {
 	u.Srv = srv
 	u.v = cfg
 	u.lastViewedAt = make(map[string]int64)
-	u.msgLast = make(map[string]string)
+	u.msgLast = make(map[string][2]string)
 	u.msgMap = make(map[string]map[string]int)
 	u.msgCounter = make(map[string]int)
 	u.updateCounter = make(map[string]time.Time)
