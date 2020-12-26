@@ -1,12 +1,16 @@
 package irckit
 
 import (
+	"errors"
 	"fmt"
 	"math/rand"
 	"net"
+	"os"
 	"strings"
 	"sync"
 	"time"
+
+	"encoding/gob"
 
 	"github.com/42wim/matterircd/bridge"
 	"github.com/42wim/matterircd/bridge/mattermost"
@@ -25,6 +29,7 @@ type UserBridge struct {
 	inprogress         bool                      //nolint:structcheck
 	lastViewedAt       map[string]int64          //nolint:structcheck
 	lastViewedAtMutex  sync.RWMutex              //nolint:structcheck
+	lastViewedAtSaved  int64                     //nolint:structcheck
 	msgCounter         map[string]int            //nolint:structcheck
 	msgLast            map[string][2]string      //nolint:structcheck
 	msgLastMutex       sync.RWMutex              //nolint:structcheck
@@ -48,6 +53,19 @@ func NewUserBridge(c net.Conn, srv Server, cfg *viper.Viper) *User {
 	u.msgMap = make(map[string]map[string]int)
 	u.msgCounter = make(map[string]int)
 	u.updateCounter = make(map[string]time.Time)
+
+	statePath := u.v.GetString("mattermost.lastviewedsavepath")
+	if statePath != "" {
+		staleDuration := u.v.GetString("mattermost.lastviewedstaleduration")
+		lastViewedAt, err := loadLastViewedState(statePath, staleDuration)
+		if err == nil {
+			logger.Info("Loaded lastViewedAt from ", lastViewedAt["__LastViewedStateSavedTime__"])
+			u.lastViewedAt = lastViewedAt
+		} else {
+			logger.Warning("Unable to load saved lastViewedAt, using empty values: ", err)
+		}
+		u.lastViewedAtSaved = model.GetMillis()
+	}
 
 	// used for login
 	u.createService("mattermost", "loginservice")
@@ -153,6 +171,21 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 	u.lastViewedAtMutex.Lock()
 	defer u.lastViewedAtMutex.Unlock()
 	u.lastViewedAt[event.ChannelID] = model.GetMillis()
+	statePath := u.v.GetString(u.br.Protocol() + ".lastviewedsavepath")
+	if statePath == "" {
+		return
+	}
+	// We only want to save or dump out saved lastViewedAt on new
+	// messages after X time (default 5mins).
+	saveInterval := int64(300000)
+	val, err := time.ParseDuration(u.v.GetString(u.br.Protocol() + ".lastviewedsaveinterval"))
+	if err == nil {
+		saveInterval = val.Milliseconds()
+	}
+	if u.lastViewedAtSaved < (model.GetMillis() - saveInterval) {
+		saveLastViewedState(statePath, u.lastViewedAt)
+		u.lastViewedAtSaved = model.GetMillis()
+	}
 }
 
 func (u *User) handleChannelAddEvent(event *bridge.ChannelAddEvent) {
@@ -287,6 +320,21 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 	u.lastViewedAtMutex.Lock()
 	defer u.lastViewedAtMutex.Unlock()
 	u.lastViewedAt[event.ChannelID] = model.GetMillis()
+	statePath := u.v.GetString(u.br.Protocol() + ".lastviewedsavepath")
+	if statePath == "" {
+		return
+	}
+	// We only want to save or dump out saved lastViewedAt on new
+	// messages after X time (default 5mins).
+	saveInterval := int64(300000)
+	val, err := time.ParseDuration(u.v.GetString(u.br.Protocol() + ".lastviewedsaveinterval"))
+	if err == nil {
+		saveInterval = val.Milliseconds()
+	}
+	if u.lastViewedAtSaved < (model.GetMillis() - saveInterval) {
+		saveLastViewedState(statePath, u.lastViewedAt)
+		u.lastViewedAtSaved = model.GetMillis()
+	}
 }
 
 func (u *User) handleFileEvent(event *bridge.FileEvent) {
@@ -628,6 +676,23 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 		u.lastViewedAt[brchannel.ID] = model.GetMillis()
 		u.lastViewedAtMutex.Unlock()
 	}
+	u.lastViewedAtMutex.Lock()
+	defer u.lastViewedAtMutex.Unlock()
+	statePath := u.v.GetString(u.br.Protocol() + ".lastviewedsavepath")
+	if statePath == "" {
+		return
+	}
+	// We only want to save or dump out saved lastViewedAt on new
+	// messages after X time (default 5mins).
+	saveInterval := int64(300000)
+	val, err := time.ParseDuration(u.v.GetString(u.br.Protocol() + ".lastviewedsaveinterval"))
+	if err == nil {
+		saveInterval = val.Milliseconds()
+	}
+	if u.lastViewedAtSaved < (model.GetMillis() - saveInterval) {
+		saveLastViewedState(statePath, u.lastViewedAt)
+		u.lastViewedAtSaved = model.GetMillis()
+	}
 }
 
 func (u *User) MsgUser(toUser *User, msg string) {
@@ -877,4 +942,78 @@ func (u *User) updateLastViewed(channelID string) {
 		time.Sleep(time.Duration(r) * time.Millisecond)
 		u.br.UpdateLastViewed(channelID)
 	}()
+}
+
+var LastViewedStateFormat = int64(1)
+
+func saveLastViewedState(statePath string, lastViewedAt map[string]int64) error {
+	f, err := os.Create(statePath)
+	if err != nil {
+		logger.Warning("Unable to save lastViewedAt: ", err)
+		return err
+	}
+	defer f.Close()
+
+	currentTime := model.GetMillis()
+
+	lastViewedAt["__LastViewedStateFormat__"] = LastViewedStateFormat
+	if _, ok := lastViewedAt["__LastViewedStateCreateTime__"]; !ok {
+		lastViewedAt["__LastViewedStateCreateTime__"] = currentTime
+	}
+	lastViewedAt["__LastViewedStateSavedTime__"] = currentTime
+	// Simple checksum
+	lastViewedAt["__LastViewedStateChecksum__"] = lastViewedAt["__LastViewedStateCreateTime__"] ^ currentTime
+
+	err = gob.NewEncoder(f).Encode(lastViewedAt)
+	if err != nil {
+		logger.Warning("Unable to save lastViewedAt: ", err)
+	} else {
+		logger.Debug("Saving lastViewedAt")
+	}
+	return err
+}
+
+func loadLastViewedState(statePath string, staleDuration string) (map[string]int64, error) {
+	f, err := os.Open(statePath)
+	if err != nil {
+		logger.Debug("Unable to load lastViewedAt: ", err)
+		return nil, err
+	}
+	defer f.Close()
+
+	var lastViewedAt map[string]int64
+	err = gob.NewDecoder(f).Decode(&lastViewedAt)
+	if err != nil {
+		logger.Warning("Unable to load lastViewedAt: ", err)
+		return nil, err
+	}
+
+	if lastViewedAt["__LastViewedStateFormat__"] != LastViewedStateFormat {
+		logger.Warning("State format version mismatch: ", lastViewedAt["__LastViewedStateFormat__"], " vs. ", LastViewedStateFormat)
+		return nil, errors.New("version mismatch")
+	}
+	checksum := lastViewedAt["__LastViewedStateChecksum__"]
+	createtime := lastViewedAt["__LastViewedStateCreateTime__"]
+	savedtime := lastViewedAt["__LastViewedStateSavedTime__"]
+	if createtime^savedtime != checksum {
+		logger.Warning("Checksum mismatch: (saved checksum, state file creation, last saved time)", checksum, createtime, savedtime)
+		return nil, errors.New("checksum mismatch")
+	}
+
+	currentTime := model.GetMillis()
+
+	// Check if stale, last saved for town-square older than defined
+	// (default 30 days).
+	stale := int64(86400 * 30 * 1000)
+	val, err := time.ParseDuration(staleDuration)
+	if err == nil {
+		stale = val.Milliseconds()
+	}
+	townSquare, ok := lastViewedAt["town-square"]
+	if !ok || townSquare < currentTime-stale {
+		logger.Warning("File stale? Saved lastViewedAt for ~town-square too old: ", lastViewedAt["town-square"], currentTime)
+		return nil, errors.New("stale lastViewedAt state file")
+	}
+
+	return lastViewedAt, nil
 }
