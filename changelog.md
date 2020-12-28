@@ -1,3 +1,25 @@
+# v0.22.0
+
+## New features
+
+- mattermost: Allow modifying or deleting last message and by Mattermost message ID (mattermost) (#353)
+- mattermost: Allow replying to your own last message to start new threads (mattermost) (#362)
+- mattermost: Support 2fa authentication (mattermost) (#355)
+
+## Enhancements
+
+- general: Log useful timestamp (#364)
+- mattermost: Save last viewed at state and use for replaying logs (#361)
+- mattermost: Add optional Unicode ellipsis to save on screen real estate (#358)
+- mattermost: Allow showing replies with Prefix/SuffixContext (#351)
+
+## Bugfix
+
+- mattermost:  Do not show replies when hidereplies is enabled (mattermost) (#352)
+
+This release couldn't exist without the following contributors:
+@hloeung, @eyenx
+
 # v0.21.0
 
 ## New features
