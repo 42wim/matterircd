@@ -59,7 +59,7 @@ func NewUserBridge(c net.Conn, srv Server, cfg *viper.Viper) *User {
 		staleDuration := u.v.GetString("mattermost.lastviewedstaleduration")
 		lastViewedAt, err := loadLastViewedState(statePath, staleDuration)
 		if err == nil {
-			logger.Info("Loaded lastViewedAt from ", lastViewedAt["__LastViewedStateSavedTime__"])
+			logger.Info("Loaded lastViewedAt from ", time.Unix(lastViewedAt["__LastViewedStateSavedTime__"]/1000, 0))
 			u.lastViewedAt = lastViewedAt
 		} else {
 			logger.Warning("Unable to load saved lastViewedAt, using empty values: ", err)
@@ -1011,9 +1011,9 @@ func loadLastViewedState(statePath string, staleDuration string) (map[string]int
 	if err == nil {
 		stale = val.Milliseconds()
 	}
-	lastsaved, ok := lastViewedAt["__LastViewedStateSavedTime__"]
-	if !ok || (lastsaved > 0 && lastsaved < currentTime-stale) {
-		logger.Warning("File stale? Last saved too old: ", lastViewedAt["__LastViewedStateSavedTime__"], currentTime)
+	lastSaved, ok := lastViewedAt["__LastViewedStateSavedTime__"]
+	if !ok || (lastSaved > 0 && lastSaved < currentTime-stale) {
+		logger.Warning("File stale? Last saved too old: ", time.Unix(lastViewedAt["__LastViewedStateSavedTime__"]/1000, 0))
 		return nil, errors.New("stale lastViewedAt state file")
 	}
 
