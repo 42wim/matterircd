@@ -58,11 +58,11 @@ func NewUserBridge(c net.Conn, srv Server, cfg *viper.Viper) *User {
 	if statePath != "" {
 		staleDuration := u.v.GetString("mattermost.lastviewedstaleduration")
 		lastViewedAt, err := loadLastViewedState(statePath, staleDuration)
-		if err == nil {
+		if err != nil {
+			logger.Warning("Unable to load saved lastViewedAt, using empty values: ", err)
+		} else {
 			logger.Info("Loaded lastViewedAt from ", time.Unix(lastViewedAt["__LastViewedStateSavedTime__"]/1000, 0))
 			u.lastViewedAt = lastViewedAt
-		} else {
-			logger.Warning("Unable to load saved lastViewedAt, using empty values: ", err)
 		}
 		u.lastViewedAtSaved = model.GetMillis()
 	}
