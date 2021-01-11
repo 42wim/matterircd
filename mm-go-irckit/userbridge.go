@@ -172,19 +172,8 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 	defer u.lastViewedAtMutex.Unlock()
 	u.lastViewedAt[event.ChannelID] = model.GetMillis()
 	statePath := u.v.GetString(u.br.Protocol() + ".lastviewedsavefile")
-	if statePath == "" {
-		return
-	}
-	// We only want to save or dump out saved lastViewedAt on new
-	// messages after X time (default 5mins).
-	saveInterval := int64(300000)
-	val, err := time.ParseDuration(u.v.GetString(u.br.Protocol() + ".lastviewedsaveinterval"))
-	if err == nil {
-		saveInterval = val.Milliseconds()
-	}
-	if u.lastViewedAtSaved < (model.GetMillis() - saveInterval) {
-		saveLastViewedState(statePath, u.lastViewedAt)
-		u.lastViewedAtSaved = model.GetMillis()
+	if statePath != "" {
+		u.saveLastViewed(statePath)
 	}
 }
 
@@ -213,19 +202,8 @@ func (u *User) handleChannelAddEvent(event *bridge.ChannelAddEvent) {
 	defer u.lastViewedAtMutex.Unlock()
 	u.lastViewedAt[event.ChannelID] = model.GetMillis()
 	statePath := u.v.GetString(u.br.Protocol() + ".lastviewedsavefile")
-	if statePath == "" {
-		return
-	}
-	// We only want to save or dump out saved lastViewedAt on new
-	// messages after X time (default 5mins).
-	saveInterval := int64(300000)
-	val, err := time.ParseDuration(u.v.GetString(u.br.Protocol() + ".lastviewedsaveinterval"))
-	if err == nil {
-		saveInterval = val.Milliseconds()
-	}
-	if u.lastViewedAtSaved < (model.GetMillis() - saveInterval) {
-		saveLastViewedState(statePath, u.lastViewedAt)
-		u.lastViewedAtSaved = model.GetMillis()
+	if statePath != "" {
+		u.saveLastViewed(statePath)
 	}
 }
 
@@ -250,19 +228,8 @@ func (u *User) handleChannelRemoveEvent(event *bridge.ChannelRemoveEvent) {
 	defer u.lastViewedAtMutex.Unlock()
 	u.lastViewedAt[event.ChannelID] = model.GetMillis()
 	statePath := u.v.GetString(u.br.Protocol() + ".lastviewedsavefile")
-	if statePath == "" {
-		return
-	}
-	// We only want to save or dump out saved lastViewedAt on new
-	// messages after X time (default 5mins).
-	saveInterval := int64(300000)
-	val, err := time.ParseDuration(u.v.GetString(u.br.Protocol() + ".lastviewedsaveinterval"))
-	if err == nil {
-		saveInterval = val.Milliseconds()
-	}
-	if u.lastViewedAtSaved < (model.GetMillis() - saveInterval) {
-		saveLastViewedState(statePath, u.lastViewedAt)
-		u.lastViewedAtSaved = model.GetMillis()
+	if statePath != "" {
+		u.saveLastViewed(statePath)
 	}
 }
 
@@ -354,19 +321,8 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 	defer u.lastViewedAtMutex.Unlock()
 	u.lastViewedAt[event.ChannelID] = model.GetMillis()
 	statePath := u.v.GetString(u.br.Protocol() + ".lastviewedsavefile")
-	if statePath == "" {
-		return
-	}
-	// We only want to save or dump out saved lastViewedAt on new
-	// messages after X time (default 5mins).
-	saveInterval := int64(300000)
-	val, err := time.ParseDuration(u.v.GetString(u.br.Protocol() + ".lastviewedsaveinterval"))
-	if err == nil {
-		saveInterval = val.Milliseconds()
-	}
-	if u.lastViewedAtSaved < (model.GetMillis() - saveInterval) {
-		saveLastViewedState(statePath, u.lastViewedAt)
-		u.lastViewedAtSaved = model.GetMillis()
+	if statePath != "" {
+		u.saveLastViewed(statePath)
 	}
 }
 
@@ -719,19 +675,8 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 	u.lastViewedAtMutex.Lock()
 	defer u.lastViewedAtMutex.Unlock()
 	statePath := u.v.GetString(u.br.Protocol() + ".lastviewedsavefile")
-	if statePath == "" {
-		return
-	}
-	// We only want to save or dump out saved lastViewedAt on new
-	// messages after X time (default 5mins).
-	saveInterval := int64(300000)
-	val, err := time.ParseDuration(u.v.GetString(u.br.Protocol() + ".lastviewedsaveinterval"))
-	if err == nil {
-		saveInterval = val.Milliseconds()
-	}
-	if u.lastViewedAtSaved < (model.GetMillis() - saveInterval) {
-		saveLastViewedState(statePath, u.lastViewedAt)
-		u.lastViewedAtSaved = model.GetMillis()
+	if statePath != "" {
+		u.saveLastViewed(statePath)
 	}
 }
 
@@ -984,6 +929,20 @@ func (u *User) updateLastViewed(channelID string) {
 		time.Sleep(time.Duration(r) * time.Millisecond)
 		u.br.UpdateLastViewed(channelID)
 	}()
+}
+
+func (u *User) saveLastViewed(statePath string) {
+	// We only want to save or dump out saved lastViewedAt on new
+	// messages after X time (default 5mins).
+	saveInterval := int64(300000)
+	val, err := time.ParseDuration(u.v.GetString(u.br.Protocol() + ".lastviewedsaveinterval"))
+	if err == nil {
+		saveInterval = val.Milliseconds()
+	}
+	if u.lastViewedAtSaved < (model.GetMillis() - saveInterval) {
+		saveLastViewedState(statePath, u.lastViewedAt)
+		u.lastViewedAtSaved = model.GetMillis()
+	}
 }
 
 const lastViewedStateFormat = int64(1)
