@@ -1002,16 +1002,16 @@ func loadLastViewedState(statePath string, staleDuration string) (map[string]int
 
 	currentTime := model.GetMillis()
 
-	// Check if stale, last saved for town-square older than defined
+	// Check if stale, time last saved older than defined
 	// (default 30 days).
 	stale := int64(86400 * 30 * 1000)
 	val, err := time.ParseDuration(staleDuration)
 	if err == nil {
 		stale = val.Milliseconds()
 	}
-	townSquare, ok := lastViewedAt["town-square"]
-	if !ok || townSquare < currentTime-stale {
-		logger.Warning("File stale? Saved lastViewedAt for ~town-square too old: ", lastViewedAt["town-square"], currentTime)
+	lastsaved, ok := lastViewedAt["__LastViewedStateSavedTime__"]
+	if !ok || (lastsaved > 0 && lastsaved < currentTime-stale) {
+		logger.Warning("File stale? Last saved too old: ", lastViewedAt["__LastViewedStateSavedTime__"], currentTime)
 		return nil, errors.New("stale lastViewedAt state file")
 	}
 

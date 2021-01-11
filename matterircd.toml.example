@@ -137,7 +137,7 @@ ShowMentions = false
 LastViewedSavePath = "matterircd-lastsaved.db"
 # Interval for how often to save last viewed information.
 LastViewedSaveInterval = "5m"
-# Consider saved last view information stale if saved town-square older than this time
+# Consider saved last view information stale if last saved older than this time
 LastViewedStaleDuration = "30d"
 
 #############################
