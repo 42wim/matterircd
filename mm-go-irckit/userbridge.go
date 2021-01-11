@@ -380,6 +380,7 @@ func (u *User) handleReactionEvent(event interface{}) {
 			Sender:    sender,
 			MessageID: messageID,
 			Event:     "reaction",
+			ParentID:  messageID,
 		}
 
 		u.handleDirectMessageEvent(e)
@@ -394,6 +395,7 @@ func (u *User) handleReactionEvent(event interface{}) {
 		Sender:      sender,
 		MessageID:   messageID,
 		Event:       "reaction",
+		ParentID:    messageID,
 	}
 
 	u.handleChannelMessageEvent(e)
@@ -564,7 +566,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			continue
 		}
 
-		var prevDate string
+		showReplayHdr := true
 
 		mmPostList := postlist.(*model.PostList)
 		if mmPostList == nil {
@@ -592,29 +594,32 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 				if override {
 					nick = botname
 				}
-				shortdate := ts.Format("2006-01-02")
-				date := ts.Format("2006-01-02 15:04:05")
-				if shortdate != prevDate {
+				if showReplayHdr {
+					date := ts.Format("2006-01-02 15:04:05")
 					if brchannel.DM {
 						spoof(nick, fmt.Sprintf("Replaying since %s", date))
 					} else {
 						spoof("matterircd", fmt.Sprintf("Replaying since %s", date))
 					}
-					prevDate = shortdate
+					showReplayHdr = false
 				}
 
 				replayMsg := fmt.Sprintf("[%s] %s", ts.Format("15:04"), post)
 				if u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" {
-					threadID := p.Id
+					threadMsg := fmt.Sprintf("@@%s", p.Id)
 					if p.ParentId != "" {
-						threadID = p.ParentId
+						if u.v.GetBool(u.br.Protocol() + ".unicode") {
+							threadMsg = fmt.Sprintf("↪@@%s", p.ParentId)
+						} else {
+							threadMsg = fmt.Sprintf("->@@%s", p.ParentId)
+						}
 					}
 
 					switch {
 					case u.v.GetBool(u.br.Protocol() + ".prefixcontext"):
-						replayMsg = fmt.Sprintf("[%s] [@@%s] %s", ts.Format("15:04"), threadID, post)
+						replayMsg = fmt.Sprintf("[%s] [%s] %s", ts.Format("15:04"), threadMsg, post)
 					case u.v.GetBool(u.br.Protocol() + ".suffixcontext"):
-						replayMsg = fmt.Sprintf("[%s] %s [@@%s]", ts.Format("15:04"), post, threadID)
+						replayMsg = fmt.Sprintf("[%s] %s [%s]", ts.Format("15:04"), post, threadMsg)
 					}
 				}
 				spoof(nick, replayMsg)
@@ -813,11 +818,13 @@ func (u *User) prefixContextModified(channelID, messageID string) string {
 
 func (u *User) prefixContext(channelID, messageID, parentID, event string) string {
 	if u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" {
-		threadID := messageID
-		if parentID != "" {
-			threadID = parentID
+		if parentID == "" {
+			return fmt.Sprintf("[@@%s]", messageID)
 		}
-		return fmt.Sprintf("[@@%s]", threadID)
+		if u.v.GetBool(u.br.Protocol() + ".unicode") {
+			return fmt.Sprintf("[↪@@%s]", parentID)
+		}
+		return fmt.Sprintf("[->@@%s]", parentID)
 	}
 
 	u.msgMapMutex.Lock()
