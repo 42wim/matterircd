@@ -98,8 +98,10 @@ PrefixMainTeam = false
 #Only mark a conversation as viewed when you reply to that conversation or
 #channel. This prevents Mattermost from clearing mobile app notifications
 #instantly. Note that this prevents you from always appearing as online
-#(anti-idle support is turned off) (default false)
+#(anti-idle support is turned off unless ForceAntiIdle) (default false)
 DisableAutoView = false
+# Force and enable anti-idle. Useful for when DisableAutoView.
+# ForceAntiIdle = true
 
 # If users set a Nickname, matterircd could either choose that or the Username
 # to display in the IRC client. The option PreferNickname controls that, the
