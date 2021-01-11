@@ -212,6 +212,21 @@ func (u *User) handleChannelAddEvent(event *bridge.ChannelAddEvent) {
 	u.lastViewedAtMutex.Lock()
 	defer u.lastViewedAtMutex.Unlock()
 	u.lastViewedAt[event.ChannelID] = model.GetMillis()
+	statePath := u.v.GetString(u.br.Protocol() + ".lastviewedsavepath")
+	if statePath == "" {
+		return
+	}
+	// We only want to save or dump out saved lastViewedAt on new
+	// messages after X time (default 5mins).
+	saveInterval := int64(300000)
+	val, err := time.ParseDuration(u.v.GetString(u.br.Protocol() + ".lastviewedsaveinterval"))
+	if err == nil {
+		saveInterval = val.Milliseconds()
+	}
+	if u.lastViewedAtSaved < (model.GetMillis() - saveInterval) {
+		saveLastViewedState(statePath, u.lastViewedAt)
+		u.lastViewedAtSaved = model.GetMillis()
+	}
 }
 
 func (u *User) handleChannelRemoveEvent(event *bridge.ChannelRemoveEvent) {
@@ -230,6 +245,24 @@ func (u *User) handleChannelRemoveEvent(event *bridge.ChannelRemoveEvent) {
 		if event.Remover != nil && removed.Nick != event.Remover.Nick && event.Remover.Nick != "system" {
 			ch.SpoofMessage("system", "removed "+removed.Nick+" from the channel by "+event.Remover.Nick)
 		}
+	}
+	u.lastViewedAtMutex.Lock()
+	defer u.lastViewedAtMutex.Unlock()
+	u.lastViewedAt[event.ChannelID] = model.GetMillis()
+	statePath := u.v.GetString(u.br.Protocol() + ".lastviewedsavepath")
+	if statePath == "" {
+		return
+	}
+	// We only want to save or dump out saved lastViewedAt on new
+	// messages after X time (default 5mins).
+	saveInterval := int64(300000)
+	val, err := time.ParseDuration(u.v.GetString(u.br.Protocol() + ".lastviewedsaveinterval"))
+	if err == nil {
+		saveInterval = val.Milliseconds()
+	}
+	if u.lastViewedAtSaved < (model.GetMillis() - saveInterval) {
+		saveLastViewedState(statePath, u.lastViewedAt)
+		u.lastViewedAtSaved = model.GetMillis()
 	}
 }
 
