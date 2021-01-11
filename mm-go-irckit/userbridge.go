@@ -1051,9 +1051,12 @@ func loadLastViewedState(statePath string, staleDuration string) (map[string]int
 	// (default 30 days).
 	stale := defaultStaleDuration
 	val, err := time.ParseDuration(staleDuration)
-	if err == nil {
+	if err != nil {
 		stale = val.Milliseconds()
+		return fmt.Errorf("incorrect lastviewedstaleduration: %s",err)
 	}
+	
+	stale = val.Milliseconds()
 	lastSaved, ok := lastViewedAt["__LastViewedStateSavedTime__"]
 	if !ok || (lastSaved > 0 && lastSaved < currentTime-stale) {
 		logger.Debug("File stale? Last saved too old: ", time.Unix(lastViewedAt["__LastViewedStateSavedTime__"]/1000, 0))
