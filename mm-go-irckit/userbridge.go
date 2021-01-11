@@ -54,7 +54,7 @@ func NewUserBridge(c net.Conn, srv Server, cfg *viper.Viper) *User {
 	u.msgCounter = make(map[string]int)
 	u.updateCounter = make(map[string]time.Time)
 
-	statePath := u.v.GetString("mattermost.lastviewedsavepath")
+	statePath := u.v.GetString("mattermost.lastviewedsavefile")
 	if statePath != "" {
 		staleDuration := u.v.GetString("mattermost.lastviewedstaleduration")
 		lastViewedAt, err := loadLastViewedState(statePath, staleDuration)
@@ -171,7 +171,7 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 	u.lastViewedAtMutex.Lock()
 	defer u.lastViewedAtMutex.Unlock()
 	u.lastViewedAt[event.ChannelID] = model.GetMillis()
-	statePath := u.v.GetString(u.br.Protocol() + ".lastviewedsavepath")
+	statePath := u.v.GetString(u.br.Protocol() + ".lastviewedsavefile")
 	if statePath == "" {
 		return
 	}
@@ -212,7 +212,7 @@ func (u *User) handleChannelAddEvent(event *bridge.ChannelAddEvent) {
 	u.lastViewedAtMutex.Lock()
 	defer u.lastViewedAtMutex.Unlock()
 	u.lastViewedAt[event.ChannelID] = model.GetMillis()
-	statePath := u.v.GetString(u.br.Protocol() + ".lastviewedsavepath")
+	statePath := u.v.GetString(u.br.Protocol() + ".lastviewedsavefile")
 	if statePath == "" {
 		return
 	}
@@ -249,7 +249,7 @@ func (u *User) handleChannelRemoveEvent(event *bridge.ChannelRemoveEvent) {
 	u.lastViewedAtMutex.Lock()
 	defer u.lastViewedAtMutex.Unlock()
 	u.lastViewedAt[event.ChannelID] = model.GetMillis()
-	statePath := u.v.GetString(u.br.Protocol() + ".lastviewedsavepath")
+	statePath := u.v.GetString(u.br.Protocol() + ".lastviewedsavefile")
 	if statePath == "" {
 		return
 	}
@@ -353,7 +353,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 	u.lastViewedAtMutex.Lock()
 	defer u.lastViewedAtMutex.Unlock()
 	u.lastViewedAt[event.ChannelID] = model.GetMillis()
-	statePath := u.v.GetString(u.br.Protocol() + ".lastviewedsavepath")
+	statePath := u.v.GetString(u.br.Protocol() + ".lastviewedsavefile")
 	if statePath == "" {
 		return
 	}
@@ -718,7 +718,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 	}
 	u.lastViewedAtMutex.Lock()
 	defer u.lastViewedAtMutex.Unlock()
-	statePath := u.v.GetString(u.br.Protocol() + ".lastviewedsavepath")
+	statePath := u.v.GetString(u.br.Protocol() + ".lastviewedsavefile")
 	if statePath == "" {
 		return
 	}
@@ -986,7 +986,10 @@ func (u *User) updateLastViewed(channelID string) {
 	}()
 }
 
-var LastViewedStateFormat = int64(1)
+const lastViewedStateFormat = int64(1)
+
+// Default 30 days
+const defaultStaleDuration = int64(86400 * 30 * 1000)
 
 func saveLastViewedState(statePath string, lastViewedAt map[string]int64) error {
 	f, err := os.Create(statePath)
@@ -998,7 +1001,7 @@ func saveLastViewedState(statePath string, lastViewedAt map[string]int64) error 
 
 	currentTime := model.GetMillis()
 
-	lastViewedAt["__LastViewedStateFormat__"] = LastViewedStateFormat
+	lastViewedAt["__LastViewedStateFormat__"] = lastViewedStateFormat
 	if _, ok := lastViewedAt["__LastViewedStateCreateTime__"]; !ok {
 		lastViewedAt["__LastViewedStateCreateTime__"] = currentTime
 	}
@@ -1030,8 +1033,8 @@ func loadLastViewedState(statePath string, staleDuration string) (map[string]int
 		return nil, err
 	}
 
-	if lastViewedAt["__LastViewedStateFormat__"] != LastViewedStateFormat {
-		logger.Debug("State format version mismatch: ", lastViewedAt["__LastViewedStateFormat__"], " vs. ", LastViewedStateFormat)
+	if lastViewedAt["__LastViewedStateFormat__"] != lastViewedStateFormat {
+		logger.Debug("State format version mismatch: ", lastViewedAt["__LastViewedStateFormat__"], " vs. ", lastViewedStateFormat)
 		return nil, errors.New("version mismatch")
 	}
 	checksum := lastViewedAt["__LastViewedStateChecksum__"]
@@ -1046,7 +1049,7 @@ func loadLastViewedState(statePath string, staleDuration string) (map[string]int
 
 	// Check if stale, time last saved older than defined
 	// (default 30 days).
-	stale := int64(86400 * 30 * 1000)
+	stale := defaultStaleDuration
 	val, err := time.ParseDuration(staleDuration)
 	if err == nil {
 		stale = val.Milliseconds()
