@@ -994,7 +994,7 @@ const defaultStaleDuration = int64(86400 * 30 * 1000)
 func saveLastViewedState(statePath string, lastViewedAt map[string]int64) error {
 	f, err := os.Create(statePath)
 	if err != nil {
-		logger.Warning("Unable to save lastViewedAt: ", err)
+		logger.Debug("Unable to save lastViewedAt: ", err)
 		return err
 	}
 	defer f.Close()
@@ -1048,15 +1048,14 @@ func loadLastViewedState(statePath string, staleDuration string) (map[string]int
 	currentTime := model.GetMillis()
 
 	// Check if stale, time last saved older than defined
-	// (default 30 days).
-	stale := defaultStaleDuration
+	var stale int64
 	val, err := time.ParseDuration(staleDuration)
 	if err != nil {
+		stale = defaultStaleDuration
+	} else {
 		stale = val.Milliseconds()
-		return nil, fmt.Errorf("incorrect lastviewedstaleduration: %s", err)
 	}
 
-	stale = val.Milliseconds()
 	lastSaved, ok := lastViewedAt["__LastViewedStateSavedTime__"]
 	if !ok || (lastSaved > 0 && lastSaved < currentTime-stale) {
 		logger.Debug("File stale? Last saved too old: ", time.Unix(lastViewedAt["__LastViewedStateSavedTime__"]/1000, 0))
