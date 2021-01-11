@@ -1010,11 +1010,11 @@ func saveLastViewedState(statePath string, lastViewedAt map[string]int64) error 
 	lastViewedAt["__LastViewedStateChecksum__"] = lastViewedAt["__LastViewedStateCreateTime__"] ^ currentTime
 
 	logger.Debug("Saving lastViewedAt")
-	
+
 	if err := gob.NewEncoder(f).Encode(lastViewedAt); err != nil {
-		return fmt.Errorf("gob encoding failed: %s",err)
+		return fmt.Errorf("gob encoding failed: %s", err)
 	}
-	
+
 	return nil
 }
 
@@ -1053,9 +1053,9 @@ func loadLastViewedState(statePath string, staleDuration string) (map[string]int
 	val, err := time.ParseDuration(staleDuration)
 	if err != nil {
 		stale = val.Milliseconds()
-		return fmt.Errorf("incorrect lastviewedstaleduration: %s",err)
+		return nil, fmt.Errorf("incorrect lastviewedstaleduration: %s", err)
 	}
-	
+
 	stale = val.Milliseconds()
 	lastSaved, ok := lastViewedAt["__LastViewedStateSavedTime__"]
 	if !ok || (lastSaved > 0 && lastSaved < currentTime-stale) {
