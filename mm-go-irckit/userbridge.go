@@ -669,12 +669,14 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			}
 		}
 
-		if !u.v.GetBool(u.br.Protocol() + ".disableautoview") {
-			u.updateLastViewed(brchannel.ID)
+		if len(mmPostList.Order) > 0 {
+			if !u.v.GetBool(u.br.Protocol() + ".disableautoview") {
+				u.updateLastViewed(brchannel.ID)
+			}
+			u.lastViewedAtMutex.Lock()
+			u.lastViewedAt[brchannel.ID] = model.GetMillis()
+			u.lastViewedAtMutex.Unlock()
 		}
-		u.lastViewedAtMutex.Lock()
-		u.lastViewedAt[brchannel.ID] = model.GetMillis()
-		u.lastViewedAtMutex.Unlock()
 	}
 	u.lastViewedAtMutex.Lock()
 	defer u.lastViewedAtMutex.Unlock()
