@@ -1026,19 +1026,19 @@ func loadLastViewedState(statePath string, staleDuration string) (map[string]int
 	var lastViewedAt map[string]int64
 	err = gob.NewDecoder(f).Decode(&lastViewedAt)
 	if err != nil {
-		logger.Warning("Unable to load lastViewedAt: ", err)
+		logger.Debug("Unable to load lastViewedAt: ", err)
 		return nil, err
 	}
 
 	if lastViewedAt["__LastViewedStateFormat__"] != LastViewedStateFormat {
-		logger.Warning("State format version mismatch: ", lastViewedAt["__LastViewedStateFormat__"], " vs. ", LastViewedStateFormat)
+		logger.Debug("State format version mismatch: ", lastViewedAt["__LastViewedStateFormat__"], " vs. ", LastViewedStateFormat)
 		return nil, errors.New("version mismatch")
 	}
 	checksum := lastViewedAt["__LastViewedStateChecksum__"]
 	createtime := lastViewedAt["__LastViewedStateCreateTime__"]
 	savedtime := lastViewedAt["__LastViewedStateSavedTime__"]
 	if createtime^savedtime != checksum {
-		logger.Warning("Checksum mismatch: (saved checksum, state file creation, last saved time)", checksum, createtime, savedtime)
+		logger.Debug("Checksum mismatch: (saved checksum, state file creation, last saved time)", checksum, createtime, savedtime)
 		return nil, errors.New("checksum mismatch")
 	}
 
@@ -1053,7 +1053,7 @@ func loadLastViewedState(statePath string, staleDuration string) (map[string]int
 	}
 	lastSaved, ok := lastViewedAt["__LastViewedStateSavedTime__"]
 	if !ok || (lastSaved > 0 && lastSaved < currentTime-stale) {
-		logger.Warning("File stale? Last saved too old: ", time.Unix(lastViewedAt["__LastViewedStateSavedTime__"]/1000, 0))
+		logger.Debug("File stale? Last saved too old: ", time.Unix(lastViewedAt["__LastViewedStateSavedTime__"]/1000, 0))
 		return nil, errors.New("stale lastViewedAt state file")
 	}
 
