@@ -48,24 +48,11 @@ func NewUserBridge(c net.Conn, srv Server, cfg *viper.Viper) *User {
 
 	u.Srv = srv
 	u.v = cfg
-	u.lastViewedAt = make(map[string]int64)
+	u.lastViewedAt = u.loadLastViewedAt()
 	u.msgLast = make(map[string][2]string)
 	u.msgMap = make(map[string]map[string]int)
 	u.msgCounter = make(map[string]int)
 	u.updateCounter = make(map[string]time.Time)
-
-	statePath := u.v.GetString("mattermost.lastviewedsavefile")
-	if statePath != "" {
-		staleDuration := u.v.GetString("mattermost.lastviewedstaleduration")
-		lastViewedAt, err := loadLastViewedState(statePath, staleDuration)
-		if err != nil {
-			logger.Warning("Unable to load saved lastViewedAt, using empty values: ", err)
-		} else {
-			logger.Info("Loaded lastViewedAt from ", time.Unix(lastViewedAt["__LastViewedStateSavedTime__"]/1000, 0))
-			u.lastViewedAt = lastViewedAt
-		}
-		u.lastViewedAtSaved = model.GetMillis()
-	}
 
 	// used for login
 	u.createService("mattermost", "loginservice")
@@ -168,13 +155,7 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 	if !u.v.GetBool(u.br.Protocol() + ".disableautoview") {
 		u.updateLastViewed(event.ChannelID)
 	}
-	u.lastViewedAtMutex.Lock()
-	defer u.lastViewedAtMutex.Unlock()
-	u.lastViewedAt[event.ChannelID] = model.GetMillis()
-	statePath := u.v.GetString(u.br.Protocol() + ".lastviewedsavefile")
-	if statePath != "" {
-		u.saveLastViewed(statePath)
-	}
+	u.saveLastViewedAt(event.ChannelID)
 }
 
 func (u *User) handleChannelAddEvent(event *bridge.ChannelAddEvent) {
@@ -198,13 +179,7 @@ func (u *User) handleChannelAddEvent(event *bridge.ChannelAddEvent) {
 	if !u.v.GetBool(u.br.Protocol() + ".disableautoview") {
 		u.updateLastViewed(event.ChannelID)
 	}
-	u.lastViewedAtMutex.Lock()
-	defer u.lastViewedAtMutex.Unlock()
-	u.lastViewedAt[event.ChannelID] = model.GetMillis()
-	statePath := u.v.GetString(u.br.Protocol() + ".lastviewedsavefile")
-	if statePath != "" {
-		u.saveLastViewed(statePath)
-	}
+	u.saveLastViewedAt(event.ChannelID)
 }
 
 func (u *User) handleChannelRemoveEvent(event *bridge.ChannelRemoveEvent) {
@@ -224,13 +199,7 @@ func (u *User) handleChannelRemoveEvent(event *bridge.ChannelRemoveEvent) {
 			ch.SpoofMessage("system", "removed "+removed.Nick+" from the channel by "+event.Remover.Nick)
 		}
 	}
-	u.lastViewedAtMutex.Lock()
-	defer u.lastViewedAtMutex.Unlock()
-	u.lastViewedAt[event.ChannelID] = model.GetMillis()
-	statePath := u.v.GetString(u.br.Protocol() + ".lastviewedsavefile")
-	if statePath != "" {
-		u.saveLastViewed(statePath)
-	}
+	u.saveLastViewedAt(event.ChannelID)
 }
 
 func (u *User) getMessageChannel(channelID, channelType string, sender *bridge.UserInfo) Channel {
@@ -317,13 +286,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 	if !u.v.GetBool(u.br.Protocol() + ".disableautoview") {
 		u.updateLastViewed(event.ChannelID)
 	}
-	u.lastViewedAtMutex.Lock()
-	defer u.lastViewedAtMutex.Unlock()
-	u.lastViewedAt[event.ChannelID] = model.GetMillis()
-	statePath := u.v.GetString(u.br.Protocol() + ".lastviewedsavefile")
-	if statePath != "" {
-		u.saveLastViewed(statePath)
-	}
+	u.saveLastViewedAt(event.ChannelID)
 }
 
 func (u *User) handleFileEvent(event *bridge.FileEvent) {
@@ -667,16 +630,8 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			if !u.v.GetBool(u.br.Protocol() + ".disableautoview") {
 				u.updateLastViewed(brchannel.ID)
 			}
-			u.lastViewedAtMutex.Lock()
-			u.lastViewedAt[brchannel.ID] = model.GetMillis()
-			u.lastViewedAtMutex.Unlock()
+			u.saveLastViewedAt(brchannel.ID)
 		}
-	}
-	u.lastViewedAtMutex.Lock()
-	defer u.lastViewedAtMutex.Unlock()
-	statePath := u.v.GetString(u.br.Protocol() + ".lastviewedsavefile")
-	if statePath != "" {
-		u.saveLastViewed(statePath)
 	}
 }
 
@@ -931,16 +886,51 @@ func (u *User) updateLastViewed(channelID string) {
 	}()
 }
 
-func (u *User) saveLastViewed(statePath string) {
+func (u *User) loadLastViewedAt() map[string]int64 {
+	statePath := u.v.GetString("mattermost.lastviewedsavefile")
+	if statePath == "" {
+		return make(map[string]int64)
+	}
+
+	staleDuration := u.v.GetString("mattermost.lastviewedstaleduration")
+	lastViewedAt, err := loadLastViewedAtStateFile(statePath, staleDuration)
+	if err != nil {
+		logger.Warning("Unable to load saved lastViewedAt, using empty values: ", err)
+	} else {
+		logger.Info("Loaded lastViewedAt from ", time.Unix(lastViewedAt["__LastViewedStateSavedTime__"]/1000, 0))
+		u.lastViewedAt = lastViewedAt
+	}
+	u.lastViewedAtSaved = model.GetMillis()
+
+	return lastViewedAt
+}
+
+// Default 5 mins
+const defaultSaveInterval = int64(300 * 1000)
+
+func (u *User) saveLastViewedAt(channelID string) {
+	u.lastViewedAtMutex.Lock()
+	defer u.lastViewedAtMutex.Unlock()
+	if channelID != "" {
+		u.lastViewedAt[channelID] = model.GetMillis()
+	}
+
+	statePath := u.v.GetString(u.br.Protocol() + ".lastviewedsavefile")
+	if statePath == "" {
+		return
+	}
+
 	// We only want to save or dump out saved lastViewedAt on new
-	// messages after X time (default 5mins).
-	saveInterval := int64(300000)
+	// messages after X time.
+	var saveInterval int64
 	val, err := time.ParseDuration(u.v.GetString(u.br.Protocol() + ".lastviewedsaveinterval"))
-	if err == nil {
+	if err != nil {
+		saveInterval = defaultSaveInterval
+	} else {
 		saveInterval = val.Milliseconds()
 	}
 	if u.lastViewedAtSaved < (model.GetMillis() - saveInterval) {
-		saveLastViewedState(statePath, u.lastViewedAt)
+		saveLastViewedAtStateFile(statePath, u.lastViewedAt)
 		u.lastViewedAtSaved = model.GetMillis()
 	}
 }
@@ -950,7 +940,7 @@ const lastViewedStateFormat = int64(1)
 // Default 30 days
 const defaultStaleDuration = int64(86400 * 30 * 1000)
 
-func saveLastViewedState(statePath string, lastViewedAt map[string]int64) error {
+func saveLastViewedAtStateFile(statePath string, lastViewedAt map[string]int64) error {
 	f, err := os.Create(statePath)
 	if err != nil {
 		logger.Debug("Unable to save lastViewedAt: ", err)
@@ -977,7 +967,7 @@ func saveLastViewedState(statePath string, lastViewedAt map[string]int64) error 
 	return nil
 }
 
-func loadLastViewedState(statePath string, staleDuration string) (map[string]int64, error) {
+func loadLastViewedAtStateFile(statePath string, staleDuration string) (map[string]int64, error) {
 	f, err := os.Open(statePath)
 	if err != nil {
 		logger.Debug("Unable to load lastViewedAt: ", err)
