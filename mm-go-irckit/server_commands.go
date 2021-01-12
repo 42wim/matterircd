@@ -389,8 +389,8 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 
 		u.msgLastMutex.Lock()
 		defer u.msgLastMutex.Unlock()
-
 		u.msgLast[ch.ID()] = [2]string{msgID, ""}
+		u.saveLastViewedAt(ch.ID())
 
 		if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
 			u.prefixContext(ch.ID(), msgID, "", "")
@@ -426,6 +426,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 			u.msgLastMutex.Lock()
 			defer u.msgLastMutex.Unlock()
 			u.msgLast[toUser.User] = [2]string{msgID, ""}
+			u.saveLastViewedAt(toUser.User)
 
 			if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
 				u.prefixContext(toUser.User, msgID, "", "")
@@ -512,6 +513,8 @@ func parseModifyMsg(u *User, msg *irc.Message, channelID string) bool {
 			return false
 		}
 		u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+text+" could not be modified: "+err.Error())
+	} else {
+		u.saveLastViewedAt(channelID)
 	}
 
 	return true
@@ -592,8 +595,8 @@ func threadMsgChannel(u *User, msg *irc.Message, channelID string) bool {
 
 	u.msgLastMutex.Lock()
 	defer u.msgLastMutex.Unlock()
-
 	u.msgLast[channelID] = [2]string{msgID, threadID}
+	u.saveLastViewedAt(channelID)
 
 	if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
 		u.prefixContext(channelID, msgID, "", "")
@@ -616,8 +619,8 @@ func threadMsgUser(u *User, msg *irc.Message, toUser string) bool {
 
 	u.msgLastMutex.Lock()
 	defer u.msgLastMutex.Unlock()
-
 	u.msgLast[toUser] = [2]string{msgID, threadID}
+	u.saveLastViewedAt(toUser)
 
 	if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
 		u.prefixContext(toUser, msgID, "", "")
