@@ -384,6 +384,7 @@ func (u *User) handleReactionEvent(event interface{}) {
 		}
 
 		u.handleDirectMessageEvent(e)
+		u.saveLastViewedAt(channelID)
 
 		return
 	}
@@ -399,6 +400,7 @@ func (u *User) handleReactionEvent(event interface{}) {
 	}
 
 	u.handleChannelMessageEvent(e)
+	u.saveLastViewedAt(channelID)
 }
 
 func (u *User) CreateUserFromInfo(info *bridge.UserInfo) *User {
