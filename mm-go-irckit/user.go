@@ -180,6 +180,16 @@ func (u *User) Decode() {
 					// start timer now
 					t.Reset(time.Duration(bufferTimeout) * time.Millisecond)
 				} else {
+					if strings.HasPrefix(msg.Trailing, "\x01ACTION") {
+						// flush buffer
+						logger.Debug("flushing buffer because of /me")
+						u.BufferedMsg.Trailing = strings.TrimSpace(u.BufferedMsg.Trailing)
+						u.DecodeCh <- u.BufferedMsg
+						u.BufferedMsg = nil
+						// send CTCP message
+						u.DecodeCh <- msg
+						continue
+					}
 					// make sure we're sending to the same recipient in the buffer
 					if u.BufferedMsg.Params[0] == msg.Params[0] {
 						u.BufferedMsg.Trailing += "\n" + msg.Trailing
