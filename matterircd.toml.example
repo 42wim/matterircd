@@ -134,6 +134,14 @@ SuffixContext = false
 #in your mattermost "word that trigger mentions" notifications.
 ShowMentions = false
 
+# Path to file to store last viewed information. This is useful for replying only
+# the messages missed.
+LastViewedSaveFile = "matterircd-lastsaved.db"
+# Interval for how often to save last viewed information.
+LastViewedSaveInterval = "5m"
+# Consider saved last view information stale if last saved older than this time
+LastViewedStaleDuration = "30d"
+
 #############################
 ##### SLACK EXAMPLE #########
 #############################
