@@ -898,10 +898,10 @@ func (u *User) loadLastViewedAt() map[string]int64 {
 	lastViewedAt, err := loadLastViewedAtStateFile(statePath, staleDuration)
 	if err != nil {
 		logger.Warning("Unable to load saved lastViewedAt, using empty values: ", err)
-	} else {
-		logger.Info("Loaded lastViewedAt from ", time.Unix(lastViewedAt["__LastViewedStateSavedTime__"]/1000, 0))
-		u.lastViewedAt = lastViewedAt
+		return make(map[string]int64)
 	}
+
+	logger.Info("Loaded lastViewedAt from ", time.Unix(lastViewedAt["__LastViewedStateSavedTime__"]/1000, 0))
 	u.lastViewedAtSaved = model.GetMillis()
 
 	return lastViewedAt
