@@ -912,8 +912,7 @@ func (u *User) loadLastViewedAt() map[string]int64 {
 	return lastViewedAt
 }
 
-// Default 5 mins
-const defaultSaveInterval = int64(300 * 1000)
+const defaultSaveInterval = int64((5 * time.Minute) / time.Millisecond)
 
 func (u *User) saveLastViewedAt(channelID string) {
 	u.lastViewedAtMutex.Lock()
@@ -944,9 +943,6 @@ func (u *User) saveLastViewedAt(channelID string) {
 
 const lastViewedStateFormat = int64(1)
 
-// Default 30 days
-const defaultStaleDuration = int64(86400 * 30 * 1000)
-
 func saveLastViewedAtStateFile(statePath string, lastViewedAt map[string]int64) error {
 	f, err := os.Create(statePath)
 	if err != nil {
@@ -973,6 +969,8 @@ func saveLastViewedAtStateFile(statePath string, lastViewedAt map[string]int64) 
 
 	return nil
 }
+
+const defaultStaleDuration = int64((30 * 24 * time.Hour) / time.Millisecond)
 
 func loadLastViewedAtStateFile(statePath string, staleDuration string) (map[string]int64, error) {
 	f, err := os.Open(statePath)
