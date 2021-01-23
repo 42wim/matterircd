@@ -591,6 +591,15 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 				continue
 			}
 
+			// GetPostsSince will return older messages with reaction
+			// changes since LastViewedAt. This will be confusing as
+			// the user will think it's a duplicate, or a post out of
+			// order. Plus, we don't show reaction changes when
+			// relaying messages/logs so let's skip these.
+			if p.CreateAt < since {
+				continue
+			}
+
 			ts := time.Unix(0, p.CreateAt*int64(time.Millisecond))
 
 			props := p.GetProps()
