@@ -560,7 +560,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 		// We used to stored last viewed at if present.
 		u.lastViewedAtMutex.RLock()
 		if lastViewedAt, ok := u.lastViewedAt[brchannel.ID]; ok {
-			since = lastViewedAt
+			since = lastViewedAt + 1
 		}
 		u.lastViewedAtMutex.RUnlock()
 		// post everything to the channel you haven't seen yet
@@ -604,9 +604,9 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 				if showReplayHdr {
 					date := ts.Format("2006-01-02 15:04:05")
 					if brchannel.DM {
-						spoof(nick, fmt.Sprintf("Replaying since %s", date))
+						spoof(nick, fmt.Sprintf("\x02Replaying since %s\x0f", date))
 					} else {
-						spoof("matterircd", fmt.Sprintf("Replaying since %s", date))
+						spoof("matterircd", fmt.Sprintf("\x02Replaying since %s\x0f", date))
 					}
 					showReplayHdr = false
 				}
