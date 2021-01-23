@@ -1,6 +1,7 @@
 package irckit
 
 import (
+	"encoding/gob"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -9,8 +10,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"encoding/gob"
 
 	"github.com/42wim/matterircd/bridge"
 	"github.com/42wim/matterircd/bridge/mattermost"
@@ -423,6 +422,7 @@ func (u *User) CreateUsersFromInfo(info []*bridge.UserInfo) []*User {
 		userinfo := userinfo
 		ghost := NewUser(u.Conn)
 		ghost.UserInfo = userinfo
+		ghost.Nick = sanitizeNick(ghost.Nick)
 		users = append(users, ghost)
 	}
 
@@ -460,6 +460,7 @@ func (u *User) createUserFromInfo(info *bridge.UserInfo) *User {
 
 	ghost := NewUser(u.Conn)
 	ghost.UserInfo = info
+	ghost.Nick = sanitizeNick(ghost.Nick)
 
 	u.Srv.Add(ghost)
 
