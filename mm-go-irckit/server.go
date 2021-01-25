@@ -19,6 +19,10 @@ const handshakeMsgTolerance = 20
 
 // ID will normalize a name to be used as a unique identifier for comparison.
 func ID(s string) string {
+	if strings.HasPrefix(s, "!") {
+		return s
+	}
+
 	return strings.ToLower(s)
 }
 

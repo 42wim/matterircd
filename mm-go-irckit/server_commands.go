@@ -402,7 +402,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 	// or a user
 	if toUser, exists := s.HasUser(query); exists {
 		switch {
-		case query == "mattermost" || query == "slack":
+		case query == "mattermost" || query == "slack" || query == "matrix":
 			go u.handleServiceBot(query, toUser, msg.Trailing)
 			msg.Trailing = "<redacted>"
 		case toUser.Ghost, toUser.Me:
@@ -421,6 +421,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 
 			msgID, err2 := u.br.MsgUser(toUser.User, msg.Trailing)
 			if err2 != nil {
+				u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+msg.Trailing+" could not be send: "+err2.Error())
 				return err
 			}
 			u.msgLastMutex.Lock()
