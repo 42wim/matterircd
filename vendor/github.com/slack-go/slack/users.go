@@ -294,7 +294,7 @@ func GetUsersOptionPresence(n bool) GetUsersOption {
 func newUserPagination(c *Client, options ...GetUsersOption) (up UserPagination) {
 	up = UserPagination{
 		c:     c,
-		limit: 1000, // per slack api documentation.
+		limit: 200, // per slack api documentation.
 	}
 
 	for _, opt := range options {
@@ -509,6 +509,45 @@ func (api *Client) DeleteUserPhotoContext(ctx context.Context) (err error) {
 	return response.Err()
 }
 
+// SetUserRealName changes the currently authenticated user's realName
+//
+// For more information see SetUserRealNameContextWithUser
+func (api *Client) SetUserRealName(realName string) error {
+	return api.SetUserRealNameContextWithUser(context.Background(), "", realName)
+}
+
+// SetUserRealNameContextWithUser will set a real name for the provided user with a custom context
+func (api *Client) SetUserRealNameContextWithUser(ctx context.Context, user, realName string) error {
+	profile, err := json.Marshal(
+		&struct {
+			RealName string `json:"real_name"`
+		}{
+			RealName: realName,
+		},
+	)
+
+	if err != nil {
+		return err
+	}
+
+	values := url.Values{
+		"token":   {api.token},
+		"profile": {string(profile)},
+	}
+
+	// optional field. It should not be set if empty
+	if user != "" {
+		values["user"] = []string{user}
+	}
+
+	response := &userResponseFull{}
+	if err = api.postMethod(ctx, "users.profile.set", values, response); err != nil {
+		return err
+	}
+
+	return response.Err()
+}
+
 // SetUserCustomStatus will set a custom status and emoji for the currently
 // authenticated user. If statusEmoji is "" and statusText is not, the Slack API
 // will automatically set it to ":speech_balloon:". Otherwise, if both are ""
@@ -522,7 +561,7 @@ func (api *Client) SetUserCustomStatus(statusText, statusEmoji string, statusExp
 //
 // For more information see SetUserCustomStatus
 func (api *Client) SetUserCustomStatusContext(ctx context.Context, statusText, statusEmoji string, statusExpiration int64) error {
-	return api.SetUserCustomStatusContextWithUser(context.Background(), "", statusText, statusEmoji, statusExpiration)
+	return api.SetUserCustomStatusContextWithUser(ctx, "", statusText, statusEmoji, statusExpiration)
 }
 
 // SetUserCustomStatusWithUser will set a custom status and emoji for the provided user.
@@ -563,9 +602,13 @@ func (api *Client) SetUserCustomStatusContextWithUser(ctx context.Context, user,
 	}
 
 	values := url.Values{
-		"user":    {user},
 		"token":   {api.token},
 		"profile": {string(profile)},
+	}
+
+	// optional field. It should not be set if empty
+	if user != "" {
+		values["user"] = []string{user}
 	}
 
 	response := &userResponseFull{}
