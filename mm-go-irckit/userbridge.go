@@ -613,11 +613,14 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 				}
 				if showReplayHdr {
 					date := ts.Format("2006-01-02 15:04:05")
+					channame := brchannel.Name
 					if brchannel.DM {
 						spoof(nick, fmt.Sprintf("\x02Replaying since %s\x0f", date))
 					} else {
 						spoof("matterircd", fmt.Sprintf("\x02Replaying since %s\x0f", date))
+						channame = fmt.Sprintf("#%s", brchannel.Name)
 					}
+					logger.Infof("Replaying logs for %s (%s) since %s", brchannel.ID, channame, date)
 					showReplayHdr = false
 				}
 
