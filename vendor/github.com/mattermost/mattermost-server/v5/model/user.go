@@ -59,6 +59,11 @@ const (
 	USER_LOCALE_MAX_LENGTH    = 5
 )
 
+//msgp:tuple User
+
+// User contains the details about the user.
+// This struct's serializer methods are auto-generated. If a new field is added/removed,
+// please run make gen-serialized.
 type User struct {
 	Id                     string    `json:"id"`
 	CreateAt               int64     `json:"create_at,omitempty"`
@@ -93,6 +98,12 @@ type User struct {
 	TermsOfServiceCreateAt int64     `db:"-" json:"terms_of_service_create_at,omitempty"`
 }
 
+//msgp UserMap
+
+// UserMap is a map from a userId to a user object.
+// It is used to generate methods which can be used for fast serialization/de-serialization.
+type UserMap map[string]*User
+
 type UserUpdate struct {
 	Old *User
 	New *User
@@ -124,6 +135,7 @@ type UserForIndexing struct {
 	Nickname    string   `json:"nickname"`
 	FirstName   string   `json:"first_name"`
 	LastName    string   `json:"last_name"`
+	Roles       string   `json:"roles"`
 	CreateAt    int64    `json:"create_at"`
 	DeleteAt    int64    `json:"delete_at"`
 	TeamsIds    []string `json:"team_id"`
@@ -534,11 +546,11 @@ func (u *User) SanitizeInput(isAdmin bool) {
 	if !isAdmin {
 		u.AuthData = NewString("")
 		u.AuthService = ""
+		u.EmailVerified = false
 	}
 	u.LastPasswordUpdate = 0
 	u.LastPictureUpdate = 0
 	u.FailedAttempts = 0
-	u.EmailVerified = false
 	u.MfaActive = false
 	u.MfaSecret = ""
 }

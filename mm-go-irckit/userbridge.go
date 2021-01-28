@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/42wim/matterircd/bridge"
+	"github.com/42wim/matterircd/bridge/matrix"
 	"github.com/42wim/matterircd/bridge/mattermost"
 	"github.com/42wim/matterircd/bridge/slack"
 	"github.com/davecgh/go-spew/spew"
@@ -61,6 +62,7 @@ func NewUserBridge(c net.Conn, srv Server, cfg *viper.Viper) *User {
 	// used for login
 	u.createService("mattermost", "loginservice")
 	u.createService("slack", "loginservice")
+	u.createService("matrix", "loginservice")
 	u.createService("matterircd", "systemservice")
 	return u
 }
@@ -777,6 +779,8 @@ func (u *User) loginTo(protocol string) error {
 		u.br, err = slack.New(u.v, u.Credentials, eventChan, u.addUsersToChannels)
 	case "mattermost":
 		u.br, _, err = mattermost.New(u.v, u.Credentials, eventChan, u.addUsersToChannels)
+	case "matrix":
+		u.br, _, err = matrix.New(u.v, u.Credentials, eventChan, u.addUsersToChannels)
 	}
 
 	if err != nil {

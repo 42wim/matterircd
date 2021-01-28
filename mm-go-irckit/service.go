@@ -39,6 +39,56 @@ func login(u *User, toUser *User, args []string, service string) {
 		return
 	}
 
+	if service == "matrix" {
+		var err error
+
+		if len(args) != 1 && len(args) != 3 {
+			u.MsgUser(toUser, "need LOGIN <server> <login> <pass> or LOGIN <token>")
+			return
+		}
+
+		if len(args) == 1 {
+			u.Credentials.Token = args[len(args)-1]
+		}
+
+		if u.Credentials.Token == "help" {
+			u.MsgUser(toUser, "need LOGIN <server> <login> <pass> or LOGIN <token>")
+			return
+		}
+
+		if len(args) == 3 {
+			u.Credentials = bridge.Credentials{
+				Server: args[0],
+				Login:  args[1],
+				Pass:   args[2],
+			}
+		}
+
+		if u.br != nil && u.br.Connected() {
+			err = u.br.Logout()
+			if err != nil {
+				u.MsgUser(toUser, err.Error())
+				return
+			}
+		}
+
+		u.inprogress = true
+		defer func() { u.inprogress = false }()
+
+		err = u.loginTo("matrix")
+		if err != nil {
+			u.MsgUser(toUser, err.Error())
+			return
+		}
+
+		u.MsgUser(toUser, "login OK")
+		if u.Credentials.Token != "" {
+			u.MsgUser(toUser, "token used: "+u.Credentials.Token)
+		}
+
+		return
+	}
+
 	if service == "slack" {
 		var err error
 
