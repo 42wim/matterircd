@@ -206,7 +206,7 @@ func (u *User) handleChannelRemoveEvent(event *bridge.ChannelRemoveEvent) {
 	u.saveLastViewedAt(event.ChannelID)
 }
 
-func (u *User) getMessageChannel(channelID, channelType string, sender *bridge.UserInfo) Channel {
+func (u *User) getMessageChannel(channelID string, sender *bridge.UserInfo) Channel {
 	ch := u.Srv.Channel(channelID)
 	ghost := u.createUserFromInfo(sender)
 
@@ -241,7 +241,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 	*/
 	nick := sanitizeNick(event.Sender.Nick)
 	logger.Debug("in handleChannelMessageEvent")
-	ch := u.getMessageChannel(event.ChannelID, event.ChannelType, event.Sender)
+	ch := u.getMessageChannel(event.ChannelID, event.Sender)
 	if event.Sender.Me {
 		nick = u.Nick
 	}
@@ -294,7 +294,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 }
 
 func (u *User) handleFileEvent(event *bridge.FileEvent) {
-	ch := u.getMessageChannel(event.ChannelID, event.ChannelType, event.Sender)
+	ch := u.getMessageChannel(event.ChannelID, event.Sender)
 
 	switch event.ChannelType {
 	case "D":
@@ -798,7 +798,7 @@ func (u *User) loginTo(protocol string) error {
 	return nil
 }
 
-// nolint:unparam,unused
+// nolint:unparam
 func (u *User) logoutFrom(protocol string) error {
 	logger.Debug("logging out from", protocol)
 

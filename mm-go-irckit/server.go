@@ -134,7 +134,6 @@ type server struct {
 
 	u *User
 	sync.RWMutex
-	count    int
 	users    map[string]*User
 	channels map[string]Channel
 }
