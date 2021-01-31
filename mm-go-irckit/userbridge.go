@@ -33,6 +33,7 @@ type UserBridge struct {
 	msgMapMutex        sync.RWMutex              //nolint:structcheck
 	updateCounter      map[string]time.Time      //nolint:structcheck
 	updateCounterMutex sync.Mutex                //nolint:structcheck
+	eventChan          chan *bridge.Event        //nolint:structcheck
 }
 
 func NewUserBridge(c net.Conn, srv Server, cfg *viper.Viper) *User {
@@ -49,6 +50,7 @@ func NewUserBridge(c net.Conn, srv Server, cfg *viper.Viper) *User {
 	u.msgMap = make(map[string]map[string]int)
 	u.msgCounter = make(map[string]int)
 	u.updateCounter = make(map[string]time.Time)
+	u.eventChan = make(chan *bridge.Event, 10000)
 
 	// used for login
 	u.createService("mattermost", "loginservice")
@@ -58,8 +60,8 @@ func NewUserBridge(c net.Conn, srv Server, cfg *viper.Viper) *User {
 	return u
 }
 
-func (u *User) handleEventChan(events chan *bridge.Event) {
-	for event := range events {
+func (u *User) handleEventChan() {
+	for event := range u.eventChan {
 		logger.Tracef("eventchan %s", spew.Sdump(event))
 		switch e := event.Data.(type) {
 		case *bridge.ChannelMessageEvent:
@@ -484,6 +486,7 @@ func (u *User) addUsersToChannels() {
 	// create and join the users
 	users := u.CreateUsersFromInfo(u.br.GetUsers())
 	srv.BatchAdd(users)
+	fmt.Println("GOT USERS", len(users))
 	u.addUsersToChannel(users, "&users", "&users")
 
 	// join ourself
@@ -512,6 +515,8 @@ func (u *User) addUsersToChannels() {
 	}
 
 	close(channels)
+
+	go u.handleEventChan()
 }
 
 func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(string, string) {
@@ -747,15 +752,15 @@ func (u *User) isValidServer(server, protocol string) bool {
 func (u *User) loginTo(protocol string) error {
 	var err error
 
-	eventChan := make(chan *bridge.Event)
+	//eventChan := make(chan *bridge.Event, 10000)
 
 	switch protocol {
 	case "slack":
-		u.br, err = slack.New(u.v, u.Credentials, eventChan, u.addUsersToChannels)
+		u.br, err = slack.New(u.v, u.Credentials, u.eventChan, u.addUsersToChannels)
 	case "mattermost":
-		u.br, _, err = mattermost.New(u.v, u.Credentials, eventChan, u.addUsersToChannels)
+		u.br, _, err = mattermost.New(u.v, u.Credentials, u.eventChan, u.addUsersToChannels)
 	case "matrix":
-		u.br, _, err = matrix.New(u.v, u.Credentials, eventChan, u.addUsersToChannels)
+		u.br, _, err = matrix.New(u.v, u.Credentials, u.eventChan, u.addUsersToChannels)
 	}
 
 	if err != nil {
@@ -772,7 +777,7 @@ func (u *User) loginTo(protocol string) error {
 	u.User = info.User
 	u.MentionKeys = info.MentionKeys
 
-	go u.handleEventChan(eventChan)
+	//go u.handleEventChan(eventChan)
 
 	return nil
 }

@@ -68,6 +68,8 @@ func New(v *viper.Viper, cred bridge.Credentials, eventChan chan *bridge.Event, 
 }
 
 func (m *Matrix) syncCallback(resp *mautrix.RespSync, since string) bool {
+	fmt.Println("synccallback", len(resp.AccountData.Events), resp.NextBatch)
+
 	m.firstSync = true
 
 	return true
@@ -75,93 +77,6 @@ func (m *Matrix) syncCallback(resp *mautrix.RespSync, since string) bool {
 
 func (m *Matrix) handleMatrix(onConnect func()) {
 	syncer := m.mc.Syncer.(*mautrix.DefaultSyncer)
-	syncer.OnSync(m.syncCallback)
-
-	/*
-		syncer.OnEventType(event.EventRedaction, m.handleEvent)
-		syncer.OnEventType(event.EventMessage, m.handleEvent)
-		syncer.OnEventType(event.StateMember, m.handleMember)
-		syncer.OnEventType(event.StateCreate, m.handleCreate)
-		syncer.OnEventType(event.AccountDataDirectChats, m.handleDM)
-		syncer.OnEventType(event.StateCanonicalAlias, m.handleCanonicalAlias)
-		syncer.OnEventType(event.StateRoomName, m.handleRoomName)
-
-	*/
-	/*
-		syncer.OnEvent(func(source mautrix.EventSource, evt *event.Event) {
-			fmt.Println(source.String())
-			spew.Dump(evt)
-		})
-	*/
-	//syncer.OnEventType(event.StateMember, m.handleMemberChange)
-
-	/*
-		resp, err := m.mc.SyncRequest(30000, "", "", true, "")
-		if err != nil {
-			return
-		}
-
-		fmt.Println("resp length:", len(resp.Rooms.Join))
-
-		for room, sync := range resp.Rooms.Join {
-			fmt.Println(room)
-
-			for _, ev := range append(append(
-				append(sync.State.Events, sync.Timeline.Events...),
-				sync.Ephemeral.Events...),
-				sync.AccountData.Events...) {
-				ev.Content.ParseRaw(ev.Type)
-				ev.RoomID = room
-				spew.Dump(ev)
-
-				switch ev.Type {
-				case event.StateCanonicalAlias:
-					m.handleCanonicalAlias(mautrix.EventSourceState, ev)
-				case event.StateRoomName:
-					m.handleRoomName(mautrix.EventSourceState, ev)
-				case event.StateMember:
-					m.handleMember(mautrix.EventSourceState, ev)
-				case event.AccountDataDirectChats:
-					m.handleDM(mautrix.EventSourceAccountData, ev)
-				}
-			}
-			//spew.Dump(ev)
-			//		fmt.Printf("%#v", event)
-			//break
-		}
-	*/
-
-	/*
-
-		resp, err = m.mc.SyncRequest(30000, resp.NextBatch, "", false, "")
-		if err != nil {
-			return
-		}
-
-		fmt.Println("resp length:", len(resp.Rooms.Join))
-
-		for room, sync := range resp.Rooms.Join {
-			fmt.Println(room)
-			for _, ev := range sync.State.Events {
-				ev.Content.ParseRaw(ev.Type)
-				spew.Dump(ev)
-
-				switch ev.Type {
-				case event.StateCanonicalAlias:
-					m.handleCanonicalAlias(mautrix.EventSourceState, ev)
-				case event.StateRoomName:
-					m.handleRoomName(mautrix.EventSourceState, ev)
-				case event.StateMember:
-					m.handleMember(mautrix.EventSourceState, ev)
-				case event.AccountDataDirectChats:
-					m.handleDM(mautrix.EventSourceAccountData, ev)
-				}
-			}
-			//spew.Dump(ev)
-			//		fmt.Printf("%#v", event)
-			//break
-		}
-	*/
 
 	fmt.Println("dumping")
 	//	spew.Dump(resp)
@@ -174,15 +89,15 @@ func (m *Matrix) handleMatrix(onConnect func()) {
 	syncer.OnEventType(event.AccountDataDirectChats, m.handleDM)
 	syncer.OnEventType(event.StateCanonicalAlias, m.handleCanonicalAlias)
 	syncer.OnEvent(func(source mautrix.EventSource, evt *event.Event) {
+		// sync is almost complete
+		if evt.RoomID.String() == "marker" {
+			m.firstSync = true
+		}
 		fmt.Println(source.String())
 		spew.Dump(evt)
 	})
 
-	//spew.Dump(m.channels)
-	//spew.Dump(m.users)
-
-	//syncer.OnEventType(event.StateMember, m.handleMember)
-	syncer.OnEventType(event.EventRedaction, m.handleEvent)
+	syncer.OnSync(m.syncCallback)
 
 	go func() {
 		for {
@@ -192,12 +107,41 @@ func (m *Matrix) handleMatrix(onConnect func()) {
 		}
 	}()
 
-	for m.firstSync == false {
+	for !m.firstSync {
 		fmt.Println("syncing..")
 		time.Sleep(time.Second)
 	}
 
-	fmt.Println("sync complete")
+	/* dirty hack to check if we've handled all the matrix events
+	the syncer.OnSync gets fired as first so we can't use this to check
+	if the sync is complete.
+
+	so we now check if the number of events on the buffered eventchan remains stable
+	and if that's the case we can conclude the sync is complete.
+
+	this is mostly an issue when debugging with spew.dump that takes a lot of time,
+	when not running in debug, we can make this faster.
+	*/
+
+	current := len(m.eventChan)
+	count := 0
+
+	for {
+		time.Sleep(time.Second)
+		fmt.Println("syncing..")
+
+		if current == len(m.eventChan) {
+			count++
+		}
+
+		if count == 10 {
+			break
+		}
+
+		current = len(m.eventChan)
+	}
+
+	fmt.Println("sync complete", len(m.eventChan))
 
 	go onConnect()
 }
@@ -224,6 +168,8 @@ func (m *Matrix) handleDM(source mautrix.EventSource, ev *event.Event) {
 			m.channels[roomID].Lock()
 			m.channels[roomID].IsDirect = true
 
+			m.dmChannels[roomID] = append(m.dmChannels[roomID], userID)
+
 			if _, ok := m.channels[roomID].Members[userID]; !ok {
 				m.channels[roomID].Members[userID] = u
 			}
@@ -246,6 +192,7 @@ func (m *Matrix) handleMember(source mautrix.EventSource, ev *event.Event) {
 				MemberEventContent: member,
 			}
 		} else if member.IsDirect {
+			fmt.Println("found direct member", *ev.StateKey)
 			user.IsDirect = true
 			if _, ok := m.channels[ev.RoomID]; !ok {
 				m.channels[ev.RoomID] = &Channel{
@@ -253,7 +200,17 @@ func (m *Matrix) handleMember(source mautrix.EventSource, ev *event.Event) {
 				}
 			}
 			m.channels[ev.RoomID].IsDirect = true
-			//m.channels[ev.RoomID].Members
+			m.users[id.UserID(*ev.StateKey)] = &User{
+				ID:                 id.UserID(*ev.StateKey),
+				MemberEventContent: member,
+			}
+
+			m.channels[ev.RoomID].Members[id.UserID(*ev.StateKey)] = m.users[id.UserID(*ev.StateKey)]
+			m.dmChannels[ev.RoomID] = append(m.dmChannels[ev.RoomID], id.UserID(*ev.StateKey))
+
+			spew.Dump(m.channels)
+			spew.Dump(m.users)
+
 		}
 	}
 
@@ -507,48 +464,6 @@ func (m *Matrix) GetChannelName(channelID string) string {
 		}
 	}
 
-	/*
-		resp, err := m.mc.Members(id.RoomID(channelID))
-		fmt.Println("getchannelname", err)
-		spew.Dump(resp)
-	*/
-	/*
-		resp,err := m.mc.JoinedRooms()
-		resp.JoinedRooms
-		var name string
-
-		channelName := m.mc.GetChannelName(channelID)
-
-		if channelName == "" {
-			m.mc.UpdateChannels()
-		}
-
-		channelName = m.mc.GetChannelName(channelID)
-
-		// return DM channels immediately
-		if strings.Contains(channelName, "__") {
-			return channelName
-		}
-
-		teamID := m.mc.GetTeamFromChannel(channelID)
-		teamName := m.mc.GetTeamName(teamID)
-
-		if channelName != "" {
-			if (teamName != "" && teamID != m.mc.Team.ID) || m.v.GetBool("mattermost.PrefixMainTeam") {
-				name = "#" + teamName + "/" + channelName
-			}
-			if teamID == m.mc.Team.ID && !m.v.GetBool("mattermost.PrefixMainTeam") {
-				name = "#" + channelName
-			}
-			if teamID == "G" {
-				name = "#" + channelName
-			}
-		} else {
-			name = channelID
-		}
-
-		return name
-	*/
 	return channelID
 }
 
@@ -574,14 +489,20 @@ func (m *Matrix) GetChannelUsers(channelID string) ([]*bridge.UserInfo, error) {
 func (m *Matrix) GetUsers() []*bridge.UserInfo {
 	var users []*bridge.UserInfo
 
-	return users
-	/*
-		for _, mmuser := range m.mc.GetUsers() {
-			users = append(users, m.createUser(mmuser))
-		}
+	fmt.Println("GetUsers()", m.users)
 
-		return users
-	*/
+	spew.Dump(m.users)
+
+	m.RLock()
+	for userID := range m.users {
+		users = append(users, m.createUser(id.UserID(userID)))
+	}
+
+	m.RUnlock()
+
+	spew.Dump(users)
+
+	return users
 }
 
 func (m *Matrix) GetChannels() []*bridge.ChannelInfo {
@@ -595,6 +516,11 @@ func (m *Matrix) GetChannels() []*bridge.ChannelInfo {
 
 		if channel.IsDirect && channel.Alias == "" {
 			channel.Alias = id.RoomAlias(roomID.String())
+		}
+
+		// if we only have 1 user this is a DM, not a real channel
+		if channel.IsDirect && len(channel.Members) == 1 {
+			continue
 		}
 
 		channels = append(channels, &bridge.ChannelInfo{
