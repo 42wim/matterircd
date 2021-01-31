@@ -24,8 +24,9 @@ import (
 type UserBridge struct {
 	Srv         Server
 	Credentials bridge.Credentials
-	br          bridge.Bridger //nolint:structcheck
-	inprogress  bool           //nolint:structcheck
+	br          bridge.Bridger     //nolint:structcheck
+	inprogress  bool               //nolint:structcheck
+	eventChan   chan *bridge.Event //nolint:structcheck
 
 	lastViewedAtMutex sync.RWMutex     //nolint:structcheck
 	lastViewedAt      map[string]int64 //nolint:structcheck
@@ -57,6 +58,7 @@ func NewUserBridge(c net.Conn, srv Server, cfg *viper.Viper) *User {
 	u.msgMap = make(map[string]map[string]int)
 	u.msgCounter = make(map[string]int)
 	u.updateCounter = make(map[string]time.Time)
+	u.eventChan = make(chan *bridge.Event, 1000)
 
 	// used for login
 	u.createService("mattermost", "loginservice")
@@ -65,8 +67,8 @@ func NewUserBridge(c net.Conn, srv Server, cfg *viper.Viper) *User {
 	return u
 }
 
-func (u *User) handleEventChan(events chan *bridge.Event) {
-	for event := range events {
+func (u *User) handleEventChan() {
+	for event := range u.eventChan {
 		logger.Tracef("eventchan %s", spew.Sdump(event))
 		switch e := event.Data.(type) {
 		case *bridge.ChannelMessageEvent:
@@ -518,6 +520,9 @@ func (u *User) addUsersToChannels() {
 	}
 
 	close(channels)
+
+	// we did all the initialization, now listen for events
+	go u.handleEventChan()
 }
 
 func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(string, string) {
@@ -768,13 +773,11 @@ func (u *User) isValidServer(server, protocol string) bool {
 func (u *User) loginTo(protocol string) error {
 	var err error
 
-	eventChan := make(chan *bridge.Event)
-
 	switch protocol {
 	case "slack":
-		u.br, err = slack.New(u.v, u.Credentials, eventChan, u.addUsersToChannels)
+		u.br, err = slack.New(u.v, u.Credentials, u.eventChan, u.addUsersToChannels)
 	case "mattermost":
-		u.br, _, err = mattermost.New(u.v, u.Credentials, eventChan, u.addUsersToChannels)
+		u.br, _, err = mattermost.New(u.v, u.Credentials, u.eventChan, u.addUsersToChannels)
 	}
 
 	if err != nil {
@@ -791,7 +794,7 @@ func (u *User) loginTo(protocol string) error {
 	u.User = info.User
 	u.MentionKeys = info.MentionKeys
 
-	go u.handleEventChan(eventChan)
+	go u.handleEventChan()
 
 	return nil
 }
