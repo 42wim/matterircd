@@ -606,27 +606,7 @@ func threadMsgChannel(u *User, msg *irc.Message, channelID string) bool {
 }
 
 func threadMsgUser(u *User, msg *irc.Message, toUser string) bool {
-	threadID, text := parseThreadID(u, msg, toUser)
-	if threadID == "" {
-		return false
-	}
-
-	msgID, err := u.br.MsgUserThread(toUser, threadID, text)
-	if err != nil {
-		u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+text+" could not be send: "+err.Error())
-		return false
-	}
-
-	u.msgLastMutex.Lock()
-	defer u.msgLastMutex.Unlock()
-	u.msgLast[toUser] = [2]string{msgID, threadID}
-	u.saveLastViewedAt(toUser)
-
-	if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
-		u.prefixContext(toUser, msgID, "", "")
-	}
-
-	return true
+	return threadMsgChannel(u, msg, toUser)
 }
 
 // CmdQuit is a handler for the /QUIT command.
