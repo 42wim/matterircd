@@ -137,11 +137,13 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 		prefix := u.prefixContext(prefixUser, event.MessageID, event.ParentID, event.Event)
 
 		switch {
-		case u.v.GetBool(u.br.Protocol() + ".prefixcontext"):
+		case u.v.GetBool(u.br.Protocol()+".prefixcontext") && strings.HasPrefix(event.Text, "\x01"):
 			event.Text = strings.Replace(event.Text, "\x01ACTION ", "\x01ACTION "+prefix+" ", 1)
+		case u.v.GetBool(u.br.Protocol() + ".prefixcontext"):
 			event.Text = prefix + " " + event.Text
-		case u.v.GetBool(u.br.Protocol() + ".suffixcontext"):
+		case u.v.GetBool(u.br.Protocol()+".suffixcontext") && strings.HasSuffix(event.Text, "\x01"):
 			event.Text = strings.Replace(event.Text, " \x01", " "+prefix+" \x01", 1)
+		case u.v.GetBool(u.br.Protocol() + ".suffixcontext"):
 			event.Text = event.Text + " " + prefix
 		}
 	}
@@ -234,10 +236,10 @@ func (u *User) getMessageChannel(channelID string, sender *bridge.UserInfo) Chan
 
 func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 	/*
-			      CHANNEL_OPEN                   = "O"
-		        CHANNEL_PRIVATE                = "P"
-		        CHANNEL_DIRECT                 = "D"
-				CHANNEL_GROUP                  = "G"
+		CHANNEL_OPEN                   = "O"
+		CHANNEL_PRIVATE                = "P"
+		CHANNEL_DIRECT                 = "D"
+		CHANNEL_GROUP                  = "G"
 	*/
 	nick := event.Sender.Nick
 	logger.Debug("in handleChannelMessageEvent")
@@ -262,20 +264,16 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		}
 	}
 
-	if u.v.GetBool(u.br.Protocol() + ".prefixcontext") {
+	if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
 		prefix := u.prefixContext(event.ChannelID, event.MessageID, event.ParentID, event.Event)
-
-		if strings.HasPrefix(event.Text, "\x01") {
+		switch {
+		case u.v.GetBool(u.br.Protocol()+".prefixcontext") && strings.HasPrefix(event.Text, "\x01"):
 			event.Text = strings.Replace(event.Text, "\x01ACTION ", "\x01ACTION "+prefix+" ", 1)
-		} else {
+		case u.v.GetBool(u.br.Protocol() + ".prefixcontext"):
 			event.Text = prefix + " " + event.Text
-		}
-	} else if u.v.GetBool(u.br.Protocol() + ".suffixcontext") {
-		prefix := u.prefixContext(event.ChannelID, event.MessageID, event.ParentID, event.Event)
-
-		if strings.HasSuffix(event.Text, "\x01") {
+		case u.v.GetBool(u.br.Protocol()+".suffixcontext") && strings.HasSuffix(event.Text, "\x01"):
 			event.Text = strings.Replace(event.Text, " \x01", " "+prefix+" \x01", 1)
-		} else {
+		case u.v.GetBool(u.br.Protocol() + ".suffixcontext"):
 			event.Text = event.Text + " " + prefix
 		}
 	}
