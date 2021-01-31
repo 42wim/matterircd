@@ -68,6 +68,7 @@ func New(v *viper.Viper, cred bridge.Credentials, eventChan chan *bridge.Event, 
 }
 
 func (m *Matrix) syncCallback(resp *mautrix.RespSync, since string) bool {
+	//spew.Dump(resp)
 	fmt.Println("synccallback", len(resp.AccountData.Events), resp.NextBatch)
 
 	m.firstSync = true
@@ -86,7 +87,7 @@ func (m *Matrix) handleMatrix(onConnect func()) {
 	syncer.OnEventType(event.StateMember, m.handleMember)
 	syncer.OnEventType(event.StateCreate, m.handleCreate)
 	syncer.OnEventType(event.StateRoomName, m.handleRoomName)
-	syncer.OnEventType(event.AccountDataDirectChats, m.handleDM)
+	//syncer.OnEventType(event.AccountDataDirectChats, m.handleDM)
 	syncer.OnEventType(event.StateCanonicalAlias, m.handleCanonicalAlias)
 	syncer.OnEvent(func(source mautrix.EventSource, evt *event.Event) {
 		// sync is almost complete
@@ -343,25 +344,43 @@ func (m *Matrix) MsgUser(userID, text string) (string, error) {
 func (m *Matrix) MsgUserThread(userID, parentID, text string) (string, error) {
 	fmt.Println("sending message", userID, parentID, text)
 	invites := []id.UserID{id.UserID(userID)}
-	req := &mautrix.ReqCreateRoom{
-		Preset:   "trusted_private_chat",
-		Invite:   invites,
-		IsDirect: true,
+
+	var roomID id.RoomID
+
+	m.RLock()
+
+	for ID, users := range m.dmChannels {
+		if len(users) == 1 && users[0] == id.UserID(userID) {
+			roomID = ID
+			break
+		}
 	}
 
-	resp, err := m.mc.CreateRoom(req)
-	if err != nil {
-		fmt.Println("msguserthread sending message: error", err)
-		return "", err
+	m.RUnlock()
+
+	if roomID.String() == "" {
+		req := &mautrix.ReqCreateRoom{
+			Preset:   "trusted_private_chat",
+			Invite:   invites,
+			IsDirect: true,
+		}
+
+		resp, err := m.mc.CreateRoom(req)
+		if err != nil {
+			fmt.Println("msguserthread sending message: error", err)
+			return "", err
+		}
+
+		fmt.Println("msguserthread sending message: error,resp", err, resp)
+
+		m.Lock()
+		m.dmChannels[id.RoomID(resp.RoomID)] = invites
+		m.Unlock()
+
+		roomID = resp.RoomID
 	}
 
-	fmt.Println("msguserthread sending message: error,resp", err, resp)
-
-	m.Lock()
-	m.dmChannels[id.RoomID(resp.RoomID)] = invites
-	m.Unlock()
-
-	return m.MsgChannelThread(resp.RoomID.String(), parentID, text)
+	return m.MsgChannelThread(roomID.String(), parentID, text)
 }
 
 func (m *Matrix) MsgChannel(channelID, text string) (string, error) {
