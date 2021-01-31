@@ -165,27 +165,6 @@ func (m *Mattermost) checkWsActionMessage(rmsg *model.WebSocketEvent, throttle *
 	}
 }
 
-// antiIdle does a lastviewed every 60 seconds so that the user is shown as online instead of away
-func (m *Mattermost) antiIdle(channelID string, quitChan chan struct{}) {
-	ticker := time.NewTicker(time.Second * 60)
-
-	for {
-		select {
-		case <-quitChan:
-			logger.Debugf("stopping antiIdle loop for %s", channelID)
-			return
-		case <-ticker.C:
-			if m.mc == nil {
-				logger.Error("antiidle: don't have a connection, exiting loop.")
-				return
-			}
-
-			logger.Tracef("antiIdle %s", channelID)
-			m.mc.UpdateLastViewed(channelID)
-		}
-	}
-}
-
 func (m *Mattermost) Invite(channelID, username string) error {
 	_, resp := m.mc.Client.AddChannelMember(channelID, username)
 	if resp.Error != nil {
@@ -720,7 +699,6 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		return
 	}
 
-	// nolint:nestif
 	if data.ParentId != "" {
 		parentPost, resp := m.mc.Client.GetPost(data.ParentId, "")
 		if resp.Error != nil {

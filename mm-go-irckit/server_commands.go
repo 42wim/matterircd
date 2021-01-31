@@ -176,7 +176,7 @@ func CmdList(s Server, u *User, msg *irc.Message) error {
 	r = append(r, &irc.Message{
 		Prefix:   s.Prefix(),
 		Params:   []string{u.Nick},
-		Command:  irc.RPL_LISTEND,
+		Command:  irc.RPL_LISTEND, // nolint:misspell
 		Trailing: "End of /LIST",
 	})
 	return u.Encode(r...)

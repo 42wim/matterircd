@@ -630,22 +630,6 @@ func (s *Slack) handleMemberJoinedChannel(rmsg *slack.MemberJoinedChannelEvent) 
 	s.eventChan <- event
 }
 
-func (s *Slack) getBotname(rmsg *slack.MessageEvent) string {
-	botname := ""
-
-	if rmsg.User == "" && rmsg.BotID != "" {
-		botname = rmsg.Username
-		if botname == "" {
-			bot, _ := s.rtm.GetBotInfo(rmsg.BotID)
-			if bot.Name != "" {
-				botname = bot.Name
-			}
-		}
-	}
-
-	return botname
-}
-
 func (s *Slack) getSlackUserFromMessage(rmsg *slack.MessageEvent) (*slack.User, error) {
 	usr := rmsg.User
 	if rmsg.SubType == "message_changed" {
