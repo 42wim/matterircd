@@ -362,14 +362,15 @@ func (m *Client) doLogin(firstConnection bool, b *backoff.Backoff) error {
 	for {
 		m.logger.Debugf("%s %s %s %s", logmsg, m.Credentials.Team, m.Credentials.Login, m.Credentials.Server)
 
-		if m.Credentials.Token != "" {
+		switch {
+		case m.Credentials.Token != "":
 			user, resp, err = m.doLoginToken()
 			if err != nil {
 				return err
 			}
-		} else if m.Credentials.MFAToken != "" {
+		case m.Credentials.MFAToken != "":
 			user, resp = m.Client.LoginWithMFA(m.Credentials.Login, m.Credentials.Pass, m.Credentials.MFAToken)
-		} else {
+		default:
 			user, resp = m.Client.Login(m.Credentials.Login, m.Credentials.Pass)
 		}
 

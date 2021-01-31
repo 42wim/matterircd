@@ -6,7 +6,7 @@ import (
 	"github.com/sorcix/irc"
 )
 
-// The error returned when an invalid command is issued.
+// ErrUnknownCommand The error returned when an invalid command is issued.
 var ErrUnknownCommand = errors.New("unknown command")
 
 // Handler is a container for an irc.Message handler.
