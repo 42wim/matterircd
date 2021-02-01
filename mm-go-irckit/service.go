@@ -202,7 +202,7 @@ func search(u *User, toUser *User, args []string, service string) {
 	}
 
 	list := u.br.SearchPosts(strings.Join(args, " "))
-	if list == nil || len(list.(*model.PostList).Order) == 0 {
+	if list == nil || list.(*model.PostList) == nil || len(list.(*model.PostList).Order) == 0 {
 		u.MsgUser(toUser, "no results")
 		return
 	}
@@ -284,7 +284,7 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 	args[0] = strings.ReplaceAll(args[0], "#", "")
 
 	list := u.br.GetPosts(u.br.GetChannelID(args[0], u.br.GetMe().TeamID), limit)
-	if list == nil || len(list.(*model.PostList).Order) == 0 {
+	if list == nil || list.(*model.PostList) == nil || len(list.(*model.PostList).Order) == 0 {
 		u.MsgUser(toUser, "no results")
 		return
 	}
