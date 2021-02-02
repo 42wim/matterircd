@@ -23,6 +23,9 @@ type Bridger interface {
 	MsgChannel(channelID, text string) (string, error)
 	MsgChannelThread(channelID, parentID, text string) (string, error)
 
+	SaveReaction(msgID, emoji string) error
+	DeleteReaction(msgID, emoji string) error
+
 	StatusUser(userID string) (string, error)
 	StatusUsers() (map[string]string, error)
 	SetStatus(status string) error

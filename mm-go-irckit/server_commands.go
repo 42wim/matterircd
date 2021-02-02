@@ -373,6 +373,10 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 			return nil
 		}
 
+		if parseReactionToMsg(u, msg) {
+			return nil
+		}
+
 		if threadMsgChannel(u, msg, ch.ID()) {
 			return nil
 		}
@@ -383,7 +387,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 
 		msgID, err2 := u.br.MsgChannel(ch.ID(), msg.Trailing)
 		if err2 != nil {
-			u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+msg.Trailing+" could not be send: "+err2.Error())
+			u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+msg.Trailing+" could not be send"+err2.Error())
 			return err2
 		}
 
@@ -411,6 +415,11 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 			if u.br == nil {
 				return nil
 			}
+
+			if parseReactionToMsg(u, msg) {
+				return nil
+			}
+
 			if threadMsgUser(u, msg, toUser.User) {
 				return nil
 			}
@@ -440,6 +449,33 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 
 	// no channel or user
 	return s.EncodeMessage(u, irc.ERR_NOSUCHNICK, msg.Params, "No such nick/channel")
+}
+
+func parseReactionToMsg(u *User, msg *irc.Message) bool {
+	re := regexp.MustCompile(`^\@\@([0-9a-z]{26}) ([\-\+]):(\S+):`)
+	matches := re.FindStringSubmatch(msg.Trailing)
+	if len(matches) != 4 {
+		return false
+	}
+
+	msgID := matches[1]
+	action := matches[2]
+	emoji := matches[3]
+
+	if action == "-" {
+		err := u.br.DeleteReaction(msgID, emoji)
+		if err != nil {
+			u.MsgSpoofUser(u, u.br.Protocol(), "reaction: "+emoji+" could not be removed"+err.Error())
+		}
+		return true
+	}
+
+	err := u.br.SaveReaction(msgID, emoji)
+	if err != nil {
+		u.MsgSpoofUser(u, u.br.Protocol(), "reaction: "+emoji+" could not be added"+err.Error())
+	}
+
+	return true
 }
 
 func parseModifyMsg(u *User, msg *irc.Message, channelID string) bool {
@@ -512,7 +548,7 @@ func parseModifyMsg(u *User, msg *irc.Message, channelID string) bool {
 		if strings.Contains(err.Error(), "permissions") {
 			return false
 		}
-		u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+text+" could not be modified: "+err.Error())
+		u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+text+" could not be modified"+err.Error())
 	} else {
 		u.saveLastViewedAt(channelID)
 	}
@@ -589,7 +625,7 @@ func threadMsgChannel(u *User, msg *irc.Message, channelID string) bool {
 
 	msgID, err := u.br.MsgChannelThread(channelID, threadID, text)
 	if err != nil {
-		u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+text+" could not be send: "+err.Error())
+		u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+text+" could not be send"+err.Error())
 		return false
 	}
 

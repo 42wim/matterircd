@@ -341,6 +341,42 @@ func (m *Mattermost) ModifyPost(msgID, text string) error {
 	return nil
 }
 
+func (m *Mattermost) SaveReaction(msgID, emoji string) error {
+	logger.Debugf("adding reaction %#v, %#v", msgID, emoji)
+	reaction := &model.Reaction{
+		UserId:    m.mc.User.Id,
+		PostId:    msgID,
+		EmojiName: emoji,
+		CreateAt:  0,
+	}
+
+	_, resp := m.mc.Client.SaveReaction(reaction)
+
+	if resp.Error != nil {
+		return resp.Error
+	}
+
+	return nil
+}
+
+func (m *Mattermost) DeleteReaction(msgID, emoji string) error {
+	logger.Debugf("removing reaction %#v, %#v", msgID, emoji)
+	reaction := &model.Reaction{
+		UserId:    m.mc.User.Id,
+		PostId:    msgID,
+		EmojiName: emoji,
+		CreateAt:  0,
+	}
+
+	_, resp := m.mc.Client.DeleteReaction(reaction)
+
+	if resp.Error != nil {
+		return resp.Error
+	}
+
+	return nil
+}
+
 func (m *Mattermost) Topic(channelID string) string {
 	return m.mc.GetChannelHeader(channelID)
 }

@@ -932,3 +932,11 @@ func (s *Slack) MsgChannelThread(username, parentID, text string) (string, error
 func (s *Slack) ModifyPost(channelID, text string) error {
 	return nil
 }
+
+func (s *Slack) SaveReaction(msgID, emoji string) error {
+	return nil
+}
+
+func (s *Slack) DeleteReaction(msgID, emoji string) error {
+	return nil
+}
