@@ -373,7 +373,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 			return nil
 		}
 
-		if parseReactionToMsg(u, msg) {
+		if parseReactionToMsg(u, msg, ch.ID()) {
 			return nil
 		}
 
@@ -416,7 +416,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 				return nil
 			}
 
-			if parseReactionToMsg(u, msg) {
+			if parseReactionToMsg(u, msg, toUser.User) {
 				return nil
 			}
 
@@ -451,8 +451,8 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 	return s.EncodeMessage(u, irc.ERR_NOSUCHNICK, msg.Params, "No such nick/channel")
 }
 
-func parseReactionToMsg(u *User, msg *irc.Message) bool {
-	re := regexp.MustCompile(`^\@\@([0-9a-z]{26}) ([\-\+]):(\S+):`)
+func parseReactionToMsg(u *User, msg *irc.Message, channelID string) bool {
+	re := regexp.MustCompile(`^\@\@([0-9a-f]{3}|[0-9a-z]{26})\s+([\-\+]):(\S+):\s*$`)
 	matches := re.FindStringSubmatch(msg.Trailing)
 	if len(matches) != 4 {
 		return false
@@ -462,15 +462,36 @@ func parseReactionToMsg(u *User, msg *irc.Message) bool {
 	action := matches[2]
 	emoji := matches[3]
 
+	// matterircd style prefix/suffix contexts (e.g. 001 and fa2).
+	if len(msgID) == 3 {
+		id, err := strconv.ParseInt(msgID, 16, 0)
+		if err != nil {
+			logger.Errorf("couldn't parseint %s: %s", msgID, err)
+		}
+
+		u.msgMapMutex.RLock()
+		defer u.msgMapMutex.RUnlock()
+
+		m := u.msgMap[channelID]
+
+		for k, v := range m {
+			if v == int(id) {
+				msgID = k
+				break
+			}
+		}
+	}
+
 	if action == "-" {
-		err := u.br.DeleteReaction(msgID, emoji)
+		err := u.br.RemoveReaction(msgID, emoji)
 		if err != nil {
 			u.MsgSpoofUser(u, u.br.Protocol(), "reaction: "+emoji+" could not be removed"+err.Error())
 		}
+
 		return true
 	}
 
-	err := u.br.SaveReaction(msgID, emoji)
+	err := u.br.AddReaction(msgID, emoji)
 	if err != nil {
 		u.MsgSpoofUser(u, u.br.Protocol(), "reaction: "+emoji+" could not be added"+err.Error())
 	}

@@ -341,7 +341,7 @@ func (m *Mattermost) ModifyPost(msgID, text string) error {
 	return nil
 }
 
-func (m *Mattermost) SaveReaction(msgID, emoji string) error {
+func (m *Mattermost) AddReaction(msgID, emoji string) error {
 	logger.Debugf("adding reaction %#v, %#v", msgID, emoji)
 	reaction := &model.Reaction{
 		UserId:    m.mc.User.Id,
@@ -359,7 +359,7 @@ func (m *Mattermost) SaveReaction(msgID, emoji string) error {
 	return nil
 }
 
-func (m *Mattermost) DeleteReaction(msgID, emoji string) error {
+func (m *Mattermost) RemoveReaction(msgID, emoji string) error {
 	logger.Debugf("removing reaction %#v, %#v", msgID, emoji)
 	reaction := &model.Reaction{
 		UserId:    m.mc.User.Id,
