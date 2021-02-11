@@ -398,6 +398,7 @@ func (s *server) add(u *User) (ok bool) {
 	return true
 }
 
+//nolint:goconst
 func (s *server) handshake(u *User) error {
 	// Assign host
 	u.Host = u.ResolveHost()
@@ -406,71 +407,78 @@ func (s *server) handshake(u *User) error {
 	// Consume N messages then give up.
 	i := handshakeMsgTolerance
 	// Read messages until we filled in USER details.
-	for msg := range u.DecodeCh {
-		// fmt.Printf("in handshake %#v\n", msg)
-		i--
-		// Consume N messages then give up.
-		if i == 0 {
-			break
-		}
-		if msg == nil {
-			// Empty message, ignore.
-			continue
-		}
-
-		// apparently NICK message can have a : prefix on connection
-		// https://github.com/42wim/matterircd/issues/32
-		if (msg.Command == irc.NICK || msg.Command == irc.PASS) && msg.Trailing != "" {
-			msg.Params = append(msg.Params, msg.Trailing)
-		}
-		if len(msg.Params) < 1 {
-			continue
-		}
-
-		switch msg.Command {
-		case irc.NICK:
-			u.Nick = msg.Params[0]
-		case irc.USER:
-			u.User = msg.Params[0]
-			u.Real = msg.Trailing
-		case irc.PASS:
-			u.Pass = msg.Params
-		}
-
-		if u.Nick == "" || u.User == "" {
-			// Wait for both to be set before proceeding
-			continue
-		}
-		if len(u.Nick) > s.config.MaxNickLen {
-			u.Nick = u.Nick[:s.config.MaxNickLen]
-		}
-
-		ok := s.add(u)
-		if !ok {
-			s.EncodeMessage(u, irc.ERR_NICKNAMEINUSE, []string{u.Nick}, "Nickname is already in use")
-			continue
-		}
-		s.u = u
-
-		err := s.welcome(u)
-		if err == nil && u.Pass != nil {
-			service := "mattermost"
-			if len(u.Pass) == 1 {
-				service = "slack"
+outerloop:
+	for {
+		select {
+		case msg := <-u.DecodeCh:
+			// fmt.Printf("in handshake %#v\n", msg)
+			i--
+			// Consume N messages then give up.
+			if i == 0 {
+				break outerloop
 			}
-			login(u, &User{
-				UserInfo: &bridge.UserInfo{
-					Nick: service,
-					User: service,
-					Real: service,
-					Host: "service",
+			if msg == nil {
+				// Empty message, ignore.
+				continue
+			}
+
+			// apparently NICK message can have a : prefix on connection
+			// https://github.com/42wim/matterircd/issues/32
+			if (msg.Command == irc.NICK || msg.Command == irc.PASS) && msg.Trailing != "" {
+				msg.Params = append(msg.Params, msg.Trailing)
+			}
+			if len(msg.Params) < 1 {
+				continue
+			}
+
+			switch msg.Command {
+			case irc.NICK:
+				u.Nick = msg.Params[0]
+			case irc.USER:
+				u.User = msg.Params[0]
+				u.Real = msg.Trailing
+			case irc.PASS:
+				u.Pass = msg.Params
+			}
+
+			if u.Nick == "" || u.User == "" {
+				// Wait for both to be set before proceeding
+				continue
+			}
+			if len(u.Nick) > s.config.MaxNickLen {
+				u.Nick = u.Nick[:s.config.MaxNickLen]
+			}
+
+			ok := s.add(u)
+			if !ok {
+				s.EncodeMessage(u, irc.ERR_NICKNAMEINUSE, []string{u.Nick}, "Nickname is already in use")
+				continue
+			}
+			s.u = u
+
+			err := s.welcome(u)
+			if err == nil && u.Pass != nil {
+				service := "mattermost"
+				if len(u.Pass) == 1 {
+					service = "slack"
+				}
+				login(u, &User{
+					UserInfo: &bridge.UserInfo{
+						Nick: service,
+						User: service,
+						Real: service,
+						Host: "service",
+					},
+					channels: map[Channel]struct{}{},
 				},
-				channels: map[Channel]struct{}{},
-			},
-				u.Pass,
-				service)
+					u.Pass,
+					service)
+			}
+
+			return err
+		case <-time.After(10 * time.Second):
+			return ErrHandshakeFailed
 		}
-		return err
 	}
 	return ErrHandshakeFailed
 }
