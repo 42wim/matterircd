@@ -638,13 +638,19 @@ func parseThreadID(u *User, msg *irc.Message, channelID string) (string, string)
 	return "", ""
 }
 
-func threadMsgChannel(u *User, msg *irc.Message, channelID string) bool {
+func threadMsgChannelUser(u *User, msg *irc.Message, channelID string, toUser bool) bool {
 	threadID, text := parseThreadID(u, msg, channelID)
 	if threadID == "" {
 		return false
 	}
 
-	msgID, err := u.br.MsgChannelThread(channelID, threadID, text)
+	var msgID string
+	var err error
+	if toUser {
+		msgID, err = u.br.MsgUserThread(channelID, threadID, text)
+	} else {
+		msgID, err = u.br.MsgChannelThread(channelID, threadID, text)
+	}
 	if err != nil {
 		u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+text+" could not be send"+err.Error())
 		return false
@@ -662,8 +668,12 @@ func threadMsgChannel(u *User, msg *irc.Message, channelID string) bool {
 	return true
 }
 
+func threadMsgChannel(u *User, msg *irc.Message, channelID string) bool {
+	return threadMsgChannelUser(u, msg, channelID, false)
+}
+
 func threadMsgUser(u *User, msg *irc.Message, toUser string) bool {
-	return threadMsgChannel(u, msg, toUser)
+	return threadMsgChannelUser(u, msg, toUser, true)
 }
 
 // CmdQuit is a handler for the /QUIT command.
