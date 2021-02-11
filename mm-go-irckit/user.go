@@ -3,6 +3,7 @@ package irckit
 import (
 	"fmt"
 	"net"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -180,9 +181,10 @@ func (u *User) Decode() {
 					// start timer now
 					t.Reset(time.Duration(bufferTimeout) * time.Millisecond)
 				} else {
-					if strings.HasPrefix(msg.Trailing, "\x01ACTION") {
+					re := regexp.MustCompile(`^(?:\@\@|s/)(?:[0-9a-f]{3}|[0-9a-z]{26}|!!)|/`)
+					if strings.HasPrefix(msg.Trailing, "\x01ACTION") || re.MatchString(msg.Trailing) {
 						// flush buffer
-						logger.Debug("flushing buffer because of /me")
+						logger.Debug("flushing buffer because of /me, replies to threads, and message modifications")
 						u.BufferedMsg.Trailing = strings.TrimSpace(u.BufferedMsg.Trailing)
 						u.DecodeCh <- u.BufferedMsg
 						u.BufferedMsg = nil
