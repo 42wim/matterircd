@@ -276,22 +276,29 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 		return
 	}
 
-	var channelName string
-	if strings.HasPrefix(args[0], "#") {
-		channelName = strings.ReplaceAll(args[0], "#", "")
-	} else if scrollbackUser, exists := u.Srv.HasUser(args[0]); exists && scrollbackUser.Ghost {
+	var channelID string
+	var spoof func(string, string)
+	scrollbackUser, exists := u.Srv.HasUser(args[0])
+
+	switch {
+	case strings.HasPrefix(args[0], "#"):
+		channelName := strings.ReplaceAll(args[0], "#", "")
+		channelID = u.br.GetChannelID(channelName, u.br.GetMe().TeamID)
+		spoof = u.Srv.Channel(channelID).SpoofMessage
+	case exists && scrollbackUser.Ghost:
 		// We need to sort the two user IDs to construct the DM
 		// channel name.
 		userIDs := []string{u.User, scrollbackUser.User}
 		sort.Strings(userIDs)
-		channelName = userIDs[0] + "__" + userIDs[1]
-	} else {
+		channelName := userIDs[0] + "__" + userIDs[1]
+		channelID = u.br.GetChannelID(channelName, u.br.GetMe().TeamID)
+	default:
 		u.MsgUser(toUser, "need SCROLLBACK (#<channel>|<user>) <lines>")
 		u.MsgUser(toUser, "e.g. SCROLLBACK #bugs 10 (show last 10 lines from #bugs)")
 		return
 	}
 
-	list := u.br.GetPosts(u.br.GetChannelID(channelName, u.br.GetMe().TeamID), limit)
+	list := u.br.GetPosts(channelID, limit)
 	if list == nil || list.(*model.PostList) == nil || len(list.(*model.PostList).Order) == 0 {
 		u.MsgUser(toUser, "no results")
 		return
@@ -303,17 +310,32 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 		p := postlist.Posts[postlist.Order[i]]
 		ts := time.Unix(0, p.CreateAt*int64(time.Millisecond))
 
-		nick := u.br.GetUser(p.UserId).Nick
+		props := p.GetProps()
+		botname, override := props["override_username"].(string)
+		user := u.br.GetUser(p.UserId)
+		nick := user.Nick
+		if override {
+			nick = botname
+		}
 
 		for _, post := range strings.Split(p.Message, "\n") {
-			if post != "" {
-				u.MsgUser(toUser, "["+ts.Format("2006-01-02 15:04")+"]"+" <"+nick+"> "+post)
+			if post == "" {
+				continue
 			}
+			if strings.HasPrefix(args[0], "#") {
+				spoof(nick, "["+ts.Format("2006-01-02 15:04")+"] "+post)
+				continue
+			}
+			u.MsgSpoofUser(scrollbackUser, nick, "["+ts.Format("2006-01-02 15:04")+"]"+" <"+nick+"> "+post)
 		}
 
 		if len(p.FileIds) > 0 {
 			for _, fname := range u.br.GetFileLinks(p.FileIds) {
-				u.MsgUser(toUser, "["+ts.Format("2006-01-02 15:04")+"]"+" <"+nick+"> download file - "+fname)
+				if strings.HasPrefix(args[0], "#") {
+					spoof(nick, "["+ts.Format("2006-01-02 15:04")+"] download file - "+fname)
+					continue
+				}
+				u.MsgSpoofUser(scrollbackUser, nick, "["+ts.Format("2006-01-02 15:04")+"]"+" <"+nick+"> download file - "+fname)
 			}
 		}
 	}
