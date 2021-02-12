@@ -264,34 +264,31 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 	}
 
 	if len(args) != 2 {
-		u.MsgUser(toUser, "need SCROLLBACK (#<channel>|@<user>) <lines>")
+		u.MsgUser(toUser, "need SCROLLBACK (#<channel>|<user>) <lines>")
 		u.MsgUser(toUser, "e.g. SCROLLBACK #bugs 10 (show last 10 lines from #bugs)")
 		return
 	}
 
 	limit, err := strconv.Atoi(args[1])
 	if err != nil {
-		u.MsgUser(toUser, "need SCROLLBACK (#<channel>|@<user>) <lines>")
-		u.MsgUser(toUser, "e.g. SCROLLBACK #bugs 10 (show last 10 lines from #bugs)")
-		return
-	}
-
-	if !strings.HasPrefix(args[0], "#") && !strings.HasPrefix(args[0], "@") {
-		u.MsgUser(toUser, "need SCROLLBACK (#<channel>|@<user>) <lines>")
+		u.MsgUser(toUser, "need SCROLLBACK (#<channel>|<user>) <lines>")
 		u.MsgUser(toUser, "e.g. SCROLLBACK #bugs 10 (show last 10 lines from #bugs)")
 		return
 	}
 
 	var channelName string
-	if strings.Contains(args[0], "@") {
-		args[0] = strings.ReplaceAll(args[0], "@", "")
+	if strings.HasPrefix(args[0], "#") {
+		channelName = strings.ReplaceAll(args[0], "#", "")
+	} else if scrollbackUser, exists := u.Srv.HasUser(args[0]); exists && scrollbackUser.Ghost {
 		// We need to sort the two user IDs to construct the DM
 		// channel name.
-		userIDs := []string{u.User, u.br.GetUserByUsername(args[0]).User}
+		userIDs := []string{u.User, scrollbackUser.User}
 		sort.Strings(userIDs)
 		channelName = userIDs[0] + "__" + userIDs[1]
 	} else {
-		channelName = strings.ReplaceAll(args[0], "#", "")
+		u.MsgUser(toUser, "need SCROLLBACK (#<channel>|<user>) <lines>")
+		u.MsgUser(toUser, "e.g. SCROLLBACK #bugs 10 (show last 10 lines from #bugs)")
+		return
 	}
 
 	list := u.br.GetPosts(u.br.GetChannelID(channelName, u.br.GetMe().TeamID), limit)
