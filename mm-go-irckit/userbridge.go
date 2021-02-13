@@ -607,13 +607,13 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 
 			props := p.GetProps()
 			botname, override := props["override_username"].(string)
+			user := u.br.GetUser(p.UserId)
+			nick := user.Nick
+			if override {
+				nick = botname
+			}
 
 			for _, post := range strings.Split(p.Message, "\n") {
-				user := u.br.GetUser(p.UserId)
-				nick := user.Nick
-				if override {
-					nick = botname
-				}
 				if showReplayHdr {
 					date := ts.Format("2006-01-02 15:04:05")
 					channame := brchannel.Name
