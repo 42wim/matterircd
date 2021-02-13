@@ -629,21 +629,8 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 
 				replayMsg := fmt.Sprintf("[%s] %s", ts.Format("15:04"), post)
 				if u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" {
-					threadMsg := fmt.Sprintf("@@%s", p.Id)
-					if p.ParentId != "" {
-						if u.v.GetBool(u.br.Protocol() + ".unicode") {
-							threadMsg = fmt.Sprintf("↪@@%s", p.ParentId)
-						} else {
-							threadMsg = fmt.Sprintf("->@@%s", p.ParentId)
-						}
-					}
-
-					switch {
-					case u.v.GetBool(u.br.Protocol() + ".prefixcontext"):
-						replayMsg = fmt.Sprintf("[%s] [%s] %s", ts.Format("15:04"), threadMsg, post)
-					case u.v.GetBool(u.br.Protocol() + ".suffixcontext"):
-						replayMsg = fmt.Sprintf("[%s] %s [%s]", ts.Format("15:04"), post, threadMsg)
-					}
+					threadMsgID := u.prefixContext("", p.Id, p.ParentId, "")
+					replayMsg = u.formatContextMessage(ts.Format("15:04"), threadMsgID, post)
 				}
 				spoof(nick, replayMsg)
 			}
@@ -816,6 +803,17 @@ func (u *User) increaseMsgCounter(channelID string) int {
 	}
 
 	return u.msgCounter[channelID]
+}
+
+func (u *User) formatContextMessage(ts, context, msg string) string {
+	var formattedMsg string
+	switch {
+	case u.v.GetBool(u.br.Protocol() + ".prefixcontext"):
+		formattedMsg = "[" + ts + "] " + context + " " + msg
+	case u.v.GetBool(u.br.Protocol() + ".suffixcontext"):
+		formattedMsg = "[" + ts + "] " + msg + " " + context
+	}
+	return formattedMsg
 }
 
 func (u *User) prefixContextModified(channelID, messageID string) string {

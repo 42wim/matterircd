@@ -322,11 +322,23 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 			if post == "" {
 				continue
 			}
-			if strings.HasPrefix(args[0], "#") {
-				spoof(nick, "["+ts.Format("2006-01-02 15:04")+"] "+post)
-				continue
+
+			switch {
+			case u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" && strings.HasPrefix(args[0], "#"):
+				threadMsgID := u.prefixContext("", p.Id, p.ParentId, "")
+				scrollbackMsg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, post)
+				spoof(nick, scrollbackMsg)
+			case u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost":
+				threadMsgID := u.prefixContext("", p.Id, p.ParentId, "")
+				scrollbackMsg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, post)
+				u.MsgSpoofUser(scrollbackUser, nick, scrollbackMsg)
+			case strings.HasPrefix(args[0], "#"):
+				scrollbackMsg := "[" + ts.Format("2006-01-02 15:04") + "] " + post
+				spoof(nick, scrollbackMsg)
+			default:
+				scrollbackMsg := "[" + ts.Format("2006-01-02 15:04") + "]" + " <" + nick + "> " + post
+				u.MsgSpoofUser(scrollbackUser, nick, scrollbackMsg)
 			}
-			u.MsgSpoofUser(scrollbackUser, nick, "["+ts.Format("2006-01-02 15:04")+"]"+" <"+nick+"> "+post)
 		}
 
 		if len(p.FileIds) > 0 {
