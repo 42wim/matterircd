@@ -301,20 +301,20 @@ func (u *User) handleFileEvent(event *bridge.FileEvent) {
 		for _, fname := range event.Files {
 			if event.Sender.Me {
 				if event.Receiver.Me {
-					u.MsgSpoofUser(u, u.Nick, "download file -"+fname.Name)
+					u.MsgSpoofUser(u, u.Nick, "download file - "+fname.Name)
 				} else {
-					u.MsgSpoofUser(u, event.Receiver.Nick, "download file -"+fname.Name)
+					u.MsgSpoofUser(u, event.Receiver.Nick, "download file - "+fname.Name)
 				}
 			} else {
-				u.MsgSpoofUser(u.createUserFromInfo(event.Sender), event.Receiver.Nick, "download file -"+fname.Name)
+				u.MsgSpoofUser(u.createUserFromInfo(event.Sender), event.Receiver.Nick, "download file - "+fname.Name)
 			}
 		}
 	default:
 		for _, fname := range event.Files {
 			if event.Sender.Me {
-				ch.SpoofMessage(u.Nick, "download file -"+fname.Name)
+				ch.SpoofMessage(u.Nick, "download file - "+fname.Name)
 			} else {
-				ch.SpoofMessage(event.Sender.Nick, "download file -"+fname.Name)
+				ch.SpoofMessage(event.Sender.Nick, "download file - "+fname.Name)
 			}
 		}
 	}
