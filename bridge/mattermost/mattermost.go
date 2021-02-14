@@ -959,6 +959,8 @@ func (m *Mattermost) handleFileEvent(channelType string, ghost *bridge.UserInfo,
 		Receiver:    ghost,
 		ChannelType: channelType,
 		ChannelID:   data.ChannelId,
+		MessageID:   data.Id,
+		ParentID:    data.ParentId,
 	}
 
 	event.Data = fileEvent

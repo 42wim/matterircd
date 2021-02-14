@@ -323,7 +323,7 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 				continue
 			}
 
-			switch {
+			switch { // nolint:dupl
 			case u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" && strings.HasPrefix(args[0], "#"):
 				threadMsgID := u.prefixContext("", p.Id, p.ParentId, "")
 				scrollbackMsg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, post)
@@ -341,13 +341,27 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 			}
 		}
 
-		if len(p.FileIds) > 0 {
-			for _, fname := range u.br.GetFileLinks(p.FileIds) {
-				if strings.HasPrefix(args[0], "#") {
-					spoof(nick, "["+ts.Format("2006-01-02 15:04")+"] download file - "+fname)
-					continue
-				}
-				u.MsgSpoofUser(scrollbackUser, nick, "["+ts.Format("2006-01-02 15:04")+"]"+" <"+nick+"> download file - "+fname)
+		if len(p.FileIds) == 0 {
+			continue
+		}
+
+		for _, fname := range u.br.GetFileLinks(p.FileIds) {
+			fileMsg := "download file - " + fname
+			switch { // nolint:dupl
+			case u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" && strings.HasPrefix(args[0], "#"):
+				threadMsgID := u.prefixContext("", p.Id, p.ParentId, "")
+				scrollbackMsg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, fileMsg)
+				spoof(nick, scrollbackMsg)
+			case u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost":
+				threadMsgID := u.prefixContext("", p.Id, p.ParentId, "")
+				scrollbackMsg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, fileMsg)
+				u.MsgSpoofUser(scrollbackUser, nick, scrollbackMsg)
+			case strings.HasPrefix(args[0], "#"):
+				scrollbackMsg := "[" + ts.Format("2006-01-02 15:04") + "] " + fileMsg
+				spoof(nick, scrollbackMsg)
+			default:
+				scrollbackMsg := "[" + ts.Format("2006-01-02 15:04") + "]" + " <" + nick + "> " + fileMsg
+				u.MsgSpoofUser(scrollbackUser, nick, scrollbackMsg)
 			}
 		}
 	}

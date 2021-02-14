@@ -294,27 +294,30 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 }
 
 func (u *User) handleFileEvent(event *bridge.FileEvent) {
-	ch := u.getMessageChannel(event.ChannelID, event.Sender)
+	for _, fname := range event.Files {
+		fileMsg := "download file - " + fname.Name
+		if u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" {
+			threadMsgID := u.prefixContext(event.ChannelID, event.MessageID, event.ParentID, "")
+			fileMsg = u.formatContextMessage("", threadMsgID, fileMsg)
+		}
 
-	switch event.ChannelType {
-	case "D":
-		for _, fname := range event.Files {
+		switch event.ChannelType {
+		case "D":
 			if event.Sender.Me {
 				if event.Receiver.Me {
-					u.MsgSpoofUser(u, u.Nick, "download file - "+fname.Name)
+					u.MsgSpoofUser(u, u.Nick, fileMsg)
 				} else {
-					u.MsgSpoofUser(u, event.Receiver.Nick, "download file - "+fname.Name)
+					u.MsgSpoofUser(u, event.Receiver.Nick, fileMsg)
 				}
 			} else {
-				u.MsgSpoofUser(u.createUserFromInfo(event.Sender), event.Receiver.Nick, "download file - "+fname.Name)
+				u.MsgSpoofUser(u.createUserFromInfo(event.Sender), event.Receiver.Nick, fileMsg)
 			}
-		}
-	default:
-		for _, fname := range event.Files {
+		default:
+			ch := u.getMessageChannel(event.ChannelID, event.Sender)
 			if event.Sender.Me {
-				ch.SpoofMessage(u.Nick, "download file - "+fname.Name)
+				ch.SpoofMessage(u.Nick, fileMsg)
 			} else {
-				ch.SpoofMessage(event.Sender.Nick, "download file - "+fname.Name)
+				ch.SpoofMessage(event.Sender.Nick, fileMsg)
 			}
 		}
 	}
@@ -805,13 +808,16 @@ func (u *User) increaseMsgCounter(channelID string) int {
 	return u.msgCounter[channelID]
 }
 
-func (u *User) formatContextMessage(ts, context, msg string) string {
+func (u *User) formatContextMessage(ts, threadMsgID, msg string) string {
 	var formattedMsg string
 	switch {
 	case u.v.GetBool(u.br.Protocol() + ".prefixcontext"):
-		formattedMsg = "[" + ts + "] " + context + " " + msg
+		formattedMsg = threadMsgID + " " + msg
 	case u.v.GetBool(u.br.Protocol() + ".suffixcontext"):
-		formattedMsg = "[" + ts + "] " + msg + " " + context
+		formattedMsg = msg + " " + threadMsgID
+	}
+	if ts != "" {
+		formattedMsg = "[" + ts + "] " + formattedMsg
 	}
 	return formattedMsg
 }
