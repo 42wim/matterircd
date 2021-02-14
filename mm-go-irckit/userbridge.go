@@ -617,6 +617,10 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			}
 
 			for _, post := range strings.Split(p.Message, "\n") {
+				if post == "" {
+					continue
+				}
+
 				if showReplayHdr {
 					date := ts.Format("2006-01-02 15:04:05")
 					channame := brchannel.Name
@@ -636,6 +640,19 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 					replayMsg = u.formatContextMessage(ts.Format("15:04"), threadMsgID, post)
 				}
 				spoof(nick, replayMsg)
+			}
+
+			if len(p.FileIds) == 0 {
+				continue
+			}
+
+			for _, fname := range u.br.GetFileLinks(p.FileIds) {
+				fileMsg := "download file - " + fname
+				if u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" {
+					threadMsgID := u.prefixContext("", p.Id, p.ParentId, "")
+					fileMsg = u.formatContextMessage(ts.Format("15:04"), threadMsgID, fileMsg)
+				}
+				spoof(nick, fileMsg)
 			}
 		}
 
