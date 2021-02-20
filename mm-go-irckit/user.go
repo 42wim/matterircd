@@ -181,7 +181,7 @@ func (u *User) Decode() {
 					// start timer now
 					t.Reset(time.Duration(bufferTimeout) * time.Millisecond)
 				} else {
-					re := regexp.MustCompile(`^(?:\@\@|s/)(?:[0-9a-f]{3}|[0-9a-z]{26}|!!)|/`)
+					re := regexp.MustCompile(`^(?:\@\@|s/)(?:[0-9a-f]{3}|[0-9a-z]{26}|!!)|^/`)
 					if strings.HasPrefix(msg.Trailing, "\x01ACTION") || re.MatchString(msg.Trailing) {
 						// flush buffer
 						logger.Debug("flushing buffer because of /me, replies to threads, and message modifications")
