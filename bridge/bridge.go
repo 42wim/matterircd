@@ -150,6 +150,8 @@ type FileEvent struct {
 	ChannelID   string
 	ChannelType string
 	Files       []*File
+	MessageID   string
+	ParentID    string
 }
 
 type ReactionAddEvent struct {
