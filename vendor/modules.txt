@@ -78,9 +78,11 @@ github.com/pkg/errors
 github.com/pmezard/go-difflib/difflib
 # github.com/sirupsen/logrus v1.6.0
 github.com/sirupsen/logrus
-# github.com/slack-go/slack v0.6.6
+# github.com/slack-go/slack v0.8.1
 github.com/slack-go/slack
+github.com/slack-go/slack/internal/backoff
 github.com/slack-go/slack/internal/errorsx
+github.com/slack-go/slack/internal/misc
 github.com/slack-go/slack/internal/timex
 github.com/slack-go/slack/slackutilsx
 # github.com/sorcix/irc v1.1.4
