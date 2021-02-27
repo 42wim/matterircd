@@ -162,14 +162,16 @@ func (s *Slack) createSlackMsgOption(text string) []slack.MsgOption {
 }
 
 func (s *Slack) MsgUser(username, text string) (string, error) {
-	_, _, dchannel, err := s.sc.OpenIMChannel(username)
+	dchannel, _, _, err := s.sc.OpenConversation(&slack.OpenConversationParameters{
+		Users: []string{username},
+	})
 	if err != nil {
 		return "", err
 	}
 
 	opts := s.createSlackMsgOption(text)
 
-	_, _, err = s.sc.PostMessage(dchannel, opts...)
+	_, _, err = s.sc.PostMessage(dchannel.ID, opts...)
 	if err != nil {
 		return "", err
 	}
