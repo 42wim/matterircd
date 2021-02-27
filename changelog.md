@@ -1,3 +1,14 @@
+# v0.23.1
+
+## Bugfix
+
+- slack: Use conversation API for DM (slack). (#402) Fixes #400
+- slack: Fix regression, increase user pag to 1000 (slack) #403
+- general: Fixed buffer flushing (#398)
+
+This release couldn't exist without the following contributors:
+@hloeung
+
 # v0.23.0
 
 Big shout-out to @hloeung for doing most of the work for this release!
