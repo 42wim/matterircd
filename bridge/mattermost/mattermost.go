@@ -1168,6 +1168,14 @@ func (m *Mattermost) handleReactionEvent(rmsg *model.WebSocketEvent) {
 		channelType = "D"
 	}
 
+	message := ""
+	if !m.v.GetBool("mattermost.hidereplies") {
+		parentPost, resp := m.mc.Client.GetPost(reaction.PostId, "")
+		if resp.Error == nil {
+			message = maybeShorten(parentPost.Message, m.v.GetInt("mattermost.shortenrepliesto"), "@", m.v.GetBool("mattermost.unicode"))
+		}
+	}
+
 	switch rmsg.Event {
 	case model.WEBSOCKET_EVENT_REACTION_ADDED:
 		event = &bridge.Event{
@@ -1178,6 +1186,7 @@ func (m *Mattermost) handleReactionEvent(rmsg *model.WebSocketEvent) {
 				Sender:      m.GetUser(reaction.UserId),
 				Reaction:    reaction.EmojiName,
 				ChannelType: channelType,
+				Message:     message,
 			},
 		}
 	case model.WEBSOCKET_EVENT_REACTION_REMOVED:
@@ -1189,6 +1198,7 @@ func (m *Mattermost) handleReactionEvent(rmsg *model.WebSocketEvent) {
 				Sender:      m.GetUser(reaction.UserId),
 				Reaction:    reaction.EmojiName,
 				ChannelType: channelType,
+				Message:     message,
 			},
 		}
 	}

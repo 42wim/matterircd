@@ -362,8 +362,14 @@ func (u *User) handleReactionEvent(event interface{}) {
 		sender                                            *bridge.UserInfo
 	)
 
+	message := ""
+
 	switch e := event.(type) {
 	case *bridge.ReactionAddEvent:
+		if !u.v.GetBool(u.br.Protocol() + ".hidereplies") {
+			nick := sanitizeNick(e.Sender.Nick)
+			message = fmt.Sprintf(" (re @%s: %s)", nick, e.Message)
+		}
 		text = "added reaction: "
 		channelID = e.ChannelID
 		messageID = e.MessageID
@@ -371,6 +377,10 @@ func (u *User) handleReactionEvent(event interface{}) {
 		channelType = e.ChannelType
 		reaction = e.Reaction
 	case *bridge.ReactionRemoveEvent:
+		if !u.v.GetBool(u.br.Protocol() + ".hidereplies") {
+			nick := sanitizeNick(e.Sender.Nick)
+			message = fmt.Sprintf(" (re @%s: %s)", nick, e.Message)
+		}
 		text = "removed reaction: "
 		channelID = e.ChannelID
 		messageID = e.MessageID
@@ -381,7 +391,7 @@ func (u *User) handleReactionEvent(event interface{}) {
 
 	if channelType == "D" {
 		e := &bridge.DirectMessageEvent{
-			Text:      text + reaction,
+			Text:      text + reaction + message,
 			ChannelID: channelID,
 			Receiver:  u.UserInfo,
 			Sender:    sender,
@@ -397,7 +407,7 @@ func (u *User) handleReactionEvent(event interface{}) {
 	}
 
 	e := &bridge.ChannelMessageEvent{
-		Text:        text + reaction,
+		Text:        text + reaction + message,
 		ChannelID:   channelID,
 		ChannelType: channelType,
 		Sender:      sender,
