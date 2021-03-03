@@ -367,7 +367,7 @@ func (u *User) handleReactionEvent(event interface{}) {
 	switch e := event.(type) {
 	case *bridge.ReactionAddEvent:
 		if !u.v.GetBool(u.br.Protocol() + ".hidereplies") {
-			nick := sanitizeNick(e.Sender.Nick)
+			nick := sanitizeNick(e.ParentUser.Nick)
 			message = fmt.Sprintf(" (re @%s: %s)", nick, e.Message)
 		}
 		text = "added reaction: "

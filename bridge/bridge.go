@@ -160,6 +160,7 @@ type ReactionAddEvent struct {
 	MessageID   string
 	Reaction    string
 	ChannelType string
+	ParentUser  *UserInfo
 	Message     string
 }
 
