@@ -24,6 +24,7 @@ type Slack struct {
 	credentials  bridge.Credentials
 	eventChan    chan *bridge.Event
 	onConnect    func()
+	msgLast      map[string]string
 	sync.RWMutex
 	v *viper.Viper
 }
@@ -51,6 +52,8 @@ func New(v *viper.Viper, cred bridge.Credentials, eventChan chan *bridge.Event, 
 	if err != nil {
 		return nil, err
 	}
+
+	s.msgLast = make(map[string]string)
 
 	users, _ := s.sc.GetUsers()
 	for _, mmuser := range users {
@@ -171,23 +174,31 @@ func (s *Slack) MsgUser(username, text string) (string, error) {
 
 	opts := s.createSlackMsgOption(text)
 
-	_, _, err = s.sc.PostMessage(dchannel.ID, opts...)
+	_, msgID, err := s.sc.PostMessage(dchannel.ID, opts...)
 	if err != nil {
 		return "", err
 	}
 
-	return "", nil
+	s.RLock()
+	s.msgLast[dchannel.ID] = msgID
+	s.RUnlock()
+
+	return msgID, nil
 }
 
 func (s *Slack) MsgChannel(channelID, text string) (string, error) {
 	opts := s.createSlackMsgOption(text)
 
-	_, _, err := s.sc.PostMessage(strings.ToUpper(channelID), opts...)
+	_, msgID, err := s.sc.PostMessage(strings.ToUpper(channelID), opts...)
 	if err != nil {
 		return "", err
 	}
 
-	return "", nil
+	s.RLock()
+	s.msgLast[strings.ToUpper(channelID)] = msgID
+	s.RUnlock()
+
+	return msgID, nil
 }
 
 func (s *Slack) Topic(channelID string) string {
@@ -720,6 +731,20 @@ func (s *Slack) handleSlackActionPost(rmsg *slack.MessageEvent) {
 	if rmsg.SubMessage != nil && len(rmsg.SubMessage.Blocks.BlockSet) == 1 {
 		block, ok := rmsg.SubMessage.Blocks.BlockSet[0].(*slack.SectionBlock)
 		hasOurCallbackID = ok && block.BlockID == "matterircd_"+s.sinfo.User.ID
+	}
+
+	// Is this our own message
+	if rmsg.User == s.sinfo.User.ID {
+		lastmsg := s.msgLast[rmsg.Channel]
+
+		// Slack can be faster in sending new message than replying to POST
+		if lastmsg < rmsg.Timestamp {
+			time.Sleep(100 * time.Millisecond)
+			lastmsg = s.msgLast[rmsg.Channel]
+		}
+
+		// Is this really the message we just sent
+		hasOurCallbackID = lastmsg == rmsg.Timestamp
 	}
 
 	if hasOurCallbackID {
