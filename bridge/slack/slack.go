@@ -145,6 +145,7 @@ func (s *Slack) Logout() error {
 func (s *Slack) createSlackMsgOption(text string) []slack.MsgOption {
 	np := slack.NewPostMessageParameters()
 	np.AsUser = true
+	np.Parse = "full"
 	// np.Username = u.User
 
 	var opts []slack.MsgOption
