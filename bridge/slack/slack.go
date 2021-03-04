@@ -152,13 +152,6 @@ func (s *Slack) createSlackMsgOption(text string) []slack.MsgOption {
 		slack.MsgOptionPostMessageParameters(np),
 		// provide regular text field (fallback used in Slack notifications, etc.)
 		slack.MsgOptionText(text, false),
-
-		// add a callback ID so we can see we created it
-		slack.MsgOptionBlocks(slack.NewSectionBlock(
-			slack.NewTextBlockObject(slack.MarkdownType, text, false, false),
-			nil, nil,
-			slack.SectionBlockOptionBlockID("matterircd_"+s.sinfo.User.ID),
-		)),
 	)
 
 	return opts
@@ -722,17 +715,6 @@ func (s *Slack) sendPublicMessage(ghost *bridge.UserInfo, msg, channelID string)
 func (s *Slack) handleSlackActionPost(rmsg *slack.MessageEvent) {
 	logger.Debugf("handleSlackActionPost() receiving msg %#v", rmsg)
 
-	hasOurCallbackID := false
-	if len(rmsg.Blocks.BlockSet) == 1 {
-		block, ok := rmsg.Blocks.BlockSet[0].(*slack.SectionBlock)
-		hasOurCallbackID = ok && block.BlockID == "matterircd_"+s.sinfo.User.ID
-	}
-
-	if rmsg.SubMessage != nil && len(rmsg.SubMessage.Blocks.BlockSet) == 1 {
-		block, ok := rmsg.SubMessage.Blocks.BlockSet[0].(*slack.SectionBlock)
-		hasOurCallbackID = ok && block.BlockID == "matterircd_"+s.sinfo.User.ID
-	}
-
 	// Is this our own message
 	if rmsg.User == s.sinfo.User.ID {
 		lastmsg := s.msgLast[rmsg.Channel]
@@ -744,11 +726,9 @@ func (s *Slack) handleSlackActionPost(rmsg *slack.MessageEvent) {
 		}
 
 		// Is this really the message we just sent
-		hasOurCallbackID = lastmsg == rmsg.Timestamp
-	}
-
-	if hasOurCallbackID {
-		return
+		if lastmsg == rmsg.Timestamp {
+			return
+		}
 	}
 
 	if rmsg.SubType == "message_deleted" {
