@@ -55,6 +55,8 @@ Master branch of matterircd should always work against latest STABLE mattermost 
 - mattermost personal token support
 - support multiline pasting
 - prefixcontext option for mattermost (see <https://github.com/42wim/matterircd/blob/master/prefixcontext.md>)
+  - threading support
+  - reactions support
 - ....
 
 ## Binaries

@@ -1,3 +1,27 @@
+# v0.24.0
+
+## New features
+
+- mattermost: Add context for reactions (#408)
+- mattermost: Add option to hide reactions; also hide our own (#415)
+- mattermost: Fix channel mentions and add option to disable channel mentions as IRC NOTICEs (mattermost) (#418)
+- mattermost: Show Mattermost message/thread IDs for file attachments (#396) (was already in v0.23.1)
+- mattermost: Show scrollback in same channel/query window (mattermost) (#393) (was already in v0.23.1)
+
+## Enhancements
+
+- mattermost: Save lastViewedAt on topic change events (#417)
+- slack: Save message IDs and use them for local echo prevention (#409)
+
+## Bugfix
+
+- general: Set correct IRC PRIVMSG nick when receiving direct messages (#407)
+- general: Fix buffer flushing yet again (#411)
+- mattermost: Handle SIGSEGV nil pointer for event.ParentUser (#412)
+
+This release couldn't exist without the following contributors:
+@hloeung, @the-real-ed, @Aketzu
+
 # v0.23.1
 
 ## Bugfix
