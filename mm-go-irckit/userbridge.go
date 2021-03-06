@@ -157,7 +157,7 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 			u.MsgSpoofUser(u, event.Receiver.Nick, event.Text)
 		}
 	} else {
-		u.MsgSpoofUser(u.createUserFromInfo(event.Sender), event.Receiver.Nick, event.Text)
+		u.MsgSpoofUser(u.createUserFromInfo(event.Sender), u.Nick, event.Text)
 	}
 
 	if !u.v.GetBool(u.br.Protocol() + ".disableautoview") {
