@@ -392,6 +392,19 @@ func (u *User) handleReactionEvent(event interface{}) {
 		reaction = e.Reaction
 	}
 
+	if u.v.GetBool(u.br.Protocol() + ".hidereactions") {
+		logger.Debug("Not showing reaction: " + text + reaction)
+		u.saveLastViewedAt(channelID)
+		return
+	}
+
+	// No need to show added/removed reaction messages for our own.
+	if sender.Me {
+		logger.Debug("Not showing own reaction: " + text + reaction)
+		u.saveLastViewedAt(channelID)
+		return
+	}
+
 	if channelType == "D" {
 		e := &bridge.DirectMessageEvent{
 			Text:      text + reaction + message,
