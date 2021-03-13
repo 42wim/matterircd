@@ -392,16 +392,16 @@ func (u *User) handleReactionEvent(event interface{}) {
 		reaction = e.Reaction
 	}
 
+	defer u.saveLastViewedAt(channelID)
+
 	if u.v.GetBool(u.br.Protocol() + ".hidereactions") {
 		logger.Debug("Not showing reaction: " + text + reaction)
-		u.saveLastViewedAt(channelID)
 		return
 	}
 
 	// No need to show added/removed reaction messages for our own.
 	if sender.Me {
 		logger.Debug("Not showing own reaction: " + text + reaction)
-		u.saveLastViewedAt(channelID)
 		return
 	}
 
@@ -417,8 +417,6 @@ func (u *User) handleReactionEvent(event interface{}) {
 		}
 
 		u.handleDirectMessageEvent(e)
-		u.saveLastViewedAt(channelID)
-
 		return
 	}
 
@@ -433,7 +431,6 @@ func (u *User) handleReactionEvent(event interface{}) {
 	}
 
 	u.handleChannelMessageEvent(e)
-	u.saveLastViewedAt(channelID)
 }
 
 func (u *User) CreateUserFromInfo(info *bridge.UserInfo) *User {
