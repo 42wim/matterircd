@@ -114,6 +114,8 @@ HideReplies = false
 ShortenRepliesTo = 0
 # Enable Unicode.
 Unicode = false
+# Disable showing reactions
+HideReactions = false
 
 #Only join direct/group messages when someone talks. This stops from cluttering your 
 #irc client with lots of windows.
