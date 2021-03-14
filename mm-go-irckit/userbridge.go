@@ -110,6 +110,7 @@ func (u *User) handleChannelTopicEvent(event *bridge.ChannelTopicEvent) {
 		ch := u.Srv.Channel(event.ChannelID)
 		ch.Topic(tu, event.Text)
 
+		u.saveLastViewedAt(event.ChannelID)
 		return
 	}
 
