@@ -886,13 +886,18 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 			}
 		case strings.Contains(data.Message, "@channel") || strings.Contains(data.Message, "@here") ||
 			strings.Contains(data.Message, "@all"):
+
+			messageType := "notice"
+			if m.v.GetBool("mattermost.disabledefaultmentions") {
+				messageType = ""
+			}
 			event := &bridge.Event{
 				Type: "channel_message",
 				Data: &bridge.ChannelMessageEvent{
 					Text:        msg,
 					ChannelID:   data.ChannelId,
 					Sender:      ghost,
-					MessageType: "notice",
+					MessageType: messageType,
 					ChannelType: channelType,
 					Files:       m.getFilesFromData(data),
 					MessageID:   data.Id,
