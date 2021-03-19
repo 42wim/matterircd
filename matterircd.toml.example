@@ -135,6 +135,9 @@ SuffixContext = false
 #This will show (mention yournick) after a message if it contains one of the words configured
 #in your mattermost "word that trigger mentions" notifications.
 ShowMentions = false
+# Channel wide default mentions @channel, @all, and @here are shown as IRC NOTICEs.
+# This disables that making them appear as normal PRIVMSGs.
+#DisableDefaultMentions = true
 
 # Path to file to store last viewed information. This is useful for replying only
 # the messages missed.
