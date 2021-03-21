@@ -24,6 +24,7 @@ type Slack struct {
 	credentials  bridge.Credentials
 	eventChan    chan *bridge.Event
 	onConnect    func()
+	msgLast      map[string]string
 	sync.RWMutex
 	v *viper.Viper
 }
@@ -51,6 +52,8 @@ func New(v *viper.Viper, cred bridge.Credentials, eventChan chan *bridge.Event, 
 	if err != nil {
 		return nil, err
 	}
+
+	s.msgLast = make(map[string]string)
 
 	users, _ := s.sc.GetUsers()
 	for _, mmuser := range users {
@@ -142,6 +145,7 @@ func (s *Slack) Logout() error {
 func (s *Slack) createSlackMsgOption(text string) []slack.MsgOption {
 	np := slack.NewPostMessageParameters()
 	np.AsUser = true
+	np.Parse = "full"
 	// np.Username = u.User
 
 	var opts []slack.MsgOption
@@ -149,13 +153,6 @@ func (s *Slack) createSlackMsgOption(text string) []slack.MsgOption {
 		slack.MsgOptionPostMessageParameters(np),
 		// provide regular text field (fallback used in Slack notifications, etc.)
 		slack.MsgOptionText(text, false),
-
-		// add a callback ID so we can see we created it
-		slack.MsgOptionBlocks(slack.NewSectionBlock(
-			slack.NewTextBlockObject(slack.MarkdownType, text, false, false),
-			nil, nil,
-			slack.SectionBlockOptionBlockID("matterircd_"+s.sinfo.User.ID),
-		)),
 	)
 
 	return opts
@@ -171,23 +168,31 @@ func (s *Slack) MsgUser(username, text string) (string, error) {
 
 	opts := s.createSlackMsgOption(text)
 
-	_, _, err = s.sc.PostMessage(dchannel.ID, opts...)
+	_, msgID, err := s.sc.PostMessage(dchannel.ID, opts...)
 	if err != nil {
 		return "", err
 	}
 
-	return "", nil
+	s.RLock()
+	s.msgLast[dchannel.ID] = msgID
+	s.RUnlock()
+
+	return msgID, nil
 }
 
 func (s *Slack) MsgChannel(channelID, text string) (string, error) {
 	opts := s.createSlackMsgOption(text)
 
-	_, _, err := s.sc.PostMessage(strings.ToUpper(channelID), opts...)
+	_, msgID, err := s.sc.PostMessage(strings.ToUpper(channelID), opts...)
 	if err != nil {
 		return "", err
 	}
 
-	return "", nil
+	s.RLock()
+	s.msgLast[strings.ToUpper(channelID)] = msgID
+	s.RUnlock()
+
+	return msgID, nil
 }
 
 func (s *Slack) Topic(channelID string) string {
@@ -711,19 +716,20 @@ func (s *Slack) sendPublicMessage(ghost *bridge.UserInfo, msg, channelID string)
 func (s *Slack) handleSlackActionPost(rmsg *slack.MessageEvent) {
 	logger.Debugf("handleSlackActionPost() receiving msg %#v", rmsg)
 
-	hasOurCallbackID := false
-	if len(rmsg.Blocks.BlockSet) == 1 {
-		block, ok := rmsg.Blocks.BlockSet[0].(*slack.SectionBlock)
-		hasOurCallbackID = ok && block.BlockID == "matterircd_"+s.sinfo.User.ID
-	}
+	// Is this our own message
+	if rmsg.User == s.sinfo.User.ID {
+		lastmsg := s.msgLast[rmsg.Channel]
 
-	if rmsg.SubMessage != nil && len(rmsg.SubMessage.Blocks.BlockSet) == 1 {
-		block, ok := rmsg.SubMessage.Blocks.BlockSet[0].(*slack.SectionBlock)
-		hasOurCallbackID = ok && block.BlockID == "matterircd_"+s.sinfo.User.ID
-	}
+		// Slack can be faster in sending new message than replying to POST
+		if lastmsg < rmsg.Timestamp {
+			time.Sleep(100 * time.Millisecond)
+			lastmsg = s.msgLast[rmsg.Channel]
+		}
 
-	if hasOurCallbackID {
-		return
+		// Is this really the message we just sent
+		if lastmsg == rmsg.Timestamp {
+			return
+		}
 	}
 
 	if rmsg.SubType == "message_deleted" {
