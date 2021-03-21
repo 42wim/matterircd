@@ -26,7 +26,4 @@ require (
 	gopkg.in/yaml.v3 v3.0.0-20200605160147-a5ece683394c // indirect
 )
 
-//replace github.com/nlopes/slack v0.6.0 => github.com/matterbridge/slack v0.1.1-0.20191208194820-95190f11bfb6
-//replace github.com/42wim/matterbridge => ../matterbridge-client
-
-go 1.13
+go 1.14

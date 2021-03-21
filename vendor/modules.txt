@@ -1,8 +1,10 @@
 # github.com/blang/semver v3.5.1+incompatible
 github.com/blang/semver
 # github.com/davecgh/go-spew v1.1.1
+## explicit
 github.com/davecgh/go-spew/spew
 # github.com/desertbit/timer v0.0.0-20180107155436-c41aec40b27f
+## explicit
 github.com/desertbit/timer
 # github.com/dyatlov/go-opengraph v0.0.0-20180429202543-816b6608b3c8
 github.com/dyatlov/go-opengraph/opengraph
@@ -13,14 +15,17 @@ github.com/fsnotify/fsnotify
 # github.com/go-asn1-ber/asn1-ber v1.4.1
 github.com/go-asn1-ber/asn1-ber
 # github.com/google/gops v0.3.11
+## explicit
 github.com/google/gops/agent
 github.com/google/gops/internal
 github.com/google/gops/signal
 # github.com/google/uuid v1.1.1
 github.com/google/uuid
 # github.com/gorilla/websocket v1.4.2
+## explicit
 github.com/gorilla/websocket
 # github.com/hashicorp/golang-lru v0.5.4
+## explicit
 github.com/hashicorp/golang-lru
 github.com/hashicorp/golang-lru/simplelru
 # github.com/hashicorp/hcl v1.0.0
@@ -35,12 +40,16 @@ github.com/hashicorp/hcl/json/parser
 github.com/hashicorp/hcl/json/scanner
 github.com/hashicorp/hcl/json/token
 # github.com/jpillora/backoff v1.0.0
+## explicit
 github.com/jpillora/backoff
 # github.com/konsorten/go-windows-terminal-sequences v1.0.3
 github.com/konsorten/go-windows-terminal-sequences
+# github.com/kr/pretty v0.2.0
+## explicit
 # github.com/magiconair/properties v1.8.1
 github.com/magiconair/properties
 # github.com/matterbridge/logrus-prefixed-formatter v0.5.3-0.20200523233437-d971309a77ba
+## explicit
 github.com/matterbridge/logrus-prefixed-formatter
 # github.com/mattermost/go-i18n v1.11.0
 github.com/mattermost/go-i18n/i18n
@@ -50,6 +59,7 @@ github.com/mattermost/go-i18n/i18n/translation
 # github.com/mattermost/ldap v0.0.0-20191128190019-9f62ba4b8d4d
 github.com/mattermost/ldap
 # github.com/mattermost/mattermost-server/v5 v5.25.2
+## explicit
 github.com/mattermost/mattermost-server/v5/mlog
 github.com/mattermost/mattermost-server/v5/model
 github.com/mattermost/mattermost-server/v5/services/timezones
@@ -62,12 +72,17 @@ github.com/mattn/go-isatty
 # github.com/mattn/go-runewidth v0.0.9
 github.com/mattn/go-runewidth
 # github.com/mgutz/ansi v0.0.0-20170206155736-9520e82c474b
+## explicit
 github.com/mgutz/ansi
 # github.com/mitchellh/mapstructure v1.2.3
+## explicit
 github.com/mitchellh/mapstructure
 # github.com/muesli/reflow v0.1.0
+## explicit
 github.com/muesli/reflow/ansi
 github.com/muesli/reflow/wordwrap
+# github.com/onsi/gomega v1.5.0
+## explicit
 # github.com/pborman/uuid v1.2.0
 github.com/pborman/uuid
 # github.com/pelletier/go-toml v1.7.0
@@ -77,8 +92,10 @@ github.com/pkg/errors
 # github.com/pmezard/go-difflib v1.0.0
 github.com/pmezard/go-difflib/difflib
 # github.com/sirupsen/logrus v1.6.0
+## explicit
 github.com/sirupsen/logrus
 # github.com/slack-go/slack v0.8.1
+## explicit
 github.com/slack-go/slack
 github.com/slack-go/slack/internal/backoff
 github.com/slack-go/slack/internal/errorsx
@@ -86,6 +103,7 @@ github.com/slack-go/slack/internal/misc
 github.com/slack-go/slack/internal/timex
 github.com/slack-go/slack/slackutilsx
 # github.com/sorcix/irc v1.1.4
+## explicit
 github.com/sorcix/irc
 # github.com/spf13/afero v1.2.2
 github.com/spf13/afero
@@ -95,13 +113,18 @@ github.com/spf13/cast
 # github.com/spf13/jwalterweatherman v1.1.0
 github.com/spf13/jwalterweatherman
 # github.com/spf13/pflag v1.0.5
+## explicit
 github.com/spf13/pflag
 # github.com/spf13/viper v1.7.0
+## explicit
 github.com/spf13/viper
 # github.com/stretchr/testify v1.6.1
+## explicit
 github.com/stretchr/testify/assert
 # github.com/subosito/gotenv v1.2.0
 github.com/subosito/gotenv
+# github.com/x-cray/logrus-prefixed-formatter v0.5.2
+## explicit
 # go.uber.org/atomic v1.6.0
 go.uber.org/atomic
 # go.uber.org/multierr v1.5.0
@@ -114,6 +137,7 @@ go.uber.org/zap/internal/color
 go.uber.org/zap/internal/exit
 go.uber.org/zap/zapcore
 # golang.org/x/crypto v0.0.0-20200728195943-123391ffb6de
+## explicit
 golang.org/x/crypto/bcrypt
 golang.org/x/crypto/blowfish
 golang.org/x/crypto/ssh/terminal
@@ -131,6 +155,8 @@ golang.org/x/text/internal/tag
 golang.org/x/text/language
 golang.org/x/text/transform
 golang.org/x/text/unicode/norm
+# golang.org/x/tools v0.0.0-20200529172331-a64b76657301
+## explicit
 # gopkg.in/ini.v1 v1.55.0
 gopkg.in/ini.v1
 # gopkg.in/natefinch/lumberjack.v2 v2.0.0
@@ -138,4 +164,5 @@ gopkg.in/natefinch/lumberjack.v2
 # gopkg.in/yaml.v2 v2.2.8
 gopkg.in/yaml.v2
 # gopkg.in/yaml.v3 v3.0.0-20200605160147-a5ece683394c
+## explicit
 gopkg.in/yaml.v3
