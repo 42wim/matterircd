@@ -825,8 +825,6 @@ func (u *User) loginTo(protocol string) error {
 	u.User = info.User
 	u.MentionKeys = info.MentionKeys
 
-	go u.handleEventChan()
-
 	return nil
 }
 
