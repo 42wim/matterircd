@@ -94,6 +94,9 @@ func (u *User) handleEventChan() {
 		case *bridge.ReactionAddEvent, *bridge.ReactionRemoveEvent:
 			u.handleReactionEvent(e)
 		case *bridge.LogoutEvent:
+			if statePath := u.v.GetString(u.br.Protocol() + ".lastviewedsavefile"); statePath != "" {
+				saveLastViewedAtStateFile(statePath, u.lastViewedAt)
+			}
 			return
 		}
 	}
@@ -591,7 +594,10 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 		// We used to stored last viewed at if present.
 		u.lastViewedAtMutex.RLock()
 		if lastViewedAt, ok := u.lastViewedAt[brchannel.ID]; ok {
-			since = lastViewedAt + 1
+			// But only use the stored last viewed if it's later than what the server knows.
+			if lastViewedAt > since {
+				since = lastViewedAt + 1
+			}
 		}
 		u.lastViewedAtMutex.RUnlock()
 		// post everything to the channel you haven't seen yet
@@ -833,6 +839,9 @@ func (u *User) logoutFrom(protocol string) error {
 	logger.Debug("logging out from", protocol)
 
 	u.Srv.Logout(u)
+	if statePath := u.v.GetString(u.br.Protocol() + ".lastviewedsavefile"); statePath != "" {
+		saveLastViewedAtStateFile(statePath, u.lastViewedAt)
+	}
 	return nil
 }
 
