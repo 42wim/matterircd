@@ -965,6 +965,14 @@ func (u *User) loadLastViewedAt() map[string]int64 {
 		return make(map[string]int64)
 	}
 
+	if _, err := os.Stat(statePath); os.IsNotExist(err) {
+		logger.Debug("No saved lastViewedAt, using empty values")
+		lastViewedAt := make(map[string]int64)
+		// We also want to dump out/create the lastViewedAt state file.
+		saveLastViewedAtStateFile(statePath, lastViewedAt)
+		return lastViewedAt
+	}
+
 	staleDuration := u.v.GetString("mattermost.lastviewedstaleduration")
 	lastViewedAt, err := loadLastViewedAtStateFile(statePath, staleDuration)
 	if err != nil {
