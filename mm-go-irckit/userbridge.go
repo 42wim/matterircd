@@ -591,13 +591,15 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 		if since == 0 {
 			continue
 		}
-		// We used to stored last viewed at if present.
+
+		// We use the stored LastViewedAt if present as we can't
+		// always trust that the Mattermost server has updated the
+		// last viewed at for the channel. This ensures we receive
+		// *all* msgs missed since matterircd was last
+		// running/connected (PR#361).
 		u.lastViewedAtMutex.RLock()
 		if lastViewedAt, ok := u.lastViewedAt[brchannel.ID]; ok {
-			// But only use the stored last viewed if it's later than what the server knows.
-			if lastViewedAt > since {
-				since = lastViewedAt + 1
-			}
+			since = lastViewedAt + 1
 		}
 		u.lastViewedAtMutex.RUnlock()
 		// post everything to the channel you haven't seen yet
