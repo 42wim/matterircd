@@ -58,7 +58,7 @@ func NewUserBridge(c net.Conn, srv Server, cfg *viper.Viper) *User {
 	u.msgMap = make(map[string]map[string]int)
 	u.msgCounter = make(map[string]int)
 	u.updateCounter = make(map[string]time.Time)
-	u.eventChan = make(chan *bridge.Event, 1000)
+	u.eventChan = make(chan *bridge.Event)
 
 	// used for login
 	u.createService("mattermost", "loginservice")
