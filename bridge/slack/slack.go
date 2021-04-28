@@ -89,7 +89,7 @@ func (s *Slack) List() (map[string]string, error) {
 
 	params := slack.GetConversationsParameters{
 		Cursor:          "",
-		ExcludeArchived: "true",
+		ExcludeArchived: true,
 		Limit:           100,
 		Types:           []string{"public_channel", "private_channel", "mpim"},
 	}
@@ -319,7 +319,7 @@ func (s *Slack) GetChannels() []*bridge.ChannelInfo {
 
 	params := slack.GetConversationsParameters{
 		Cursor:          "",
-		ExcludeArchived: "true",
+		ExcludeArchived: true,
 		Limit:           100,
 		Types:           []string{"public_channel", "private_channel", "mpim"},
 	}

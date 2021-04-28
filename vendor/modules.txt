@@ -14,7 +14,7 @@ github.com/francoispqt/gojay
 github.com/fsnotify/fsnotify
 # github.com/go-asn1-ber/asn1-ber v1.4.1
 github.com/go-asn1-ber/asn1-ber
-# github.com/google/gops v0.3.11
+# github.com/google/gops v0.3.18
 ## explicit
 github.com/google/gops/agent
 github.com/google/gops/internal
@@ -42,8 +42,6 @@ github.com/hashicorp/hcl/json/token
 # github.com/jpillora/backoff v1.0.0
 ## explicit
 github.com/jpillora/backoff
-# github.com/konsorten/go-windows-terminal-sequences v1.0.3
-github.com/konsorten/go-windows-terminal-sequences
 # github.com/kr/pretty v0.2.0
 ## explicit
 # github.com/magiconair/properties v1.8.1
@@ -74,10 +72,10 @@ github.com/mattn/go-runewidth
 # github.com/mgutz/ansi v0.0.0-20170206155736-9520e82c474b
 ## explicit
 github.com/mgutz/ansi
-# github.com/mitchellh/mapstructure v1.2.3
+# github.com/mitchellh/mapstructure v1.4.1
 ## explicit
 github.com/mitchellh/mapstructure
-# github.com/muesli/reflow v0.1.0
+# github.com/muesli/reflow v0.2.0
 ## explicit
 github.com/muesli/reflow/ansi
 github.com/muesli/reflow/wordwrap
@@ -91,10 +89,10 @@ github.com/pelletier/go-toml
 github.com/pkg/errors
 # github.com/pmezard/go-difflib v1.0.0
 github.com/pmezard/go-difflib/difflib
-# github.com/sirupsen/logrus v1.6.0
+# github.com/sirupsen/logrus v1.8.1
 ## explicit
 github.com/sirupsen/logrus
-# github.com/slack-go/slack v0.8.1
+# github.com/slack-go/slack v0.9.0
 ## explicit
 github.com/slack-go/slack
 github.com/slack-go/slack/internal/backoff
@@ -115,7 +113,7 @@ github.com/spf13/jwalterweatherman
 # github.com/spf13/pflag v1.0.5
 ## explicit
 github.com/spf13/pflag
-# github.com/spf13/viper v1.7.0
+# github.com/spf13/viper v1.7.1
 ## explicit
 github.com/spf13/viper
 # github.com/stretchr/testify v1.6.1
@@ -144,7 +142,7 @@ golang.org/x/crypto/ssh/terminal
 # golang.org/x/net v0.0.0-20200501053045-e0ff5e5a1de5
 golang.org/x/net/html
 golang.org/x/net/html/atom
-# golang.org/x/sys v0.0.0-20200515095857-1151b9dac4a9
+# golang.org/x/sys v0.0.0-20210217105451-b926d437f341
 golang.org/x/sys/internal/unsafeheader
 golang.org/x/sys/unix
 golang.org/x/sys/windows
