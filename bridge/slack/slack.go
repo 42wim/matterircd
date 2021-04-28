@@ -536,21 +536,33 @@ func (s *Slack) handleSlack() {
 			s.handleActionMisc(ev.User, ev.Item.Channel, msg)
 		case *slack.StarAddedEvent:
 			logger.Debugf("StarAdded msg %#v", ev)
+			if ev.Item.Message == nil {
+				continue
+			}
 			ts := formatTS(ev.Item.Message.Timestamp)
 			msg := "[M " + ts + "] Message starred (" + ev.Item.Message.Text + ")"
 			s.handleActionMisc(ev.User, ev.Item.Channel, msg)
 		case *slack.StarRemovedEvent:
 			logger.Debugf("StarRemoved msg %#v", ev)
+			if ev.Item.Message == nil {
+				continue
+			}
 			ts := formatTS(ev.Item.Message.Timestamp)
 			msg := "[M " + ts + "] Message unstarred (" + ev.Item.Message.Text + ")"
 			s.handleActionMisc(ev.User, ev.Item.Channel, msg)
 		case *slack.PinAddedEvent:
 			logger.Debugf("PinAdded msg %#v", ev)
+			if ev.Item.Message == nil {
+				continue
+			}
 			ts := formatTS(ev.Item.Message.Timestamp)
 			msg := "[M " + ts + "] Message pinned (" + ev.Item.Message.Text + ")"
 			s.handleActionMisc(ev.User, ev.Item.Channel, msg)
 		case *slack.PinRemovedEvent:
 			logger.Debugf("PinRemoved msg %#v", ev)
+			if ev.Item.Message == nil {
+				continue
+			}
 			ts := formatTS(ev.Item.Message.Timestamp)
 			msg := "[M " + ts + "] Message unpinned (" + ev.Item.Message.Text + ")"
 			s.handleActionMisc(ev.User, ev.Item.Channel, msg)
