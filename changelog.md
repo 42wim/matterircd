@@ -1,3 +1,19 @@
+# v0.24.1
+
+## Enhancement
+
+- mattermost: Don't show warning if lastViewedAt state file doesn't exist, also create it early (#423)
+- slack: update vendored library
+
+## Bugfix
+
+- mattermost: Fix ordering of events (such as code blocks) (#419)
+- mattermost: Save last viewed at state on logout and only use stored last viewed at if newer than what the server knows (#422)
+- slack: Make sure receiving item message isn't nil (slack). Fixes #428 (#429)
+
+This release couldn't exist without the following contributors:
+@hloeung
+
 # v0.24.0
 
 ## New features
