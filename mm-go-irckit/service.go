@@ -319,10 +319,6 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 		}
 
 		for _, post := range strings.Split(p.Message, "\n") {
-			if post == "" {
-				continue
-			}
-
 			switch { // nolint:dupl
 			case u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" && strings.HasPrefix(args[0], "#"):
 				threadMsgID := u.prefixContext("", p.Id, p.ParentId, "")

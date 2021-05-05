@@ -839,10 +839,6 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	}
 
 	for _, msg := range msgs {
-		if msg == "" {
-			continue
-		}
-
 		switch {
 		// DirectMessage
 		case channelType == "D":
