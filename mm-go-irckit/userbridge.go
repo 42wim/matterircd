@@ -385,7 +385,10 @@ func (u *User) handleReactionEvent(event interface{}) {
 		reaction = e.Reaction
 	case *bridge.ReactionRemoveEvent:
 		if !u.v.GetBool(u.br.Protocol() + ".hidereplies") {
-			nick := sanitizeNick(e.Sender.Nick)
+			nick := "(none)"
+			if e.ParentUser != nil {
+				nick = sanitizeNick(e.ParentUser.Nick)
+			}
 			message = fmt.Sprintf(" (re @%s: %s)", nick, e.Message)
 		}
 		text = "removed reaction: "
