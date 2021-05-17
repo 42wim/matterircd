@@ -649,8 +649,13 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 				nick = botname
 			}
 
+			codeBlock := false
 			for _, post := range strings.Split(p.Message, "\n") {
-				if post == "" {
+				if post == "```" {
+					codeBlock = !codeBlock
+				}
+				// skip empty lines for anything not part of a code block.
+				if !codeBlock && post == "" {
 					continue
 				}
 
@@ -668,7 +673,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 				}
 
 				replayMsg := fmt.Sprintf("[%s] %s", ts.Format("15:04"), post)
-				if u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" {
+				if (u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext")) && u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" {
 					threadMsgID := u.prefixContext("", p.Id, p.ParentId, "")
 					replayMsg = u.formatContextMessage(ts.Format("15:04"), threadMsgID, post)
 				}
@@ -710,13 +715,7 @@ func (u *User) MsgUser(toUser *User, msg string) {
 func (u *User) MsgSpoofUser(sender *User, rcvuser string, msg string) {
 	msg = wordwrap.String(msg, 440)
 	lines := strings.Split(msg, "\n")
-
 	for _, l := range lines {
-		l = strings.TrimSpace(l)
-		if len(l) == 0 {
-			continue
-		}
-
 		u.Encode(&irc.Message{
 			Prefix: &irc.Prefix{
 				Name: sender.Nick,
