@@ -318,7 +318,16 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 			nick = botname
 		}
 
+		codeBlock := false
 		for _, post := range strings.Split(p.Message, "\n") {
+			if post == "```" {
+				codeBlock = !codeBlock
+			}
+			// skip empty lines for anything not part of a code block.
+			if !codeBlock && post == "" {
+				continue
+			}
+
 			switch { // nolint:dupl
 			case u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" && strings.HasPrefix(args[0], "#"):
 				threadMsgID := u.prefixContext("", p.Id, p.ParentId, "")

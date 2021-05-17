@@ -838,7 +838,16 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		dmchannel = name
 	}
 
+	codeBlock := false
 	for _, msg := range msgs {
+		if msg == "```" {
+			codeBlock = !codeBlock
+		}
+		// skip empty lines for anything not part of a code block.
+		if !codeBlock && msg == "" {
+			continue
+		}
+
 		switch {
 		// DirectMessage
 		case channelType == "D":

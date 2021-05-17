@@ -646,7 +646,16 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 				nick = botname
 			}
 
+			codeBlock := false
 			for _, post := range strings.Split(p.Message, "\n") {
+				if post == "```" {
+					codeBlock = !codeBlock
+				}
+				// skip empty lines for anything not part of a code block.
+				if !codeBlock && post == "" {
+					continue
+				}
+
 				if showReplayHdr {
 					date := ts.Format("2006-01-02 15:04:05")
 					channame := brchannel.Name
