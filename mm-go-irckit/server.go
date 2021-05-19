@@ -439,6 +439,8 @@ outerloop:
 				u.Real = msg.Trailing
 			case irc.PASS:
 				u.Pass = msg.Params
+			case irc.JOIN:
+				s.EncodeMessage(u, irc.ERR_NOTREGISTERED, []string{"*"}, "Please register first")
 			}
 
 			if u.Nick == "" || u.User == "" {
