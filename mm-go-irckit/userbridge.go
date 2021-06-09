@@ -814,8 +814,10 @@ func (u *User) loginTo(protocol string) error {
 
 	switch protocol {
 	case "slack":
+		u.eventChan = make(chan *bridge.Event)
 		u.br, err = slack.New(u.v, u.Credentials, u.eventChan, u.addUsersToChannels)
 	case "mattermost":
+		u.eventChan = make(chan *bridge.Event)
 		u.br, _, err = mattermost.New(u.v, u.Credentials, u.eventChan, u.addUsersToChannels)
 	}
 
