@@ -1,3 +1,15 @@
+# v0.24.2
+
+## Bugfix
+
+- general: Return ERR_NOTREGISTERED when trying to join before registration (#434)
+- mattermost: Fix incorrect nick for reaction removal (#433)
+- mattermost: Preserve leading whitespace and for code blocks, new/empty lines. Fixes #420 (#432)
+- slack,mattermost: Use unbuffered eventChan for slack/mattermost. Fixes #426 (#436)
+
+This release couldn't exist without the following contributors:
+@hloeung, @Peter4825
+
 # v0.24.1
 
 ## Enhancement
