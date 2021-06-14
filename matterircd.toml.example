@@ -24,6 +24,9 @@ gops = false
 #TLSKey = "/etc/pki/tls/matterircd/key.pem"
 #TLSCert = "/etc/pki/tls/matterircd/cer.pem"
 
+# Override handshake timeout (in seconds)
+#HandshakeTimeout = 10
+
 #PasteBufferTimeout specifies the amount of time in milliseconds that
 #messages get kept in matterircd internal buffer before being sent to
 #mattermost or slack.
