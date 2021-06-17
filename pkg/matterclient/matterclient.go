@@ -168,6 +168,10 @@ func (m *Client) Login() error {
 	go m.checkConnection(ctx)
 
 	if m.AntiIdle {
+		if m.AntiIdleChan == "" {
+			// do anti idle on town-square, every installation should have this channel
+			m.AntiIdleChan = "town-square"
+		}
 		channels := m.GetChannels()
 		for _, channel := range channels {
 			if channel.Name == m.AntiIdleChan {
@@ -711,8 +715,11 @@ func (m *Client) HandleRatelimit(name string, resp *model.Response) error {
 }
 
 func (m *Client) antiIdle(ctx context.Context, channelID string, interval int) {
-	m.logger.Debugf("starting antiIdle for %s every %d secs", channelID, interval)
+	if interval == 0 {
+		interval = 60
+	}
 
+	m.logger.Debugf("starting antiIdle for %s every %d secs", channelID, interval)
 	ticker := time.NewTicker(time.Second * time.Duration(interval))
 
 	for {
