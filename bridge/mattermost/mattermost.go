@@ -68,8 +68,18 @@ func (m *Mattermost) loginToMattermost(onWsConnect func()) (*matterclient.Client
 		mc.Credentials.NoTLS = true
 	}
 
-	// do anti idle on town-square, every installation should have this channel
 	mc.AntiIdle = !m.v.GetBool("mattermost.DisableAutoView") || m.v.GetBool("mattermost.ForceAntiIdle")
+	if mc.AntiIdle {
+		mc.AntiIdleChan = m.v.GetString("mattermost.AntiIdleChannel")
+		if mc.AntiIdleChan == "" {
+			// do anti idle on town-square, every installation should have this channel
+			mc.AntiIdleChan = "town-square"
+		}
+		mc.AntiIdleIntvl = m.v.GetInt("mattermost.AntiIdleInterval")
+		if mc.AntiIdleIntvl == 0 {
+			mc.AntiIdleIntvl = 60
+		}
+	}
 	mc.OnWsConnect = onWsConnect
 
 	if m.v.GetBool("debug") {

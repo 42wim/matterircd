@@ -65,6 +65,8 @@ type Client struct {
 	MessageChan   chan *Message
 	WsClient      *model.WebSocketClient
 	AntiIdle      bool
+	AntiIdleChan  string
+	AntiIdleIntvl int
 	WsQuit        bool
 	WsConnected   bool
 	OnWsConnect   func()
@@ -168,8 +170,8 @@ func (m *Client) Login() error {
 	if m.AntiIdle {
 		channels := m.GetChannels()
 		for _, channel := range channels {
-			if channel.Name == "town-square" {
-				go m.antiIdle(ctx, channel.Id)
+			if channel.Name == m.AntiIdleChan {
+				go m.antiIdle(ctx, channel.Id, m.AntiIdleIntvl)
 
 				continue
 			}
@@ -708,10 +710,10 @@ func (m *Client) HandleRatelimit(name string, resp *model.Response) error {
 	return nil
 }
 
-func (m *Client) antiIdle(ctx context.Context, channelID string) {
-	m.logger.Debugf("starting antiIdle for %s", channelID)
+func (m *Client) antiIdle(ctx context.Context, channelID string, interval int) {
+	m.logger.Debugf("starting antiIdle for %s every %d secs", channelID, interval)
 
-	ticker := time.NewTicker(time.Second * 60)
+	ticker := time.NewTicker(time.Second * time.Duration(interval))
 
 	for {
 		select {

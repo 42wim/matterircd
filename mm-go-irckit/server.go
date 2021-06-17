@@ -234,7 +234,7 @@ func (s *server) Channel(channelID string) Channel {
 		if err != nil {
 			// don't error on our special channels
 			if !strings.HasPrefix(channelID, "&") {
-				logger.Errorf("didn't find channel %s: %s", channelID, err)
+				logger.Errorf("didn't find channel %s (%s): %s", channelID, name, err)
 			}
 			info = &bridge.ChannelInfo{}
 		}
