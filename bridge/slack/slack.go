@@ -676,10 +676,10 @@ func (s *Slack) getSlackUserFromMessage(rmsg *slack.MessageEvent) (*slack.User, 
 			if err != nil {
 				suser.Profile.DisplayName = "bot"
 				suser.Name = "bot"
+			} else {
+				suser.Profile.DisplayName = bot.Name
+				suser.Name = bot.Name
 			}
-
-			suser.Profile.DisplayName = bot.Name
-			suser.Name = bot.Name
 		}
 
 		return suser, nil
