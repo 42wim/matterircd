@@ -404,6 +404,10 @@ func (s *server) handshake(u *User) error {
 	u.Host = u.ResolveHost()
 	go u.Decode()
 
+	timeout := u.v.GetInt("HandshakeTimeout")
+	if timeout == 0 {
+		timeout = 10
+	}
 	// Consume N messages then give up.
 	i := handshakeMsgTolerance
 	// Read messages until we filled in USER details.
@@ -478,7 +482,7 @@ outerloop:
 			}
 
 			return err
-		case <-time.After(10 * time.Second):
+		case <-time.After(time.Duration(timeout) * time.Second):
 			return ErrHandshakeFailed
 		}
 	}
