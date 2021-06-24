@@ -105,6 +105,8 @@ PrefixMainTeam = false
 DisableAutoView = false
 # Force and enable anti-idle. Useful for when DisableAutoView.
 # ForceAntiIdle = true
+# AntiIdleChannel = "town-square"
+# AntiIdleInterval = 60
 
 # If users set a Nickname, matterircd could either choose that or the Username
 # to display in the IRC client. The option PreferNickname controls that, the
