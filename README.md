@@ -202,7 +202,8 @@ We're also on the `#matterircd` channel on irc.freenode.net
 You'll need to get the `MMAUTHTOKEN` from your cookies, login via the browser first.  
 Then in chrome run F12 - application - Storage/cookies - select your mattermostdomain and fetch the `MMAUTHTOKEN`
 
-Now login with `/msg mattermost login <username> MMAUTHTOKEN=<mytoken>`
+Now login with `/msg mattermost login <username> MMAUTHTOKEN=<mytoken>`  
+(if this doesn't work, try `/msg mattermost login <username> token=<mytoken>`)
 
 See <https://github.com/42wim/matterircd/issues/29> for more information
 
