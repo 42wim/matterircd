@@ -21,6 +21,8 @@ import (
 	"github.com/spf13/viper"
 )
 
+const systemUser = "system"
+
 type UserBridge struct {
 	Srv         Server
 	Credentials bridge.Credentials
@@ -183,8 +185,8 @@ func (u *User) handleChannelAddEvent(event *bridge.ChannelAddEvent) {
 
 		ch.Join(ghost)
 
-		if event.Adder != nil && added.Nick != event.Adder.Nick && event.Adder.Nick != "system" {
-			ch.SpoofMessage("system", "added "+added.Nick+" to the channel by "+event.Adder.Nick)
+		if event.Adder != nil && added.Nick != event.Adder.Nick && event.Adder.Nick != systemUser {
+			ch.SpoofMessage(systemUser, "added "+added.Nick+" to the channel by "+event.Adder.Nick)
 		}
 	}
 
@@ -207,8 +209,8 @@ func (u *User) handleChannelRemoveEvent(event *bridge.ChannelRemoveEvent) {
 
 		ch.Part(ghost, "")
 
-		if event.Remover != nil && removed.Nick != event.Remover.Nick && event.Remover.Nick != "system" {
-			ch.SpoofMessage("system", "removed "+removed.Nick+" from the channel by "+event.Remover.Nick)
+		if event.Remover != nil && removed.Nick != event.Remover.Nick && event.Remover.Nick != systemUser {
+			ch.SpoofMessage(systemUser, "removed "+removed.Nick+" from the channel by "+event.Remover.Nick)
 		}
 	}
 	u.saveLastViewedAt(event.ChannelID)
@@ -270,7 +272,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		}
 	}
 
-	if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
+	if (u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext")) && u.Nick != systemUser {
 		prefix := u.prefixContext(event.ChannelID, event.MessageID, event.ParentID, event.Event)
 		switch {
 		case u.v.GetBool(u.br.Protocol()+".prefixcontext") && strings.HasPrefix(event.Text, "\x01"):
@@ -649,6 +651,10 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 				nick = botname
 			}
 
+			if p.Type == "system_add_to_team" || p.Type == "system_remove_from_team" {
+				nick = systemUser
+			}
+
 			codeBlock := false
 			for _, post := range strings.Split(p.Message, "\n") {
 				if post == "```" {
@@ -673,7 +679,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 				}
 
 				replayMsg := fmt.Sprintf("[%s] %s", ts.Format("15:04"), post)
-				if (u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext")) && u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" {
+				if (u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext")) && u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" && nick != systemUser {
 					threadMsgID := u.prefixContext("", p.Id, p.ParentId, "")
 					replayMsg = u.formatContextMessage(ts.Format("15:04"), threadMsgID, post)
 				}

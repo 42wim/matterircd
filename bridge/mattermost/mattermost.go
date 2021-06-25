@@ -811,6 +811,12 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		return
 	}
 
+	if data.Type == "system_add_to_team" || data.Type == "system_remove_from_team" {
+		ghost = &bridge.UserInfo{
+			Nick: "system",
+		}
+	}
+
 	msgs := strings.Split(data.Message+replyMessage, "\n")
 
 	channelType := ""
