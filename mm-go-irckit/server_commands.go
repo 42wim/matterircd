@@ -387,7 +387,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 
 		msgID, err2 := u.br.MsgChannel(ch.ID(), msg.Trailing)
 		if err2 != nil {
-			u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+msg.Trailing+" could not be send"+err2.Error())
+			u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+msg.Trailing+" could not be sent "+err2.Error())
 			return err2
 		}
 
@@ -485,7 +485,7 @@ func parseReactionToMsg(u *User, msg *irc.Message, channelID string) bool {
 	if action == "-" {
 		err := u.br.RemoveReaction(msgID, emoji)
 		if err != nil {
-			u.MsgSpoofUser(u, u.br.Protocol(), "reaction: "+emoji+" could not be removed"+err.Error())
+			u.MsgSpoofUser(u, u.br.Protocol(), "reaction: "+emoji+" could not be removed "+err.Error())
 		}
 
 		return true
@@ -493,7 +493,7 @@ func parseReactionToMsg(u *User, msg *irc.Message, channelID string) bool {
 
 	err := u.br.AddReaction(msgID, emoji)
 	if err != nil {
-		u.MsgSpoofUser(u, u.br.Protocol(), "reaction: "+emoji+" could not be added"+err.Error())
+		u.MsgSpoofUser(u, u.br.Protocol(), "reaction: "+emoji+" could not be added "+err.Error())
 	}
 
 	return true
@@ -569,7 +569,7 @@ func parseModifyMsg(u *User, msg *irc.Message, channelID string) bool {
 		if strings.Contains(err.Error(), "permissions") {
 			return false
 		}
-		u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+text+" could not be modified"+err.Error())
+		u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+text+" could not be modified "+err.Error())
 	} else {
 		u.saveLastViewedAt(channelID)
 	}
@@ -652,7 +652,7 @@ func threadMsgChannelUser(u *User, msg *irc.Message, channelID string, toUser bo
 		msgID, err = u.br.MsgChannelThread(channelID, threadID, text)
 	}
 	if err != nil {
-		u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+text+" could not be send"+err.Error())
+		u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+text+" could not be sent "+err.Error())
 		return false
 	}
 
