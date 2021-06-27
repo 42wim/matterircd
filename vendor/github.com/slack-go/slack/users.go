@@ -524,6 +524,7 @@ func (api *Client) SetUserRealNameContextWithUser(ctx context.Context, user, rea
 			RealName: realName,
 		},
 	)
+
 	if err != nil {
 		return err
 	}
@@ -594,6 +595,7 @@ func (api *Client) SetUserCustomStatusContextWithUser(ctx context.Context, user,
 			StatusExpiration: statusExpiration,
 		},
 	)
+
 	if err != nil {
 		return err
 	}
