@@ -1,6 +1,7 @@
 package irckit
 
 import (
+	"encoding/binary"
 	"encoding/gob"
 	"errors"
 	"fmt"
@@ -10,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	bolt "go.etcd.io/bbolt"
 
 	"github.com/42wim/matterircd/bridge"
 	"github.com/42wim/matterircd/bridge/mattermost"
@@ -33,8 +36,8 @@ type UserBridge struct {
 	lastViewedAtMutex sync.RWMutex     //nolint:structcheck
 	lastViewedAt      map[string]int64 //nolint:structcheck
 
-	lastViewedAtSaved int64          //nolint:structcheck
-	msgCounter        map[string]int //nolint:structcheck
+	lastViewedAtDB *bolt.DB       //nolint:structcheck
+	msgCounter     map[string]int //nolint:structcheck
 
 	msgLastMutex sync.RWMutex         //nolint:structcheck
 	msgLast      map[string][2]string //nolint:structcheck
@@ -46,7 +49,7 @@ type UserBridge struct {
 	updateCounter      map[string]time.Time //nolint:structcheck
 }
 
-func NewUserBridge(c net.Conn, srv Server, cfg *viper.Viper) *User {
+func NewUserBridge(c net.Conn, srv Server, cfg *viper.Viper, db *bolt.DB) *User {
 	u := NewUser(&conn{
 		Conn:    c,
 		Encoder: irc.NewEncoder(c),
@@ -55,7 +58,7 @@ func NewUserBridge(c net.Conn, srv Server, cfg *viper.Viper) *User {
 
 	u.Srv = srv
 	u.v = cfg
-	u.lastViewedAt = u.loadLastViewedAt()
+	u.lastViewedAtDB = db
 	u.msgLast = make(map[string][2]string)
 	u.msgMap = make(map[string]map[string]int)
 	u.msgCounter = make(map[string]int)
@@ -96,9 +99,6 @@ func (u *User) handleEventChan() {
 		case *bridge.ReactionAddEvent, *bridge.ReactionRemoveEvent:
 			u.handleReactionEvent(e)
 		case *bridge.LogoutEvent:
-			if statePath := u.v.GetString(u.br.Protocol() + ".lastviewedsavefile"); statePath != "" {
-				saveLastViewedAtStateFile(statePath, u.lastViewedAt)
-			}
 			return
 		}
 	}
@@ -596,21 +596,44 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 		if since == 0 {
 			continue
 		}
-		// We used to stored last viewed at if present.
-		u.lastViewedAtMutex.RLock()
-		if lastViewedAt, ok := u.lastViewedAt[brchannel.ID]; ok {
-			// But only use the stored last viewed if it's later than what the server knows.
-			if lastViewedAt > since {
-				since = lastViewedAt + 1
-			}
+
+		logSince := "server"
+		channame := brchannel.Name
+		if !brchannel.DM {
+			channame = fmt.Sprintf("#%s", brchannel.Name)
 		}
-		u.lastViewedAtMutex.RUnlock()
+
+		// We used to stored last viewed at if present.
+		var lastViewedAt int64
+		key := brchannel.ID
+		u.lastViewedAtDB.View(func(tx *bolt.Tx) error {
+			b := tx.Bucket([]byte(u.User))
+			if v := b.Get([]byte(key)); v != nil {
+				lastViewedAt = int64(binary.LittleEndian.Uint64(v))
+			}
+			return nil
+		})
+
+		// XXX: backwards compatibility with older DB format (pre bbolt).
+		// TODO: Remove in future releases.
+		if lastViewedAt == 0 {
+			u.lastViewedAtMutex.RLock()
+			lastViewedAt = u.lastViewedAt[brchannel.ID]
+			u.lastViewedAtMutex.RUnlock()
+		}
+
+		// But only use the stored last viewed if it's later than what the server knows.
+		if lastViewedAt > since {
+			since = lastViewedAt + 1
+			logSince = "stored"
+		}
+
 		// post everything to the channel you haven't seen yet
 		postlist := u.br.GetPostsSince(brchannel.ID, since)
 		if postlist == nil {
 			// if the channel is not from the primary team id, we can't get posts
 			if brchannel.TeamID == u.br.GetMe().TeamID {
-				logger.Errorf("something wrong with getPostsSince for channel %s (%s)", brchannel.ID, brchannel.Name)
+				logger.Errorf("something wrong with getPostsSince for %s for channel %s (%s)", u.Nick, channame, brchannel.ID)
 			}
 			continue
 		}
@@ -667,14 +690,12 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 
 				if showReplayHdr {
 					date := ts.Format("2006-01-02 15:04:05")
-					channame := brchannel.Name
 					if brchannel.DM {
-						spoof(nick, fmt.Sprintf("\x02Replaying since %s\x0f", date))
+						spoof(nick, fmt.Sprintf("\x02Replaying msgs since %s\x0f", date))
 					} else {
-						spoof("matterircd", fmt.Sprintf("\x02Replaying since %s\x0f", date))
-						channame = fmt.Sprintf("#%s", brchannel.Name)
+						spoof("matterircd", fmt.Sprintf("\x02Replaying msgs since %s\x0f", date))
 					}
-					logger.Infof("Replaying logs for %s (%s) since %s", brchannel.ID, channame, date)
+					logger.Infof("Replaying msgs for %s for %s (%s) since %s (%s)", u.Nick, channame, brchannel.ID, date, logSince)
 					showReplayHdr = false
 				}
 
@@ -826,7 +847,6 @@ func (u *User) loginTo(protocol string) error {
 		u.eventChan = make(chan *bridge.Event)
 		u.br, _, err = mattermost.New(u.v, u.Credentials, u.eventChan, u.addUsersToChannels)
 	}
-
 	if err != nil {
 		return err
 	}
@@ -841,6 +861,18 @@ func (u *User) loginTo(protocol string) error {
 	u.User = info.User
 	u.MentionKeys = info.MentionKeys
 
+	// XXX: backwards compatibility with older DB format (pre bbolt).
+	// TODO: Remove in future releases.
+	u.lastViewedAt = u.loadLastViewedAt()
+
+	err = u.lastViewedAtDB.Update(func(tx *bolt.Tx) error {
+		_, err2 := tx.CreateBucketIfNotExists([]byte(u.User))
+		return err2
+	})
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -849,9 +881,6 @@ func (u *User) logoutFrom(protocol string) error {
 	logger.Debug("logging out from", protocol)
 
 	u.Srv.Logout(u)
-	if statePath := u.v.GetString(u.br.Protocol() + ".lastviewedsavefile"); statePath != "" {
-		saveLastViewedAtStateFile(statePath, u.lastViewedAt)
-	}
 	return nil
 }
 
@@ -969,18 +998,11 @@ func (u *User) updateLastViewed(channelID string) {
 	}()
 }
 
+// TODO: This has been replaced by bbolt. Remove in future releases.
 func (u *User) loadLastViewedAt() map[string]int64 {
-	statePath := u.v.GetString("mattermost.lastviewedsavefile")
-	if statePath == "" {
-		return make(map[string]int64)
-	}
-
+	statePath := u.v.GetString("mattermost.lastviewedsavefile") + ".migrated"
 	if _, err := os.Stat(statePath); os.IsNotExist(err) {
-		logger.Debug("No saved lastViewedAt, using empty values")
-		lastViewedAt := make(map[string]int64)
-		// We also want to dump out/create the lastViewedAt state file.
-		saveLastViewedAtStateFile(statePath, lastViewedAt)
-		return lastViewedAt
+		return make(map[string]int64)
 	}
 
 	staleDuration := u.v.GetString("mattermost.lastviewedstaleduration")
@@ -990,69 +1012,28 @@ func (u *User) loadLastViewedAt() map[string]int64 {
 		return make(map[string]int64)
 	}
 
+	logger.Warning("Found old last viewed at state file, loading and removing")
 	logger.Info("Loaded lastViewedAt from ", time.Unix(lastViewedAt["__LastViewedStateSavedTime__"]/1000, 0))
-	u.lastViewedAtSaved = model.GetMillis()
+	os.Remove(statePath)
 
 	return lastViewedAt
 }
 
-const defaultSaveInterval = int64((5 * time.Minute) / time.Millisecond)
-
 func (u *User) saveLastViewedAt(channelID string) {
-	u.lastViewedAtMutex.Lock()
-	defer u.lastViewedAtMutex.Unlock()
-	if channelID != "" {
-		u.lastViewedAt[channelID] = model.GetMillis()
-	}
+	currentTime := make([]byte, 8)
+	binary.LittleEndian.PutUint64(currentTime, uint64(model.GetMillis()))
 
-	statePath := u.v.GetString(u.br.Protocol() + ".lastviewedsavefile")
-	if statePath == "" {
-		return
-	}
-
-	// We only want to save or dump out saved lastViewedAt on new
-	// messages after X time.
-	var saveInterval int64
-	val, err := time.ParseDuration(u.v.GetString(u.br.Protocol() + ".lastviewedsaveinterval"))
+	err := u.lastViewedAtDB.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(u.User))
+		err := b.Put([]byte(channelID), currentTime)
+		return err
+	})
 	if err != nil {
-		saveInterval = defaultSaveInterval
-	} else {
-		saveInterval = val.Milliseconds()
-	}
-	if u.lastViewedAtSaved < (model.GetMillis() - saveInterval) {
-		saveLastViewedAtStateFile(statePath, u.lastViewedAt)
-		u.lastViewedAtSaved = model.GetMillis()
+		logger.Fatal(err)
 	}
 }
 
 const lastViewedStateFormat = int64(1)
-
-func saveLastViewedAtStateFile(statePath string, lastViewedAt map[string]int64) error {
-	f, err := os.Create(statePath)
-	if err != nil {
-		logger.Debug("Unable to save lastViewedAt: ", err)
-		return err
-	}
-	defer f.Close()
-
-	currentTime := model.GetMillis()
-
-	lastViewedAt["__LastViewedStateFormat__"] = lastViewedStateFormat
-	if _, ok := lastViewedAt["__LastViewedStateCreateTime__"]; !ok {
-		lastViewedAt["__LastViewedStateCreateTime__"] = currentTime
-	}
-	lastViewedAt["__LastViewedStateSavedTime__"] = currentTime
-	// Simple checksum
-	lastViewedAt["__LastViewedStateChecksum__"] = lastViewedAt["__LastViewedStateCreateTime__"] ^ currentTime
-
-	logger.Debug("Saving lastViewedAt")
-
-	if err := gob.NewEncoder(f).Encode(lastViewedAt); err != nil {
-		return fmt.Errorf("gob encoding failed: %s", err)
-	}
-
-	return nil
-}
 
 const defaultStaleDuration = int64((30 * 24 * time.Hour) / time.Millisecond)
 

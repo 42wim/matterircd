@@ -8,6 +8,9 @@ import (
 	"net"
 	"os"
 	"strings"
+	"time"
+
+	bolt "go.etcd.io/bbolt"
 
 	"github.com/42wim/matterircd/config"
 	irckit "github.com/42wim/matterircd/mm-go-irckit"
@@ -22,6 +25,8 @@ var (
 	githash string
 	logger  *logrus.Entry
 	v       *viper.Viper
+
+	LastViewedSaveDB *bolt.DB
 )
 
 func main() {
@@ -98,6 +103,25 @@ func main() {
 		}()
 	}
 
+	mmLastViewedFile := "matterircd-lastsaved.db"
+	if statePath := v.GetString("mattermost.LastViewedSaveFile"); statePath != "" {
+		mmLastViewedFile = statePath
+	}
+	db, err := bolt.Open(mmLastViewedFile, 0600, &bolt.Options{Timeout: 1 * time.Second})
+	// XXX: backwards compatibility with older DB format (pre bbolt).
+	// TODO: Remove in future releases.
+	if err != nil && err.Error() == "invalid database" {
+		logger.Warning("Found old last viewed at state file, renaming to .migrated")
+		os.Rename(mmLastViewedFile, mmLastViewedFile+".migrated")
+		// Recall to create DB now that it no longer exists.
+		db, err = bolt.Open(mmLastViewedFile, 0600, &bolt.Options{Timeout: 1 * time.Second})
+	}
+	if err != nil {
+		logger.Fatal(err)
+	}
+	defer db.Close()
+	LastViewedSaveDB = db
+
 	// backwards compatible
 
 	if v.GetString("bind") != "" {
@@ -171,7 +195,7 @@ func start(socket net.Listener) {
 
 			logger.Infof("New connection: %s", conn.RemoteAddr())
 
-			user := irckit.NewUserBridge(conn, newsrv, v)
+			user := irckit.NewUserBridge(conn, newsrv, v, LastViewedSaveDB)
 			err = newsrv.Connect(user)
 			if err != nil {
 				logger.Errorf("Failed to join: %v", err)
