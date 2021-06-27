@@ -2,13 +2,10 @@ package irckit
 
 import (
 	"encoding/binary"
-	"encoding/gob"
-	"errors"
 	"fmt"
 	"math/rand"
 	"net"
 	"net/http"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -36,9 +33,6 @@ type UserBridge struct {
 	br          bridge.Bridger     //nolint:structcheck
 	inprogress  bool               //nolint:structcheck
 	eventChan   chan *bridge.Event //nolint:structcheck
-
-	lastViewedAtMutex sync.RWMutex     //nolint:structcheck
-	lastViewedAt      map[string]int64 //nolint:structcheck
 
 	lastViewedAtDB *bolt.DB       //nolint:structcheck
 	msgCounter     map[string]int //nolint:structcheck
@@ -628,14 +622,6 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			lastViewedAt = since
 		}
 
-		// XXX: backwards compatibility with older DB format (pre bbolt).
-		// TODO: Remove in future releases.
-		if lastViewedAt == 0 {
-			u.lastViewedAtMutex.RLock()
-			lastViewedAt = u.lastViewedAt[brchannel.ID]
-			u.lastViewedAtMutex.RUnlock()
-		}
-
 		// But only use the stored last viewed if it's later than what the server knows.
 		if lastViewedAt > since {
 			since = lastViewedAt + 1
@@ -778,14 +764,6 @@ func (u *User) addUserToChannelWorker6(channels <-chan *bridge.ChannelInfo, thro
 		if err != nil {
 			logger.Errorf("something wrong with u.lastViewedAtDB.View for %s for channel %s (%s)", u.Nick, channame, brchannel.ID)
 			lastViewedAt = since
-		}
-
-		// XXX: backwards compatibility with older DB format (pre bbolt).
-		// TODO: Remove in future releases.
-		if lastViewedAt == 0 {
-			u.lastViewedAtMutex.RLock()
-			lastViewedAt = u.lastViewedAt[brchannel.ID]
-			u.lastViewedAtMutex.RUnlock()
 		}
 
 		// But only use the stored last viewed if it's later than what the server knows.
@@ -1031,10 +1009,6 @@ func (u *User) loginTo(protocol string) error {
 	u.User = info.User
 	u.MentionKeys = info.MentionKeys
 
-	// XXX: backwards compatibility with older DB format (pre bbolt).
-	// TODO: Remove in future releases.
-	u.lastViewedAt = u.loadLastViewedAt()
-
 	err = u.lastViewedAtDB.Update(func(tx *bolt.Tx) error {
 		_, err2 := tx.CreateBucketIfNotExists([]byte(u.User))
 		return err2
@@ -1172,27 +1146,6 @@ func (u *User) updateLastViewed(channelID string) {
 	}()
 }
 
-// TODO: This has been replaced by bbolt. Remove in future releases.
-func (u *User) loadLastViewedAt() map[string]int64 {
-	statePath := u.v.GetString("mattermost.lastviewedsavefile") + ".migrated"
-	if _, err := os.Stat(statePath); os.IsNotExist(err) {
-		return make(map[string]int64)
-	}
-
-	staleDuration := u.v.GetString("mattermost.lastviewedstaleduration")
-	lastViewedAt, err := loadLastViewedAtStateFile(statePath, staleDuration)
-	if err != nil {
-		logger.Warning("Unable to load saved lastViewedAt, using empty values: ", err)
-		return make(map[string]int64)
-	}
-
-	logger.Warning("Found old last viewed at state file, loading and removing")
-	logger.Info("Loaded lastViewedAt from ", time.Unix(lastViewedAt["__LastViewedStateSavedTime__"]/1000, 0))
-	os.Remove(statePath)
-
-	return lastViewedAt
-}
-
 func (u *User) saveLastViewedAt(channelID string) {
 	currentTime := make([]byte, 8)
 	binary.LittleEndian.PutUint64(currentTime, uint64(model.GetMillis()))
@@ -1205,57 +1158,6 @@ func (u *User) saveLastViewedAt(channelID string) {
 	if err != nil {
 		logger.Fatal(err)
 	}
-}
-
-const lastViewedStateFormat = int64(1)
-
-const defaultStaleDuration = int64((30 * 24 * time.Hour) / time.Millisecond)
-
-func loadLastViewedAtStateFile(statePath string, staleDuration string) (map[string]int64, error) {
-	f, err := os.Open(statePath)
-	if err != nil {
-		logger.Debug("Unable to load lastViewedAt: ", err)
-		return nil, err
-	}
-	defer f.Close()
-
-	var lastViewedAt map[string]int64
-	err = gob.NewDecoder(f).Decode(&lastViewedAt)
-	if err != nil {
-		logger.Debug("Unable to load lastViewedAt: ", err)
-		return nil, err
-	}
-
-	if lastViewedAt["__LastViewedStateFormat__"] != lastViewedStateFormat {
-		logger.Debug("State format version mismatch: ", lastViewedAt["__LastViewedStateFormat__"], " vs. ", lastViewedStateFormat)
-		return nil, errors.New("version mismatch")
-	}
-	checksum := lastViewedAt["__LastViewedStateChecksum__"]
-	createtime := lastViewedAt["__LastViewedStateCreateTime__"]
-	savedtime := lastViewedAt["__LastViewedStateSavedTime__"]
-	if createtime^savedtime != checksum {
-		logger.Debug("Checksum mismatch: (saved checksum, state file creation, last saved time)", checksum, createtime, savedtime)
-		return nil, errors.New("checksum mismatch")
-	}
-
-	currentTime := model.GetMillis()
-
-	// Check if stale, time last saved older than defined
-	var stale int64
-	val, err := time.ParseDuration(staleDuration)
-	if err != nil {
-		stale = defaultStaleDuration
-	} else {
-		stale = val.Milliseconds()
-	}
-
-	lastSaved, ok := lastViewedAt["__LastViewedStateSavedTime__"]
-	if !ok || (lastSaved > 0 && lastSaved < currentTime-stale) {
-		logger.Debug("File stale? Last saved too old: ", time.Unix(lastViewedAt["__LastViewedStateSavedTime__"]/1000, 0))
-		return nil, errors.New("stale lastViewedAt state file")
-	}
-
-	return lastViewedAt, nil
 }
 
 func (u *User) getMattermostVersion() string {
