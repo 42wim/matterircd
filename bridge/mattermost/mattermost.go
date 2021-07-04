@@ -938,7 +938,12 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 					MessageID:   data.Id,
 					Event:       rmsg.Event,
 					ParentID:    data.ParentId,
+					Multiline:   len(msgs) > 1,
 				},
+			}
+
+			if len(msgs) > 1 && m.v.GetBool("ootrace") {
+				logger.Infof("OOTRACE: sending msg %s to eventChan on %d: %d", msg, time.Now().UnixNano(), len(m.eventChan))
 			}
 
 			m.eventChan <- event
@@ -950,6 +955,10 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	}
 
 	m.handleFileEvent(channelType, ghost, data, rmsg)
+
+	if len(msgs) > 1 && m.v.GetBool("ootrace") {
+		logger.Infof("OOTRACE: %s sent %v", m.mc.GetUser(data.UserId).Username, data.Message)
+	}
 
 	logger.Debugf("handleWsActionPost() user %s sent %s", m.mc.GetUser(data.UserId).Username, data.Message)
 	logger.Debugf("%#v", data)
