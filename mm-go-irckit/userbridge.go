@@ -67,7 +67,8 @@ func NewUserBridge(c net.Conn, srv Server, cfg *viper.Viper, db *bolt.DB) *User 
 	u.msgMap = make(map[string]map[string]int)
 	u.msgCounter = make(map[string]int)
 	u.updateCounter = make(map[string]time.Time)
-	u.eventChan = make(chan *bridge.Event, 1000)
+	logger.Info("OOTRACE: creating non-buffered eventchan on start-up")
+	u.eventChan = make(chan *bridge.Event)
 
 	// used for login
 	u.createService("mattermost", "loginservice")
@@ -981,10 +982,8 @@ func (u *User) loginTo(protocol string) error {
 
 	switch protocol {
 	case "slack":
-		u.eventChan = make(chan *bridge.Event)
 		u.br, err = slack.New(u.v, u.Credentials, u.eventChan, u.addUsersToChannels)
 	case "mattermost":
-		u.eventChan = make(chan *bridge.Event)
 		if strings.HasPrefix(u.getMattermostVersion(), "6.") {
 			u.br, _, err = mattermost6.New(u.v, u.Credentials, u.eventChan, u.addUsersToChannels)
 		} else {
