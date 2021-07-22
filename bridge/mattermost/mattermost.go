@@ -838,7 +838,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		msgs[len(msgs)-1] = msgs[len(msgs)-1] + postfix
 
 		// check if we have an edited direct message (channels have __)
-		name := m.GetChannelName(data.ChannelId)
+		name := m.mc.GetChannelName(data.ChannelId)
 		if strings.Contains(name, "__") {
 			channelType = "D"
 		}
@@ -846,12 +846,15 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	}
 
 	codeBlock := false
-	for _, msg := range msgs {
+	for msgIndex, msg := range msgs {
 		if msg == "```" {
 			codeBlock = !codeBlock
 		}
 		// skip empty lines for anything not part of a code block.
 		if !codeBlock && msg == "" {
+			if len(msgs) > 1 && m.v.GetBool("ootrace") {
+				logger.Infof("OOTRACE: #%s: %s: skipping msg %d to eventChan", dmchannel, data.Id, msgIndex)
+			}
 			continue
 		}
 
@@ -939,14 +942,19 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 					Event:       rmsg.Event,
 					ParentID:    data.ParentId,
 					Multiline:   len(msgs) > 1,
+					MessageIdx:  msgIndex,
 				},
 			}
 
 			if len(msgs) > 1 && m.v.GetBool("ootrace") {
-				logger.Infof("OOTRACE: sending msg %s to eventChan on %d: %d", msg, time.Now().UnixNano(), len(m.eventChan))
+				logger.Infof("OOTRACE: #%s: %s: sending  msg %d %s to eventChan on %d: %d", dmchannel, data.Id, msgIndex, msg, time.Now().UnixNano(), len(m.eventChan))
 			}
 
 			m.eventChan <- event
+
+			if len(msgs) > 1 && m.v.GetBool("ootrace") {
+				logger.Infof("OOTRACE: #%s: %s: sent     msg %d %s to eventChan on %d: %d", dmchannel, data.Id, msgIndex, msg, time.Now().UnixNano(), len(m.eventChan))
+			}
 
 			if data.Type == "me" {
 				break
@@ -957,7 +965,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	m.handleFileEvent(channelType, ghost, data, rmsg)
 
 	if len(msgs) > 1 && m.v.GetBool("ootrace") {
-		logger.Infof("OOTRACE: %s sent %v", m.mc.GetUser(data.UserId).Username, data.Message)
+		logger.Infof("OOTRACE: #%s: %s: %s sent %v", dmchannel, data.Id, m.mc.GetUser(data.UserId).Username, data.Message)
 	}
 
 	logger.Debugf("handleWsActionPost() user %s sent %s", m.mc.GetUser(data.UserId).Username, data.Message)
