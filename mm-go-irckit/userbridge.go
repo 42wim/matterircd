@@ -23,6 +23,11 @@ import (
 
 const systemUser = "system"
 
+type msgOrder struct {
+	id  string
+	seq int
+}
+
 type UserBridge struct {
 	Srv         Server
 	Credentials bridge.Credentials
@@ -42,6 +47,9 @@ type UserBridge struct {
 	msgMapMutex sync.RWMutex              //nolint:structcheck
 	msgMap      map[string]map[string]int //nolint:structcheck
 
+	msgOrderMutex sync.RWMutex        //nolint:structcheck
+	msgOrder      map[string]msgOrder //nolint:structcheck
+
 	updateCounterMutex sync.Mutex           //nolint:structcheck
 	updateCounter      map[string]time.Time //nolint:structcheck
 }
@@ -58,6 +66,7 @@ func NewUserBridge(c net.Conn, srv Server, cfg *viper.Viper) *User {
 	u.lastViewedAt = u.loadLastViewedAt()
 	u.msgLast = make(map[string][2]string)
 	u.msgMap = make(map[string]map[string]int)
+	u.msgOrder = make(map[string]msgOrder)
 	u.msgCounter = make(map[string]int)
 	u.updateCounter = make(map[string]time.Time)
 	logger.Info("OOTRACE: creating non-buffered eventchan on start-up")
@@ -294,6 +303,17 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		if u.v.GetBool("ootrace") && event.Multiline {
 			name := u.br.GetChannelName(event.ChannelID)
 			logger.Infof("OOTRACE: %s: %s: got      msg %d %s on %d", name, event.MessageID, event.MessageIdx, event.Text, time.Now().UnixNano())
+
+			u.msgOrderMutex.RLock()
+			msgOrderID := u.msgOrder[event.ChannelID].id
+			msgOrderSeq := u.msgOrder[event.ChannelID].seq
+			u.msgOrderMutex.RUnlock()
+			if msgOrderID == event.MessageID && msgOrderSeq > event.MessageIdx {
+				logger.Warnf("OOTRACE: %s: %s: Message out of order, got msg %d %s but seen %d", name, event.MessageID, event.MessageIdx, event.Text, msgOrderSeq)
+			}
+			u.msgOrderMutex.Lock()
+			u.msgOrder[event.ChannelID] = msgOrder{id: event.MessageID, seq: event.MessageIdx}
+			u.msgOrderMutex.Unlock()
 		}
 		ch.SpoofMessage(nick, event.Text)
 	}
