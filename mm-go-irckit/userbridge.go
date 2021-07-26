@@ -308,7 +308,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 			msgOrderID := u.msgOrder[event.ChannelID].id
 			msgOrderSeq := u.msgOrder[event.ChannelID].seq
 			u.msgOrderMutex.RUnlock()
-			if msgOrderID == event.MessageID && msgOrderSeq > event.MessageIdx {
+			if msgOrderID == event.MessageID && msgOrderSeq > event.MessageIdx && !(event.MessageEdit && msgOrderSeq == 0) {
 				logger.Warnf("OOTRACE: %s: %s: Message out of order, got msg %d %s but seen %d", name, event.MessageID, event.MessageIdx, event.Text, msgOrderSeq)
 			}
 			u.msgOrderMutex.Lock()

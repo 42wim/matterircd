@@ -826,10 +826,12 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 
 	dmchannel, _ := rmsg.Data["channel_name"].(string)
 
+	msgEdited := false
 	// add an edited/deleted string when messages are edited/deleted
 	if len(msgs) > 0 && (rmsg.Event == model.WEBSOCKET_EVENT_POST_EDITED ||
 		rmsg.Event == model.WEBSOCKET_EVENT_POST_DELETED) {
 		postfix := " (edited)"
+		msgEdited = true
 
 		if rmsg.Event == model.WEBSOCKET_EVENT_POST_DELETED {
 			postfix = " (deleted)"
@@ -943,6 +945,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 					ParentID:    data.ParentId,
 					Multiline:   len(msgs) > 1,
 					MessageIdx:  msgIndex,
+					MessageEdit: msgEdited,
 				},
 			}
 
