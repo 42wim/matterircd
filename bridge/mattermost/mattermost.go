@@ -736,7 +736,6 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		return
 	}
 
-	replyMessage := ""
 	if data.ParentId != "" {
 		parentPost, resp := m.mc.Client.GetPost(data.ParentId, "")
 		if resp.Error != nil {
@@ -746,7 +745,8 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 
 			if !m.v.GetBool("mattermost.hidereplies") {
 				parentMessage := maybeShorten(parentPost.Message, m.v.GetInt("mattermost.ShortenRepliesTo"), "@", m.v.GetBool("mattermost.unicode"))
-				replyMessage = fmt.Sprintf(" (re @%s: %s)", parentGhost.Nick, parentMessage)
+				replyMessage := fmt.Sprintf(" (re @%s: %s)", parentGhost.Nick, parentMessage)
+				data.Message = strings.TrimRight(data.Message, "\n") + replyMessage
 			}
 		}
 	}
@@ -817,7 +817,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		}
 	}
 
-	msgs := strings.Split(data.Message+replyMessage, "\n")
+	msgs := strings.Split(data.Message, "\n")
 
 	channelType := ""
 	if t, ok := props["channel_type"].(string); ok {
