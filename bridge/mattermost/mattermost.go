@@ -266,7 +266,7 @@ func (m *Mattermost) MsgUser(userID, text string) (string, error) {
 	return m.MsgUserThread(userID, "", text)
 }
 
-func (m *Mattermost) MsgUserThread(userID, parentID, text string) (string, error) {
+func (m *Mattermost) MsgUserThread(userID, rootID, text string) (string, error) {
 	props := make(map[string]interface{})
 
 	props["matterircd_"+m.mc.User.Id] = true
@@ -282,7 +282,7 @@ func (m *Mattermost) MsgUserThread(userID, parentID, text string) (string, error
 	post := &model.Post{
 		ChannelId: dchannel.Id,
 		Message:   text,
-		RootId:    parentID,
+		RootId:    rootID,
 	}
 
 	post.SetProps(props)
@@ -300,14 +300,14 @@ func (m *Mattermost) MsgChannel(channelID, text string) (string, error) {
 	return m.MsgChannelThread(channelID, "", text)
 }
 
-func (m *Mattermost) MsgChannelThread(channelID, parentID, text string) (string, error) {
+func (m *Mattermost) MsgChannelThread(channelID, rootID, text string) (string, error) {
 	props := make(map[string]interface{})
 	props["matterircd_"+m.mc.User.Id] = true
 
 	post := &model.Post{
 		ChannelId: channelID,
 		Message:   text,
-		RootId:    parentID,
+		RootId:    rootID,
 	}
 
 	post.SetProps(props)
@@ -737,8 +737,8 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	}
 
 	replyMessage := ""
-	if data.ParentId != "" {
-		parentPost, resp := m.mc.Client.GetPost(data.ParentId, "")
+	if data.RootId != "" {
+		parentPost, resp := m.mc.Client.GetPost(data.RootId, "")
 		if resp.Error != nil {
 			logger.Errorf("Unable to get parent post for %#v", data)
 		} else {
@@ -874,7 +874,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 				ChannelID: data.ChannelId,
 				MessageID: data.Id,
 				Event:     rmsg.Event,
-				ParentID:  data.ParentId,
+				RootID:    data.RootId,
 			}
 
 			if ghost.Me {
@@ -915,7 +915,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 					Files:       m.getFilesFromData(data),
 					MessageID:   data.Id,
 					Event:       rmsg.Event,
-					ParentID:    data.ParentId,
+					RootID:      data.RootId,
 				},
 			}
 
@@ -937,7 +937,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 					Files:       m.getFilesFromData(data),
 					MessageID:   data.Id,
 					Event:       rmsg.Event,
-					ParentID:    data.ParentId,
+					RootID:      data.RootId,
 				},
 			}
 
@@ -978,7 +978,7 @@ func (m *Mattermost) handleFileEvent(channelType string, ghost *bridge.UserInfo,
 		ChannelType: channelType,
 		ChannelID:   data.ChannelId,
 		MessageID:   data.Id,
-		ParentID:    data.ParentId,
+		RootID:      data.RootId,
 	}
 
 	event.Data = fileEvent

@@ -941,11 +941,11 @@ func (s *Slack) Connected() bool {
 	return s.connected
 }
 
-func (s *Slack) MsgUserThread(username, parentID, text string) (string, error) {
+func (s *Slack) MsgUserThread(username, rootID, text string) (string, error) {
 	return "", nil
 }
 
-func (s *Slack) MsgChannelThread(username, parentID, text string) (string, error) {
+func (s *Slack) MsgChannelThread(username, rootID, text string) (string, error) {
 	return "", nil
 }
 

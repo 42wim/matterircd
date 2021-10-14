@@ -19,9 +19,9 @@ type Bridger interface {
 	Connected() bool
 
 	MsgUser(userID, text string) (string, error)
-	MsgUserThread(userID, parentID, text string) (string, error)
+	MsgUserThread(userID, rootID, text string) (string, error)
 	MsgChannel(channelID, text string) (string, error)
-	MsgChannelThread(channelID, parentID, text string) (string, error)
+	MsgChannelThread(channelID, rootID, text string) (string, error)
 
 	AddReaction(msgID, emoji string) error
 	RemoveReaction(msgID, emoji string) error
@@ -124,7 +124,7 @@ type ChannelMessageEvent struct {
 	Files       []*File
 	MessageID   string
 	Event       string
-	ParentID    string
+	RootID      string
 }
 
 type ChannelTopicEvent struct {
@@ -141,7 +141,7 @@ type DirectMessageEvent struct {
 	Files     []*File
 	MessageID string
 	Event     string
-	ParentID  string
+	RootID    string
 }
 
 type FileEvent struct {
@@ -151,7 +151,7 @@ type FileEvent struct {
 	ChannelType string
 	Files       []*File
 	MessageID   string
-	ParentID    string
+	RootID      string
 }
 
 type ReactionAddEvent struct {
@@ -189,7 +189,7 @@ type Message struct {
 	Account   string    `json:"account"`
 	Event     string    `json:"event"`
 	Protocol  string    `json:"protocol"`
-	ParentID  string    `json:"parent_id"`
+	RootID    string    `json:"root_id"`
 	Timestamp time.Time `json:"timestamp"`
 	ID        string    `json:"id"`
 	Extra     map[string][]interface{}

@@ -334,14 +334,14 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 
 			switch { // nolint:dupl
 			case u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" && strings.HasPrefix(args[0], "#") && nick != "system":
-				threadMsgID := u.prefixContext("", p.Id, p.ParentId, "")
+				threadMsgID := u.prefixContext("", p.Id, p.RootId, "")
 				scrollbackMsg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, post)
 				spoof(nick, scrollbackMsg)
 			case strings.HasPrefix(args[0], "#"):
 				scrollbackMsg := "[" + ts.Format("2006-01-02 15:04") + "] " + post
 				spoof(nick, scrollbackMsg)
 			case u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost":
-				threadMsgID := u.prefixContext("", p.Id, p.ParentId, "")
+				threadMsgID := u.prefixContext("", p.Id, p.RootId, "")
 				scrollbackMsg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, post)
 				u.MsgSpoofUser(scrollbackUser, nick, scrollbackMsg)
 			default:
@@ -358,11 +358,11 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 			fileMsg := "download file - " + fname
 			switch { // nolint:dupl
 			case u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" && strings.HasPrefix(args[0], "#"):
-				threadMsgID := u.prefixContext("", p.Id, p.ParentId, "")
+				threadMsgID := u.prefixContext("", p.Id, p.RootId, "")
 				scrollbackMsg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, fileMsg)
 				spoof(nick, scrollbackMsg)
 			case u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost":
-				threadMsgID := u.prefixContext("", p.Id, p.ParentId, "")
+				threadMsgID := u.prefixContext("", p.Id, p.RootId, "")
 				scrollbackMsg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, fileMsg)
 				u.MsgSpoofUser(scrollbackUser, nick, scrollbackMsg)
 			case strings.HasPrefix(args[0], "#"):

@@ -582,13 +582,13 @@ func parseThreadID(u *User, msg *irc.Message, channelID string) (string, string)
 	matches := re.FindStringSubmatch(msg.Trailing)
 	if len(matches) == 2 {
 		msg.Trailing = strings.Replace(msg.Trailing, matches[0], "", 1)
-		parentID := matches[1]
+		rootID := matches[1]
 		newMessage := msg.Trailing
 		// Also strip separator in message.
 		if len(newMessage) > 1 {
 			newMessage = newMessage[1:]
 		}
-		return parentID, newMessage
+		return rootID, newMessage
 	}
 
 	re = regexp.MustCompile(`^\@\@!!`)
@@ -601,16 +601,16 @@ func parseThreadID(u *User, msg *irc.Message, channelID string) (string, string)
 		if !ok {
 			return "", ""
 		}
-		parentID := msgLast[0]
+		rootID := msgLast[0]
 		if msgLast[1] != "" {
-			parentID = msgLast[1]
+			rootID = msgLast[1]
 		}
 		newMessage := msg.Trailing
 		// Also strip separator in message.
 		if len(newMessage) > 1 {
 			newMessage = newMessage[1:]
 		}
-		return parentID, newMessage
+		return rootID, newMessage
 	}
 
 	re = regexp.MustCompile(`^\@\@([0-9a-f]{3})`)

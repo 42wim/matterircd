@@ -142,7 +142,7 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 			prefixUser = event.Receiver.User
 		}
 
-		prefix := u.prefixContext(prefixUser, event.MessageID, event.ParentID, event.Event)
+		prefix := u.prefixContext(prefixUser, event.MessageID, event.RootID, event.Event)
 
 		switch {
 		case u.v.GetBool(u.br.Protocol()+".prefixcontext") && strings.HasPrefix(event.Text, "\x01"):
@@ -273,7 +273,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 	}
 
 	if (u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext")) && u.Nick != systemUser {
-		prefix := u.prefixContext(event.ChannelID, event.MessageID, event.ParentID, event.Event)
+		prefix := u.prefixContext(event.ChannelID, event.MessageID, event.RootID, event.Event)
 		switch {
 		case u.v.GetBool(u.br.Protocol()+".prefixcontext") && strings.HasPrefix(event.Text, "\x01"):
 			event.Text = strings.Replace(event.Text, "\x01ACTION ", "\x01ACTION "+prefix+" ", 1)
@@ -303,7 +303,7 @@ func (u *User) handleFileEvent(event *bridge.FileEvent) {
 	for _, fname := range event.Files {
 		fileMsg := "download file - " + fname.Name
 		if u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" {
-			threadMsgID := u.prefixContext(event.ChannelID, event.MessageID, event.ParentID, "")
+			threadMsgID := u.prefixContext(event.ChannelID, event.MessageID, event.RootID, "")
 			fileMsg = u.formatContextMessage("", threadMsgID, fileMsg)
 		}
 
@@ -422,7 +422,7 @@ func (u *User) handleReactionEvent(event interface{}) {
 			Sender:    sender,
 			MessageID: messageID,
 			Event:     "reaction",
-			ParentID:  messageID,
+			RootID:    messageID,
 		}
 
 		u.handleDirectMessageEvent(e)
@@ -436,7 +436,7 @@ func (u *User) handleReactionEvent(event interface{}) {
 		Sender:      sender,
 		MessageID:   messageID,
 		Event:       "reaction",
-		ParentID:    messageID,
+		RootID:      messageID,
 	}
 
 	u.handleChannelMessageEvent(e)
@@ -680,7 +680,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 
 				replayMsg := fmt.Sprintf("[%s] %s", ts.Format("15:04"), post)
 				if (u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext")) && u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" && nick != systemUser {
-					threadMsgID := u.prefixContext("", p.Id, p.ParentId, "")
+					threadMsgID := u.prefixContext("", p.Id, p.RootId, "")
 					replayMsg = u.formatContextMessage(ts.Format("15:04"), threadMsgID, post)
 				}
 				spoof(nick, replayMsg)
@@ -693,7 +693,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			for _, fname := range u.br.GetFileLinks(p.FileIds) {
 				fileMsg := "download file - " + fname
 				if u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" {
-					threadMsgID := u.prefixContext("", p.Id, p.ParentId, "")
+					threadMsgID := u.prefixContext("", p.Id, p.RootId, "")
 					fileMsg = u.formatContextMessage(ts.Format("15:04"), threadMsgID, fileMsg)
 				}
 				spoof(nick, fileMsg)
@@ -899,15 +899,15 @@ func (u *User) prefixContextModified(channelID, messageID string) string {
 	return fmt.Sprintf("[%03x]", currentcount)
 }
 
-func (u *User) prefixContext(channelID, messageID, parentID, event string) string {
+func (u *User) prefixContext(channelID, messageID, rootID, event string) string {
 	if u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" {
-		if parentID == "" {
+		if rootID == "" {
 			return fmt.Sprintf("[@@%s]", messageID)
 		}
 		if u.v.GetBool(u.br.Protocol() + ".unicode") {
-			return fmt.Sprintf("[↪@@%s]", parentID)
+			return fmt.Sprintf("[↪@@%s]", rootID)
 		}
-		return fmt.Sprintf("[->@@%s]", parentID)
+		return fmt.Sprintf("[->@@%s]", rootID)
 	}
 
 	u.msgMapMutex.Lock()
@@ -922,17 +922,17 @@ func (u *User) prefixContext(channelID, messageID, parentID, event string) strin
 		ok                        bool
 	)
 
-	if parentID != "" {
+	if rootID != "" {
 		if _, ok = u.msgMap[channelID]; !ok {
 			u.msgMap[channelID] = make(map[string]int)
 		}
 
-		if _, ok = u.msgMap[channelID][parentID]; !ok {
+		if _, ok = u.msgMap[channelID][rootID]; !ok {
 			u.increaseMsgCounter(channelID)
-			u.msgMap[channelID][parentID] = u.msgCounter[channelID]
+			u.msgMap[channelID][rootID] = u.msgCounter[channelID]
 		}
 
-		parentcount = u.msgMap[channelID][parentID]
+		parentcount = u.msgMap[channelID][rootID]
 	}
 
 	currentcount = u.increaseMsgCounter(channelID)
@@ -943,7 +943,7 @@ func (u *User) prefixContext(channelID, messageID, parentID, event string) strin
 
 	u.msgMap[channelID][messageID] = u.msgCounter[channelID]
 
-	if parentID != "" {
+	if rootID != "" {
 		return fmt.Sprintf("[%03x->%03x]", currentcount, parentcount)
 	}
 
