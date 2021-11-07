@@ -295,7 +295,7 @@ func GetUsersOptionPresence(n bool) GetUsersOption {
 func newUserPagination(c *Client, options ...GetUsersOption) (up UserPagination) {
 	up = UserPagination{
 		c:     c,
-		limit: 1000, // per slack api documentation.
+		limit: 200, // per slack api documentation.
 	}
 
 	for _, opt := range options {
@@ -329,7 +329,9 @@ func (t UserPagination) Failure(err error) error {
 }
 
 func (t UserPagination) Next(ctx context.Context) (_ UserPagination, err error) {
-	var resp *userResponseFull
+	var (
+		resp *userResponseFull
+	)
 
 	if t.c == nil || (t.previousResp != nil && t.previousResp.Cursor == "") {
 		return t, errPaginationComplete
@@ -524,6 +526,7 @@ func (api *Client) SetUserRealNameContextWithUser(ctx context.Context, user, rea
 			RealName: realName,
 		},
 	)
+
 	if err != nil {
 		return err
 	}
@@ -594,6 +597,7 @@ func (api *Client) SetUserCustomStatusContextWithUser(ctx context.Context, user,
 			StatusExpiration: statusExpiration,
 		},
 	)
+
 	if err != nil {
 		return err
 	}

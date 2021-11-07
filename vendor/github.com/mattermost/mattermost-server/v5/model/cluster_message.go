@@ -40,8 +40,19 @@ const (
 	CLUSTER_EVENT_CLEAR_SESSION_CACHE_FOR_ALL_USERS                 = "inv_all_user_sessions"
 	CLUSTER_EVENT_INSTALL_PLUGIN                                    = "install_plugin"
 	CLUSTER_EVENT_REMOVE_PLUGIN                                     = "remove_plugin"
+	CLUSTER_EVENT_PLUGIN_EVENT                                      = "plugin_event"
 	CLUSTER_EVENT_INVALIDATE_CACHE_FOR_TERMS_OF_SERVICE             = "inv_terms_of_service"
 	CLUSTER_EVENT_BUSY_STATE_CHANGED                                = "busy_state_change"
+
+	// Gossip communication
+	CLUSTER_GOSSIP_EVENT_REQUEST_GET_LOGS             = "gossip_request_get_logs"
+	CLUSTER_GOSSIP_EVENT_RESPONSE_GET_LOGS            = "gossip_response_get_logs"
+	CLUSTER_GOSSIP_EVENT_REQUEST_GET_CLUSTER_STATS    = "gossip_request_cluster_stats"
+	CLUSTER_GOSSIP_EVENT_RESPONSE_GET_CLUSTER_STATS   = "gossip_response_cluster_stats"
+	CLUSTER_GOSSIP_EVENT_REQUEST_GET_PLUGIN_STATUSES  = "gossip_request_plugin_statuses"
+	CLUSTER_GOSSIP_EVENT_RESPONSE_GET_PLUGIN_STATUSES = "gossip_response_plugin_statuses"
+	CLUSTER_GOSSIP_EVENT_REQUEST_SAVE_CONFIG          = "gossip_request_save_config"
+	CLUSTER_GOSSIP_EVENT_RESPONSE_SAVE_CONFIG         = "gossip_response_save_config"
 
 	// SendTypes for ClusterMessage.
 	CLUSTER_SEND_BEST_EFFORT = "best_effort"
