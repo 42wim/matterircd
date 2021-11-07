@@ -94,6 +94,11 @@ type PageOpts struct {
 	PerPage int
 }
 
+type GroupStats struct {
+	GroupID          string `json:"group_id"`
+	TotalMemberCount int64  `json:"total_member_count"`
+}
+
 func (group *Group) Patch(patch *GroupPatch) {
 	if patch.Name != nil {
 		group.Name = patch.Name
@@ -134,7 +139,7 @@ func (group *Group) IsValidForCreate() *AppError {
 		return NewAppError("Group.IsValidForCreate", "model.group.source.app_error", nil, "", http.StatusBadRequest)
 	}
 
-	if len(group.RemoteId) > GroupRemoteIDMaxLength || (len(group.RemoteId) == 0 && group.requiresRemoteId()) {
+	if len(group.RemoteId) > GroupRemoteIDMaxLength || (group.RemoteId == "" && group.requiresRemoteId()) {
 		return NewAppError("Group.IsValidForCreate", "model.group.remote_id.app_error", nil, "", http.StatusBadRequest)
 	}
 
@@ -152,7 +157,7 @@ func (group *Group) requiresRemoteId() bool {
 
 func (group *Group) IsValidForUpdate() *AppError {
 	if !IsValidId(group.Id) {
-		return NewAppError("Group.IsValidForUpdate", "model.group.id.app_error", nil, "", http.StatusBadRequest)
+		return NewAppError("Group.IsValidForUpdate", "app.group.id.app_error", nil, "", http.StatusBadRequest)
 	}
 	if group.CreateAt == 0 {
 		return NewAppError("Group.IsValidForUpdate", "model.group.create_at.app_error", nil, "", http.StatusBadRequest)
@@ -207,4 +212,10 @@ func GroupPatchFromJson(data io.Reader) *GroupPatch {
 	var groupPatch *GroupPatch
 	json.NewDecoder(data).Decode(&groupPatch)
 	return groupPatch
+}
+
+func GroupStatsFromJson(data io.Reader) *GroupStats {
+	var groupStats *GroupStats
+	json.NewDecoder(data).Decode(&groupStats)
+	return groupStats
 }
