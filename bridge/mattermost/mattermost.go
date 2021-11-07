@@ -73,17 +73,16 @@ func (m *Mattermost) loginToMattermost(onWsConnect func()) (*matterclient.Client
 	mc.AntiIdleIntvl = m.v.GetInt("mattermost.AntiIdleInterval")
 	mc.OnWsConnect = onWsConnect
 
+	mc.Timeout = m.v.GetInt("ClientTimeout")
+	if mc.Timeout == 0 {
+		mc.Timeout = 10
+	}
+
 	if m.v.GetBool("debug") {
 		mc.SetLogLevel("debug")
 	}
 
 	mc.Credentials.SkipTLSVerify = m.v.GetBool("mattermost.SkipTLSVerify")
-
-	/*
-		if m.v.GetBool("debug") {
-			mc.SetLogLevel("debug")
-		}
-	*/
 
 	logger.Infof("login as %s (team: %s) on %s", m.credentials.Login, m.credentials.Team, m.credentials.Server)
 

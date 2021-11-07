@@ -71,6 +71,7 @@ type Client struct {
 	WsConnected   bool
 	OnWsConnect   func()
 	reconnectBusy bool
+	Timeout       int
 
 	logger      *logrus.Entry
 	rootLogger  *logrus.Logger
@@ -224,7 +225,7 @@ func (m *Client) initClient(b *backoff.Backoff) error {
 		},
 		Proxy: http.ProxyFromEnvironment,
 	}
-	m.Client.HttpClient.Timeout = time.Second * 10
+	m.Client.HttpClient.Timeout = time.Second * time.Duration(m.Timeout)
 
 	// handle MMAUTHTOKEN and personal token
 	if err := m.handleLoginToken(); err != nil {
