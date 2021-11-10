@@ -190,6 +190,8 @@ linters:
     - exhaustivestruct
     - forbidigo
     - wrapcheck
+    - ireturn
+    - varnamelen
 
 # rules to deal with reported isues
 issues:
