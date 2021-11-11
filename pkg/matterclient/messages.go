@@ -54,7 +54,7 @@ func (m *Client) GetFileLinks(filenames []string) []string {
 
 func (m *Client) GetPosts(channelID string, limit int) *model.PostList {
 	for {
-		res, resp := m.Client.GetPostsForChannel(channelID, 0, limit, "")
+		res, resp := m.Client.GetPostsForChannel(channelID, 0, limit, "", true)
 		if resp.Error == nil {
 			return res
 		}
@@ -67,7 +67,7 @@ func (m *Client) GetPosts(channelID string, limit int) *model.PostList {
 
 func (m *Client) GetPostsSince(channelID string, time int64) *model.PostList {
 	for {
-		res, resp := m.Client.GetPostsSince(channelID, time)
+		res, resp := m.Client.GetPostsSince(channelID, time, true)
 		if resp.Error == nil {
 			return res
 		}

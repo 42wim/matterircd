@@ -26,6 +26,8 @@ gops = false
 
 # Override handshake timeout (in seconds)
 #HandshakeTimeout = 10
+# Override client timeout (in seconds)
+#ClientTimeout = 10
 
 #PasteBufferTimeout specifies the amount of time in milliseconds that
 #messages get kept in matterircd internal buffer before being sent to
