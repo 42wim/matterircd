@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -13,9 +14,12 @@ import (
 
 	"github.com/42wim/matterircd/bridge"
 	"github.com/42wim/matterircd/bridge/mattermost"
+	mattermost6 "github.com/42wim/matterircd/bridge/mattermost6"
+
 	"github.com/42wim/matterircd/bridge/slack"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/mattermost/mattermost-server/v5/model"
+	model6 "github.com/mattermost/mattermost-server/v6/model"
 	"github.com/muesli/reflow/wordwrap"
 	"github.com/sorcix/irc"
 	"github.com/spf13/viper"
@@ -584,6 +588,12 @@ func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(string, string) {
 }
 
 func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throttle *time.Ticker) {
+	if strings.HasPrefix(u.getMattermostVersion(), "6.") {
+		u.addUserToChannelWorker6(channels, throttle)
+
+		return
+	}
+
 	for brchannel := range channels {
 		logger.Debug("addUserToChannelWorker", brchannel)
 
@@ -694,6 +704,133 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 				fileMsg := "download file - " + fname
 				if u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" {
 					threadMsgID := u.prefixContext("", p.Id, p.ParentId, "")
+					fileMsg = u.formatContextMessage(ts.Format("15:04"), threadMsgID, fileMsg)
+				}
+				spoof(nick, fileMsg)
+			}
+		}
+
+		if len(mmPostList.Order) > 0 {
+			if !u.v.GetBool(u.br.Protocol() + ".disableautoview") {
+				u.updateLastViewed(brchannel.ID)
+			}
+			u.saveLastViewedAt(brchannel.ID)
+		}
+	}
+}
+
+// nolint:dupl,funlen,gocognit,gocyclo,cyclop
+func (u *User) addUserToChannelWorker6(channels <-chan *bridge.ChannelInfo, throttle *time.Ticker) {
+	for brchannel := range channels {
+		logger.Debug("addUserToChannelWorker", brchannel)
+
+		<-throttle.C
+		// exclude direct messages
+		spoof := u.createSpoof(brchannel)
+
+		since := u.br.GetLastViewedAt(brchannel.ID)
+		// ignore invalid/deleted/old channels
+		if since == 0 {
+			continue
+		}
+		// We used to stored last viewed at if present.
+		u.lastViewedAtMutex.RLock()
+		if lastViewedAt, ok := u.lastViewedAt[brchannel.ID]; ok {
+			// But only use the stored last viewed if it's later than what the server knows.
+			if lastViewedAt > since {
+				since = lastViewedAt + 1
+			}
+		}
+		u.lastViewedAtMutex.RUnlock()
+		// post everything to the channel you haven't seen yet
+		postlist := u.br.GetPostsSince(brchannel.ID, since)
+		if postlist == nil {
+			// if the channel is not from the primary team id, we can't get posts
+			if brchannel.TeamID == u.br.GetMe().TeamID {
+				logger.Errorf("something wrong with getPostsSince for channel %s (%s)", brchannel.ID, brchannel.Name)
+			}
+			continue
+		}
+
+		showReplayHdr := true
+
+		mmPostList, _ := postlist.(*model6.PostList)
+		if mmPostList == nil {
+			continue
+		}
+		// traverse the order in reverse
+		for i := len(mmPostList.Order) - 1; i >= 0; i-- {
+			p := mmPostList.Posts[mmPostList.Order[i]]
+			if p.Type == model6.PostTypeJoinLeave {
+				continue
+			}
+
+			if p.DeleteAt > p.CreateAt {
+				continue
+			}
+
+			// GetPostsSince will return older messages with reaction
+			// changes since LastViewedAt. This will be confusing as
+			// the user will think it's a duplicate, or a post out of
+			// order. Plus, we don't show reaction changes when
+			// relaying messages/logs so let's skip these.
+			if p.CreateAt < since {
+				continue
+			}
+
+			ts := time.Unix(0, p.CreateAt*int64(time.Millisecond))
+
+			props := p.GetProps()
+			botname, override := props["override_username"].(string)
+			user := u.br.GetUser(p.UserId)
+			nick := user.Nick
+			if override {
+				nick = botname
+			}
+
+			if p.Type == model6.PostTypeAddToTeam || p.Type == model6.PostTypeRemoveFromTeam {
+				nick = systemUser
+			}
+
+			codeBlock := false
+			for _, post := range strings.Split(p.Message, "\n") {
+				if post == "```" {
+					codeBlock = !codeBlock
+				}
+				// skip empty lines for anything not part of a code block.
+				if !codeBlock && post == "" {
+					continue
+				}
+
+				if showReplayHdr {
+					date := ts.Format("2006-01-02 15:04:05")
+					channame := brchannel.Name
+					if brchannel.DM {
+						spoof(nick, fmt.Sprintf("\x02Replaying since %s\x0f", date))
+					} else {
+						spoof("matterircd", fmt.Sprintf("\x02Replaying since %s\x0f", date))
+						channame = fmt.Sprintf("#%s", brchannel.Name)
+					}
+					logger.Infof("Replaying logs for %s (%s) since %s", brchannel.ID, channame, date)
+					showReplayHdr = false
+				}
+
+				replayMsg := fmt.Sprintf("[%s] %s", ts.Format("15:04"), post)
+				if (u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext")) && u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" && nick != systemUser {
+					threadMsgID := u.prefixContext("", p.Id, p.RootId, "")
+					replayMsg = u.formatContextMessage(ts.Format("15:04"), threadMsgID, post)
+				}
+				spoof(nick, replayMsg)
+			}
+
+			if len(p.FileIds) == 0 {
+				continue
+			}
+
+			for _, fname := range u.br.GetFileLinks(p.FileIds) {
+				fileMsg := "download file - " + fname
+				if u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" {
+					threadMsgID := u.prefixContext("", p.Id, p.RootId, "")
 					fileMsg = u.formatContextMessage(ts.Format("15:04"), threadMsgID, fileMsg)
 				}
 				spoof(nick, fileMsg)
@@ -824,7 +961,11 @@ func (u *User) loginTo(protocol string) error {
 		u.br, err = slack.New(u.v, u.Credentials, u.eventChan, u.addUsersToChannels)
 	case "mattermost":
 		u.eventChan = make(chan *bridge.Event)
-		u.br, _, err = mattermost.New(u.v, u.Credentials, u.eventChan, u.addUsersToChannels)
+		if strings.HasPrefix(u.getMattermostVersion(), "6.") {
+			u.br, _, err = mattermost6.New(u.v, u.Credentials, u.eventChan, u.addUsersToChannels)
+		} else {
+			u.br, _, err = mattermost.New(u.v, u.Credentials, u.eventChan, u.addUsersToChannels)
+		}
 	}
 
 	if err != nil {
@@ -1101,4 +1242,22 @@ func loadLastViewedAtStateFile(statePath string, staleDuration string) (map[stri
 	}
 
 	return lastViewedAt, nil
+}
+
+func (u *User) getMattermostVersion() string {
+	proto := "https"
+
+	if u.v.GetBool("mattermost.insecure") {
+		proto = "http"
+	}
+
+	resp, err := http.Get(proto + "://" + u.Credentials.Server)
+	if err != nil {
+		logger.Errorf("Failed to get mattermost version: %s", err)
+		return ""
+	}
+
+	defer resp.Body.Close()
+
+	return resp.Header.Get("X-Version-Id")
 }

@@ -57,7 +57,10 @@ github.com/magiconair/properties
 # github.com/matterbridge/logrus-prefixed-formatter v0.5.3-0.20200523233437-d971309a77ba
 ## explicit
 github.com/matterbridge/logrus-prefixed-formatter
-# github.com/mattermost/go-i18n v1.11.0
+# github.com/matterbridge/matterclient v0.0.0-20211107234719-faca3cd42315
+## explicit
+github.com/matterbridge/matterclient
+# github.com/mattermost/go-i18n v1.11.1-0.20211013152124-5c415071e404
 github.com/mattermost/go-i18n/i18n
 github.com/mattermost/go-i18n/i18n/bundle
 github.com/mattermost/go-i18n/i18n/language
@@ -68,6 +71,11 @@ github.com/mattermost/ldap
 github.com/mattermost/logr
 github.com/mattermost/logr/format
 github.com/mattermost/logr/target
+# github.com/mattermost/logr/v2 v2.0.10
+github.com/mattermost/logr/v2
+github.com/mattermost/logr/v2/config
+github.com/mattermost/logr/v2/formatters
+github.com/mattermost/logr/v2/targets
 # github.com/mattermost/mattermost-server/v5 v5.39.1
 ## explicit
 github.com/mattermost/mattermost-server/v5/model
@@ -77,14 +85,23 @@ github.com/mattermost/mattermost-server/v5/shared/i18n
 github.com/mattermost/mattermost-server/v5/shared/markdown
 github.com/mattermost/mattermost-server/v5/shared/mlog
 github.com/mattermost/mattermost-server/v5/utils/jsonutils
+# github.com/mattermost/mattermost-server/v6 v6.0.2
+## explicit
+github.com/mattermost/mattermost-server/v6/model
+github.com/mattermost/mattermost-server/v6/services/timezones
+github.com/mattermost/mattermost-server/v6/shared/filestore
+github.com/mattermost/mattermost-server/v6/shared/i18n
+github.com/mattermost/mattermost-server/v6/shared/markdown
+github.com/mattermost/mattermost-server/v6/shared/mlog
+github.com/mattermost/mattermost-server/v6/utils/jsonutils
 # github.com/mattn/go-colorable v0.1.8
 github.com/mattn/go-colorable
-# github.com/mattn/go-isatty v0.0.13
+# github.com/mattn/go-isatty v0.0.14
+## explicit
 github.com/mattn/go-isatty
 # github.com/mattn/go-runewidth v0.0.13
 github.com/mattn/go-runewidth
 # github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d
-## explicit
 github.com/mgutz/ansi
 # github.com/minio/md5-simd v1.1.2
 github.com/minio/md5-simd
@@ -176,8 +193,6 @@ github.com/wiggin77/cfg/timeconv
 github.com/wiggin77/merror
 # github.com/wiggin77/srslog v1.0.1
 github.com/wiggin77/srslog
-# github.com/x-cray/logrus-prefixed-formatter v0.5.2
-## explicit
 # go.uber.org/atomic v1.8.0
 go.uber.org/atomic
 # go.uber.org/multierr v1.7.0
@@ -197,13 +212,15 @@ golang.org/x/crypto/blowfish
 golang.org/x/crypto/pbkdf2
 golang.org/x/crypto/scrypt
 golang.org/x/crypto/ssh/terminal
-# golang.org/x/net v0.0.0-20210614182718-04defd469f4e
+# golang.org/x/net v0.0.0-20210913180222-943fd674d43e
+## explicit
 golang.org/x/net/html
 golang.org/x/net/html/atom
 golang.org/x/net/http/httpguts
 golang.org/x/net/idna
 golang.org/x/net/publicsuffix
-# golang.org/x/sys v0.0.0-20210902050250-f475640dd07b
+# golang.org/x/sys v0.0.0-20210910150752-751e447fb3d0
+## explicit
 golang.org/x/sys/cpu
 golang.org/x/sys/internal/unsafeheader
 golang.org/x/sys/plan9
@@ -211,7 +228,8 @@ golang.org/x/sys/unix
 golang.org/x/sys/windows
 # golang.org/x/term v0.0.0-20201126162022-7de9c90e9dd1
 golang.org/x/term
-# golang.org/x/text v0.3.6
+# golang.org/x/text v0.3.7
+## explicit
 golang.org/x/text/internal/language
 golang.org/x/text/internal/language/compact
 golang.org/x/text/internal/tag

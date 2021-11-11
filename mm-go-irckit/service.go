@@ -11,6 +11,7 @@ import (
 
 	"github.com/42wim/matterircd/bridge"
 	"github.com/mattermost/mattermost-server/v5/model"
+	model6 "github.com/mattermost/mattermost-server/v6/model"
 )
 
 type CommandHandler interface {
@@ -197,18 +198,71 @@ func login(u *User, toUser *User, args []string, service string) {
 }
 
 func search(u *User, toUser *User, args []string, service string) {
+	if strings.HasPrefix(u.getMattermostVersion(), "6.") {
+		search6(u, toUser, args, service)
+
+		return
+	}
+
 	if service == "slack" {
 		u.MsgUser(toUser, "not implemented")
 		return
 	}
 
 	list := u.br.SearchPosts(strings.Join(args, " "))
+
 	if list == nil || list.(*model.PostList) == nil || len(list.(*model.PostList).Order) == 0 {
 		u.MsgUser(toUser, "no results")
 		return
 	}
 
 	postlist := list.(*model.PostList)
+
+	for i := len(postlist.Order) - 1; i >= 0; i-- {
+		if postlist.Posts[postlist.Order[i]].DeleteAt > postlist.Posts[postlist.Order[i]].CreateAt {
+			continue
+		}
+
+		timestamp := time.Unix(postlist.Posts[postlist.Order[i]].CreateAt/1000, 0).Format("January 02, 2006 15:04")
+		channelname := u.br.GetChannelName(postlist.Posts[postlist.Order[i]].ChannelId)
+
+		nick := u.br.GetUser(postlist.Posts[postlist.Order[i]].UserId).Nick
+
+		u.MsgUser(toUser, "#"+channelname+" <"+nick+"> "+timestamp)
+		u.MsgUser(toUser, strings.Repeat("=", len("#"+channelname+" <"+nick+"> "+timestamp)))
+
+		for _, post := range strings.Split(postlist.Posts[postlist.Order[i]].Message, "\n") {
+			if post != "" {
+				u.MsgUser(toUser, post)
+			}
+		}
+
+		if len(postlist.Posts[postlist.Order[i]].FileIds) > 0 {
+			for _, fname := range u.br.GetFileLinks(postlist.Posts[postlist.Order[i]].FileIds) {
+				u.MsgUser(toUser, "download file - "+fname)
+			}
+		}
+
+		u.MsgUser(toUser, "")
+		u.MsgUser(toUser, "")
+	}
+}
+
+// nolint:dupl,cyclop
+func search6(u *User, toUser *User, args []string, service string) {
+	if service == "slack" {
+		u.MsgUser(toUser, "not implemented")
+		return
+	}
+
+	list := u.br.SearchPosts(strings.Join(args, " "))
+
+	if list == nil || list.(*model6.PostList) == nil || len(list.(*model6.PostList).Order) == 0 {
+		u.MsgUser(toUser, "no results")
+		return
+	}
+
+	postlist, _ := list.(*model6.PostList)
 
 	for i := len(postlist.Order) - 1; i >= 0; i-- {
 		if postlist.Posts[postlist.Order[i]].DeleteAt > postlist.Posts[postlist.Order[i]].CreateAt {
@@ -257,7 +311,14 @@ func searchUsers(u *User, toUser *User, args []string, service string) {
 	}
 }
 
+// nolint:dupl,goconst
 func scrollback(u *User, toUser *User, args []string, service string) {
+	if strings.HasPrefix(u.getMattermostVersion(), "6.") {
+		scrollback6(u, toUser, args, service)
+
+		return
+	}
+
 	if service == "slack" {
 		u.MsgUser(toUser, "not implemented")
 		return
@@ -363,6 +424,126 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 				spoof(nick, scrollbackMsg)
 			case u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost":
 				threadMsgID := u.prefixContext("", p.Id, p.ParentId, "")
+				scrollbackMsg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, fileMsg)
+				u.MsgSpoofUser(scrollbackUser, nick, scrollbackMsg)
+			case strings.HasPrefix(args[0], "#"):
+				scrollbackMsg := "[" + ts.Format("2006-01-02 15:04") + "] " + fileMsg
+				spoof(nick, scrollbackMsg)
+			default:
+				scrollbackMsg := "[" + ts.Format("2006-01-02 15:04") + "]" + " <" + nick + "> " + fileMsg
+				u.MsgSpoofUser(scrollbackUser, nick, scrollbackMsg)
+			}
+		}
+	}
+}
+
+// nolint:dupl,funlen,gocognit,gocyclo,cyclop
+func scrollback6(u *User, toUser *User, args []string, service string) {
+	if service == "slack" {
+		u.MsgUser(toUser, "not implemented")
+		return
+	}
+
+	if len(args) != 2 {
+		u.MsgUser(toUser, "need SCROLLBACK (#<channel>|<user>) <lines>")
+		u.MsgUser(toUser, "e.g. SCROLLBACK #bugs 10 (show last 10 lines from #bugs)")
+		return
+	}
+
+	limit, err := strconv.Atoi(args[1])
+	if err != nil {
+		u.MsgUser(toUser, "need SCROLLBACK (#<channel>|<user>) <lines>")
+		u.MsgUser(toUser, "e.g. SCROLLBACK #bugs 10 (show last 10 lines from #bugs)")
+		return
+	}
+
+	var channelID string
+	var spoof func(string, string)
+	scrollbackUser, exists := u.Srv.HasUser(args[0])
+
+	switch {
+	case strings.HasPrefix(args[0], "#"):
+		channelName := strings.ReplaceAll(args[0], "#", "")
+		channelID = u.br.GetChannelID(channelName, u.br.GetMe().TeamID)
+		spoof = u.Srv.Channel(channelID).SpoofMessage
+	case exists && scrollbackUser.Ghost:
+		// We need to sort the two user IDs to construct the DM
+		// channel name.
+		userIDs := []string{u.User, scrollbackUser.User}
+		sort.Strings(userIDs)
+		channelName := userIDs[0] + "__" + userIDs[1]
+		channelID = u.br.GetChannelID(channelName, u.br.GetMe().TeamID)
+	default:
+		u.MsgUser(toUser, "need SCROLLBACK (#<channel>|<user>) <lines>")
+		u.MsgUser(toUser, "e.g. SCROLLBACK #bugs 10 (show last 10 lines from #bugs)")
+		return
+	}
+
+	list := u.br.GetPosts(channelID, limit)
+	if list == nil || list.(*model6.PostList) == nil || len(list.(*model6.PostList).Order) == 0 {
+		u.MsgUser(toUser, "no results")
+		return
+	}
+
+	postlist, _ := list.(*model6.PostList)
+
+	for i := len(postlist.Order) - 1; i >= 0; i-- {
+		p := postlist.Posts[postlist.Order[i]]
+		ts := time.Unix(0, p.CreateAt*int64(time.Millisecond))
+
+		props := p.GetProps()
+		botname, override := props["override_username"].(string)
+		user := u.br.GetUser(p.UserId)
+		nick := user.Nick
+		if override {
+			nick = botname
+		}
+
+		if p.Type == model6.PostTypeAddToTeam || p.Type == model6.PostTypeRemoveFromTeam {
+			nick = "system"
+		}
+
+		codeBlock := false
+		for _, post := range strings.Split(p.Message, "\n") {
+			if post == "```" {
+				codeBlock = !codeBlock
+			}
+			// skip empty lines for anything not part of a code block.
+			if !codeBlock && post == "" {
+				continue
+			}
+
+			switch { // nolint:dupl
+			case u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" && strings.HasPrefix(args[0], "#") && nick != "system":
+				threadMsgID := u.prefixContext("", p.Id, p.RootId, "")
+				scrollbackMsg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, post)
+				spoof(nick, scrollbackMsg)
+			case strings.HasPrefix(args[0], "#"):
+				scrollbackMsg := "[" + ts.Format("2006-01-02 15:04") + "] " + post
+				spoof(nick, scrollbackMsg)
+			case u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost":
+				threadMsgID := u.prefixContext("", p.Id, p.RootId, "")
+				scrollbackMsg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, post)
+				u.MsgSpoofUser(scrollbackUser, nick, scrollbackMsg)
+			default:
+				scrollbackMsg := "[" + ts.Format("2006-01-02 15:04") + "]" + " <" + nick + "> " + post
+				u.MsgSpoofUser(scrollbackUser, nick, scrollbackMsg)
+			}
+		}
+
+		if len(p.FileIds) == 0 {
+			continue
+		}
+
+		for _, fname := range u.br.GetFileLinks(p.FileIds) {
+			fileMsg := "download file - " + fname
+			switch { // nolint:dupl
+			case u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" && strings.HasPrefix(args[0], "#"):
+				threadMsgID := u.prefixContext("", p.Id, p.RootId, "")
+				scrollbackMsg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, fileMsg)
+				spoof(nick, scrollbackMsg)
+			case u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost":
+				threadMsgID := u.prefixContext("", p.Id, p.RootId, "")
 				scrollbackMsg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, fileMsg)
 				u.MsgSpoofUser(scrollbackUser, nick, scrollbackMsg)
 			case strings.HasPrefix(args[0], "#"):
