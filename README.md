@@ -28,7 +28,7 @@ Tested on FreeBSD / Linux / Windows
 
 ## Compatibility
 
-- Matterircd works with slack and mattermost 5.x
+- Matterircd works with slack and mattermost 5.x, 6.x
 
 Master branch of matterircd should always work against latest STABLE mattermost release.
 
@@ -65,10 +65,10 @@ You can find the binaries [here](https://github.com/42wim/matterircd/releases/la
 
 ## Building
 
-Go 1.14+ is required
+Go 1.16+ is required
 
 ```bash
-go get github.com/42wim/matterircd
+go install github.com/42wim/matterircd
 ```
 
 You should now have matterircd binary in the bin directory:
