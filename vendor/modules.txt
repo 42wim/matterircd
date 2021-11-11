@@ -193,6 +193,9 @@ github.com/wiggin77/cfg/timeconv
 github.com/wiggin77/merror
 # github.com/wiggin77/srslog v1.0.1
 github.com/wiggin77/srslog
+# go.etcd.io/bbolt v1.3.6
+## explicit
+go.etcd.io/bbolt
 # go.uber.org/atomic v1.8.0
 go.uber.org/atomic
 # go.uber.org/multierr v1.7.0
