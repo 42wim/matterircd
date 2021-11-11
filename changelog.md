@@ -1,3 +1,24 @@
+# v0.25.0
+
+## New features
+
+- general: Add automated docker builds
+- general: Allow overriding handshake timeout. Fixes #438 (#439)
+- mattermost: Support saving last viewed at state for multiple users (mattermost) (#425)
+- mattermost: Add mattermost 6 support (#452)
+- mattermost: Allow overriding client timeout (mattermost) (#449)
+- mattermost: Allow overriding the anti-idle channel and interval (mattermost) (#441)
+
+## Bugfix
+
+- general: Fix word boundary and grammar of error messages (#443)
+- mattermost: Fix to ensure reply message is on the same line as last message line (mattermost) (#447)
+- mattermost: Addition and removal of user to/from team from system (mattermost) (#442)
+- slack: Fix segfault when bot user fetch fails (#440)
+
+This release couldn't exist without the following contributors:
+@hloeung, @Aketzu
+
 # v0.24.2
 
 ## Bugfix
