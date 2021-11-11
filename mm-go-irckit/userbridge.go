@@ -650,7 +650,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 
 		showReplayHdr := true
 
-		mmPostList := postlist.(*model.PostList)
+		mmPostList, _ := postlist.(*model.PostList)
 		if mmPostList == nil {
 			continue
 		}
@@ -740,7 +740,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 	}
 }
 
-// nolint:dupl,funlen,gocognit,gocyclo,cyclop
+// nolint:funlen,gocognit,gocyclo,cyclop
 func (u *User) addUserToChannelWorker6(channels <-chan *bridge.ChannelInfo, throttle *time.Ticker) {
 	for brchannel := range channels {
 		logger.Debug("addUserToChannelWorker", brchannel)

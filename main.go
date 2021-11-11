@@ -107,14 +107,14 @@ func main() {
 	if statePath := v.GetString("mattermost.LastViewedSaveFile"); statePath != "" {
 		mmLastViewedFile = statePath
 	}
-	db, err := bolt.Open(mmLastViewedFile, 0600, &bolt.Options{Timeout: 1 * time.Second})
+	db, err := bolt.Open(mmLastViewedFile, 0o600, &bolt.Options{Timeout: 1 * time.Second})
 	// XXX: backwards compatibility with older DB format (pre bbolt).
 	// TODO: Remove in future releases.
 	if err != nil && err.Error() == "invalid database" {
 		logger.Warning("Found old last viewed at state file, renaming to .migrated")
 		os.Rename(mmLastViewedFile, mmLastViewedFile+".migrated")
 		// Recall to create DB now that it no longer exists.
-		db, err = bolt.Open(mmLastViewedFile, 0600, &bolt.Options{Timeout: 1 * time.Second})
+		db, err = bolt.Open(mmLastViewedFile, 0o600, &bolt.Options{Timeout: 1 * time.Second})
 	}
 	if err != nil {
 		logger.Fatal(err)
