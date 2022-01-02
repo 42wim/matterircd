@@ -197,6 +197,11 @@ We're also on the `#matterircd` channel on irc.freenode.net
 
 ## FAQ
 
+### can I use matterircd for multiple mattermost or slack servers?
+
+Yes, but not in the same connection (would cause problems with channel/user name conflicts).  
+matterircd supports multiple users, so you can configure your IRC client to have multiple networks that all connect to the same matterircd server.
+
 ### mattermost login with sso/gitlab
 
 You'll need to get the `MMAUTHTOKEN` from your cookies, login via the browser first.  
