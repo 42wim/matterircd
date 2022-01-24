@@ -578,23 +578,19 @@ func parseModifyMsg(u *User, msg *irc.Message, channelID string) bool {
 }
 
 func parseThreadID(u *User, msg *irc.Message, channelID string) (string, string) {
-	re := regexp.MustCompile(`^\@\@([0-9a-z]{26})`)
+	re := regexp.MustCompile(`^\@\@(?:(!!|[0-9a-f]{3}|[0-9a-z]{26})\s)(.*)`)
 	matches := re.FindStringSubmatch(msg.Trailing)
-	if len(matches) == 2 {
-		msg.Trailing = strings.Replace(msg.Trailing, matches[0], "", 1)
-		parentID := matches[1]
-		newMessage := msg.Trailing
-		// Also strip separator in message.
-		if len(newMessage) > 1 {
-			newMessage = newMessage[1:]
-		}
-		return parentID, newMessage
+	if len(matches) == 0 {
+		return "", ""
 	}
-
-	re = regexp.MustCompile(`^\@\@!!`)
-	matches = re.FindStringSubmatch(msg.Trailing)
-	if len(matches) == 1 {
-		msg.Trailing = strings.Replace(msg.Trailing, matches[0], "", 1)
+	const expected = 3
+	if len(matches) != expected {
+		logger.Errorf("parseThreadID: expected %d matches for re match against %q, got %d",
+			expected, msg.Trailing, len(matches))
+		return "", ""
+	}
+	switch {
+	case matches[1] == "!!":
 		u.msgLastMutex.RLock()
 		defer u.msgLastMutex.RUnlock()
 		msgLast, ok := u.msgLast[channelID]
@@ -605,22 +601,12 @@ func parseThreadID(u *User, msg *irc.Message, channelID string) (string, string)
 		if msgLast[1] != "" {
 			parentID = msgLast[1]
 		}
-		newMessage := msg.Trailing
-		// Also strip separator in message.
-		if len(newMessage) > 1 {
-			newMessage = newMessage[1:]
-		}
-		return parentID, newMessage
-	}
-
-	re = regexp.MustCompile(`^\@\@([0-9a-f]{3})`)
-	matches = re.FindStringSubmatch(msg.Trailing)
-	if len(matches) == 2 {
-		msg.Trailing = strings.Replace(msg.Trailing, matches[0], "", 1)
-
+		return parentID, matches[2]
+	case len(matches[1]) == 3:
 		id, err := strconv.ParseInt(matches[1], 16, 0)
 		if err != nil {
 			logger.Errorf("couldn't parseint %s: %s", matches[1], err)
+			return "", ""
 		}
 
 		u.msgMapMutex.RLock()
@@ -630,11 +616,15 @@ func parseThreadID(u *User, msg *irc.Message, channelID string) (string, string)
 
 		for k, v := range m {
 			if v == int(id) {
-				return k, msg.Trailing
+				return k, matches[2]
 			}
 		}
+	case len(matches[1]) == 26:
+		return matches[1], matches[2]
+	default:
+		logger.Errorf("parseThreadID: could not parse reply ID %q", matches[1])
+		return "", ""
 	}
-
 	return "", ""
 }
 
