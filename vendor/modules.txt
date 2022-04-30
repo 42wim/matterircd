@@ -1,4 +1,5 @@
 # github.com/blang/semver v3.5.1+incompatible
+## explicit
 github.com/blang/semver
 # github.com/davecgh/go-spew v1.1.1
 ## explicit
@@ -7,34 +8,60 @@ github.com/davecgh/go-spew/spew
 ## explicit
 github.com/desertbit/timer
 # github.com/dustin/go-humanize v1.0.0
+## explicit
 github.com/dustin/go-humanize
 # github.com/dyatlov/go-opengraph v0.0.0-20210112100619-dae8665a5b09
+## explicit
 github.com/dyatlov/go-opengraph/opengraph
 # github.com/francoispqt/gojay v1.2.13
+## explicit; go 1.12
 github.com/francoispqt/gojay
 # github.com/fsnotify/fsnotify v1.5.1
+## explicit; go 1.13
 github.com/fsnotify/fsnotify
 # github.com/go-asn1-ber/asn1-ber v1.5.3
+## explicit; go 1.13
 github.com/go-asn1-ber/asn1-ber
 # github.com/google/gops v0.3.22
-## explicit
+## explicit; go 1.12
 github.com/google/gops/agent
 github.com/google/gops/internal
 github.com/google/gops/signal
 # github.com/google/uuid v1.3.0
-github.com/google/uuid
-# github.com/gorilla/websocket v1.4.2
 ## explicit
+github.com/google/uuid
+# github.com/gorilla/websocket v1.5.0
+## explicit; go 1.12
 github.com/gorilla/websocket
+# github.com/graph-gophers/graphql-go v1.3.0
+## explicit; go 1.13
+github.com/graph-gophers/graphql-go
+github.com/graph-gophers/graphql-go/decode
+github.com/graph-gophers/graphql-go/errors
+github.com/graph-gophers/graphql-go/internal/common
+github.com/graph-gophers/graphql-go/internal/exec
+github.com/graph-gophers/graphql-go/internal/exec/packer
+github.com/graph-gophers/graphql-go/internal/exec/resolvable
+github.com/graph-gophers/graphql-go/internal/exec/selected
+github.com/graph-gophers/graphql-go/internal/query
+github.com/graph-gophers/graphql-go/internal/schema
+github.com/graph-gophers/graphql-go/internal/validation
+github.com/graph-gophers/graphql-go/introspection
+github.com/graph-gophers/graphql-go/log
+github.com/graph-gophers/graphql-go/trace
+github.com/graph-gophers/graphql-go/types
 # github.com/hashicorp/errwrap v1.1.0
+## explicit
 github.com/hashicorp/errwrap
 # github.com/hashicorp/go-multierror v1.1.1
+## explicit; go 1.13
 github.com/hashicorp/go-multierror
 # github.com/hashicorp/golang-lru v0.5.4
-## explicit
+## explicit; go 1.12
 github.com/hashicorp/golang-lru
 github.com/hashicorp/golang-lru/simplelru
 # github.com/hashicorp/hcl v1.0.0
+## explicit
 github.com/hashicorp/hcl
 github.com/hashicorp/hcl/hcl/ast
 github.com/hashicorp/hcl/hcl/parser
@@ -46,38 +73,48 @@ github.com/hashicorp/hcl/json/parser
 github.com/hashicorp/hcl/json/scanner
 github.com/hashicorp/hcl/json/token
 # github.com/jpillora/backoff v1.0.0
-## explicit
+## explicit; go 1.13
 github.com/jpillora/backoff
 # github.com/json-iterator/go v1.1.12
+## explicit; go 1.12
 github.com/json-iterator/go
-# github.com/klauspost/cpuid/v2 v2.0.9
+# github.com/klauspost/compress v1.14.4
+## explicit; go 1.15
+github.com/klauspost/compress/s2
+# github.com/klauspost/cpuid/v2 v2.0.11
+## explicit; go 1.15
 github.com/klauspost/cpuid/v2
-# github.com/magiconair/properties v1.8.5
+# github.com/magiconair/properties v1.8.6
+## explicit; go 1.13
 github.com/magiconair/properties
 # github.com/matterbridge/logrus-prefixed-formatter v0.5.3-0.20200523233437-d971309a77ba
 ## explicit
 github.com/matterbridge/logrus-prefixed-formatter
 # github.com/matterbridge/matterclient v0.0.0-20211107234719-faca3cd42315
-## explicit
+## explicit; go 1.16
 github.com/matterbridge/matterclient
 # github.com/mattermost/go-i18n v1.11.1-0.20211013152124-5c415071e404
+## explicit
 github.com/mattermost/go-i18n/i18n
 github.com/mattermost/go-i18n/i18n/bundle
 github.com/mattermost/go-i18n/i18n/language
 github.com/mattermost/go-i18n/i18n/translation
 # github.com/mattermost/ldap v0.0.0-20201202150706-ee0e6284187d
+## explicit; go 1.13
 github.com/mattermost/ldap
 # github.com/mattermost/logr v1.0.13
+## explicit; go 1.12
 github.com/mattermost/logr
 github.com/mattermost/logr/format
 github.com/mattermost/logr/target
 # github.com/mattermost/logr/v2 v2.0.15
+## explicit; go 1.12
 github.com/mattermost/logr/v2
 github.com/mattermost/logr/v2/config
 github.com/mattermost/logr/v2/formatters
 github.com/mattermost/logr/v2/targets
 # github.com/mattermost/mattermost-server/v5 v5.39.3
-## explicit
+## explicit; go 1.15
 github.com/mattermost/mattermost-server/v5/model
 github.com/mattermost/mattermost-server/v5/services/timezones
 github.com/mattermost/mattermost-server/v5/shared/filestore
@@ -85,8 +122,8 @@ github.com/mattermost/mattermost-server/v5/shared/i18n
 github.com/mattermost/mattermost-server/v5/shared/markdown
 github.com/mattermost/mattermost-server/v5/shared/mlog
 github.com/mattermost/mattermost-server/v5/utils/jsonutils
-# github.com/mattermost/mattermost-server/v6 v6.2.1
-## explicit
+# github.com/mattermost/mattermost-server/v6 v6.6.1
+## explicit; go 1.16
 github.com/mattermost/mattermost-server/v6/model
 github.com/mattermost/mattermost-server/v6/services/timezones
 github.com/mattermost/mattermost-server/v6/shared/filestore
@@ -95,16 +132,22 @@ github.com/mattermost/mattermost-server/v6/shared/markdown
 github.com/mattermost/mattermost-server/v6/shared/mlog
 github.com/mattermost/mattermost-server/v6/utils/jsonutils
 # github.com/mattn/go-colorable v0.1.12
+## explicit; go 1.13
 github.com/mattn/go-colorable
 # github.com/mattn/go-isatty v0.0.14
+## explicit; go 1.12
 github.com/mattn/go-isatty
 # github.com/mattn/go-runewidth v0.0.13
+## explicit; go 1.9
 github.com/mattn/go-runewidth
 # github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d
+## explicit
 github.com/mgutz/ansi
 # github.com/minio/md5-simd v1.1.2
+## explicit; go 1.14
 github.com/minio/md5-simd
-# github.com/minio/minio-go/v7 v7.0.14
+# github.com/minio/minio-go/v7 v7.0.23
+## explicit; go 1.17
 github.com/minio/minio-go/v7
 github.com/minio/minio-go/v7/pkg/credentials
 github.com/minio/minio-go/v7/pkg/encrypt
@@ -117,39 +160,61 @@ github.com/minio/minio-go/v7/pkg/signer
 github.com/minio/minio-go/v7/pkg/sse
 github.com/minio/minio-go/v7/pkg/tags
 # github.com/minio/sha256-simd v1.0.0
+## explicit; go 1.13
 github.com/minio/sha256-simd
 # github.com/mitchellh/go-homedir v1.1.0
-github.com/mitchellh/go-homedir
-# github.com/mitchellh/mapstructure v1.4.3
 ## explicit
+github.com/mitchellh/go-homedir
+# github.com/mitchellh/mapstructure v1.5.0
+## explicit; go 1.14
 github.com/mitchellh/mapstructure
 # github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd
+## explicit
 github.com/modern-go/concurrent
 # github.com/modern-go/reflect2 v1.0.2
+## explicit; go 1.12
 github.com/modern-go/reflect2
 # github.com/muesli/reflow v0.3.0
-## explicit
+## explicit; go 1.13
 github.com/muesli/reflow/ansi
 github.com/muesli/reflow/wordwrap
+# github.com/opentracing/opentracing-go v1.2.0
+## explicit; go 1.14
+github.com/opentracing/opentracing-go
+github.com/opentracing/opentracing-go/ext
+github.com/opentracing/opentracing-go/log
 # github.com/pborman/uuid v1.2.1
+## explicit
 github.com/pborman/uuid
 # github.com/pelletier/go-toml v1.9.4
+## explicit; go 1.12
 github.com/pelletier/go-toml
+# github.com/pelletier/go-toml/v2 v2.0.0-beta.8
+## explicit; go 1.16
+github.com/pelletier/go-toml/v2
+github.com/pelletier/go-toml/v2/internal/ast
+github.com/pelletier/go-toml/v2/internal/danger
+github.com/pelletier/go-toml/v2/internal/tracker
 # github.com/philhofer/fwd v1.1.1
+## explicit
 github.com/philhofer/fwd
 # github.com/pkg/errors v0.9.1
+## explicit
 github.com/pkg/errors
 # github.com/pmezard/go-difflib v1.0.0
+## explicit
 github.com/pmezard/go-difflib/difflib
 # github.com/rivo/uniseg v0.2.0
+## explicit; go 1.12
 github.com/rivo/uniseg
 # github.com/rs/xid v1.3.0
+## explicit; go 1.12
 github.com/rs/xid
 # github.com/sirupsen/logrus v1.8.1
-## explicit
+## explicit; go 1.13
 github.com/sirupsen/logrus
-# github.com/slack-go/slack v0.10.1
-## explicit
+# github.com/slack-go/slack v0.10.3
+## explicit; go 1.16
 github.com/slack-go/slack
 github.com/slack-go/slack/internal/backoff
 github.com/slack-go/slack/internal/errorsx
@@ -159,54 +224,78 @@ github.com/slack-go/slack/slackutilsx
 # github.com/sorcix/irc v1.1.4
 ## explicit
 github.com/sorcix/irc
-# github.com/spf13/afero v1.6.0
+# github.com/spf13/afero v1.8.2
+## explicit; go 1.13
 github.com/spf13/afero
 github.com/spf13/afero/mem
 # github.com/spf13/cast v1.4.1
+## explicit
 github.com/spf13/cast
 # github.com/spf13/jwalterweatherman v1.1.0
+## explicit
 github.com/spf13/jwalterweatherman
 # github.com/spf13/pflag v1.0.5
-## explicit
+## explicit; go 1.12
 github.com/spf13/pflag
-# github.com/spf13/viper v1.10.1
-## explicit
+# github.com/spf13/viper v1.11.0
+## explicit; go 1.17
 github.com/spf13/viper
 github.com/spf13/viper/internal/encoding
+github.com/spf13/viper/internal/encoding/dotenv
 github.com/spf13/viper/internal/encoding/hcl
+github.com/spf13/viper/internal/encoding/ini
+github.com/spf13/viper/internal/encoding/javaproperties
 github.com/spf13/viper/internal/encoding/json
 github.com/spf13/viper/internal/encoding/toml
 github.com/spf13/viper/internal/encoding/yaml
-# github.com/stretchr/testify v1.7.0
-## explicit
+# github.com/stretchr/testify v1.7.1
+## explicit; go 1.13
 github.com/stretchr/testify/assert
 # github.com/subosito/gotenv v1.2.0
+## explicit
 github.com/subosito/gotenv
 # github.com/tinylib/msgp v1.1.6
+## explicit; go 1.14
 github.com/tinylib/msgp/msgp
+# github.com/vmihailenco/msgpack/v5 v5.3.5
+## explicit; go 1.11
+github.com/vmihailenco/msgpack/v5
+github.com/vmihailenco/msgpack/v5/msgpcode
+# github.com/vmihailenco/tagparser/v2 v2.0.0
+## explicit; go 1.15
+github.com/vmihailenco/tagparser/v2
+github.com/vmihailenco/tagparser/v2/internal
+github.com/vmihailenco/tagparser/v2/internal/parser
 # github.com/wiggin77/cfg v1.0.2
+## explicit; go 1.12
 github.com/wiggin77/cfg
 github.com/wiggin77/cfg/ini
 github.com/wiggin77/cfg/timeconv
 # github.com/wiggin77/merror v1.0.3
+## explicit; go 1.15
 github.com/wiggin77/merror
 # github.com/wiggin77/srslog v1.0.1
+## explicit; go 1.14
 github.com/wiggin77/srslog
 # go.etcd.io/bbolt v1.3.6
-## explicit
+## explicit; go 1.12
 go.etcd.io/bbolt
 # go.uber.org/atomic v1.9.0
+## explicit; go 1.13
 go.uber.org/atomic
 # go.uber.org/multierr v1.7.0
+## explicit; go 1.14
 go.uber.org/multierr
 # go.uber.org/zap v1.17.0
+## explicit; go 1.13
 go.uber.org/zap
 go.uber.org/zap/buffer
 go.uber.org/zap/internal/bufferpool
 go.uber.org/zap/internal/color
 go.uber.org/zap/internal/exit
 go.uber.org/zap/zapcore
-# golang.org/x/crypto v0.0.0-20210921155107-089bfa567519
+# golang.org/x/crypto v0.0.0-20220411220226-7b82a4e95df4
+## explicit; go 1.17
 golang.org/x/crypto/argon2
 golang.org/x/crypto/bcrypt
 golang.org/x/crypto/blake2b
@@ -214,21 +303,25 @@ golang.org/x/crypto/blowfish
 golang.org/x/crypto/pbkdf2
 golang.org/x/crypto/scrypt
 golang.org/x/crypto/ssh/terminal
-# golang.org/x/net v0.0.0-20211006190231-62292e806868
+# golang.org/x/net v0.0.0-20220412020605-290c469a71a5
+## explicit; go 1.17
 golang.org/x/net/html
 golang.org/x/net/html/atom
 golang.org/x/net/http/httpguts
 golang.org/x/net/idna
 golang.org/x/net/publicsuffix
-# golang.org/x/sys v0.0.0-20211210111614-af8b64212486
+# golang.org/x/sys v0.0.0-20220412211240-33da011f77ad
+## explicit; go 1.17
 golang.org/x/sys/cpu
 golang.org/x/sys/internal/unsafeheader
 golang.org/x/sys/plan9
 golang.org/x/sys/unix
 golang.org/x/sys/windows
-# golang.org/x/term v0.0.0-20201126162022-7de9c90e9dd1
+# golang.org/x/term v0.0.0-20210927222741-03fcf44c2211
+## explicit; go 1.17
 golang.org/x/term
 # golang.org/x/text v0.3.7
+## explicit; go 1.17
 golang.org/x/text/internal/language
 golang.org/x/text/internal/language/compact
 golang.org/x/text/internal/tag
@@ -237,11 +330,15 @@ golang.org/x/text/secure/bidirule
 golang.org/x/text/transform
 golang.org/x/text/unicode/bidi
 golang.org/x/text/unicode/norm
-# gopkg.in/ini.v1 v1.66.2
+# gopkg.in/ini.v1 v1.66.4
+## explicit
 gopkg.in/ini.v1
 # gopkg.in/natefinch/lumberjack.v2 v2.0.0
+## explicit
 gopkg.in/natefinch/lumberjack.v2
 # gopkg.in/yaml.v2 v2.4.0
+## explicit; go 1.15
 gopkg.in/yaml.v2
 # gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b
+## explicit
 gopkg.in/yaml.v3
