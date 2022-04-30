@@ -65,7 +65,7 @@ You can find the binaries [here](https://github.com/42wim/matterircd/releases/la
 
 ## Building
 
-Go 1.16+ is required
+Go 1.17+ is required
 
 ```bash
 go install github.com/42wim/matterircd
