@@ -1,3 +1,19 @@
+# v0.25.1
+
+## Enhancement
+
+- general: build arm6/7 docker images
+- general: update dependencies (#465)
+
+## Bugfix
+
+- general: Fix RPL_MYINFO and move debuglevel output to MOTD (#466)
+- mattermost: Use regexp to fully parse thread replies (#460)
+- mattermost: Fix possible panic in mattermost (#458,#467)
+
+This release couldn't exist without the following contributors:
+@jetpackdanger, @Zauberfisch
+
 # v0.25.0
 
 ## New features
