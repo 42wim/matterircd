@@ -214,14 +214,21 @@ func (a completedParts) Less(i, j int) bool { return a[i].PartNumber < a[j].Part
 //
 // You must have WRITE permissions on a bucket to create an object.
 //
-//  - For size smaller than 128MiB PutObject automatically does a
-//    single atomic Put operation.
-//  - For size larger than 128MiB PutObject automatically does a
-//    multipart Put operation.
+//  - For size smaller than 16MiB PutObject automatically does a
+//    single atomic PUT operation.
+//
+//  - For size larger than 16MiB PutObject automatically does a
+//    multipart upload operation.
+//
 //  - For size input as -1 PutObject does a multipart Put operation
 //    until input stream reaches EOF. Maximum object size that can
 //    be uploaded through this operation will be 5TiB.
-func (c Client) PutObject(ctx context.Context, bucketName, objectName string, reader io.Reader, objectSize int64,
+//
+//    WARNING: Passing down '-1' will use memory and these cannot
+//    be reused for best outcomes for PutObject(), pass the size always.
+//
+// NOTE: Upon errors during upload multipart operation is entirely aborted.
+func (c *Client) PutObject(ctx context.Context, bucketName, objectName string, reader io.Reader, objectSize int64,
 	opts PutObjectOptions) (info UploadInfo, err error) {
 	if objectSize < 0 && opts.DisableMultipart {
 		return UploadInfo{}, errors.New("object size must be provided with disable multipart upload")
@@ -235,7 +242,7 @@ func (c Client) PutObject(ctx context.Context, bucketName, objectName string, re
 	return c.putObjectCommon(ctx, bucketName, objectName, reader, objectSize, opts)
 }
 
-func (c Client) putObjectCommon(ctx context.Context, bucketName, objectName string, reader io.Reader, size int64, opts PutObjectOptions) (info UploadInfo, err error) {
+func (c *Client) putObjectCommon(ctx context.Context, bucketName, objectName string, reader io.Reader, size int64, opts PutObjectOptions) (info UploadInfo, err error) {
 	// Check for largest object size allowed.
 	if size > int64(maxMultipartPutObjectSize) {
 		return UploadInfo{}, errEntityTooLarge(size, maxMultipartPutObjectSize, bucketName, objectName)
@@ -269,7 +276,7 @@ func (c Client) putObjectCommon(ctx context.Context, bucketName, objectName stri
 	return c.putObjectMultipartStream(ctx, bucketName, objectName, reader, size, opts)
 }
 
-func (c Client) putObjectMultipartStreamNoLength(ctx context.Context, bucketName, objectName string, reader io.Reader, opts PutObjectOptions) (info UploadInfo, err error) {
+func (c *Client) putObjectMultipartStreamNoLength(ctx context.Context, bucketName, objectName string, reader io.Reader, opts PutObjectOptions) (info UploadInfo, err error) {
 	// Input validation.
 	if err = s3utils.CheckValidBucketName(bucketName); err != nil {
 		return UploadInfo{}, err
