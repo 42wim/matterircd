@@ -232,6 +232,10 @@ func CmdMotd(s Server, u *User, _ *irc.Message) error {
 		Trailing: fmt.Sprintf("- %s Message of the Day -", s.Name()),
 	})
 
+	if IsDebugLevel() {
+		motd = append(motd, "server is running in debugmode.")
+	}
+
 	for _, line := range motd {
 		r = append(r, &irc.Message{
 			Prefix:   s.Prefix(),
