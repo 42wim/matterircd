@@ -161,7 +161,7 @@ A docker image for easily setting up and running matterircd on a server is avail
 Run the irc server on port 6667. You'll need to specify -bind 0.0.0.0:6667 otherwise it only listens on 127.0.0.1 in the container.
 
 ```
-docker run -p 6667:6667 42wim/matterircd:latest -bind 0.0.0.0:6667
+docker run -p 6667:6667 42wim/matterircd:latest --bind 0.0.0.0:6667
 ```
 
 Now you can connect with your IRC client to port 6667 on your docker host.
