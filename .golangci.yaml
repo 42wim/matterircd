@@ -192,6 +192,8 @@ linters:
     - wrapcheck
     - ireturn
     - varnamelen
+    - golint
+    - scopelint
 
 # rules to deal with reported isues
 issues:
