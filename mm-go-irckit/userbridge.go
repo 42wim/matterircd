@@ -1070,24 +1070,18 @@ func (u *User) prefixContextModified(channelID, messageID string) string {
 }
 
 func (u *User) prefixContext(channelID, messageID, parentID, event string) string {
-	if u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" {
+	if u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" || u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost+post" {
 		if parentID == "" {
 			return fmt.Sprintf("[@@%s]", messageID)
 		}
+		prefixChar := "->"
 		if u.v.GetBool(u.br.Protocol() + ".unicode") {
-			return fmt.Sprintf("[↪@@%s]", parentID)
+			prefixChar = "↪"
 		}
-		return fmt.Sprintf("[->@@%s]", parentID)
-	}
-
-	if u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost+post" {
-		if parentID == "" {
-			return fmt.Sprintf("[@@%s]", messageID)
+		if u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" || parentID == messageID {
+			return fmt.Sprintf("[%s@@%s]", prefixChar, parentID)
 		}
-		if u.v.GetBool(u.br.Protocol() + ".unicode") {
-			return fmt.Sprintf("[↪@@%s,@@%s]", parentID, messageID)
-		}
-		return fmt.Sprintf("[->@@%s,@@%s]", parentID, messageID)
+		return fmt.Sprintf("[%s@@%s,@@%s]", prefixChar, parentID, messageID)
 	}
 
 	u.msgMapMutex.Lock()
