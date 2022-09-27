@@ -1,0 +1,55 @@
+[Unit]
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=exec
+
+# Update user and paths to ones that will be used for daemon
+# WorkingDirectory should have matterircd.toml in it and will be used for db file(s)
+User=matterircd
+WorkingDirectory=/srv/matterircd
+ReadWritePaths=/srv/matterircd
+
+## Simple start with all logging to journal
+ExecStart=matterircd --conf matterircd.toml
+
+## More complicated logging setup, splitting slack debug-logging to rotated files
+# SyslogIdentifier=%p
+# KillMode=control-group
+# ExecStart=sh -c 'trap "wait; exit 0" TERM; \
+#   matterircd --conf matterircd.toml 2>&1 | \
+#   gawk -v prefix=debug -v max_kb=1000 -v n=4 \
+#     \'/^slack-go\\/slack\\S+ / { \
+#       c+=length($0); fn0=fn; fn=int(c/(max_kb*1024))%%n; \
+#       if (fn != fn0) { if (dst) close(dst); if (fn < fn0) c=0 }; \
+#       dst=sprintf("%%s.%%d.log", prefix, fn); \
+#       print $0 >dst; fflush(dst); next } \
+#     {print; fflush()}\' & wait; exit 1'
+
+DynamicUser=yes
+ProcSubset=pid
+ProtectProc=invisible
+ProtectHome=yes
+PrivateDevices=yes
+NoNewPrivileges=yes
+SecureBits=keep-caps-locked noroot-locked
+SystemCallFilter=@system-service
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_INET AF_INET6
+
+UMask=0077
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+ProtectClock=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectKernelModules=yes
+ProtectHostname=yes
+ProtectKernelTunables=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

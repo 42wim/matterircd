@@ -582,7 +582,7 @@ func parseModifyMsg(u *User, msg *irc.Message, channelID string) bool {
 }
 
 func parseThreadID(u *User, msg *irc.Message, channelID string) (string, string) {
-	re := regexp.MustCompile(`^\@\@(?:(!!|[0-9a-f]{3}|[0-9a-z]{26})\s)(.*)`)
+	re := regexp.MustCompile(`(?s)^\@\@(?:(!!|[0-9a-f]{3}|[0-9a-z]{26})\s)(.*)`)
 	matches := re.FindStringSubmatch(msg.Trailing)
 	if len(matches) == 0 {
 		return "", ""

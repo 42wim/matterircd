@@ -181,19 +181,40 @@ linters:
     - testpackage
     - godot
     - interfacer
-      #- goheader
+    - goheader
     - noctx
-    - errcheck
     - gci
     - errorlint
     - nlreturn
     - exhaustivestruct
     - forbidigo
     - wrapcheck
-    - ireturn
     - varnamelen
     - golint
     - scopelint
+    - ireturn
+    - errorlint
+    - tparallel
+    - wrapcheck
+    - paralleltest
+    - makezero
+    - thelper
+    - cyclop
+    - revive
+    - importas
+    - gomoddirectives
+    - promlinter
+    - tagliatelle
+    - errname
+    - typecheck
+    - grouper
+    - decorder
+    - maintidx
+    - exhaustruct
+    - asasalint
+    - execinquery
+    - nosnakecase
+    - exhaustive
 
 # rules to deal with reported isues
 issues:
