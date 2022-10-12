@@ -28,7 +28,7 @@ Tested on FreeBSD / Linux / Windows
 
 ## Compatibility
 
-- Matterircd works with slack and mattermost 5.x, 6.x
+- Matterircd works with slack and mattermost 5.x, 6.x, 7.x
 
 Master branch of matterircd should always work against latest STABLE mattermost release.
 

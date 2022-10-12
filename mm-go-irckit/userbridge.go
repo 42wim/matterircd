@@ -982,7 +982,7 @@ func (u *User) loginTo(protocol string) error {
 		u.br, err = slack.New(u.v, u.Credentials, u.eventChan, u.addUsersToChannels)
 	case "mattermost":
 		u.eventChan = make(chan *bridge.Event)
-		if strings.HasPrefix(u.getMattermostVersion(), "6.") {
+		if strings.HasPrefix(u.getMattermostVersion(), "6.") || strings.HasPrefix(u.getMattermostVersion(), "7.") {
 			u.br, _, err = mattermost6.New(u.v, u.Credentials, u.eventChan, u.addUsersToChannels)
 		} else {
 			u.br, _, err = mattermost.New(u.v, u.Credentials, u.eventChan, u.addUsersToChannels)
