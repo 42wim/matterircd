@@ -444,6 +444,21 @@ outerloop:
 				u.Pass = msg.Params
 			case irc.JOIN:
 				s.EncodeMessage(u, irc.ERR_NOTREGISTERED, []string{"*"}, "Please register first")
+			// https://ircv3.net/specs/extensions/capability-negotiation.html
+			case irc.CAP:
+				subcommand := msg.Params[0]
+				switch subcommand {
+				case irc.CAP_LS, irc.CAP_LIST:
+					params := fmt.Sprintf("* %s :", subcommand)
+					s.EncodeMessage(u, irc.CAP, []string{params}, "") //nolint:errcheck
+				case irc.CAP_END, irc.CAP_REQ:
+					// Do nothing.
+				default:
+					params := fmt.Sprintf("* %s", subcommand)
+					// github.com/sorcix/irc doesn't yet support ERR_INVALIDCAPCMD (410)
+					s.EncodeMessage(u, "410", []string{params}, "Invalid or unsupported CAP command") //nolint:errcheck
+				}
+				continue
 			}
 
 			if u.Nick == "" || u.User == "" {
