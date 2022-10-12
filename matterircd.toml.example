@@ -138,6 +138,8 @@ SuffixContext = false
 # If either PrefixContext or SuffixContext specify which thread ID to use. Default is the
 # matterircd generated @@([0-9][a-f]){3}. Uncomment to use Mattermost's message/parent thread IDs instead.
 #ThreadContext = "mattermost"
+# Similar to the above, but also show the message post IDs in addition to the parent thread ID.
+#ThreadContext = "mattermost+post"
 
 #This will show (mention yournick) after a message if it contains one of the words configured
 #in your mattermost "word that trigger mentions" notifications.

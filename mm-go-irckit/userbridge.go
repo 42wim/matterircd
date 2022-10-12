@@ -306,7 +306,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 func (u *User) handleFileEvent(event *bridge.FileEvent) {
 	for _, fname := range event.Files {
 		fileMsg := "download file - " + fname.Name
-		if u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" {
+		if u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" || u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost+post" {
 			threadMsgID := u.prefixContext(event.ChannelID, event.MessageID, event.ParentID, "")
 			fileMsg = u.formatContextMessage("", threadMsgID, fileMsg)
 		}
@@ -710,7 +710,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 				}
 
 				replayMsg := fmt.Sprintf("[%s] %s", ts.Format("15:04"), post)
-				if (u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext")) && u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" && nick != systemUser {
+				if (u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext")) && (u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" || u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost+post") && nick != systemUser {
 					threadMsgID := u.prefixContext("", p.Id, p.ParentId, "")
 					replayMsg = u.formatContextMessage(ts.Format("15:04"), threadMsgID, post)
 				}
@@ -723,7 +723,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 
 			for _, fname := range u.br.GetFileLinks(p.FileIds) {
 				fileMsg := "download file - " + fname
-				if u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" {
+				if u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" || u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost+post" {
 					threadMsgID := u.prefixContext("", p.Id, p.ParentId, "")
 					fileMsg = u.formatContextMessage(ts.Format("15:04"), threadMsgID, fileMsg)
 				}
@@ -837,7 +837,7 @@ func (u *User) addUserToChannelWorker6(channels <-chan *bridge.ChannelInfo, thro
 				}
 
 				replayMsg := fmt.Sprintf("[%s] %s", ts.Format("15:04"), post)
-				if (u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext")) && u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" && nick != systemUser {
+				if (u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext")) && (u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" || u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost+post") && nick != systemUser {
 					threadMsgID := u.prefixContext("", p.Id, p.RootId, "")
 					replayMsg = u.formatContextMessage(ts.Format("15:04"), threadMsgID, post)
 				}
@@ -850,7 +850,7 @@ func (u *User) addUserToChannelWorker6(channels <-chan *bridge.ChannelInfo, thro
 
 			for _, fname := range u.br.GetFileLinks(p.FileIds) {
 				fileMsg := "download file - " + fname
-				if u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" {
+				if u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" || u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost+post" {
 					threadMsgID := u.prefixContext("", p.Id, p.RootId, "")
 					fileMsg = u.formatContextMessage(ts.Format("15:04"), threadMsgID, fileMsg)
 				}
@@ -1070,14 +1070,18 @@ func (u *User) prefixContextModified(channelID, messageID string) string {
 }
 
 func (u *User) prefixContext(channelID, messageID, parentID, event string) string {
-	if u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" {
+	if u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" || u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost+post" {
 		if parentID == "" {
 			return fmt.Sprintf("[@@%s]", messageID)
 		}
+		prefixChar := "->"
 		if u.v.GetBool(u.br.Protocol() + ".unicode") {
-			return fmt.Sprintf("[↪@@%s]", parentID)
+			prefixChar = "↪"
 		}
-		return fmt.Sprintf("[->@@%s]", parentID)
+		if u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" || parentID == messageID {
+			return fmt.Sprintf("[%s@@%s]", prefixChar, parentID)
+		}
+		return fmt.Sprintf("[%s@@%s,@@%s]", prefixChar, parentID, messageID)
 	}
 
 	u.msgMapMutex.Lock()

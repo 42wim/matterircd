@@ -190,6 +190,8 @@ linters:
     - forbidigo
     - wrapcheck
     - varnamelen
+    - golint
+    - scopelint
     - ireturn
     - errorlint
     - tparallel
