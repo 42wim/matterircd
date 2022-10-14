@@ -825,7 +825,8 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		}
 	}
 
-	msgs := strings.Split(data.Message, "\n")
+	// msgs := strings.Split(data.Message, "\n")
+	msgs := []string{data.Message}
 
 	channelType := ""
 	if t, ok := props["channel_type"].(string); ok {
@@ -855,12 +856,12 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 
 	codeBlock := false
 	for _, msg := range msgs {
-		if msg == "```" {
+		if strings.HasPrefix(msg, "```") {
 			codeBlock = !codeBlock
 		}
 		// skip empty lines for anything not part of a code block.
-		if !codeBlock && msg == "" {
-			continue
+		if !codeBlock {
+			msg = strings.ReplaceAll(msg, "\n\n", "\n")
 		}
 
 		switch {
