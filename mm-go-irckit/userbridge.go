@@ -588,7 +588,7 @@ func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(string, string) {
 }
 
 func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throttle *time.Ticker) {
-	if strings.HasPrefix(u.getMattermostVersion(), "6.") {
+	if strings.HasPrefix(u.getMattermostVersion(), "6.") || strings.HasPrefix(u.getMattermostVersion(), "7.") {
 		u.addUserToChannelWorker6(channels, throttle)
 
 		return
