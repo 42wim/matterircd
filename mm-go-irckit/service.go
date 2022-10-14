@@ -198,7 +198,7 @@ func login(u *User, toUser *User, args []string, service string) {
 }
 
 func search(u *User, toUser *User, args []string, service string) {
-	if strings.HasPrefix(u.getMattermostVersion(), "6.") {
+	if strings.HasPrefix(u.getMattermostVersion(), "6.") || strings.HasPrefix(u.getMattermostVersion(), "7.") {
 		search6(u, toUser, args, service)
 
 		return
@@ -313,7 +313,7 @@ func searchUsers(u *User, toUser *User, args []string, service string) {
 
 // nolint:dupl,goconst
 func scrollback(u *User, toUser *User, args []string, service string) {
-	if strings.HasPrefix(u.getMattermostVersion(), "6.") {
+	if strings.HasPrefix(u.getMattermostVersion(), "6.") || strings.HasPrefix(u.getMattermostVersion(), "7.") {
 		scrollback6(u, toUser, args, service)
 
 		return
