@@ -856,7 +856,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 
 	codeBlock := false
 	for _, msg := range msgs {
-		if strings.HasPrefix(msg, "```") {
+		if strings.HasPrefix(msg, "```") || strings.Contains(msg, "\n```") {
 			codeBlock = !codeBlock
 		}
 		// skip empty lines for anything not part of a code block.
