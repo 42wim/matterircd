@@ -141,8 +141,14 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 
 	text := wordwrap.String(event.Text, 440)
 	lines := strings.Split(text, "\n")
-	for _, text := range lines {
-		if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
+	for idx, text := range lines {
+		showContext := u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext")
+
+		if showContext && u.v.GetBool(u.br.Protocol()+".hidecontextmulti") && idx != len(lines)-1 {
+			showContext = false
+		}
+
+		if showContext {
 			prefixUser := event.Sender.User
 
 			if event.Sender.Me {
@@ -284,8 +290,14 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 
 	text := wordwrap.String(event.Text, 440)
 	lines := strings.Split(text, "\n")
-	for _, text := range lines {
-		if (u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext")) && u.Nick != systemUser {
+	for idx, text := range lines {
+		showContext := (u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext")) && u.Nick != systemUser
+
+		if showContext && u.v.GetBool(u.br.Protocol()+".hidecontextmulti") && idx != len(lines)-1 {
+			showContext = false
+		}
+
+		if showContext {
 			prefix := u.prefixContext(event.ChannelID, event.MessageID, event.ParentID, event.Event)
 			switch {
 			case u.v.GetBool(u.br.Protocol()+".prefixcontext") && strings.HasPrefix(text, "\x01"):
@@ -889,7 +901,7 @@ func (u *User) MsgUser(toUser *User, msg string) {
 }
 
 func (u *User) MsgSpoofUser(sender *User, rcvuser string, msg string) {
-	u.Encode(&irc.Message{
+	u.Encode(&irc.Message{ //nolint:errcheck
 		Prefix: &irc.Prefix{
 			Name: sender.Nick,
 			User: sender.Nick,

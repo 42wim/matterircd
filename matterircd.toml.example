@@ -140,6 +140,8 @@ SuffixContext = false
 #ThreadContext = "mattermost"
 # Similar to the above, but also show the message post IDs in addition to the parent thread ID.
 #ThreadContext = "mattermost+post"
+#Hide Context for multi-line messages and only show it at the end.
+HideContextMulti = false
 
 #This will show (mention yournick) after a message if it contains one of the words configured
 #in your mattermost "word that trigger mentions" notifications.
