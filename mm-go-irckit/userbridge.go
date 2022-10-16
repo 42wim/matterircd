@@ -139,35 +139,41 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 		}
 	}
 
-	if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
-		prefixUser := event.Sender.User
+	text := wordwrap.String(event.Text, 440)
+	lines := strings.Split(text, "\n")
+	for _, text := range lines {
+		if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
+			prefixUser := event.Sender.User
+
+			if event.Sender.Me {
+				prefixUser = event.Receiver.User
+			}
+
+			prefix := u.prefixContext(prefixUser, event.MessageID, event.ParentID, event.Event)
+
+			switch {
+			case u.v.GetBool(u.br.Protocol()+".prefixcontext") && strings.HasPrefix(text, "\x01"):
+				text = strings.Replace(text, "\x01ACTION ", "\x01ACTION "+prefix+" ", 1)
+			case u.v.GetBool(u.br.Protocol() + ".prefixcontext"):
+				text = prefix + " " + text
+			case u.v.GetBool(u.br.Protocol()+".suffixcontext") && strings.HasSuffix(text, "\x01"):
+				text = strings.Replace(text, " \x01", " "+prefix+" \x01", 1)
+			case u.v.GetBool(u.br.Protocol() + ".suffixcontext"):
+				text = text + " " + prefix
+			}
+		}
+
+		text += "\n"
 
 		if event.Sender.Me {
-			prefixUser = event.Receiver.User
-		}
-
-		prefix := u.prefixContext(prefixUser, event.MessageID, event.ParentID, event.Event)
-
-		switch {
-		case u.v.GetBool(u.br.Protocol()+".prefixcontext") && strings.HasPrefix(event.Text, "\x01"):
-			event.Text = strings.Replace(event.Text, "\x01ACTION ", "\x01ACTION "+prefix+" ", 1)
-		case u.v.GetBool(u.br.Protocol() + ".prefixcontext"):
-			event.Text = prefix + " " + event.Text
-		case u.v.GetBool(u.br.Protocol()+".suffixcontext") && strings.HasSuffix(event.Text, "\x01"):
-			event.Text = strings.Replace(event.Text, " \x01", " "+prefix+" \x01", 1)
-		case u.v.GetBool(u.br.Protocol() + ".suffixcontext"):
-			event.Text = event.Text + " " + prefix
-		}
-	}
-
-	if event.Sender.Me {
-		if event.Receiver.Me {
-			u.MsgSpoofUser(u, u.Nick, event.Text)
+			if event.Receiver.Me {
+				u.MsgSpoofUser(u, u.Nick, text)
+			} else {
+				u.MsgSpoofUser(u, event.Receiver.Nick, text)
+			}
 		} else {
-			u.MsgSpoofUser(u, event.Receiver.Nick, event.Text)
+			u.MsgSpoofUser(u.createUserFromInfo(event.Sender), u.Nick, text)
 		}
-	} else {
-		u.MsgSpoofUser(u.createUserFromInfo(event.Sender), u.Nick, event.Text)
 	}
 
 	if !u.v.GetBool(u.br.Protocol() + ".disableautoview") {
@@ -276,25 +282,31 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		}
 	}
 
-	if (u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext")) && u.Nick != systemUser {
-		prefix := u.prefixContext(event.ChannelID, event.MessageID, event.ParentID, event.Event)
-		switch {
-		case u.v.GetBool(u.br.Protocol()+".prefixcontext") && strings.HasPrefix(event.Text, "\x01"):
-			event.Text = strings.Replace(event.Text, "\x01ACTION ", "\x01ACTION "+prefix+" ", 1)
-		case u.v.GetBool(u.br.Protocol() + ".prefixcontext"):
-			event.Text = prefix + " " + event.Text
-		case u.v.GetBool(u.br.Protocol()+".suffixcontext") && strings.HasSuffix(event.Text, "\x01"):
-			event.Text = strings.Replace(event.Text, " \x01", " "+prefix+" \x01", 1)
-		case u.v.GetBool(u.br.Protocol() + ".suffixcontext"):
-			event.Text = event.Text + " " + prefix
+	text := wordwrap.String(event.Text, 440)
+	lines := strings.Split(text, "\n")
+	for _, text := range lines {
+		if (u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext")) && u.Nick != systemUser {
+			prefix := u.prefixContext(event.ChannelID, event.MessageID, event.ParentID, event.Event)
+			switch {
+			case u.v.GetBool(u.br.Protocol()+".prefixcontext") && strings.HasPrefix(text, "\x01"):
+				text = strings.Replace(text, "\x01ACTION ", "\x01ACTION "+prefix+" ", 1)
+			case u.v.GetBool(u.br.Protocol() + ".prefixcontext"):
+				text = prefix + " " + text
+			case u.v.GetBool(u.br.Protocol()+".suffixcontext") && strings.HasSuffix(text, "\x01"):
+				text = strings.Replace(text, " \x01", " "+prefix+" \x01", 1)
+			case u.v.GetBool(u.br.Protocol() + ".suffixcontext"):
+				text = text + " " + prefix
+			}
 		}
-	}
 
-	switch event.MessageType {
-	case "notice":
-		ch.SpoofNotice(nick, event.Text)
-	default:
-		ch.SpoofMessage(nick, event.Text)
+		text += "\n"
+
+		switch event.MessageType {
+		case "notice":
+			ch.SpoofNotice(nick, text)
+		default:
+			ch.SpoofMessage(nick, text)
+		}
 	}
 
 	if !u.v.GetBool(u.br.Protocol() + ".disableautoview") {
@@ -877,20 +889,16 @@ func (u *User) MsgUser(toUser *User, msg string) {
 }
 
 func (u *User) MsgSpoofUser(sender *User, rcvuser string, msg string) {
-	msg = wordwrap.String(msg, 440)
-	lines := strings.Split(msg, "\n")
-	for _, l := range lines {
-		u.Encode(&irc.Message{
-			Prefix: &irc.Prefix{
-				Name: sender.Nick,
-				User: sender.Nick,
-				Host: sender.Host,
-			},
-			Command:  irc.PRIVMSG,
-			Params:   []string{rcvuser},
-			Trailing: l + "\n",
-		})
-	}
+	u.Encode(&irc.Message{
+		Prefix: &irc.Prefix{
+			Name: sender.Nick,
+			User: sender.Nick,
+			Host: sender.Host,
+		},
+		Command:  irc.PRIVMSG,
+		Params:   []string{rcvuser},
+		Trailing: msg,
+	})
 }
 
 func (u *User) syncChannel(id string, name string) {
