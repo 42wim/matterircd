@@ -139,9 +139,20 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 		}
 	}
 
+	codeBlock := false
 	text := wordwrap.String(event.Text, 440)
 	lines := strings.Split(text, "\n")
 	for idx, text := range lines {
+		if text == "```" {
+			codeBlock = !codeBlock
+		}
+		// skip empty lines for anything not part of a code block.
+		if !codeBlock && text == "" {
+			continue
+		} else if text == "" {
+			text = " "
+		}
+
 		showContext := u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext")
 
 		if showContext && u.v.GetBool(u.br.Protocol()+".hidecontextmulti") && idx != len(lines)-1 {
@@ -288,9 +299,20 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		}
 	}
 
+	codeBlock := false
 	text := wordwrap.String(event.Text, 440)
 	lines := strings.Split(text, "\n")
 	for idx, text := range lines {
+		if text == "```" {
+			codeBlock = !codeBlock
+		}
+		// skip empty lines for anything not part of a code block.
+		if !codeBlock && text == "" {
+			continue
+		} else if text == "" {
+			text = " "
+		}
+
 		showContext := (u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext")) && u.Nick != systemUser
 
 		if showContext && u.v.GetBool(u.br.Protocol()+".hidecontextmulti") && idx != len(lines)-1 {
@@ -712,16 +734,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 				nick = systemUser
 			}
 
-			codeBlock := false
 			for _, post := range strings.Split(p.Message, "\n") {
-				if post == "```" {
-					codeBlock = !codeBlock
-				}
-				// skip empty lines for anything not part of a code block.
-				if !codeBlock && post == "" {
-					continue
-				}
-
 				if showReplayHdr {
 					date := ts.Format("2006-01-02 15:04:05")
 					if brchannel.DM {
@@ -837,16 +850,7 @@ func (u *User) addUserToChannelWorker6(channels <-chan *bridge.ChannelInfo, thro
 				nick = systemUser
 			}
 
-			codeBlock := false
 			for _, post := range strings.Split(p.Message, "\n") {
-				if post == "```" {
-					codeBlock = !codeBlock
-				}
-				// skip empty lines for anything not part of a code block.
-				if !codeBlock && post == "" {
-					continue
-				}
-
 				if showReplayHdr {
 					date := ts.Format("2006-01-02 15:04:05")
 					channame := brchannel.Name
