@@ -616,13 +616,17 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 		// We used to stored last viewed at if present.
 		var lastViewedAt int64
 		key := brchannel.ID
-		u.lastViewedAtDB.View(func(tx *bolt.Tx) error {
+		err := u.lastViewedAtDB.View(func(tx *bolt.Tx) error {
 			b := tx.Bucket([]byte(u.User))
 			if v := b.Get([]byte(key)); v != nil {
 				lastViewedAt = int64(binary.LittleEndian.Uint64(v))
 			}
 			return nil
 		})
+		if err != nil {
+			logger.Errorf("something wrong with u.lastViewedAtDB.View for %s for channel %s (%s)", u.Nick, channame, brchannel.ID)
+			lastViewedAt = since
+		}
 
 		// XXX: backwards compatibility with older DB format (pre bbolt).
 		// TODO: Remove in future releases.
@@ -754,21 +758,48 @@ func (u *User) addUserToChannelWorker6(channels <-chan *bridge.ChannelInfo, thro
 		if since == 0 {
 			continue
 		}
-		// We used to stored last viewed at if present.
-		u.lastViewedAtMutex.RLock()
-		if lastViewedAt, ok := u.lastViewedAt[brchannel.ID]; ok {
-			// But only use the stored last viewed if it's later than what the server knows.
-			if lastViewedAt > since {
-				since = lastViewedAt + 1
-			}
+
+		logSince := "server"
+		channame := brchannel.Name
+		if !brchannel.DM {
+			channame = fmt.Sprintf("#%s", brchannel.Name)
 		}
-		u.lastViewedAtMutex.RUnlock()
+
+		// We used to stored last viewed at if present.
+		var lastViewedAt int64
+		key := brchannel.ID
+		err := u.lastViewedAtDB.View(func(tx *bolt.Tx) error {
+			b := tx.Bucket([]byte(u.User))
+			if v := b.Get([]byte(key)); v != nil {
+				lastViewedAt = int64(binary.LittleEndian.Uint64(v))
+			}
+			return nil
+		})
+		if err != nil {
+			logger.Errorf("something wrong with u.lastViewedAtDB.View for %s for channel %s (%s)", u.Nick, channame, brchannel.ID)
+			lastViewedAt = since
+		}
+
+		// XXX: backwards compatibility with older DB format (pre bbolt).
+		// TODO: Remove in future releases.
+		if lastViewedAt == 0 {
+			u.lastViewedAtMutex.RLock()
+			lastViewedAt = u.lastViewedAt[brchannel.ID]
+			u.lastViewedAtMutex.RUnlock()
+		}
+
+		// But only use the stored last viewed if it's later than what the server knows.
+		if lastViewedAt > since {
+			since = lastViewedAt + 1
+			logSince = "stored"
+		}
+
 		// post everything to the channel you haven't seen yet
 		postlist := u.br.GetPostsSince(brchannel.ID, since)
 		if postlist == nil {
 			// if the channel is not from the primary team id, we can't get posts
 			if brchannel.TeamID == u.br.GetMe().TeamID {
-				logger.Errorf("something wrong with getPostsSince for channel %s (%s)", brchannel.ID, brchannel.Name)
+				logger.Errorf("something wrong with getPostsSince for %s for channel %s (%s)", u.Nick, brchannel.ID, brchannel.Name)
 			}
 			continue
 		}
@@ -825,14 +856,12 @@ func (u *User) addUserToChannelWorker6(channels <-chan *bridge.ChannelInfo, thro
 
 				if showReplayHdr {
 					date := ts.Format("2006-01-02 15:04:05")
-					channame := brchannel.Name
 					if brchannel.DM {
-						spoof(nick, fmt.Sprintf("\x02Replaying since %s\x0f", date))
+						spoof(nick, fmt.Sprintf("\x02Replaying msgs since %s\x0f", date))
 					} else {
-						spoof("matterircd", fmt.Sprintf("\x02Replaying since %s\x0f", date))
-						channame = fmt.Sprintf("#%s", brchannel.Name)
+						spoof("matterircd", fmt.Sprintf("\x02Replaying msgs since %s\x0f", date))
 					}
-					logger.Infof("Replaying logs for %s (%s) since %s", brchannel.ID, channame, date)
+					logger.Infof("Replaying msgs for %s for %s (%s) since %s (%s)", u.Nick, channame, brchannel.ID, date, logSince)
 					showReplayHdr = false
 				}
 
