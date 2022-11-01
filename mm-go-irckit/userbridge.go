@@ -905,16 +905,20 @@ func (u *User) MsgUser(toUser *User, msg string) {
 }
 
 func (u *User) MsgSpoofUser(sender *User, rcvuser string, msg string) {
-	u.Encode(&irc.Message{ //nolint:errcheck
-		Prefix: &irc.Prefix{
-			Name: sender.Nick,
-			User: sender.Nick,
-			Host: sender.Host,
-		},
-		Command:  irc.PRIVMSG,
-		Params:   []string{rcvuser},
-		Trailing: msg,
-	})
+	msg = wordwrap.String(msg, 440)
+	lines := strings.Split(msg, "\n")
+	for _, l := range lines {
+		u.Encode(&irc.Message{
+			Prefix: &irc.Prefix{
+				Name: sender.Nick,
+				User: sender.Nick,
+				Host: sender.Host,
+			},
+			Command:  irc.PRIVMSG,
+			Params:   []string{rcvuser},
+			Trailing: l + "\n",
+		})
+	}
 }
 
 func (u *User) syncChannel(id string, name string) {
