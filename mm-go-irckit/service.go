@@ -338,7 +338,7 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 	}
 
 	var channelID string
-	var spoof func(string, string)
+	var spoof func(string, string, ...int)
 	scrollbackUser, exists := u.Srv.HasUser(args[0])
 
 	switch {
@@ -383,16 +383,7 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 			nick = "system"
 		}
 
-		codeBlock := false
 		for _, post := range strings.Split(p.Message, "\n") {
-			if post == "```" {
-				codeBlock = !codeBlock
-			}
-			// skip empty lines for anything not part of a code block.
-			if !codeBlock && post == "" {
-				continue
-			}
-
 			switch { // nolint:dupl
 			case (u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" || u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost+post") && strings.HasPrefix(args[0], "#") && nick != "system":
 				threadMsgID := u.prefixContext("", p.Id, p.ParentId, "")
@@ -458,7 +449,7 @@ func scrollback6(u *User, toUser *User, args []string, service string) {
 	}
 
 	var channelID string
-	var spoof func(string, string)
+	var spoof func(string, string, ...int)
 	scrollbackUser, exists := u.Srv.HasUser(args[0])
 
 	switch {
@@ -503,16 +494,7 @@ func scrollback6(u *User, toUser *User, args []string, service string) {
 			nick = "system"
 		}
 
-		codeBlock := false
 		for _, post := range strings.Split(p.Message, "\n") {
-			if post == "```" {
-				codeBlock = !codeBlock
-			}
-			// skip empty lines for anything not part of a code block.
-			if !codeBlock && post == "" {
-				continue
-			}
-
 			switch { // nolint:dupl
 			case (u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" || u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost+post") && strings.HasPrefix(args[0], "#") && nick != "system":
 				threadMsgID := u.prefixContext("", p.Id, p.RootId, "")
