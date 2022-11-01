@@ -139,41 +139,11 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 		}
 	}
 
-	text := event.Text
-	prefix := ""
-	suffix := ""
-	maxlen := 440
-	showContext := false
-	if u.Nick != systemUser {
-		prefixUser := event.Sender.User
-		if event.Sender.Me {
-			prefixUser = event.Receiver.User
-		}
-
-		switch {
-		case u.v.GetBool(u.br.Protocol()+".prefixcontext") && strings.HasPrefix(text, "\x01"):
-			prefix = u.prefixContext(prefixUser, event.MessageID, event.ParentID, event.Event) + " "
-			text = strings.Replace(text, "\x01ACTION ", "\x01ACTION "+prefix, 1)
-			maxlen = len(text)
-		case u.v.GetBool(u.br.Protocol()+".prefixcontext") && u.v.GetBool(u.br.Protocol()+".showcontextmulti"):
-			prefix = u.prefixContext(prefixUser, event.MessageID, event.ParentID, event.Event) + " "
-			showContext = true
-			maxlen = maxlen - len(prefix)
-		case u.v.GetBool(u.br.Protocol() + ".prefixcontext"):
-			prefix = u.prefixContext(prefixUser, event.MessageID, event.ParentID, event.Event) + " "
-			text = prefix + text
-		case u.v.GetBool(u.br.Protocol()+".suffixcontext") && strings.HasSuffix(text, "\x01"):
-			suffix = " " + u.prefixContext(prefixUser, event.MessageID, event.ParentID, event.Event)
-			text = strings.Replace(text, " \x01", suffix+" \x01", 1)
-		case u.v.GetBool(u.br.Protocol()+".suffixcontext") && u.v.GetBool(u.br.Protocol()+".showcontextmulti"):
-			suffix = " " + u.prefixContext(prefixUser, event.MessageID, event.ParentID, event.Event)
-			showContext = true
-			maxlen = maxlen - len(suffix)
-		case u.v.GetBool(u.br.Protocol() + ".suffixcontext"):
-			suffix = " " + u.prefixContext(prefixUser, event.MessageID, event.ParentID, event.Event)
-			text = strings.TrimRight(text, "\n") + suffix
-		}
+	prefixUser := event.Sender.User
+	if event.Sender.Me {
+		prefixUser = event.Receiver.User
 	}
+	text, prefix, suffix, showContext, maxlen := u.handleMessageThreadContext(prefixUser, event.MessageID, event.ParentID, event.Event, event.Text)
 
 	codeBlock := false
 	text = wordwrap.String(text, maxlen)
@@ -313,32 +283,10 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 	text := event.Text
 	prefix := ""
 	suffix := ""
-	maxlen := 440
 	showContext := false
+	maxlen := 440
 	if u.Nick != systemUser {
-		switch {
-		case u.v.GetBool(u.br.Protocol()+".prefixcontext") && strings.HasPrefix(text, "\x01"):
-			prefix = u.prefixContext(event.ChannelID, event.MessageID, event.ParentID, event.Event) + " "
-			text = strings.Replace(text, "\x01ACTION ", "\x01ACTION "+prefix, 1)
-			maxlen = len(text)
-		case u.v.GetBool(u.br.Protocol()+".prefixcontext") && u.v.GetBool(u.br.Protocol()+".showcontextmulti"):
-			prefix = u.prefixContext(event.ChannelID, event.MessageID, event.ParentID, event.Event) + " "
-			showContext = true
-			maxlen = maxlen - len(prefix)
-		case u.v.GetBool(u.br.Protocol() + ".prefixcontext"):
-			prefix = u.prefixContext(event.ChannelID, event.MessageID, event.ParentID, event.Event) + " "
-			text = prefix + text
-		case u.v.GetBool(u.br.Protocol()+".suffixcontext") && strings.HasSuffix(text, "\x01"):
-			suffix = " " + u.prefixContext(event.ChannelID, event.MessageID, event.ParentID, event.Event)
-			text = strings.Replace(text, " \x01", suffix+" \x01", 1)
-		case u.v.GetBool(u.br.Protocol()+".suffixcontext") && u.v.GetBool(u.br.Protocol()+".showcontextmulti"):
-			suffix = " " + u.prefixContext(event.ChannelID, event.MessageID, event.ParentID, event.Event)
-			showContext = true
-			maxlen = maxlen - len(suffix)
-		case u.v.GetBool(u.br.Protocol() + ".suffixcontext"):
-			suffix = " " + u.prefixContext(event.ChannelID, event.MessageID, event.ParentID, event.Event)
-			text = strings.TrimRight(text, "\n") + suffix
-		}
+		text, prefix, suffix, showContext, maxlen = u.handleMessageThreadContext(event.ChannelID, event.MessageID, event.ParentID, event.Event, event.Text)
 	}
 
 	codeBlock := false
@@ -1301,4 +1249,40 @@ func (u *User) getMattermostVersion() string {
 	defer resp.Body.Close()
 
 	return resp.Header.Get("X-Version-Id")
+}
+
+func (u *User) handleMessageThreadContext(channelID, messageID, parentID, event, text string) (string, string, string, bool, int) {
+	newText := text
+	prefix := ""
+	suffix := ""
+	maxlen := 440
+	showContext := false
+
+	switch {
+	case u.v.GetBool(u.br.Protocol()+".prefixcontext") && strings.HasPrefix(text, "\x01"):
+		prefix = u.prefixContext(channelID, messageID, parentID, event) + " "
+		newText = strings.Replace(text, "\x01ACTION ", "\x01ACTION "+prefix, 1)
+		maxlen = len(text)
+	case u.v.GetBool(u.br.Protocol()+".prefixcontext") && u.v.GetBool(u.br.Protocol()+".showcontextmulti"):
+		prefix = u.prefixContext(channelID, messageID, parentID, event) + " "
+		newText = text
+		showContext = true
+		maxlen -= len(prefix)
+	case u.v.GetBool(u.br.Protocol() + ".prefixcontext"):
+		prefix = u.prefixContext(channelID, messageID, parentID, event) + " "
+		newText = prefix + text
+	case u.v.GetBool(u.br.Protocol()+".suffixcontext") && strings.HasSuffix(text, "\x01"):
+		suffix = " " + u.prefixContext(channelID, messageID, parentID, event)
+		newText = strings.Replace(text, " \x01", suffix+" \x01", 1)
+	case u.v.GetBool(u.br.Protocol()+".suffixcontext") && u.v.GetBool(u.br.Protocol()+".showcontextmulti"):
+		suffix = " " + u.prefixContext(channelID, messageID, parentID, event)
+		newText = text
+		showContext = true
+		maxlen -= len(suffix)
+	case u.v.GetBool(u.br.Protocol() + ".suffixcontext"):
+		suffix = " " + u.prefixContext(channelID, messageID, parentID, event)
+		newText = strings.TrimRight(text, "\n") + suffix
+	}
+
+	return newText, prefix, suffix, showContext, maxlen
 }
