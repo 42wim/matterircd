@@ -67,10 +67,10 @@ type Channel interface {
 	String() string
 
 	// Spoof message
-	SpoofMessage(from string, text string)
+	SpoofMessage(from string, text string, maxlen ...int)
 
 	// Spoof notice
-	SpoofNotice(from string, text string)
+	SpoofNotice(from string, text string, maxlen ...int)
 
 	IsPrivate() bool
 }
@@ -440,8 +440,12 @@ func (ch *channel) Len() int {
 	return len(ch.usersIdx)
 }
 
-func (ch *channel) Spoof(from string, text string, cmd string) {
-	text = wordwrap.String(text, 440)
+func (ch *channel) Spoof(from string, text string, cmd string, maxlen ...int) {
+	if len(maxlen) == 0 {
+		text = wordwrap.String(text, 440)
+	} else {
+		text = wordwrap.String(text, maxlen[0])
+	}
 	lines := strings.Split(text, "\n")
 	for _, l := range lines {
 		msg := &irc.Message{
@@ -461,12 +465,20 @@ func (ch *channel) Spoof(from string, text string, cmd string) {
 	}
 }
 
-func (ch *channel) SpoofMessage(from string, text string) {
-	ch.Spoof(from, text, irc.PRIVMSG)
+func (ch *channel) SpoofMessage(from string, text string, maxlen ...int) {
+	if len(maxlen) == 0 {
+		ch.Spoof(from, text, irc.PRIVMSG, 440)
+	} else {
+		ch.Spoof(from, text, irc.PRIVMSG, maxlen[0])
+	}
 }
 
-func (ch *channel) SpoofNotice(from string, text string) {
-	ch.Spoof(from, text, irc.NOTICE)
+func (ch *channel) SpoofNotice(from string, text string, maxlen ...int) {
+	if len(maxlen) == 0 {
+		ch.Spoof(from, text, irc.NOTICE, 440)
+	} else {
+		ch.Spoof(from, text, irc.NOTICE, maxlen[0])
+	}
 }
 
 func (ch *channel) IsPrivate() bool {

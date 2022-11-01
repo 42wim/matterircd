@@ -139,35 +139,39 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 		}
 	}
 
-	if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
-		prefixUser := event.Sender.User
+	prefixUser := event.Sender.User
+	if event.Sender.Me {
+		prefixUser = event.Receiver.User
+	}
+	text, prefix, suffix, showContext, maxlen := u.handleMessageThreadContext(prefixUser, event.MessageID, event.ParentID, event.Event, event.Text)
+
+	codeBlock := false
+	text = wordwrap.String(text, maxlen)
+	lines := strings.Split(text, "\n")
+	for _, text := range lines {
+		if text == "```" {
+			codeBlock = !codeBlock
+		}
+		// skip empty lines for anything not part of a code block.
+		if !codeBlock && text == "" {
+			continue
+		} else if text == "" {
+			text = " "
+		}
+
+		if showContext {
+			text = prefix + text + suffix
+		}
 
 		if event.Sender.Me {
-			prefixUser = event.Receiver.User
-		}
-
-		prefix := u.prefixContext(prefixUser, event.MessageID, event.ParentID, event.Event)
-
-		switch {
-		case u.v.GetBool(u.br.Protocol()+".prefixcontext") && strings.HasPrefix(event.Text, "\x01"):
-			event.Text = strings.Replace(event.Text, "\x01ACTION ", "\x01ACTION "+prefix+" ", 1)
-		case u.v.GetBool(u.br.Protocol() + ".prefixcontext"):
-			event.Text = prefix + " " + event.Text
-		case u.v.GetBool(u.br.Protocol()+".suffixcontext") && strings.HasSuffix(event.Text, "\x01"):
-			event.Text = strings.Replace(event.Text, " \x01", " "+prefix+" \x01", 1)
-		case u.v.GetBool(u.br.Protocol() + ".suffixcontext"):
-			event.Text = event.Text + " " + prefix
-		}
-	}
-
-	if event.Sender.Me {
-		if event.Receiver.Me {
-			u.MsgSpoofUser(u, u.Nick, event.Text)
+			if event.Receiver.Me {
+				u.MsgSpoofUser(u, u.Nick, text, len(text))
+			} else {
+				u.MsgSpoofUser(u, event.Receiver.Nick, text, len(text))
+			}
 		} else {
-			u.MsgSpoofUser(u, event.Receiver.Nick, event.Text)
+			u.MsgSpoofUser(u.createUserFromInfo(event.Sender), u.Nick, text, len(text))
 		}
-	} else {
-		u.MsgSpoofUser(u.createUserFromInfo(event.Sender), u.Nick, event.Text)
 	}
 
 	if !u.v.GetBool(u.br.Protocol() + ".disableautoview") {
@@ -276,25 +280,39 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		}
 	}
 
-	if (u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext")) && u.Nick != systemUser {
-		prefix := u.prefixContext(event.ChannelID, event.MessageID, event.ParentID, event.Event)
-		switch {
-		case u.v.GetBool(u.br.Protocol()+".prefixcontext") && strings.HasPrefix(event.Text, "\x01"):
-			event.Text = strings.Replace(event.Text, "\x01ACTION ", "\x01ACTION "+prefix+" ", 1)
-		case u.v.GetBool(u.br.Protocol() + ".prefixcontext"):
-			event.Text = prefix + " " + event.Text
-		case u.v.GetBool(u.br.Protocol()+".suffixcontext") && strings.HasSuffix(event.Text, "\x01"):
-			event.Text = strings.Replace(event.Text, " \x01", " "+prefix+" \x01", 1)
-		case u.v.GetBool(u.br.Protocol() + ".suffixcontext"):
-			event.Text = event.Text + " " + prefix
-		}
+	text := event.Text
+	prefix := ""
+	suffix := ""
+	showContext := false
+	maxlen := 440
+	if u.Nick != systemUser {
+		text, prefix, suffix, showContext, maxlen = u.handleMessageThreadContext(event.ChannelID, event.MessageID, event.ParentID, event.Event, event.Text)
 	}
 
-	switch event.MessageType {
-	case "notice":
-		ch.SpoofNotice(nick, event.Text)
-	default:
-		ch.SpoofMessage(nick, event.Text)
+	codeBlock := false
+	text = wordwrap.String(text, maxlen)
+	lines := strings.Split(text, "\n")
+	for _, text := range lines {
+		if text == "```" {
+			codeBlock = !codeBlock
+		}
+		// skip empty lines for anything not part of a code block.
+		if !codeBlock && text == "" {
+			continue
+		} else if text == "" {
+			text = " "
+		}
+
+		if showContext {
+			text = prefix + text + suffix
+		}
+
+		switch event.MessageType {
+		case "notice":
+			ch.SpoofNotice(nick, text, len(text))
+		default:
+			ch.SpoofMessage(nick, text, len(text))
+		}
 	}
 
 	if !u.v.GetBool(u.br.Protocol() + ".disableautoview") {
@@ -564,9 +582,9 @@ func (u *User) addUsersToChannels() {
 	go u.handleEventChan()
 }
 
-func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(string, string) {
+func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(string, string, ...int) {
 	if strings.Contains(mmchannel.Name, "__") {
-		return func(nick string, msg string) {
+		return func(nick string, msg string, maxlen ...int) {
 			if usr, ok := u.Srv.HasUser(nick); ok {
 				u.MsgSpoofUser(usr, u.Nick, msg)
 			} else {
@@ -688,16 +706,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 				nick = systemUser
 			}
 
-			codeBlock := false
 			for _, post := range strings.Split(p.Message, "\n") {
-				if post == "```" {
-					codeBlock = !codeBlock
-				}
-				// skip empty lines for anything not part of a code block.
-				if !codeBlock && post == "" {
-					continue
-				}
-
 				if showReplayHdr {
 					date := ts.Format("2006-01-02 15:04:05")
 					if brchannel.DM {
@@ -813,16 +822,7 @@ func (u *User) addUserToChannelWorker6(channels <-chan *bridge.ChannelInfo, thro
 				nick = systemUser
 			}
 
-			codeBlock := false
 			for _, post := range strings.Split(p.Message, "\n") {
-				if post == "```" {
-					codeBlock = !codeBlock
-				}
-				// skip empty lines for anything not part of a code block.
-				if !codeBlock && post == "" {
-					continue
-				}
-
 				if showReplayHdr {
 					date := ts.Format("2006-01-02 15:04:05")
 					channame := brchannel.Name
@@ -876,8 +876,12 @@ func (u *User) MsgUser(toUser *User, msg string) {
 	})
 }
 
-func (u *User) MsgSpoofUser(sender *User, rcvuser string, msg string) {
-	msg = wordwrap.String(msg, 440)
+func (u *User) MsgSpoofUser(sender *User, rcvuser string, msg string, maxlen ...int) {
+	if len(maxlen) == 0 {
+		msg = wordwrap.String(msg, 440)
+	} else {
+		msg = wordwrap.String(msg, maxlen[0])
+	}
 	lines := strings.Split(msg, "\n")
 	for _, l := range lines {
 		u.Encode(&irc.Message{
@@ -1245,4 +1249,40 @@ func (u *User) getMattermostVersion() string {
 	defer resp.Body.Close()
 
 	return resp.Header.Get("X-Version-Id")
+}
+
+func (u *User) handleMessageThreadContext(channelID, messageID, parentID, event, text string) (string, string, string, bool, int) {
+	newText := text
+	prefix := ""
+	suffix := ""
+	maxlen := 440
+	showContext := false
+
+	switch {
+	case u.v.GetBool(u.br.Protocol()+".prefixcontext") && strings.HasPrefix(text, "\x01"):
+		prefix = u.prefixContext(channelID, messageID, parentID, event) + " "
+		newText = strings.Replace(text, "\x01ACTION ", "\x01ACTION "+prefix, 1)
+		maxlen = len(text)
+	case u.v.GetBool(u.br.Protocol()+".prefixcontext") && u.v.GetBool(u.br.Protocol()+".showcontextmulti"):
+		prefix = u.prefixContext(channelID, messageID, parentID, event) + " "
+		newText = text
+		showContext = true
+		maxlen -= len(prefix)
+	case u.v.GetBool(u.br.Protocol() + ".prefixcontext"):
+		prefix = u.prefixContext(channelID, messageID, parentID, event) + " "
+		newText = prefix + text
+	case u.v.GetBool(u.br.Protocol()+".suffixcontext") && strings.HasSuffix(text, "\x01"):
+		suffix = " " + u.prefixContext(channelID, messageID, parentID, event)
+		newText = strings.Replace(text, " \x01", suffix+" \x01", 1)
+	case u.v.GetBool(u.br.Protocol()+".suffixcontext") && u.v.GetBool(u.br.Protocol()+".showcontextmulti"):
+		suffix = " " + u.prefixContext(channelID, messageID, parentID, event)
+		newText = text
+		showContext = true
+		maxlen -= len(suffix)
+	case u.v.GetBool(u.br.Protocol() + ".suffixcontext"):
+		suffix = " " + u.prefixContext(channelID, messageID, parentID, event)
+		newText = strings.TrimRight(text, "\n") + suffix
+	}
+
+	return newText, prefix, suffix, showContext, maxlen
 }
