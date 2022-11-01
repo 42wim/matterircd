@@ -1,3 +1,29 @@
+# v0.26.0
+
+## New features
+
+- general: Add support for IRCv3 Client Capability Negotiation (#478)
+- mattermost: Support mattermost 7 (#481)
+- mattermost: Add new thread context to show both Mattermost thread/parent/root and post IDs (#474).
+  - see `ThreadContext` in matterircd.toml.example
+
+## Enhancement
+
+- general: Add systemd service unit example (#475)
+- general: Fix small typo on docker parameter (#469)
+- mattermost: Do not split message on newlines (#482)
+  - see `ShowContextMulti` in matterircd.toml.example to enable context on every line if needed.
+  - this also fixes #426 where messages could get out of order
+
+## Bugfix
+
+- general: Update dependencies
+- mattermost: Fix multiline replies to threads (#473)
+- mattermost: Fix replaying to match addUserToChannelWorker (#484)
+
+This release couldn't exist without the following contributors:
+@hloeung, @mk-fg, @zodman
+
 # v0.25.1
 
 ## Enhancement
