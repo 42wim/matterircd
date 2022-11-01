@@ -70,17 +70,11 @@ func (m *Client) GetChannelID(name string, teamID string) string {
 }
 
 func (m *Client) getChannelIDTeam(name string, teamID string) string {
-	for _, t := range m.OtherTeams {
-		if t.ID == teamID {
-			for _, channel := range append(t.Channels, t.MoreChannels...) {
-				if getNormalisedName(channel) == name {
-					return channel.Id
-				}
-			}
-		}
+	channel, resp, err := m.Client.GetChannelByName(name, teamID, "")
+	if err != nil || resp == nil {
+		return ""
 	}
-
-	return ""
+	return channel.Id
 }
 
 func (m *Client) GetChannelName(channelID string) string {
