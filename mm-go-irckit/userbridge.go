@@ -139,10 +139,46 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 		}
 	}
 
+	text := event.Text
+	prefix := ""
+	suffix := ""
+	maxlen := 440
+	showContext := false
+	if u.Nick != systemUser {
+		prefixUser := event.Sender.User
+		if event.Sender.Me {
+			prefixUser = event.Receiver.User
+		}
+
+		switch {
+		case u.v.GetBool(u.br.Protocol()+".prefixcontext") && strings.HasPrefix(text, "\x01"):
+			prefix = u.prefixContext(prefixUser, event.MessageID, event.ParentID, event.Event) + " "
+			text = strings.Replace(text, "\x01ACTION ", "\x01ACTION "+prefix, 1)
+			maxlen = len(text)
+		case u.v.GetBool(u.br.Protocol()+".prefixcontext") && u.v.GetBool(u.br.Protocol()+".showcontextmulti"):
+			prefix = u.prefixContext(prefixUser, event.MessageID, event.ParentID, event.Event) + " "
+			showContext = true
+			maxlen = maxlen - len(prefix)
+		case u.v.GetBool(u.br.Protocol() + ".prefixcontext"):
+			prefix = u.prefixContext(prefixUser, event.MessageID, event.ParentID, event.Event) + " "
+			text = prefix + text
+		case u.v.GetBool(u.br.Protocol()+".suffixcontext") && strings.HasSuffix(text, "\x01"):
+			suffix = " " + u.prefixContext(prefixUser, event.MessageID, event.ParentID, event.Event)
+			text = strings.Replace(text, " \x01", suffix+" \x01", 1)
+		case u.v.GetBool(u.br.Protocol()+".suffixcontext") && u.v.GetBool(u.br.Protocol()+".showcontextmulti"):
+			suffix = " " + u.prefixContext(prefixUser, event.MessageID, event.ParentID, event.Event)
+			showContext = true
+			maxlen = maxlen - len(suffix)
+		case u.v.GetBool(u.br.Protocol() + ".suffixcontext"):
+			suffix = " " + u.prefixContext(prefixUser, event.MessageID, event.ParentID, event.Event)
+			text = strings.TrimRight(text, "\n") + suffix
+		}
+	}
+
 	codeBlock := false
-	text := wordwrap.String(event.Text, 440)
+	text = wordwrap.String(text, maxlen)
 	lines := strings.Split(text, "\n")
-	for idx, text := range lines {
+	for _, text := range lines {
 		if text == "```" {
 			codeBlock = !codeBlock
 		}
@@ -153,34 +189,9 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 			text = " "
 		}
 
-		showContext := u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext")
-
-		if showContext && u.v.GetBool(u.br.Protocol()+".hidecontextmulti") && idx != len(lines)-1 {
-			showContext = false
-		}
-
 		if showContext {
-			prefixUser := event.Sender.User
-
-			if event.Sender.Me {
-				prefixUser = event.Receiver.User
-			}
-
-			prefix := u.prefixContext(prefixUser, event.MessageID, event.ParentID, event.Event)
-
-			switch {
-			case u.v.GetBool(u.br.Protocol()+".prefixcontext") && strings.HasPrefix(text, "\x01"):
-				text = strings.Replace(text, "\x01ACTION ", "\x01ACTION "+prefix+" ", 1)
-			case u.v.GetBool(u.br.Protocol() + ".prefixcontext"):
-				text = prefix + " " + text
-			case u.v.GetBool(u.br.Protocol()+".suffixcontext") && strings.HasSuffix(text, "\x01"):
-				text = strings.Replace(text, " \x01", " "+prefix+" \x01", 1)
-			case u.v.GetBool(u.br.Protocol() + ".suffixcontext"):
-				text = text + " " + prefix
-			}
+			text = prefix + text + suffix
 		}
-
-		text += "\n"
 
 		if event.Sender.Me {
 			if event.Receiver.Me {
@@ -299,10 +310,41 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		}
 	}
 
+	text := event.Text
+	prefix := ""
+	suffix := ""
+	maxlen := 440
+	showContext := false
+	if u.Nick != systemUser {
+		switch {
+		case u.v.GetBool(u.br.Protocol()+".prefixcontext") && strings.HasPrefix(text, "\x01"):
+			prefix = u.prefixContext(event.ChannelID, event.MessageID, event.ParentID, event.Event) + " "
+			text = strings.Replace(text, "\x01ACTION ", "\x01ACTION "+prefix, 1)
+			maxlen = len(text)
+		case u.v.GetBool(u.br.Protocol()+".prefixcontext") && u.v.GetBool(u.br.Protocol()+".showcontextmulti"):
+			prefix = u.prefixContext(event.ChannelID, event.MessageID, event.ParentID, event.Event) + " "
+			showContext = true
+			maxlen = maxlen - len(prefix)
+		case u.v.GetBool(u.br.Protocol() + ".prefixcontext"):
+			prefix = u.prefixContext(event.ChannelID, event.MessageID, event.ParentID, event.Event) + " "
+			text = prefix + text
+		case u.v.GetBool(u.br.Protocol()+".suffixcontext") && strings.HasSuffix(text, "\x01"):
+			suffix = " " + u.prefixContext(event.ChannelID, event.MessageID, event.ParentID, event.Event)
+			text = strings.Replace(text, " \x01", suffix+" \x01", 1)
+		case u.v.GetBool(u.br.Protocol()+".suffixcontext") && u.v.GetBool(u.br.Protocol()+".showcontextmulti"):
+			suffix = " " + u.prefixContext(event.ChannelID, event.MessageID, event.ParentID, event.Event)
+			showContext = true
+			maxlen = maxlen - len(suffix)
+		case u.v.GetBool(u.br.Protocol() + ".suffixcontext"):
+			suffix = " " + u.prefixContext(event.ChannelID, event.MessageID, event.ParentID, event.Event)
+			text = strings.TrimRight(text, "\n") + suffix
+		}
+	}
+
 	codeBlock := false
-	text := wordwrap.String(event.Text, 440)
+	text = wordwrap.String(text, maxlen)
 	lines := strings.Split(text, "\n")
-	for idx, text := range lines {
+	for _, text := range lines {
 		if text == "```" {
 			codeBlock = !codeBlock
 		}
@@ -313,27 +355,9 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 			text = " "
 		}
 
-		showContext := (u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext")) && u.Nick != systemUser
-
-		if showContext && u.v.GetBool(u.br.Protocol()+".hidecontextmulti") && idx != len(lines)-1 {
-			showContext = false
-		}
-
 		if showContext {
-			prefix := u.prefixContext(event.ChannelID, event.MessageID, event.ParentID, event.Event)
-			switch {
-			case u.v.GetBool(u.br.Protocol()+".prefixcontext") && strings.HasPrefix(text, "\x01"):
-				text = strings.Replace(text, "\x01ACTION ", "\x01ACTION "+prefix+" ", 1)
-			case u.v.GetBool(u.br.Protocol() + ".prefixcontext"):
-				text = prefix + " " + text
-			case u.v.GetBool(u.br.Protocol()+".suffixcontext") && strings.HasSuffix(text, "\x01"):
-				text = strings.Replace(text, " \x01", " "+prefix+" \x01", 1)
-			case u.v.GetBool(u.br.Protocol() + ".suffixcontext"):
-				text = text + " " + prefix
-			}
+			text = prefix + text + suffix
 		}
-
-		text += "\n"
 
 		switch event.MessageType {
 		case "notice":
