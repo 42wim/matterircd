@@ -184,12 +184,12 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 
 		if event.Sender.Me {
 			if event.Receiver.Me {
-				u.MsgSpoofUser(u, u.Nick, text)
+				u.MsgSpoofUser(u, u.Nick, text, len(text))
 			} else {
-				u.MsgSpoofUser(u, event.Receiver.Nick, text)
+				u.MsgSpoofUser(u, event.Receiver.Nick, text, len(text))
 			}
 		} else {
-			u.MsgSpoofUser(u.createUserFromInfo(event.Sender), u.Nick, text)
+			u.MsgSpoofUser(u.createUserFromInfo(event.Sender), u.Nick, text, len(text))
 		}
 	}
 
@@ -337,9 +337,9 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 
 		switch event.MessageType {
 		case "notice":
-			ch.SpoofNotice(nick, text)
+			ch.SpoofNotice(nick, text, len(text))
 		default:
-			ch.SpoofMessage(nick, text)
+			ch.SpoofMessage(nick, text, len(text))
 		}
 	}
 
@@ -610,9 +610,9 @@ func (u *User) addUsersToChannels() {
 	go u.handleEventChan()
 }
 
-func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(string, string) {
+func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(string, string, ...int) {
 	if strings.Contains(mmchannel.Name, "__") {
-		return func(nick string, msg string) {
+		return func(nick string, msg string, maxlen ...int) {
 			if usr, ok := u.Srv.HasUser(nick); ok {
 				u.MsgSpoofUser(usr, u.Nick, msg)
 			} else {
@@ -904,8 +904,12 @@ func (u *User) MsgUser(toUser *User, msg string) {
 	})
 }
 
-func (u *User) MsgSpoofUser(sender *User, rcvuser string, msg string) {
-	msg = wordwrap.String(msg, 440)
+func (u *User) MsgSpoofUser(sender *User, rcvuser string, msg string, maxlen ...int) {
+	if len(maxlen) == 0 {
+		msg = wordwrap.String(msg, 440)
+	} else {
+		msg = wordwrap.String(msg, maxlen[0])
+	}
 	lines := strings.Split(msg, "\n")
 	for _, l := range lines {
 		u.Encode(&irc.Message{

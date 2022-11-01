@@ -338,7 +338,7 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 	}
 
 	var channelID string
-	var spoof func(string, string)
+	var spoof func(string, string, ...int)
 	scrollbackUser, exists := u.Srv.HasUser(args[0])
 
 	switch {
@@ -449,7 +449,7 @@ func scrollback6(u *User, toUser *User, args []string, service string) {
 	}
 
 	var channelID string
-	var spoof func(string, string)
+	var spoof func(string, string, ...int)
 	scrollbackUser, exists := u.Srv.HasUser(args[0])
 
 	switch {
