@@ -12,7 +12,7 @@ trace = false
 #default false
 gops = false
 
-#interface:port to bind to. (e.g 127.0.0.1:6697) (deault "")
+#TLS interface:port to bind to. (e.g 127.0.0.1:6697) (deault "")
 #
 #TLSBind = "127.0.0.1:6697"
 
@@ -32,7 +32,7 @@ gops = false
 #PasteBufferTimeout specifies the amount of time in milliseconds that
 #messages get kept in matterircd internal buffer before being sent to
 #mattermost or slack.
-#Messageis that will be received in this time will be concatenated together
+#Messages that will be received in this time will be concatenated together
 #So this can be used to paste stuff like ansi-art or code.
 #Default 0 (is disabled)
 #Depending on how fast you type 2500 is a good number
