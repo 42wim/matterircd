@@ -334,6 +334,10 @@ func (m *Client) initUser() error {
 		}
 
 		m.logger.Infof("found %d users in team %s", len(usermap), team.Name)
+		// add all users
+		for k, v := range usermap {
+			m.Users[k] = v
+		}
 
 		t := &Team{
 			Team:  team,
@@ -347,22 +351,42 @@ func (m *Client) initUser() error {
 		}
 
 		t.Channels = mmchannels
+		m.logger.Infof("found %d channels for user in team %s", len(mmchannels), team.Name)
 
-		mmchannels, _, err = m.Client.GetPublicChannelsForTeam(team.Id, 0, 5000, "")
+		idx = 0
+		max = 200
+		channelmap := make(map[string]*model.Channel)
+
+		mmchannels, _, err = m.Client.GetPublicChannelsForTeam(team.Id, idx, max, "")
 		if err != nil {
 			return err
 		}
 
-		t.MoreChannels = mmchannels
+		for len(mmchannels) > 0 {
+			for _, channel := range mmchannels {
+				channelmap[channel.Id] = channel
+			}
+
+			mmchannels, _, err = m.Client.GetPublicChannelsForTeam(team.Id, idx, max, "")
+			if err != nil {
+				return err
+			}
+
+			idx++
+
+			time.Sleep(time.Millisecond * 200)
+		}
+
+		m.logger.Infof("found %d public channels in team %s", len(channelmap), team.Name)
+		// add all channels
+		for _, member := range channelmap {
+			t.MoreChannels = append(t.MoreChannels, member)
+		}
 		m.OtherTeams = append(m.OtherTeams, t)
 
 		if team.Name == m.Credentials.Team {
 			m.Team = t
 			m.logger.Debugf("initUser(): found our team %s (id: %s)", team.Name, team.Id)
-		}
-		// add all users
-		for k, v := range t.Users {
-			m.Users[k] = v
 		}
 	}
 
