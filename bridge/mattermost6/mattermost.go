@@ -126,8 +126,6 @@ func (m *Mattermost) handleWsMessage(quitChan chan struct{}) {
 		case message := <-m.mc.MessageChan:
 			logger.Debugf("MMUser WsReceiver: %#v", message.Raw)
 			logger.Tracef("handleWsMessage %s", spew.Sdump(message))
-			// check if we have the users/channels in our cache. If not update
-			m.checkWsActionMessage(message.Raw, updateChannelsThrottle)
 
 			switch message.Raw.EventType() {
 			case model.WebsocketEventPosted:
@@ -139,11 +137,20 @@ func (m *Mattermost) handleWsMessage(quitChan chan struct{}) {
 			case model.WebsocketEventUserRemoved:
 				m.handleWsActionUserRemoved(message.Raw)
 			case model.WebsocketEventUserAdded:
+				// check if we have the users/channels in our cache. If not update
+				m.checkWsActionMessage(message.Raw, updateChannelsThrottle)
 				m.handleWsActionUserAdded(message.Raw)
 			case model.WebsocketEventChannelCreated:
+				// check if we have the users/channels in our cache. If not update
+				m.checkWsActionMessage(message.Raw, updateChannelsThrottle)
 				m.handleWsActionChannelCreated(message.Raw)
 			case model.WebsocketEventChannelDeleted:
+				// check if we have the users/channels in our cache. If not update
+				m.checkWsActionMessage(message.Raw, updateChannelsThrottle)
 				m.handleWsActionChannelDeleted(message.Raw)
+			case model.WebsocketEventChannelRestored:
+				// check if we have the users/channels in our cache. If not update
+				m.checkWsActionMessage(message.Raw, updateChannelsThrottle)
 			case model.WebsocketEventUserUpdated:
 				m.handleWsActionUserUpdated(message.Raw)
 			case model.WebsocketEventStatusChange:
@@ -433,6 +440,10 @@ func (m *Mattermost) Nick(name string) error {
 func (m *Mattermost) GetChannelName(channelID string) string {
 	var name string
 
+	if channelID == "" || strings.HasPrefix(channelID, "&") || channelID == m.mc.User.Nickname || channelID == m.mc.User.Username {
+		return channelID
+	}
+
 	channelName := m.mc.GetChannelName(channelID)
 
 	if channelName == "" {
@@ -549,6 +560,10 @@ func (m *Mattermost) GetChannels() []*bridge.ChannelInfo {
 }
 
 func (m *Mattermost) GetChannel(channelID string) (*bridge.ChannelInfo, error) {
+	if channelID == "" || strings.HasPrefix(channelID, "&") || channelID == m.mc.User.Nickname || channelID == m.mc.User.Username {
+		return nil, errors.New("channel not found")
+	}
+
 	for _, channel := range m.GetChannels() {
 		if channel.ID == channelID {
 			return channel, nil
