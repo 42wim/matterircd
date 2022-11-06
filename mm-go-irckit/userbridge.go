@@ -808,7 +808,7 @@ func (u *User) addUserToChannelWorker6(channels <-chan *bridge.ChannelInfo, thro
 		if postlist == nil {
 			// if the channel is not from the primary team id, we can't get posts
 			if brchannel.TeamID == u.br.GetMe().TeamID {
-				logger.Errorf("something wrong with getPostsSince for %s for channel %s (%s)", u.Nick, brchannel.ID, brchannel.Name)
+				logger.Errorf("something wrong with getPostsSince for %s for channel %s (%s)", u.Nick, channame, brchannel.ID)
 			}
 			continue
 		}

@@ -578,7 +578,18 @@ func (m *Mattermost) GetChannel(channelID string) (*bridge.ChannelInfo, error) {
 		}
 	}
 
-	return nil, errors.New("channel not found")
+	// Fallback if it's not found in the cache.
+	mmchannel, _, err := m.mc.Client.GetChannel(channelID, "")
+	if err != nil {
+		return nil, errors.New("channel not found")
+	}
+	return &bridge.ChannelInfo{
+		Name:    mmchannel.Name,
+		ID:      mmchannel.Id,
+		TeamID:  mmchannel.TeamId,
+		DM:      mmchannel.IsGroupOrDirect(),
+		Private: !mmchannel.IsOpen(),
+	}, nil
 }
 
 func (m *Mattermost) GetUser(userID string) *bridge.UserInfo {
