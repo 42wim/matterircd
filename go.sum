@@ -1048,8 +1048,8 @@ github.com/marstr/guid v0.0.0-20170427235115-8bdf7d1a087c/go.mod h1:74gB1z2wpxxI
 github.com/marstr/guid v1.1.0/go.mod h1:74gB1z2wpxxInTG6yaqA7KrtM0NZ+RbrcqDvYHefzho=
 github.com/matterbridge/logrus-prefixed-formatter v0.5.3-0.20200523233437-d971309a77ba h1:XleOY4IjAEIcxAh+IFwT5JT5Ze3RHiYz6m+4ZfZ0rc0=
 github.com/matterbridge/logrus-prefixed-formatter v0.5.3-0.20200523233437-d971309a77ba/go.mod h1:iXGEotOvwI1R1SjLxRc+BF5rUORTMtE0iMZBT2lxqAU=
-github.com/matterbridge/matterclient v0.0.0-20220624224459-272af20c7ddf h1:vaiRcLFKSD0fzlcLll53LU8HnpVv8XzP7C0mi8Tfvro=
-github.com/matterbridge/matterclient v0.0.0-20220624224459-272af20c7ddf/go.mod h1:Zg8PH1P/1CNUxozQ8blnjAV9PA4Qn2qWf33cX5yNKGM=
+github.com/matterbridge/matterclient v0.0.0-20221106190440-8bcf49695e0d h1:aI0ANEzy3dMv3vEAMQ80AItNie0fBR9ZxE2sAedORmM=
+github.com/matterbridge/matterclient v0.0.0-20221106190440-8bcf49695e0d/go.mod h1:Zg8PH1P/1CNUxozQ8blnjAV9PA4Qn2qWf33cX5yNKGM=
 github.com/mattermost/go-i18n v1.11.0/go.mod h1:RyS7FDNQlzF1PsjbJWHRI35exqaKGSO9qD4iv8QjE34=
 github.com/mattermost/go-i18n v1.11.1-0.20211013152124-5c415071e404 h1:Khvh6waxG1cHc4Cz5ef9n3XVCxRWpAKUtqg9PJl5+y8=
 github.com/mattermost/go-i18n v1.11.1-0.20211013152124-5c415071e404/go.mod h1:RyS7FDNQlzF1PsjbJWHRI35exqaKGSO9qD4iv8QjE34=
