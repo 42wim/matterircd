@@ -1198,6 +1198,10 @@ func (u *User) loadLastViewedAt() map[string]int64 {
 }
 
 func (u *User) saveLastViewedAt(channelID string) {
+	if channelID == "" {
+		return
+	}
+
 	currentTime := make([]byte, 8)
 	binary.LittleEndian.PutUint64(currentTime, uint64(model.GetMillis()))
 
