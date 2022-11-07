@@ -951,6 +951,12 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 				msg = strings.TrimLeft(msg, "*")
 				msg = strings.TrimRight(msg, "*")
 				msg = "\x01ACTION " + msg + " \x01"
+			} else if data.Type == "custom_matterpoll" {
+				pollMsg := parseMatterpollToMsg(data.Attachments())
+				if pollMsg == "" {
+					break
+				}
+				msg = pollMsg + msg
 			}
 
 			event := &bridge.Event{
@@ -1365,4 +1371,26 @@ func (m *Mattermost) getDMUser(name interface{}) *bridge.UserInfo {
 	}
 
 	return nil
+}
+
+func parseMatterpollToMsg(attachments []*model.SlackAttachment) string {
+	msg := ""
+	for _, attachment := range attachments {
+		if strings.HasPrefix(attachment.Text, "This poll has ended.") {
+			return ""
+		}
+
+		options := ""
+		for _, action := range attachment.Actions {
+			if strings.HasPrefix(action.Id, "vote") {
+				options += "* " + action.Name + "\n"
+			}
+		}
+
+		text := strings.TrimSuffix(attachment.Text, "\n")
+		text = strings.Replace(text, "**Total votes**", "*Total votes*", 1)
+		msg = fmt.Sprintf("%s: %s\n%s%s", attachment.AuthorName, attachment.Title, options, text)
+	}
+
+	return msg
 }
