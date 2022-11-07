@@ -16,13 +16,11 @@ import (
 	bolt "go.etcd.io/bbolt"
 
 	"github.com/42wim/matterircd/bridge"
-	"github.com/42wim/matterircd/bridge/mattermost"
-	mattermost6 "github.com/42wim/matterircd/bridge/mattermost6"
 
+	mattermost "github.com/42wim/matterircd/bridge/mattermost"
 	"github.com/42wim/matterircd/bridge/slack"
 	"github.com/davecgh/go-spew/spew"
-	"github.com/mattermost/mattermost-server/v5/model"
-	model6 "github.com/mattermost/mattermost-server/v6/model"
+	"github.com/mattermost/mattermost-server/v6/model"
 	"github.com/muesli/reflow/wordwrap"
 	"github.com/sorcix/irc"
 	"github.com/spf13/viper"
@@ -605,13 +603,8 @@ func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(string, string, .
 	return ch.SpoofMessage
 }
 
+//nolint:funlen,gocognit,gocyclo,cyclop
 func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throttle *time.Ticker) {
-	if strings.HasPrefix(u.getMattermostVersion(), "6.") || strings.HasPrefix(u.getMattermostVersion(), "7.") {
-		u.addUserToChannelWorker6(channels, throttle)
-
-		return
-	}
-
 	for brchannel := range channels {
 		logger.Debug("addUserToChannelWorker", brchannel)
 
@@ -679,7 +672,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 		// traverse the order in reverse
 		for i := len(mmPostList.Order) - 1; i >= 0; i-- {
 			p := mmPostList.Posts[mmPostList.Order[i]]
-			if p.Type == model.POST_JOIN_LEAVE {
+			if p.Type == model.PostTypeJoinLeave {
 				continue
 			}
 
@@ -706,150 +699,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 				nick = botname
 			}
 
-			if p.Type == "system_add_to_team" || p.Type == "system_remove_from_team" {
-				nick = systemUser
-			}
-
-			for _, post := range strings.Split(p.Message, "\n") {
-				if showReplayHdr {
-					date := ts.Format("2006-01-02 15:04:05")
-					if brchannel.DM {
-						spoof(nick, fmt.Sprintf("\x02Replaying msgs since %s\x0f", date))
-					} else {
-						spoof("matterircd", fmt.Sprintf("\x02Replaying msgs since %s\x0f", date))
-					}
-					logger.Infof("Replaying msgs for %s for %s (%s) since %s (%s)", u.Nick, channame, brchannel.ID, date, logSince)
-					showReplayHdr = false
-				}
-
-				replayMsg := fmt.Sprintf("[%s] %s", ts.Format("15:04"), post)
-				if (u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext")) && (u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" || u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost+post") && nick != systemUser {
-					threadMsgID := u.prefixContext("", p.Id, p.ParentId, "")
-					replayMsg = u.formatContextMessage(ts.Format("15:04"), threadMsgID, post)
-				}
-				spoof(nick, replayMsg)
-			}
-
-			if len(p.FileIds) == 0 {
-				continue
-			}
-
-			for _, fname := range u.br.GetFileLinks(p.FileIds) {
-				fileMsg := "download file - " + fname
-				if u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" || u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost+post" {
-					threadMsgID := u.prefixContext("", p.Id, p.ParentId, "")
-					fileMsg = u.formatContextMessage(ts.Format("15:04"), threadMsgID, fileMsg)
-				}
-				spoof(nick, fileMsg)
-			}
-		}
-
-		if len(mmPostList.Order) > 0 {
-			if !u.v.GetBool(u.br.Protocol() + ".disableautoview") {
-				u.updateLastViewed(brchannel.ID)
-			}
-			u.saveLastViewedAt(brchannel.ID)
-		}
-	}
-}
-
-// nolint:funlen,gocognit,gocyclo,cyclop
-func (u *User) addUserToChannelWorker6(channels <-chan *bridge.ChannelInfo, throttle *time.Ticker) {
-	for brchannel := range channels {
-		logger.Debug("addUserToChannelWorker", brchannel)
-
-		<-throttle.C
-		// exclude direct messages
-		spoof := u.createSpoof(brchannel)
-
-		since := u.br.GetLastViewedAt(brchannel.ID)
-		// ignore invalid/deleted/old channels
-		if since == 0 {
-			continue
-		}
-
-		logSince := "server"
-		channame := brchannel.Name
-		if !brchannel.DM {
-			channame = fmt.Sprintf("#%s", brchannel.Name)
-		}
-
-		// We used to stored last viewed at if present.
-		var lastViewedAt int64
-		key := brchannel.ID
-		err := u.lastViewedAtDB.View(func(tx *bolt.Tx) error {
-			b := tx.Bucket([]byte(u.User))
-			if v := b.Get([]byte(key)); v != nil {
-				lastViewedAt = int64(binary.LittleEndian.Uint64(v))
-			}
-			return nil
-		})
-		if err != nil {
-			logger.Errorf("something wrong with u.lastViewedAtDB.View for %s for channel %s (%s)", u.Nick, channame, brchannel.ID)
-			lastViewedAt = since
-		}
-
-		// XXX: backwards compatibility with older DB format (pre bbolt).
-		// TODO: Remove in future releases.
-		if lastViewedAt == 0 {
-			u.lastViewedAtMutex.RLock()
-			lastViewedAt = u.lastViewedAt[brchannel.ID]
-			u.lastViewedAtMutex.RUnlock()
-		}
-
-		// But only use the stored last viewed if it's later than what the server knows.
-		if lastViewedAt > since {
-			since = lastViewedAt + 1
-			logSince = "stored"
-		}
-
-		// post everything to the channel you haven't seen yet
-		postlist := u.br.GetPostsSince(brchannel.ID, since)
-		if postlist == nil {
-			// if the channel is not from the primary team id, we can't get posts
-			if brchannel.TeamID == u.br.GetMe().TeamID {
-				logger.Errorf("something wrong with getPostsSince for %s for channel %s (%s)", u.Nick, channame, brchannel.ID)
-			}
-			continue
-		}
-
-		showReplayHdr := true
-
-		mmPostList, _ := postlist.(*model6.PostList)
-		if mmPostList == nil {
-			continue
-		}
-		// traverse the order in reverse
-		for i := len(mmPostList.Order) - 1; i >= 0; i-- {
-			p := mmPostList.Posts[mmPostList.Order[i]]
-			if p.Type == model6.PostTypeJoinLeave {
-				continue
-			}
-
-			if p.DeleteAt > p.CreateAt {
-				continue
-			}
-
-			// GetPostsSince will return older messages with reaction
-			// changes since LastViewedAt. This will be confusing as
-			// the user will think it's a duplicate, or a post out of
-			// order. Plus, we don't show reaction changes when
-			// relaying messages/logs so let's skip these.
-			if p.CreateAt < since {
-				continue
-			}
-
-			ts := time.Unix(0, p.CreateAt*int64(time.Millisecond))
-
-			props := p.GetProps()
-			botname, override := props["override_username"].(string)
-			user := u.br.GetUser(p.UserId)
-			nick := user.Nick
-			if override {
-				nick = botname
-			}
-
-			if p.Type == model6.PostTypeAddToTeam || p.Type == model6.PostTypeRemoveFromTeam {
+			if p.Type == model.PostTypeAddToTeam || p.Type == model.PostTypeRemoveFromTeam {
 				nick = systemUser
 			}
 
@@ -1016,9 +866,9 @@ func (u *User) loginTo(protocol string) error {
 	case "mattermost":
 		u.eventChan = make(chan *bridge.Event)
 		if strings.HasPrefix(u.getMattermostVersion(), "6.") || strings.HasPrefix(u.getMattermostVersion(), "7.") {
-			u.br, _, err = mattermost6.New(u.v, u.Credentials, u.eventChan, u.addUsersToChannels)
-		} else {
 			u.br, _, err = mattermost.New(u.v, u.Credentials, u.eventChan, u.addUsersToChannels)
+		} else {
+			return fmt.Errorf("mattermost version %s not supported", u.getMattermostVersion())
 		}
 	}
 	if err != nil {
