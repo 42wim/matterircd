@@ -1,3 +1,20 @@
+# v0.26.1
+
+## Enhancement
+
+- general: Update matterircd.toml.example (#489)
+- mattermost: Reduce UpdateChannelsTeam() calls (#493)
+- mattermost: Add support for the Matterpoll plugin (#495)
+
+## Bugfix
+
+- mattermost: Update matterclient vendor/fix fetching list of channels (#494)
+- mattermost: Fallback to use API for getting channel data when not in the cache (#490)
+- mattermost: Fix "key required" crash when channel ID can't be found (#496)
+
+This release couldn't exist without the following contributors:
+@hloeung, @PeGaSus-Coder
+
 # v0.26.0
 
 ## New features
