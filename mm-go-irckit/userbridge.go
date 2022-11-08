@@ -1197,7 +1197,7 @@ func (u *User) handleMessageThreadContext(channelID, messageID, parentID, event,
 	case u.v.GetBool(u.br.Protocol()+".prefixcontext") && strings.HasPrefix(text, "\x01"):
 		prefix = u.prefixContext(channelID, messageID, parentID, event) + " "
 		newText = strings.Replace(text, "\x01ACTION ", "\x01ACTION "+prefix, 1)
-		maxlen = len(text)
+		maxlen = len(newText)
 	case u.v.GetBool(u.br.Protocol()+".prefixcontext") && u.v.GetBool(u.br.Protocol()+".showcontextmulti"):
 		prefix = u.prefixContext(channelID, messageID, parentID, event) + " "
 		newText = text
@@ -1209,6 +1209,7 @@ func (u *User) handleMessageThreadContext(channelID, messageID, parentID, event,
 	case u.v.GetBool(u.br.Protocol()+".suffixcontext") && strings.HasSuffix(text, "\x01"):
 		suffix = " " + u.prefixContext(channelID, messageID, parentID, event)
 		newText = strings.Replace(text, " \x01", suffix+" \x01", 1)
+		maxlen = len(newText)
 	case u.v.GetBool(u.br.Protocol()+".suffixcontext") && u.v.GetBool(u.br.Protocol()+".showcontextmulti"):
 		suffix = " " + u.prefixContext(channelID, messageID, parentID, event)
 		newText = text
