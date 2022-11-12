@@ -1,6 +1,7 @@
 package mattermost
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -8,9 +9,9 @@ import (
 	"time"
 
 	"github.com/42wim/matterircd/bridge"
-	"github.com/42wim/matterircd/pkg/matterclient"
 	"github.com/davecgh/go-spew/spew"
-	"github.com/mattermost/mattermost-server/v5/model"
+	"github.com/matterbridge/matterclient"
+	"github.com/mattermost/mattermost-server/v6/model"
 	"github.com/mitchellh/mapstructure"
 	logger "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
@@ -63,6 +64,8 @@ func New(v *viper.Viper, cred bridge.Credentials, eventChan chan *bridge.Event, 
 }
 
 func (m *Mattermost) loginToMattermost(onWsConnect func()) (*matterclient.Client, error) {
+	matterclient.Matterircd = true
+
 	mc := matterclient.New(m.credentials.Login, m.credentials.Pass, m.credentials.Team, m.credentials.Server, m.credentials.MFAToken)
 	if m.v.GetBool("mattermost.Insecure") {
 		mc.Credentials.NoTLS = true
@@ -86,8 +89,7 @@ func (m *Mattermost) loginToMattermost(onWsConnect func()) (*matterclient.Client
 
 	logger.Infof("login as %s (team: %s) on %s", m.credentials.Login, m.credentials.Team, m.credentials.Server)
 
-	err := mc.Login()
-	if err != nil {
+	if err := mc.Login(); err != nil {
 		logger.Error("login failed", err)
 		return nil, err
 	}
@@ -105,6 +107,7 @@ func (m *Mattermost) loginToMattermost(onWsConnect func()) (*matterclient.Client
 	return mc, nil
 }
 
+//nolint:cyclop
 func (m *Mattermost) handleWsMessage(quitChan chan struct{}) {
 	updateChannelsThrottle := time.NewTicker(time.Second * 60)
 
@@ -124,35 +127,35 @@ func (m *Mattermost) handleWsMessage(quitChan chan struct{}) {
 			logger.Debugf("MMUser WsReceiver: %#v", message.Raw)
 			logger.Tracef("handleWsMessage %s", spew.Sdump(message))
 
-			switch message.Raw.Event {
-			case model.WEBSOCKET_EVENT_POSTED:
+			switch message.Raw.EventType() {
+			case model.WebsocketEventPosted:
 				m.handleWsActionPost(message.Raw)
-			case model.WEBSOCKET_EVENT_POST_EDITED:
+			case model.WebsocketEventPostEdited:
 				m.handleWsActionPost(message.Raw)
-			case model.WEBSOCKET_EVENT_POST_DELETED:
+			case model.WebsocketEventPostDeleted:
 				m.handleWsActionPost(message.Raw)
-			case model.WEBSOCKET_EVENT_USER_REMOVED:
+			case model.WebsocketEventUserRemoved:
 				m.handleWsActionUserRemoved(message.Raw)
-			case model.WEBSOCKET_EVENT_USER_ADDED:
+			case model.WebsocketEventUserAdded:
 				// check if we have the users/channels in our cache. If not update
 				m.checkWsActionMessage(message.Raw, updateChannelsThrottle)
 				m.handleWsActionUserAdded(message.Raw)
-			case model.WEBSOCKET_EVENT_CHANNEL_CREATED:
+			case model.WebsocketEventChannelCreated:
 				// check if we have the users/channels in our cache. If not update
 				m.checkWsActionMessage(message.Raw, updateChannelsThrottle)
 				m.handleWsActionChannelCreated(message.Raw)
-			case model.WEBSOCKET_EVENT_CHANNEL_DELETED:
+			case model.WebsocketEventChannelDeleted:
 				// check if we have the users/channels in our cache. If not update
 				m.checkWsActionMessage(message.Raw, updateChannelsThrottle)
 				m.handleWsActionChannelDeleted(message.Raw)
-			case model.WEBSOCKET_EVENT_CHANNEL_RESTORED:
+			case model.WebsocketEventChannelRestored:
 				// check if we have the users/channels in our cache. If not update
 				m.checkWsActionMessage(message.Raw, updateChannelsThrottle)
-			case model.WEBSOCKET_EVENT_USER_UPDATED:
+			case model.WebsocketEventUserUpdated:
 				m.handleWsActionUserUpdated(message.Raw)
-			case model.WEBSOCKET_EVENT_STATUS_CHANGE:
+			case model.WebsocketEventStatusChange:
 				m.handleStatusChangeEvent(message.Raw)
-			case model.WEBSOCKET_EVENT_REACTION_ADDED, model.WEBSOCKET_EVENT_REACTION_REMOVED:
+			case model.WebsocketEventReactionAdded, model.WebsocketEventReactionRemoved:
 				m.handleReactionEvent(message.Raw)
 			}
 		}
@@ -160,22 +163,22 @@ func (m *Mattermost) handleWsMessage(quitChan chan struct{}) {
 }
 
 func (m *Mattermost) checkWsActionMessage(rmsg *model.WebSocketEvent, throttle *time.Ticker) {
-	if m.GetChannelName(rmsg.Broadcast.ChannelId) != "" {
+	if m.GetChannelName(rmsg.GetBroadcast().ChannelId) != "" {
 		return
 	}
 
 	select {
 	case <-throttle.C:
-		logger.Debugf("Updating channels for %#v", rmsg.Broadcast)
+		logger.Debugf("Updating channels for %#v", rmsg.GetBroadcast())
 		go m.UpdateChannels()
 	default:
 	}
 }
 
 func (m *Mattermost) Invite(channelID, username string) error {
-	_, resp := m.mc.Client.AddChannelMember(channelID, username)
-	if resp.Error != nil {
-		return resp.Error
+	_, _, err := m.mc.Client.AddChannelMember(channelID, username)
+	if err != nil {
+		return err
 	}
 
 	return nil
@@ -186,7 +189,7 @@ func (m *Mattermost) Join(channelName string) (string, string, error) {
 
 	sp := strings.Split(channelName, "/")
 	if len(sp) > 1 {
-		team, _ := m.mc.Client.GetTeamByName(sp[0], "")
+		team, _, _ := m.mc.Client.GetTeamByName(sp[0], "")
 		if team == nil {
 			return "", "", fmt.Errorf("cannot join channel (+i)")
 		}
@@ -278,9 +281,9 @@ func (m *Mattermost) MsgUserThread(userID, parentID, text string) (string, error
 	props["matterircd_"+m.mc.User.Id] = true
 
 	// create DM channel (only happens on first message)
-	dchannel, resp := m.mc.Client.CreateDirectChannel(m.mc.User.Id, userID)
-	if resp.Error != nil {
-		return "", resp.Error
+	dchannel, _, err := m.mc.Client.CreateDirectChannel(m.mc.User.Id, userID)
+	if err != nil {
+		return "", err
 	}
 
 	// build & send the message
@@ -293,10 +296,9 @@ func (m *Mattermost) MsgUserThread(userID, parentID, text string) (string, error
 
 	post.SetProps(props)
 
-	rp, resp := m.mc.Client.CreatePost(post)
-
-	if resp.Error != nil {
-		return "", resp.Error
+	rp, _, err := m.mc.Client.CreatePost(post)
+	if err != nil {
+		return "", err
 	}
 
 	return rp.Id, nil
@@ -318,10 +320,9 @@ func (m *Mattermost) MsgChannelThread(channelID, parentID, text string) (string,
 
 	post.SetProps(props)
 
-	rp, resp := m.mc.Client.CreatePost(post)
-
-	if resp.Error != nil {
-		return "", resp.Error
+	rp, _, err := m.mc.Client.CreatePost(post)
+	if err != nil {
+		return "", err
 	}
 
 	return rp.Id, nil
@@ -329,20 +330,19 @@ func (m *Mattermost) MsgChannelThread(channelID, parentID, text string) (string,
 
 func (m *Mattermost) ModifyPost(msgID, text string) error {
 	if text == "" {
-		_, resp := m.mc.Client.DeletePost(msgID)
-		if resp.Error != nil {
-			return resp.Error
+		_, err := m.mc.Client.DeletePost(msgID)
+		if err != nil {
+			return err
 		}
 
 		return nil
 	}
 
-	_, resp := m.mc.Client.PatchPost(msgID, &model.PostPatch{
+	_, _, err := m.mc.Client.PatchPost(msgID, &model.PostPatch{
 		Message: &text,
 	})
-
-	if resp.Error != nil {
-		return resp.Error
+	if err != nil {
+		return err
 	}
 
 	return nil
@@ -357,10 +357,9 @@ func (m *Mattermost) AddReaction(msgID, emoji string) error {
 		CreateAt:  0,
 	}
 
-	_, resp := m.mc.Client.SaveReaction(reaction)
-
-	if resp.Error != nil {
-		return resp.Error
+	_, _, err := m.mc.Client.SaveReaction(reaction)
+	if err != nil {
+		return err
 	}
 
 	return nil
@@ -375,10 +374,9 @@ func (m *Mattermost) RemoveReaction(msgID, emoji string) error {
 		CreateAt:  0,
 	}
 
-	_, resp := m.mc.Client.DeleteReaction(reaction)
-
-	if resp.Error != nil {
-		return resp.Error
+	_, err := m.mc.Client.DeleteReaction(reaction)
+	if err != nil {
+		return err
 	}
 
 	return nil
@@ -394,9 +392,9 @@ func (m *Mattermost) SetTopic(channelID, text string) error {
 		Header: &text,
 	}
 
-	_, resp := m.mc.Client.PatchChannel(channelID, patch)
-	if resp.Error != nil {
-		return resp.Error
+	_, _, err := m.mc.Client.PatchChannel(channelID, patch)
+	if err != nil {
+		return err
 	}
 
 	return nil
@@ -415,21 +413,21 @@ func (m *Mattermost) Protocol() string {
 }
 
 func (m *Mattermost) Kick(channelID, username string) error {
-	_, resp := m.mc.Client.RemoveUserFromChannel(channelID, username)
-	if resp.Error != nil {
-		return resp.Error
+	_, err := m.mc.Client.RemoveUserFromChannel(channelID, username)
+	if err != nil {
+		return err
 	}
 
 	return nil
 }
 
 func (m *Mattermost) SetStatus(status string) error {
-	_, resp := m.mc.Client.UpdateUserStatus(m.mc.User.Id, &model.Status{
+	_, _, err := m.mc.Client.UpdateUserStatus(m.mc.User.Id, &model.Status{
 		Status: status,
 		UserId: m.mc.User.Id,
 	})
-	if resp.Error != nil {
-		return resp.Error
+	if err != nil {
+		return err
 	}
 
 	return nil
@@ -483,6 +481,7 @@ func (m *Mattermost) GetChannelUsers(channelID string) ([]*bridge.UserInfo, erro
 	var (
 		mmusers, mmusersPaged []*model.User
 		users                 []*bridge.UserInfo
+		err                   error
 		resp                  *model.Response
 	)
 
@@ -490,20 +489,20 @@ func (m *Mattermost) GetChannelUsers(channelID string) ([]*bridge.UserInfo, erro
 	max := 200
 
 	for {
-		mmusersPaged, resp = m.mc.Client.GetUsersInChannel(channelID, idx, max, "")
-		if resp.Error == nil {
+		mmusersPaged, resp, err = m.mc.Client.GetUsersInChannel(channelID, idx, max, "")
+		if err == nil {
 			break
 		}
 
-		if err := m.mc.HandleRatelimit("GetUsersInChannel", resp); err != nil {
+		if err = m.mc.HandleRatelimit("GetUsersInChannel", resp); err != nil {
 			return nil, err
 		}
 	}
 
 	for len(mmusersPaged) > 0 {
 		for {
-			mmusersPaged, resp = m.mc.Client.GetUsersInChannel(channelID, idx, max, "")
-			if resp.Error == nil {
+			mmusersPaged, resp, err = m.mc.Client.GetUsersInChannel(channelID, idx, max, "")
+			if err == nil {
 				idx++
 				time.Sleep(time.Millisecond * 200)
 				mmusers = append(mmusers, mmusersPaged...)
@@ -579,7 +578,18 @@ func (m *Mattermost) GetChannel(channelID string) (*bridge.ChannelInfo, error) {
 		}
 	}
 
-	return nil, errors.New("channel not found")
+	// Fallback if it's not found in the cache.
+	mmchannel, _, err := m.mc.Client.GetChannel(channelID, "")
+	if err != nil {
+		return nil, errors.New("channel not found")
+	}
+	return &bridge.ChannelInfo{
+		Name:    mmchannel.Name,
+		ID:      mmchannel.Id,
+		TeamID:  mmchannel.TeamId,
+		DM:      mmchannel.IsGroupOrDirect(),
+		Private: !mmchannel.IsOpen(),
+	}, nil
 }
 
 func (m *Mattermost) GetUser(userID string) *bridge.UserInfo {
@@ -592,8 +602,8 @@ func (m *Mattermost) GetMe() *bridge.UserInfo {
 
 func (m *Mattermost) GetUserByUsername(username string) *bridge.UserInfo {
 	for {
-		mmuser, resp := m.mc.Client.GetUserByUsername(username, "")
-		if resp.Error == nil {
+		mmuser, resp, err := m.mc.Client.GetUserByUsername(username, "")
+		if err == nil {
 			return m.createUser(mmuser)
 		}
 
@@ -628,7 +638,7 @@ func (m *Mattermost) createUser(mmuser *model.User) *bridge.UserInfo {
 		Nick:        nick,
 		User:        mmuser.Id,
 		Real:        mmuser.FirstName + " " + mmuser.LastName,
-		Host:        m.mc.Client.Url,
+		Host:        m.mc.Client.URL,
 		Roles:       mmuser.Roles,
 		Ghost:       true,
 		Me:          me,
@@ -642,6 +652,7 @@ func (m *Mattermost) createUser(mmuser *model.User) *bridge.UserInfo {
 	return info
 }
 
+//nolint:cyclop
 func isValidNick(s string) bool {
 	/* IRC RFC ([0] - see below) mentions a limit of 9 chars for
 	 * IRC nicks, but modern clients allow more than that. Let's
@@ -678,11 +689,16 @@ func isValidNick(s string) bool {
 	return true
 }
 
+//nolint:forcetypeassert
 func (m *Mattermost) wsActionPostSkip(rmsg *model.WebSocketEvent) bool {
-	data := model.PostFromJson(strings.NewReader(rmsg.Data["post"].(string)))
-	extraProps := model.StringInterfaceFromJson(strings.NewReader(rmsg.Data["post"].(string)))["props"].(map[string]interface{})
+	var data model.Post
+	if err := json.NewDecoder(strings.NewReader(rmsg.GetData()["post"].(string))).Decode(&data); err != nil {
+		return true
+	}
 
-	if rmsg.Event == model.WEBSOCKET_EVENT_POST_EDITED && data.HasReactions {
+	extraProps := data.GetProps()
+
+	if rmsg.EventType() == model.WebsocketEventPostEdited && data.HasReactions {
 		logger.Debugf("edit post with reactions, do not relay. We don't know if a reaction is added or the post has been edited")
 		return true
 	}
@@ -693,7 +709,7 @@ func (m *Mattermost) wsActionPostSkip(rmsg *model.WebSocketEvent) bool {
 			return true
 		}
 
-		if data.Type == model.POST_JOIN_LEAVE || data.Type == model.POST_JOIN_CHANNEL {
+		if data.Type == model.PostTypeLeaveChannel || data.Type == model.PostTypeJoinChannel {
 			logger.Debugf("our own join/leave message. not relaying %#v", data.Message)
 			return true
 		}
@@ -705,6 +721,7 @@ func (m *Mattermost) wsActionPostSkip(rmsg *model.WebSocketEvent) bool {
 // maybeShorten returns a prefix of msg that is approximately newLen
 // characters long, followed by "...".  Words that start with uncounted
 // are included in the result but are not reckoned against newLen.
+//nolint:cyclop
 func maybeShorten(msg string, newLen int, uncounted string, unicode bool) string {
 	if newLen == 0 || len(msg) < newLen {
 		return msg
@@ -739,21 +756,25 @@ func maybeShorten(msg string, newLen int, uncounted string, unicode bool) string
 	return fmt.Sprintf("%s %s", newMsg, ellipsis)
 }
 
-// nolint:funlen,gocognit,gocyclo
+//nolint:funlen,gocognit,gocyclo,cyclop,forcetypeassert
 func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
-	data := model.PostFromJson(strings.NewReader(rmsg.Data["post"].(string)))
-	props := rmsg.Data
-	extraProps := model.StringInterfaceFromJson(strings.NewReader(rmsg.Data["post"].(string)))["props"].(map[string]interface{})
+	var data model.Post
+	if err := json.NewDecoder(strings.NewReader(rmsg.GetData()["post"].(string))).Decode(&data); err != nil {
+		return
+	}
+
+	props := rmsg.GetData()
+	extraProps := data.GetProps()
 
 	logger.Debugf("handleWsActionPost() receiving userid %s", data.UserId)
 	if m.wsActionPostSkip(rmsg) {
 		return
 	}
 
-	if data.ParentId != "" {
-		parentPost, resp := m.mc.Client.GetPost(data.ParentId, "")
-		if resp.Error != nil {
-			logger.Errorf("Unable to get parent post for %#v", data)
+	if data.RootId != "" {
+		parentPost, _, err := m.mc.Client.GetPost(data.RootId, "")
+		if err != nil {
+			logger.Errorf("Unable to get parent post for %#v", data) //nolint:govet
 		} else {
 			parentGhost := m.GetUser(parentPost.UserId)
 
@@ -799,17 +820,17 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		}
 	}
 
-	if data.Type == model.POST_JOIN_LEAVE || data.Type == "system_leave_channel" ||
-		data.Type == "system_join_channel" || data.Type == "system_add_to_channel" ||
-		data.Type == "system_remove_from_channel" {
+	if data.Type == model.PostTypeJoinChannel || data.Type == model.PostTypeLeaveChannel ||
+		data.Type == model.PostTypeAddToChannel ||
+		data.Type == model.PostTypeRemoveFromChannel {
 		logger.Debugf("join/leave message. not relaying %#v", data.Message)
 		m.UpdateChannels()
 
-		m.wsActionPostJoinLeave(data, extraProps)
+		m.wsActionPostJoinLeave(&data, extraProps)
 		return
 	}
 
-	if data.Type == "system_header_change" {
+	if data.Type == model.PostTypeHeaderChange {
 		if topic, ok := extraProps["new_header"].(string); ok {
 			event := &bridge.Event{
 				Type: "channel_topic",
@@ -825,27 +846,28 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		return
 	}
 
-	if data.Type == "system_add_to_team" || data.Type == "system_remove_from_team" {
+	if data.Type == model.PostTypeAddToTeam || data.Type == model.PostTypeRemoveFromTeam {
 		ghost = &bridge.UserInfo{
 			Nick: "system",
 		}
 	}
 
-	msgs := strings.Split(data.Message, "\n")
+	// msgs := strings.Split(data.Message, "\n")
+	msgs := []string{data.Message}
 
 	channelType := ""
 	if t, ok := props["channel_type"].(string); ok {
 		channelType = t
 	}
 
-	dmchannel, _ := rmsg.Data["channel_name"].(string)
+	dmchannel, _ := rmsg.GetData()["channel_name"].(string)
 
 	// add an edited/deleted string when messages are edited/deleted
-	if len(msgs) > 0 && (rmsg.Event == model.WEBSOCKET_EVENT_POST_EDITED ||
-		rmsg.Event == model.WEBSOCKET_EVENT_POST_DELETED) {
+	if len(msgs) > 0 && (rmsg.EventType() == model.WebsocketEventPostEdited ||
+		rmsg.EventType() == model.WebsocketEventPostDeleted) {
 		postfix := " (edited)"
 
-		if rmsg.Event == model.WEBSOCKET_EVENT_POST_DELETED {
+		if rmsg.EventType() == model.WebsocketEventPostDeleted {
 			postfix = " (deleted)"
 		}
 
@@ -875,11 +897,11 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 
 			d := &bridge.DirectMessageEvent{
 				Text:      msg,
-				Files:     m.getFilesFromData(data),
+				Files:     m.getFilesFromData(&data),
 				ChannelID: data.ChannelId,
 				MessageID: data.Id,
-				Event:     rmsg.Event,
-				ParentID:  data.ParentId,
+				Event:     rmsg.EventType(),
+				ParentID:  data.RootId,
 			}
 
 			if ghost.Me {
@@ -917,10 +939,10 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 					Sender:      ghost,
 					MessageType: messageType,
 					ChannelType: channelType,
-					Files:       m.getFilesFromData(data),
+					Files:       m.getFilesFromData(&data),
 					MessageID:   data.Id,
-					Event:       rmsg.Event,
-					ParentID:    data.ParentId,
+					Event:       rmsg.EventType(),
+					ParentID:    data.RootId,
 				},
 			}
 
@@ -930,6 +952,12 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 				msg = strings.TrimLeft(msg, "*")
 				msg = strings.TrimRight(msg, "*")
 				msg = "\x01ACTION " + msg + " \x01"
+			} else if data.Type == "custom_matterpoll" {
+				pollMsg := parseMatterpollToMsg(data.Attachments())
+				if pollMsg == "" {
+					break
+				}
+				msg = pollMsg + msg
 			}
 
 			event := &bridge.Event{
@@ -939,10 +967,10 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 					ChannelID:   data.ChannelId,
 					Sender:      ghost,
 					ChannelType: channelType,
-					Files:       m.getFilesFromData(data),
+					Files:       m.getFilesFromData(&data),
 					MessageID:   data.Id,
-					Event:       rmsg.Event,
-					ParentID:    data.ParentId,
+					Event:       rmsg.EventType(),
+					ParentID:    data.RootId,
 				},
 			}
 
@@ -954,10 +982,10 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		}
 	}
 
-	m.handleFileEvent(channelType, ghost, data, rmsg)
+	m.handleFileEvent(channelType, ghost, &data, rmsg)
 
 	logger.Debugf("handleWsActionPost() user %s sent %s", m.mc.GetUser(data.UserId).Username, data.Message)
-	logger.Debugf("%#v", data)
+	logger.Debugf("%#v", data) //nolint:govet
 }
 
 func (m *Mattermost) getFilesFromData(data *model.Post) []*bridge.File {
@@ -983,7 +1011,7 @@ func (m *Mattermost) handleFileEvent(channelType string, ghost *bridge.UserInfo,
 		ChannelType: channelType,
 		ChannelID:   data.ChannelId,
 		MessageID:   data.Id,
-		ParentID:    data.ParentId,
+		ParentID:    data.RootId,
 	}
 
 	event.Data = fileEvent
@@ -999,9 +1027,9 @@ func (m *Mattermost) handleFileEvent(channelType string, ghost *bridge.UserInfo,
 		case channelType == "D":
 			if ghost.Me {
 				fileEvent.Sender = ghost
-				fileEvent.Receiver = m.getDMUser(rmsg.Data["channel_name"])
+				fileEvent.Receiver = m.getDMUser(rmsg.GetData()["channel_name"])
 			} else {
-				fileEvent.Sender = m.getDMUser(rmsg.Data["channel_name"])
+				fileEvent.Sender = m.getDMUser(rmsg.GetData()["channel_name"])
 				fileEvent.Receiver = ghost
 			}
 
@@ -1055,7 +1083,7 @@ func (m *Mattermost) wsActionPostJoinLeave(data *model.Post, extraProps map[stri
 }
 
 func (m *Mattermost) handleWsActionUserAdded(rmsg *model.WebSocketEvent) {
-	userID, ok := rmsg.Data["user_id"].(string)
+	userID, ok := rmsg.GetData()["user_id"].(string)
 	if !ok {
 		return
 	}
@@ -1069,7 +1097,7 @@ func (m *Mattermost) handleWsActionUserAdded(rmsg *model.WebSocketEvent) {
 			Adder: &bridge.UserInfo{
 				Nick: "system",
 			},
-			ChannelID: rmsg.Broadcast.ChannelId,
+			ChannelID: rmsg.GetBroadcast().ChannelId,
 		},
 	}
 
@@ -1077,20 +1105,20 @@ func (m *Mattermost) handleWsActionUserAdded(rmsg *model.WebSocketEvent) {
 }
 
 func (m *Mattermost) handleWsActionUserRemoved(rmsg *model.WebSocketEvent) {
-	userID, ok := rmsg.Data["user_id"].(string)
+	userID, ok := rmsg.GetData()["user_id"].(string)
 	if !ok {
-		userID = rmsg.Broadcast.UserId
+		userID = rmsg.GetBroadcast().UserId
 	}
 
-	removerID, ok := rmsg.Data["remover_id"].(string)
+	removerID, ok := rmsg.GetData()["remover_id"].(string)
 	if !ok {
 		fmt.Println("not ok removerID", removerID)
 		return
 	}
 
-	channelID, ok := rmsg.Data["channel_id"].(string)
+	channelID, ok := rmsg.GetData()["channel_id"].(string)
 	if !ok {
-		channelID = rmsg.Broadcast.ChannelId
+		channelID = rmsg.GetBroadcast().ChannelId
 	}
 
 	event := &bridge.Event{
@@ -1110,7 +1138,7 @@ func (m *Mattermost) handleWsActionUserRemoved(rmsg *model.WebSocketEvent) {
 func (m *Mattermost) handleWsActionUserUpdated(rmsg *model.WebSocketEvent) {
 	var info model.User
 
-	err := Decode(rmsg.Data["user"], &info)
+	err := Decode(rmsg.GetData()["user"], &info)
 	if err != nil {
 		fmt.Println("decode", err)
 		return
@@ -1127,7 +1155,7 @@ func (m *Mattermost) handleWsActionUserUpdated(rmsg *model.WebSocketEvent) {
 }
 
 func (m *Mattermost) handleWsActionChannelCreated(rmsg *model.WebSocketEvent) {
-	channelID, ok := rmsg.Data["channel_id"].(string)
+	channelID, ok := rmsg.GetData()["channel_id"].(string)
 	if !ok {
 		return
 	}
@@ -1143,7 +1171,7 @@ func (m *Mattermost) handleWsActionChannelCreated(rmsg *model.WebSocketEvent) {
 }
 
 func (m *Mattermost) handleWsActionChannelDeleted(rmsg *model.WebSocketEvent) {
-	channelID, ok := rmsg.Data["channel_id"].(string)
+	channelID, ok := rmsg.GetData()["channel_id"].(string)
 	if !ok {
 		return
 	}
@@ -1161,7 +1189,7 @@ func (m *Mattermost) handleWsActionChannelDeleted(rmsg *model.WebSocketEvent) {
 func (m *Mattermost) handleStatusChangeEvent(rmsg *model.WebSocketEvent) {
 	var info model.Status
 
-	err := Decode(rmsg.Data, &info)
+	err := Decode(rmsg.GetData(), &info)
 	if err != nil {
 		fmt.Println("decode", err)
 
@@ -1179,14 +1207,18 @@ func (m *Mattermost) handleStatusChangeEvent(rmsg *model.WebSocketEvent) {
 	m.eventChan <- event
 }
 
+//nolint:forcetypeassert
 func (m *Mattermost) handleReactionEvent(rmsg *model.WebSocketEvent) {
-	reaction := model.ReactionFromJson(strings.NewReader(rmsg.Data["reaction"].(string)))
+	var reaction model.Reaction
+	if err := json.NewDecoder(strings.NewReader(rmsg.GetData()["reaction"].(string))).Decode(&reaction); err != nil {
+		return
+	}
 
 	var event *bridge.Event
 
 	channelType := ""
 
-	name := m.GetChannelName(rmsg.Broadcast.ChannelId)
+	name := m.GetChannelName(rmsg.GetBroadcast().ChannelId)
 	if strings.Contains(name, "__") {
 		channelType = "D"
 	}
@@ -1194,19 +1226,19 @@ func (m *Mattermost) handleReactionEvent(rmsg *model.WebSocketEvent) {
 	var parentUser *bridge.UserInfo
 	message := ""
 	if !m.v.GetBool("mattermost.hidereplies") {
-		parentPost, resp := m.mc.Client.GetPost(reaction.PostId, "")
-		if resp.Error == nil {
+		parentPost, _, err := m.mc.Client.GetPost(reaction.PostId, "")
+		if err == nil {
 			parentUser = m.GetUser(parentPost.UserId)
 			message = maybeShorten(parentPost.Message, m.v.GetInt("mattermost.shortenrepliesto"), "@", m.v.GetBool("mattermost.unicode"))
 		}
 	}
 
-	switch rmsg.Event {
-	case model.WEBSOCKET_EVENT_REACTION_ADDED:
+	switch rmsg.EventType() {
+	case model.WebsocketEventReactionAdded:
 		event = &bridge.Event{
 			Type: "reaction_add",
 			Data: &bridge.ReactionAddEvent{
-				ChannelID:   rmsg.Broadcast.ChannelId,
+				ChannelID:   rmsg.GetBroadcast().ChannelId,
 				MessageID:   reaction.PostId,
 				Sender:      m.GetUser(reaction.UserId),
 				Reaction:    reaction.EmojiName,
@@ -1215,11 +1247,11 @@ func (m *Mattermost) handleReactionEvent(rmsg *model.WebSocketEvent) {
 				Message:     message,
 			},
 		}
-	case model.WEBSOCKET_EVENT_REACTION_REMOVED:
+	case model.WebsocketEventReactionRemoved:
 		event = &bridge.Event{
 			Type: "reaction_remove",
 			Data: &bridge.ReactionRemoveEvent{
-				ChannelID:   rmsg.Broadcast.ChannelId,
+				ChannelID:   rmsg.GetBroadcast().ChannelId,
 				MessageID:   reaction.PostId,
 				Sender:      m.GetUser(reaction.UserId),
 				Reaction:    reaction.EmojiName,
@@ -1258,8 +1290,8 @@ func (m *Mattermost) UpdateLastViewed(channelID string) {
 
 func (m *Mattermost) UpdateLastViewedUser(userID string) error {
 	for {
-		dc, resp := m.mc.Client.CreateDirectChannel(m.mc.User.Id, userID)
-		if resp.Error == nil {
+		dc, resp, err := m.mc.Client.CreateDirectChannel(m.mc.User.Id, userID)
+		if err == nil {
 			return m.mc.UpdateLastViewed(dc.Id)
 		}
 
@@ -1278,9 +1310,9 @@ func (m *Mattermost) GetFileLinks(fileIDs []string) []string {
 }
 
 func (m *Mattermost) SearchUsers(query string) ([]*bridge.UserInfo, error) {
-	users, resp := m.mc.Client.SearchUsers(&model.UserSearch{Term: query})
-	if resp.Error != nil {
-		return nil, resp.Error
+	users, _, err := m.mc.Client.SearchUsers(&model.UserSearch{Term: query})
+	if err != nil {
+		return nil, err
 	}
 
 	var brusers []*bridge.UserInfo
@@ -1341,4 +1373,26 @@ func (m *Mattermost) getDMUser(name interface{}) *bridge.UserInfo {
 	}
 
 	return nil
+}
+
+func parseMatterpollToMsg(attachments []*model.SlackAttachment) string {
+	msg := ""
+	for _, attachment := range attachments {
+		if strings.HasPrefix(attachment.Text, "This poll has ended.") {
+			return ""
+		}
+
+		options := ""
+		for _, action := range attachment.Actions {
+			if strings.HasPrefix(action.Id, "vote") {
+				options += "* " + action.Name + "\n"
+			}
+		}
+
+		text := strings.TrimSuffix(attachment.Text, "\n")
+		text = strings.Replace(text, "**Total votes**", "*Total votes*", 1)
+		msg = fmt.Sprintf("%s: %s\n%s%s", attachment.AuthorName, attachment.Title, options, text)
+	}
+
+	return msg
 }
