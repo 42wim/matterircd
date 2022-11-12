@@ -143,7 +143,7 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 	text = wordwrap.String(text, maxlen)
 	lines := strings.Split(text, "\n")
 	for _, text := range lines {
-		if text == "```" {
+		if strings.HasPrefix(text, "```") {
 			codeBlock = !codeBlock
 		}
 		// skip empty lines for anything not part of a code block.
@@ -287,7 +287,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 	text = wordwrap.String(text, maxlen)
 	lines := strings.Split(text, "\n")
 	for _, text := range lines {
-		if text == "```" {
+		if strings.HasPrefix(text, "```") {
 			codeBlock = !codeBlock
 		}
 		// skip empty lines for anything not part of a code block.
