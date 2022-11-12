@@ -107,7 +107,7 @@ func (m *Mattermost) loginToMattermost(onWsConnect func()) (*matterclient.Client
 	return mc, nil
 }
 
-// nolint:cyclop
+//nolint:cyclop
 func (m *Mattermost) handleWsMessage(quitChan chan struct{}) {
 	updateChannelsThrottle := time.NewTicker(time.Second * 60)
 
@@ -652,7 +652,7 @@ func (m *Mattermost) createUser(mmuser *model.User) *bridge.UserInfo {
 	return info
 }
 
-// nolint:cyclop
+//nolint:cyclop
 func isValidNick(s string) bool {
 	/* IRC RFC ([0] - see below) mentions a limit of 9 chars for
 	 * IRC nicks, but modern clients allow more than that. Let's
@@ -689,6 +689,7 @@ func isValidNick(s string) bool {
 	return true
 }
 
+//nolint:forcetypeassert
 func (m *Mattermost) wsActionPostSkip(rmsg *model.WebSocketEvent) bool {
 	var data model.Post
 	if err := json.NewDecoder(strings.NewReader(rmsg.GetData()["post"].(string))).Decode(&data); err != nil {
@@ -720,7 +721,7 @@ func (m *Mattermost) wsActionPostSkip(rmsg *model.WebSocketEvent) bool {
 // maybeShorten returns a prefix of msg that is approximately newLen
 // characters long, followed by "...".  Words that start with uncounted
 // are included in the result but are not reckoned against newLen.
-// nolint:cyclop
+//nolint:cyclop
 func maybeShorten(msg string, newLen int, uncounted string, unicode bool) string {
 	if newLen == 0 || len(msg) < newLen {
 		return msg
@@ -755,7 +756,7 @@ func maybeShorten(msg string, newLen int, uncounted string, unicode bool) string
 	return fmt.Sprintf("%s %s", newMsg, ellipsis)
 }
 
-// nolint:funlen,gocognit,gocyclo,cyclop
+//nolint:funlen,gocognit,gocyclo,cyclop,forcetypeassert
 func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	var data model.Post
 	if err := json.NewDecoder(strings.NewReader(rmsg.GetData()["post"].(string))).Decode(&data); err != nil {
@@ -773,7 +774,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	if data.RootId != "" {
 		parentPost, _, err := m.mc.Client.GetPost(data.RootId, "")
 		if err != nil {
-			logger.Errorf("Unable to get parent post for %#v", data) // nolint:govet
+			logger.Errorf("Unable to get parent post for %#v", data) //nolint:govet
 		} else {
 			parentGhost := m.GetUser(parentPost.UserId)
 
@@ -1206,6 +1207,7 @@ func (m *Mattermost) handleStatusChangeEvent(rmsg *model.WebSocketEvent) {
 	m.eventChan <- event
 }
 
+//nolint:forcetypeassert
 func (m *Mattermost) handleReactionEvent(rmsg *model.WebSocketEvent) {
 	var reaction model.Reaction
 	if err := json.NewDecoder(strings.NewReader(rmsg.GetData()["reaction"].(string))).Decode(&reaction); err != nil {
