@@ -5,12 +5,14 @@ require (
 	github.com/desertbit/timer v0.0.0-20180107155436-c41aec40b27f
 	github.com/google/gops v0.3.22
 	github.com/gorilla/websocket v1.5.0
+	github.com/grokify/html-strip-tags-go v0.0.1
 	github.com/hashicorp/golang-lru v0.5.4
 	github.com/jpillora/backoff v1.0.0
 	github.com/matterbridge/logrus-prefixed-formatter v0.5.3-0.20200523233437-d971309a77ba
 	github.com/matterbridge/matterclient v0.0.0-20221106190440-8bcf49695e0d
 	github.com/mattermost/mattermost-server/v5 v5.39.3
 	github.com/mattermost/mattermost-server/v6 v6.7.2
+	github.com/mattn/go-mastodon v0.0.5
 	github.com/mitchellh/mapstructure v1.5.0
 	github.com/muesli/reflow v0.3.0
 	github.com/sirupsen/logrus v1.9.0
@@ -66,6 +68,7 @@ require (
 	github.com/spf13/jwalterweatherman v1.1.0 // indirect
 	github.com/subosito/gotenv v1.4.1 // indirect
 	github.com/tinylib/msgp v1.1.6 // indirect
+	github.com/tomnomnom/linkheader v0.0.0-20180905144013-02ca5825eb80 // indirect
 	github.com/vmihailenco/msgpack/v5 v5.3.5 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	github.com/wiggin77/cfg v1.0.2 // indirect

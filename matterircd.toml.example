@@ -215,3 +215,20 @@ UseDisplayName = false
 PrefixContext = false
 
 
+#############################
+##### MASTODON EXAMPLE ######
+#############################
+[mastodon]
+#Go to https://yourmastodonserver/settings/applications/new
+#Use matterircd as application name (default read/write/follow scopes are ok)
+#Click on submit
+#After submitting it'll show you the Client Key (we call it clientID), 
+#the client secret and Your access token
+#
+#Fill those in below with your server
+#Connect to matterircd and /msg mastodon login
+#
+#server="https://mastodon.social"
+#clientID="clientidstring"
+#clientSecret="clientsecretstring"
+#accessToken="accesstokenstring"

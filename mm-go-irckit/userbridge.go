@@ -13,8 +13,8 @@ import (
 	bolt "go.etcd.io/bbolt"
 
 	"github.com/42wim/matterircd/bridge"
-
-	mattermost "github.com/42wim/matterircd/bridge/mattermost"
+	"github.com/42wim/matterircd/bridge/mastodon"
+	"github.com/42wim/matterircd/bridge/mattermost"
 	"github.com/42wim/matterircd/bridge/slack"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/mattermost/mattermost-server/v6/model"
@@ -64,6 +64,7 @@ func NewUserBridge(c net.Conn, srv Server, cfg *viper.Viper, db *bolt.DB) *User 
 	// used for login
 	u.createService("mattermost", "loginservice")
 	u.createService("slack", "loginservice")
+	u.createService("mastodon", "loginservice")
 	u.createService("matterircd", "systemservice")
 	return u
 }
@@ -846,6 +847,9 @@ func (u *User) loginTo(protocol string) error {
 	var err error
 
 	switch protocol {
+	case "mastodon":
+		u.eventChan = make(chan *bridge.Event)
+		u.br, err = mastodon.New(u.v, u.Credentials, u.eventChan, u.addUsersToChannels)
 	case "slack":
 		u.eventChan = make(chan *bridge.Event)
 		u.br, err = slack.New(u.v, u.Credentials, u.eventChan, u.addUsersToChannels)

@@ -40,6 +40,19 @@ func login(u *User, toUser *User, args []string, service string) {
 		return
 	}
 
+	if service == "mastodon" {
+		fmt.Println("login mastodon")
+		err := u.loginTo("mastodon")
+		if err != nil {
+			u.MsgUser(toUser, err.Error())
+			return
+		}
+
+		u.MsgUser(toUser, "login OK")
+
+		return
+	}
+
 	if service == "slack" {
 		var err error
 
