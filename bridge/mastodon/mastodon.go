@@ -87,7 +87,14 @@ func (m *Mastodon) MsgUser(username, text string) (string, error) {
 }
 
 func (m *Mastodon) MsgChannel(channelID, text string) (string, error) {
-	return "", nil
+	s, err := m.mc.PostStatus(context.Background(), &mastodon.Toot{
+		Status: text,
+	})
+	if err != nil {
+		return "", err
+	}
+
+	return string(s.ID), nil
 }
 
 func (m *Mastodon) StatusUser(name string) (string, error) {
@@ -99,7 +106,7 @@ func (m *Mastodon) StatusUsers() (map[string]string, error) {
 }
 
 func (m *Mastodon) Protocol() string {
-	return "mastodon"
+	return "mastodon" //nolint:goconst
 }
 
 func (m *Mastodon) Kick(channelID, username string) error {
@@ -115,7 +122,11 @@ func (m *Mastodon) Nick(name string) error {
 }
 
 func (m *Mastodon) GetChannelName(channelID string) string {
-	return "#mastodon"
+	if channelID == "mastodon" {
+		return "#mastodon"
+	}
+
+	return channelID
 }
 
 func (m *Mastodon) GetChannelUsers(channelID string) ([]*bridge.UserInfo, error) {
@@ -123,7 +134,7 @@ func (m *Mastodon) GetChannelUsers(channelID string) ([]*bridge.UserInfo, error)
 }
 
 func (m *Mastodon) GetUsers() []*bridge.UserInfo {
-	return nil
+	return []*bridge.UserInfo{}
 }
 
 func (m *Mastodon) GetChannels() []*bridge.ChannelInfo {
@@ -131,8 +142,12 @@ func (m *Mastodon) GetChannels() []*bridge.ChannelInfo {
 }
 
 func (m *Mastodon) GetChannel(channelID string) (*bridge.ChannelInfo, error) {
+	if channelID != "mastodon" {
+		return nil, fmt.Errorf("channel not found")
+	}
+
 	return &bridge.ChannelInfo{
-		ID:      channelID,
+		ID:      "mastodon",
 		Name:    "#mastodon",
 		TeamID:  "mastodon",
 		DM:      false,
@@ -210,18 +225,16 @@ func (m *Mastodon) loginToMastodon() (*mastodon.Client, error) {
 	return mc, nil
 }
 
-//nolint:gocritic
 func (m *Mastodon) handleMastodon() {
 	for event := range m.eventChanIn {
 		logger.Tracef("handleMastodon %s", spew.Sdump(event))
 		switch event := event.(type) {
 		case *mastodon.UpdateEvent:
 			m.handleMastodonUpdate(event)
-			/*
-				case *mastodon.NotificationEvent:
-					m.handleMastodonNotification(event)
-				case *mastodon.DeleteEvent:
-					m.handleMastodonDelete(event)
+		case *mastodon.NotificationEvent:
+			m.handleMastodonNotification(event)
+			/*				case *mastodon.DeleteEvent:
+							m.handleMastodonDelete(event)
 			*/
 		}
 	}
@@ -242,12 +255,20 @@ func (m *Mastodon) sendPublicMessage(ghost *bridge.UserInfo, msg, channelID stri
 	m.eventChan <- event
 }
 
+func (m *Mastodon) handleMastodonNotification(event *mastodon.NotificationEvent) {
+	if event.Notification == nil {
+		return
+	}
+
+	logger.Tracef("handleMastodonNotification %s", spew.Sdump(event))
+}
+
 func (m *Mastodon) handleMastodonUpdate(event *mastodon.UpdateEvent) {
 	if event.Status == nil {
 		return
 	}
 
-	logger.Debugf("handleMastodonUpdate %s", spew.Sdump(event))
+	logger.Tracef("handleMastodonUpdate %s", spew.Sdump(event))
 
 	s := event.Status
 
@@ -294,7 +315,7 @@ func (m *Mastodon) createUser(muser *mastodon.Account) *bridge.UserInfo {
 	}
 
 	info := &bridge.UserInfo{
-		Nick:        username,
+		Nick:        strings.ReplaceAll(muser.Acct, "@", "|"),
 		User:        username,
 		Real:        host,
 		Host:        host,

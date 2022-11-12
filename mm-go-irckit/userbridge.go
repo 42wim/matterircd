@@ -223,8 +223,10 @@ func (u *User) getMessageChannel(channelID string, sender *bridge.UserInfo) Chan
 
 	// if it's another user, let them join
 	if !ghost.Me && !ch.HasUser(ghost) {
-		logger.Debugf("User %s is not in channel %s. Joining now", ghost.Nick, ch.String())
-		ch.Join(ghost)
+		if u.br.Protocol() != "mastodon" {
+			logger.Debugf("User %s is not in channel %s. Joining now", ghost.Nick, ch.String())
+			ch.Join(ghost) //nolint:errcheck
+		}
 	}
 
 	// check if we mayjoin this channel
@@ -541,11 +543,18 @@ func (u *User) addUsersToChannels() {
 
 	// create and join the users
 	users := u.CreateUsersFromInfo(u.br.GetUsers())
-	srv.BatchAdd(users)
-	u.addUsersToChannel(users, "&users", "&users")
+	if len(users) > 0 {
+		srv.BatchAdd(users)
+		u.addUsersToChannel(users, "&users", "&users")
 
-	// join ourself
-	ch.Join(u)
+		// join ourself
+		ch.Join(u) //nolint:errcheck
+	}
+
+	if u.br.Protocol() == "mastodon" {
+		ch = srv.Channel("mastodon")
+		ch.Join(u) //nolint:errcheck
+	}
 
 	// channel that receives messages from channels not joined on irc
 	ch = srv.Channel("&messages")
