@@ -10,6 +10,7 @@
     - [Usage](#usage)
         - [Mattermost user commands](#mattermost-user-commands)
         - [Slack user commands](#slack-user-commands)
+        - [Mastodon user commands](#mastodon-user-commands)
     - [Docker](#docker)
     - [FreeBSD](#freebsd)
     - [Support/questions](#supportquestions)
@@ -28,7 +29,7 @@ Tested on FreeBSD / Linux / Windows
 
 ## Compatibility
 
-- Matterircd works with slack and mattermost 6.x, 7.x
+- Matterircd works with slack, mastodon and mattermost 6.x, 7.x
 
 Master branch of matterircd should always work against latest STABLE mattermost release.
 
@@ -165,6 +166,21 @@ docker run -p 6667:6667 42wim/matterircd:latest --bind 0.0.0.0:6667
 ```
 
 Now you can connect with your IRC client to port 6667 on your docker host.
+
+### Mastodon user commands
+
+(still WIP)
+
+Configure your mastodon settings  
+See the `[mastodon]` section in [matterircd.toml.example](https://github.com/42wim/matterircd/blob/master/matterircd.toml.example)
+
+Login
+
+```
+/msg mastodon login
+```
+
+You'll see your timeline in #mastodon (automatically joined to that channel)
 
 ## FreeBSD
 

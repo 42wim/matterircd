@@ -410,7 +410,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 	// or a user
 	if toUser, exists := s.HasUser(query); exists {
 		switch {
-		case query == "mattermost" || query == "slack":
+		case query == "mattermost" || query == "slack" || query == "mastodon": //nolint:goconst
 			go u.handleServiceBot(query, toUser, msg.Trailing)
 			msg.Trailing = "<redacted>"
 		case toUser.Ghost, toUser.Me:
