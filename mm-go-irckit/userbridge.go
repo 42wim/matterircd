@@ -372,6 +372,9 @@ func (u *User) handleStatusChangeEvent(event *bridge.StatusChangeEvent) {
 		case "online":
 			logger.Debug("setting myself online")
 			u.Srv.EncodeMessage(u, irc.RPL_UNAWAY, []string{u.Nick}, "You are no longer marked as being away")
+		// Ignore `offline` status changes to prevent bouncing between being marked away and not.
+		case "offline":
+			logger.Debugf("doing nothing as status %s", event.Status)
 		default:
 			logger.Debug("setting myself away")
 			u.Srv.EncodeMessage(u, irc.RPL_NOWAWAY, []string{u.Nick}, "You have been marked as being away")
