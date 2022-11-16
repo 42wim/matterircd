@@ -22,7 +22,7 @@
 
 <!-- /TOC -->
 
-[![Join the IRC chat at https://webchat.freenode.net/?channels=matterircd](https://img.shields.io/badge/IRC-matterircd-green.svg)](https://webchat.freenode.net/?channels=matterircd)
+[![Join the IRC chat at https://web.libera.chat/gamja/?channels=#matterircd](https://img.shields.io/badge/IRC-matterircd-green.svg)](https://web.libera.chat/gamja/?channels=#matterircd)
 
 Minimal IRC server which integrates with [mattermost](https://www.mattermost.org) and [slack](https://www.slack.com)
 Tested on FreeBSD / Linux / Windows
@@ -209,7 +209,7 @@ Start the service.
 
 ## Support/questions
 
-We're also on the `#matterircd` channel on irc.freenode.net
+We're also on the `#matterircd` channel on irc.libera.chat
 
 ## FAQ
 
