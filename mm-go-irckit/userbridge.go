@@ -138,15 +138,19 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 	}
 	text, prefix, suffix, showContext, maxlen := u.handleMessageThreadContext(prefixUser, event.MessageID, event.ParentID, event.Event, event.Text)
 
-	codeBlock := false
+	codeBlockBackTick := false
+	codeBlockTilde := false
 	text = wordwrap.String(text, maxlen)
 	lines := strings.Split(text, "\n")
 	for _, text := range lines {
-		if strings.HasPrefix(text, "```") {
-			codeBlock = !codeBlock
+		if strings.HasPrefix(text, "```") && !codeBlockTilde {
+			codeBlockBackTick = !codeBlockBackTick
+		}
+		if strings.HasPrefix(text, "~~~") && !codeBlockBackTick {
+			codeBlockTilde = !codeBlockTilde
 		}
 		// skip empty lines for anything not part of a code block.
-		if !codeBlock && text == "" {
+		if !codeBlockBackTick && !codeBlockTilde && text == "" {
 			continue
 		} else if text == "" {
 			text = " "
@@ -284,15 +288,19 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		text, prefix, suffix, showContext, maxlen = u.handleMessageThreadContext(event.ChannelID, event.MessageID, event.ParentID, event.Event, event.Text)
 	}
 
-	codeBlock := false
+	codeBlockBackTick := false
+	codeBlockTilde := false
 	text = wordwrap.String(text, maxlen)
 	lines := strings.Split(text, "\n")
 	for _, text := range lines {
-		if strings.HasPrefix(text, "```") {
-			codeBlock = !codeBlock
+		if strings.HasPrefix(text, "```") && !codeBlockTilde {
+			codeBlockBackTick = !codeBlockBackTick
+		}
+		if strings.HasPrefix(text, "~~~") && !codeBlockBackTick {
+			codeBlockTilde = !codeBlockTilde
 		}
 		// skip empty lines for anything not part of a code block.
-		if !codeBlock && text == "" {
+		if !codeBlockBackTick && !codeBlockTilde && text == "" {
 			continue
 		} else if text == "" {
 			text = " "
