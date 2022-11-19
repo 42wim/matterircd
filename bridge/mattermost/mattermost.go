@@ -771,18 +771,19 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		return
 	}
 
-	if data.RootId != "" {
+	if !m.v.GetBool("mattermost.hidereplies") && data.RootId != "" {
 		parentPost, _, err := m.mc.Client.GetPost(data.RootId, "")
+		// TODO: Add caching of parent hosts and replies (shortened or not). For now, let's retry on failure.
+		if err != nil {
+			parentPost, _, err = m.mc.Client.GetPost(data.RootId, "")
+		}
 		if err != nil {
 			logger.Errorf("Unable to get parent post for %#v", data) //nolint:govet
 		} else {
 			parentGhost := m.GetUser(parentPost.UserId)
-
-			if !m.v.GetBool("mattermost.hidereplies") {
-				parentMessage := maybeShorten(parentPost.Message, m.v.GetInt("mattermost.ShortenRepliesTo"), "@", m.v.GetBool("mattermost.unicode"))
-				replyMessage := fmt.Sprintf(" (re @%s: %s)", parentGhost.Nick, parentMessage)
-				data.Message = strings.TrimRight(data.Message, "\n") + replyMessage
-			}
+			parentMessage := maybeShorten(parentPost.Message, m.v.GetInt("mattermost.ShortenRepliesTo"), "@", m.v.GetBool("mattermost.unicode"))
+			replyMessage := fmt.Sprintf(" (re @%s: %s)", parentGhost.Nick, parentMessage)
+			data.Message = strings.TrimRight(data.Message, "\n") + replyMessage
 		}
 	}
 
