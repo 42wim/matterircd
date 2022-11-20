@@ -135,7 +135,7 @@ func (ch *channel) Message(from *User, text string) {
 			Prefix:   from.Prefix(),
 			Command:  irc.PRIVMSG,
 			Params:   []string{ch.name},
-			Trailing: l + "\n",
+			Trailing: l,
 		}
 
 		ch.mu.RLock()
@@ -452,7 +452,7 @@ func (ch *channel) Spoof(from string, text string, cmd string, maxlen ...int) {
 			Prefix:   &irc.Prefix{Name: from, User: from, Host: from},
 			Command:  cmd,
 			Params:   []string{ch.name},
-			Trailing: l + "\n",
+			Trailing: l,
 		}
 
 		ch.mu.RLock()
