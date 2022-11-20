@@ -9,7 +9,8 @@ import (
 
 	"github.com/42wim/matterircd/bridge"
 	"github.com/davecgh/go-spew/spew"
-	logger "github.com/sirupsen/logrus"
+	prefixed "github.com/matterbridge/logrus-prefixed-formatter"
+	"github.com/sirupsen/logrus"
 	"github.com/slack-go/slack"
 	"github.com/spf13/viper"
 )
@@ -29,6 +30,8 @@ type Slack struct {
 	v *viper.Viper
 }
 
+var logger *logrus.Entry
+
 func New(v *viper.Viper, cred bridge.Credentials, eventChan chan *bridge.Event, onConnect func()) (bridge.Bridger, error) {
 	s := &Slack{
 		credentials: cred,
@@ -39,13 +42,18 @@ func New(v *viper.Viper, cred bridge.Credentials, eventChan chan *bridge.Event, 
 
 	var err error
 
-	logger.SetFormatter(&logger.TextFormatter{FullTimestamp: true})
+	ourlog := logrus.New()
+	ourlog.SetFormatter(&prefixed.TextFormatter{
+		PrefixPadding: 13,
+		FullTimestamp: true,
+	})
+	logger = ourlog.WithFields(logrus.Fields{"prefix": "bridge/slack"})
 	if v.GetBool("debug") {
-		logger.SetLevel(logger.DebugLevel)
+		ourlog.SetLevel(logrus.DebugLevel)
 	}
 
 	if v.GetBool("trace") {
-		logger.SetLevel(logger.TraceLevel)
+		ourlog.SetLevel(logrus.TraceLevel)
 	}
 
 	s.sc, err = s.loginToSlack()
