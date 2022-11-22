@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/42wim/matterircd/bridge"
@@ -24,6 +25,12 @@ type Mattermost struct {
 	eventChan   chan *bridge.Event
 	v           *viper.Viper
 	connected   bool
+
+	// Parent/root post message cache used for adding to threaded replies (unless HideReplies).
+	// The index is to make the size bounded so it's not unlimited.
+	msgMapMutex sync.RWMutex
+	msgMap      map[string]map[int]map[string]string
+	msgMapIdx   map[string]int
 }
 
 func New(v *viper.Viper, cred bridge.Credentials, eventChan chan *bridge.Event, onWsConnect func()) (bridge.Bridger, *matterclient.Client, error) {
@@ -32,6 +39,8 @@ func New(v *viper.Viper, cred bridge.Credentials, eventChan chan *bridge.Event, 
 		eventChan:   eventChan,
 		v:           v,
 	}
+	m.msgMap = make(map[string]map[int]map[string]string)
+	m.msgMapIdx = make(map[string]int)
 
 	logger.SetFormatter(&logger.TextFormatter{FullTimestamp: true})
 	if v.GetBool("debug") {
@@ -756,6 +765,62 @@ func maybeShorten(msg string, newLen int, uncounted string, unicode bool) string
 	return fmt.Sprintf("%s %s", newMsg, ellipsis)
 }
 
+// XXX: Maybe make the buffer/cache size configurable?
+const defaultReplyMsgCacheSize = 30
+
+func (m *Mattermost) addParentMsg(parentID string, msg string, channelID string, newLen int, uncounted string, unicode bool) (string, error) {
+	if _, ok := m.msgMap[channelID]; !ok {
+		// Map doesn't exist for this channel, let's create it.
+		mm := make(map[int]map[string]string)
+		m.msgMap[channelID] = mm
+		m.msgMapIdx[channelID] = 0
+	}
+
+	replyMessage := ""
+	// Search and use cached reply if it exists.
+	for _, element := range m.msgMap[channelID] {
+		for postID, reply := range element {
+			if postID == parentID {
+				logger.Debugf("Found saved reply for parent post %s, using:%s", parentID, reply)
+				replyMessage = reply
+			}
+		}
+	}
+
+	// None found, so we'll need to create one and save it for future uses.
+	if replyMessage == "" {
+		parentPost, _, err := m.mc.Client.GetPost(parentID, "")
+		// Retry once on failure.
+		if err != nil {
+			parentPost, _, err = m.mc.Client.GetPost(parentID, "")
+		}
+		if err != nil {
+			return msg, err
+		}
+
+		parentUser := m.GetUser(parentPost.UserId)
+		parentMessage := maybeShorten(parentPost.Message, newLen, uncounted, unicode)
+		replyMessage = fmt.Sprintf(" (re @%s: %s)", parentUser.Nick, parentMessage)
+
+		logger.Debugf("Created reply for parent post %s:%s", parentID, replyMessage)
+
+		m.msgMapMutex.Lock()
+		defer m.msgMapMutex.Unlock()
+
+		// Delete existing entry if present
+		delete(m.msgMap[channelID], m.msgMapIdx[channelID])
+		// Now insert new
+		m.msgMap[channelID][m.msgMapIdx[channelID]] = make(map[string]string)
+		m.msgMap[channelID][m.msgMapIdx[channelID]][parentID] = replyMessage
+		m.msgMapIdx[channelID] += 1
+		if m.msgMapIdx[channelID] > defaultReplyMsgCacheSize {
+			m.msgMapIdx[channelID] = 0
+		}
+	}
+
+	return strings.TrimRight(msg, "\n") + replyMessage, nil
+}
+
 //nolint:funlen,gocognit,gocyclo,cyclop,forcetypeassert
 func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	var data model.Post
@@ -771,19 +836,12 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		return
 	}
 
-	if data.RootId != "" {
-		parentPost, _, err := m.mc.Client.GetPost(data.RootId, "")
+	if !m.v.GetBool("mattermost.hidereplies") && data.RootId != "" {
+		message, err := m.addParentMsg(data.RootId, data.Message, data.ChannelId, m.v.GetInt("mattermost.ShortenRepliesTo"), "@", m.v.GetBool("mattermost.unicode"))
 		if err != nil {
 			logger.Errorf("Unable to get parent post for %#v", data) //nolint:govet
-		} else {
-			parentGhost := m.GetUser(parentPost.UserId)
-
-			if !m.v.GetBool("mattermost.hidereplies") {
-				parentMessage := maybeShorten(parentPost.Message, m.v.GetInt("mattermost.ShortenRepliesTo"), "@", m.v.GetBool("mattermost.unicode"))
-				replyMessage := fmt.Sprintf(" (re @%s: %s)", parentGhost.Nick, parentMessage)
-				data.Message = strings.TrimRight(data.Message, "\n") + replyMessage
-			}
 		}
+		data.Message = message
 	}
 
 	// create new "ghost" user
@@ -1214,23 +1272,32 @@ func (m *Mattermost) handleReactionEvent(rmsg *model.WebSocketEvent) {
 		return
 	}
 
+	userID := m.GetUser(reaction.UserId)
+
+	// No need to show added/removed reaction messages for our own.
+	if userID.Me {
+		logger.Debugf("Not showing own reaction: %s: %s", rmsg.EventType(), reaction.EmojiName)
+		return
+	}
+
 	var event *bridge.Event
 
 	channelType := ""
+	channelID := rmsg.GetBroadcast().ChannelId
 
-	name := m.GetChannelName(rmsg.GetBroadcast().ChannelId)
+	name := m.GetChannelName(channelID)
 	if strings.Contains(name, "__") {
 		channelType = "D"
 	}
 
 	var parentUser *bridge.UserInfo
-	message := ""
+	rMessage := ""
 	if !m.v.GetBool("mattermost.hidereplies") {
-		parentPost, _, err := m.mc.Client.GetPost(reaction.PostId, "")
-		if err == nil {
-			parentUser = m.GetUser(parentPost.UserId)
-			message = maybeShorten(parentPost.Message, m.v.GetInt("mattermost.shortenrepliesto"), "@", m.v.GetBool("mattermost.unicode"))
+		message, err := m.addParentMsg(reaction.PostId, "", channelID, m.v.GetInt("mattermost.ShortenRepliesTo"), "@", m.v.GetBool("mattermost.unicode"))
+		if err != nil {
+			logger.Errorf("Unable to get parent post for %#v", reaction)
 		}
+		rMessage = message
 	}
 
 	switch rmsg.EventType() {
@@ -1238,26 +1305,26 @@ func (m *Mattermost) handleReactionEvent(rmsg *model.WebSocketEvent) {
 		event = &bridge.Event{
 			Type: "reaction_add",
 			Data: &bridge.ReactionAddEvent{
-				ChannelID:   rmsg.GetBroadcast().ChannelId,
+				ChannelID:   channelID,
 				MessageID:   reaction.PostId,
-				Sender:      m.GetUser(reaction.UserId),
+				Sender:      userID,
 				Reaction:    reaction.EmojiName,
 				ChannelType: channelType,
 				ParentUser:  parentUser,
-				Message:     message,
+				Message:     rMessage,
 			},
 		}
 	case model.WebsocketEventReactionRemoved:
 		event = &bridge.Event{
 			Type: "reaction_remove",
 			Data: &bridge.ReactionRemoveEvent{
-				ChannelID:   rmsg.GetBroadcast().ChannelId,
+				ChannelID:   channelID,
 				MessageID:   reaction.PostId,
-				Sender:      m.GetUser(reaction.UserId),
+				Sender:      userID,
 				Reaction:    reaction.EmojiName,
 				ChannelType: channelType,
 				ParentUser:  parentUser,
-				Message:     message,
+				Message:     rMessage,
 			},
 		}
 	}
