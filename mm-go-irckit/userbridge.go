@@ -778,7 +778,7 @@ func (u *User) MsgSpoofUser(sender *User, rcvuser string, msg string, maxlen ...
 			},
 			Command:  irc.PRIVMSG,
 			Params:   []string{rcvuser},
-			Trailing: l + "\n",
+			Trailing: l,
 		})
 	}
 }
