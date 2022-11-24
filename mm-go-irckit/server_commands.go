@@ -119,7 +119,7 @@ func CmdJoin(s Server, u *User, msg *irc.Message) error {
 			continue
 		}
 
-		channelID, topic, err := u.br.Join(channelName)
+		channelID, _, err := u.br.Join(channelName)
 		if err != nil {
 			logger.Errorf("Cannot join channel %s, id %s, err: %v", channelName, channelID, err)
 			s.EncodeMessage(u, irc.ERR_INVITEONLYCHAN, []string{u.Nick, channel}, "Cannot join channel (+i)")
@@ -143,10 +143,7 @@ func CmdJoin(s Server, u *User, msg *irc.Message) error {
 		}
 
 		ch := s.Channel(channelID)
-		ch.Topic(u, topic)
-
 		sync(channelID, channelName)
-
 		ch.Join(u)
 	}
 
