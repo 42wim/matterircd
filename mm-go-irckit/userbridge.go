@@ -341,7 +341,7 @@ func (u *User) handleFileEvent(event *bridge.FileEvent) {
 					u.MsgSpoofUser(u, event.Receiver.Nick, fileMsg)
 				}
 			} else {
-				u.MsgSpoofUser(u.createUserFromInfo(event.Sender), event.Receiver.Nick, fileMsg)
+				u.MsgSpoofUser(u.createUserFromInfo(event.Sender), u.Nick, fileMsg)
 			}
 		default:
 			ch := u.getMessageChannel(event.ChannelID, event.Sender)
