@@ -365,9 +365,16 @@ func (u *User) handleChannelCreateEvent(event *bridge.ChannelCreateEvent) {
 func (u *User) handleChannelDeleteEvent(event *bridge.ChannelDeleteEvent) {
 	ch := u.Srv.Channel(event.ChannelID)
 
-	logger.Debugf("ACTION_CHANNEL_DELETED removing myself from %s (%s)", u.br.GetChannelName(event.ChannelID), event.ChannelID)
+	for _, brchannel := range u.br.GetChannels() {
+		if brchannel.ID == event.ChannelID {
+			logger.Debugf("ACTION_CHANNEL_DELETED removing myself from %s (%s)", u.br.GetChannelName(event.ChannelID), event.ChannelID)
 
-	ch.Part(u, "")
+			ch.Part(u, "")
+			return
+		}
+	}
+
+	logger.Debugf("ACTION_CHANNEL_DELETED not in channel %s (%s)", u.br.GetChannelName(event.ChannelID), event.ChannelID)
 }
 
 func (u *User) handleUserUpdateEvent(event *bridge.UserUpdateEvent) {
