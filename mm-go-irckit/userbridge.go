@@ -172,6 +172,8 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 			err := quick.Highlight(&b, text, lexer, "terminal", u.v.GetString(u.br.Protocol()+".syntaxhighlightingstyle"))
 			if err == nil {
 				text = b.String()
+				// Work around https://github.com/alecthomas/chroma/issues/716
+				text = strings.ReplaceAll(text, "\n", "")
 			}
 		}
 
@@ -339,6 +341,8 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 			err := quick.Highlight(&b, text, lexer, "terminal", u.v.GetString(u.br.Protocol()+".syntaxhighlightingstyle"))
 			if err == nil {
 				text = b.String()
+				// Work around https://github.com/alecthomas/chroma/issues/716
+				text = strings.ReplaceAll(text, "\n", "")
 			}
 		}
 
