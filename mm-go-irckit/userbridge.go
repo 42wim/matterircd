@@ -140,6 +140,8 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 	}
 	text, prefix, suffix, showContext, maxlen := u.handleMessageThreadContext(prefixUser, event.MessageID, event.ParentID, event.Event, event.Text)
 
+	formatter := u.v.GetString(u.br.Protocol() + ".syntaxhighlightingformatter")
+	style := u.v.GetString(u.br.Protocol() + ".syntaxhighlightingstyle")
 	lexer := ""
 	codeBlockBackTick := false
 	codeBlockTilde := false
@@ -169,7 +171,7 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 		} else if (codeBlockBackTick || codeBlockTilde) && u.v.GetBool(u.br.Protocol()+".showsyntaxhighlighting") && !startSyntaxHighlight && lexer != "" {
 			// TODO: Ideally, we want to read the whole code block and syntax highlight on that, but let's go with per-line for now.
 			var b bytes.Buffer
-			err := quick.Highlight(&b, text, lexer, "terminal", u.v.GetString(u.br.Protocol()+".syntaxhighlightingstyle"))
+			err := quick.Highlight(&b, text, lexer, formatter, style)
 			if err == nil {
 				text = b.String()
 				// Work around https://github.com/alecthomas/chroma/issues/716
@@ -309,6 +311,8 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		text, prefix, suffix, showContext, maxlen = u.handleMessageThreadContext(event.ChannelID, event.MessageID, event.ParentID, event.Event, event.Text)
 	}
 
+	formatter := u.v.GetString(u.br.Protocol() + ".syntaxhighlightingformatter")
+	style := u.v.GetString(u.br.Protocol() + ".syntaxhighlightingstyle")
 	lexer := ""
 	codeBlockBackTick := false
 	codeBlockTilde := false
@@ -338,7 +342,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		} else if (codeBlockBackTick || codeBlockTilde) && u.v.GetBool(u.br.Protocol()+".showsyntaxhighlighting") && !startSyntaxHighlight && lexer != "" {
 			// TODO: Ideally, we want to read the whole code block and syntax highlight on that, but let's go with per-line for now.
 			var b bytes.Buffer
-			err := quick.Highlight(&b, text, lexer, "terminal", u.v.GetString(u.br.Protocol()+".syntaxhighlightingstyle"))
+			err := quick.Highlight(&b, text, lexer, formatter, style)
 			if err == nil {
 				text = b.String()
 				// Work around https://github.com/alecthomas/chroma/issues/716
