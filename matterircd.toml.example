@@ -150,6 +150,10 @@ ShowMentions = false
 # This disables that making them appear as normal PRIVMSGs.
 #DisableDefaultMentions = true
 
+# Enable syntax highlighting for code blocks.
+#ShowSyntaxHighlighting = true
+#SyntaxHighlightingStyle = "pygments"
+
 # Path to file to store last viewed information. This is useful for replying only
 # the messages missed.
 LastViewedSaveFile = "matterircd-lastsaved.db"

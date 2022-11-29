@@ -1,6 +1,7 @@
 package irckit
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"math/rand"
@@ -16,6 +17,7 @@ import (
 	"github.com/42wim/matterircd/bridge/mastodon"
 	"github.com/42wim/matterircd/bridge/mattermost"
 	"github.com/42wim/matterircd/bridge/slack"
+	"github.com/alecthomas/chroma/v2/quick"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/mattermost/mattermost-server/v6/model"
 	"github.com/muesli/reflow/wordwrap"
@@ -138,22 +140,39 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 	}
 	text, prefix, suffix, showContext, maxlen := u.handleMessageThreadContext(prefixUser, event.MessageID, event.ParentID, event.Event, event.Text)
 
+	lexer := ""
 	codeBlockBackTick := false
 	codeBlockTilde := false
 	text = wordwrap.String(text, maxlen)
 	lines := strings.Split(text, "\n")
 	for _, text := range lines {
+		startSyntaxHighlight := false
 		if strings.HasPrefix(text, "```") && !codeBlockTilde {
 			codeBlockBackTick = !codeBlockBackTick
+			if codeBlockBackTick {
+				startSyntaxHighlight = true
+				lexer = strings.TrimSpace(strings.TrimPrefix(text, "```"))
+			}
 		}
 		if strings.HasPrefix(text, "~~~") && !codeBlockBackTick {
 			codeBlockTilde = !codeBlockTilde
+			if codeBlockTilde {
+				startSyntaxHighlight = true
+				lexer = strings.TrimSpace(strings.TrimPrefix(text, "~~~"))
+			}
 		}
 		// skip empty lines for anything not part of a code block.
 		if !codeBlockBackTick && !codeBlockTilde && text == "" {
 			continue
 		} else if text == "" {
 			text = " "
+		} else if (codeBlockBackTick || codeBlockTilde) && u.v.GetBool(u.br.Protocol()+".showsyntaxhighlighting") && !startSyntaxHighlight && lexer != "" {
+			// TODO: Ideally, we want to read the whole code block and syntax highlight on that, but let's go with per-line for now.
+			var b bytes.Buffer
+			err := quick.Highlight(&b, text, lexer, "terminal", u.v.GetString(u.br.Protocol()+".syntaxhighlightingstyle"))
+			if err == nil {
+				text = b.String()
+			}
 		}
 
 		if showContext {
@@ -288,22 +307,39 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		text, prefix, suffix, showContext, maxlen = u.handleMessageThreadContext(event.ChannelID, event.MessageID, event.ParentID, event.Event, event.Text)
 	}
 
+	lexer := ""
 	codeBlockBackTick := false
 	codeBlockTilde := false
 	text = wordwrap.String(text, maxlen)
 	lines := strings.Split(text, "\n")
 	for _, text := range lines {
+		startSyntaxHighlight := false
 		if strings.HasPrefix(text, "```") && !codeBlockTilde {
 			codeBlockBackTick = !codeBlockBackTick
+			if codeBlockBackTick {
+				startSyntaxHighlight = true
+				lexer = strings.TrimSpace(strings.TrimPrefix(text, "```"))
+			}
 		}
 		if strings.HasPrefix(text, "~~~") && !codeBlockBackTick {
 			codeBlockTilde = !codeBlockTilde
+			if codeBlockTilde {
+				startSyntaxHighlight = true
+				lexer = strings.TrimSpace(strings.TrimPrefix(text, "~~~"))
+			}
 		}
 		// skip empty lines for anything not part of a code block.
 		if !codeBlockBackTick && !codeBlockTilde && text == "" {
 			continue
 		} else if text == "" {
 			text = " "
+		} else if (codeBlockBackTick || codeBlockTilde) && u.v.GetBool(u.br.Protocol()+".showsyntaxhighlighting") && !startSyntaxHighlight && lexer != "" {
+			// TODO: Ideally, we want to read the whole code block and syntax highlight on that, but let's go with per-line for now.
+			var b bytes.Buffer
+			err := quick.Highlight(&b, text, lexer, "terminal", u.v.GetString(u.br.Protocol()+".syntaxhighlightingstyle"))
+			if err == nil {
+				text = b.String()
+			}
 		}
 
 		if showContext {
