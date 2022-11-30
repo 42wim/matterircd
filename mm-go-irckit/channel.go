@@ -132,10 +132,11 @@ func (ch *channel) Message(from *User, text string) {
 	lines := strings.Split(text, "\n")
 	for _, l := range lines {
 		msg := &irc.Message{
-			Prefix:   from.Prefix(),
-			Command:  irc.PRIVMSG,
-			Params:   []string{ch.name},
-			Trailing: l,
+			Prefix:        from.Prefix(),
+			Command:       irc.PRIVMSG,
+			Params:        []string{ch.name},
+			Trailing:      l,
+			EmptyTrailing: true,
 		}
 
 		ch.mu.RLock()
@@ -436,10 +437,11 @@ func (ch *channel) Spoof(from string, text string, cmd string, maxlen ...int) {
 	lines := strings.Split(text, "\n")
 	for _, l := range lines {
 		msg := &irc.Message{
-			Prefix:   &irc.Prefix{Name: from, User: from, Host: from},
-			Command:  cmd,
-			Params:   []string{ch.name},
-			Trailing: l,
+			Prefix:        &irc.Prefix{Name: from, User: from, Host: from},
+			Command:       cmd,
+			Params:        []string{ch.name},
+			Trailing:      l,
+			EmptyTrailing: true,
 		}
 
 		ch.mu.RLock()
