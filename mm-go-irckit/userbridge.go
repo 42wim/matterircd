@@ -762,10 +762,11 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 
 func (u *User) MsgUser(toUser *User, msg string) {
 	u.Encode(&irc.Message{
-		Prefix:   toUser.Prefix(),
-		Command:  irc.PRIVMSG,
-		Params:   []string{u.Nick},
-		Trailing: msg,
+		Prefix:        toUser.Prefix(),
+		Command:       irc.PRIVMSG,
+		Params:        []string{u.Nick},
+		Trailing:      msg,
+		EmptyTrailing: true,
 	})
 }
 
@@ -783,9 +784,10 @@ func (u *User) MsgSpoofUser(sender *User, rcvuser string, msg string, maxlen ...
 				User: sender.Nick,
 				Host: sender.Host,
 			},
-			Command:  irc.PRIVMSG,
-			Params:   []string{rcvuser},
-			Trailing: l,
+			Command:       irc.PRIVMSG,
+			Params:        []string{rcvuser},
+			Trailing:      l,
+			EmptyTrailing: true,
 		})
 	}
 }
