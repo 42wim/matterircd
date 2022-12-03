@@ -140,8 +140,16 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 	}
 	text, prefix, suffix, showContext, maxlen := u.handleMessageThreadContext(prefixUser, event.MessageID, event.ParentID, event.Event, event.Text)
 
-	formatter := u.v.GetString(u.br.Protocol() + ".syntaxhighlightingformatter")
-	style := u.v.GetString(u.br.Protocol() + ".syntaxhighlightingstyle")
+	syntaxHighlighting := u.v.GetString(u.br.Protocol() + ".syntaxhighlighting")
+	formatter := "terminal256"
+	style := "pygments"
+	if syntaxHighlighting != "" {
+		v := strings.SplitN(syntaxHighlighting, ":", 2)
+		if len(v) == 2 {
+			formatter = v[0]
+			style = v[1]
+		}
+	}
 	lexer := ""
 	codeBlockBackTick := false
 	codeBlockTilde := false
@@ -168,7 +176,7 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 			continue
 		} else if text == "" {
 			text = " "
-		} else if (codeBlockBackTick || codeBlockTilde) && u.v.GetBool(u.br.Protocol()+".showsyntaxhighlighting") && !startSyntaxHighlight && lexer != "" {
+		} else if (codeBlockBackTick || codeBlockTilde) && syntaxHighlighting != "" && !startSyntaxHighlight && lexer != "" {
 			// TODO: Ideally, we want to read the whole code block and syntax highlight on that, but let's go with per-line for now.
 			var b bytes.Buffer
 			err := quick.Highlight(&b, text, lexer, formatter, style)
@@ -176,6 +184,8 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 				text = b.String()
 				// Work around https://github.com/alecthomas/chroma/issues/716
 				text = strings.ReplaceAll(text, "\n", "")
+			} else {
+				logger.Warnf("handleDirectMessageEvent() syntax formatting failed, likely invalid formatter and/or style provided: %s %s", formatter, style)
 			}
 		}
 
@@ -311,8 +321,16 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		text, prefix, suffix, showContext, maxlen = u.handleMessageThreadContext(event.ChannelID, event.MessageID, event.ParentID, event.Event, event.Text)
 	}
 
-	formatter := u.v.GetString(u.br.Protocol() + ".syntaxhighlightingformatter")
-	style := u.v.GetString(u.br.Protocol() + ".syntaxhighlightingstyle")
+	syntaxHighlighting := u.v.GetString(u.br.Protocol() + ".syntaxhighlighting")
+	formatter := "terminal256"
+	style := "pygments"
+	if syntaxHighlighting != "" {
+		v := strings.SplitN(syntaxHighlighting, ":", 2)
+		if len(v) == 2 {
+			formatter = v[0]
+			style = v[1]
+		}
+	}
 	lexer := ""
 	codeBlockBackTick := false
 	codeBlockTilde := false
@@ -339,7 +357,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 			continue
 		} else if text == "" {
 			text = " "
-		} else if (codeBlockBackTick || codeBlockTilde) && u.v.GetBool(u.br.Protocol()+".showsyntaxhighlighting") && !startSyntaxHighlight && lexer != "" {
+		} else if (codeBlockBackTick || codeBlockTilde) && syntaxHighlighting != "" && !startSyntaxHighlight && lexer != "" {
 			// TODO: Ideally, we want to read the whole code block and syntax highlight on that, but let's go with per-line for now.
 			var b bytes.Buffer
 			err := quick.Highlight(&b, text, lexer, formatter, style)
@@ -347,6 +365,8 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 				text = b.String()
 				// Work around https://github.com/alecthomas/chroma/issues/716
 				text = strings.ReplaceAll(text, "\n", "")
+			} else {
+				logger.Warnf("handleChannelMessageEvent() syntax formatting failed, likely invalid formatter and/or style provided: %s %s", formatter, style)
 			}
 		}
 

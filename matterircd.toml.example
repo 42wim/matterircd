@@ -151,14 +151,12 @@ ShowMentions = false
 #DisableDefaultMentions = true
 
 # Enable syntax highlighting for code blocks.
-#ShowSyntaxHighlighting = true
 # Formatter and Style are passed through to the chroma v2 package.
 #   https://github.com/alecthomas/chroma/blob/master/formatters/tty_indexed.go#L262
 # terminal/terminal8 for 8-colors, terminal16, terminal256, terminal16m (16M true-colour).
-SyntaxHighlightingFormatter = "terminal256"
 #   https://github.com/alecthomas/chroma/tree/master/styles
 # These are different colour schemes/styles. E.g. pygments, emacs, autumn, etc.
-SyntaxHighlightingStyle = "pygments"
+SyntaxHighlighting = "terminal256:pygments"
 
 # Path to file to store last viewed information. This is useful for replying only
 # the messages missed.
