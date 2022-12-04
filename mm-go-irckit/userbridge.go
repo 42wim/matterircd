@@ -140,53 +140,18 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 	}
 	text, prefix, suffix, showContext, maxlen := u.handleMessageThreadContext(prefixUser, event.MessageID, event.ParentID, event.Event, event.Text)
 
-	syntaxHighlighting := u.v.GetString(u.br.Protocol() + ".syntaxhighlighting")
-	formatter := "terminal256"
-	style := "pygments"
-	if syntaxHighlighting != "" {
-		v := strings.SplitN(syntaxHighlighting, ":", 2)
-		if len(v) == 2 {
-			formatter = v[0]
-			style = v[1]
-		}
-	}
 	lexer := ""
 	codeBlockBackTick := false
 	codeBlockTilde := false
 	text = wordwrap.String(text, maxlen)
 	lines := strings.Split(text, "\n")
 	for _, text := range lines {
-		startSyntaxHighlight := false
-		if (strings.HasPrefix(text, "```") || strings.HasPrefix(text, prefix+"```")) && !codeBlockTilde {
-			codeBlockBackTick = !codeBlockBackTick
-			if codeBlockBackTick {
-				startSyntaxHighlight = true
-				lexer = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(text, "```"), prefix+"```"))
-			}
-		}
-		if (strings.HasPrefix(text, "~~~") || strings.HasPrefix(text, prefix+"~~~")) && !codeBlockBackTick {
-			codeBlockTilde = !codeBlockTilde
-			if codeBlockTilde {
-				startSyntaxHighlight = true
-				lexer = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(text, "~~~"), prefix+"~~~"))
-			}
-		}
-		// skip empty lines for anything not part of a code block.
-		if !codeBlockBackTick && !codeBlockTilde && text == "" {
+
+		// TODO: Ideally, we want to read the whole code block and syntax highlight on that, but let's go with per-line for now.
+		text, codeBlockBackTick, codeBlockTilde, lexer = u.formatCodeBlockText(text, prefix, codeBlockBackTick, codeBlockTilde, lexer)
+
+		if text == "" {
 			continue
-		} else if text == "" {
-			text = " "
-		} else if (codeBlockBackTick || codeBlockTilde) && syntaxHighlighting != "" && !startSyntaxHighlight && lexer != "" {
-			// TODO: Ideally, we want to read the whole code block and syntax highlight on that, but let's go with per-line for now.
-			var b bytes.Buffer
-			err := quick.Highlight(&b, text, lexer, formatter, style)
-			if err == nil {
-				text = b.String()
-				// Work around https://github.com/alecthomas/chroma/issues/716
-				text = strings.ReplaceAll(text, "\n", "")
-			} else {
-				logger.Warnf("handleDirectMessageEvent() syntax formatting failed, likely invalid formatter and/or style provided: %s %s", formatter, style)
-			}
 		}
 
 		if showContext {
@@ -321,53 +286,18 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		text, prefix, suffix, showContext, maxlen = u.handleMessageThreadContext(event.ChannelID, event.MessageID, event.ParentID, event.Event, event.Text)
 	}
 
-	syntaxHighlighting := u.v.GetString(u.br.Protocol() + ".syntaxhighlighting")
-	formatter := "terminal256"
-	style := "pygments"
-	if syntaxHighlighting != "" {
-		v := strings.SplitN(syntaxHighlighting, ":", 2)
-		if len(v) == 2 {
-			formatter = v[0]
-			style = v[1]
-		}
-	}
 	lexer := ""
 	codeBlockBackTick := false
 	codeBlockTilde := false
 	text = wordwrap.String(text, maxlen)
 	lines := strings.Split(text, "\n")
 	for _, text := range lines {
-		startSyntaxHighlight := false
-		if (strings.HasPrefix(text, "```") || strings.HasPrefix(text, prefix+"```")) && !codeBlockTilde {
-			codeBlockBackTick = !codeBlockBackTick
-			if codeBlockBackTick {
-				startSyntaxHighlight = true
-				lexer = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(text, "```"), prefix+"```"))
-			}
-		}
-		if (strings.HasPrefix(text, "~~~") || strings.HasPrefix(text, prefix+"~~~")) && !codeBlockBackTick {
-			codeBlockTilde = !codeBlockTilde
-			if codeBlockTilde {
-				startSyntaxHighlight = true
-				lexer = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(text, "~~~"), prefix+"~~~"))
-			}
-		}
-		// skip empty lines for anything not part of a code block.
-		if !codeBlockBackTick && !codeBlockTilde && text == "" {
+
+		// TODO: Ideally, we want to read the whole code block and syntax highlight on that, but let's go with per-line for now.
+		text, codeBlockBackTick, codeBlockTilde, lexer = u.formatCodeBlockText(text, prefix, codeBlockBackTick, codeBlockTilde, lexer)
+
+		if text == "" {
 			continue
-		} else if text == "" {
-			text = " "
-		} else if (codeBlockBackTick || codeBlockTilde) && syntaxHighlighting != "" && !startSyntaxHighlight && lexer != "" {
-			// TODO: Ideally, we want to read the whole code block and syntax highlight on that, but let's go with per-line for now.
-			var b bytes.Buffer
-			err := quick.Highlight(&b, text, lexer, formatter, style)
-			if err == nil {
-				text = b.String()
-				// Work around https://github.com/alecthomas/chroma/issues/716
-				text = strings.ReplaceAll(text, "\n", "")
-			} else {
-				logger.Warnf("handleChannelMessageEvent() syntax formatting failed, likely invalid formatter and/or style provided: %s %s", formatter, style)
-			}
 		}
 
 		if showContext {
@@ -1174,4 +1104,54 @@ func (u *User) handleMessageThreadContext(channelID, messageID, parentID, event,
 	}
 
 	return newText, prefix, suffix, showContext, maxlen
+}
+
+//nolint:gocyclo
+func (u *User) formatCodeBlockText(text string, prefix string, codeBlockBackTick bool, codeBlockTilde bool, lexer string) (string, bool, bool, string) {
+	// skip empty lines for anything not part of a code block.
+	if text == "" {
+		if codeBlockBackTick || codeBlockTilde {
+			return " ", codeBlockBackTick, codeBlockTilde, lexer
+		}
+		return "", codeBlockBackTick, codeBlockTilde, lexer
+	}
+
+	syntaxHighlighting := u.v.GetString(u.br.Protocol() + ".syntaxhighlighting")
+
+	if (strings.HasPrefix(text, "```") || strings.HasPrefix(text, prefix+"```")) && !codeBlockTilde {
+		codeBlockBackTick = !codeBlockBackTick
+		if codeBlockBackTick {
+			lexer = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(text, "```"), prefix+"```"))
+		}
+		return text, codeBlockBackTick, codeBlockTilde, lexer
+	}
+	if (strings.HasPrefix(text, "~~~") || strings.HasPrefix(text, prefix+"~~~")) && !codeBlockBackTick {
+		codeBlockTilde = !codeBlockTilde
+		if codeBlockTilde {
+			lexer = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(text, "~~~"), prefix+"~~~"))
+		}
+		return text, codeBlockBackTick, codeBlockTilde, lexer
+	}
+
+	if !(codeBlockBackTick || codeBlockTilde) || syntaxHighlighting == "" || lexer == "" {
+		return text, codeBlockBackTick, codeBlockTilde, lexer
+	}
+
+	formatter := "terminal256"
+	style := "pygments"
+	v := strings.SplitN(syntaxHighlighting, ":", 2)
+	if len(v) == 2 {
+		formatter = v[0]
+		style = v[1]
+	}
+
+	var b bytes.Buffer
+	err := quick.Highlight(&b, text, lexer, formatter, style)
+	if err == nil {
+		text = b.String()
+		// Work around https://github.com/alecthomas/chroma/issues/716
+		text = strings.ReplaceAll(text, "\n", "")
+	}
+
+	return text, codeBlockBackTick, codeBlockTilde, lexer
 }
