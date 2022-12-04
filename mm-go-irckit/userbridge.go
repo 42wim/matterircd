@@ -157,18 +157,18 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 	lines := strings.Split(text, "\n")
 	for _, text := range lines {
 		startSyntaxHighlight := false
-		if strings.HasPrefix(text, "```") && !codeBlockTilde {
+		if (strings.HasPrefix(text, "```") || strings.HasPrefix(text, prefix+"```")) && !codeBlockTilde {
 			codeBlockBackTick = !codeBlockBackTick
 			if codeBlockBackTick {
 				startSyntaxHighlight = true
-				lexer = strings.TrimSpace(strings.TrimPrefix(text, "```"))
+				lexer = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(text, "```"), prefix+"```"))
 			}
 		}
-		if strings.HasPrefix(text, "~~~") && !codeBlockBackTick {
+		if (strings.HasPrefix(text, "~~~") || strings.HasPrefix(text, prefix+"~~~")) && !codeBlockBackTick {
 			codeBlockTilde = !codeBlockTilde
 			if codeBlockTilde {
 				startSyntaxHighlight = true
-				lexer = strings.TrimSpace(strings.TrimPrefix(text, "~~~"))
+				lexer = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(text, "~~~"), prefix+"~~~"))
 			}
 		}
 		// skip empty lines for anything not part of a code block.
@@ -338,18 +338,18 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 	lines := strings.Split(text, "\n")
 	for _, text := range lines {
 		startSyntaxHighlight := false
-		if strings.HasPrefix(text, "```") && !codeBlockTilde {
+		if (strings.HasPrefix(text, "```") || strings.HasPrefix(text, prefix+"```")) && !codeBlockTilde {
 			codeBlockBackTick = !codeBlockBackTick
 			if codeBlockBackTick {
 				startSyntaxHighlight = true
-				lexer = strings.TrimSpace(strings.TrimPrefix(text, "```"))
+				lexer = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(text, "```"), prefix+"```"))
 			}
 		}
-		if strings.HasPrefix(text, "~~~") && !codeBlockBackTick {
+		if (strings.HasPrefix(text, "~~~") || strings.HasPrefix(text, prefix+"~~~")) && !codeBlockBackTick {
 			codeBlockTilde = !codeBlockTilde
 			if codeBlockTilde {
 				startSyntaxHighlight = true
-				lexer = strings.TrimSpace(strings.TrimPrefix(text, "~~~"))
+				lexer = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(text, "~~~"), prefix+"~~~"))
 			}
 		}
 		// skip empty lines for anything not part of a code block.
