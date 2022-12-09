@@ -422,6 +422,7 @@ func updatelastviewed(u *User, toUser *User, args []string, service string) {
 }
 
 var cmds = map[string]Command{
+	"lastsent":         {handler: lastsent, login: true, minParams: 0, maxParams: 0},
 	"logout":           {handler: logout, login: true, minParams: 0, maxParams: 0},
 	"login":            {handler: login, minParams: 2, maxParams: 5},
 	"search":           {handler: search, login: true, minParams: 1, maxParams: -1},
@@ -531,4 +532,10 @@ func parseCommandString(line string) ([]string, error) {
 	}
 
 	return args, nil
+}
+
+func lastsent(u *User, toUser *User, args []string, service string) {
+	for _, line := range u.br.GetLastSentMsgs() {
+		u.MsgUser(toUser, line)
+	}
 }

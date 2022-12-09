@@ -363,3 +363,7 @@ func (m *Mastodon) SetTopic(channelID, text string) error {
 func (m *Mastodon) Topic(channelID string) string {
 	return ""
 }
+
+func (m *Mastodon) GetLastSentMsgs() []string {
+	return []string{}
+}
