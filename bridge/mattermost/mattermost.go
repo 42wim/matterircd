@@ -10,6 +10,7 @@ import (
 
 	"github.com/42wim/matterircd/bridge"
 	"github.com/davecgh/go-spew/spew"
+	lru "github.com/hashicorp/golang-lru"
 	"github.com/matterbridge/matterclient"
 	"github.com/mattermost/mattermost-server/v6/model"
 	"github.com/mitchellh/mapstructure"
@@ -24,6 +25,8 @@ type Mattermost struct {
 	eventChan   chan *bridge.Event
 	v           *viper.Viper
 	connected   bool
+
+	msglruCache *lru.Cache
 }
 
 func New(v *viper.Viper, cred bridge.Credentials, eventChan chan *bridge.Event, onWsConnect func()) (bridge.Bridger, *matterclient.Client, error) {
@@ -32,6 +35,8 @@ func New(v *viper.Viper, cred bridge.Credentials, eventChan chan *bridge.Event, 
 		eventChan:   eventChan,
 		v:           v,
 	}
+	cache, _ := lru.New(300)
+	m.msglruCache = cache
 
 	logger.SetFormatter(&logger.TextFormatter{FullTimestamp: true})
 	if v.GetBool("debug") {
@@ -756,6 +761,34 @@ func maybeShorten(msg string, newLen int, uncounted string, unicode bool) string
 	return fmt.Sprintf("%s %s", newMsg, ellipsis)
 }
 
+func (m *Mattermost) addParentMsg(parentID string, msg string, newLen int, uncounted string, unicode bool) (string, error) {
+	var replyMessage string
+
+	// Search and use cached reply if it exists.
+	// None found, so we'll need to create one and save it for future uses.
+	if v, ok := m.msglruCache.Get(parentID); !ok {
+		parentPost, _, err := m.mc.Client.GetPost(parentID, "")
+		// Retry once on failure.
+		if err != nil {
+			parentPost, _, err = m.mc.Client.GetPost(parentID, "")
+		}
+		if err != nil {
+			return msg, err
+		}
+
+		parentUser := m.GetUser(parentPost.UserId)
+		parentMessage := maybeShorten(parentPost.Message, newLen, uncounted, unicode)
+		replyMessage = fmt.Sprintf(" (re @%s: %s)", parentUser.Nick, parentMessage)
+		logger.Debugf("Created reply for parent post %s:%s", parentID, replyMessage)
+
+		m.msglruCache.Add(parentID, replyMessage)
+	} else if replyMessage, ok = v.(string); ok {
+		logger.Debugf("Found saved reply for parent post %s, using:%s", parentID, replyMessage)
+	}
+
+	return strings.TrimRight(msg, "\n") + replyMessage, nil
+}
+
 //nolint:funlen,gocognit,gocyclo,cyclop,forcetypeassert
 func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	var data model.Post
@@ -771,19 +804,12 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		return
 	}
 
-	if data.RootId != "" {
-		parentPost, _, err := m.mc.Client.GetPost(data.RootId, "")
+	if !m.v.GetBool("mattermost.hidereplies") && data.RootId != "" {
+		message, err := m.addParentMsg(data.RootId, data.Message, m.v.GetInt("mattermost.ShortenRepliesTo"), "@", m.v.GetBool("mattermost.unicode"))
 		if err != nil {
 			logger.Errorf("Unable to get parent post for %#v", data) //nolint:govet
-		} else {
-			parentGhost := m.GetUser(parentPost.UserId)
-
-			if !m.v.GetBool("mattermost.hidereplies") {
-				parentMessage := maybeShorten(parentPost.Message, m.v.GetInt("mattermost.ShortenRepliesTo"), "@", m.v.GetBool("mattermost.unicode"))
-				replyMessage := fmt.Sprintf(" (re @%s: %s)", parentGhost.Nick, parentMessage)
-				data.Message = strings.TrimRight(data.Message, "\n") + replyMessage
-			}
 		}
+		data.Message = message
 	}
 
 	// create new "ghost" user
@@ -1218,23 +1244,32 @@ func (m *Mattermost) handleReactionEvent(rmsg *model.WebSocketEvent) {
 		return
 	}
 
+	userID := m.GetUser(reaction.UserId)
+
+	// No need to show added/removed reaction messages for our own.
+	if userID.Me {
+		logger.Debugf("Not showing own reaction: %s: %s", rmsg.EventType(), reaction.EmojiName)
+		return
+	}
+
 	var event *bridge.Event
 
 	channelType := ""
+	channelID := rmsg.GetBroadcast().ChannelId
 
-	name := m.GetChannelName(rmsg.GetBroadcast().ChannelId)
+	name := m.GetChannelName(channelID)
 	if strings.Contains(name, "__") {
 		channelType = "D"
 	}
 
 	var parentUser *bridge.UserInfo
-	message := ""
+	rMessage := ""
 	if !m.v.GetBool("mattermost.hidereplies") {
-		parentPost, _, err := m.mc.Client.GetPost(reaction.PostId, "")
-		if err == nil {
-			parentUser = m.GetUser(parentPost.UserId)
-			message = maybeShorten(parentPost.Message, m.v.GetInt("mattermost.shortenrepliesto"), "@", m.v.GetBool("mattermost.unicode"))
+		message, err := m.addParentMsg(reaction.PostId, "", m.v.GetInt("mattermost.ShortenRepliesTo"), "@", m.v.GetBool("mattermost.unicode"))
+		if err != nil {
+			logger.Errorf("Unable to get parent post for %#v", reaction)
 		}
+		rMessage = message
 	}
 
 	switch rmsg.EventType() {
@@ -1242,26 +1277,26 @@ func (m *Mattermost) handleReactionEvent(rmsg *model.WebSocketEvent) {
 		event = &bridge.Event{
 			Type: "reaction_add",
 			Data: &bridge.ReactionAddEvent{
-				ChannelID:   rmsg.GetBroadcast().ChannelId,
+				ChannelID:   channelID,
 				MessageID:   reaction.PostId,
-				Sender:      m.GetUser(reaction.UserId),
+				Sender:      userID,
 				Reaction:    reaction.EmojiName,
 				ChannelType: channelType,
 				ParentUser:  parentUser,
-				Message:     message,
+				Message:     rMessage,
 			},
 		}
 	case model.WebsocketEventReactionRemoved:
 		event = &bridge.Event{
 			Type: "reaction_remove",
 			Data: &bridge.ReactionRemoveEvent{
-				ChannelID:   rmsg.GetBroadcast().ChannelId,
+				ChannelID:   channelID,
 				MessageID:   reaction.PostId,
-				Sender:      m.GetUser(reaction.UserId),
+				Sender:      userID,
 				Reaction:    reaction.EmojiName,
 				ChannelType: channelType,
 				ParentUser:  parentUser,
-				Message:     message,
+				Message:     rMessage,
 			},
 		}
 	}

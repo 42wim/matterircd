@@ -414,13 +414,7 @@ func (u *User) handleReactionEvent(event interface{}) {
 
 	switch e := event.(type) {
 	case *bridge.ReactionAddEvent:
-		if !u.v.GetBool(u.br.Protocol() + ".hidereplies") {
-			nick := "(none)"
-			if e.ParentUser != nil {
-				nick = sanitizeNick(e.ParentUser.Nick)
-			}
-			message = fmt.Sprintf(" (re @%s: %s)", nick, e.Message)
-		}
+		message = e.Message
 		text = "added reaction: "
 		channelID = e.ChannelID
 		messageID = e.MessageID
@@ -428,13 +422,7 @@ func (u *User) handleReactionEvent(event interface{}) {
 		channelType = e.ChannelType
 		reaction = e.Reaction
 	case *bridge.ReactionRemoveEvent:
-		if !u.v.GetBool(u.br.Protocol() + ".hidereplies") {
-			nick := "(none)"
-			if e.ParentUser != nil {
-				nick = sanitizeNick(e.ParentUser.Nick)
-			}
-			message = fmt.Sprintf(" (re @%s: %s)", nick, e.Message)
-		}
+		message = e.Message
 		text = "removed reaction: "
 		channelID = e.ChannelID
 		messageID = e.MessageID
@@ -447,12 +435,6 @@ func (u *User) handleReactionEvent(event interface{}) {
 
 	if u.v.GetBool(u.br.Protocol() + ".hidereactions") {
 		logger.Debug("Not showing reaction: " + text + reaction)
-		return
-	}
-
-	// No need to show added/removed reaction messages for our own.
-	if sender.Me {
-		logger.Debug("Not showing own reaction: " + text + reaction)
 		return
 	}
 
