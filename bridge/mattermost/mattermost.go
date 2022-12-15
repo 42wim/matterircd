@@ -281,10 +281,6 @@ func (m *Mattermost) MsgUser(userID, text string) (string, error) {
 }
 
 func (m *Mattermost) MsgUserThread(userID, parentID, text string) (string, error) {
-	props := make(map[string]interface{})
-
-	props["matterircd_"+m.mc.User.Id] = true
-
 	// create DM channel (only happens on first message)
 	dchannel, _, err := m.mc.Client.CreateDirectChannel(m.mc.User.Id, userID)
 	if err != nil {
@@ -293,20 +289,8 @@ func (m *Mattermost) MsgUserThread(userID, parentID, text string) (string, error
 
 	// build & send the message
 	text = strings.ReplaceAll(text, "\r", "")
-	post := &model.Post{
-		ChannelId: dchannel.Id,
-		Message:   text,
-		RootId:    parentID,
-	}
 
-	post.SetProps(props)
-
-	rp, _, err := m.mc.Client.CreatePost(post)
-	if err != nil {
-		return "", err
-	}
-
-	return rp.Id, nil
+	return m.MsgChannelThread(dchannel.Id, parentID, text)
 }
 
 func (m *Mattermost) MsgChannel(channelID, text string) (string, error) {
@@ -326,11 +310,34 @@ func (m *Mattermost) MsgChannelThread(channelID, parentID, text string) (string,
 	post.SetProps(props)
 
 	rp, _, err := m.mc.Client.CreatePost(post)
+	if err == nil {
+		return rp.Id, nil
+	}
+
+	if parentID == "" {
+		return "", err
+	}
+
+	// Try to work out if we're trying to reply to a post within a thread.
+	replyPost, _, err := m.mc.Client.GetPost(parentID, "")
 	if err != nil {
 		return "", err
 	}
 
-	return rp.Id, nil
+	post = &model.Post{
+		ChannelId: channelID,
+		Message:   text,
+		RootId:    replyPost.RootId,
+	}
+
+	post.SetProps(props)
+
+	rp, _, err = m.mc.Client.CreatePost(post)
+	if err == nil {
+		return rp.Id, nil
+	}
+
+	return "", err
 }
 
 func (m *Mattermost) ModifyPost(msgID, text string) error {
