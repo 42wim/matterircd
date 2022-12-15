@@ -150,6 +150,14 @@ ShowMentions = false
 # This disables that making them appear as normal PRIVMSGs.
 #DisableDefaultMentions = true
 
+# Enable syntax highlighting for code blocks.
+# Formatter and Style are passed through to the chroma v2 package.
+#   https://github.com/alecthomas/chroma/blob/master/formatters/tty_indexed.go#L262
+# terminal/terminal8 for 8-colors, terminal16, terminal256, terminal16m (16M true-colour).
+#   https://github.com/alecthomas/chroma/tree/master/styles
+# These are different colour schemes/styles. E.g. pygments, emacs, autumn, etc.
+SyntaxHighlighting = "terminal256:pygments"
+
 # Path to file to store last viewed information. This is useful for replying only
 # the messages missed.
 LastViewedSaveFile = "matterircd-lastsaved.db"

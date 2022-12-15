@@ -25,7 +25,9 @@ require (
 )
 
 require (
+	github.com/alecthomas/chroma/v2 v2.4.0 // indirect
 	github.com/blang/semver v3.5.1+incompatible // indirect
+	github.com/dlclark/regexp2 v1.4.0 // indirect
 	github.com/dustin/go-humanize v1.0.0 // indirect
 	github.com/dyatlov/go-opengraph v0.0.0-20210112100619-dae8665a5b09 // indirect
 	github.com/francoispqt/gojay v1.2.13 // indirect
