@@ -196,7 +196,9 @@ func (s *Slack) MsgChannel(channelID, text string) (string, error) {
 }
 
 func (s *Slack) Topic(channelID string) string {
-	info, err := s.sc.GetConversationInfo(strings.ToUpper(channelID), false)
+	info, err := s.sc.GetConversationInfo(&slack.GetConversationInfoInput{
+		ChannelID: strings.ToUpper(channelID),
+	})
 	if err != nil {
 		logger.Errorf("error getting topic of %s: %s", channelID, err)
 		return ""
@@ -244,7 +246,9 @@ func (s *Slack) Nick(name string) error {
 func (s *Slack) GetChannelName(channelID string) string {
 	var name string
 
-	info, err := s.sc.GetConversationInfo(channelID, false)
+	info, err := s.sc.GetConversationInfo(&slack.GetConversationInfoInput{
+		ChannelID: channelID,
+	})
 	if err != nil {
 		name = channelID
 	} else {
@@ -259,7 +263,9 @@ func (s *Slack) GetChannelUsers(channelID string) ([]*bridge.UserInfo, error) {
 
 	limit := 100
 
-	info, err := s.sc.GetConversationInfo(channelID, false)
+	info, err := s.sc.GetConversationInfo(&slack.GetConversationInfoInput{
+		ChannelID: channelID,
+	})
 	if err != nil {
 		return nil, err
 	}

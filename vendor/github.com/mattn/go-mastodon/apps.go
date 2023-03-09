@@ -27,7 +27,7 @@ type AppConfig struct {
 	Website string
 }
 
-// Application is mastodon application.
+// Application is a mastodon application.
 type Application struct {
 	ID           ID     `json:"id"`
 	RedirectURI  string `json:"redirect_uri"`
@@ -93,4 +93,21 @@ func RegisterApp(ctx context.Context, appConfig *AppConfig) (*Application, error
 	app.AuthURI = u.String()
 
 	return &app, nil
+}
+
+// ApplicationVerification is mastodon application.
+type ApplicationVerification struct {
+	Name     string `json:"name"`
+	Website  string `json:"website"`
+	VapidKey string `json:"vapid_key"`
+}
+
+// VerifyAppCredentials returns the mastodon application.
+func (c *Client) VerifyAppCredentials(ctx context.Context) (*ApplicationVerification, error) {
+	var application ApplicationVerification
+	err := c.doAPI(ctx, http.MethodGet, "/api/v1/apps/verify_credentials", nil, &application, nil)
+	if err != nil {
+		return nil, err
+	}
+	return &application, nil
 }
