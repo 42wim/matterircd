@@ -1,3 +1,36 @@
+# v0.27.0
+
+## New features
+
+- mastodon: Add mastodon support (#500)
+
+## Enhancement
+
+- general: Add support for syntax highlighted code blocks (#501)
+- mastodon: Add support for posting on timeline (#503)
+- mattermost: Remove backwards compatibility support of last saved at state (#444)
+- mattermost: Add support for tilde fenced code blocks (#506)
+- mattermost: Reduce extra call to Mattermost server for files link (#509)
+
+## Bugfix
+
+- irc: Fix splitting of lines for ACTIONs (#499)
+- irc: Ignore when our user status is "offline" (#504)
+- irc: Ignore special channels (&users and &messages) (#507)
+- irc: Remove unnecessary topic setting on channel join (#512)
+- irc: Remove extra new lines showing in debug logging (#511)
+- irc: Only remove from channel for channels we're in on channel_deleted
+- irc: Set correct IRC PRIVMSG nick for file events too (#406)
+- irc: Ensure colon present for empty messages per IRC protocol/spec (#517)
+- irc: Only flip between away and online when actually away or not (#518)
+- irc: Add basic support for syntax highlighting in code blocks (#515)
+- mattermost: Remove support for mattermost 5
+- mattermost: Handle replies to posts part of threadst
+- mattermost: Reduce calls to Mattermost server by caching replies (#513)
+
+This release couldn't exist without the following contributors:
+@hloeung
+
 # v0.26.1
 
 ## Enhancement
