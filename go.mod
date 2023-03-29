@@ -7,7 +7,7 @@ require (
 	github.com/google/gops v0.3.27
 	github.com/grokify/html-strip-tags-go v0.0.1
 	github.com/hashicorp/golang-lru v0.6.0
-	github.com/matterbridge/matterclient v0.0.0-20221106190440-8bcf49695e0d
+	github.com/matterbridge/matterclient v0.0.0-20230329213635-bc6e42a4a84a
 	github.com/mattermost/mattermost-server/v5 v5.39.3
 	github.com/mattermost/mattermost-server/v6 v6.7.2
 	github.com/mattn/go-mastodon v0.0.6
