@@ -15,6 +15,7 @@ import (
 	"github.com/42wim/matterircd/config"
 	irckit "github.com/42wim/matterircd/mm-go-irckit"
 	"github.com/google/gops/agent"
+	prefixed "github.com/matterbridge/logrus-prefixed-formatter"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
@@ -31,8 +32,11 @@ var (
 
 func main() {
 	ourlog := logrus.New()
-	ourlog.Formatter = &logrus.TextFormatter{FullTimestamp: true}
-	logger = ourlog.WithFields(logrus.Fields{"module": "matterircd"})
+	ourlog.Formatter = &prefixed.TextFormatter{
+		PrefixPadding: 11,
+		FullTimestamp: true,
+	}
+	logger = ourlog.WithFields(logrus.Fields{"prefix": "matterircd"})
 	config.Logger = logger
 
 	// config related. instantiate a new config.Config to store flags

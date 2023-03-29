@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	logger "github.com/sirupsen/logrus"
+	"github.com/sirupsen/logrus"
 	"github.com/slack-go/slack"
 )
 
@@ -220,11 +220,11 @@ type httpClient struct {
 // taken from https://github.com/insomniacslk/irc-slack/blob/master/pkg/ircslack/irc_server.go
 func (hc httpClient) Do(req *http.Request) (*http.Response, error) {
 	if hc.cookie != "" {
-		logger.Debug("Setting auth cookie")
+		logrus.Debug("Setting auth cookie")
 		if strings.ToLower(req.URL.Scheme) == "https" {
 			req.Header.Add("Cookie", hc.cookie)
 		} else {
-			logger.Warning("Cookie is set but connection is not HTTPS, skipping")
+			logrus.Warning("Cookie is set but connection is not HTTPS, skipping")
 		}
 	}
 

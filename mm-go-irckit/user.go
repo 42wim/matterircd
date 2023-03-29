@@ -142,7 +142,7 @@ func (u *User) Encode(msgs ...*irc.Message) (err error) {
 			continue
 		}
 
-		logger.Debugf("-> %s", msg)
+		logger.Debugf("-> \"%s\"", msg)
 
 		err := u.Conn.Encode(msg)
 		if err != nil {
@@ -168,7 +168,7 @@ func (u *User) Decode() {
 	if bufferTimeout < 100 {
 		bufferTimeout = 100
 	}
-	logger.Debugf("using paste buffer timeout: %#v\n", bufferTimeout)
+	logger.Debugf("using paste buffer timeout: %#v", bufferTimeout)
 	t := timer.NewTimer(time.Duration(bufferTimeout) * time.Millisecond)
 	t.Stop()
 	go func(buffer chan *irc.Message, stop chan struct{}) {
@@ -204,7 +204,7 @@ func (u *User) Decode() {
 				if u.BufferedMsg != nil {
 					// trim last newline
 					u.BufferedMsg.Trailing = strings.TrimSpace(u.BufferedMsg.Trailing)
-					logger.Debugf("flushing buffer: %#v\n", u.BufferedMsg)
+					logger.Debugf("flushing buffer: %#v", u.BufferedMsg)
 					u.DecodeCh <- u.BufferedMsg
 					// clear buffer
 					u.BufferedMsg = nil
@@ -240,7 +240,7 @@ func (u *User) Decode() {
 		}
 		// PRIVMSG can be buffered
 		if msg.Command == "PRIVMSG" {
-			logger.Debugf("B: %#v\n", dmsg)
+			logger.Debugf("B: %#v", dmsg)
 			buffer <- msg
 		} else {
 			logger.Debug(dmsg)
