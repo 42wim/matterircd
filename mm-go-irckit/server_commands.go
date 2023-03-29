@@ -418,24 +418,28 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 			logger.Tracef("sending message %s to user %s", msg.Trailing, toUser.User)
 			// no messages when we're not logged in
 			if u.br == nil {
+				logger.Tracef("u.br was nil, ignored message")
 				return nil
 			}
 
 			if parseReactionToMsg(u, msg, toUser.User) {
+				logger.Trace("matched parseReactionToMsg")
 				return nil
 			}
 
 			if threadMsgUser(u, msg, toUser.User) {
+				logger.Trace("matched threadMsgUser")
 				return nil
 			}
 
 			if parseModifyMsg(u, msg, toUser.User) {
+				logger.Trace("matched parseModifyMsg")
 				return nil
 			}
 
 			msgID, err2 := u.br.MsgUser(toUser.User, msg.Trailing)
 			if err2 != nil {
-				return err
+				return err2
 			}
 			u.msgLastMutex.Lock()
 			defer u.msgLastMutex.Unlock()
@@ -572,6 +576,7 @@ func parseModifyMsg(u *User, msg *irc.Message, channelID string) bool {
 	if err != nil {
 		// probably a wrong id, just put it through as normally
 		if strings.Contains(err.Error(), "permissions") {
+			logger.Trace("parseModifyMsg triggered permissions error")
 			return false
 		}
 		u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+text+" could not be modified "+err.Error())
@@ -664,6 +669,7 @@ func threadMsgChannelUser(u *User, msg *irc.Message, channelID string, toUser bo
 }
 
 func threadMsgChannel(u *User, msg *irc.Message, channelID string) bool {
+	logger.Trace("entering threadMsgChannel")
 	return threadMsgChannelUser(u, msg, channelID, false)
 }
 
