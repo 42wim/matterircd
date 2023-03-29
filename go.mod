@@ -7,6 +7,7 @@ require (
 	github.com/google/gops v0.3.27
 	github.com/grokify/html-strip-tags-go v0.0.1
 	github.com/hashicorp/golang-lru v0.6.0
+	github.com/matterbridge/logrus-prefixed-formatter v0.5.3-0.20200523233437-d971309a77ba
 	github.com/matterbridge/matterclient v0.0.0-20230329213635-bc6e42a4a84a
 	github.com/mattermost/mattermost-server/v5 v5.39.3
 	github.com/mattermost/mattermost-server/v6 v6.7.2
@@ -41,7 +42,6 @@ require (
 	github.com/klauspost/compress v1.15.1 // indirect
 	github.com/klauspost/cpuid/v2 v2.0.12 // indirect
 	github.com/magiconair/properties v1.8.7 // indirect
-	github.com/matterbridge/logrus-prefixed-formatter v0.5.3-0.20200523233437-d971309a77ba // indirect
 	github.com/mattermost/go-i18n v1.11.1-0.20211013152124-5c415071e404 // indirect
 	github.com/mattermost/ldap v0.0.0-20201202150706-ee0e6284187d // indirect
 	github.com/mattermost/logr v1.0.13 // indirect
