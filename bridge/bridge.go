@@ -54,6 +54,8 @@ type Bridger interface {
 	SearchPosts(search string) interface{}
 	ModifyPost(msgID, text string) error
 	GetFileLinks(fileIDs []string) []string
+
+	GetLastSentMsgs() []string
 }
 
 type ChannelInfo struct {

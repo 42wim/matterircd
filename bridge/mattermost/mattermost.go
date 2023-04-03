@@ -27,7 +27,8 @@ type Mattermost struct {
 	v           *viper.Viper
 	connected   bool
 
-	msglruCache *lru.Cache
+	msgParentCache   *lru.Cache
+	msgLastSentCache *lru.Cache
 }
 
 var logger *logrus.Entry
@@ -38,8 +39,8 @@ func New(v *viper.Viper, cred bridge.Credentials, eventChan chan *bridge.Event, 
 		eventChan:   eventChan,
 		v:           v,
 	}
-	cache, _ := lru.New(300)
-	m.msglruCache = cache
+	m.msgParentCache, _ = lru.New(100)
+	m.msgLastSentCache, _ = lru.New(10)
 
 	ourlog := logrus.New()
 	ourlog.SetFormatter(&prefixed.TextFormatter{
@@ -723,19 +724,42 @@ func (m *Mattermost) wsActionPostSkip(rmsg *model.WebSocketEvent) bool {
 		return true
 	}
 
-	if data.UserId == m.GetMe().User {
-		if _, ok := extraProps["matterircd_"+m.GetMe().User].(bool); ok {
-			logger.Debugf("message is sent from matterirc, not relaying %#v", data.Message)
-			return true
-		}
+	if data.UserId != m.GetMe().User {
+		return false
+	}
 
-		if data.Type == model.PostTypeLeaveChannel || data.Type == model.PostTypeJoinChannel {
-			logger.Debugf("our own join/leave message. not relaying %#v", data.Message)
-			return true
+	if _, ok := extraProps["matterircd_"+m.GetMe().User].(bool); !ok {
+		return false
+	}
+
+	if data.Type == model.PostTypeLeaveChannel || data.Type == model.PostTypeJoinChannel {
+		logger.Debugf("our own join/leave message. not relaying %#v", data.Message)
+		return true
+	}
+
+	msgID := data.Id
+	msg := data.Message
+	channel := m.GetChannelName(data.ChannelId)
+
+	if strings.Contains(channel, "__") {
+		receiver := m.getDMUser(channel)
+		channel = receiver.Username
+	}
+
+	if data.RootId != "" {
+		msgID = data.RootId
+		if !m.v.GetBool("mattermost.hidereplies") {
+			newMsg, err := m.addParentMsg(data.RootId, data.Message, m.v.GetInt("mattermost.ShortenRepliesTo"), "@", m.v.GetBool("mattermost.unicode"))
+			if err == nil {
+				msg = newMsg
+			}
 		}
 	}
 
-	return false
+	m.msgLastSentCache.Add(msgID, fmt.Sprintf("%s: %s", channel, msg))
+
+	logger.Debugf("message is sent from matterirc, not relaying %#v", data.Message)
+	return true
 }
 
 // maybeShorten returns a prefix of msg that is approximately newLen
@@ -781,7 +805,7 @@ func (m *Mattermost) addParentMsg(parentID string, msg string, newLen int, uncou
 
 	// Search and use cached reply if it exists.
 	// None found, so we'll need to create one and save it for future uses.
-	if v, ok := m.msglruCache.Get(parentID); !ok {
+	if v, ok := m.msgParentCache.Get(parentID); !ok {
 		parentPost, _, err := m.mc.Client.GetPost(parentID, "")
 		// Retry once on failure.
 		if err != nil {
@@ -796,7 +820,7 @@ func (m *Mattermost) addParentMsg(parentID string, msg string, newLen int, uncou
 		replyMessage = fmt.Sprintf(" (re @%s: %s)", parentUser.Nick, parentMessage)
 		logger.Debugf("Created reply for parent post %s:%s", parentID, replyMessage)
 
-		m.msglruCache.Add(parentID, replyMessage)
+		m.msgParentCache.Add(parentID, replyMessage)
 	} else if replyMessage, ok = v.(string); ok {
 		logger.Debugf("Found saved reply for parent post %s, using:%s", parentID, replyMessage)
 	}
@@ -1449,4 +1473,17 @@ func parseMatterpollToMsg(attachments []*model.SlackAttachment) string {
 	}
 
 	return msg
+}
+
+func (m *Mattermost) GetLastSentMsgs() []string {
+	data := make([]string, 0)
+
+	for _, k := range m.msgLastSentCache.Keys() {
+		if v, ok := m.msgLastSentCache.Get(k); ok {
+			msg, _ := v.(string)
+			data = append(data, fmt.Sprintf("[@@%s] %s", k, msg))
+		}
+	}
+
+	return data
 }

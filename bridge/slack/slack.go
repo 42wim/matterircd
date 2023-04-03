@@ -974,3 +974,7 @@ func (s *Slack) AddReaction(msgID, emoji string) error {
 func (s *Slack) RemoveReaction(msgID, emoji string) error {
 	return nil
 }
+
+func (s *Slack) GetLastSentMsgs() []string {
+	return []string{}
+}
