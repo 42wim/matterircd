@@ -400,8 +400,8 @@ func (u *User) handleStatusChangeEvent(event *bridge.StatusChangeEvent) {
 
 func (u *User) handleReactionEvent(event interface{}) {
 	var (
-		text, channelID, messageID, channelType, reaction string
-		sender                                            *bridge.UserInfo
+		text, channelID, messageID, parentID, channelType, reaction string
+		sender                                                      *bridge.UserInfo
 	)
 
 	message := ""
@@ -415,6 +415,7 @@ func (u *User) handleReactionEvent(event interface{}) {
 		sender = e.Sender
 		channelType = e.ChannelType
 		reaction = e.Reaction
+		parentID = e.ParentID
 	case *bridge.ReactionRemoveEvent:
 		message = e.Message
 		text = "removed reaction: "
@@ -423,6 +424,7 @@ func (u *User) handleReactionEvent(event interface{}) {
 		sender = e.Sender
 		channelType = e.ChannelType
 		reaction = e.Reaction
+		parentID = e.ParentID
 	}
 
 	defer u.saveLastViewedAt(channelID)
@@ -440,7 +442,7 @@ func (u *User) handleReactionEvent(event interface{}) {
 			Sender:    sender,
 			MessageID: messageID,
 			Event:     "reaction",
-			ParentID:  messageID,
+			ParentID:  parentID,
 		}
 
 		u.handleDirectMessageEvent(e)
@@ -454,7 +456,7 @@ func (u *User) handleReactionEvent(event interface{}) {
 		Sender:      sender,
 		MessageID:   messageID,
 		Event:       "reaction",
-		ParentID:    messageID,
+		ParentID:    parentID,
 	}
 
 	u.handleChannelMessageEvent(e)

@@ -1323,6 +1323,12 @@ func (m *Mattermost) handleReactionEvent(rmsg *model.WebSocketEvent) {
 		rMessage = message
 	}
 
+	parentID := reaction.PostId
+	parentPost, _, err := m.mc.Client.GetPost(reaction.PostId, "")
+	if err == nil {
+		parentID = parentPost.RootId
+	}
+
 	switch rmsg.EventType() {
 	case model.WebsocketEventReactionAdded:
 		event = &bridge.Event{
@@ -1335,6 +1341,7 @@ func (m *Mattermost) handleReactionEvent(rmsg *model.WebSocketEvent) {
 				ChannelType: channelType,
 				ParentUser:  parentUser,
 				Message:     rMessage,
+				ParentID:    parentID,
 			},
 		}
 	case model.WebsocketEventReactionRemoved:
@@ -1348,6 +1355,7 @@ func (m *Mattermost) handleReactionEvent(rmsg *model.WebSocketEvent) {
 				ChannelType: channelType,
 				ParentUser:  parentUser,
 				Message:     rMessage,
+				ParentID:    parentID,
 			},
 		}
 	}
