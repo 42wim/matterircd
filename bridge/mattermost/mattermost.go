@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand"
 	"regexp"
 	"strings"
 	"time"
@@ -26,6 +27,7 @@ type Mattermost struct {
 	eventChan   chan *bridge.Event
 	v           *viper.Viper
 	connected   bool
+	instanceTag string
 
 	msgParentCache   *lru.Cache
 	msgLastSentCache *lru.Cache
@@ -73,6 +75,15 @@ func New(v *viper.Viper, cred bridge.Credentials, eventChan chan *bridge.Event, 
 
 	m.mc = mc
 	m.connected = true
+
+	// Create a unique matterircd instance tag so we don't relay messages sent from it.
+	charset := []byte("abcdefghijklmnopqrstuvwxyz")
+	b := make([]byte, 8)
+	rand.Seed(time.Now().UnixNano())
+	for i := range b {
+		b[i] = charset[rand.Intn(len(charset))] //nolint:gosec
+	}
+	m.instanceTag = string(b)
 
 	return m, mc, nil
 }
@@ -308,7 +319,7 @@ func (m *Mattermost) MsgChannel(channelID, text string) (string, error) {
 
 func (m *Mattermost) MsgChannelThread(channelID, parentID, text string) (string, error) {
 	props := make(map[string]interface{})
-	props["matterircd_"+m.mc.User.Id] = true
+	props["matterircd_"+m.mc.User.Id] = m.instanceTag
 
 	post := &model.Post{
 		ChannelId: channelID,
@@ -728,7 +739,7 @@ func (m *Mattermost) wsActionPostSkip(rmsg *model.WebSocketEvent) bool {
 		return false
 	}
 
-	if _, ok := extraProps["matterircd_"+m.GetMe().User].(bool); !ok {
+	if tag, ok := extraProps["matterircd_"+m.GetMe().User]; !ok || tag != m.instanceTag {
 		return false
 	}
 
@@ -758,13 +769,14 @@ func (m *Mattermost) wsActionPostSkip(rmsg *model.WebSocketEvent) bool {
 
 	m.msgLastSentCache.Add(msgID, fmt.Sprintf("%s: %s", channel, msg))
 
-	logger.Debugf("message is sent from matterirc, not relaying %#v", data.Message)
+	logger.Debugf("message is sent from this matterircd instance, not relaying %#v", data.Message)
 	return true
 }
 
 // maybeShorten returns a prefix of msg that is approximately newLen
 // characters long, followed by "...".  Words that start with uncounted
 // are included in the result but are not reckoned against newLen.
+//
 //nolint:cyclop
 func maybeShorten(msg string, newLen int, uncounted string, unicode bool) string {
 	if newLen == 0 || len(msg) < newLen {
