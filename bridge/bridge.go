@@ -164,6 +164,7 @@ type ReactionAddEvent struct {
 	ChannelType string
 	ParentUser  *UserInfo
 	Message     string
+	ParentID    string
 }
 
 type ReactionRemoveEvent ReactionAddEvent
