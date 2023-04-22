@@ -272,12 +272,12 @@ func searchUsers(u *User, toUser *User, args []string, service string) {
 	}
 }
 
-func getChannelName(u *User, channelID string) string {
+func getMattermostChannelName(u *User, channelID string) string {
 	channelName := u.br.GetChannelName(channelID)
 	channelMembers := strings.Split(channelName, "__")
 
 	if len(channelMembers) != 2 {
-		return fmt.Sprintf("#%s", channelName)
+		return channelName
 	}
 
 	if channelMembers[0] == u.br.GetMe().User {
@@ -342,12 +342,27 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 
 	postlist, _ := list.(*model.PostList)
 
-	for i := len(postlist.Order) - 1; i >= 0; i-- {
-		if limit != 0 && len(postlist.Order) > limit && i < len(postlist.Order)-limit {
+	// Workaround https://github.com/mattermost/mattermost-server/issues/23081
+	plOrder := postlist.Order
+	if searchPostID != "" {
+		plOrder = append(plOrder, searchPostID)
+	}
+	skipRoot := false
+
+	for i := len(plOrder) - 1; i >= 0; i-- {
+		if limit != 0 && len(plOrder) > limit && i < len(plOrder)-limit {
 			continue
 		}
 
-		p := postlist.Posts[postlist.Order[i]]
+		p := postlist.Posts[plOrder[i]]
+
+		// Workaround https://github.com/mattermost/mattermost-server/issues/23081
+		if searchPostID != "" && p.Id == searchPostID {
+			if skipRoot {
+				continue
+			}
+			skipRoot = true
+		}
 
 		props := p.GetProps()
 		botname, override := props["override_username"].(string)
@@ -363,7 +378,7 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 
 		if searchPostID != "" && channelID == "" {
 			channelID = p.ChannelId
-			search = getChannelName(u, p.ChannelId)
+			search = getMattermostChannelName(u, p.ChannelId)
 			if !strings.HasPrefix(search, "#") {
 				user := u.br.GetUser(search)
 				search = user.Nick
@@ -387,6 +402,8 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 			formatScrollbackMsg(u, channelID, search, scrollbackUser, nick, p, fileMsg)
 		}
 	}
+
+	u.MsgUser(toUser, fmt.Sprintf("scrollback results shown in %s", search))
 }
 
 func formatScrollbackMsg(u *User, channelID string, channel string, user *User, nick string, p *model.Post, msgText string) {
