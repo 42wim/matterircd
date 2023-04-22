@@ -51,6 +51,7 @@ type Bridger interface {
 
 	GetPostsSince(channelID string, since int64) interface{}
 	GetPosts(channelID string, limit int) interface{}
+	GetPostThread(postID string) interface{}
 	SearchPosts(search string) interface{}
 	ModifyPost(msgID, text string) error
 	GetFileLinks(fileIDs []string) []string
