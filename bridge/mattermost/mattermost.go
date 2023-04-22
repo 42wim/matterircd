@@ -1426,6 +1426,10 @@ func (m *Mattermost) GetPosts(channelID string, limit int) interface{} {
 	return m.mc.GetPosts(channelID, limit)
 }
 
+func (m *Mattermost) GetPostThread(postID string) interface{} {
+	return m.mc.GetPostThread(postID)
+}
+
 func (m *Mattermost) GetChannelID(name, teamID string) string {
 	return m.mc.GetChannelID(name, teamID)
 }
