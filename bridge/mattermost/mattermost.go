@@ -956,6 +956,9 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 			channelType = "D"
 		}
 		dmchannel = name
+
+		// We need to remove it from the cache so that replies use the latest msg.
+		m.msgParentCache.Remove(data.Id)
 	}
 
 	for _, msg := range msgs {
