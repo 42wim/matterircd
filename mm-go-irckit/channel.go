@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mattermost/mattermost-server/v5/model"
+	"github.com/mattermost/mattermost-server/v6/model"
 	"github.com/muesli/reflow/wordwrap"
 	"github.com/sorcix/irc"
 )
@@ -407,7 +407,7 @@ func (ch *channel) Names() []string {
 	names := make([]string, 0, len(users))
 
 	for _, u := range users {
-		if strings.Contains(u.Roles, model.SYSTEM_ADMIN_ROLE_ID) {
+		if strings.Contains(u.Roles, model.SystemAdminRoleId) {
 			names = append(names, "@"+u.Nick)
 		} else {
 			names = append(names, u.Nick)

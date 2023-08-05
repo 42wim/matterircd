@@ -1019,9 +1019,8 @@ func (u *User) updateLastViewed(channelID string) {
 	u.updateCounter[channelID] = time.Now()
 
 	go func() {
-		rand.Seed(time.Now().UnixNano())
-		r := rand.Intn(3000)
-		time.Sleep(time.Duration(r) * time.Millisecond)
+		r := rand.New(rand.NewSource(time.Now().UnixNano())) //nolint:gosec
+		time.Sleep(time.Duration(r.Intn(3000)) * time.Millisecond)
 		u.br.UpdateLastViewed(channelID)
 	}()
 }
