@@ -1,3 +1,20 @@
+# v0.27.1
+
+## Enhancement
+
+- general: Allow multiple instances of matterircd (#523)
+- mattermost: Support mattermost version 8, drop support for version 6 (#539)
+- mattermost: Improve on logging and make consistent with matterclient (#510)
+- mattermost: Add caching of last sent msgs and 'lastsent' service command to show them (#520)
+- mattermost: Update reactions so they're part of threads (#530)
+
+## Bugfix
+
+- mattermost: Add extra logging and fix return of wrong error (#529)
+
+This release couldn't exist without the following contributors:
+@hloeung
+
 # v0.27.0
 
 ## New features
