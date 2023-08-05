@@ -53,6 +53,9 @@ PasteBufferTimeout = 2500
 #use http connection to mattermost (default false)
 Insecure = false
 
+#ignore the Mattermost server version when checking if supported
+#ignoreserverversion = false
+
 #an array of channels that only will be joined on IRC. JoinExlude and JoinInclude will not be checked
 #regexp is supported
 #If it's empty, it means all channels get joined (except those defined in JoinExclude)
