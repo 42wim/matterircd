@@ -27,7 +27,8 @@ translators for Pygments lexers and styles.
     2. [Formatters](#formatters)
     3. [Styles](#styles)
 6. [Command-line interface](#command-line-interface)
-7. [What's missing compared to Pygments?](#whats-missing-compared-to-pygments)
+7. [Testing lexers](#testing-lexers)
+8. [What's missing compared to Pygments?](#whats-missing-compared-to-pygments)
 
 <!-- /TOC -->
 
@@ -36,7 +37,7 @@ translators for Pygments lexers and styles.
 
 Prefix | Language
 :----: | --------
-A | ABAP, ABNF, ActionScript, ActionScript 3, Ada, Angular2, ANTLR, ApacheConf, APL, AppleScript, Arduino, Awk
+A | ABAP, ABNF, ActionScript, ActionScript 3, Ada, Angular2, ANTLR, ApacheConf, APL, AppleScript, ArangoDB AQL, Arduino, Awk
 B | Ballerina, Bash, Batchfile, BibTeX, Bicep, BlitzBasic, BNF, Brainfuck, BQN
 C | C, C#, C++, Caddyfile, Caddyfile Directives, Cap'n Proto, Cassandra CQL, Ceylon, CFEngine3, cfstatement, ChaiScript, Chapel, Cheetah, Clojure, CMake, COBOL, CoffeeScript, Common Lisp, Coq, Crystal, CSS, Cython
 D | D, Dart, Diff, Django/Jinja, Docker, DTD, Dylan
@@ -54,7 +55,7 @@ O | Objective-C, OCaml, Octave, OnesEnterprise, OpenEdge ABL, OpenSCAD, Org Mode
 P | PacmanConf, Perl, PHP, PHTML, Pig, PkgConfig, PL/pgSQL, plaintext, Pony, PostgreSQL SQL dialect, PostScript, POVRay, PowerShell, Prolog, PromQL, Properties, Protocol Buffer, PSL, Puppet, Python 2, Python
 Q | QBasic
 R | R, Racket, Ragel, Raku, react, ReasonML, reg, reStructuredText, Rexx, Ruby, Rust
-S | SAS, Sass, Scala, Scheme, Scilab, SCSS, Sed, Smalltalk, Smarty, Snobol, Solidity, SPARQL, SQL, SquidConf, Standard ML, stas, Stylus, Svelte, Swift, SYSTEMD, systemverilog
+S | SAS, Sass, Scala, Scheme, Scilab, SCSS, Sed, Smali, Smalltalk, Smarty, Snobol, Solidity, SPARQL, SQL, SquidConf, Standard ML, stas, Stylus, Svelte, Swift, SYSTEMD, systemverilog
 T | TableGen, TASM, Tcl, Tcsh, Termcap, Terminfo, Terraform, TeX, Thrift, TOML, TradingView, Transact-SQL, Turing, Turtle, Twig, TypeScript, TypoScript, TypoScriptCssData, TypoScriptHtmlData
 V | VB.net, verilog, VHDL, VHS, VimL, vue
 W | WDTE
@@ -277,6 +278,21 @@ Debian and derivatives](https://manpages.debian.org/lesspipe#USER_DEFINED_FILTER
 for that setup the `chroma` executable can be just symlinked to `~/.lessfilter`.
 
 <a id="markdown-whats-missing-compared-to-pygments" name="whats-missing-compared-to-pygments"></a>
+
+<a id="markdown-testing-lexers" name="testing-lexers"></a>
+## Testing lexers
+If you edit some lexers and want to try it, open a shell in `cmd/chromad` and run:
+```shell
+go run .
+```
+A Link will be printed. Open it in your Browser. Now you can test on the Playground with your local changes.
+
+If you want to run the tests and the lexers, open a shell in the root directory and run:
+```shell
+go test ./lexers
+```
+When updating or adding a lexer, please add tests. See [lexers/README.md](lexers/README.md) for more.
+
 ## What's missing compared to Pygments?
 
 - Quite a few lexers, for various reasons (pull-requests welcome):
