@@ -215,6 +215,14 @@ linters:
     - execinquery
     - nosnakecase
     - exhaustive
+    - depguard
+    - deadcode
+    - structcheck
+    - varcheck
+    - ifshort
+    - gosmopolitan
+    - zerologlint
+    - tagalign
 
 # rules to deal with reported isues
 issues:
