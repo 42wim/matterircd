@@ -30,9 +30,6 @@ archives:
     format: binary
     files:
       - none*
-    replacements:
-      386: 32bit
-      amd64: 64bit
 
 checksum:
   name_template: 'checksums.txt'
