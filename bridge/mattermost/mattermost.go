@@ -79,9 +79,9 @@ func New(v *viper.Viper, cred bridge.Credentials, eventChan chan *bridge.Event, 
 	// Create a unique matterircd instance tag so we don't relay messages sent from it.
 	charset := []byte("abcdefghijklmnopqrstuvwxyz")
 	b := make([]byte, 8)
-	rand.Seed(time.Now().UnixNano())
+	r := rand.New(rand.NewSource(time.Now().UnixNano())) //nolint:gosec
 	for i := range b {
-		b[i] = charset[rand.Intn(len(charset))] //nolint:gosec
+		b[i] = charset[r.Intn(len(charset))]
 	}
 	m.instanceTag = string(b)
 
