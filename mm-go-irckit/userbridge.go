@@ -35,8 +35,10 @@ type UserBridge struct {
 	eventChan   chan *bridge.Event //nolint:structcheck
 	away        bool               //nolint:structcheck
 
-	lastViewedAtDB *bolt.DB       //nolint:structcheck
-	msgCounter     map[string]int //nolint:structcheck
+	lastViewedAtDB *bolt.DB //nolint:structcheck
+
+	msgCounterMutex sync.RWMutex   //nolint:structcheck
+	msgCounter      map[string]int //nolint:structcheck
 
 	msgLastMutex sync.RWMutex         //nolint:structcheck
 	msgLast      map[string][2]string //nolint:structcheck
@@ -909,6 +911,8 @@ func (u *User) logoutFrom(protocol string) error {
 }
 
 func (u *User) increaseMsgCounter(channelID string) int {
+	u.msgCounterMutex.Lock()
+	defer u.msgCounterMutex.Unlock()
 	u.msgCounter[channelID]++
 
 	// max 4096 entries
@@ -939,10 +943,6 @@ func (u *User) prefixContextModified(channelID, messageID string) string {
 		currentcount int
 	)
 
-	if _, ok = u.msgMap[channelID]; !ok {
-		u.msgMap[channelID] = make(map[string]int)
-	}
-
 	// check if we already have a counter for this messageID otherwise
 	// increase counter and create it
 	if currentcount, ok = u.msgMap[channelID][messageID]; !ok {
@@ -970,35 +970,31 @@ func (u *User) prefixContext(channelID, messageID, parentID, event string) strin
 	u.msgMapMutex.Lock()
 	defer u.msgMapMutex.Unlock()
 
-	if event == "post_edited" || event == "post_deleted" || event == "reaction" {
-		return u.prefixContextModified(channelID, messageID)
+	var ok bool
+
+	if _, ok = u.msgMap[channelID]; !ok {
+		u.msgMap[channelID] = make(map[string]int)
 	}
 
-	var (
-		currentcount, parentcount int
-		ok                        bool
-	)
+	if event == "post_edited" || event == "post_deleted" {
+		return u.prefixContextModified(channelID, messageID)
+	}
+	if event == "reaction" {
+		return u.prefixContextModified(channelID, parentID)
+	}
+
+	var currentcount, parentcount int
 
 	if parentID != "" {
-		if _, ok = u.msgMap[channelID]; !ok {
-			u.msgMap[channelID] = make(map[string]int)
-		}
-
 		if _, ok = u.msgMap[channelID][parentID]; !ok {
-			u.increaseMsgCounter(channelID)
-			u.msgMap[channelID][parentID] = u.msgCounter[channelID]
+			u.msgMap[channelID][parentID] = u.increaseMsgCounter(channelID)
 		}
 
 		parentcount = u.msgMap[channelID][parentID]
 	}
 
 	currentcount = u.increaseMsgCounter(channelID)
-
-	if _, ok = u.msgMap[channelID]; !ok {
-		u.msgMap[channelID] = make(map[string]int)
-	}
-
-	u.msgMap[channelID][messageID] = u.msgCounter[channelID]
+	u.msgMap[channelID][messageID] = currentcount
 
 	if parentID != "" {
 		return fmt.Sprintf("[%03x->%03x]", currentcount, parentcount)
