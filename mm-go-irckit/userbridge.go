@@ -915,9 +915,9 @@ func (u *User) increaseMsgCounter(channelID string) int {
 	defer u.msgCounterMutex.Unlock()
 	u.msgCounter[channelID]++
 
-	// max 4096 entries
-	if u.msgCounter[channelID] == 4095 {
-		u.msgCounter[channelID] = 0
+	// max 4096 entries (0xFFF); set back to 1, 0 is used for absent.
+	if u.msgCounter[channelID] == 4096 {
+		u.msgCounter[channelID] = 1
 	}
 
 	return u.msgCounter[channelID]
@@ -937,29 +937,15 @@ func (u *User) formatContextMessage(ts, threadMsgID, msg string) string {
 	return formattedMsg
 }
 
-func (u *User) prefixContextModified(channelID, messageID string) string {
-	var (
-		ok           bool
-		currentcount int
-	)
-
-	// check if we already have a counter for this messageID otherwise
-	// increase counter and create it
-	if currentcount, ok = u.msgMap[channelID][messageID]; !ok {
-		currentcount = u.increaseMsgCounter(channelID)
+func (u *User) prefixContext(channelID, messageID, parentID, event string) string {
+	prefixChar := "->"
+	if u.v.GetBool(u.br.Protocol() + ".unicode") {
+		prefixChar = "↪"
 	}
 
-	return fmt.Sprintf("[%03x]", currentcount)
-}
-
-func (u *User) prefixContext(channelID, messageID, parentID, event string) string {
 	if u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" || u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost+post" {
 		if parentID == "" {
 			return fmt.Sprintf("[@@%s]", messageID)
-		}
-		prefixChar := "->"
-		if u.v.GetBool(u.br.Protocol() + ".unicode") {
-			prefixChar = "↪"
 		}
 		if u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" || parentID == messageID {
 			return fmt.Sprintf("[%s@@%s]", prefixChar, parentID)
@@ -970,20 +956,14 @@ func (u *User) prefixContext(channelID, messageID, parentID, event string) strin
 	u.msgMapMutex.Lock()
 	defer u.msgMapMutex.Unlock()
 
-	var ok bool
+	var (
+		currentcount, parentcount int
+		ok                        bool
+	)
 
 	if _, ok = u.msgMap[channelID]; !ok {
 		u.msgMap[channelID] = make(map[string]int)
 	}
-
-	if event == "post_edited" || event == "post_deleted" {
-		return u.prefixContextModified(channelID, messageID)
-	}
-	if event == "reaction" {
-		return u.prefixContextModified(channelID, parentID)
-	}
-
-	var currentcount, parentcount int
 
 	if parentID != "" {
 		if _, ok = u.msgMap[channelID][parentID]; !ok {
@@ -993,13 +973,20 @@ func (u *User) prefixContext(channelID, messageID, parentID, event string) strin
 		parentcount = u.msgMap[channelID][parentID]
 	}
 
-	currentcount = u.increaseMsgCounter(channelID)
-	u.msgMap[channelID][messageID] = currentcount
+	if event == "post_edited" || event == "post_deleted" || event == "reaction" {
+		if _, ok = u.msgMap[channelID][messageID]; !ok {
+			u.msgMap[channelID][messageID] = u.increaseMsgCounter(channelID)
+		}
 
-	if parentID != "" {
-		return fmt.Sprintf("[%03x->%03x]", currentcount, parentcount)
+		currentcount = u.msgMap[channelID][messageID]
+	} else {
+		u.msgMap[channelID][messageID] = u.increaseMsgCounter(channelID)
+		currentcount = u.msgMap[channelID][messageID]
 	}
 
+	if parentID != "" {
+		return fmt.Sprintf("[%s%03x,%03x]", prefixChar, parentcount, currentcount)
+	}
 	return fmt.Sprintf("[%03x]", currentcount)
 }
 
