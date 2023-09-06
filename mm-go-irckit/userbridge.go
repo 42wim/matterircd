@@ -43,8 +43,10 @@ type UserBridge struct {
 	msgLastMutex sync.RWMutex         //nolint:structcheck
 	msgLast      map[string][2]string //nolint:structcheck
 
-	msgMapMutex sync.RWMutex              //nolint:structcheck
-	msgMap      map[string]map[string]int //nolint:structcheck
+	msgMapMutex      sync.RWMutex              //nolint:structcheck
+	msgMap           map[string]map[string]int //nolint:structcheck
+	msgMapIndexMutex sync.RWMutex              //nolint:structcheck
+	msgMapIndex      map[string]map[int]string //nolint:structcheck
 
 	updateCounterMutex sync.Mutex           //nolint:structcheck
 	updateCounter      map[string]time.Time //nolint:structcheck
@@ -62,6 +64,7 @@ func NewUserBridge(c net.Conn, srv Server, cfg *viper.Viper, db *bolt.DB) *User 
 	u.lastViewedAtDB = db
 	u.msgLast = make(map[string][2]string)
 	u.msgMap = make(map[string]map[string]int)
+	u.msgMapIndex = make(map[string]map[int]string)
 	u.msgCounter = make(map[string]int)
 	u.updateCounter = make(map[string]time.Time)
 	u.eventChan = make(chan *bridge.Event, 1000)
@@ -913,14 +916,45 @@ func (u *User) logoutFrom(protocol string) error {
 func (u *User) increaseMsgCounter(channelID string) int {
 	u.msgCounterMutex.Lock()
 	defer u.msgCounterMutex.Unlock()
+
 	u.msgCounter[channelID]++
 
 	// max 4096 entries (0xFFF); set back to 1, 0 is used for absent.
-	if u.msgCounter[channelID] == 4096 {
+	if u.msgCounter[channelID] >= 4096 {
 		u.msgCounter[channelID] = 1
 	}
 
 	return u.msgCounter[channelID]
+}
+
+func (u *User) updateMsgMapIndex(channelID string, counter int, messageID string) {
+	u.msgMapIndexMutex.Lock()
+	defer u.msgMapIndexMutex.Unlock()
+
+	var (
+		ok    bool
+		msgID string
+	)
+
+	if _, ok = u.msgMapIndex[channelID]; !ok {
+		u.msgMapIndex[channelID] = make(map[int]string)
+	}
+
+	if msgID, ok = u.msgMapIndex[channelID][counter]; !ok {
+		u.msgMapIndex[channelID][counter] = messageID
+		return
+	}
+
+	if msgID == messageID {
+		return
+	}
+
+	// Remove previous msgID from MsgMap with the same counter.
+	if _, ok = u.msgMap[channelID][msgID]; ok {
+		delete(u.msgMap[channelID], msgID)
+	}
+
+	u.msgMapIndex[channelID][counter] = messageID
 }
 
 func (u *User) formatContextMessage(ts, threadMsgID, msg string) string {
@@ -971,18 +1005,19 @@ func (u *User) prefixContext(channelID, messageID, parentID, event string) strin
 		}
 
 		parentcount = u.msgMap[channelID][parentID]
+		u.updateMsgMapIndex(channelID, parentcount, parentID)
 	}
 
 	if event == "post_edited" || event == "post_deleted" || event == "reaction" {
 		if _, ok = u.msgMap[channelID][messageID]; !ok {
 			u.msgMap[channelID][messageID] = u.increaseMsgCounter(channelID)
 		}
-
 		currentcount = u.msgMap[channelID][messageID]
 	} else {
 		u.msgMap[channelID][messageID] = u.increaseMsgCounter(channelID)
 		currentcount = u.msgMap[channelID][messageID]
 	}
+	u.updateMsgMapIndex(channelID, currentcount, messageID)
 
 	if parentID != "" {
 		return fmt.Sprintf("[%s%03x,%03x]", prefixChar, parentcount, currentcount)
