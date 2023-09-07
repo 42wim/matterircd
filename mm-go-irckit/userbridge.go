@@ -913,7 +913,7 @@ func (u *User) logoutFrom(protocol string) error {
 	return nil
 }
 
-func (u *User) increaseMsgCounter(channelID string) int {
+func (u *User) increaseMsgCounter(channelID string, skip int) int {
 	u.msgCounterMutex.Lock()
 	defer u.msgCounterMutex.Unlock()
 
@@ -922,6 +922,15 @@ func (u *User) increaseMsgCounter(channelID string) int {
 	// max 4096 entries (0xFFF); set back to 1, 0 is used for absent.
 	if u.msgCounter[channelID] >= 4096 {
 		u.msgCounter[channelID] = 1
+	}
+
+	if skip != 0 && u.msgCounter[channelID] == skip {
+		u.msgCounter[channelID]++
+
+		// max 4096 entries (0xFFF); set back to 1, 0 is used for absent.
+		if u.msgCounter[channelID] >= 4096 {
+			u.msgCounter[channelID] = 1
+		}
 	}
 
 	return u.msgCounter[channelID]
@@ -945,6 +954,7 @@ func (u *User) updateMsgMapIndex(channelID string, counter int, messageID string
 		return
 	}
 
+	// map entry is the same as the one provided so do nothing.
 	if msgID == messageID {
 		return
 	}
@@ -1001,7 +1011,7 @@ func (u *User) prefixContext(channelID, messageID, parentID, event string) strin
 
 	if parentID != "" {
 		if _, ok = u.msgMap[channelID][parentID]; !ok {
-			u.msgMap[channelID][parentID] = u.increaseMsgCounter(channelID)
+			u.msgMap[channelID][parentID] = u.increaseMsgCounter(channelID, parentcount)
 		}
 
 		parentcount = u.msgMap[channelID][parentID]
@@ -1010,18 +1020,19 @@ func (u *User) prefixContext(channelID, messageID, parentID, event string) strin
 
 	if event == "post_edited" || event == "post_deleted" || event == "reaction" {
 		if _, ok = u.msgMap[channelID][messageID]; !ok {
-			u.msgMap[channelID][messageID] = u.increaseMsgCounter(channelID)
+			u.msgMap[channelID][messageID] = u.increaseMsgCounter(channelID, parentcount)
 		}
-		currentcount = u.msgMap[channelID][messageID]
 	} else {
-		u.msgMap[channelID][messageID] = u.increaseMsgCounter(channelID)
-		currentcount = u.msgMap[channelID][messageID]
+		u.msgMap[channelID][messageID] = u.increaseMsgCounter(channelID, parentcount)
 	}
+
+	currentcount = u.msgMap[channelID][messageID]
 	u.updateMsgMapIndex(channelID, currentcount, messageID)
 
 	if parentID != "" {
 		return fmt.Sprintf("[%s%03x,%03x]", prefixChar, parentcount, currentcount)
 	}
+
 	return fmt.Sprintf("[%03x]", currentcount)
 }
 
