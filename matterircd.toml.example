@@ -50,6 +50,9 @@ PasteBufferTimeout = 2500
 #
 #DefaultTeam = "mycompany"
 
+#disable Mattermost support
+#Disable = false
+
 #use http connection to mattermost (default false)
 Insecure = false
 
@@ -169,6 +172,9 @@ LastViewedSaveFile = "matterircd-lastsaved.db"
 ##### SLACK EXAMPLE #########
 #############################
 [slack]
+#disable Slack support
+#Disable = false
+
 #deny specific users from connecting.
 #As we only connect using tokens, this will first do a ccnnection to see what username the token is from. If this
 #username is on the DenyUsers the user will be disconnected.
@@ -230,6 +236,9 @@ PrefixContext = false
 ##### MASTODON EXAMPLE ######
 #############################
 [mastodon]
+#disable Mastodon support
+#Disable = false
+
 #Go to https://yourmastodonserver/settings/applications/new
 #Use matterircd as application name (default read/write/follow scopes are ok)
 #Click on submit

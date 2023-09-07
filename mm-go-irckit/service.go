@@ -41,6 +41,11 @@ func login(u *User, toUser *User, args []string, service string) {
 	}
 
 	if service == "mastodon" {
+		if u.v.GetBool("mastodon.disable") {
+			logger.Info("Mastodon disabled")
+			return
+		}
+
 		fmt.Println("login mastodon")
 		err := u.loginTo("mastodon")
 		if err != nil {
@@ -54,6 +59,11 @@ func login(u *User, toUser *User, args []string, service string) {
 	}
 
 	if service == "slack" {
+		if u.v.GetBool("slack.disable") {
+			logger.Info("Slack disabled")
+			return
+		}
+
 		var err error
 
 		if len(args) != 1 && len(args) != 3 {
@@ -109,6 +119,11 @@ func login(u *User, toUser *User, args []string, service string) {
 			u.MsgUser(toUser, "token used: "+u.Credentials.Token)
 		}
 
+		return
+	}
+
+	if u.v.GetBool("mattermost.disable") {
+		logger.Info("Mattermost disabled")
 		return
 	}
 
