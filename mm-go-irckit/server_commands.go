@@ -402,7 +402,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 		u.saveLastViewedAt(ch.ID())
 
 		if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
-			u.prefixContext(ch.ID(), msgID, "", "")
+			u.prefixContext(ch.ID(), msgID, "", "posted_self")
 		}
 
 		return nil
@@ -447,7 +447,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 			u.saveLastViewedAt(toUser.User)
 
 			if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
-				u.prefixContext(toUser.User, msgID, "", "")
+				u.prefixContext(toUser.User, msgID, "", "posted_self")
 			}
 
 		default:
@@ -662,7 +662,7 @@ func threadMsgChannelUser(u *User, msg *irc.Message, channelID string, toUser bo
 	u.saveLastViewedAt(channelID)
 
 	if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
-		u.prefixContext(channelID, msgID, "", "")
+		u.prefixContext(channelID, msgID, threadID, "posted_self")
 	}
 
 	return true
