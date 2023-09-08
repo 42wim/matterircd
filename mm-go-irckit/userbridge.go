@@ -323,7 +323,7 @@ func (u *User) handleFileEvent(event *bridge.FileEvent) {
 	for _, fname := range event.Files {
 		fileMsg := "download file - " + fname.Name
 		if u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" || u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost+post" {
-			threadMsgID := u.prefixContext(event.ChannelID, event.MessageID, event.ParentID, "")
+			threadMsgID := u.prefixContext(event.ChannelID, event.MessageID, event.ParentID, "posted_file")
 			fileMsg = u.formatContextMessage("", threadMsgID, fileMsg)
 		}
 
@@ -716,7 +716,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 
 				replayMsg := fmt.Sprintf("[%s] %s", ts.Format("15:04"), post)
 				if (u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext")) && (u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" || u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost+post") && nick != systemUser {
-					threadMsgID := u.prefixContext("", p.Id, p.RootId, "")
+					threadMsgID := u.prefixContext("", p.Id, p.RootId, "replay")
 					replayMsg = u.formatContextMessage(ts.Format("15:04"), threadMsgID, post)
 				}
 				spoof(nick, replayMsg)
@@ -729,7 +729,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			for _, fname := range u.br.GetFileLinks(p.FileIds) {
 				fileMsg := "download file - " + fname
 				if u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" || u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost+post" {
-					threadMsgID := u.prefixContext("", p.Id, p.RootId, "")
+					threadMsgID := u.prefixContext("", p.Id, p.RootId, "replay_file")
 					fileMsg = u.formatContextMessage(ts.Format("15:04"), threadMsgID, fileMsg)
 				}
 				spoof(nick, fileMsg)
