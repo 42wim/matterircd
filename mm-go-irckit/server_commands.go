@@ -478,16 +478,11 @@ func parseReactionToMsg(u *User, msg *irc.Message, channelID string) bool {
 			logger.Errorf("couldn't parseint %s: %s", msgID, err)
 		}
 
-		u.msgMapMutex.RLock()
-		defer u.msgMapMutex.RUnlock()
+		u.msgMapIndexMutex.RLock()
+		defer u.msgMapIndexMutex.RUnlock()
 
-		m := u.msgMap[channelID]
-
-		for k, v := range m {
-			if v == int(id) {
-				msgID = k
-				break
-			}
+		if _, ok := u.msgMapIndex[channelID][int(id)]; ok {
+			msgID = u.msgMapIndex[channelID][int(id)]
 		}
 	}
 
@@ -549,17 +544,11 @@ func parseModifyMsg(u *User, msg *irc.Message, channelID string) bool {
 			logger.Errorf("couldn't parseint %s: %s", matches[1], err)
 		}
 
-		u.msgMapMutex.RLock()
-		defer u.msgMapMutex.RUnlock()
+		u.msgMapIndexMutex.RLock()
+		defer u.msgMapIndexMutex.RUnlock()
 
-		m := u.msgMap[channelID]
-
-		for k, v := range m {
-			if v != int(id) {
-				continue
-			}
-
-			msgID = k
+		if _, ok := u.msgMapIndex[channelID][int(id)]; ok {
+			msgID = u.msgMapIndex[channelID][int(id)]
 
 			u.msgLastMutex.Lock()
 			defer u.msgLastMutex.Unlock()
@@ -619,15 +608,11 @@ func parseThreadID(u *User, msg *irc.Message, channelID string) (string, string)
 			return "", ""
 		}
 
-		u.msgMapMutex.RLock()
-		defer u.msgMapMutex.RUnlock()
+		u.msgMapIndexMutex.RLock()
+		defer u.msgMapIndexMutex.RUnlock()
 
-		m := u.msgMap[channelID]
-
-		for k, v := range m {
-			if v == int(id) {
-				return k, matches[2]
-			}
+		if _, ok := u.msgMapIndex[channelID][int(id)]; ok {
+			return u.msgMapIndex[channelID][int(id)], matches[2]
 		}
 	case len(matches[1]) == 26:
 		return matches[1], matches[2]

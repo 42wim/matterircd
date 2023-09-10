@@ -35,14 +35,18 @@ type UserBridge struct {
 	eventChan   chan *bridge.Event //nolint:structcheck
 	away        bool               //nolint:structcheck
 
-	lastViewedAtDB *bolt.DB       //nolint:structcheck
-	msgCounter     map[string]int //nolint:structcheck
+	lastViewedAtDB *bolt.DB //nolint:structcheck
+
+	msgCounterMutex sync.RWMutex   //nolint:structcheck
+	msgCounter      map[string]int //nolint:structcheck
 
 	msgLastMutex sync.RWMutex         //nolint:structcheck
 	msgLast      map[string][2]string //nolint:structcheck
 
-	msgMapMutex sync.RWMutex              //nolint:structcheck
-	msgMap      map[string]map[string]int //nolint:structcheck
+	msgMapMutex      sync.RWMutex              //nolint:structcheck
+	msgMap           map[string]map[string]int //nolint:structcheck
+	msgMapIndexMutex sync.RWMutex              //nolint:structcheck
+	msgMapIndex      map[string]map[int]string //nolint:structcheck
 
 	updateCounterMutex sync.Mutex           //nolint:structcheck
 	updateCounter      map[string]time.Time //nolint:structcheck
@@ -60,6 +64,7 @@ func NewUserBridge(c net.Conn, srv Server, cfg *viper.Viper, db *bolt.DB) *User 
 	u.lastViewedAtDB = db
 	u.msgLast = make(map[string][2]string)
 	u.msgMap = make(map[string]map[string]int)
+	u.msgMapIndex = make(map[string]map[int]string)
 	u.msgCounter = make(map[string]int)
 	u.updateCounter = make(map[string]time.Time)
 	u.eventChan = make(chan *bridge.Event, 1000)
@@ -908,15 +913,58 @@ func (u *User) logoutFrom(protocol string) error {
 	return nil
 }
 
-func (u *User) increaseMsgCounter(channelID string) int {
+func (u *User) increaseMsgCounter(channelID string, skip int) int {
+	u.msgCounterMutex.Lock()
+	defer u.msgCounterMutex.Unlock()
+
 	u.msgCounter[channelID]++
 
-	// max 4096 entries
-	if u.msgCounter[channelID] == 4095 {
-		u.msgCounter[channelID] = 0
+	// max 4096 entries (0xFFF); set back to 1, 0 is used for absent.
+	if u.msgCounter[channelID] >= 4096 {
+		u.msgCounter[channelID] = 1
+	}
+
+	if skip != 0 && u.msgCounter[channelID] == skip {
+		u.msgCounter[channelID]++
+
+		// max 4096 entries (0xFFF); set back to 1, 0 is used for absent.
+		if u.msgCounter[channelID] >= 4096 {
+			u.msgCounter[channelID] = 1
+		}
 	}
 
 	return u.msgCounter[channelID]
+}
+
+func (u *User) updateMsgMapIndex(channelID string, counter int, messageID string) {
+	u.msgMapIndexMutex.Lock()
+	defer u.msgMapIndexMutex.Unlock()
+
+	var (
+		ok    bool
+		msgID string
+	)
+
+	if _, ok = u.msgMapIndex[channelID]; !ok {
+		u.msgMapIndex[channelID] = make(map[int]string)
+	}
+
+	if msgID, ok = u.msgMapIndex[channelID][counter]; !ok {
+		u.msgMapIndex[channelID][counter] = messageID
+		return
+	}
+
+	// map entry is the same as the one provided so do nothing.
+	if msgID == messageID {
+		return
+	}
+
+	// Remove previous msgID from MsgMap with the same counter.
+	if _, ok = u.msgMap[channelID][msgID]; ok {
+		delete(u.msgMap[channelID], msgID)
+	}
+
+	u.msgMapIndex[channelID][counter] = messageID
 }
 
 func (u *User) formatContextMessage(ts, threadMsgID, msg string) string {
@@ -933,33 +981,15 @@ func (u *User) formatContextMessage(ts, threadMsgID, msg string) string {
 	return formattedMsg
 }
 
-func (u *User) prefixContextModified(channelID, messageID string) string {
-	var (
-		ok           bool
-		currentcount int
-	)
-
-	if _, ok = u.msgMap[channelID]; !ok {
-		u.msgMap[channelID] = make(map[string]int)
-	}
-
-	// check if we already have a counter for this messageID otherwise
-	// increase counter and create it
-	if currentcount, ok = u.msgMap[channelID][messageID]; !ok {
-		currentcount = u.increaseMsgCounter(channelID)
-	}
-
-	return fmt.Sprintf("[%03x]", currentcount)
-}
-
 func (u *User) prefixContext(channelID, messageID, parentID, event string) string {
+	prefixChar := "->"
+	if u.v.GetBool(u.br.Protocol() + ".unicode") {
+		prefixChar = "↪"
+	}
+
 	if u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" || u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost+post" {
 		if parentID == "" {
 			return fmt.Sprintf("[@@%s]", messageID)
-		}
-		prefixChar := "->"
-		if u.v.GetBool(u.br.Protocol() + ".unicode") {
-			prefixChar = "↪"
 		}
 		if u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" || parentID == messageID {
 			return fmt.Sprintf("[%s@@%s]", prefixChar, parentID)
@@ -970,38 +1000,37 @@ func (u *User) prefixContext(channelID, messageID, parentID, event string) strin
 	u.msgMapMutex.Lock()
 	defer u.msgMapMutex.Unlock()
 
-	if event == "post_edited" || event == "post_deleted" || event == "reaction" {
-		return u.prefixContextModified(channelID, messageID)
-	}
-
 	var (
 		currentcount, parentcount int
 		ok                        bool
 	)
 
-	if parentID != "" {
-		if _, ok = u.msgMap[channelID]; !ok {
-			u.msgMap[channelID] = make(map[string]int)
-		}
-
-		if _, ok = u.msgMap[channelID][parentID]; !ok {
-			u.increaseMsgCounter(channelID)
-			u.msgMap[channelID][parentID] = u.msgCounter[channelID]
-		}
-
-		parentcount = u.msgMap[channelID][parentID]
-	}
-
-	currentcount = u.increaseMsgCounter(channelID)
-
 	if _, ok = u.msgMap[channelID]; !ok {
 		u.msgMap[channelID] = make(map[string]int)
 	}
 
-	u.msgMap[channelID][messageID] = u.msgCounter[channelID]
+	if parentID != "" {
+		if _, ok = u.msgMap[channelID][parentID]; !ok {
+			u.msgMap[channelID][parentID] = u.increaseMsgCounter(channelID, parentcount)
+		}
+
+		parentcount = u.msgMap[channelID][parentID]
+		u.updateMsgMapIndex(channelID, parentcount, parentID)
+	}
+
+	if event == "post_edited" || event == "post_deleted" || event == "reaction" {
+		if _, ok = u.msgMap[channelID][messageID]; !ok {
+			u.msgMap[channelID][messageID] = u.increaseMsgCounter(channelID, parentcount)
+		}
+	} else {
+		u.msgMap[channelID][messageID] = u.increaseMsgCounter(channelID, parentcount)
+	}
+
+	currentcount = u.msgMap[channelID][messageID]
+	u.updateMsgMapIndex(channelID, currentcount, messageID)
 
 	if parentID != "" {
-		return fmt.Sprintf("[%03x->%03x]", currentcount, parentcount)
+		return fmt.Sprintf("[%s%03x,%03x]", prefixChar, parentcount, currentcount)
 	}
 
 	return fmt.Sprintf("[%03x]", currentcount)
