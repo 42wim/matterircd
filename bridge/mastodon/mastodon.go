@@ -202,6 +202,10 @@ func (m *Mastodon) GetPosts(channelID string, limit int) interface{} {
 	return nil
 }
 
+func (m *Mastodon) GetPostThread(postID string) interface{} {
+	return nil
+}
+
 func (m *Mastodon) GetChannelID(name, teamID string) string {
 	return ""
 }

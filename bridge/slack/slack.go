@@ -425,6 +425,10 @@ func (s *Slack) GetPosts(channelID string, limit int) interface{} {
 	return nil
 }
 
+func (s *Slack) GetPostThread(channelID string) interface{} {
+	return nil
+}
+
 func (s *Slack) GetChannelID(name, teamID string) string {
 	return ""
 }
