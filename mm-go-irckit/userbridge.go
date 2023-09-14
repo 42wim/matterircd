@@ -327,7 +327,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 func (u *User) handleFileEvent(event *bridge.FileEvent) {
 	for _, fname := range event.Files {
 		fileMsg := "download file - " + fname.Name
-		if u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" || u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost+post" {
+		if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
 			threadMsgID := u.prefixContext(event.ChannelID, event.MessageID, event.ParentID, "posted_file")
 			fileMsg = u.formatContextMessage("", threadMsgID, fileMsg)
 		}
@@ -720,8 +720,8 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 				}
 
 				replayMsg := fmt.Sprintf("[%s] %s", ts.Format("15:04"), post)
-				if (u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext")) && (u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" || u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost+post") && nick != systemUser {
-					threadMsgID := u.prefixContext("", p.Id, p.RootId, "replay")
+				if (u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext")) && nick != systemUser {
+					threadMsgID := u.prefixContext(brchannel.ID, p.Id, p.RootId, "replay")
 					replayMsg = u.formatContextMessage(ts.Format("15:04"), threadMsgID, post)
 				}
 				spoof(nick, replayMsg)
@@ -733,8 +733,8 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 
 			for _, fname := range u.br.GetFileLinks(p.FileIds) {
 				fileMsg := "download file - " + fname
-				if u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" || u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost+post" {
-					threadMsgID := u.prefixContext("", p.Id, p.RootId, "replay_file")
+				if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
+					threadMsgID := u.prefixContext(brchannel.ID, p.Id, p.RootId, "replay_file")
 					fileMsg = u.formatContextMessage(ts.Format("15:04"), threadMsgID, fileMsg)
 				}
 				spoof(nick, fileMsg)
@@ -982,6 +982,8 @@ func (u *User) formatContextMessage(ts, threadMsgID, msg string) string {
 }
 
 func (u *User) prefixContext(channelID, messageID, parentID, event string) string {
+	logger.Tracef("prefixContext ch %s msg %s parent %s event %s", channelID, messageID, parentID, event)
+
 	prefixChar := "->"
 	if u.v.GetBool(u.br.Protocol() + ".unicode") {
 		prefixChar = "↪"
@@ -1018,11 +1020,7 @@ func (u *User) prefixContext(channelID, messageID, parentID, event string) strin
 		u.updateMsgMapIndex(channelID, parentcount, parentID)
 	}
 
-	if event == "post_edited" || event == "post_deleted" || event == "reaction" {
-		if _, ok = u.msgMap[channelID][messageID]; !ok {
-			u.msgMap[channelID][messageID] = u.increaseMsgCounter(channelID, parentcount)
-		}
-	} else {
+	if _, ok = u.msgMap[channelID][messageID]; !ok {
 		u.msgMap[channelID][messageID] = u.increaseMsgCounter(channelID, parentcount)
 	}
 
