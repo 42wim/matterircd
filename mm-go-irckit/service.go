@@ -410,15 +410,15 @@ func formatScrollbackMsg(u *User, channelID string, channel string, user *User, 
 	ts := time.Unix(0, p.CreateAt*int64(time.Millisecond))
 
 	switch {
-	case (u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" || u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost+post") && strings.HasPrefix(channel, "#") && nick != "system": //nolint:goconst
-		threadMsgID := u.prefixContext("", p.Id, p.RootId, "scrollback")
+	case (u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext")) && strings.HasPrefix(channel, "#") && nick != "system":
+		threadMsgID := u.prefixContext(channelID, p.Id, p.RootId, "scrollback")
 		msg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, msgText)
 		u.Srv.Channel(channelID).SpoofMessage(nick, msg)
 	case strings.HasPrefix(channel, "#"):
 		msg := "[" + ts.Format("2006-01-02 15:04") + "] " + msgText
 		u.Srv.Channel(channelID).SpoofMessage(nick, msg)
-	case u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" || u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost+post":
-		threadMsgID := u.prefixContext("", p.Id, p.RootId, "scrollback")
+	case u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext"):
+		threadMsgID := u.prefixContext(channelID, p.Id, p.RootId, "scrollback")
 		msg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, msgText)
 		u.MsgSpoofUser(user, nick, msg)
 	default:
