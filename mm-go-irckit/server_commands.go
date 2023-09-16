@@ -369,11 +369,9 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 	}
 	// strip IRC colors
 	re := regexp.MustCompile(`\x03([019]?[0-9](,[019]?[0-9])?)?`)
-
+	msg.Trailing = re.ReplaceAllString(msg.Trailing, "")
 	// Convert IRC formatting / emphasis to markdown.
 	msg.Trailing = irc2md(msg.Trailing)
-
-	msg.Trailing = re.ReplaceAllString(msg.Trailing, "")
 
 	// are we sending to a channel
 	if ch, exists := s.HasChannel(query); exists {
@@ -812,74 +810,69 @@ func CmdWhois(s Server, u *User, msg *irc.Message) error {
 	return s.EncodeMessage(u, irc.ERR_NOSUCHNICK, msg.Params, "No such nick/channel")
 }
 
-//nolint:funlen,gocognit,gocyclo,cyclop
+//nolint:funlen
 func irc2md(msg string) string {
-	data := []byte(msg)
-
-	var buf []byte
-	emphasis := ""
-	for _, char := range data {
-		switch {
-		// Bold      0x02  **   (**text**)
-		case char == '\x02' && emphasis == "":
-			buf = append(buf, '*', '*')
-			emphasis = "b"
-		case char == '\x02' && emphasis == "b":
-			buf = append(buf, '*', '*')
-			emphasis = ""
-		// Italics   0x1D  _    (_text_)
-		case char == '\x1d' && emphasis == "":
-			buf = append(buf, '_')
-			emphasis = "i"
-		case char == '\x1d' && emphasis == "i":
-			buf = append(buf, '_')
-			emphasis = ""
-		// Bold+Ital 0x02+0x1D **_  (**_text_**)
-		case char == '\x1d' && emphasis == "b":
-			buf = append(buf, '_')
-			emphasis = "bi"
-		case char == '\x1d' && emphasis == "bi":
-			buf = append(buf, '_')
-			emphasis = "b"
-		// Monospace 0x11  `    (`text`)
-		case char == '\x11' && emphasis == "":
-			buf = append(buf, '`')
-			emphasis = "m"
-		case char == '\x11' && emphasis == "m":
-			buf = append(buf, '`')
-			emphasis = ""
-
-		// Reset     0x0F       (**text\x0f)
-		case char == '\x0f' && emphasis != "":
-			switch {
-			case emphasis == "b":
-				buf = append(buf, '*', '*')
-				emphasis = ""
-			case emphasis == "i":
-				buf = append(buf, '_')
-				emphasis = ""
-			case emphasis == "bi":
-				buf = append(buf, '_', '*', '*')
-				emphasis = ""
-			case emphasis == "m":
-				buf = append(buf, '`')
-				emphasis = ""
-			}
-
-		default:
-			buf = append(buf, char)
-		}
+	emphasisSupported := map[byte][]byte{
+		'\x02': {'*', '*'}, // Bold      0x02  **   (**text**)
+		'\x1d': {'_'},      // Italics   0x1D  _    (_text_)
+		'\x11': {'`'},      // Monospace 0x11  `    (`text`)
+		'\x0f': {' '},      // Reset     0x0F       (**text\x0f)
+	}
+	emphasisUnsupported := map[byte]string{
+		'\x1f': "", // Underline 0x1f
+		'\x1e': "", // Strikethr 0x1e
 	}
 
-	switch {
-	case emphasis == "b":
-		buf = append(buf, '*', '*')
-	case emphasis == "i":
-		buf = append(buf, '_')
-	case emphasis == "bi":
-		buf = append(buf, '_', '*', '*')
-	case emphasis == "m":
-		buf = append(buf, '`')
+	var buf []byte
+
+	var currentEmphasis []byte
+	for _, char := range []byte(msg) {
+		var ok bool
+		var emp []byte
+
+		if _, ok = emphasisUnsupported[char]; ok {
+			buf = append(buf, char)
+			continue
+		}
+
+		if emp, ok = emphasisSupported[char]; !ok {
+			buf = append(buf, char)
+			continue
+		}
+
+		// Reset formatting
+		if char == '\x0f' {
+			// Close off any current emphasis
+			for _, c := range currentEmphasis {
+				buf = append(buf, emphasisSupported[c]...)
+			}
+			currentEmphasis = nil
+			continue
+		}
+
+		buf = append(buf, emp...)
+
+		// Remove closing emphasis.
+		found := false
+		var newEmphasis []byte
+		for _, c := range currentEmphasis {
+			if !found && c == char {
+				found = true
+				continue
+			}
+			newEmphasis = append(newEmphasis, c)
+		}
+
+		if found {
+			currentEmphasis = newEmphasis
+			continue
+		}
+
+		currentEmphasis = append([]byte{char}, currentEmphasis...)
+	}
+
+	for _, c := range currentEmphasis {
+		buf = append(buf, emphasisSupported[c]...)
 	}
 
 	return string(buf)
