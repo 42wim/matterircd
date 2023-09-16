@@ -370,6 +370,9 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 	// strip IRC colors
 	re := regexp.MustCompile(`\x03([019]?[0-9](,[019]?[0-9])?)?`)
 
+	// Convert IRC formatting / emphasis to markdown.
+	msg.Trailing = irc2md(msg.Trailing)
+
 	msg.Trailing = re.ReplaceAllString(msg.Trailing, "")
 
 	// are we sending to a channel
@@ -807,4 +810,77 @@ func CmdWhois(s Server, u *User, msg *irc.Message) error {
 		return u.Encode(r...)
 	}
 	return s.EncodeMessage(u, irc.ERR_NOSUCHNICK, msg.Params, "No such nick/channel")
+}
+
+//nolint:funlen,gocognit,gocyclo,cyclop
+func irc2md(msg string) string {
+	data := []byte(msg)
+
+	var buf []byte
+	emphasis := ""
+	for _, char := range data {
+		switch {
+		// Bold      0x02  **   (**text**)
+		case char == '\x02' && emphasis == "":
+			buf = append(buf, '*', '*')
+			emphasis = "b"
+		case char == '\x02' && emphasis == "b":
+			buf = append(buf, '*', '*')
+			emphasis = ""
+		// Italics   0x1D  _    (_text_)
+		case char == '\x1d' && emphasis == "":
+			buf = append(buf, '_')
+			emphasis = "i"
+		case char == '\x1d' && emphasis == "i":
+			buf = append(buf, '_')
+			emphasis = ""
+		// Bold+Ital 0x02+0x1D **_  (**_text_**)
+		case char == '\x1d' && emphasis == "b":
+			buf = append(buf, '_')
+			emphasis = "bi"
+		case char == '\x1d' && emphasis == "bi":
+			buf = append(buf, '_')
+			emphasis = "b"
+		// Monospace 0x11  `    (`text`)
+		case char == '\x11' && emphasis == "":
+			buf = append(buf, '`')
+			emphasis = "m"
+		case char == '\x11' && emphasis == "m":
+			buf = append(buf, '`')
+			emphasis = ""
+
+		// Reset     0x0F       (**text\x0f)
+		case char == '\x0f' && emphasis != "":
+			switch {
+			case emphasis == "b":
+				buf = append(buf, '*', '*')
+				emphasis = ""
+			case emphasis == "i":
+				buf = append(buf, '_')
+				emphasis = ""
+			case emphasis == "bi":
+				buf = append(buf, '_', '*', '*')
+				emphasis = ""
+			case emphasis == "m":
+				buf = append(buf, '`')
+				emphasis = ""
+			}
+
+		default:
+			buf = append(buf, char)
+		}
+	}
+
+	switch {
+	case emphasis == "b":
+		buf = append(buf, '*', '*')
+	case emphasis == "i":
+		buf = append(buf, '_')
+	case emphasis == "bi":
+		buf = append(buf, '_', '*', '*')
+	case emphasis == "m":
+		buf = append(buf, '`')
+	}
+
+	return string(buf)
 }
