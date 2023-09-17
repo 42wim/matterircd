@@ -1197,12 +1197,6 @@ var (
 	italicsEndRegExp   = regexp.MustCompile(`(\S)(?:_)([\s$]*)`)
 )
 
-// Monospace 0x11  `    (`text`)
-var (
-	monospaceStartRegExp = regexp.MustCompile(`([\s^]*)(?:\x60{1})(\S)`)
-	monospaceEndRegExp   = regexp.MustCompile(`(\S)(?:\x60{1})([\s$]*)`)
-)
-
 func markdown2irc(msg string) string {
 	// Bold      0x02  **   (**text**)
 	msg = boldStartRegExp.ReplaceAllString(msg, "$1\x02$2")
@@ -1211,10 +1205,6 @@ func markdown2irc(msg string) string {
 	// Italics   0x1D  _    (_text_)
 	msg = italicsStartRegExp.ReplaceAllString(msg, "$1\x1d$2")
 	msg = italicsEndRegExp.ReplaceAllString(msg, "$1\x1d$2")
-
-	// Monospace 0x11  `    (`text`)
-	msg = monospaceStartRegExp.ReplaceAllString(msg, "$1\x11$2")
-	msg = monospaceEndRegExp.ReplaceAllString(msg, "$1\x11$2")
 
 	return msg
 }
