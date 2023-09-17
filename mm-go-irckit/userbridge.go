@@ -1188,21 +1188,21 @@ func (u *User) formatCodeBlockText(text string, prefix string, codeBlockBackTick
 // Bold & Italic - https://www.markdownguide.org/basic-syntax#bold-and-italic
 var boldItalicRegExp = []*regexp.Regexp{
 	regexp.MustCompile(`(?:\*\*\*)+?(.+?)(?:\*\*\*)+?`),
-	regexp.MustCompile(`(?:\_\_\_)+?(.+?)(?:\_\_\_)+?`),
-	regexp.MustCompile(`(?:\_\_\*)+?(.+?)(?:\*\_\_)+?`),
-	regexp.MustCompile(`(?:\*\*\_)+?(.+?)(?:\_\*\*)+?`),
+	regexp.MustCompile(`\b(?:\_\_\_)+?(.+?)(?:\_\_\_)+?\b`),
+	regexp.MustCompile(`\b(?:\_\_\*)+?(.+?)(?:\*\_\_)+?\b`),
+	regexp.MustCompile(`\b(?:\*\*\_)+?(.+?)(?:\_\*\*)+?\b`),
 }
 
 // Bold - https://www.markdownguide.org/basic-syntax#bold
 var boldRegExp = []*regexp.Regexp{
 	regexp.MustCompile(`(?:\*\*)+?(.+?)(?:\*\*)+?`),
-	regexp.MustCompile(`(?:\_\_)+?(.+?)(?:\_\_)+?`),
+	regexp.MustCompile(`\b(?:\_\_)+?(.+?)(?:\_\_)+?\b`),
 }
 
 // Italic - https://www.markdownguide.org/basic-syntax#italic
 var italicRegExp = []*regexp.Regexp{
-	regexp.MustCompile(`(?:\*)+?(.+?)(?:\*)+?`),
-	regexp.MustCompile(`(?:\_)+?(.+?)(?:\_)+?`),
+	regexp.MustCompile(`(?:\*)+?([^\*]+?)(?:\*)+?`),
+	regexp.MustCompile(`\b(?:\_)+?([^_]+?)(?:\_)+?\b`),
 }
 
 func markdown2irc(msg string) string {
