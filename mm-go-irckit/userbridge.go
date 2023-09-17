@@ -162,7 +162,7 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 		}
 
 		if !codeBlockBackTick && !codeBlockTilde {
-			text = md2irc(text)
+			text = markdown2irc(text)
 		}
 
 		if showContext {
@@ -312,7 +312,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		}
 
 		if !codeBlockBackTick && !codeBlockTilde {
-			text = md2irc(text)
+			text = markdown2irc(text)
 		}
 
 		if showContext {
@@ -1184,26 +1184,37 @@ func (u *User) formatCodeBlockText(text string, prefix string, codeBlockBackTick
 	return text, codeBlockBackTick, codeBlockTilde, lexer
 }
 
-func md2irc(msg string) string {
-	var re *regexp.Regexp
+// Use static initialisation to optimize.
+// Bold      0x02  **   (**text**)
+var (
+	boldStartRegExp = regexp.MustCompile(`([\s^]*)(?:(?:\*\*)|(?:\_\_)){1}(\S)`)
+	boldEndRegExp   = regexp.MustCompile(`(\S)(?:(?:\*\*)|(?:\_\_)){1}([\s$]*)`)
+)
 
+// Italics   0x1D  _    (_text_)
+var (
+	italicsStartRegExp = regexp.MustCompile(`([\s^]*)(?:[\*\_]{1})(\S)`)
+	italicsEndRegExp   = regexp.MustCompile(`(\S)(?:_)([\s$]*)`)
+)
+
+// Monospace 0x11  `    (`text`)
+var (
+	monospaceStartRegExp = regexp.MustCompile(`([\s^]*)(?:\x60{1})(\S)`)
+	monospaceEndRegExp   = regexp.MustCompile(`(\S)(?:\x60{1})([\s$]*)`)
+)
+
+func markdown2irc(msg string) string {
 	// Bold      0x02  **   (**text**)
-	re = regexp.MustCompile(`([\s^]*)(?:(?:\*\*)|(?:\_\_)){1}(\S)`)
-	msg = re.ReplaceAllString(msg, "$1\x02$2")
-	re = regexp.MustCompile(`(\S)(?:(?:\*\*)|(?:\_\_)){1}([\s$]*)`)
-	msg = re.ReplaceAllString(msg, "$1\x02$2")
+	msg = boldStartRegExp.ReplaceAllString(msg, "$1\x02$2")
+	msg = boldEndRegExp.ReplaceAllString(msg, "$1\x02$2")
 
 	// Italics   0x1D  _    (_text_)
-	re = regexp.MustCompile(`([\s^]*)(?:[\*\_]{1})(\S)`)
-	msg = re.ReplaceAllString(msg, "$1\x1d$2")
-	re = regexp.MustCompile(`(\S)(?:_)([\s$]*)`)
-	msg = re.ReplaceAllString(msg, "$1\x1d$2")
+	msg = italicsStartRegExp.ReplaceAllString(msg, "$1\x1d$2")
+	msg = italicsEndRegExp.ReplaceAllString(msg, "$1\x1d$2")
 
 	// Monospace 0x11  `    (`text`)
-	re = regexp.MustCompile(`([\s^]*)(?:\x60{1})(\S)`)
-	msg = re.ReplaceAllString(msg, "$1\x11$2")
-	re = regexp.MustCompile(`(\S)(?:\x60{1})([\s$]*)`)
-	msg = re.ReplaceAllString(msg, "$1\x11$2")
+	msg = monospaceStartRegExp.ReplaceAllString(msg, "$1\x11$2")
+	msg = monospaceEndRegExp.ReplaceAllString(msg, "$1\x11$2")
 
 	return msg
 }
