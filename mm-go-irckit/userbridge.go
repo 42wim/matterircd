@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"net"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -160,6 +161,10 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 			continue
 		}
 
+		if !codeBlockBackTick && !codeBlockTilde {
+			text = md2irc(text)
+		}
+
 		if showContext {
 			text = prefix + text + suffix
 		}
@@ -304,6 +309,10 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 
 		if text == "" {
 			continue
+		}
+
+		if !codeBlockBackTick && !codeBlockTilde {
+			text = md2irc(text)
 		}
 
 		if showContext {
@@ -1173,4 +1182,28 @@ func (u *User) formatCodeBlockText(text string, prefix string, codeBlockBackTick
 	}
 
 	return text, codeBlockBackTick, codeBlockTilde, lexer
+}
+
+func md2irc(msg string) string {
+	var re *regexp.Regexp
+
+	// Bold      0x02  **   (**text**)
+	re = regexp.MustCompile(`([\s^]*)(?:(?:\*\*)|(?:\_\_)){1}(\S)`)
+	msg = re.ReplaceAllString(msg, "$1\x02$2")
+	re = regexp.MustCompile(`(\S)(?:(?:\*\*)|(?:\_\_)){1}([\s$]*)`)
+	msg = re.ReplaceAllString(msg, "$1\x02$2")
+
+	// Italics   0x1D  _    (_text_)
+	re = regexp.MustCompile(`([\s^]*)(?:[\*\_]{1})(\S)`)
+	msg = re.ReplaceAllString(msg, "$1\x1d$2")
+	re = regexp.MustCompile(`(\S)(?:_)([\s$]*)`)
+	msg = re.ReplaceAllString(msg, "$1\x1d$2")
+
+	// Monospace 0x11  `    (`text`)
+	re = regexp.MustCompile(`([\s^]*)(?:\x60{1})(\S)`)
+	msg = re.ReplaceAllString(msg, "$1\x11$2")
+	re = regexp.MustCompile(`(\S)(?:\x60{1})([\s$]*)`)
+	msg = re.ReplaceAllString(msg, "$1\x11$2")
+
+	return msg
 }
