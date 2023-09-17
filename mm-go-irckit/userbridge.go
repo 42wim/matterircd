@@ -1185,26 +1185,41 @@ func (u *User) formatCodeBlockText(text string, prefix string, codeBlockBackTick
 }
 
 // Use static initialisation to optimize.
-// Bold      0x02  **   (**text**)
-var (
-	boldStartRegExp = regexp.MustCompile(`([\s^]*)(?:(?:\*\*)|(?:\_\_)){1}(\S)`)
-	boldEndRegExp   = regexp.MustCompile(`(\S)(?:(?:\*\*)|(?:\_\_)){1}([\s$]*)`)
-)
+// Bold & Italic - https://www.markdownguide.org/basic-syntax#bold-and-italic
+var boldItalicRegExp = []*regexp.Regexp{
+	regexp.MustCompile(`(?:\*\*\*)+?(.+?)(?:\*\*\*)+?`),
+	regexp.MustCompile(`(?:\_\_\_)+?(.+?)(?:\_\_\_)+?`),
+	regexp.MustCompile(`(?:\_\_\*)+?(.+?)(?:\*\_\_)+?`),
+	regexp.MustCompile(`(?:\*\*\_)+?(.+?)(?:\_\*\*)+?`),
+}
 
-// Italics   0x1D  _    (_text_)
-var (
-	italicsStartRegExp = regexp.MustCompile(`([\s^]*)(?:[\*\_]{1})(\S)`)
-	italicsEndRegExp   = regexp.MustCompile(`(\S)(?:_)([\s$]*)`)
-)
+// Bold - https://www.markdownguide.org/basic-syntax#bold
+var boldRegExp = []*regexp.Regexp{
+	regexp.MustCompile(`(?:\*\*)+?(.+?)(?:\*\*)+?`),
+	regexp.MustCompile(`(?:\_\_)+?(.+?)(?:\_\_)+?`),
+}
+
+// Italic - https://www.markdownguide.org/basic-syntax#italic
+var italicRegExp = []*regexp.Regexp{
+	regexp.MustCompile(`(?:\*)+?(.+?)(?:\*)+?`),
+	regexp.MustCompile(`(?:\_)+?(.+?)(?:\_)+?`),
+}
 
 func markdown2irc(msg string) string {
-	// Bold      0x02  **   (**text**)
-	msg = boldStartRegExp.ReplaceAllString(msg, "$1\x02$2")
-	msg = boldEndRegExp.ReplaceAllString(msg, "$1\x02$2")
+	// Bold & Italic 0x02+0x1d
+	for _, re := range boldItalicRegExp {
+		msg = re.ReplaceAllString(msg, "\x02\x1d$1\x1d\x02")
+	}
 
-	// Italics   0x1D  _    (_text_)
-	msg = italicsStartRegExp.ReplaceAllString(msg, "$1\x1d$2")
-	msg = italicsEndRegExp.ReplaceAllString(msg, "$1\x1d$2")
+	// Bold 0x02
+	for _, re := range boldRegExp {
+		msg = re.ReplaceAllString(msg, "\x02$1\x02")
+	}
+
+	// Italic 0x1d
+	for _, re := range italicRegExp {
+		msg = re.ReplaceAllString(msg, "\x1d$1\x1d")
+	}
 
 	return msg
 }
