@@ -246,7 +246,7 @@ func search(u *User, toUser *User, args []string, service string) {
 
 		if len(postlist.Posts[postlist.Order[i]].FileIds) > 0 {
 			for _, fname := range u.br.GetFileLinks(postlist.Posts[postlist.Order[i]].FileIds) {
-				u.MsgUser(toUser, "download file - "+fname)
+				u.MsgUser(toUser, "\x1ddownload file - "+fname+"\x1d")
 			}
 		}
 
@@ -373,7 +373,7 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 		}
 
 		if p.Type == model.PostTypeAddToTeam || p.Type == model.PostTypeRemoveFromTeam {
-			nick = "system"
+			nick = systemUser
 		}
 
 		if searchPostID != "" && channelID == "" {
@@ -390,6 +390,9 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 		}
 
 		for _, post := range strings.Split(p.Message, "\n") {
+			if nick == systemUser {
+				post = "\x1d" + post + "\x1d"
+			}
 			formatScrollbackMsg(u, channelID, search, scrollbackUser, nick, p, post)
 		}
 
@@ -398,7 +401,7 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 		}
 
 		for _, fname := range u.br.GetFileLinks(p.FileIds) {
-			fileMsg := "download file - " + fname
+			fileMsg := "\x1ddownload file - " + fname + "\x1d"
 			formatScrollbackMsg(u, channelID, search, scrollbackUser, nick, p, fileMsg)
 		}
 	}
@@ -410,7 +413,7 @@ func formatScrollbackMsg(u *User, channelID string, channel string, user *User, 
 	ts := time.Unix(0, p.CreateAt*int64(time.Millisecond))
 
 	switch {
-	case (u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext")) && strings.HasPrefix(channel, "#") && nick != "system":
+	case (u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext")) && strings.HasPrefix(channel, "#") && nick != systemUser:
 		threadMsgID := u.prefixContext(channelID, p.Id, p.RootId, "scrollback")
 		msg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, msgText)
 		u.Srv.Channel(channelID).SpoofMessage(nick, msg)
