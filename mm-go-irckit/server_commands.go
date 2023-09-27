@@ -460,9 +460,10 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 	return s.EncodeMessage(u, irc.ERR_NOSUCHNICK, msg.Params, "No such nick/channel")
 }
 
+var parseReactionToMsgRegExp = regexp.MustCompile(`^\@\@([0-9a-f]{3}|[0-9a-z]{26})\s+([\-\+]):(\S+):\s*$`)
+
 func parseReactionToMsg(u *User, msg *irc.Message, channelID string) bool {
-	re := regexp.MustCompile(`^\@\@([0-9a-f]{3}|[0-9a-z]{26})\s+([\-\+]):(\S+):\s*$`)
-	matches := re.FindStringSubmatch(msg.Trailing)
+	matches := parseReactionToMsgRegExp.FindStringSubmatch(msg.Trailing)
 	if len(matches) != 4 {
 		return false
 	}
@@ -503,9 +504,10 @@ func parseReactionToMsg(u *User, msg *irc.Message, channelID string) bool {
 	return true
 }
 
+var parseModifyMsgRegExp = regexp.MustCompile(`^s(\/(?:[0-9a-f]{3}|[0-9a-z]{26}|!!)?\/)(.*)`)
+
 func parseModifyMsg(u *User, msg *irc.Message, channelID string) bool {
-	re := regexp.MustCompile(`^s(\/(?:[0-9a-f]{3}|[0-9a-z]{26}|!!)?\/)(.*)`)
-	matches := re.FindStringSubmatch(msg.Trailing)
+	matches := parseModifyMsgRegExp.FindStringSubmatch(msg.Trailing)
 	text := msg.Trailing
 
 	// only two so s/xxx/ which means a delete
@@ -576,9 +578,10 @@ func parseModifyMsg(u *User, msg *irc.Message, channelID string) bool {
 	return true
 }
 
+var parseThreadIDRegExp = regexp.MustCompile(`(?s)^\@\@(?:(!!|[0-9a-f]{3}|[0-9a-z]{26})\s)(.*)`)
+
 func parseThreadID(u *User, msg *irc.Message, channelID string) (string, string) {
-	re := regexp.MustCompile(`(?s)^\@\@(?:(!!|[0-9a-f]{3}|[0-9a-z]{26})\s)(.*)`)
-	matches := re.FindStringSubmatch(msg.Trailing)
+	matches := parseThreadIDRegExp.FindStringSubmatch(msg.Trailing)
 	if len(matches) == 0 {
 		return "", ""
 	}

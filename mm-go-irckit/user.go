@@ -153,6 +153,11 @@ func (u *User) Encode(msgs ...*irc.Message) (err error) {
 	return nil
 }
 
+var (
+	replyRegExp  = regexp.MustCompile(`\@\@(?:[0-9a-z]{26}|[0-9a-f]{3}|!!)\s`)
+	modifyRegExp = regexp.MustCompile(`^s/(?:[0-9a-z]{26}|[0-9a-f]{3}|!!)?/`)
+)
+
 // Decode will receive and return a decoded message, or an error.
 // nolint:funlen,gocognit,gocyclo
 func (u *User) Decode() {
@@ -181,9 +186,7 @@ func (u *User) Decode() {
 					// start timer now
 					t.Reset(time.Duration(bufferTimeout) * time.Millisecond)
 				} else {
-					replyRe := regexp.MustCompile(`\@\@(?:[0-9a-z]{26}|[0-9a-f]{3}|!!)\s`)
-					modifyRe := regexp.MustCompile(`^s/(?:[0-9a-z]{26}|[0-9a-f]{3}|!!)?/`)
-					if strings.HasPrefix(msg.Trailing, "\x01ACTION") || replyRe.MatchString(msg.Trailing) || modifyRe.MatchString(msg.Trailing) {
+					if strings.HasPrefix(msg.Trailing, "\x01ACTION") || replyRegExp.MatchString(msg.Trailing) || modifyRegExp.MatchString(msg.Trailing) {
 						// flush buffer
 						logger.Debug("flushing buffer because of /me, replies to threads, and message modifications")
 						u.BufferedMsg.Trailing = strings.TrimSpace(u.BufferedMsg.Trailing)

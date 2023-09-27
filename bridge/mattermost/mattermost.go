@@ -840,6 +840,8 @@ func (m *Mattermost) addParentMsg(parentID string, msg string, newLen int, uncou
 	return strings.TrimRight(msg, "\n") + replyMessage, nil
 }
 
+var validIRCNickRegExp = regexp.MustCompile("^[a-zA-Z0-9_]*$")
+
 //nolint:funlen,gocognit,gocyclo,cyclop,forcetypeassert
 func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	var data model.Post
@@ -890,8 +892,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	if overrideUsername != "" {
 		logger.Debugf("found override username %s", overrideUsername)
 		// only allow valid irc nicks
-		re := regexp.MustCompile("^[a-zA-Z0-9_]*$")
-		if re.MatchString(overrideUsername) {
+		if validIRCNickRegExp.MatchString(overrideUsername) {
 			ghost.Nick = overrideUsername
 			ghost.Me = false
 		}
