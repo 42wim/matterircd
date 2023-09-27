@@ -337,6 +337,13 @@ func CmdPing(s Server, u *User, msg *irc.Message) error {
 	return nil
 }
 
+// Use static initialisation to optimize.
+// Color - https://modern.ircdocs.horse/formatting.html#color
+var colorRegExp = regexp.MustCompile(`\x03([019]?[0-9](,[019]?[0-9])?)?`)
+
+// Hex Color - https://modern.ircdocs.horse/formatting.html#hex-color
+var hexColorRegExp = regexp.MustCompile(`\x04[0-9a-fA-F]{6}`)
+
 // CmdPrivMsg is a handler for the /PRIVMSG command.
 func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 	var err error
@@ -367,9 +374,11 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 		msg.Trailing = strings.ReplaceAll(msg.Trailing, "\x01", "")
 		msg.Trailing = "*" + msg.Trailing + "*"
 	}
+
 	// strip IRC colors
-	re := regexp.MustCompile(`\x03([019]?[0-9](,[019]?[0-9])?)?`)
-	msg.Trailing = re.ReplaceAllString(msg.Trailing, "")
+	msg.Trailing = colorRegExp.ReplaceAllString(msg.Trailing, "")
+	msg.Trailing = hexColorRegExp.ReplaceAllString(msg.Trailing, "")
+
 	// Convert IRC formatting / emphasis to markdown.
 	msg.Trailing = irc2markdown(msg.Trailing)
 
