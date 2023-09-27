@@ -161,7 +161,7 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 			continue
 		}
 
-		if !codeBlockBackTick && !codeBlockTilde {
+		if !u.v.GetBool(u.br.Protocol()+".disableircemphasis") && !codeBlockBackTick && !codeBlockTilde {
 			text = markdown2irc(text)
 		}
 
@@ -311,7 +311,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 			continue
 		}
 
-		if !codeBlockBackTick && !codeBlockTilde {
+		if !u.v.GetBool(u.br.Protocol()+".disableircemphasis") && !codeBlockBackTick && !codeBlockTilde {
 			text = markdown2irc(text)
 		}
 
