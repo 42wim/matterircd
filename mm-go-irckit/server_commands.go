@@ -812,6 +812,7 @@ func CmdWhois(s Server, u *User, msg *irc.Message) error {
 
 //nolint:funlen
 func irc2markdown(msg string) string {
+	// https://modern.ircdocs.horse/formatting.html
 	emphasisSupported := map[byte][]byte{
 		'\x02': {'*', '*'}, // Bold      0x02  **   (**text**)
 		'\x1d': {'_'},      // Italics   0x1D  _    (_text_)
@@ -821,6 +822,7 @@ func irc2markdown(msg string) string {
 	emphasisUnsupported := map[byte]string{
 		'\x1f': "", // Underline 0x1f
 		'\x1e': "", // Strikethr 0x1e
+		'\x16': "", // Reverse Color
 	}
 
 	var buf []byte
@@ -853,7 +855,7 @@ func irc2markdown(msg string) string {
 
 		buf = append(buf, emp...)
 
-		// Remove closing emphasis
+		// Closing emphasis, they're in pairs, remove for list of outstanding
 		found := false
 		var newEmphasis []byte
 		for _, c := range currentEmphasis {
