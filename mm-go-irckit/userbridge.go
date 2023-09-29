@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"net"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -160,6 +161,10 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 			continue
 		}
 
+		if !u.v.GetBool(u.br.Protocol()+".disableircemphasis") && !codeBlockBackTick && !codeBlockTilde {
+			text = markdown2irc(text)
+		}
+
 		if showContext {
 			text = prefix + text + suffix
 		}
@@ -306,6 +311,10 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 
 		if text == "" {
 			continue
+		}
+
+		if !u.v.GetBool(u.br.Protocol()+".disableircemphasis") && !codeBlockBackTick && !codeBlockTilde {
+			text = markdown2irc(text)
 		}
 
 		if showContext {
@@ -1179,4 +1188,44 @@ func (u *User) formatCodeBlockText(text string, prefix string, codeBlockBackTick
 	}
 
 	return text, codeBlockBackTick, codeBlockTilde, lexer
+}
+
+// Use static initialisation to optimize.
+// Bold & Italic - https://www.markdownguide.org/basic-syntax#bold-and-italic
+var boldItalicRegExp = []*regexp.Regexp{
+	regexp.MustCompile(`(?:\*\*\*)+?(.+?)(?:\*\*\*)+?`),
+	regexp.MustCompile(`\b(?:\_\_\_)+?(.+?)(?:\_\_\_)+?\b`),
+	regexp.MustCompile(`\b(?:\_\_\*)+?(.+?)(?:\*\_\_)+?\b`),
+	regexp.MustCompile(`\b(?:\*\*\_)+?(.+?)(?:\_\*\*)+?\b`),
+}
+
+// Bold - https://www.markdownguide.org/basic-syntax#bold
+var boldRegExp = []*regexp.Regexp{
+	regexp.MustCompile(`(?:\*\*)+?(.+?)(?:\*\*)+?`),
+	regexp.MustCompile(`\b(?:\_\_)+?(.+?)(?:\_\_)+?\b`),
+}
+
+// Italic - https://www.markdownguide.org/basic-syntax#italic
+var italicRegExp = []*regexp.Regexp{
+	regexp.MustCompile(`(?:\*)+?([^\*]+?)(?:\*)+?`),
+	regexp.MustCompile(`\b(?:\_)+?([^_]+?)(?:\_)+?\b`),
+}
+
+func markdown2irc(msg string) string {
+	// Bold & Italic 0x02+0x1d
+	for _, re := range boldItalicRegExp {
+		msg = re.ReplaceAllString(msg, "\x02\x1d$1\x1d\x02")
+	}
+
+	// Bold 0x02
+	for _, re := range boldRegExp {
+		msg = re.ReplaceAllString(msg, "\x02$1\x02")
+	}
+
+	// Italic 0x1d
+	for _, re := range italicRegExp {
+		msg = re.ReplaceAllString(msg, "\x1d$1\x1d")
+	}
+
+	return msg
 }

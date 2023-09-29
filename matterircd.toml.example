@@ -153,6 +153,9 @@ ShowMentions = false
 # This disables that making them appear as normal PRIVMSGs.
 #DisableDefaultMentions = true
 
+# Disable formatting / emphasis of text from Mattermost markdown to IRC (bold & italics)
+#DisableIRCEmphasis = true
+
 # Enable syntax highlighting for code blocks.
 # Formatter and Style are passed through to the chroma v2 package.
 #   https://github.com/alecthomas/chroma/blob/master/formatters/tty_indexed.go#L262
