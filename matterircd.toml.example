@@ -65,6 +65,10 @@ Insecure = false
 #
 #JoinOnly = ["#onlythischannel"]
 
+# When set, all scrollback messages are shown in &messages rather than individual channels
+#
+#CollapseScrollback = false
+
 #an array of channels that won't be joined on IRC.
 #regexp is supported
 #Messages that get sent to unjoined channels (but you're joined on mattermost) will

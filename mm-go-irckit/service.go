@@ -406,13 +406,25 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 		}
 	}
 
-	u.MsgUser(toUser, fmt.Sprintf("scrollback results shown in %s", search))
+	if !u.v.GetBool(u.br.Protocol() + ".collapsescrollback") {
+		u.MsgUser(toUser, fmt.Sprintf("scrollback results shown in %s", search))
+	}
 }
 
 func formatScrollbackMsg(u *User, channelID string, channel string, user *User, nick string, p *model.Post, msgText string) {
 	ts := time.Unix(0, p.CreateAt*int64(time.Millisecond))
 
 	switch {
+	case (u.v.GetBool(u.br.Protocol()+".collapsescrollback") && strings.HasPrefix(channel, "#")):
+		threadMsgID := u.prefixContext(channelID, p.Id, p.RootId, "scrollback")
+		msg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, msgText)
+		nick += "/" + channel
+		u.Srv.Channel("&messages").SpoofMessage(nick, msg)
+	case u.v.GetBool(u.br.Protocol() + ".collapsescrollback"):
+		threadMsgID := u.prefixContext(channelID, p.Id, p.RootId, "scrollback")
+		msg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, msgText)
+		nick += "/" + channel
+		u.Srv.Channel("&messages").SpoofMessage(nick, msg)
 	case (u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext")) && strings.HasPrefix(channel, "#") && nick != systemUser:
 		threadMsgID := u.prefixContext(channelID, p.Id, p.RootId, "scrollback")
 		msg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, msgText)
