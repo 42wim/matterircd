@@ -293,19 +293,19 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 		return
 	}
 
-	if len(args) != 2 {
+	var err error
+	limit := 0
+	err = nil
+	if len(args) == 2 {
+		limit, err = strconv.Atoi(args[1])
+	}
+	if len(args) == 0 || len(args) > 2 || err != nil {
 		u.MsgUser(toUser, "need SCROLLBACK (#<channel>|<user>|<post/thread ID>) <lines>")
 		u.MsgUser(toUser, "e.g. SCROLLBACK #bugs 10 (show last 10 lines from #bugs)")
 		return
 	}
 
 	search := args[0]
-	limit, err := strconv.Atoi(args[1])
-	if err != nil {
-		u.MsgUser(toUser, "need SCROLLBACK (#<channel>|<user>|<post/thread ID>) <lines>")
-		u.MsgUser(toUser, "e.g. SCROLLBACK #bugs 10 (show last 10 lines from #bugs)")
-		return
-	}
 
 	var channelID, searchPostID string
 	scrollbackUser, exists := u.Srv.HasUser(search)
