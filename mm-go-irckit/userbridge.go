@@ -135,6 +135,10 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 				continue
 			}
 
+			if m == "" {
+				continue
+			}
+
 			if strings.Contains(event.Text, m) {
 				event.Text = event.Text + " (mention " + u.Nick + ")"
 			}
@@ -279,6 +283,10 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 	if u.v.GetBool(u.br.Protocol() + ".showmentions") {
 		for _, m := range u.MentionKeys {
 			if m == u.Nick {
+				continue
+			}
+
+			if m == "" {
 				continue
 			}
 
