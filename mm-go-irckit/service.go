@@ -370,7 +370,7 @@ func replay(u *User, toUser *User, args []string, service string) {
 		}
 
 		for _, fname := range u.br.GetFileLinks(p.FileIds) {
-			fileMsg := "\x1ddownload file - " + fname + "\x1d"
+			fileMsg := "\x1ddownload file - " + fname + "\x1d" //nolint:goconst
 			if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
 				threadMsgID := u.prefixContext(brchannel.ID, p.Id, p.RootId, "replay_file")
 				fileMsg = u.formatContextMessage(ts.Format("15:04"), threadMsgID, fileMsg)
