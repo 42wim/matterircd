@@ -361,22 +361,28 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 		return
 	}
 
-	if len(args) != 2 {
+	var err error
+	limit := 0
+	err = nil
+	if len(args) == 2 {
+		limit, err = strconv.Atoi(args[1])
+	}
+	if len(args) == 0 || len(args) > 2 || err != nil {
 		u.MsgUser(toUser, "need SCROLLBACK (#<channel>|<user>|<post/thread ID>) <lines>")
 		u.MsgUser(toUser, "e.g. SCROLLBACK #bugs 10 (show last 10 lines from #bugs)")
 		return
 	}
 
 	search := args[0]
-	limit, err := strconv.Atoi(args[1])
-	if err != nil {
-		u.MsgUser(toUser, "need SCROLLBACK (#<channel>|<user>|<post/thread ID>) <lines>")
-		u.MsgUser(toUser, "e.g. SCROLLBACK #bugs 10 (show last 10 lines from #bugs)")
-		return
-	}
 
 	var channelID, searchPostID string
 	scrollbackUser, exists := u.Srv.HasUser(search)
+
+	proto := "https"
+	if u.v.GetBool(u.br.Protocol() + ".insecure") {
+		proto = "http"
+	}
+	postlistURL := proto + "://" + u.Credentials.Server + "/" + u.Credentials.Team + "/pl/"
 
 	switch {
 	case strings.HasPrefix(search, "#"):
@@ -391,6 +397,10 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 		channelID = u.br.GetChannelID(channelName, u.br.GetMe().TeamID)
 	case len(search) == 26:
 		searchPostID = search
+	case strings.HasPrefix(search, "@@"):
+		searchPostID = strings.TrimPrefix(search, "@@")
+	case strings.HasPrefix(strings.ToLower(search), postlistURL):
+		searchPostID = strings.TrimPrefix(search, postlistURL)
 	default:
 		u.MsgUser(toUser, "need SCROLLBACK (#<channel>|<user>|<post/thread ID>) <lines>")
 		u.MsgUser(toUser, "e.g. SCROLLBACK #bugs 10 (show last 10 lines from #bugs)")
