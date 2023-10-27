@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"net"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -134,6 +135,10 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 				continue
 			}
 
+			if m == "" {
+				continue
+			}
+
 			if strings.Contains(event.Text, m) {
 				event.Text = event.Text + " (mention " + u.Nick + ")"
 			}
@@ -158,6 +163,10 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 
 		if text == "" {
 			continue
+		}
+
+		if !u.v.GetBool(u.br.Protocol()+".disableircemphasis") && !codeBlockBackTick && !codeBlockTilde {
+			text = markdown2irc(text)
 		}
 
 		if showContext {
@@ -195,7 +204,7 @@ func (u *User) handleChannelAddEvent(event *bridge.ChannelAddEvent) {
 		ch.Join(ghost)
 
 		if event.Adder != nil && added.Nick != event.Adder.Nick && event.Adder.Nick != systemUser {
-			ch.SpoofMessage(systemUser, "added "+added.Nick+" to the channel by "+event.Adder.Nick)
+			ch.SpoofMessage(systemUser, "\x1dadded "+added.Nick+" to the channel by "+event.Adder.Nick+"\x1d")
 		}
 	}
 
@@ -219,7 +228,7 @@ func (u *User) handleChannelRemoveEvent(event *bridge.ChannelRemoveEvent) {
 		ch.Part(ghost, "")
 
 		if event.Remover != nil && removed.Nick != event.Remover.Nick && event.Remover.Nick != systemUser {
-			ch.SpoofMessage(systemUser, "removed "+removed.Nick+" from the channel by "+event.Remover.Nick)
+			ch.SpoofMessage(systemUser, "\x1dremoved "+removed.Nick+" from the channel by "+event.Remover.Nick+"\x1d")
 		}
 	}
 	u.saveLastViewedAt(event.ChannelID)
@@ -277,6 +286,10 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 				continue
 			}
 
+			if m == "" {
+				continue
+			}
+
 			if strings.Contains(event.Text, m) {
 				event.Text = event.Text + " (mention " + u.Nick + ")"
 			}
@@ -290,6 +303,8 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 	maxlen := 440
 	if u.Nick != systemUser {
 		text, prefix, suffix, showContext, maxlen = u.handleMessageThreadContext(event.ChannelID, event.MessageID, event.ParentID, event.Event, event.Text)
+	} else {
+		text = "\x1d" + text + "\x1d"
 	}
 
 	lexer := ""
@@ -304,6 +319,10 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 
 		if text == "" {
 			continue
+		}
+
+		if !u.v.GetBool(u.br.Protocol()+".disableircemphasis") && !codeBlockBackTick && !codeBlockTilde {
+			text = markdown2irc(text)
 		}
 
 		if showContext {
@@ -326,7 +345,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 
 func (u *User) handleFileEvent(event *bridge.FileEvent) {
 	for _, fname := range event.Files {
-		fileMsg := "download file - " + fname.Name
+		fileMsg := "\x1ddownload file - " + fname.Name + "\x1d"
 		if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
 			threadMsgID := u.prefixContext(event.ChannelID, event.MessageID, event.ParentID, "posted_file")
 			fileMsg = u.formatContextMessage("", threadMsgID, fileMsg)
@@ -441,7 +460,7 @@ func (u *User) handleReactionEvent(event interface{}) {
 
 	if channelType == "D" {
 		e := &bridge.DirectMessageEvent{
-			Text:      text + reaction + message,
+			Text:      "\x1d" + text + reaction + "\x1d" + message,
 			ChannelID: channelID,
 			Receiver:  u.UserInfo,
 			Sender:    sender,
@@ -455,7 +474,7 @@ func (u *User) handleReactionEvent(event interface{}) {
 	}
 
 	e := &bridge.ChannelMessageEvent{
-		Text:        text + reaction + message,
+		Text:        "\x1d" + text + reaction + "\x1d" + message,
 		ChannelID:   channelID,
 		ChannelType: channelType,
 		Sender:      sender,
@@ -719,6 +738,10 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 					showReplayHdr = false
 				}
 
+				if nick == systemUser {
+					post = "\x1d" + post + "\x1d"
+				}
+
 				replayMsg := fmt.Sprintf("[%s] %s", ts.Format("15:04"), post)
 				if (u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext")) && nick != systemUser {
 					threadMsgID := u.prefixContext(brchannel.ID, p.Id, p.RootId, "replay")
@@ -732,7 +755,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			}
 
 			for _, fname := range u.br.GetFileLinks(p.FileIds) {
-				fileMsg := "download file - " + fname
+				fileMsg := "\x1ddownload file - " + fname + "\x1d"
 				if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
 					threadMsgID := u.prefixContext(brchannel.ID, p.Id, p.RootId, "replay_file")
 					fileMsg = u.formatContextMessage(ts.Format("15:04"), threadMsgID, fileMsg)
@@ -874,7 +897,7 @@ func (u *User) loginTo(protocol string) error {
 		u.br, err = slack.New(u.v, u.Credentials, u.eventChan, u.addUsersToChannels)
 	case "mattermost":
 		u.eventChan = make(chan *bridge.Event)
-		if u.v.GetBool("mattermost.ignoreserverversion") || strings.HasPrefix(u.getMattermostVersion(), "7.") || strings.HasPrefix(u.getMattermostVersion(), "8.") {
+		if u.v.GetBool("mattermost.ignoreserverversion") || strings.HasPrefix(u.getMattermostVersion(), "7.") || strings.HasPrefix(u.getMattermostVersion(), "8.") || strings.HasPrefix(u.getMattermostVersion(), "9.") {
 			u.br, _, err = mattermost.New(u.v, u.Credentials, u.eventChan, u.addUsersToChannels)
 		} else {
 			return fmt.Errorf("mattermost version %s not supported", u.getMattermostVersion())
@@ -1173,4 +1196,44 @@ func (u *User) formatCodeBlockText(text string, prefix string, codeBlockBackTick
 	}
 
 	return text, codeBlockBackTick, codeBlockTilde, lexer
+}
+
+// Use static initialisation to optimize.
+// Bold & Italic - https://www.markdownguide.org/basic-syntax#bold-and-italic
+var boldItalicRegExp = []*regexp.Regexp{
+	regexp.MustCompile(`(?:\*\*\*)+?(.+?)(?:\*\*\*)+?`),
+	regexp.MustCompile(`\b(?:\_\_\_)+?(.+?)(?:\_\_\_)+?\b`),
+	regexp.MustCompile(`\b(?:\_\_\*)+?(.+?)(?:\*\_\_)+?\b`),
+	regexp.MustCompile(`\b(?:\*\*\_)+?(.+?)(?:\_\*\*)+?\b`),
+}
+
+// Bold - https://www.markdownguide.org/basic-syntax#bold
+var boldRegExp = []*regexp.Regexp{
+	regexp.MustCompile(`(?:\*\*)+?(.+?)(?:\*\*)+?`),
+	regexp.MustCompile(`\b(?:\_\_)+?(.+?)(?:\_\_)+?\b`),
+}
+
+// Italic - https://www.markdownguide.org/basic-syntax#italic
+var italicRegExp = []*regexp.Regexp{
+	regexp.MustCompile(`(?:\*)+?([^\*]+?)(?:\*)+?`),
+	regexp.MustCompile(`\b(?:\_)+?([^_]+?)(?:\_)+?\b`),
+}
+
+func markdown2irc(msg string) string {
+	// Bold & Italic 0x02+0x1d
+	for _, re := range boldItalicRegExp {
+		msg = re.ReplaceAllString(msg, "\x02\x1d$1\x1d\x02")
+	}
+
+	// Bold 0x02
+	for _, re := range boldRegExp {
+		msg = re.ReplaceAllString(msg, "\x02$1\x02")
+	}
+
+	// Italic 0x1d
+	for _, re := range italicRegExp {
+		msg = re.ReplaceAllString(msg, "\x1d$1\x1d")
+	}
+
+	return msg
 }

@@ -1,3 +1,26 @@
+# v0.28.0
+
+## New features
+
+- mattermost: Add support for searching scrollback for specific posts/threads (#533)
+- mattermost: Allow ignoring Mattermost server version when checking if supported (#541)
+- mattermost: Support for mattermost version 9 (#548)
+
+## Enhancement
+
+- mattermost: Include thread context for matterircd style hex numbers for replay and scrollback (#545)
+- mattermost: Emphasize system and reaction messages (#549)
+- mattermost: Use static initialisation for regular expressions to optimize (#551)
+- mattermost: Convert Mattermost markdown formatting / emphasis to IRC (#547)
+- mattermost: Update scrollback to support @@msgthreadID and the MM postlist URL (#555)
+
+## Bugfix
+
+- mattermost: Fix incorrect msg/thread counters (#542)
+
+This release couldn't exist without the following contributors:
+@hloeung
+
 # v0.27.1
 
 ## Enhancement
