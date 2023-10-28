@@ -277,6 +277,9 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 	}
 
 	if event.ChannelType != "D" && ch.ID() == "&messages" {
+		if u.v.GetBool(u.br.Protocol() + ".showonlyjoined") {
+			return
+		}
 		nick += "/" + u.Srv.Channel(event.ChannelID).String()
 	}
 
