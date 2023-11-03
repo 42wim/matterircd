@@ -250,6 +250,10 @@ running more quickly:
 
 - [Breaking out of the Slack walled garden](https://purpleidea.com/blog/2018/06/22/breaking-out-of-the-slack-walled-garden/)
 
+## Contributors
+
+[![Contributors](https://contrib.rocks/image?repo=42wim/matterircd)](https://github.com/42wim/matterircd/graphs/contributors)
+
 ## Related
 
 - [matterircd-complete](https://github.com/hloeung/matterircd-complete) - better irssi/mattermost/matterircd integration
