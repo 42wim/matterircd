@@ -698,9 +698,6 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 		// traverse the order in reverse
 		for i := len(mmPostList.Order) - 1; i >= 0; i-- {
 			p := mmPostList.Posts[mmPostList.Order[i]]
-			if p.Type == model.PostTypeJoinLeave {
-				continue
-			}
 
 			if p.DeleteAt > p.CreateAt {
 				continue
@@ -725,8 +722,31 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 				nick = botname
 			}
 
-			if p.Type == model.PostTypeAddToTeam || p.Type == model.PostTypeRemoveFromTeam {
+			switch {
+			case p.Type == model.PostTypeAddToTeam:
 				nick = systemUser
+				ghost := u.createUserFromInfo(user)
+				u.Srv.Channel(brchannel.ID).Join(ghost) //nolint:errcheck
+			case p.Type == model.PostTypeRemoveFromTeam:
+				nick = systemUser
+				ghost := u.createUserFromInfo(user)
+				u.Srv.Channel(brchannel.ID).Part(ghost, "")
+			case p.Type == model.PostTypeJoinChannel:
+				ghost := u.createUserFromInfo(user)
+				u.Srv.Channel(brchannel.ID).Join(ghost) //nolint:errcheck
+			case p.Type == model.PostTypeLeaveChannel:
+				ghost := u.createUserFromInfo(user)
+				u.Srv.Channel(brchannel.ID).Part(ghost, "")
+			case p.Type == model.PostTypeAddToChannel:
+				if addedUserID, ok := props["addedUserId"].(string); ok {
+					ghost := u.createUserFromInfo(u.br.GetUser(addedUserID))
+					u.Srv.Channel(brchannel.ID).Join(ghost) //nolint:errcheck
+				}
+			case p.Type == model.PostTypeRemoveFromChannel:
+				if removedUserID, ok := props["removedUserId"].(string); ok {
+					ghost := u.createUserFromInfo(u.br.GetUser(removedUserID))
+					u.Srv.Channel(brchannel.ID).Part(ghost, "")
+				}
 			}
 
 			for _, post := range strings.Split(p.Message, "\n") {
