@@ -163,7 +163,7 @@ func (ch *channel) Part(u *User, text string) {
 	if _, ok := ch.usersIdx[u.ID()]; !ok {
 		ch.mu.Unlock()
 		for _, to := range ch.usersIdx {
-			if !to.Ghost {
+			if !to.Ghost && to.Nick != u.Nick {
 				to.Encode(msg) //nolint:errcheck
 			}
 		}
@@ -348,7 +348,7 @@ func (ch *channel) Join(u *User) error {
 		ch.mu.Unlock()
 		for _, to := range ch.usersIdx {
 			// only send join messages to real users
-			if !to.Ghost {
+			if !to.Ghost && to.Nick != u.Nick {
 				to.Encode(msg) //nolint:errcheck
 			}
 		}
