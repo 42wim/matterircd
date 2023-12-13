@@ -347,6 +347,13 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 }
 
 func (u *User) handleFileEvent(event *bridge.FileEvent) {
+	ch := u.getMessageChannel(event.ChannelID, event.Sender)
+	if event.ChannelType != "D" && ch.ID() == "&messages" {
+		if u.v.GetBool(u.br.Protocol() + ".showonlyjoined") {
+			return
+		}
+	}
+
 	for _, fname := range event.Files {
 		fileMsg := "\x1ddownload file - " + fname.Name + "\x1d"
 		if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
