@@ -139,6 +139,11 @@ Mark messages in a channel/from a user as read (when DisableAutoView is set).
 /msg mattermost updatelastviewed <username>
 ```
 
+Part/leave
+```
+/msg mattermost part #mychannel
+```
+
 ### Slack user commands
 
 Get a slack token on <https://api.slack.com/custom-integrations/legacy-tokens>
