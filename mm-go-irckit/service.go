@@ -113,75 +113,73 @@ func login(u *User, toUser *User, args []string, service string) {
 	}
 
 	cred := bridge.Credentials{}
-	datalen := 4
+	datalen := len(args)
 
 	if len(args) > 1 && strings.Contains(args[len(args)-1], "MFAToken=") {
-		datalen = 5
-	}
-
-	if u.v.GetString("mattermost.DefaultTeam") != "" {
-		cred.Team = u.v.GetString("mattermost.DefaultTeam")
+		MFAToken := strings.Split(args[len(args)-1], "=")
+		cred.MFAToken = MFAToken[1]
 		datalen--
 	}
 
-	if u.v.GetString("mattermost.DefaultServer") != "" {
+	teamOrServer := ""
+	creds := []*string{&cred.Server, &teamOrServer, &cred.Login, &cred.Pass}
+	for argsIdx, credsIdx := datalen, len(creds); argsIdx > 0 && credsIdx > 0; argsIdx-- {
+		*creds[credsIdx-1] = args[argsIdx-1]
+		creds = creds[:credsIdx-1]
+		credsIdx--
+	}
+
+	switch {
+	// All params provided (server team username password) so set the team to provided.
+	case cred.Server != "":
+		cred.Team = teamOrServer
+	// Missing both server and team, let's use DefaultServer and DefaultTeam.
+	case teamOrServer == "" && u.v.GetString("mattermost.DefaultServer") != "" && u.v.GetString("mattermost.DefaultTeam") != "":
 		cred.Server = u.v.GetString("mattermost.DefaultServer")
-		datalen--
+		cred.Team = u.v.GetString("mattermost.DefaultTeam")
+	// Missing server, let's use DefaultServer.
+	case u.v.GetString("mattermost.DefaultServer") != "":
+		cred.Server = u.v.GetString("mattermost.DefaultServer")
+		cred.Team = teamOrServer
+	// Missing team, let's use DefaultTeam.
+	case u.v.GetString("mattermost.DefaultTeam") != "":
+		cred.Server = teamOrServer
+		cred.Team = u.v.GetString("mattermost.DefaultTeam")
+	default:
+		cred.Server = teamOrServer
 	}
 
-	if len(args) >= datalen { // nolint:nestif
-		logger.Debugf("args_len: %d", len(args))
-		logger.Debugf("team: %s", cred.Team)
-		logger.Debugf("server: %s", cred.Server)
-		if strings.Contains(args[len(args)-1], "MFAToken=") {
-			logger.Debug("found MFAToken")
-			MFAToken := strings.Split(args[len(args)-1], "=")
-			cred.MFAToken = MFAToken[1]
-			cred.Pass = args[len(args)-2]
-			cred.Login = args[len(args)-3]
-		} else {
-			cred.Pass = args[len(args)-1]
-			cred.Login = args[len(args)-2]
-		}
-		// no default server or team specified
-		if cred.Server == "" && cred.Team == "" {
-			cred.Server = args[0]
-			cred.Team = args[1]
-		}
-
-		if cred.Team == "" {
-			cred.Team = args[0]
-		}
-
-		if cred.Server == "" {
-			cred.Server = args[0]
-		}
+	logger.Debugf("args_len: %d", len(args))
+	logger.Debugf("team: %s", cred.Team)
+	logger.Debugf("server: %s", cred.Server)
+	if cred.MFAToken != "" {
+		logger.Debug("found MFAToken")
 	}
 
-	// incorrect arguments
-	if len(args) < datalen {
-		switch {
-		// no server or team
-		case cred.Team != "" && cred.Server != "":
-			u.MsgUser(toUser, "need LOGIN <login> <pass>")
-			u.MsgUser(toUser, "when using a personal token replace <pass> with token=<yourtoken>")
-			u.MsgUser(toUser, "when using a mfa token use LOGIN <login> <pass> MFAToken=<yourmfatoken>")
-		// server missing
-		case cred.Team != "":
-			u.MsgUser(toUser, "need LOGIN <server> <login> <pass>")
-			u.MsgUser(toUser, "when using a personal token replace <pass> with token=<yourtoken>")
-			u.MsgUser(toUser, "when using a mfa token use LOGIN <server> <login> <pass> MFAToken=<yourmfatoken>")
-		// team missing
-		case cred.Server != "":
-			u.MsgUser(toUser, "need LOGIN <team> <login> <pass>")
-			u.MsgUser(toUser, "when using a personal token replace <pass> with token=<yourtoken>")
-			u.MsgUser(toUser, "when using a mfa token use LOGIN <team> <login> <pass> MFAToken=<yourmfatoken>")
-		default:
-			u.MsgUser(toUser, "need LOGIN <server> <team> <login> <pass>")
-			u.MsgUser(toUser, "when using a personal token replace <pass> with token=<yourtoken>")
-			u.MsgUser(toUser, "when using a mfa token use LOGIN <server> <team> <login> <pass> MFAToken=<yourmfatoken>")
-		}
-
+	switch {
+	// Both server and team missing
+	case cred.Team == "" && cred.Server == "":
+		u.MsgUser(toUser, "need LOGIN <server> <team> <login> <pass>")
+		u.MsgUser(toUser, "when using a personal token replace <pass> with token=<yourtoken>")
+		u.MsgUser(toUser, "when using a mfa token use LOGIN <server> <team> <login> <pass> MFAToken=<yourmfatoken>")
+		return
+	// server missing
+	case cred.Server == "":
+		u.MsgUser(toUser, "need LOGIN <server> <login> <pass>")
+		u.MsgUser(toUser, "when using a personal token replace <pass> with token=<yourtoken>")
+		u.MsgUser(toUser, "when using a mfa token use LOGIN <server> <login> <pass> MFAToken=<yourmfatoken>")
+		return
+	// team missing
+	case cred.Team == "":
+		u.MsgUser(toUser, "need LOGIN <team> <login> <pass>")
+		u.MsgUser(toUser, "when using a personal token replace <pass> with token=<yourtoken>")
+		u.MsgUser(toUser, "when using a mfa token use LOGIN <team> <login> <pass> MFAToken=<yourmfatoken>")
+		return
+	// login/username or password/token missing
+	case cred.Login == "" || cred.Pass == "":
+		u.MsgUser(toUser, "need LOGIN <login> <pass>")
+		u.MsgUser(toUser, "when using a personal token replace <pass> with token=<yourtoken>")
+		u.MsgUser(toUser, "when using a mfa token use LOGIN <login> <pass> MFAToken=<yourmfatoken>")
 		return
 	}
 
