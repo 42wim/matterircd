@@ -347,9 +347,9 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 }
 
 func (u *User) handleFileEvent(event *bridge.FileEvent) {
-	ch := u.getMessageChannel(event.ChannelID, event.Sender)
-	if event.ChannelType != "D" && ch.ID() == "&messages" {
-		if u.v.GetBool(u.br.Protocol() + ".showonlyjoined") {
+	if u.v.GetBool(u.br.Protocol()+".showonlyjoined") && event.ChannelType != "D" {
+		ch := u.getMessageChannel(event.ChannelID, event.Sender)
+		if ch.ID() == "&messages" {
 			return
 		}
 	}
