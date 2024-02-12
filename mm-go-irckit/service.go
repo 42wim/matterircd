@@ -286,6 +286,26 @@ func getMattermostChannelName(u *User, channelID string) string {
 	return channelMembers[0]
 }
 
+func part(u *User, toUser *User, args []string, service string) {
+	if len(args) != 1 {
+		u.MsgUser(toUser, "need PART #<channel>")
+		u.MsgUser(toUser, "e.g. PART #bugs")
+		return
+	}
+
+	channelName := strings.TrimPrefix(args[0], "#")
+	channelTeamID := u.br.GetMe().TeamID
+	if len(args) == 2 {
+		channelTeamID = args[1]
+	}
+	channelID := u.br.GetChannelID(channelName, channelTeamID)
+
+	err := u.br.Part(channelID)
+	if err != nil {
+		u.MsgUser(toUser, fmt.Sprintf("could not part/leave %s", args[0]))
+	}
+}
+
 //nolint:funlen,gocognit,gocyclo,cyclop
 func scrollback(u *User, toUser *User, args []string, service string) {
 	if service == "slack" {
@@ -494,6 +514,7 @@ var cmds = map[string]Command{
 	"lastsent":         {handler: lastsent, login: true, minParams: 0, maxParams: 0},
 	"logout":           {handler: logout, login: true, minParams: 0, maxParams: 0},
 	"login":            {handler: login, minParams: 2, maxParams: 5},
+	"part":             {handler: part, login: true, minParams: 1, maxParams: 1},
 	"search":           {handler: search, login: true, minParams: 1, maxParams: -1},
 	"searchusers":      {handler: searchUsers, login: true, minParams: 1, maxParams: -1},
 	"scrollback":       {handler: scrollback, login: true, minParams: 2, maxParams: 2},
