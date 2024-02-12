@@ -337,6 +337,13 @@ func CmdPing(s Server, u *User, msg *irc.Message) error {
 	return nil
 }
 
+// Use static initialisation to optimize.
+// Color - https://modern.ircdocs.horse/formatting.html#color
+var colorRegExp = regexp.MustCompile(`\x03([019]?[0-9](,[019]?[0-9])?)?`)
+
+// Hex Color - https://modern.ircdocs.horse/formatting.html#hex-color
+var hexColorRegExp = regexp.MustCompile(`\x04[0-9a-fA-F]{6}`)
+
 // CmdPrivMsg is a handler for the /PRIVMSG command.
 func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 	var err error
@@ -367,10 +374,13 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 		msg.Trailing = strings.ReplaceAll(msg.Trailing, "\x01", "")
 		msg.Trailing = "*" + msg.Trailing + "*"
 	}
-	// strip IRC colors
-	re := regexp.MustCompile(`\x03([019]?[0-9](,[019]?[0-9])?)?`)
 
-	msg.Trailing = re.ReplaceAllString(msg.Trailing, "")
+	// strip IRC colors
+	msg.Trailing = colorRegExp.ReplaceAllString(msg.Trailing, "")
+	msg.Trailing = hexColorRegExp.ReplaceAllString(msg.Trailing, "")
+
+	// Convert IRC formatting / emphasis to markdown.
+	msg.Trailing = irc2markdown(msg.Trailing)
 
 	// are we sending to a channel
 	if ch, exists := s.HasChannel(query); exists {
@@ -810,4 +820,75 @@ func CmdWhois(s Server, u *User, msg *irc.Message) error {
 		return u.Encode(r...)
 	}
 	return s.EncodeMessage(u, irc.ERR_NOSUCHNICK, msg.Params, "No such nick/channel")
+}
+
+//nolint:funlen
+func irc2markdown(msg string) string {
+	// https://modern.ircdocs.horse/formatting.html
+	emphasisSupported := map[byte][]byte{
+		'\x02': {'*', '*'}, // Bold      0x02  **   (**text**)
+		'\x1d': {'_'},      // Italics   0x1D  _    (_text_)
+		'\x11': {'`'},      // Monospace 0x11  `    (`text`)
+		'\x0f': {' '},      // Reset     0x0F       (**text\x0f)
+	}
+	emphasisUnsupported := map[byte]string{
+		'\x1f': "", // Underline 0x1f
+		'\x1e': "", // Strikethr 0x1e
+		'\x16': "", // Reverse Color
+	}
+
+	var buf []byte
+
+	var currentEmphasis []byte
+	for _, char := range []byte(msg) {
+		var ok bool
+		var emp []byte
+
+		// Strip or ignore unsuppored IRC formatting / emphasis
+		if _, ok = emphasisUnsupported[char]; ok {
+			continue
+		}
+
+		// Not an IRC formatting / emphasis character so copy as is
+		if emp, ok = emphasisSupported[char]; !ok {
+			buf = append(buf, char)
+			continue
+		}
+
+		// IRC reset so reset formatting
+		if char == '\x0f' {
+			// Close off any current formatting / emphasis
+			for _, c := range currentEmphasis {
+				buf = append(buf, emphasisSupported[c]...)
+			}
+			currentEmphasis = nil
+			continue
+		}
+
+		buf = append(buf, emp...)
+
+		// Closing emphasis, they're in pairs, remove for list of outstanding
+		found := false
+		var newEmphasis []byte
+		for _, c := range currentEmphasis {
+			if !found && c == char {
+				found = true
+				continue
+			}
+			newEmphasis = append(newEmphasis, c)
+		}
+		if found {
+			currentEmphasis = newEmphasis
+			continue
+		}
+
+		currentEmphasis = append([]byte{char}, currentEmphasis...)
+	}
+
+	// Close off any current formatting / emphasis
+	for _, c := range currentEmphasis {
+		buf = append(buf, emphasisSupported[c]...)
+	}
+
+	return string(buf)
 }
