@@ -129,14 +129,20 @@ Search
 
 Scrollback
 ```
-/msg mattermost scrollback <channel> <limit>
-e.g. /msg mattermost scrollback #bugs 100 shows the last 100 messages of #bugs
+/msg mattermost scrollback #<channel>|<user>|<post/thread ID> <limit>
 ```
+e.g. `/msg mattermost scrollback #bugs 100` shows the last 100 messages of *#bugs*
+e.g. `/msg mattermost scrollback zdofdf1nctgsj87xgt6oco1a3w 0` shows all messages from the thread with root/parent *zdofdf1nctgsj87xgt6oco1a3w*
 
 Mark messages in a channel/from a user as read (when DisableAutoView is set).
 ```
 /msg mattermost updatelastviewed <channel>
 /msg mattermost updatelastviewed <username>
+```
+
+Part/leave
+```
+/msg mattermost part #mychannel
 ```
 
 ### Slack user commands
@@ -249,6 +255,10 @@ Here are some external guides and documentation that might help you get up and
 running more quickly:
 
 - [Breaking out of the Slack walled garden](https://purpleidea.com/blog/2018/06/22/breaking-out-of-the-slack-walled-garden/)
+
+## Contributors
+
+[![Contributors](https://contrib.rocks/image?repo=42wim/matterircd)](https://github.com/42wim/matterircd/graphs/contributors)
 
 ## Related
 

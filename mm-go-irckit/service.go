@@ -457,6 +457,26 @@ func getMattermostChannelName(u *User, channelID string) string {
 	return channelMembers[0]
 }
 
+func part(u *User, toUser *User, args []string, service string) {
+	if len(args) != 1 {
+		u.MsgUser(toUser, "need PART #<channel>")
+		u.MsgUser(toUser, "e.g. PART #bugs")
+		return
+	}
+
+	channelName := strings.TrimPrefix(args[0], "#")
+	channelTeamID := u.br.GetMe().TeamID
+	if len(args) == 2 {
+		channelTeamID = args[1]
+	}
+	channelID := u.br.GetChannelID(channelName, channelTeamID)
+
+	err := u.br.Part(channelID)
+	if err != nil {
+		u.MsgUser(toUser, fmt.Sprintf("could not part/leave %s", args[0]))
+	}
+}
+
 //nolint:funlen,gocognit,gocyclo,cyclop
 func scrollback(u *User, toUser *User, args []string, service string) {
 	if service == "slack" {
@@ -587,13 +607,25 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 		}
 	}
 
-	u.MsgUser(toUser, fmt.Sprintf("scrollback results shown in %s", search))
+	if !u.v.GetBool(u.br.Protocol() + ".collapsescrollback") { //nolint:goconst
+		u.MsgUser(toUser, fmt.Sprintf("scrollback results shown in %s", search))
+	}
 }
 
 func formatScrollbackMsg(u *User, channelID string, channel string, user *User, nick string, p *model.Post, msgText string) {
 	ts := time.Unix(0, p.CreateAt*int64(time.Millisecond))
 
 	switch {
+	case (u.v.GetBool(u.br.Protocol()+".collapsescrollback") && strings.HasPrefix(channel, "#")):
+		threadMsgID := u.prefixContext(channelID, p.Id, p.RootId, "scrollback")
+		msg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, msgText)
+		nick += "/" + channel
+		u.Srv.Channel("&messages").SpoofMessage(nick, msg)
+	case u.v.GetBool(u.br.Protocol() + ".collapsescrollback"):
+		threadMsgID := u.prefixContext(channelID, p.Id, p.RootId, "scrollback")
+		msg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, msgText)
+		nick += "/" + channel
+		u.Srv.Channel("&messages").SpoofMessage(nick, msg)
 	case (u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext")) && strings.HasPrefix(channel, "#") && nick != systemUser:
 		threadMsgID := u.prefixContext(channelID, p.Id, p.RootId, "scrollback")
 		msg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, msgText)
@@ -654,6 +686,7 @@ var cmds = map[string]Command{
 	"logout":           {handler: logout, login: true, minParams: 0, maxParams: 0},
 	"login":            {handler: login, minParams: 2, maxParams: 5},
 	"replay":           {handler: replay, login: true, minParams: 1, maxParams: 2},
+	"part":             {handler: part, login: true, minParams: 1, maxParams: 1},
 	"search":           {handler: search, login: true, minParams: 1, maxParams: -1},
 	"searchusers":      {handler: searchUsers, login: true, minParams: 1, maxParams: -1},
 	"scrollback":       {handler: scrollback, login: true, minParams: 2, maxParams: 2},

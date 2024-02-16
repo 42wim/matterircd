@@ -54,7 +54,7 @@ PasteBufferTimeout = 2500
 Insecure = false
 
 #ignore the Mattermost server version when checking if supported
-#ignoreserverversion = false
+#IgnoreServerVersion = false
 
 #an array of channels that only will be joined on IRC. JoinExlude and JoinInclude will not be checked
 #regexp is supported
@@ -64,6 +64,10 @@ Insecure = false
 #default ""
 #
 #JoinOnly = ["#onlythischannel"]
+
+# When set, all scrollback messages are shown in &messages rather than individual channels
+#
+#CollapseScrollback = false
 
 #an array of channels that won't be joined on IRC.
 #regexp is supported
@@ -82,6 +86,9 @@ Insecure = false
 #default ""
 #
 #JoinInclude = ["#devops","#myteam-marketing"]
+
+#show only messages for channels joined, so nothing in the &messages channel.
+#ShowOnlyJoined = false
 
 #PartFake: a bool that defines if you do a /LEAVE or /PART on IRC it will also
 #actually leave the channel on mattermost.
@@ -223,6 +230,9 @@ UseDisplayName = false
 #default ""
 #
 #JoinInclude = ["#devops","#myteam-marketing"]
+
+#show only messages for channels joined, so nothing in the &messages channel.
+#ShowOnlyJoined = false
 
 #This will add a number between 000 and fff to each message
 #This number will be referenced when a message is edited/deleted/threaded/reaction
