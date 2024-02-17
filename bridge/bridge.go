@@ -23,6 +23,9 @@ type Bridger interface {
 	MsgChannel(channelID, text string) (string, error)
 	MsgChannelThread(channelID, parentID, text string) (string, error)
 
+	AddReaction(msgID, emoji string) error
+	RemoveReaction(msgID, emoji string) error
+
 	StatusUser(userID string) (string, error)
 	StatusUsers() (map[string]string, error)
 	SetStatus(status string) error
@@ -48,9 +51,12 @@ type Bridger interface {
 
 	GetPostsSince(channelID string, since int64) interface{}
 	GetPosts(channelID string, limit int) interface{}
+	GetPostThread(postID string) interface{}
 	SearchPosts(search string) interface{}
 	ModifyPost(msgID, text string) error
 	GetFileLinks(fileIDs []string) []string
+
+	GetLastSentMsgs() []string
 }
 
 type ChannelInfo struct {
@@ -147,6 +153,8 @@ type FileEvent struct {
 	ChannelID   string
 	ChannelType string
 	Files       []*File
+	MessageID   string
+	ParentID    string
 }
 
 type ReactionAddEvent struct {
@@ -155,6 +163,9 @@ type ReactionAddEvent struct {
 	MessageID   string
 	Reaction    string
 	ChannelType string
+	ParentUser  *UserInfo
+	Message     string
+	ParentID    string
 }
 
 type ReactionRemoveEvent ReactionAddEvent

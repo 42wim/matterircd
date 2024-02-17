@@ -12,7 +12,7 @@ trace = false
 #default false
 gops = false
 
-#interface:port to bind to. (e.g 127.0.0.1:6697) (deault "")
+#TLS interface:port to bind to. (e.g 127.0.0.1:6697) (deault "")
 #
 #TLSBind = "127.0.0.1:6697"
 
@@ -24,10 +24,15 @@ gops = false
 #TLSKey = "/etc/pki/tls/matterircd/key.pem"
 #TLSCert = "/etc/pki/tls/matterircd/cer.pem"
 
+# Override handshake timeout (in seconds)
+#HandshakeTimeout = 10
+# Override client timeout (in seconds)
+#ClientTimeout = 10
+
 #PasteBufferTimeout specifies the amount of time in milliseconds that
 #messages get kept in matterircd internal buffer before being sent to
 #mattermost or slack.
-#Messageis that will be received in this time will be concatenated together
+#Messages that will be received in this time will be concatenated together
 #So this can be used to paste stuff like ansi-art or code.
 #Default 0 (is disabled)
 #Depending on how fast you type 2500 is a good number
@@ -48,6 +53,9 @@ PasteBufferTimeout = 2500
 #use http connection to mattermost (default false)
 Insecure = false
 
+#ignore the Mattermost server version when checking if supported
+#IgnoreServerVersion = false
+
 #an array of channels that only will be joined on IRC. JoinExlude and JoinInclude will not be checked
 #regexp is supported
 #If it's empty, it means all channels get joined (except those defined in JoinExclude)
@@ -56,6 +64,10 @@ Insecure = false
 #default ""
 #
 #JoinOnly = ["#onlythischannel"]
+
+# When set, all scrollback messages are shown in &messages rather than individual channels
+#
+#CollapseScrollback = false
 
 #an array of channels that won't be joined on IRC.
 #regexp is supported
@@ -74,6 +86,9 @@ Insecure = false
 #default ""
 #
 #JoinInclude = ["#devops","#myteam-marketing"]
+
+#show only messages for channels joined, so nothing in the &messages channel.
+#ShowOnlyJoined = false
 
 #PartFake: a bool that defines if you do a /LEAVE or /PART on IRC it will also
 #actually leave the channel on mattermost.
@@ -98,8 +113,12 @@ PrefixMainTeam = false
 #Only mark a conversation as viewed when you reply to that conversation or
 #channel. This prevents Mattermost from clearing mobile app notifications
 #instantly. Note that this prevents you from always appearing as online
-#(anti-idle support is turned off) (default false)
+#(anti-idle support is turned off unless ForceAntiIdle) (default false)
 DisableAutoView = false
+# Force and enable anti-idle. Useful for when DisableAutoView.
+# ForceAntiIdle = true
+# AntiIdleChannel = "town-square"
+# AntiIdleInterval = 60
 
 # If users set a Nickname, matterircd could either choose that or the Username
 # to display in the IRC client. The option PreferNickname controls that, the
@@ -112,6 +131,8 @@ HideReplies = false
 ShortenRepliesTo = 0
 # Enable Unicode.
 Unicode = false
+# Disable showing reactions
+HideReactions = false
 
 #Only join direct/group messages when someone talks. This stops from cluttering your 
 #irc client with lots of windows.
@@ -127,10 +148,32 @@ SuffixContext = false
 # If either PrefixContext or SuffixContext specify which thread ID to use. Default is the
 # matterircd generated @@([0-9][a-f]){3}. Uncomment to use Mattermost's message/parent thread IDs instead.
 #ThreadContext = "mattermost"
+# Similar to the above, but also show the message post IDs in addition to the parent thread ID.
+#ThreadContext = "mattermost+post"
+#Show Context for multi-line messages and only show it at the end.
+ShowContextMulti = false
 
 #This will show (mention yournick) after a message if it contains one of the words configured
 #in your mattermost "word that trigger mentions" notifications.
 ShowMentions = false
+# Channel wide default mentions @channel, @all, and @here are shown as IRC NOTICEs.
+# This disables that making them appear as normal PRIVMSGs.
+#DisableDefaultMentions = true
+
+# Disable formatting / emphasis of text from Mattermost markdown to IRC (bold & italics)
+#DisableIRCEmphasis = true
+
+# Enable syntax highlighting for code blocks.
+# Formatter and Style are passed through to the chroma v2 package.
+#   https://github.com/alecthomas/chroma/blob/master/formatters/tty_indexed.go#L262
+# terminal/terminal8 for 8-colors, terminal16, terminal256, terminal16m (16M true-colour).
+#   https://github.com/alecthomas/chroma/tree/master/styles
+# These are different colour schemes/styles. E.g. pygments, emacs, autumn, etc.
+SyntaxHighlighting = "terminal256:pygments"
+
+# Path to file to store last viewed information. This is useful for replying only
+# the messages missed.
+LastViewedSaveFile = "matterircd-lastsaved.db"
 
 #############################
 ##### SLACK EXAMPLE #########
@@ -188,8 +231,28 @@ UseDisplayName = false
 #
 #JoinInclude = ["#devops","#myteam-marketing"]
 
+#show only messages for channels joined, so nothing in the &messages channel.
+#ShowOnlyJoined = false
+
 #This will add a number between 000 and fff to each message
 #This number will be referenced when a message is edited/deleted/threaded/reaction
 PrefixContext = false
 
 
+#############################
+##### MASTODON EXAMPLE ######
+#############################
+[mastodon]
+#Go to https://yourmastodonserver/settings/applications/new
+#Use matterircd as application name (default read/write/follow scopes are ok)
+#Click on submit
+#After submitting it'll show you the Client Key (we call it clientID), 
+#the client secret and Your access token
+#
+#Fill those in below with your server
+#Connect to matterircd and /msg mastodon login
+#
+#server="https://mastodon.social"
+#clientID="clientidstring"
+#clientSecret="clientsecretstring"
+#accessToken="accesstokenstring"

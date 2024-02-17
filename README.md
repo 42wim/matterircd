@@ -10,6 +10,7 @@
     - [Usage](#usage)
         - [Mattermost user commands](#mattermost-user-commands)
         - [Slack user commands](#slack-user-commands)
+        - [Mastodon user commands](#mastodon-user-commands)
     - [Docker](#docker)
     - [FreeBSD](#freebsd)
     - [Support/questions](#supportquestions)
@@ -21,14 +22,14 @@
 
 <!-- /TOC -->
 
-[![Join the IRC chat at https://webchat.freenode.net/?channels=matterircd](https://img.shields.io/badge/IRC-matterircd-green.svg)](https://webchat.freenode.net/?channels=matterircd)
+[![Join the IRC chat at https://web.libera.chat/gamja/?channels=#matterircd](https://img.shields.io/badge/IRC-matterircd-green.svg)](https://web.libera.chat/gamja/?channels=#matterircd)
 
 Minimal IRC server which integrates with [mattermost](https://www.mattermost.org) and [slack](https://www.slack.com)
 Tested on FreeBSD / Linux / Windows
 
 ## Compatibility
 
-- Matterircd works with slack and mattermost 5.x
+- Matterircd works with slack, mastodon and mattermost 6.x, 7.x
 
 Master branch of matterircd should always work against latest STABLE mattermost release.
 
@@ -55,6 +56,8 @@ Master branch of matterircd should always work against latest STABLE mattermost 
 - mattermost personal token support
 - support multiline pasting
 - prefixcontext option for mattermost (see <https://github.com/42wim/matterircd/blob/master/prefixcontext.md>)
+  - threading support
+  - reactions support
 - ....
 
 ## Binaries
@@ -63,10 +66,10 @@ You can find the binaries [here](https://github.com/42wim/matterircd/releases/la
 
 ## Building
 
-Go 1.14+ is required
+Go 1.17+ is required
 
 ```bash
-go get github.com/42wim/matterircd
+go install github.com/42wim/matterircd
 ```
 
 You should now have matterircd binary in the bin directory:
@@ -126,14 +129,20 @@ Search
 
 Scrollback
 ```
-/msg mattermost scrollback <channel> <limit>
-e.g. /msg mattermost scrollback #bugs 100 shows the last 100 messages of #bugs
+/msg mattermost scrollback #<channel>|<user>|<post/thread ID> <limit>
 ```
+e.g. `/msg mattermost scrollback #bugs 100` shows the last 100 messages of *#bugs*
+e.g. `/msg mattermost scrollback zdofdf1nctgsj87xgt6oco1a3w 0` shows all messages from the thread with root/parent *zdofdf1nctgsj87xgt6oco1a3w*
 
 Mark messages in a channel/from a user as read (when DisableAutoView is set).
 ```
 /msg mattermost updatelastviewed <channel>
 /msg mattermost updatelastviewed <username>
+```
+
+Part/leave
+```
+/msg mattermost part #mychannel
 ```
 
 ### Slack user commands
@@ -159,10 +168,25 @@ A docker image for easily setting up and running matterircd on a server is avail
 Run the irc server on port 6667. You'll need to specify -bind 0.0.0.0:6667 otherwise it only listens on 127.0.0.1 in the container.
 
 ```
-docker run -p 6667:6667 42wim/matterircd:latest -bind 0.0.0.0:6667
+docker run -p 6667:6667 42wim/matterircd:latest --bind 0.0.0.0:6667
 ```
 
 Now you can connect with your IRC client to port 6667 on your docker host.
+
+### Mastodon user commands
+
+(still WIP)
+
+Configure your mastodon settings  
+See the `[mastodon]` section in [matterircd.toml.example](https://github.com/42wim/matterircd/blob/master/matterircd.toml.example)
+
+Login
+
+```
+/msg mastodon login
+```
+
+You'll see your timeline in #mastodon (automatically joined to that channel)
 
 ## FreeBSD
 
@@ -191,16 +215,22 @@ Start the service.
 
 ## Support/questions
 
-We're also on the `#matterircd` channel on irc.freenode.net
+We're also on the `#matterircd` channel on irc.libera.chat
 
 ## FAQ
+
+### can I use matterircd for multiple mattermost or slack servers?
+
+Yes, but not in the same connection (would cause problems with channel/user name conflicts).  
+matterircd supports multiple users, so you can configure your IRC client to have multiple networks that all connect to the same matterircd server.
 
 ### mattermost login with sso/gitlab
 
 You'll need to get the `MMAUTHTOKEN` from your cookies, login via the browser first.  
 Then in chrome run F12 - application - Storage/cookies - select your mattermostdomain and fetch the `MMAUTHTOKEN`
 
-Now login with `/msg mattermost login <username> MMAUTHTOKEN=<mytoken>`
+Now login with `/msg mattermost login <username> MMAUTHTOKEN=<mytoken>`  
+(if this doesn't work, try `/msg mattermost login <username> token=<mytoken>`)
 
 See <https://github.com/42wim/matterircd/issues/29> for more information
 
@@ -225,6 +255,10 @@ Here are some external guides and documentation that might help you get up and
 running more quickly:
 
 - [Breaking out of the Slack walled garden](https://purpleidea.com/blog/2018/06/22/breaking-out-of-the-slack-walled-garden/)
+
+## Contributors
+
+[![Contributors](https://contrib.rocks/image?repo=42wim/matterircd)](https://github.com/42wim/matterircd/graphs/contributors)
 
 ## Related
 

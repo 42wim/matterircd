@@ -5,10 +5,7 @@ import (
 	"fmt"
 	"image/png"
 	"io"
-	"io/ioutil"
 	"net/http"
-	"os"
-	"os/exec"
 	"regexp"
 	"strings"
 	"time"
@@ -51,6 +48,30 @@ func DownloadFileAuth(url string, auth string) (*[]byte, error) {
 	return &data, nil
 }
 
+// DownloadFileAuthRocket downloads the given URL using the specified Rocket user ID and authentication token.
+func DownloadFileAuthRocket(url, token, userID string) (*[]byte, error) {
+	var buf bytes.Buffer
+	client := &http.Client{
+		Timeout: time.Second * 5,
+	}
+	req, err := http.NewRequest("GET", url, nil)
+
+	req.Header.Add("X-Auth-Token", token)
+	req.Header.Add("X-User-Id", userID)
+
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	_, err = io.Copy(&buf, resp.Body)
+	data := buf.Bytes()
+	return &data, err
+}
+
 // GetSubLines splits messages in newline-delimited lines. If maxLineLength is
 // specified as non-zero GetSubLines will also clip long lines to the maximum
 // length and insert a warning marker that the line was clipped.
@@ -58,11 +79,19 @@ func DownloadFileAuth(url string, auth string) (*[]byte, error) {
 // TODO: The current implementation has the inconvenient that it disregards
 // word boundaries when splitting but this is hard to solve without potentially
 // breaking formatting and other stylistic effects.
-func GetSubLines(message string, maxLineLength int) []string {
-	const clippingMessage = " <clipped message>"
+func GetSubLines(message string, maxLineLength int, clippingMessage string) []string {
+	if clippingMessage == "" {
+		clippingMessage = " <clipped message>"
+	}
 
 	var lines []string
 	for _, line := range strings.Split(strings.TrimSpace(message), "\n") {
+		if line == "" {
+			// Prevent sending empty messages, so we'll skip this line
+			// if it has no content.
+			continue
+		}
+
 		if maxLineLength == 0 || len([]byte(line)) <= maxLineLength {
 			lines = append(lines, line)
 			continue
@@ -145,17 +174,23 @@ func HandleDownloadSize(logger *logrus.Entry, msg *config.Message, name string, 
 
 // HandleDownloadData adds the data for a remote file into a Matterbridge gateway message.
 func HandleDownloadData(logger *logrus.Entry, msg *config.Message, name, comment, url string, data *[]byte, general *config.Protocol) {
+	HandleDownloadData2(logger, msg, name, "", comment, url, data, general)
+}
+
+// HandleDownloadData adds the data for a remote file into a Matterbridge gateway message.
+func HandleDownloadData2(logger *logrus.Entry, msg *config.Message, name, id, comment, url string, data *[]byte, general *config.Protocol) {
 	var avatar bool
 	logger.Debugf("Download OK %#v %#v", name, len(*data))
 	if msg.Event == config.EventAvatarDownload {
 		avatar = true
 	}
 	msg.Extra["file"] = append(msg.Extra["file"], config.FileInfo{
-		Name:    name,
-		Data:    data,
-		URL:     url,
-		Comment: comment,
-		Avatar:  avatar,
+		Name:     name,
+		Data:     data,
+		URL:      url,
+		Comment:  comment,
+		Avatar:   avatar,
+		NativeID: id,
 	})
 }
 
@@ -169,8 +204,11 @@ func RemoveEmptyNewLines(msg string) string {
 
 // ClipMessage trims a message to the specified length if it exceeds it and adds a warning
 // to the message in case it does so.
-func ClipMessage(text string, length int) string {
-	const clippingMessage = " <clipped message>"
+func ClipMessage(text string, length int, clippingMessage string) string {
+	if clippingMessage == "" {
+		clippingMessage = " <clipped message>"
+	}
+
 	if len(text) > length {
 		text = text[:length-len(clippingMessage)]
 		if r, size := utf8.DecodeLastRuneInString(text); r == utf8.RuneError {
@@ -208,51 +246,5 @@ func ConvertWebPToPNG(data *[]byte) error {
 		return err
 	}
 	*data = w.Bytes()
-	return nil
-}
-
-// CanConvertTgsToX Checks whether the external command necessary for ConvertTgsToX works.
-func CanConvertTgsToX() error {
-	// We depend on the fact that `lottie_convert.py --help` has exit status 0.
-	// Hyrum's Law predicted this, and Murphy's Law predicts that this will break eventually.
-	// However, there is no alternative like `lottie_convert.py --is-properly-installed`
-	cmd := exec.Command("lottie_convert.py", "--help")
-	return cmd.Run()
-}
-
-// ConvertTgsToWebP convert input data (which should be tgs format) to WebP format
-// This relies on an external command, which is ugly, but works.
-func ConvertTgsToX(data *[]byte, outputFormat string, logger *logrus.Entry) error {
-	// lottie can't handle input from a pipe, so write to a temporary file:
-	tmpFile, err := ioutil.TempFile(os.TempDir(), "matterbridge-lottie-*.tgs")
-	if err != nil {
-		return err
-	}
-	tmpFileName := tmpFile.Name()
-	defer func() {
-		if removeErr := os.Remove(tmpFileName); removeErr != nil {
-			logger.Errorf("Could not delete temporary file %s: %v", tmpFileName, removeErr)
-		}
-	}()
-
-	if _, writeErr := tmpFile.Write(*data); writeErr != nil {
-		return writeErr
-	}
-	// Must close before calling lottie to avoid data races:
-	if closeErr := tmpFile.Close(); closeErr != nil {
-		return closeErr
-	}
-
-	// Call lottie to transform:
-	cmd := exec.Command("lottie_convert.py", "--input-format", "lottie", "--output-format", outputFormat, tmpFileName, "/dev/stdout")
-	cmd.Stderr = nil
-	// NB: lottie writes progress into to stderr in all cases.
-	stdout, stderr := cmd.Output()
-	if stderr != nil {
-		// 'stderr' already contains some parts of Stderr, because it was set to 'nil'.
-		return stderr
-	}
-
-	*data = stdout
 	return nil
 }

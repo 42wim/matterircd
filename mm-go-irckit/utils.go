@@ -1,6 +1,9 @@
 package irckit
 
-import "regexp"
+import (
+	"regexp"
+	"strings"
+)
 
 func stringInRegexp(a string, list []string) bool {
 	for _, entry := range list {
@@ -21,4 +24,15 @@ func removeStringInSlice(a string, list []string) []string {
 		}
 	}
 	return newlist
+}
+
+// Sanitize nick: replace IRC characters with special meanings with "-"
+func sanitizeNick(nick string) string {
+	sanitize := func(r rune) rune {
+		if strings.ContainsRune("!+%@&#$:'\"?*, ", r) {
+			return '-'
+		}
+		return r
+	}
+	return strings.Map(sanitize, nick)
 }

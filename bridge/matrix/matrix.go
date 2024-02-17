@@ -744,6 +744,10 @@ func (m *Matrix) SearchUsers(query string) ([]*bridge.UserInfo, error) {
 	return brusers, nil
 }
 
+func (s *Matrix) GetPostThread(channelID string) interface{} {
+	return nil
+}
+
 func (m *Matrix) GetPosts(channelID string, limit int) interface{} {
 	return nil
 	//	return m.mc.GetPosts(channelID, limit)
@@ -762,4 +766,16 @@ func (m *Matrix) GetChannelID(name, teamID string) string {
 
 func (m *Matrix) Connected() bool {
 	return m.connected
+}
+
+func (s *Matrix) AddReaction(msgID, emoji string) error {
+	return nil
+}
+
+func (s *Matrix) RemoveReaction(msgID, emoji string) error {
+	return nil
+}
+
+func (s *Matrix) GetLastSentMsgs() []string {
+	return []string{}
 }

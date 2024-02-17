@@ -115,7 +115,11 @@ func CmdJoin(s Server, u *User, msg *irc.Message) error {
 		// you can only join existing channels
 		var err error
 
-		channelID, topic, err := u.br.Join(channelName)
+		if channelName == "&messages" || channelName == "&users" { //nolint:goconst
+			continue
+		}
+
+		channelID, _, err := u.br.Join(channelName)
 		if err != nil {
 			logger.Errorf("Cannot join channel %s, id %s, err: %v", channelName, channelID, err)
 			s.EncodeMessage(u, irc.ERR_INVITEONLYCHAN, []string{u.Nick, channel}, "Cannot join channel (+i)")
@@ -139,10 +143,7 @@ func CmdJoin(s Server, u *User, msg *irc.Message) error {
 		}
 
 		ch := s.Channel(channelID)
-		ch.Topic(u, topic)
-
 		sync(channelID, channelName)
-
 		ch.Join(u)
 	}
 
@@ -176,7 +177,7 @@ func CmdList(s Server, u *User, msg *irc.Message) error {
 	r = append(r, &irc.Message{
 		Prefix:   s.Prefix(),
 		Params:   []string{u.Nick},
-		Command:  irc.RPL_LISTEND,
+		Command:  irc.RPL_LISTEND, // nolint:misspell
 		Trailing: "End of /LIST",
 	})
 	return u.Encode(r...)
@@ -231,6 +232,10 @@ func CmdMotd(s Server, u *User, _ *irc.Message) error {
 		Params:   []string{u.Nick},
 		Trailing: fmt.Sprintf("- %s Message of the Day -", s.Name()),
 	})
+
+	if IsDebugLevel() {
+		motd = append(motd, "server is running in debugmode.")
+	}
 
 	for _, line := range motd {
 		r = append(r, &irc.Message{
@@ -373,6 +378,10 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 			return nil
 		}
 
+		if parseReactionToMsg(u, msg, ch.ID()) {
+			return nil
+		}
+
 		if threadMsgChannel(u, msg, ch.ID()) {
 			return nil
 		}
@@ -383,17 +392,17 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 
 		msgID, err2 := u.br.MsgChannel(ch.ID(), msg.Trailing)
 		if err2 != nil {
-			u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+msg.Trailing+" could not be send: "+err2.Error())
+			u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+msg.Trailing+" could not be sent "+err2.Error())
 			return err2
 		}
 
 		u.msgLastMutex.Lock()
 		defer u.msgLastMutex.Unlock()
-
 		u.msgLast[ch.ID()] = [2]string{msgID, ""}
+		u.saveLastViewedAt(ch.ID())
 
 		if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
-			u.prefixContext(ch.ID(), msgID, "", "")
+			u.prefixContext(ch.ID(), msgID, "", "posted_self")
 		}
 
 		return nil
@@ -402,34 +411,44 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 	// or a user
 	if toUser, exists := s.HasUser(query); exists {
 		switch {
-		case query == "mattermost" || query == "slack" || query == "matrix":
+		case query == "mattermost" || query == "slack" || query == "mastodon" || query == "matrix": //nolint:goconst
 			go u.handleServiceBot(query, toUser, msg.Trailing)
 			msg.Trailing = "<redacted>"
 		case toUser.Ghost, toUser.Me:
 			logger.Tracef("sending message %s to user %s", msg.Trailing, toUser.User)
 			// no messages when we're not logged in
 			if u.br == nil {
+				logger.Tracef("u.br was nil, ignored message")
 				return nil
 			}
+
+			if parseReactionToMsg(u, msg, toUser.User) {
+				logger.Trace("matched parseReactionToMsg")
+				return nil
+			}
+
 			if threadMsgUser(u, msg, toUser.User) {
+				logger.Trace("matched threadMsgUser")
 				return nil
 			}
 
 			if parseModifyMsg(u, msg, toUser.User) {
+				logger.Trace("matched parseModifyMsg")
 				return nil
 			}
 
 			msgID, err2 := u.br.MsgUser(toUser.User, msg.Trailing)
 			if err2 != nil {
 				u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+msg.Trailing+" could not be send: "+err2.Error())
-				return err
+				return err2
 			}
 			u.msgLastMutex.Lock()
 			defer u.msgLastMutex.Unlock()
 			u.msgLast[toUser.User] = [2]string{msgID, ""}
+			u.saveLastViewedAt(toUser.User)
 
 			if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
-				u.prefixContext(toUser.User, msgID, "", "")
+				u.prefixContext(toUser.User, msgID, "", "posted_self")
 			}
 
 		default:
@@ -442,9 +461,54 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 	return s.EncodeMessage(u, irc.ERR_NOSUCHNICK, msg.Params, "No such nick/channel")
 }
 
+var parseReactionToMsgRegExp = regexp.MustCompile(`^\@\@([0-9a-f]{3}|[0-9a-z]{26})\s+([\-\+]):(\S+):\s*$`)
+
+func parseReactionToMsg(u *User, msg *irc.Message, channelID string) bool {
+	matches := parseReactionToMsgRegExp.FindStringSubmatch(msg.Trailing)
+	if len(matches) != 4 {
+		return false
+	}
+
+	msgID := matches[1]
+	action := matches[2]
+	emoji := matches[3]
+
+	// matterircd style prefix/suffix contexts (e.g. 001 and fa2).
+	if len(msgID) == 3 {
+		id, err := strconv.ParseInt(msgID, 16, 0)
+		if err != nil {
+			logger.Errorf("couldn't parseint %s: %s", msgID, err)
+		}
+
+		u.msgMapIndexMutex.RLock()
+		defer u.msgMapIndexMutex.RUnlock()
+
+		if _, ok := u.msgMapIndex[channelID][int(id)]; ok {
+			msgID = u.msgMapIndex[channelID][int(id)]
+		}
+	}
+
+	if action == "-" {
+		err := u.br.RemoveReaction(msgID, emoji)
+		if err != nil {
+			u.MsgSpoofUser(u, u.br.Protocol(), "reaction: "+emoji+" could not be removed "+err.Error())
+		}
+
+		return true
+	}
+
+	err := u.br.AddReaction(msgID, emoji)
+	if err != nil {
+		u.MsgSpoofUser(u, u.br.Protocol(), "reaction: "+emoji+" could not be added "+err.Error())
+	}
+
+	return true
+}
+
+var parseModifyMsgRegExp = regexp.MustCompile(`^s(\/(?:[0-9a-f]{3}|[0-9a-z]{26}|!!)?\/)(.*)`)
+
 func parseModifyMsg(u *User, msg *irc.Message, channelID string) bool {
-	re := regexp.MustCompile(`^s(\/(?:[0-9a-f]{3}|[0-9a-z]{26}|!!)?\/)(.*)`)
-	matches := re.FindStringSubmatch(msg.Trailing)
+	matches := parseModifyMsgRegExp.FindStringSubmatch(msg.Trailing)
 	text := msg.Trailing
 
 	// only two so s/xxx/ which means a delete
@@ -483,17 +547,11 @@ func parseModifyMsg(u *User, msg *irc.Message, channelID string) bool {
 			logger.Errorf("couldn't parseint %s: %s", matches[1], err)
 		}
 
-		u.msgMapMutex.RLock()
-		defer u.msgMapMutex.RUnlock()
+		u.msgMapIndexMutex.RLock()
+		defer u.msgMapIndexMutex.RUnlock()
 
-		m := u.msgMap[channelID]
-
-		for k, v := range m {
-			if v != int(id) {
-				continue
-			}
-
-			msgID = k
+		if _, ok := u.msgMapIndex[channelID][int(id)]; ok {
+			msgID = u.msgMapIndex[channelID][int(id)]
 
 			u.msgLastMutex.Lock()
 			defer u.msgLastMutex.Unlock()
@@ -510,32 +568,32 @@ func parseModifyMsg(u *User, msg *irc.Message, channelID string) bool {
 	if err != nil {
 		// probably a wrong id, just put it through as normally
 		if strings.Contains(err.Error(), "permissions") {
+			logger.Trace("parseModifyMsg triggered permissions error")
 			return false
 		}
-		u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+text+" could not be modified: "+err.Error())
+		u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+text+" could not be modified "+err.Error())
+	} else {
+		u.saveLastViewedAt(channelID)
 	}
 
 	return true
 }
 
-func parseThreadID(u *User, msg *irc.Message, channelID string) (string, string) {
-	re := regexp.MustCompile(`^\@\@([0-9a-z]{26})`)
-	matches := re.FindStringSubmatch(msg.Trailing)
-	if len(matches) == 2 {
-		msg.Trailing = strings.Replace(msg.Trailing, matches[0], "", 1)
-		parentID := matches[1]
-		newMessage := msg.Trailing
-		// Also strip separator in message.
-		if len(newMessage) > 1 {
-			newMessage = newMessage[1:]
-		}
-		return parentID, newMessage
-	}
+var parseThreadIDRegExp = regexp.MustCompile(`(?s)^\@\@(?:(!!|[0-9a-f]{3}|[0-9a-z]{26})\s)(.*)`)
 
-	re = regexp.MustCompile(`^\@\@!!`)
-	matches = re.FindStringSubmatch(msg.Trailing)
-	if len(matches) == 1 {
-		msg.Trailing = strings.Replace(msg.Trailing, matches[0], "", 1)
+func parseThreadID(u *User, msg *irc.Message, channelID string) (string, string) {
+	matches := parseThreadIDRegExp.FindStringSubmatch(msg.Trailing)
+	if len(matches) == 0 {
+		return "", ""
+	}
+	const expected = 3
+	if len(matches) != expected {
+		logger.Errorf("parseThreadID: expected %d matches for re match against %q, got %d",
+			expected, msg.Trailing, len(matches))
+		return "", ""
+	}
+	switch {
+	case matches[1] == "!!":
 		u.msgLastMutex.RLock()
 		defer u.msgLastMutex.RUnlock()
 		msgLast, ok := u.msgLast[channelID]
@@ -546,85 +604,66 @@ func parseThreadID(u *User, msg *irc.Message, channelID string) (string, string)
 		if msgLast[1] != "" {
 			parentID = msgLast[1]
 		}
-		newMessage := msg.Trailing
-		// Also strip separator in message.
-		if len(newMessage) > 1 {
-			newMessage = newMessage[1:]
-		}
-		return parentID, newMessage
-	}
-
-	re = regexp.MustCompile(`^\@\@([0-9a-f]{3})`)
-	matches = re.FindStringSubmatch(msg.Trailing)
-	if len(matches) == 2 {
-		msg.Trailing = strings.Replace(msg.Trailing, matches[0], "", 1)
-
+		return parentID, matches[2]
+	case len(matches[1]) == 3:
 		id, err := strconv.ParseInt(matches[1], 16, 0)
 		if err != nil {
 			logger.Errorf("couldn't parseint %s: %s", matches[1], err)
+			return "", ""
 		}
 
-		u.msgMapMutex.RLock()
-		defer u.msgMapMutex.RUnlock()
+		u.msgMapIndexMutex.RLock()
+		defer u.msgMapIndexMutex.RUnlock()
 
-		m := u.msgMap[channelID]
-
-		for k, v := range m {
-			if v == int(id) {
-				return k, msg.Trailing
-			}
+		if _, ok := u.msgMapIndex[channelID][int(id)]; ok {
+			return u.msgMapIndex[channelID][int(id)], matches[2]
 		}
+	case len(matches[1]) == 26:
+		return matches[1], matches[2]
+	default:
+		logger.Errorf("parseThreadID: could not parse reply ID %q", matches[1])
+		return "", ""
 	}
-
 	return "", ""
 }
 
-func threadMsgChannel(u *User, msg *irc.Message, channelID string) bool {
+func threadMsgChannelUser(u *User, msg *irc.Message, channelID string, toUser bool) bool {
 	threadID, text := parseThreadID(u, msg, channelID)
 	if threadID == "" {
 		return false
 	}
 
-	msgID, err := u.br.MsgChannelThread(channelID, threadID, text)
+	var msgID string
+	var err error
+	if toUser {
+		msgID, err = u.br.MsgUserThread(channelID, threadID, text)
+	} else {
+		msgID, err = u.br.MsgChannelThread(channelID, threadID, text)
+	}
 	if err != nil {
-		u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+text+" could not be send: "+err.Error())
+		u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+text+" could not be sent "+err.Error())
 		return false
 	}
 
 	u.msgLastMutex.Lock()
 	defer u.msgLastMutex.Unlock()
-
 	u.msgLast[channelID] = [2]string{msgID, threadID}
+	u.saveLastViewedAt(channelID)
 
 	if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
-		u.prefixContext(channelID, msgID, "", "")
+		u.prefixContext(channelID, msgID, threadID, "posted_self")
 	}
 
 	return true
 }
 
+func threadMsgChannel(u *User, msg *irc.Message, channelID string) bool {
+	logger.Trace("entering threadMsgChannel")
+	return threadMsgChannelUser(u, msg, channelID, false)
+}
+
 func threadMsgUser(u *User, msg *irc.Message, toUser string) bool {
-	threadID, text := parseThreadID(u, msg, toUser)
-	if threadID == "" {
-		return false
-	}
-
-	msgID, err := u.br.MsgUserThread(toUser, threadID, text)
-	if err != nil {
-		u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+text+" could not be send: "+err.Error())
-		return false
-	}
-
-	u.msgLastMutex.Lock()
-	defer u.msgLastMutex.Unlock()
-
-	u.msgLast[toUser] = [2]string{msgID, threadID}
-
-	if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
-		u.prefixContext(toUser, msgID, "", "")
-	}
-
-	return true
+	return threadMsgChannelUser(u, msg, toUser, true)
 }
 
 // CmdQuit is a handler for the /QUIT command.

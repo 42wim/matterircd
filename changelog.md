@@ -1,3 +1,251 @@
+# v0.28.0
+
+## New features
+
+- mattermost: Add support for searching scrollback for specific posts/threads (#533)
+- mattermost: Allow ignoring Mattermost server version when checking if supported (#541)
+- mattermost: Support for mattermost version 9 (#548)
+
+## Enhancement
+
+- mattermost: Include thread context for matterircd style hex numbers for replay and scrollback (#545)
+- mattermost: Emphasize system and reaction messages (#549)
+- mattermost: Use static initialisation for regular expressions to optimize (#551)
+- mattermost: Convert Mattermost markdown formatting / emphasis to IRC (#547)
+- mattermost: Update scrollback to support @@msgthreadID and the MM postlist URL (#555)
+
+## Bugfix
+
+- mattermost: Fix incorrect msg/thread counters (#542)
+
+This release couldn't exist without the following contributors:
+@hloeung
+
+# v0.27.1
+
+## Enhancement
+
+- general: Allow multiple instances of matterircd (#523)
+- mattermost: Support mattermost version 8, drop support for version 6 (#539)
+- mattermost: Improve on logging and make consistent with matterclient (#510)
+- mattermost: Add caching of last sent msgs and 'lastsent' service command to show them (#520)
+- mattermost: Update reactions so they're part of threads (#530)
+
+## Bugfix
+
+- mattermost: Add extra logging and fix return of wrong error (#529)
+
+This release couldn't exist without the following contributors:
+@hloeung
+
+# v0.27.0
+
+## New features
+
+- mastodon: Add mastodon support (#500)
+
+## Enhancement
+
+- general: Add support for syntax highlighted code blocks (#501)
+- mastodon: Add support for posting on timeline (#503)
+- mattermost: Remove backwards compatibility support of last saved at state (#444)
+- mattermost: Add support for tilde fenced code blocks (#506)
+- mattermost: Reduce extra call to Mattermost server for files link (#509)
+
+## Bugfix
+
+- irc: Fix splitting of lines for ACTIONs (#499)
+- irc: Ignore when our user status is "offline" (#504)
+- irc: Ignore special channels (&users and &messages) (#507)
+- irc: Remove unnecessary topic setting on channel join (#512)
+- irc: Remove extra new lines showing in debug logging (#511)
+- irc: Only remove from channel for channels we're in on channel_deleted
+- irc: Set correct IRC PRIVMSG nick for file events too (#406)
+- irc: Ensure colon present for empty messages per IRC protocol/spec (#517)
+- irc: Only flip between away and online when actually away or not (#518)
+- irc: Add basic support for syntax highlighting in code blocks (#515)
+- mattermost: Remove support for mattermost 5
+- mattermost: Handle replies to posts part of threadst
+- mattermost: Reduce calls to Mattermost server by caching replies (#513)
+
+This release couldn't exist without the following contributors:
+@hloeung
+
+# v0.26.1
+
+## Enhancement
+
+- general: Update matterircd.toml.example (#489)
+- mattermost: Reduce UpdateChannelsTeam() calls (#493)
+- mattermost: Add support for the Matterpoll plugin (#495)
+
+## Bugfix
+
+- mattermost: Update matterclient vendor/fix fetching list of channels (#494)
+- mattermost: Fallback to use API for getting channel data when not in the cache (#490)
+- mattermost: Fix "key required" crash when channel ID can't be found (#496)
+
+This release couldn't exist without the following contributors:
+@hloeung, @PeGaSus-Coder
+
+# v0.26.0
+
+## New features
+
+- general: Add support for IRCv3 Client Capability Negotiation (#478)
+- mattermost: Support mattermost 7 (#481)
+- mattermost: Add new thread context to show both Mattermost thread/parent/root and post IDs (#474).
+  - see `ThreadContext` in matterircd.toml.example
+
+## Enhancement
+
+- general: Add systemd service unit example (#475)
+- general: Fix small typo on docker parameter (#469)
+- mattermost: Do not split message on newlines (#482)
+  - see `ShowContextMulti` in matterircd.toml.example to enable context on every line if needed.
+  - this also fixes #426 where messages could get out of order
+
+## Bugfix
+
+- general: Update dependencies
+- mattermost: Fix multiline replies to threads (#473)
+- mattermost: Fix replaying to match addUserToChannelWorker (#484)
+
+This release couldn't exist without the following contributors:
+@hloeung, @mk-fg, @zodman
+
+# v0.25.1
+
+## Enhancement
+
+- general: build arm6/7 docker images
+- general: update dependencies (#465)
+
+## Bugfix
+
+- general: Fix RPL_MYINFO and move debuglevel output to MOTD (#466)
+- mattermost: Use regexp to fully parse thread replies (#460)
+- mattermost: Fix possible panic in mattermost (#458,#467)
+
+This release couldn't exist without the following contributors:
+@jetpackdanger, @Zauberfisch
+
+# v0.25.0
+
+## New features
+
+- general: Add automated docker builds
+- general: Allow overriding handshake timeout. Fixes #438 (#439)
+- mattermost: Support saving last viewed at state for multiple users (mattermost) (#425)
+- mattermost: Add mattermost 6 support (#452)
+- mattermost: Allow overriding client timeout (mattermost) (#449)
+- mattermost: Allow overriding the anti-idle channel and interval (mattermost) (#441)
+
+## Bugfix
+
+- general: Fix word boundary and grammar of error messages (#443)
+- mattermost: Fix to ensure reply message is on the same line as last message line (mattermost) (#447)
+- mattermost: Addition and removal of user to/from team from system (mattermost) (#442)
+- slack: Fix segfault when bot user fetch fails (#440)
+
+This release couldn't exist without the following contributors:
+@hloeung, @Aketzu
+
+# v0.24.2
+
+## Bugfix
+
+- general: Return ERR_NOTREGISTERED when trying to join before registration (#434)
+- mattermost: Fix incorrect nick for reaction removal (#433)
+- mattermost: Preserve leading whitespace and for code blocks, new/empty lines. Fixes #420 (#432)
+- slack,mattermost: Use unbuffered eventChan for slack/mattermost. Fixes #426 (#436)
+
+This release couldn't exist without the following contributors:
+@hloeung, @Peter4825
+
+# v0.24.1
+
+## Enhancement
+
+- mattermost: Don't show warning if lastViewedAt state file doesn't exist, also create it early (#423)
+- slack: update vendored library
+
+## Bugfix
+
+- mattermost: Fix ordering of events (such as code blocks) (#419)
+- mattermost: Save last viewed at state on logout and only use stored last viewed at if newer than what the server knows (#422)
+- slack: Make sure receiving item message isn't nil (slack). Fixes #428 (#429)
+
+This release couldn't exist without the following contributors:
+@hloeung
+
+# v0.24.0
+
+## New features
+
+- mattermost: Add context for reactions (#408)
+- mattermost: Add option to hide reactions; also hide our own (#415)
+- mattermost: Fix channel mentions and add option to disable channel mentions as IRC NOTICEs (mattermost) (#418)
+- mattermost: Show Mattermost message/thread IDs for file attachments (#396) (was already in v0.23.1)
+- mattermost: Show scrollback in same channel/query window (mattermost) (#393) (was already in v0.23.1)
+
+## Enhancements
+
+- mattermost: Save lastViewedAt on topic change events (#417)
+- slack: Save message IDs and use them for local echo prevention (#409)
+
+## Bugfix
+
+- general: Set correct IRC PRIVMSG nick when receiving direct messages (#407)
+- general: Fix buffer flushing yet again (#411)
+- mattermost: Handle SIGSEGV nil pointer for event.ParentUser (#412)
+
+This release couldn't exist without the following contributors:
+@hloeung, @the-real-ed, @Aketzu
+
+# v0.23.1
+
+## Bugfix
+
+- slack: Use conversation API for DM (slack). (#402) Fixes #400
+- slack: Fix regression, increase user pag to 1000 (slack) #403
+- general: Fixed buffer flushing (#398)
+
+This release couldn't exist without the following contributors:
+@hloeung
+
+# v0.23.0
+
+Big shout-out to @hloeung for doing most of the work for this release!
+
+## New features
+
+- mattermost: Replay only messages not seen; also make it clear when replaying #373
+- mattermost: new ForceAntiIdle option - Allow forcing anti-idle #369
+- mattermost: Allow adding or removing reactions #386
+- mattermost: Add scrollback support for direct messages (DMs). Fixes #385 #388
+
+## Enhancements
+
+- mattermost: Add prefix showing messages are replies to threads when using Mattermost ThreadContext
+- mattermost: Save lastViewedAt and load on start up (#313) #368
+- mattermost: Add logging when replaying logs #377
+- general: Handle events after initialization use buffered channel #383
+
+## Bugfix
+
+- general: Flush buffer on ctcp action. Fixes #367 #371
+- general: Sanitize nicks, replace invalid chars with dash #374
+- general: Sanitize nick before sending PRIVMSG irc command #378
+- general: Flush buffers on reactions, allows adding various reactions in sequence, also replies to threads or message modifications #387
+- general: Fix fd leak - Timeout unused handshake after 10 seconds. Fixes #390 #392
+- general: Space separate 'download file' #394
+- mattermost: Fix panic with no postlist returned. Fixes #380 #384
+- mattermost: Fix permissions issues when replying to threads in DM #389
+
+This release couldn't exist without the following contributors:
+@hloeung, @dfskoll
+
 # v0.22.0
 
 ## New features
@@ -15,7 +263,7 @@
 
 ## Bugfix
 
-- mattermost:  Do not show replies when hidereplies is enabled (mattermost) (#352)
+- mattermost: Do not show replies when hidereplies is enabled (mattermost) (#352)
 
 This release couldn't exist without the following contributors:
 @hloeung, @eyenx
@@ -75,7 +323,6 @@ This release couldn't exist without the following contributors:
 
 This release couldn't exist without the following contributors:
 @hloeung, @42wim
-
 
 # v0.20.0
 
@@ -151,310 +398,393 @@ Thanks a lot to @cjwatson, @muesli, @hloeung, @vmiklos and @guilhermepiccoli for
 - slack: fix regression with slack library (#264)
 - slack: fix an unexpected panic (#263)
 
-
 # v0.19.3
 
 ## Enhancement
 
-* general: Add UPDATELASTVIEWED command, and make DisableAutoView work consistently (#255)
-* slack: Handle message edits and deletion (#260)
-* slack: Add handling of reactions, stars and pins (#229)
+- general: Add UPDATELASTVIEWED command, and make DisableAutoView work consistently (#255)
+- slack: Handle message edits and deletion (#260)
+- slack: Add handling of reactions, stars and pins (#229)
 
 ## Bugfix
 
-* mattermost: Fix a panic #247
-* mattermost: Fixes incorrect users because of paging. #244
-* mattermost: Fix outdated channel issue
-* mattermost: Add paging so we can see > 200 users in a channel #248
-* mattermost: Fix expired session panic #259
-* general: Fix datarace #246
-* general: Fix empty JoinInclude
-* general: Fix panic #257
+- mattermost: Fix a panic #247
+- mattermost: Fixes incorrect users because of paging. #244
+- mattermost: Fix outdated channel issue
+- mattermost: Add paging so we can see > 200 users in a channel #248
+- mattermost: Fix expired session panic #259
+- general: Fix datarace #246
+- general: Fix empty JoinInclude
+- general: Fix panic #257
 
 This release couldn't exist without the following contributors:
 @Aketzu, @bucko909, @42wim
 
 # v0.19.2
+
 ## Enhancement
-* general: Add a default value matterirc.toml for the '-conf' flag (#240)
-* slack: library updated
-* mattermost: library updated
-* mattermost: Add support for channel created/deleted events
+
+- general: Add a default value matterirc.toml for the '-conf' flag (#240)
+- slack: library updated
+- mattermost: library updated
+- mattermost: Add support for channel created/deleted events
 
 ## Bugfix
-* mattermost: Remove ourselves from the channel when removed in mattermost. Fixes #233
-* mattermost: Add/remove ourselves to the channel if we join using the GUI. #239
-* mattermost: Update topics in mattermost. Closes #241
-* mattermost: Fix pastes and attachments in direct message. Closes #228
-* mattermost: Update channels if not known on join yet
+
+- mattermost: Remove ourselves from the channel when removed in mattermost. Fixes #233
+- mattermost: Add/remove ourselves to the channel if we join using the GUI. #239
+- mattermost: Update topics in mattermost. Closes #241
+- mattermost: Fix pastes and attachments in direct message. Closes #228
+- mattermost: Update channels if not known on join yet
 
 # v0.19.1
+
 ## New features
-* mattermost: Added support for disabling of automatic view flag updates (#226). See DisableAutoView in matterircd.toml.example
-* slack: Add message showing enhancements and add slackbot to all channels (#230)
+
+- mattermost: Added support for disabling of automatic view flag updates (#226). See DisableAutoView in matterircd.toml.example
+- slack: Add message showing enhancements and add slackbot to all channels (#230)
 
 ## Bugfix
-* general: Fix tight loop (100% CPU). Closes #231
+
+- general: Fix tight loop (100% CPU). Closes #231
 
 # v0.19.0
+
 ## New features
-* irc: Add support for spoofing query messages. #195
-	* You can now see your own messages you've typed on slack/mattermost web in irc
-* irc: Add PasteBufferTimeout option (send ascii-art!)
-   	* See matterircd.toml.example for an example.
-   	* PasteBufferTimeout specifies the amount of time in milliseconds that messages get kept in matterircd internal buffer before being sent to
-   	 mattermost or slack.  Messages that will be received in this time will be concatenated together
-   	 So this can be used to paste stuff like ascii-art or code.
-   	 Default 0 (is disabled)
-   	 Depending on how fast you type 2500 is a good number
+
+- irc: Add support for spoofing query messages. #195
+  - You can now see your own messages you've typed on slack/mattermost web in irc
+- irc: Add PasteBufferTimeout option (send ascii-art!)
+  _ See matterircd.toml.example for an example.
+  _ PasteBufferTimeout specifies the amount of time in milliseconds that messages get kept in matterircd internal buffer before being sent to
+  mattermost or slack. Messages that will be received in this time will be concatenated together
+  So this can be used to paste stuff like ascii-art or code.
+  Default 0 (is disabled)
+  Depending on how fast you type 2500 is a good number
 
 ## Bugfix
-* slack: Correctly handle different nick and username #203
-* slack: Ignore channel join messages #198
+
+- slack: Correctly handle different nick and username #203
+- slack: Ignore channel join messages #198
 
 # v0.18.4
+
 ## Bugfix
-* general: fix cli args not override configuration file #205
-* mattermost: support multi DM-groups correctly #209
-* mattermost: add correct support for personal tokens #208
-     `Use /msg mattermost login <server> <team> <login> token=<yourtoken>`
-* mattermost: Fix JoinInclude / JoinExclude logic when joining/parting channels. Also support #team/channel
-* mattermost: Fix issue with empty channelname
-* mattermost: Fix re-login on session expiry
+
+- general: fix cli args not override configuration file #205
+- mattermost: support multi DM-groups correctly #209
+- mattermost: add correct support for personal tokens #208
+  `Use /msg mattermost login <server> <team> <login> token=<yourtoken>`
+- mattermost: Fix JoinInclude / JoinExclude logic when joining/parting channels. Also support #team/channel
+- mattermost: Fix issue with empty channelname
+- mattermost: Fix re-login on session expiry
 
 # v0.18.3
+
 ## Bugfix
-* slack: api changed, show uploaded files again
+
+- slack: api changed, show uploaded files again
 
 Because of changes in slack API and the forced use of pagination, big channels with lots of users can take a while to load.
 
 # v0.18.2
+
 ## Bugfix
-* slack: fix panic on websocket bug #189, #196
+
+- slack: fix panic on websocket bug #189, #196
 
 # v0.18.1
+
 ## New features
-* mattermost: support mattermost 5.x
+
+- mattermost: support mattermost 5.x
 
 # v0.18.0
+
 ## New features
-* general: Add debugmode true/false message in banner
-* irc: Add PrefixMainTeam setting. Also set the main team name as prefix in the irc-channel. See matterircd.toml.example
-* slack: Add support for login <team> <user> <pass> for slack (as addition to login <token>)
+
+- general: Add debugmode true/false message in banner
+- irc: Add PrefixMainTeam setting. Also set the main team name as prefix in the irc-channel. See matterircd.toml.example
+- slack: Add support for login <team> <user> <pass> for slack (as addition to login <token>)
 
 ## Bugfix
-* mattermost: update channels when adding/removing users to new channel. Alsso join channel when we are added. Closes 42wim/matterircd#178
-* irc: fix NAMES reply to send entire member list 
-* irc: Use service for on-join topic changes (instead of your own username)
-* irc: Handle \r, ACTION and colour sanitization everywhere
-* irc: Fix concurrent map read/write. Closes 42wim/matterircd#188
-* slack: Make sure to return for not implemented functions in slack. Closes 42wim/matterircd#186
-* slack: Replace spaces to underscore in botnames. Closes 42wim/matterircd#184
+
+- mattermost: update channels when adding/removing users to new channel. Alsso join channel when we are added. Closes 42wim/matterircd#178
+- irc: fix NAMES reply to send entire member list
+- irc: Use service for on-join topic changes (instead of your own username)
+- irc: Handle \r, ACTION and colour sanitization everywhere
+- irc: Fix concurrent map read/write. Closes 42wim/matterircd#188
+- slack: Make sure to return for not implemented functions in slack. Closes 42wim/matterircd#186
+- slack: Replace spaces to underscore in botnames. Closes 42wim/matterircd#184
 
 # v0.17.3
+
 ## Bugfix
-* slack: Fix issues with bots with spaces in the name
-* mattermost: Actually join/remove users to channel when they join, not when they say something #113
-* mattermost: Join/remove users when they're added by someone else. Use a system message to show this #175
+
+- slack: Fix issues with bots with spaces in the name
+- mattermost: Actually join/remove users to channel when they join, not when they say something #113
+- mattermost: Join/remove users when they're added by someone else. Use a system message to show this #175
 
 # v0.17.2
+
 ## Bugfix
-* mattermost: Fix message looping issue
+
+- mattermost: Fix message looping issue
 
 # v0.17.1
+
 ## New features
-* general: enable login via irc PASS command during handshake instead of PRIVMSG 
+
+- general: enable login via irc PASS command during handshake instead of PRIVMSG
 
 ## Bugfix
-* mattermost: Update GetFileLinks to API_V4
-* slack/mattermost: Fix issue with matterircd users not being able to chat to eachother
-* slack: Do not join channels for single direct messages (slack)
-* slack: Split fallback messages on newline (slack)
+
+- mattermost: Update GetFileLinks to API_V4
+- slack/mattermost: Fix issue with matterircd users not being able to chat to eachother
+- slack: Do not join channels for single direct messages (slack)
+- slack: Split fallback messages on newline (slack)
 
 # v0.17.0
+
 ## New features
-* general: mattermost configuration settings need to be migrated to `[mattermost]` settings. See matterircd.toml.example
-* slack: Add BlackListUser config setting. Blacklist users from connecting to slack. See matterircd.toml.example
-* slack: Add JoinMpImOnTalk config setting. Only join MultiPerson IM when someone talks. See mattericd.toml.example 
-* slack: Add Restrict config setting. Only allowed to connect to specified slack teams. See matterircd.toml.example
-* slack: Add UseDisplayName config setting. If displayname is set, the message will be prepended with `<displayname>`. See matterircd.toml.example
-* slack: also show messages from bots
-* slack: reconnect on disconnects
+
+- general: mattermost configuration settings need to be migrated to `[mattermost]` settings. See matterircd.toml.example
+- slack: Add BlackListUser config setting. Blacklist users from connecting to slack. See matterircd.toml.example
+- slack: Add JoinMpImOnTalk config setting. Only join MultiPerson IM when someone talks. See mattericd.toml.example
+- slack: Add Restrict config setting. Only allowed to connect to specified slack teams. See matterircd.toml.example
+- slack: Add UseDisplayName config setting. If displayname is set, the message will be prepended with `<displayname>`. See matterircd.toml.example
+- slack: also show messages from bots
+- slack: reconnect on disconnects
 
 ## Bugfix
-* &users join speedup on teams with massive amount of users (tested on 26k users)
-* Only allow 1 login/logout in progress
-* slack: Fix on-join race condition
-* slack: Always add yourself to your channels (fixes problem with > 500 users channels)
-* slack: remove carriage returns from topic
-* slack: Autojoin new channel/group when invited
-* slack: Join MpIm channel if we haven't joined it yet
+
+- &users join speedup on teams with massive amount of users (tested on 26k users)
+- Only allow 1 login/logout in progress
+- slack: Fix on-join race condition
+- slack: Always add yourself to your channels (fixes problem with > 500 users channels)
+- slack: remove carriage returns from topic
+- slack: Autojoin new channel/group when invited
+- slack: Join MpIm channel if we haven't joined it yet
 
 # v0.16.8
+
 ## Bugfix
-* Fix newlines in topic to client. Closes 42wim/matterircd#163
-* Remove double part messages. Closes 42wim/matterircd#156
-* mattermost: Fix away (mattermost). Closes 42wim/matterircd#165
-* slack: Look into attachments if message is empty (slack). Fixes 42wim/matterircd#160
+
+- Fix newlines in topic to client. Closes 42wim/matterircd#163
+- Remove double part messages. Closes 42wim/matterircd#156
+- mattermost: Fix away (mattermost). Closes 42wim/matterircd#165
+- slack: Look into attachments if message is empty (slack). Fixes 42wim/matterircd#160
 
 # v0.16.7
+
 ## Bugfix
-* mattermost: Update lastview every 60 second as antiIdle (mattermost). Closes 42wim/matterircd#147
-* slack: Make sure we only can execute comands if login is fully done. Closes 42wim/matterircd#154
-* slack: Add invite support (slack). Closes 42wim/matterircd#159
-* slack: Add list support (slack)
-* slack: Fix channel parts for private channels
-* slack: Add kick support (slack)
-* slack: Allow to mention yourself.. Closes 42wim/matterircd#157
+
+- mattermost: Update lastview every 60 second as antiIdle (mattermost). Closes 42wim/matterircd#147
+- slack: Make sure we only can execute comands if login is fully done. Closes 42wim/matterircd#154
+- slack: Add invite support (slack). Closes 42wim/matterircd#159
+- slack: Add list support (slack)
+- slack: Fix channel parts for private channels
+- slack: Add kick support (slack)
+- slack: Allow to mention yourself.. Closes 42wim/matterircd#157
 
 # v0.16.6
+
 ## Bugfix
-* Strip IRC colors. Closes 42wim/matterircd#149
-* slack: Replace mentions, channels, etc..  #13
-* slack: Use displayname if possible (instead of name)
-* slack: Enable LinkNames. (@here,@all) Closes 42wim/matterircd#152
-* slack: Add topic change support (slack). Closes 42wim/matterircd#151
-* mattermost: Print list of valid team names when team not found (42wim/matterbridge#390)
+
+- Strip IRC colors. Closes 42wim/matterircd#149
+- slack: Replace mentions, channels, etc.. #13
+- slack: Use displayname if possible (instead of name)
+- slack: Enable LinkNames. (@here,@all) Closes 42wim/matterircd#152
+- slack: Add topic change support (slack). Closes 42wim/matterircd#151
+- mattermost: Print list of valid team names when team not found (42wim/matterbridge#390)
 
 # v0.16.5
+
 ## New features
-* Add support for private channels in slack #142
+
+- Add support for private channels in slack #142
 
 ## Bugfix
-* Slack: fixes join/parts #143, #146
-* Slack: fixes away #144
+
+- Slack: fixes join/parts #143, #146
+- Slack: fixes away #144
 
 # v0.16.4
+
 ## Bugfix
-* Fix some messages going to &messages #140
+
+- Fix some messages going to &messages #140
 
 # v0.16.3
+
 ## Bugfix
-* Fix crash on /nick change when not logged in #141
+
+- Fix crash on /nick change when not logged in #141
 
 # v0.16.2
+
 ## Bugfix
-* Remove crash on channel lookup of private messages
+
+- Remove crash on channel lookup of private messages
 
 # v0.16.1
+
 ## Bugfix
-* Remove debug code which could cause a crash
-* Only append channel name to sender once in &messages
+
+- Remove debug code which could cause a crash
+- Only append channel name to sender once in &messages
 
 # v0.16.0
+
 ## New features
-* `-conf` option (for a config file). See https://github.com/42wim/matterircd/blob/master/matterircd.toml.example for an example. Thanks @slowbro for this PR.
-* New config file options
-   * JoinExclude: an array of channels that won't be joined on IRC.
+
+- `-conf` option (for a config file). See https://github.com/42wim/matterircd/blob/master/matterircd.toml.example for an example. Thanks @slowbro for this PR.
+- New config file options
+
+  - JoinExclude: an array of channels that won't be joined on IRC.
     Messages that get sent to unjoined channels (but you're joined on mattermost) will
     get sent to the &messages channel.
     You can still /JOIN exclude channels.
 
-    JoinExclude = ["#town-square","#boringchannel"]
+  JoinExclude = ["#town-square","#boringchannel"]
 
-    * JoinInclude: an array of channels that only will be joined on IRC.
+  - JoinInclude: an array of channels that only will be joined on IRC.
     If it's empty, it means all channels get joined (except those defined in JoinExclude)
     Messages that get sent to unjoined channels (but you're joined on mattermost) will
     get sent to the &messages channel.
 
-    JoinInclude = ["#devops"]
+  JoinInclude = ["#devops"]
 
-    * PartFake: a bool that defines if you do a /LEAVE or /PART on IRC it will also
+  - PartFake: a bool that defines if you do a /LEAVE or /PART on IRC it will also
     actually leave the channel on mattermost.
     Default false
 
-    PartFake = true
+  PartFake = true
 
-* don't log passwords used with 'mattermost' and 'slack'. Closes #73
+- don't log passwords used with 'mattermost' and 'slack'. Closes #73
 
 ## Bugfix
-* Already read messages are replayed again and again #130
-* Update to latest mattermost (4.6) libs
-* Deprecated flags `-bindinterface` and `-port` removed
+
+- Already read messages are replayed again and again #130
+- Update to latest mattermost (4.6) libs
+- Deprecated flags `-bindinterface` and `-port` removed
 
 # v0.15.0
+
 ## New features
-* Support mattermost 4.2 and higher (4.x) (use mattermost v4 API)
-* Add -mmskiptlsverify option to skip TLS certificate checks on mattermost
+
+- Support mattermost 4.2 and higher (4.x) (use mattermost v4 API)
+- Add -mmskiptlsverify option to skip TLS certificate checks on mattermost
 
 ## Enhancements
-* Display nickname, if set #120
-* Replace IRC parsing function with shellwords like function to allow for passwords with spaces. (#8)
+
+- Display nickname, if set #120
+- Replace IRC parsing function with shellwords like function to allow for passwords with spaces. (#8)
 
 # v0.14.0
+
 ## New features
-* Support mattermost 4.1
-* Add initial support for slack
+
+- Support mattermost 4.1
+- Add initial support for slack
 
 # v0.13.0
+
 ## New features
-* Support mattermost 4.0
+
+- Support mattermost 4.0
 
 ## Enhancement
-* Show slack attachments if they have a fallback/contain text
-* Show links even when public links are disabled #105
-* Edited messages now have "(edited)" appended
-* ```-bind ""``` now disables non-tls port-binding when you have ```-tlsbind``` specified #109
+
+- Show slack attachments if they have a fallback/contain text
+- Show links even when public links are disabled #105
+- Edited messages now have "(edited)" appended
+- `-bind ""` now disables non-tls port-binding when you have `-tlsbind` specified #109
 
 ## Bugfix
-* Long messages from mattermost will be split in multiple smaller messages #103
-* Fix join/leave messages for recent mattermost versions #113, #104
-* Ignore messages sent to &users #108 
-* Ignore posts that have a reaction (emoji) added #111
 
+- Long messages from mattermost will be split in multiple smaller messages #103
+- Fix join/leave messages for recent mattermost versions #113, #104
+- Ignore messages sent to &users #108
+- Ignore posts that have a reaction (emoji) added #111
 
 # v0.12.0
+
 (thanks to @recht matterircd fork)
+
 ## New features
-* Add KICK support
-* Add INVITE support
-* Also relay edited messages
+
+- Add KICK support
+- Add INVITE support
+- Also relay edited messages
 
 ## Enhancement
-* Show the original message/author after replied messages
-* Print timestamp of replayed messages
-* Faster startup (joining channels)
+
+- Show the original message/author after replied messages
+- Print timestamp of replayed messages
+- Faster startup (joining channels)
 
 ## Bugfix
-* Do not clear topic on empty /TOPIC command
-* Fix various possible panics
+
+- Do not clear topic on empty /TOPIC command
+- Fix various possible panics
 
 # v0.11.6
+
 ## New features
-* Support mattermost 3.10.0
+
+- Support mattermost 3.10.0
 
 # v0.11.5
+
 ## Bugfix
-* Fix crash #97
+
+- Fix crash #97
 
 # v0.11.4
+
 ## New features
-* Support mattermost 3.9.0
+
+- Support mattermost 3.9.0
+
 ## Enhancement
-* Use props instead of ZWSP to check if message comes from matterircd (no more spaces after messages from matterircd -> mattermost)
+
+- Use props instead of ZWSP to check if message comes from matterircd (no more spaces after messages from matterircd -> mattermost)
 
 # v0.11.3
-## New features
-* Support mattermost 3.7.0 and 3.8.0
-## Bugfix
-* Make public links (pasted images/attachments) work again
 
 ## New features
-* Add support for public links in SCROLLBACK and SEARCH
+
+- Support mattermost 3.7.0 and 3.8.0
+
+## Bugfix
+
+- Make public links (pasted images/attachments) work again
+
+## New features
+
+- Add support for public links in SCROLLBACK and SEARCH
 
 # v0.11.2
+
 ## Bugfix
-* Use correct status for /WHO #81
-* Fix ISON for misbehaving clients #78
+
+- Use correct status for /WHO #81
+- Fix ISON for misbehaving clients #78
 
 ## New features
-* Support mattermost 3.6.0
+
+- Support mattermost 3.6.0
 
 # v0.11.1
+
 ## Bugfix
-* Fix crash on new channel joins #77
-* Fix crash on channel join/leaves of other mattermost users #77
+
+- Fix crash on new channel joins #77
+- Fix crash on channel join/leaves of other mattermost users #77
 
 # v0.11.0
+
 ## New features
-* Support mattermost 3.5.0
+
+- Support mattermost 3.5.0

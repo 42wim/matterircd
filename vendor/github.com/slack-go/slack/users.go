@@ -17,29 +17,38 @@ const (
 
 // UserProfile contains all the information details of a given user
 type UserProfile struct {
-	FirstName             string                  `json:"first_name"`
-	LastName              string                  `json:"last_name"`
-	RealName              string                  `json:"real_name"`
-	RealNameNormalized    string                  `json:"real_name_normalized"`
-	DisplayName           string                  `json:"display_name"`
-	DisplayNameNormalized string                  `json:"display_name_normalized"`
-	Email                 string                  `json:"email"`
-	Skype                 string                  `json:"skype"`
-	Phone                 string                  `json:"phone"`
-	Image24               string                  `json:"image_24"`
-	Image32               string                  `json:"image_32"`
-	Image48               string                  `json:"image_48"`
-	Image72               string                  `json:"image_72"`
-	Image192              string                  `json:"image_192"`
-	ImageOriginal         string                  `json:"image_original"`
-	Title                 string                  `json:"title"`
-	BotID                 string                  `json:"bot_id,omitempty"`
-	ApiAppID              string                  `json:"api_app_id,omitempty"`
-	StatusText            string                  `json:"status_text,omitempty"`
-	StatusEmoji           string                  `json:"status_emoji,omitempty"`
-	StatusExpiration      int                     `json:"status_expiration"`
-	Team                  string                  `json:"team"`
-	Fields                UserProfileCustomFields `json:"fields"`
+	FirstName              string                              `json:"first_name"`
+	LastName               string                              `json:"last_name"`
+	RealName               string                              `json:"real_name"`
+	RealNameNormalized     string                              `json:"real_name_normalized"`
+	DisplayName            string                              `json:"display_name"`
+	DisplayNameNormalized  string                              `json:"display_name_normalized"`
+	Email                  string                              `json:"email"`
+	Skype                  string                              `json:"skype"`
+	Phone                  string                              `json:"phone"`
+	Image24                string                              `json:"image_24"`
+	Image32                string                              `json:"image_32"`
+	Image48                string                              `json:"image_48"`
+	Image72                string                              `json:"image_72"`
+	Image192               string                              `json:"image_192"`
+	Image512               string                              `json:"image_512"`
+	ImageOriginal          string                              `json:"image_original"`
+	Title                  string                              `json:"title"`
+	BotID                  string                              `json:"bot_id,omitempty"`
+	ApiAppID               string                              `json:"api_app_id,omitempty"`
+	StatusText             string                              `json:"status_text,omitempty"`
+	StatusEmoji            string                              `json:"status_emoji,omitempty"`
+	StatusEmojiDisplayInfo []UserProfileStatusEmojiDisplayInfo `json:"status_emoji_display_info,omitempty"`
+	StatusExpiration       int                                 `json:"status_expiration"`
+	Team                   string                              `json:"team"`
+	Fields                 UserProfileCustomFields             `json:"fields"`
+}
+
+type UserProfileStatusEmojiDisplayInfo struct {
+	EmojiName    string `json:"emoji_name"`
+	DisplayAlias string `json:"display_alias,omitempty"`
+	DisplayURL   string `json:"display_url,omitempty"`
+	Unicode      string `json:"unicode,omitempty"`
 }
 
 // UserProfileCustomFields represents user profile's custom fields.
@@ -121,6 +130,7 @@ type User struct {
 	IsAppUser         bool           `json:"is_app_user"`
 	IsInvitedUser     bool           `json:"is_invited_user"`
 	Has2FA            bool           `json:"has_2fa"`
+	TwoFactorType     *string        `json:"two_factor_type"`
 	HasFiles          bool           `json:"has_files"`
 	Presence          string         `json:"presence"`
 	Locale            string         `json:"locale"`
@@ -291,6 +301,13 @@ func GetUsersOptionPresence(n bool) GetUsersOption {
 	}
 }
 
+// GetUsersOptionTeamID include team Id
+func GetUsersOptionTeamID(teamId string) GetUsersOption {
+	return func(p *UserPagination) {
+		p.teamId = teamId
+	}
+}
+
 func newUserPagination(c *Client, options ...GetUsersOption) (up UserPagination) {
 	up = UserPagination{
 		c:     c,
@@ -309,6 +326,7 @@ type UserPagination struct {
 	Users        []User
 	limit        int
 	presence     bool
+	teamId       string
 	previousResp *ResponseMetadata
 	c            *Client
 }
@@ -343,6 +361,7 @@ func (t UserPagination) Next(ctx context.Context) (_ UserPagination, err error) 
 		"presence":       {strconv.FormatBool(t.presence)},
 		"token":          {t.c.token},
 		"cursor":         {t.previousResp.Cursor},
+		"team_id":        {t.teamId},
 		"include_locale": {strconv.FormatBool(true)},
 	}
 
@@ -363,13 +382,13 @@ func (api *Client) GetUsersPaginated(options ...GetUsersOption) UserPagination {
 }
 
 // GetUsers returns the list of users (with their detailed information)
-func (api *Client) GetUsers() ([]User, error) {
-	return api.GetUsersContext(context.Background())
+func (api *Client) GetUsers(options ...GetUsersOption) ([]User, error) {
+	return api.GetUsersContext(context.Background(), options...)
 }
 
 // GetUsersContext returns the list of users (with their detailed information) with a custom context
-func (api *Client) GetUsersContext(ctx context.Context) (results []User, err error) {
-	p := api.GetUsersPaginated()
+func (api *Client) GetUsersContext(ctx context.Context, options ...GetUsersOption) (results []User, err error) {
+	p := api.GetUsersPaginated(options...)
 	for err == nil {
 		p, err = p.Next(ctx)
 		if err == nil {
@@ -468,9 +487,7 @@ func (api *Client) SetUserPhoto(image string, params UserSetPhotoParams) error {
 // SetUserPhotoContext changes the currently authenticated user's profile image using a custom context
 func (api *Client) SetUserPhotoContext(ctx context.Context, image string, params UserSetPhotoParams) (err error) {
 	response := &SlackResponse{}
-	values := url.Values{
-		"token": {api.token},
-	}
+	values := url.Values{}
 	if params.CropX != DEFAULT_USER_PHOTO_CROP_X {
 		values.Add("crop_x", strconv.Itoa(params.CropX))
 	}
@@ -481,7 +498,7 @@ func (api *Client) SetUserPhotoContext(ctx context.Context, image string, params
 		values.Add("crop_w", strconv.Itoa(params.CropW))
 	}
 
-	err = postLocalWithMultipartResponse(ctx, api.httpclient, api.endpoint+"users.setPhoto", image, "image", values, response, api)
+	err = postLocalWithMultipartResponse(ctx, api.httpclient, api.endpoint+"users.setPhoto", image, "image", api.token, values, response, api)
 	if err != nil {
 		return err
 	}
@@ -546,6 +563,55 @@ func (api *Client) SetUserRealNameContextWithUser(ctx context.Context, user, rea
 	}
 
 	return response.Err()
+}
+
+// SetUserCustomFields sets Custom Profile fields on the provided users account.  Due to the non-repeating elements
+// within the request, a map fields is required.  The key in the map signifies the field that will be updated.
+//
+// Note: You may need to change the way the custom field is populated within the Profile section of the Admin Console from
+// SCIM or User Entered to API.
+//
+// See GetTeamProfile for information to retrieve possible fields for your account.
+func (api *Client) SetUserCustomFields(userID string, customFields map[string]UserProfileCustomField) error {
+	return api.SetUserCustomFieldsContext(context.Background(), userID, customFields)
+}
+
+// SetUserCustomFieldsContext will set a users custom profile field with context.
+//
+// For more information see SetUserCustomFields
+func (api *Client) SetUserCustomFieldsContext(ctx context.Context, userID string, customFields map[string]UserProfileCustomField) error {
+
+	// Convert data to data type with custom marshall / unmarshall
+	// For more information, see UserProfileCustomFields definition.
+	updateFields := UserProfileCustomFields{}
+	updateFields.SetMap(customFields)
+
+	// This anonymous struct is needed to set the fields level of the request data.  The base struct for
+	// UserProfileCustomFields has an unexported variable named fields that does not contain a struct tag,
+	// which has resulted in this configuration.
+	profile, err := json.Marshal(&struct {
+		Fields UserProfileCustomFields `json:"fields"`
+	}{
+		Fields: updateFields,
+	})
+
+	if err != nil {
+		return err
+	}
+
+	values := url.Values{
+		"token":   {api.token},
+		"user":    {userID},
+		"profile": {string(profile)},
+	}
+
+	response := &userResponseFull{}
+	if err := postForm(ctx, api.httpclient, APIURL+"users.profile.set", values, response, api); err != nil {
+		return err
+	}
+
+	return response.Err()
+
 }
 
 // SetUserCustomStatus will set a custom status and emoji for the currently
@@ -631,9 +697,15 @@ func (api *Client) UnsetUserCustomStatusContext(ctx context.Context) error {
 	return api.SetUserCustomStatusContext(ctx, "", "", 0)
 }
 
+// GetUserProfileParameters are the parameters required to get user profile
+type GetUserProfileParameters struct {
+	UserID        string
+	IncludeLabels bool
+}
+
 // GetUserProfile retrieves a user's profile information.
-func (api *Client) GetUserProfile(userID string, includeLabels bool) (*UserProfile, error) {
-	return api.GetUserProfileContext(context.Background(), userID, includeLabels)
+func (api *Client) GetUserProfile(params *GetUserProfileParameters) (*UserProfile, error) {
+	return api.GetUserProfileContext(context.Background(), params)
 }
 
 type getUserProfileResponse struct {
@@ -642,9 +714,13 @@ type getUserProfileResponse struct {
 }
 
 // GetUserProfileContext retrieves a user's profile information with a context.
-func (api *Client) GetUserProfileContext(ctx context.Context, userID string, includeLabels bool) (*UserProfile, error) {
-	values := url.Values{"token": {api.token}, "user": {userID}}
-	if includeLabels {
+func (api *Client) GetUserProfileContext(ctx context.Context, params *GetUserProfileParameters) (*UserProfile, error) {
+	values := url.Values{"token": {api.token}}
+
+	if params.UserID != "" {
+		values.Add("user", params.UserID)
+	}
+	if params.IncludeLabels {
 		values.Add("include_labels", "true")
 	}
 	resp := &getUserProfileResponse{}

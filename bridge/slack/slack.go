@@ -9,7 +9,8 @@ import (
 
 	"github.com/42wim/matterircd/bridge"
 	"github.com/davecgh/go-spew/spew"
-	logger "github.com/sirupsen/logrus"
+	prefixed "github.com/matterbridge/logrus-prefixed-formatter"
+	"github.com/sirupsen/logrus"
 	"github.com/slack-go/slack"
 	"github.com/spf13/viper"
 )
@@ -24,9 +25,12 @@ type Slack struct {
 	credentials  bridge.Credentials
 	eventChan    chan *bridge.Event
 	onConnect    func()
+	msgLast      map[string]string
 	sync.RWMutex
 	v *viper.Viper
 }
+
+var logger *logrus.Entry
 
 func New(v *viper.Viper, cred bridge.Credentials, eventChan chan *bridge.Event, onConnect func()) (bridge.Bridger, error) {
 	s := &Slack{
@@ -38,19 +42,26 @@ func New(v *viper.Viper, cred bridge.Credentials, eventChan chan *bridge.Event, 
 
 	var err error
 
-	logger.SetFormatter(&logger.TextFormatter{FullTimestamp: true})
+	ourlog := logrus.New()
+	ourlog.SetFormatter(&prefixed.TextFormatter{
+		PrefixPadding: 13,
+		FullTimestamp: true,
+	})
+	logger = ourlog.WithFields(logrus.Fields{"prefix": "bridge/slack"})
 	if v.GetBool("debug") {
-		logger.SetLevel(logger.DebugLevel)
+		ourlog.SetLevel(logrus.DebugLevel)
 	}
 
 	if v.GetBool("trace") {
-		logger.SetLevel(logger.TraceLevel)
+		ourlog.SetLevel(logrus.TraceLevel)
 	}
 
 	s.sc, err = s.loginToSlack()
 	if err != nil {
 		return nil, err
 	}
+
+	s.msgLast = make(map[string]string)
 
 	users, _ := s.sc.GetUsers()
 	for _, mmuser := range users {
@@ -86,7 +97,7 @@ func (s *Slack) List() (map[string]string, error) {
 
 	params := slack.GetConversationsParameters{
 		Cursor:          "",
-		ExcludeArchived: "true",
+		ExcludeArchived: true,
 		Limit:           100,
 		Types:           []string{"public_channel", "private_channel", "mpim"},
 	}
@@ -142,6 +153,7 @@ func (s *Slack) Logout() error {
 func (s *Slack) createSlackMsgOption(text string) []slack.MsgOption {
 	np := slack.NewPostMessageParameters()
 	np.AsUser = true
+	np.Parse = "full"
 	// np.Username = u.User
 
 	var opts []slack.MsgOption
@@ -149,47 +161,52 @@ func (s *Slack) createSlackMsgOption(text string) []slack.MsgOption {
 		slack.MsgOptionPostMessageParameters(np),
 		// provide regular text field (fallback used in Slack notifications, etc.)
 		slack.MsgOptionText(text, false),
-
-		// add a callback ID so we can see we created it
-		slack.MsgOptionBlocks(slack.NewSectionBlock(
-			slack.NewTextBlockObject(slack.MarkdownType, text, false, false),
-			nil, nil,
-			slack.SectionBlockOptionBlockID("matterircd_"+s.sinfo.User.ID),
-		)),
 	)
 
 	return opts
 }
 
 func (s *Slack) MsgUser(username, text string) (string, error) {
-	_, _, dchannel, err := s.sc.OpenIMChannel(username)
+	dchannel, _, _, err := s.sc.OpenConversation(&slack.OpenConversationParameters{
+		Users: []string{username},
+	})
 	if err != nil {
 		return "", err
 	}
 
 	opts := s.createSlackMsgOption(text)
 
-	_, _, err = s.sc.PostMessage(dchannel, opts...)
+	_, msgID, err := s.sc.PostMessage(dchannel.ID, opts...)
 	if err != nil {
 		return "", err
 	}
 
-	return "", nil
+	s.RLock()
+	s.msgLast[dchannel.ID] = msgID
+	s.RUnlock()
+
+	return msgID, nil
 }
 
 func (s *Slack) MsgChannel(channelID, text string) (string, error) {
 	opts := s.createSlackMsgOption(text)
 
-	_, _, err := s.sc.PostMessage(strings.ToUpper(channelID), opts...)
+	_, msgID, err := s.sc.PostMessage(strings.ToUpper(channelID), opts...)
 	if err != nil {
 		return "", err
 	}
 
-	return "", nil
+	s.RLock()
+	s.msgLast[strings.ToUpper(channelID)] = msgID
+	s.RUnlock()
+
+	return msgID, nil
 }
 
 func (s *Slack) Topic(channelID string) string {
-	info, err := s.sc.GetConversationInfo(strings.ToUpper(channelID), false)
+	info, err := s.sc.GetConversationInfo(&slack.GetConversationInfoInput{
+		ChannelID: strings.ToUpper(channelID),
+	})
 	if err != nil {
 		logger.Errorf("error getting topic of %s: %s", channelID, err)
 		return ""
@@ -237,7 +254,9 @@ func (s *Slack) Nick(name string) error {
 func (s *Slack) GetChannelName(channelID string) string {
 	var name string
 
-	info, err := s.sc.GetConversationInfo(channelID, false)
+	info, err := s.sc.GetConversationInfo(&slack.GetConversationInfoInput{
+		ChannelID: channelID,
+	})
 	if err != nil {
 		name = channelID
 	} else {
@@ -252,7 +271,9 @@ func (s *Slack) GetChannelUsers(channelID string) ([]*bridge.UserInfo, error) {
 
 	limit := 100
 
-	info, err := s.sc.GetConversationInfo(channelID, false)
+	info, err := s.sc.GetConversationInfo(&slack.GetConversationInfoInput{
+		ChannelID: channelID,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -312,7 +333,7 @@ func (s *Slack) GetChannels() []*bridge.ChannelInfo {
 
 	params := slack.GetConversationsParameters{
 		Cursor:          "",
-		ExcludeArchived: "true",
+		ExcludeArchived: true,
 		Limit:           100,
 		Types:           []string{"public_channel", "private_channel", "mpim"},
 	}
@@ -401,6 +422,10 @@ func (s *Slack) SearchUsers(query string) ([]*bridge.UserInfo, error) {
 }
 
 func (s *Slack) GetPosts(channelID string, limit int) interface{} {
+	return nil
+}
+
+func (s *Slack) GetPostThread(channelID string) interface{} {
 	return nil
 }
 
@@ -529,21 +554,33 @@ func (s *Slack) handleSlack() {
 			s.handleActionMisc(ev.User, ev.Item.Channel, msg)
 		case *slack.StarAddedEvent:
 			logger.Debugf("StarAdded msg %#v", ev)
+			if ev.Item.Message == nil {
+				continue
+			}
 			ts := formatTS(ev.Item.Message.Timestamp)
 			msg := "[M " + ts + "] Message starred (" + ev.Item.Message.Text + ")"
 			s.handleActionMisc(ev.User, ev.Item.Channel, msg)
 		case *slack.StarRemovedEvent:
 			logger.Debugf("StarRemoved msg %#v", ev)
+			if ev.Item.Message == nil {
+				continue
+			}
 			ts := formatTS(ev.Item.Message.Timestamp)
 			msg := "[M " + ts + "] Message unstarred (" + ev.Item.Message.Text + ")"
 			s.handleActionMisc(ev.User, ev.Item.Channel, msg)
 		case *slack.PinAddedEvent:
 			logger.Debugf("PinAdded msg %#v", ev)
+			if ev.Item.Message == nil {
+				continue
+			}
 			ts := formatTS(ev.Item.Message.Timestamp)
 			msg := "[M " + ts + "] Message pinned (" + ev.Item.Message.Text + ")"
 			s.handleActionMisc(ev.User, ev.Item.Channel, msg)
 		case *slack.PinRemovedEvent:
 			logger.Debugf("PinRemoved msg %#v", ev)
+			if ev.Item.Message == nil {
+				continue
+			}
 			ts := formatTS(ev.Item.Message.Timestamp)
 			msg := "[M " + ts + "] Message unpinned (" + ev.Item.Message.Text + ")"
 			s.handleActionMisc(ev.User, ev.Item.Channel, msg)
@@ -630,22 +667,6 @@ func (s *Slack) handleMemberJoinedChannel(rmsg *slack.MemberJoinedChannelEvent) 
 	s.eventChan <- event
 }
 
-func (s *Slack) getBotname(rmsg *slack.MessageEvent) string {
-	botname := ""
-
-	if rmsg.User == "" && rmsg.BotID != "" {
-		botname = rmsg.Username
-		if botname == "" {
-			bot, _ := s.rtm.GetBotInfo(rmsg.BotID)
-			if bot.Name != "" {
-				botname = bot.Name
-			}
-		}
-	}
-
-	return botname
-}
-
 func (s *Slack) getSlackUserFromMessage(rmsg *slack.MessageEvent) (*slack.User, error) {
 	usr := rmsg.User
 	if rmsg.SubType == "message_changed" {
@@ -673,10 +694,10 @@ func (s *Slack) getSlackUserFromMessage(rmsg *slack.MessageEvent) (*slack.User, 
 			if err != nil {
 				suser.Profile.DisplayName = "bot"
 				suser.Name = "bot"
+			} else {
+				suser.Profile.DisplayName = bot.Name
+				suser.Name = bot.Name
 			}
-
-			suser.Profile.DisplayName = bot.Name
-			suser.Name = bot.Name
 		}
 
 		return suser, nil
@@ -725,19 +746,20 @@ func (s *Slack) sendPublicMessage(ghost *bridge.UserInfo, msg, channelID string)
 func (s *Slack) handleSlackActionPost(rmsg *slack.MessageEvent) {
 	logger.Debugf("handleSlackActionPost() receiving msg %#v", rmsg)
 
-	hasOurCallbackID := false
-	if len(rmsg.Blocks.BlockSet) == 1 {
-		block, ok := rmsg.Blocks.BlockSet[0].(*slack.SectionBlock)
-		hasOurCallbackID = ok && block.BlockID == "matterircd_"+s.sinfo.User.ID
-	}
+	// Is this our own message
+	if rmsg.User == s.sinfo.User.ID {
+		lastmsg := s.msgLast[rmsg.Channel]
 
-	if rmsg.SubMessage != nil && len(rmsg.SubMessage.Blocks.BlockSet) == 1 {
-		block, ok := rmsg.SubMessage.Blocks.BlockSet[0].(*slack.SectionBlock)
-		hasOurCallbackID = ok && block.BlockID == "matterircd_"+s.sinfo.User.ID
-	}
+		// Slack can be faster in sending new message than replying to POST
+		if lastmsg < rmsg.Timestamp {
+			time.Sleep(100 * time.Millisecond)
+			lastmsg = s.msgLast[rmsg.Channel]
+		}
 
-	if hasOurCallbackID {
-		return
+		// Is this really the message we just sent
+		if lastmsg == rmsg.Timestamp {
+			return
+		}
 	}
 
 	if rmsg.SubType == "message_deleted" {
@@ -947,4 +969,16 @@ func (s *Slack) MsgChannelThread(username, parentID, text string) (string, error
 
 func (s *Slack) ModifyPost(channelID, text string) error {
 	return nil
+}
+
+func (s *Slack) AddReaction(msgID, emoji string) error {
+	return nil
+}
+
+func (s *Slack) RemoveReaction(msgID, emoji string) error {
+	return nil
+}
+
+func (s *Slack) GetLastSentMsgs() []string {
+	return []string{}
 }

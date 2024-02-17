@@ -1,30 +1,23 @@
 # Markdown Parser and HTML Renderer for Go
 
-[![GoDoc](https://godoc.org/github.com/gomarkdown/markdown?status.svg)](https://godoc.org/github.com/gomarkdown/markdown) [![codecov](https://codecov.io/gh/gomarkdown/markdown/branch/master/graph/badge.svg)](https://codecov.io/gh/gomarkdown/markdown)
+[![pkg.go.dev](https://pkg.go.dev/badge/github.com/gomarkdown/markdown)](https://pkg.go.dev/github.com/gomarkdown/markdown)
 
-Package `github.com/gomarkdown/markdown` is a very fast Go library for parsing [Markdown](https://daringfireball.net/projects/markdown/) documents and rendering them to HTML.
+Package `github.com/gomarkdown/markdown` is a Go library for parsing Markdown text and rendering as HTML.
 
-It's fast and supports common extensions.
+It's very fast and supports common extensions.
+
+Try code examples online: https://replit.com/@kjk1?path=folder/gomarkdown
 
 ## API Docs:
 
-- https://godoc.org/github.com/gomarkdown/markdown : top level package
-- https://godoc.org/github.com/gomarkdown/markdown/ast : defines abstract syntax tree of parsed markdown document
-- https://godoc.org/github.com/gomarkdown/markdown/parser : parser
-- https://godoc.org/github.com/gomarkdown/markdown/html : html renderer
+- https://pkg.go.dev/github.com/gomarkdown/markdown : top level package
+- https://pkg.go.dev/github.com/gomarkdown/markdown/ast : defines abstract syntax tree of parsed markdown document
+- https://pkg.go.dev/github.com/gomarkdown/markdown/parser : parser
+- https://pkg.go.dev/github.com/gomarkdown/markdown/html : html renderer
 
 ## Users
 
-Some tools using this package:
-
-- https://github.com/MichaelMure/go-term-markdown : markdown renderer for the terminal
-- https://github.com/artyom/mdserver : web server that serves markdown files
-- https://github.com/rsdoiel/mkpage : content management system generating static websites
-- https://github.com/cugu/dashboard : creates a badge dashboard from a yaml file
-- https://github.com/ieyasu/go-bwiki : simple wiki
-- https://github.com/romanyx/mdopen : view markdown files in the default browser
-- https://github.com/ystyle/sqlmanager : a library for manager sql with markdown like beetsql
-- https://gitlab.com/kendellfab/fazer : library for making templates
+Some tools using this package: https://pkg.go.dev/github.com/gomarkdown/markdown?tab=importedby
 
 ## Usage
 
@@ -35,11 +28,13 @@ md := []byte("## markdown document")
 output := markdown.ToHTML(md, nil, nil)
 ```
 
+Try it online: https://replit.com/@kjk1/gomarkdown-basic
+
 ## Customizing markdown parser
 
 Markdown format is loosely specified and there are multiple extensions invented after original specification was created.
 
-The parser supports several [extensions](https://godoc.org/github.com/gomarkdown/markdown/parser#Extensions).
+The parser supports several [extensions](https://pkg.go.dev/github.com/gomarkdown/markdown/parser#Extensions).
 
 Default parser uses most common `parser.CommonExtensions` but you can easily use parser with custom extension:
 
@@ -56,9 +51,11 @@ md := []byte("markdown text")
 html := markdown.ToHTML(md, parser, nil)
 ```
 
+Try it online: https://replit.com/@kjk1/gomarkdown-customized-html-renderer
+
 ## Customizing HTML renderer
 
-Similarly, HTML renderer can be configured with different [options](https://godoc.org/github.com/gomarkdown/markdown/html#RendererOptions)
+Similarly, HTML renderer can be configured with different [options](https://pkg.go.dev/github.com/gomarkdown/markdown/html#RendererOptions)
 
 Here's how to use a custom renderer:
 
@@ -76,9 +73,11 @@ md := []byte("markdown text")
 html := markdown.ToHTML(md, nil, renderer)
 ```
 
-HTML renderer also supports reusing most of the logic and overriding rendering of only specifc nodes.
+Try it online: https://replit.com/@kjk1/gomarkdown-customized-html-renderer
 
-You can provide [RenderNodeFunc](https://godoc.org/github.com/gomarkdown/markdown/html#RenderNodeFunc) in [RendererOptions](https://godoc.org/github.com/gomarkdown/markdown/html#RendererOptions).
+HTML renderer also supports reusing most of the logic and overriding rendering of only specific nodes.
+
+You can provide [RenderNodeFunc](https://pkg.go.dev/github.com/gomarkdown/markdown/html#RenderNodeFunc) in [RendererOptions](https://pkg.go.dev/github.com/gomarkdown/markdown/html#RendererOptions).
 
 The function is called for each node in AST, you can implement custom rendering logic and tell HTML renderer to skip rendering this node.
 
@@ -129,6 +128,12 @@ import (
 maybeUnsafeHTML := markdown.ToHTML(md, nil, nil)
 html := bluemonday.UGCPolicy().SanitizeBytes(maybeUnsafeHTML)
 ```
+
+## Windows / Mac newlines
+
+The library only supports Unix newlines. If you have markdown text with possibly
+Windows / Mac newlines, normalize newlines before calling this library using
+`d = markdown.NormalizeNewlines(d)`
 
 ## mdtohtml command-line tool
 
@@ -207,6 +212,18 @@ implements the following extensions:
   Total   | 50
   ```
 
+  A cell spanning multiple columns (colspan) is supported, just repeat the pipe symbol:
+
+  ```
+  Name    | Age
+  --------|------
+  Bob     ||
+  Alice   | 23
+  ========|======
+  Total   | 23
+  ```
+
+
 - **Fenced code blocks**. In addition to the normal 4-space
   indentation to mark code blocks, you can explicitly mark them
   and supply a language (to make syntax highlighting simple). Just
@@ -247,10 +264,10 @@ implements the following extensions:
   should be crossed out.
 
 - **Hard line breaks**. With this extension enabled newlines in the input
-  translate into line breaks in the output. This extension is off by default.
+  translates into line breaks in the output. This extension is off by default.
 
-- **Non blocking space**. With this extension enabled spaces preceeded by an backslash n the input
-  translate non-blocking spaces in the output. This extension is off by default.
+- **Non blocking space**. With this extension enabled spaces preceeded by a backslash
+  in the input translates non-blocking spaces in the output. This extension is off by default.
 
 - **Smart quotes**. Smartypants-style punctuation substitution is
   supported, turning normal double- and single-quote marks into
@@ -269,9 +286,9 @@ implements the following extensions:
   <sup>4</sup>&frasl;<sub>5</sub>.
 
 - **MathJaX Support** is an additional feature which is supported by
-  many markdown editor. It translate inline math equation quoted by `$`
-  and display math block quoted by `$$` into MathJax compatible format.
-  hyphen `_` won't break LaTeX render within a math element any more.
+  many markdown editor. It translates inline math equations quoted by `$`
+  and displays math blocks quoted by `$$` into MathJax compatible format.
+  Hyphens (`_`) won't break LaTeX render within a math element any more.
 
   ```
   $$
@@ -287,13 +304,13 @@ implements the following extensions:
    $$
   ```
 
-- **Ordered list start number**. With this extension enabled an ordered list will start with the
+- **Ordered list start number**. With this extension enabled an ordered list will start with
   the number that was used to start it.
 
 - **Super and subscript**. With this extension enabled sequences between ^ will indicate
   superscript and ~ will become a subscript. For example: H~2~O is a liquid, 2^10^ is 1024.
 
-- **Block level attributes**, allow setting attributes (ID, classes and key/value pairs) on block
+- **Block level attributes** allow setting attributes (ID, classes and key/value pairs) on block
   level elements. The attribute must be enclosed with braces and be put on a line before the
   element.
 

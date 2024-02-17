@@ -57,12 +57,14 @@ type authTestResponseFull struct {
 type ParamOption func(*url.Values)
 
 type Client struct {
-	token         string
-	appLevelToken string
-	endpoint      string
-	debug         bool
-	log           ilogger
-	httpclient    httpClient
+	token              string
+	appLevelToken      string
+	configToken        string
+	configRefreshToken string
+	endpoint           string
+	debug              bool
+	log                ilogger
+	httpclient         httpClient
 }
 
 // Option defines an option for a Client
@@ -97,6 +99,16 @@ func OptionAPIURL(u string) func(*Client) {
 // OptionAppLevelToken sets an app-level token for the client.
 func OptionAppLevelToken(token string) func(*Client) {
 	return func(c *Client) { c.appLevelToken = token }
+}
+
+// OptionConfigToken sets a configuration token for the client.
+func OptionConfigToken(token string) func(*Client) {
+	return func(c *Client) { c.configToken = token }
+}
+
+// OptionConfigRefreshToken sets a configuration refresh token for the client.
+func OptionConfigRefreshToken(token string) func(*Client) {
+	return func(c *Client) { c.configRefreshToken = token }
 }
 
 // New builds a slack client from the provided token and options.
@@ -157,6 +169,6 @@ func (api *Client) postMethod(ctx context.Context, path string, values url.Value
 }
 
 // get a slack web method.
-func (api *Client) getMethod(ctx context.Context, path string, values url.Values, intf interface{}) error {
-	return getResource(ctx, api.httpclient, api.endpoint+path, values, intf, api)
+func (api *Client) getMethod(ctx context.Context, path string, token string, values url.Values, intf interface{}) error {
+	return getResource(ctx, api.httpclient, api.endpoint+path, token, values, intf, api)
 }

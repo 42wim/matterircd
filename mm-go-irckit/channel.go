@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mattermost/mattermost-server/v5/model"
+	"github.com/mattermost/mattermost-server/v6/model"
 	"github.com/muesli/reflow/wordwrap"
 	"github.com/sorcix/irc"
 )
@@ -67,10 +67,10 @@ type Channel interface {
 	String() string
 
 	// Spoof message
-	SpoofMessage(from string, text string)
+	SpoofMessage(from string, text string, maxlen ...int)
 
 	// Spoof notice
-	SpoofNotice(from string, text string)
+	SpoofNotice(from string, text string, maxlen ...int)
 
 	IsPrivate() bool
 }
@@ -131,16 +131,12 @@ func (ch *channel) Message(from *User, text string) {
 	text = wordwrap.String(text, 440)
 	lines := strings.Split(text, "\n")
 	for _, l := range lines {
-		l = strings.TrimSpace(l)
-		if len(l) == 0 {
-			continue
-		}
-
 		msg := &irc.Message{
-			Prefix:   from.Prefix(),
-			Command:  irc.PRIVMSG,
-			Params:   []string{ch.name},
-			Trailing: l + "\n",
+			Prefix:        from.Prefix(),
+			Command:       irc.PRIVMSG,
+			Params:        []string{ch.name},
+			Trailing:      l,
+			EmptyTrailing: true,
 		}
 
 		ch.mu.RLock()
@@ -344,8 +340,6 @@ func (ch *channel) Join(u *User) error {
 		return nil
 	}
 
-	topic := ch.topic
-
 	ch.usersIdx[u.ID()] = u
 
 	ch.mu.Unlock()
@@ -378,20 +372,9 @@ func (ch *channel) Join(u *User) error {
 
 	ch.mu.RUnlock()
 
-	msgs := []*irc.Message{}
-
-	if topic != "" {
-		msgs = append(msgs, &irc.Message{
-			Prefix:   ch.Prefix(),
-			Command:  irc.RPL_TOPIC,
-			Params:   []string{u.Nick, ch.name},
-			Trailing: topic,
-		})
-	}
-
 	ch.SendNamesResponse(u)
 
-	return u.Encode(msgs...)
+	return nil
 }
 
 func (ch *channel) HasUser(u *User) bool {
@@ -424,7 +407,7 @@ func (ch *channel) Names() []string {
 	names := make([]string, 0, len(users))
 
 	for _, u := range users {
-		if strings.Contains(u.Roles, model.SYSTEM_ADMIN_ROLE_ID) {
+		if strings.Contains(u.Roles, model.SystemAdminRoleId) {
 			names = append(names, "@"+u.Nick)
 		} else {
 			names = append(names, u.Nick)
@@ -445,24 +428,24 @@ func (ch *channel) Len() int {
 	return len(ch.usersIdx)
 }
 
-func (ch *channel) Spoof(from string, text string, cmd string) {
-	text = wordwrap.String(text, 440)
+func (ch *channel) Spoof(from string, text string, cmd string, maxlen ...int) {
+	if len(maxlen) == 0 {
+		text = wordwrap.String(text, 440)
+	} else {
+		text = wordwrap.String(text, maxlen[0])
+	}
 	lines := strings.Split(text, "\n")
-
 	for _, l := range lines {
-		l = strings.TrimSpace(l)
-		if len(l) == 0 {
-			continue
-		}
-
 		msg := &irc.Message{
-			Prefix:   &irc.Prefix{Name: from, User: from, Host: from},
-			Command:  cmd,
-			Params:   []string{ch.name},
-			Trailing: l + "\n",
+			Prefix:        &irc.Prefix{Name: from, User: from, Host: from},
+			Command:       cmd,
+			Params:        []string{ch.name},
+			Trailing:      l,
+			EmptyTrailing: true,
 		}
 
 		ch.mu.RLock()
+
 		for _, to := range ch.usersIdx {
 			to.Encode(msg)
 		}
@@ -471,12 +454,20 @@ func (ch *channel) Spoof(from string, text string, cmd string) {
 	}
 }
 
-func (ch *channel) SpoofMessage(from string, text string) {
-	ch.Spoof(from, text, irc.PRIVMSG)
+func (ch *channel) SpoofMessage(from string, text string, maxlen ...int) {
+	if len(maxlen) == 0 {
+		ch.Spoof(from, text, irc.PRIVMSG, 440)
+	} else {
+		ch.Spoof(from, text, irc.PRIVMSG, maxlen[0])
+	}
 }
 
-func (ch *channel) SpoofNotice(from string, text string) {
-	ch.Spoof(from, text, irc.NOTICE)
+func (ch *channel) SpoofNotice(from string, text string, maxlen ...int) {
+	if len(maxlen) == 0 {
+		ch.Spoof(from, text, irc.NOTICE, 440)
+	} else {
+		ch.Spoof(from, text, irc.NOTICE, maxlen[0])
+	}
 }
 
 func (ch *channel) IsPrivate() bool {

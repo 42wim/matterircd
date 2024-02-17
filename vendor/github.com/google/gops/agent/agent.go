@@ -12,10 +12,10 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net"
 	"os"
 	gosignal "os/signal"
+	"path/filepath"
 	"runtime"
 	"runtime/debug"
 	"runtime/pprof"
@@ -58,7 +58,7 @@ type Options struct {
 	ShutdownCleanup bool
 
 	// ReuseSocketAddrAndPort determines whether the SO_REUSEADDR and
-	// SO_REUSEADDR socket options should be set on the listening socket of
+	// SO_REUSEPORT socket options should be set on the listening socket of
 	// the agent. This option is only effective on unix-like OSes and if
 	// Addr is set to a fixed host:port.
 	// Optional.
@@ -106,27 +106,27 @@ func Listen(opts Options) error {
 	}
 	var lc net.ListenConfig
 	if opts.ReuseSocketAddrAndPort {
-		lc.Control = setsockoptReuseAddrAndPort
+		lc.Control = setReuseAddrAndPortSockopts
 	}
 	listener, err = lc.Listen(context.Background(), "tcp", addr)
 	if err != nil {
 		return err
 	}
 	port := listener.Addr().(*net.TCPAddr).Port
-	portfile = fmt.Sprintf("%s/%d", gopsdir, os.Getpid())
-	err = ioutil.WriteFile(portfile, []byte(strconv.Itoa(port)), os.ModePerm)
+	portfile = filepath.Join(gopsdir, strconv.Itoa(os.Getpid()))
+	err = os.WriteFile(portfile, []byte(strconv.Itoa(port)), os.ModePerm)
 	if err != nil {
 		return err
 	}
 
-	go listen()
+	go listen(listener)
 	return nil
 }
 
-func listen() {
+func listen(l net.Listener) {
 	buf := make([]byte, 1)
 	for {
-		fd, err := listener.Accept()
+		fd, err := l.Accept()
 		if err != nil {
 			// No great way to check for this, see https://golang.org/issues/4373.
 			if !strings.Contains(err.Error(), "use of closed network connection") {

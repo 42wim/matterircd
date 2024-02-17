@@ -3,13 +3,14 @@ package irckit
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 	"unicode"
 
 	"github.com/42wim/matterircd/bridge"
-	"github.com/mattermost/mattermost-server/v5/model"
+	"github.com/mattermost/mattermost-server/v6/model"
 )
 
 type CommandHandler interface {
@@ -76,6 +77,22 @@ func login(u *User, toUser *User, args []string, service string) {
 		defer func() { u.inprogress = false }()
 
 		err = u.loginTo("matrix")
+		if err != nil {
+			u.MsgUser(toUser, err.Error())
+			return
+		}
+
+		u.MsgUser(toUser, "login OK")
+		if u.Credentials.Token != "" {
+			u.MsgUser(toUser, "token used: "+u.Credentials.Token)
+		}
+
+		return
+	}
+
+	if service == "mastodon" {
+		fmt.Println("login mastodon")
+		err := u.loginTo("mastodon")
 		if err != nil {
 			u.MsgUser(toUser, err.Error())
 			return
@@ -245,6 +262,7 @@ func login(u *User, toUser *User, args []string, service string) {
 	u.MsgUser(toUser, "login OK")
 }
 
+//nolint:cyclop
 func search(u *User, toUser *User, args []string, service string) {
 	if service == "slack" {
 		u.MsgUser(toUser, "not implemented")
@@ -252,12 +270,13 @@ func search(u *User, toUser *User, args []string, service string) {
 	}
 
 	list := u.br.SearchPosts(strings.Join(args, " "))
-	if list == nil || len(list.(*model.PostList).Order) == 0 {
+
+	if list == nil || list.(*model.PostList) == nil || len(list.(*model.PostList).Order) == 0 {
 		u.MsgUser(toUser, "no results")
 		return
 	}
 
-	postlist := list.(*model.PostList)
+	postlist, _ := list.(*model.PostList)
 
 	for i := len(postlist.Order) - 1; i >= 0; i-- {
 		if postlist.Posts[postlist.Order[i]].DeleteAt > postlist.Posts[postlist.Order[i]].CreateAt {
@@ -280,7 +299,7 @@ func search(u *User, toUser *User, args []string, service string) {
 
 		if len(postlist.Posts[postlist.Order[i]].FileIds) > 0 {
 			for _, fname := range u.br.GetFileLinks(postlist.Posts[postlist.Order[i]].FileIds) {
-				u.MsgUser(toUser, "download file - "+fname)
+				u.MsgUser(toUser, "\x1ddownload file - "+fname+"\x1d")
 			}
 		}
 
@@ -306,58 +325,203 @@ func searchUsers(u *User, toUser *User, args []string, service string) {
 	}
 }
 
+func getMattermostChannelName(u *User, channelID string) string {
+	channelName := u.br.GetChannelName(channelID)
+	channelMembers := strings.Split(channelName, "__")
+
+	if len(channelMembers) != 2 {
+		return channelName
+	}
+
+	if channelMembers[0] == u.br.GetMe().User {
+		return channelMembers[1]
+	}
+	return channelMembers[0]
+}
+
+func part(u *User, toUser *User, args []string, service string) {
+	if len(args) != 1 {
+		u.MsgUser(toUser, "need PART #<channel>")
+		u.MsgUser(toUser, "e.g. PART #bugs")
+		return
+	}
+
+	channelName := strings.TrimPrefix(args[0], "#")
+	channelTeamID := u.br.GetMe().TeamID
+	if len(args) == 2 {
+		channelTeamID = args[1]
+	}
+	channelID := u.br.GetChannelID(channelName, channelTeamID)
+
+	err := u.br.Part(channelID)
+	if err != nil {
+		u.MsgUser(toUser, fmt.Sprintf("could not part/leave %s", args[0]))
+	}
+}
+
+//nolint:funlen,gocognit,gocyclo,cyclop
 func scrollback(u *User, toUser *User, args []string, service string) {
 	if service == "slack" {
 		u.MsgUser(toUser, "not implemented")
 		return
 	}
 
-	if len(args) != 2 {
-		u.MsgUser(toUser, "need SCROLLBACK <channel> <lines>")
+	var err error
+	limit := 0
+	err = nil
+	if len(args) == 2 {
+		limit, err = strconv.Atoi(args[1])
+	}
+	if len(args) == 0 || len(args) > 2 || err != nil {
+		u.MsgUser(toUser, "need SCROLLBACK (#<channel>|<user>|<post/thread ID>) <lines>")
 		u.MsgUser(toUser, "e.g. SCROLLBACK #bugs 10 (show last 10 lines from #bugs)")
 		return
 	}
 
-	limit, err := strconv.Atoi(args[1])
-	if err != nil {
-		u.MsgUser(toUser, "need SCROLLBACK <channel> <lines>")
+	search := args[0]
+
+	var channelID, searchPostID string
+	scrollbackUser, exists := u.Srv.HasUser(search)
+
+	proto := "https"
+	if u.v.GetBool(u.br.Protocol() + ".insecure") {
+		proto = "http"
+	}
+	postlistURL := proto + "://" + u.Credentials.Server + "/" + u.Credentials.Team + "/pl/"
+
+	switch {
+	case strings.HasPrefix(search, "#"):
+		channelName := strings.ReplaceAll(search, "#", "")
+		channelID = u.br.GetChannelID(channelName, u.br.GetMe().TeamID)
+	case exists && scrollbackUser.Ghost:
+		// We need to sort the two user IDs to construct the DM
+		// channel name.
+		userIDs := []string{u.User, scrollbackUser.User}
+		sort.Strings(userIDs)
+		channelName := userIDs[0] + "__" + userIDs[1]
+		channelID = u.br.GetChannelID(channelName, u.br.GetMe().TeamID)
+	case len(search) == 26:
+		searchPostID = search
+	case strings.HasPrefix(search, "@@"):
+		searchPostID = strings.TrimPrefix(search, "@@")
+	case strings.HasPrefix(strings.ToLower(search), postlistURL):
+		searchPostID = strings.TrimPrefix(search, postlistURL)
+	default:
+		u.MsgUser(toUser, "need SCROLLBACK (#<channel>|<user>|<post/thread ID>) <lines>")
 		u.MsgUser(toUser, "e.g. SCROLLBACK #bugs 10 (show last 10 lines from #bugs)")
 		return
 	}
 
-	if !strings.Contains(args[0], "#") {
-		u.MsgUser(toUser, "need SCROLLBACK <channel> <lines>")
-		u.MsgUser(toUser, "e.g. SCROLLBACK #bugs 10 (show last 10 lines from #bugs)")
-		return
+	var list interface{}
+	if searchPostID != "" {
+		list = u.br.GetPostThread(searchPostID)
+	} else {
+		list = u.br.GetPosts(channelID, limit)
 	}
-
-	args[0] = strings.ReplaceAll(args[0], "#", "")
-
-	list := u.br.GetPosts(u.br.GetChannelID(args[0], u.br.GetMe().TeamID), limit)
-	if list == nil || len(list.(*model.PostList).Order) == 0 {
+	if list == nil || list.(*model.PostList) == nil || len(list.(*model.PostList).Order) == 0 {
 		u.MsgUser(toUser, "no results")
 		return
 	}
 
-	postlist := list.(*model.PostList)
+	postlist, _ := list.(*model.PostList)
 
-	for i := len(postlist.Order) - 1; i >= 0; i-- {
-		p := postlist.Posts[postlist.Order[i]]
-		ts := time.Unix(0, p.CreateAt*int64(time.Millisecond))
+	// Workaround https://github.com/mattermost/mattermost-server/issues/23081
+	plOrder := postlist.Order
+	if searchPostID != "" {
+		plOrder = append(plOrder, searchPostID)
+	}
+	skipRoot := false
 
-		nick := u.br.GetUser(p.UserId).Nick
+	for i := len(plOrder) - 1; i >= 0; i-- {
+		if limit != 0 && len(plOrder) > limit && i < len(plOrder)-limit {
+			continue
+		}
+
+		p := postlist.Posts[plOrder[i]]
+
+		// Workaround https://github.com/mattermost/mattermost-server/issues/23081
+		if searchPostID != "" && p.Id == searchPostID {
+			if skipRoot {
+				continue
+			}
+			skipRoot = true
+		}
+
+		props := p.GetProps()
+		botname, override := props["override_username"].(string)
+		user := u.br.GetUser(p.UserId)
+		nick := user.Nick
+		if override {
+			nick = botname
+		}
+
+		if p.Type == model.PostTypeAddToTeam || p.Type == model.PostTypeRemoveFromTeam {
+			nick = systemUser
+		}
+
+		if searchPostID != "" && channelID == "" {
+			channelID = p.ChannelId
+			search = getMattermostChannelName(u, p.ChannelId)
+			if !strings.HasPrefix(search, "#") {
+				user := u.br.GetUser(search)
+				search = user.Nick
+				if override {
+					search = botname
+				}
+				scrollbackUser, _ = u.Srv.HasUser(search)
+			}
+		}
 
 		for _, post := range strings.Split(p.Message, "\n") {
-			if post != "" {
-				u.MsgUser(toUser, "["+ts.Format("2006-01-02 15:04")+"]"+" <"+nick+"> "+post)
+			if nick == systemUser {
+				post = "\x1d" + post + "\x1d"
 			}
+			formatScrollbackMsg(u, channelID, search, scrollbackUser, nick, p, post)
 		}
 
-		if len(p.FileIds) > 0 {
-			for _, fname := range u.br.GetFileLinks(p.FileIds) {
-				u.MsgUser(toUser, "["+ts.Format("2006-01-02 15:04")+"]"+" <"+nick+"> download file - "+fname)
-			}
+		if len(p.FileIds) == 0 {
+			continue
 		}
+
+		for _, fname := range u.br.GetFileLinks(p.FileIds) {
+			fileMsg := "\x1ddownload file - " + fname + "\x1d"
+			formatScrollbackMsg(u, channelID, search, scrollbackUser, nick, p, fileMsg)
+		}
+	}
+
+	if !u.v.GetBool(u.br.Protocol() + ".collapsescrollback") { //nolint:goconst
+		u.MsgUser(toUser, fmt.Sprintf("scrollback results shown in %s", search))
+	}
+}
+
+func formatScrollbackMsg(u *User, channelID string, channel string, user *User, nick string, p *model.Post, msgText string) {
+	ts := time.Unix(0, p.CreateAt*int64(time.Millisecond))
+
+	switch {
+	case (u.v.GetBool(u.br.Protocol()+".collapsescrollback") && strings.HasPrefix(channel, "#")):
+		threadMsgID := u.prefixContext(channelID, p.Id, p.RootId, "scrollback")
+		msg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, msgText)
+		nick += "/" + channel
+		u.Srv.Channel("&messages").SpoofMessage(nick, msg)
+	case u.v.GetBool(u.br.Protocol() + ".collapsescrollback"):
+		threadMsgID := u.prefixContext(channelID, p.Id, p.RootId, "scrollback")
+		msg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, msgText)
+		nick += "/" + channel
+		u.Srv.Channel("&messages").SpoofMessage(nick, msg)
+	case (u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext")) && strings.HasPrefix(channel, "#") && nick != systemUser:
+		threadMsgID := u.prefixContext(channelID, p.Id, p.RootId, "scrollback")
+		msg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, msgText)
+		u.Srv.Channel(channelID).SpoofMessage(nick, msg)
+	case strings.HasPrefix(channel, "#"):
+		msg := "[" + ts.Format("2006-01-02 15:04") + "] " + msgText
+		u.Srv.Channel(channelID).SpoofMessage(nick, msg)
+	case u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext"):
+		threadMsgID := u.prefixContext(channelID, p.Id, p.RootId, "scrollback")
+		msg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, msgText)
+		u.MsgSpoofUser(user, nick, msg)
+	default:
+		msg := "[" + ts.Format("2006-01-02 15:04") + "]" + " <" + nick + "> " + msgText
+		u.MsgSpoofUser(user, nick, msg)
 	}
 }
 
@@ -400,8 +564,10 @@ func updatelastviewed(u *User, toUser *User, args []string, service string) {
 }
 
 var cmds = map[string]Command{
+	"lastsent":         {handler: lastsent, login: true, minParams: 0, maxParams: 0},
 	"logout":           {handler: logout, login: true, minParams: 0, maxParams: 0},
 	"login":            {handler: login, minParams: 2, maxParams: 5},
+	"part":             {handler: part, login: true, minParams: 1, maxParams: 1},
 	"search":           {handler: search, login: true, minParams: 1, maxParams: -1},
 	"searchusers":      {handler: searchUsers, login: true, minParams: 1, maxParams: -1},
 	"scrollback":       {handler: scrollback, login: true, minParams: 2, maxParams: 2},
@@ -509,4 +675,10 @@ func parseCommandString(line string) ([]string, error) {
 	}
 
 	return args, nil
+}
+
+func lastsent(u *User, toUser *User, args []string, service string) {
+	for _, line := range u.br.GetLastSentMsgs() {
+		u.MsgUser(toUser, line)
+	}
 }

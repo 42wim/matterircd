@@ -8,26 +8,35 @@ import (
 	"net"
 	"os"
 	"strings"
+	"time"
+
+	bolt "go.etcd.io/bbolt"
 
 	"github.com/42wim/matterircd/config"
 	irckit "github.com/42wim/matterircd/mm-go-irckit"
 	"github.com/google/gops/agent"
+	prefixed "github.com/matterbridge/logrus-prefixed-formatter"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 )
 
 var (
-	version = "0.22.1-dev"
+	version = "0.28.1-dev"
 	githash string
 	logger  *logrus.Entry
 	v       *viper.Viper
+
+	LastViewedSaveDB *bolt.DB
 )
 
 func main() {
 	ourlog := logrus.New()
-	ourlog.Formatter = &logrus.TextFormatter{FullTimestamp: true}
-	logger = ourlog.WithFields(logrus.Fields{"module": "matterircd"})
+	ourlog.Formatter = &prefixed.TextFormatter{
+		PrefixPadding: 11,
+		FullTimestamp: true,
+	}
+	logger = ourlog.WithFields(logrus.Fields{"prefix": "matterircd"})
 	config.Logger = logger
 
 	// config related. instantiate a new config.Config to store flags
@@ -97,6 +106,17 @@ func main() {
 			start(socket)
 		}()
 	}
+
+	mmLastViewedFile := "matterircd-lastsaved.db"
+	if statePath := v.GetString("mattermost.LastViewedSaveFile"); statePath != "" {
+		mmLastViewedFile = statePath
+	}
+	db, err := bolt.Open(mmLastViewedFile, 0o600, &bolt.Options{Timeout: 1 * time.Second})
+	if err != nil {
+		logger.Fatal(err)
+	}
+	defer db.Close()
+	LastViewedSaveDB = db
 
 	// backwards compatible
 
@@ -171,7 +191,7 @@ func start(socket net.Listener) {
 
 			logger.Infof("New connection: %s", conn.RemoteAddr())
 
-			user := irckit.NewUserBridge(conn, newsrv, v)
+			user := irckit.NewUserBridge(conn, newsrv, v, LastViewedSaveDB)
 			err = newsrv.Connect(user)
 			if err != nil {
 				logger.Errorf("Failed to join: %v", err)

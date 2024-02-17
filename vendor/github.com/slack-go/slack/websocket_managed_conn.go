@@ -10,9 +10,36 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+
+	"github.com/slack-go/slack/internal/backoff"
 	"github.com/slack-go/slack/internal/errorsx"
 	"github.com/slack-go/slack/internal/timex"
 )
+
+// UnmappedError represents error occurred when there is no mapping between given event name
+// and corresponding Go struct.
+type UnmappedError struct {
+	// EventType returns event type name.
+	EventType string
+	// RawEvent returns raw event body.
+	RawEvent json.RawMessage
+
+	ctxMsg string
+}
+
+// NewUnmappedError returns new UnmappedError instance.
+func NewUnmappedError(ctxMsg, eventType string, raw json.RawMessage) *UnmappedError {
+	return &UnmappedError{
+		ctxMsg:    ctxMsg,
+		EventType: eventType,
+		RawEvent:  raw,
+	}
+}
+
+// Error returns human-readable error message.
+func (u UnmappedError) Error() string {
+	return fmt.Sprintf("%s: Received unmapped event %q", u.ctxMsg, u.EventType)
+}
 
 // ManageConnection can be called on a Slack RTM instance returned by the
 // NewRTM method. It will connect to the slack RTM API and handle all incoming
@@ -88,11 +115,12 @@ func (rtm *RTM) connect(connectionCount int, useRTMStart bool) (*Info, *websocke
 		errInvalidAuth      = "invalid_auth"
 		errInactiveAccount  = "account_inactive"
 		errMissingAuthToken = "not_authed"
+		errTokenRevoked     = "token_revoked"
 	)
 
 	// used to provide exponential backoff wait time with jitter before trying
 	// to connect to slack again
-	boff := &backoff{
+	boff := &backoff.Backoff{
 		Max: 5 * time.Minute,
 	}
 
@@ -103,7 +131,7 @@ func (rtm *RTM) connect(connectionCount int, useRTMStart bool) (*Info, *websocke
 
 		// send connecting event
 		rtm.IncomingEvents <- RTMEvent{"connecting", &ConnectingEvent{
-			Attempt:         boff.attempts + 1,
+			Attempt:         boff.Attempts() + 1,
 			ConnectionCount: connectionCount,
 		}}
 
@@ -115,7 +143,7 @@ func (rtm *RTM) connect(connectionCount int, useRTMStart bool) (*Info, *websocke
 
 		// check for fatal errors
 		switch err.Error() {
-		case errInvalidAuth, errInactiveAccount, errMissingAuthToken:
+		case errInvalidAuth, errInactiveAccount, errMissingAuthToken, errTokenRevoked:
 			rtm.Debugf("invalid auth when connecting with RTM: %s", err)
 			rtm.IncomingEvents <- RTMEvent{"invalid_auth", &InvalidAuthEvent{}}
 			return nil, nil, err
@@ -123,7 +151,7 @@ func (rtm *RTM) connect(connectionCount int, useRTMStart bool) (*Info, *websocke
 		}
 
 		switch actual := err.(type) {
-		case statusCodeError:
+		case StatusCodeError:
 			if actual.Code == http.StatusNotFound {
 				rtm.Debugf("invalid auth when connecting with RTM: %s", err)
 				rtm.IncomingEvents <- RTMEvent{"invalid_auth", &InvalidAuthEvent{}}
@@ -138,13 +166,13 @@ func (rtm *RTM) connect(connectionCount int, useRTMStart bool) (*Info, *websocke
 		// any other errors are treated as recoverable and we try again after
 		// sending the event along the IncomingEvents channel
 		rtm.IncomingEvents <- RTMEvent{"connection_error", &ConnectionErrorEvent{
-			Attempt:  boff.attempts,
+			Attempt:  boff.Attempts(),
 			Backoff:  backoff,
 			ErrorObj: err,
 		}}
 
 		// get time we should wait before attempting to connect again
-		rtm.Debugf("reconnection %d failed: %s reconnecting in %v\n", boff.attempts, err, backoff)
+		rtm.Debugf("reconnection %d failed: %s reconnecting in %v\n", boff.Attempts(), err, backoff)
 
 		// wait for one of the following to occur,
 		// backoff duration has elapsed, killChannel is signalled, or
@@ -435,10 +463,10 @@ func (rtm *RTM) handleAck(event json.RawMessage) {
 		if ack.RTMResponse.Error.Code == -1 && ack.RTMResponse.Error.Msg == "slow down, too many messages..." {
 			rtm.IncomingEvents <- RTMEvent{"ack_error", &RateLimitEvent{}}
 		} else {
-			rtm.IncomingEvents <- RTMEvent{"ack_error", &AckErrorEvent{ack.Error}}
+			rtm.IncomingEvents <- RTMEvent{"ack_error", &AckErrorEvent{ack.Error, ack.ReplyTo}}
 		}
 	} else {
-		rtm.IncomingEvents <- RTMEvent{"ack_error", &AckErrorEvent{fmt.Errorf("ack decode failure")}}
+		rtm.IncomingEvents <- RTMEvent{"ack_error", &AckErrorEvent{ErrorObj: fmt.Errorf("ack decode failure")}}
 	}
 }
 
@@ -471,7 +499,7 @@ func (rtm *RTM) handleEvent(typeStr string, event json.RawMessage) {
 	v, exists := EventMapping[typeStr]
 	if !exists {
 		rtm.Debugf("RTM Error - received unmapped event %q: %s\n", typeStr, string(event))
-		err := fmt.Errorf("RTM Error: Received unmapped event %q: %s", typeStr, string(event))
+		err := NewUnmappedError("RTM Error", typeStr, event)
 		rtm.IncomingEvents <- RTMEvent{"unmarshalling_error", &UnmarshallingErrorEvent{err}}
 		return
 	}
@@ -480,7 +508,7 @@ func (rtm *RTM) handleEvent(typeStr string, event json.RawMessage) {
 	err := json.Unmarshal(event, recvEvent)
 	if err != nil {
 		rtm.Debugf("RTM Error, could not unmarshall event %q: %s\n", typeStr, string(event))
-		err := fmt.Errorf("RTM Error: Could not unmarshall event %q: %s", typeStr, string(event))
+		err := fmt.Errorf("RTM Error: Could not unmarshall event %q", typeStr)
 		rtm.IncomingEvents <- RTMEvent{"unmarshalling_error", &UnmarshallingErrorEvent{err}}
 		return
 	}

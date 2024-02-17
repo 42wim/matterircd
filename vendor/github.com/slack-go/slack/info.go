@@ -321,10 +321,13 @@ type UserPrefs struct {
 }
 
 func (api *Client) GetUserPrefs() (*UserPrefsCarrier, error) {
-	values := url.Values{"token": {api.token}}
+	return api.GetUserPrefsContext(context.Background())
+}
+
+func (api *Client) GetUserPrefsContext(ctx context.Context) (*UserPrefsCarrier, error) {
 	response := UserPrefsCarrier{}
 
-	err := api.getMethod(context.Background(), "users.prefs.get", values, &response)
+	err := api.getMethod(ctx, "users.prefs.get", api.token, url.Values{}, &response)
 	if err != nil {
 		return nil, err
 	}
@@ -405,6 +408,11 @@ func (t JSONTime) Time() time.Time {
 // UnmarshalJSON will unmarshal both string and int JSON values
 func (t *JSONTime) UnmarshalJSON(buf []byte) error {
 	s := bytes.Trim(buf, `"`)
+
+	if bytes.EqualFold(s, []byte("null")) {
+		*t = JSONTime(0)
+		return nil
+	}
 
 	v, err := strconv.Atoi(string(s))
 	if err != nil {

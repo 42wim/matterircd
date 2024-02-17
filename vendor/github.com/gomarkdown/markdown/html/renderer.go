@@ -43,6 +43,7 @@ const (
 	SmartypantsAngledQuotes                   // Enable angled double quotes (with Smartypants) for double quotes rendering
 	SmartypantsQuotesNBSP                     // Enable « French guillemets » (with Smartypants)
 	TOC                                       // Generate a table of contents
+	LazyLoadImages                            // Include loading="lazy" with images
 
 	CommonFlags Flags = Smartypants | SmartypantsFractions | SmartypantsDashes | SmartypantsLatexDashes
 )
@@ -131,6 +132,11 @@ type Renderer struct {
 	// if > 0, will strip html tags in Out and Outs
 	DisableTags int
 
+	// IsSafeURLOverride allows overriding the default URL matcher. URL is
+	// safe if the overriding function returns true. Can be used to extend
+	// the default list of safe URLs.
+	IsSafeURLOverride func(url []byte) bool
+
 	sr *SPRenderer
 
 	documentMatter ast.DocumentMatters // keep track of front/main/back matter.
@@ -210,71 +216,12 @@ func NewRenderer(opts RendererOptions) *Renderer {
 	}
 }
 
-func isHTMLTag(tag []byte, tagname string) bool {
-	found, _ := findHTMLTagPos(tag, tagname)
-	return found
-}
-
-// Look for a character, but ignore it when it's in any kind of quotes, it
-// might be JavaScript
-func skipUntilCharIgnoreQuotes(html []byte, start int, char byte) int {
-	inSingleQuote := false
-	inDoubleQuote := false
-	inGraveQuote := false
-	i := start
-	for i < len(html) {
-		switch {
-		case html[i] == char && !inSingleQuote && !inDoubleQuote && !inGraveQuote:
-			return i
-		case html[i] == '\'':
-			inSingleQuote = !inSingleQuote
-		case html[i] == '"':
-			inDoubleQuote = !inDoubleQuote
-		case html[i] == '`':
-			inGraveQuote = !inGraveQuote
-		}
-		i++
-	}
-	return start
-}
-
-func findHTMLTagPos(tag []byte, tagname string) (bool, int) {
-	i := 0
-	if i < len(tag) && tag[0] != '<' {
-		return false, -1
-	}
-	i++
-	i = skipSpace(tag, i)
-
-	if i < len(tag) && tag[i] == '/' {
-		i++
-	}
-
-	i = skipSpace(tag, i)
-	j := 0
-	for ; i < len(tag); i, j = i+1, j+1 {
-		if j >= len(tagname) {
-			break
-		}
-
-		if strings.ToLower(string(tag[i]))[0] != tagname[j] {
-			return false, -1
-		}
-	}
-
-	if i == len(tag) {
-		return false, -1
-	}
-
-	rightAngle := skipUntilCharIgnoreQuotes(tag, i, '>')
-	if rightAngle >= i {
-		return true, rightAngle
-	}
-
-	return false, -1
-}
-
 func isRelativeLink(link []byte) (yes bool) {
+	// empty links considerd relative
+	if len(link) == 0 {
+		return true
+	}
+
 	// a tag begin with '#'
 	if link[0] == '#' {
 		return true
@@ -303,26 +250,10 @@ func isRelativeLink(link []byte) (yes bool) {
 	return false
 }
 
-func (r *Renderer) ensureUniqueHeadingID(id string) string {
-	for count, found := r.headingIDs[id]; found; count, found = r.headingIDs[id] {
-		tmp := fmt.Sprintf("%s-%d", id, count+1)
-
-		if _, tmpFound := r.headingIDs[tmp]; !tmpFound {
-			r.headingIDs[id] = count + 1
-			id = tmp
-		} else {
-			id = id + "-1"
-		}
-	}
-
-	if _, found := r.headingIDs[id]; !found {
-		r.headingIDs[id] = 0
-	}
-
-	return id
-}
-
 func (r *Renderer) addAbsPrefix(link []byte) []byte {
+	if len(link) == 0 {
+		return link
+	}
 	if r.opts.AbsolutePrefix != "" && isRelativeLink(link) && link[0] != '.' {
 		newDest := r.opts.AbsolutePrefix
 		if link[0] != '/' {
@@ -362,19 +293,16 @@ func isMailto(link []byte) bool {
 	return bytes.HasPrefix(link, []byte("mailto:"))
 }
 
-func needSkipLink(flags Flags, dest []byte) bool {
+func needSkipLink(r *Renderer, dest []byte) bool {
+	flags := r.opts.Flags
 	if flags&SkipLinks != 0 {
 		return true
 	}
-	return flags&Safelink != 0 && !isSafeLink(dest) && !isMailto(dest)
-}
-
-func isSmartypantable(node ast.Node) bool {
-	switch node.GetParent().(type) {
-	case *ast.Link, *ast.CodeBlock, *ast.Code:
-		return false
+	isSafeURL := r.IsSafeURLOverride
+	if isSafeURL == nil {
+		isSafeURL = parser.IsSafeURL
 	}
-	return true
+	return flags&Safelink != 0 && !isSafeURL(dest) && !isMailto(dest)
 }
 
 func appendLanguageAttr(attrs []string, info []byte) []string {
@@ -570,7 +498,7 @@ func (r *Renderer) linkExit(w io.Writer, link *ast.Link) {
 // Link writes ast.Link node
 func (r *Renderer) Link(w io.Writer, link *ast.Link, entering bool) {
 	// mark it but don't link it if it is not a safe link: no smartypants
-	if needSkipLink(r.opts.Flags, link.Destination) {
+	if needSkipLink(r, link.Destination) {
 		r.OutOneOf(w, entering, "<tt>", "</tt>")
 		return
 	}
@@ -589,7 +517,11 @@ func (r *Renderer) imageEnter(w io.Writer, image *ast.Image) {
 		//if options.safe && potentiallyUnsafe(dest) {
 		//out(w, `<img src="" alt="`)
 		//} else {
-		r.Outs(w, `<img src="`)
+		if r.opts.Flags&LazyLoadImages != 0 {
+			r.Outs(w, `<img loading="lazy" src="`)
+		} else {
+			r.Outs(w, `<img src="`)
+		}
 		escLink(w, dest)
 		r.Outs(w, `" alt="`)
 		//}
@@ -696,8 +628,28 @@ func (r *Renderer) headingEnter(w io.Writer, nodeData *ast.Heading) {
 	if class != "" {
 		attrs = []string{`class="` + class + `"`}
 	}
+
+	ensureUniqueHeadingID := func(id string) string {
+		for count, found := r.headingIDs[id]; found; count, found = r.headingIDs[id] {
+			tmp := fmt.Sprintf("%s-%d", id, count+1)
+
+			if _, tmpFound := r.headingIDs[tmp]; !tmpFound {
+				r.headingIDs[id] = count + 1
+				id = tmp
+			} else {
+				id = id + "-1"
+			}
+		}
+
+		if _, found := r.headingIDs[id]; !found {
+			r.headingIDs[id] = 0
+		}
+
+		return id
+	}
+
 	if nodeData.HeadingID != "" {
-		id := r.ensureUniqueHeadingID(nodeData.HeadingID)
+		id := ensureUniqueHeadingID(nodeData.HeadingID)
 		if r.opts.HeadingIDPrefix != "" {
 			id = r.opts.HeadingIDPrefix + id
 		}
@@ -951,6 +903,9 @@ func (r *Renderer) TableCell(w io.Writer, tableCell *ast.TableCell, entering boo
 	align := tableCell.Align.String()
 	if align != "" {
 		attrs = append(attrs, fmt.Sprintf(`align="%s"`, align))
+	}
+	if colspan := tableCell.ColSpan; colspan > 0 {
+		attrs = append(attrs, fmt.Sprintf(`colspan="%d"`, colspan))
 	}
 	if ast.GetPrevNode(tableCell) == nil {
 		r.CR(w)
@@ -1289,41 +1244,6 @@ func isListItemTerm(node ast.Node) bool {
 }
 
 // TODO: move to internal package
-func skipSpace(data []byte, i int) int {
-	n := len(data)
-	for i < n && isSpace(data[i]) {
-		i++
-	}
-	return i
-}
-
-// TODO: move to internal package
-var validUris = [][]byte{[]byte("http://"), []byte("https://"), []byte("ftp://"), []byte("mailto://")}
-var validPaths = [][]byte{[]byte("/"), []byte("./"), []byte("../")}
-
-func isSafeLink(link []byte) bool {
-	for _, path := range validPaths {
-		if len(link) >= len(path) && bytes.Equal(link[:len(path)], path) {
-			if len(link) == len(path) {
-				return true
-			} else if isAlnum(link[len(path)]) {
-				return true
-			}
-		}
-	}
-
-	for _, prefix := range validUris {
-		// TODO: handle unicode here
-		// case-insensitive prefix test
-		if len(link) > len(prefix) && bytes.Equal(bytes.ToLower(link[:len(prefix)]), prefix) && isAlnum(link[len(prefix)]) {
-			return true
-		}
-	}
-
-	return false
-}
-
-// TODO: move to internal package
 // Create a url-safe slug for fragments
 func slugify(in []byte) []byte {
 	if len(in) == 0 {
@@ -1356,33 +1276,6 @@ func slugify(in []byte) []byte {
 		}
 	}
 	return out[a : b+1]
-}
-
-// TODO: move to internal package
-// isAlnum returns true if c is a digit or letter
-// TODO: check when this is looking for ASCII alnum and when it should use unicode
-func isAlnum(c byte) bool {
-	return (c >= '0' && c <= '9') || isLetter(c)
-}
-
-// isSpace returns true if c is a white-space charactr
-func isSpace(c byte) bool {
-	return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v'
-}
-
-// isLetter returns true if c is ascii letter
-func isLetter(c byte) bool {
-	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
-}
-
-// isPunctuation returns true if c is a punctuation symbol.
-func isPunctuation(c byte) bool {
-	for _, r := range []byte("!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~") {
-		if c == r {
-			return true
-		}
-	}
-	return false
 }
 
 // BlockAttrs takes a node and checks if it has block level attributes set. If so it

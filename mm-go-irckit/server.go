@@ -138,7 +138,6 @@ type server struct {
 
 	u *User
 	sync.RWMutex
-	count    int
 	users    map[string]*User
 	channels map[string]Channel
 }
@@ -238,8 +237,8 @@ func (s *server) Channel(channelID string) Channel {
 		info, err := s.u.br.GetChannel(channelID)
 		if err != nil {
 			// don't error on our special channels
-			if !strings.HasPrefix(channelID, "&") {
-				logger.Errorf("didn't find channel %s: %s", channelID, err)
+			if channelID != "" && !strings.HasPrefix(channelID, "&") && channelID != s.u.Nick && channelID != s.u.Username {
+				logger.Errorf("didn't find channel %s (%s): %s", channelID, name, err)
 			}
 			info = &bridge.ChannelInfo{}
 		}
@@ -324,8 +323,7 @@ func (s *server) welcome(u *User) error {
 		&irc.Message{
 			Prefix:   s.Prefix(),
 			Command:  irc.RPL_MYINFO,
-			Params:   []string{u.Nick},
-			Trailing: fmt.Sprintf("%s %s o o debugmode %t", s.config.Name, s.config.Version, IsDebugLevel()),
+			Params:   []string{u.Nick, s.config.Name, s.config.Version, "o", "o"},
 		},
 		&irc.Message{
 			Prefix:   s.Prefix(),
@@ -403,79 +401,108 @@ func (s *server) add(u *User) (ok bool) {
 	return true
 }
 
+//nolint:goconst
 func (s *server) handshake(u *User) error {
 	// Assign host
 	u.Host = u.ResolveHost()
 	go u.Decode()
 
+	timeout := u.v.GetInt("HandshakeTimeout")
+	if timeout == 0 {
+		timeout = 10
+	}
 	// Consume N messages then give up.
 	i := handshakeMsgTolerance
 	// Read messages until we filled in USER details.
-	for msg := range u.DecodeCh {
-		// fmt.Printf("in handshake %#v\n", msg)
-		i--
-		// Consume N messages then give up.
-		if i == 0 {
-			break
-		}
-		if msg == nil {
-			// Empty message, ignore.
-			continue
-		}
-
-		// apparently NICK message can have a : prefix on connection
-		// https://github.com/42wim/matterircd/issues/32
-		if (msg.Command == irc.NICK || msg.Command == irc.PASS) && msg.Trailing != "" {
-			msg.Params = append(msg.Params, msg.Trailing)
-		}
-		if len(msg.Params) < 1 {
-			continue
-		}
-
-		switch msg.Command {
-		case irc.NICK:
-			u.Nick = msg.Params[0]
-		case irc.USER:
-			u.User = msg.Params[0]
-			u.Real = msg.Trailing
-		case irc.PASS:
-			u.Pass = msg.Params
-		}
-
-		if u.Nick == "" || u.User == "" {
-			// Wait for both to be set before proceeding
-			continue
-		}
-		if len(u.Nick) > s.config.MaxNickLen {
-			u.Nick = u.Nick[:s.config.MaxNickLen]
-		}
-
-		ok := s.add(u)
-		if !ok {
-			s.EncodeMessage(u, irc.ERR_NICKNAMEINUSE, []string{u.Nick}, "Nickname is already in use")
-			continue
-		}
-		s.u = u
-
-		err := s.welcome(u)
-		if err == nil && u.Pass != nil {
-			service := "mattermost"
-			if len(u.Pass) == 1 {
-				service = "slack"
+outerloop:
+	for {
+		select {
+		case msg := <-u.DecodeCh:
+			// fmt.Printf("in handshake %#v\n", msg)
+			i--
+			// Consume N messages then give up.
+			if i == 0 {
+				break outerloop
 			}
-			login(u, &User{
-				UserInfo: &bridge.UserInfo{
-					Nick: service,
-					User: service,
-					Real: service,
-					Host: "service",
+			if msg == nil {
+				// Empty message, ignore.
+				continue
+			}
+
+			// apparently NICK message can have a : prefix on connection
+			// https://github.com/42wim/matterircd/issues/32
+			if (msg.Command == irc.NICK || msg.Command == irc.PASS) && msg.Trailing != "" {
+				msg.Params = append(msg.Params, msg.Trailing)
+			}
+			if len(msg.Params) < 1 {
+				continue
+			}
+
+			switch msg.Command {
+			case irc.NICK:
+				u.Nick = msg.Params[0]
+			case irc.USER:
+				u.User = msg.Params[0]
+				u.Real = msg.Trailing
+			case irc.PASS:
+				u.Pass = msg.Params
+			case irc.JOIN:
+				s.EncodeMessage(u, irc.ERR_NOTREGISTERED, []string{"*"}, "Please register first")
+			// https://ircv3.net/specs/extensions/capability-negotiation.html
+			case irc.CAP:
+				subcommand := msg.Params[0]
+				switch subcommand {
+				case irc.CAP_LS, irc.CAP_LIST:
+					params := fmt.Sprintf("* %s :", subcommand)
+					s.EncodeMessage(u, irc.CAP, []string{params}, "") //nolint:errcheck
+				case irc.CAP_END, irc.CAP_REQ:
+					// Do nothing.
+				default:
+					params := fmt.Sprintf("* %s", subcommand)
+					// github.com/sorcix/irc doesn't yet support ERR_INVALIDCAPCMD (410)
+					s.EncodeMessage(u, "410", []string{params}, "Invalid or unsupported CAP command") //nolint:errcheck
+				}
+				continue
+			}
+
+			if u.Nick == "" || u.User == "" {
+				// Wait for both to be set before proceeding
+				continue
+			}
+			if len(u.Nick) > s.config.MaxNickLen {
+				u.Nick = u.Nick[:s.config.MaxNickLen]
+			}
+
+			ok := s.add(u)
+			if !ok {
+				s.EncodeMessage(u, irc.ERR_NICKNAMEINUSE, []string{u.Nick}, "Nickname is already in use")
+				continue
+			}
+			s.u = u
+
+			err := s.welcome(u)
+			if err == nil && u.Pass != nil {
+				service := "mattermost"
+				if len(u.Pass) == 1 {
+					service = "slack"
+				}
+				login(u, &User{
+					UserInfo: &bridge.UserInfo{
+						Nick: service,
+						User: service,
+						Real: service,
+						Host: "service",
+					},
+					channels: map[Channel]struct{}{},
 				},
-				channels: map[Channel]struct{}{},
-			},
-				u.Pass,
-				service)
+					u.Pass,
+					service)
+			}
+
+			return err
+		case <-time.After(time.Duration(timeout) * time.Second):
+			return ErrHandshakeFailed
 		}
-		return err
 	}
 	return ErrHandshakeFailed
 }

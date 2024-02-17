@@ -110,3 +110,27 @@ Or start a thread with the last message you sent.
 23:25 < wimirc> @@!! how are you?
 23:25 <@wim> [005->003] good
 ```
+
+## add/remove reactions to messages/posts from other users
+
+To add a reaction to a message/post, just use +:reaction: as follows:
+
+```irc
+23:25 <@wim> [001] hi
+23:25 < wimirc> hello how are you
+23:25 <@wim> [003] fine
+23:25 < wimirc> @@003 +:thumbsup:
+23:25 < wimirc> added reaction: thumbsup
+```
+
+You can also remove reactions.
+
+```irc
+23:25 <@wim> [001] hi
+23:25 < wimirc> hello how are you
+23:25 <@wim> [003] fine
+23:25 < wimirc> @@003 +:thumbsup:
+23:25 < wimirc> added reaction: thumbsup
+23:25 < wimirc> @@003 -:thumbsup:
+23:25 < wimirc> removed reaction: thumbsup
+```

@@ -1,5 +1,14 @@
 package ast
 
+// An attribute can be attached to block elements. They are specified as
+// {#id .classs key="value"} where quotes for values are mandatory, multiple
+// key/value pairs are separated by whitespace.
+type Attribute struct {
+	ID      []byte
+	Classes [][]byte
+	Attrs   map[string][]byte
+}
+
 // ListType contains bitwise or'ed flags for list and list item objects.
 type ListType int
 
@@ -148,9 +157,13 @@ func (l *Leaf) GetChildren() []Node {
 	return nil
 }
 
-// SetChildren will panic becuase Leaf cannot have children
+// SetChildren will panic if trying to set non-empty children
+// because Leaf cannot have children
 func (l *Leaf) SetChildren(newChildren []Node) {
-	panic("leaf node cannot have children")
+	if len(newChildren) != 0 {
+		panic("leaf node cannot have children")
+	}
+
 }
 
 // Document represents markdown document node, a root of ast
@@ -263,6 +276,7 @@ type CrossReference struct {
 	Container
 
 	Destination []byte // Destination is where the reference points to
+	Suffix      []byte // Potential citation suffix, i.e. (#myid, text)
 }
 
 // Citation is a citation node.
@@ -340,6 +354,7 @@ type TableCell struct {
 
 	IsHeader bool           // This tells if it's under the header row
 	Align    CellAlignFlags // This holds the value for align attribute
+	ColSpan  int            // How many columns to span
 }
 
 // TableHeader represents markdown table head node

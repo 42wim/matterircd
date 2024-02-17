@@ -3,6 +3,7 @@ package irckit
 import (
 	"fmt"
 	"net"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -141,7 +142,7 @@ func (u *User) Encode(msgs ...*irc.Message) (err error) {
 			continue
 		}
 
-		logger.Debugf("-> %s", msg)
+		logger.Debugf("-> \"%s\"", msg)
 
 		err := u.Conn.Encode(msg)
 		if err != nil {
@@ -151,6 +152,11 @@ func (u *User) Encode(msgs ...*irc.Message) (err error) {
 
 	return nil
 }
+
+var (
+	replyRegExp  = regexp.MustCompile(`\@\@(?:[0-9a-z]{26}|[0-9a-f]{3}|!!)\s`)
+	modifyRegExp = regexp.MustCompile(`^s/(?:[0-9a-z]{26}|[0-9a-f]{3}|!!)?/`)
+)
 
 // Decode will receive and return a decoded message, or an error.
 // nolint:funlen,gocognit,gocyclo
@@ -167,7 +173,7 @@ func (u *User) Decode() {
 	if bufferTimeout < 100 {
 		bufferTimeout = 100
 	}
-	logger.Debugf("using paste buffer timeout: %#v\n", bufferTimeout)
+	logger.Debugf("using paste buffer timeout: %#v", bufferTimeout)
 	t := timer.NewTimer(time.Duration(bufferTimeout) * time.Millisecond)
 	t.Stop()
 	go func(buffer chan *irc.Message, stop chan struct{}) {
@@ -180,6 +186,16 @@ func (u *User) Decode() {
 					// start timer now
 					t.Reset(time.Duration(bufferTimeout) * time.Millisecond)
 				} else {
+					if strings.HasPrefix(msg.Trailing, "\x01ACTION") || replyRegExp.MatchString(msg.Trailing) || modifyRegExp.MatchString(msg.Trailing) {
+						// flush buffer
+						logger.Debug("flushing buffer because of /me, replies to threads, and message modifications")
+						u.BufferedMsg.Trailing = strings.TrimSpace(u.BufferedMsg.Trailing)
+						u.DecodeCh <- u.BufferedMsg
+						u.BufferedMsg = nil
+						// send CTCP message
+						u.DecodeCh <- msg
+						continue
+					}
 					// make sure we're sending to the same recipient in the buffer
 					if u.BufferedMsg.Params[0] == msg.Params[0] {
 						u.BufferedMsg.Trailing += "\n" + msg.Trailing
@@ -191,7 +207,7 @@ func (u *User) Decode() {
 				if u.BufferedMsg != nil {
 					// trim last newline
 					u.BufferedMsg.Trailing = strings.TrimSpace(u.BufferedMsg.Trailing)
-					logger.Debugf("flushing buffer: %#v\n", u.BufferedMsg)
+					logger.Debugf("flushing buffer: %#v", u.BufferedMsg)
 					u.DecodeCh <- u.BufferedMsg
 					// clear buffer
 					u.BufferedMsg = nil
@@ -227,7 +243,7 @@ func (u *User) Decode() {
 		}
 		// PRIVMSG can be buffered
 		if msg.Command == "PRIVMSG" {
-			logger.Debugf("B: %#v\n", dmsg)
+			logger.Debugf("B: %#v", dmsg)
 			buffer <- msg
 		} else {
 			logger.Debug(dmsg)

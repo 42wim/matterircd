@@ -1,18 +1,22 @@
 package mattermost
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand"
 	"regexp"
 	"strings"
 	"time"
 
 	"github.com/42wim/matterircd/bridge"
-	"github.com/42wim/matterircd/pkg/matterclient"
 	"github.com/davecgh/go-spew/spew"
-	"github.com/mattermost/mattermost-server/v5/model"
+	lru "github.com/hashicorp/golang-lru"
+	prefixed "github.com/matterbridge/logrus-prefixed-formatter"
+	"github.com/matterbridge/matterclient"
+	"github.com/mattermost/mattermost-server/v6/model"
 	"github.com/mitchellh/mapstructure"
-	logger "github.com/sirupsen/logrus"
+	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 )
 
@@ -23,7 +27,13 @@ type Mattermost struct {
 	eventChan   chan *bridge.Event
 	v           *viper.Viper
 	connected   bool
+	instanceTag string
+
+	msgParentCache   *lru.Cache
+	msgLastSentCache *lru.Cache
 }
+
+var logger *logrus.Entry
 
 func New(v *viper.Viper, cred bridge.Credentials, eventChan chan *bridge.Event, onWsConnect func()) (bridge.Bridger, *matterclient.Client, error) {
 	m := &Mattermost{
@@ -31,17 +41,24 @@ func New(v *viper.Viper, cred bridge.Credentials, eventChan chan *bridge.Event, 
 		eventChan:   eventChan,
 		v:           v,
 	}
+	m.msgParentCache, _ = lru.New(100)
+	m.msgLastSentCache, _ = lru.New(10)
 
-	logger.SetFormatter(&logger.TextFormatter{FullTimestamp: true})
+	ourlog := logrus.New()
+	ourlog.SetFormatter(&prefixed.TextFormatter{
+		PrefixPadding: 18,
+		FullTimestamp: true,
+	})
+	logger = ourlog.WithFields(logrus.Fields{"prefix": "bridge/mattermost"})
 	if v.GetBool("debug") {
-		logger.SetLevel(logger.DebugLevel)
+		ourlog.SetLevel(logrus.DebugLevel)
 	}
 
 	if v.GetBool("trace") {
-		logger.SetLevel(logger.TraceLevel)
+		ourlog.SetLevel(logrus.TraceLevel)
 	}
 
-	fmt.Println("loggerlevel:", logger.GetLevel())
+	fmt.Println("loggerlevel:", ourlog.GetLevel())
 
 	mc, err := m.loginToMattermost(onWsConnect)
 	if err != nil {
@@ -59,18 +76,35 @@ func New(v *viper.Viper, cred bridge.Credentials, eventChan chan *bridge.Event, 
 	m.mc = mc
 	m.connected = true
 
+	// Create a unique matterircd instance tag so we don't relay messages sent from it.
+	charset := []byte("abcdefghijklmnopqrstuvwxyz")
+	b := make([]byte, 8)
+	r := rand.New(rand.NewSource(time.Now().UnixNano())) //nolint:gosec
+	for i := range b {
+		b[i] = charset[r.Intn(len(charset))]
+	}
+	m.instanceTag = string(b)
+
 	return m, mc, nil
 }
 
 func (m *Mattermost) loginToMattermost(onWsConnect func()) (*matterclient.Client, error) {
+	matterclient.Matterircd = true
+
 	mc := matterclient.New(m.credentials.Login, m.credentials.Pass, m.credentials.Team, m.credentials.Server, m.credentials.MFAToken)
 	if m.v.GetBool("mattermost.Insecure") {
 		mc.Credentials.NoTLS = true
 	}
 
-	// do anti idle on town-square, every installation should have this channel
-	mc.AntiIdle = !m.v.GetBool("mattermost.DisableAutoView")
+	mc.AntiIdle = !m.v.GetBool("mattermost.DisableAutoView") || m.v.GetBool("mattermost.ForceAntiIdle")
+	mc.AntiIdleChan = m.v.GetString("mattermost.AntiIdleChannel")
+	mc.AntiIdleIntvl = m.v.GetInt("mattermost.AntiIdleInterval")
 	mc.OnWsConnect = onWsConnect
+
+	mc.Timeout = m.v.GetInt("ClientTimeout")
+	if mc.Timeout == 0 {
+		mc.Timeout = 10
+	}
 
 	if m.v.GetBool("debug") {
 		mc.SetLogLevel("debug")
@@ -78,16 +112,9 @@ func (m *Mattermost) loginToMattermost(onWsConnect func()) (*matterclient.Client
 
 	mc.Credentials.SkipTLSVerify = m.v.GetBool("mattermost.SkipTLSVerify")
 
-	/*
-		if m.v.GetBool("debug") {
-			mc.SetLogLevel("debug")
-		}
-	*/
-
 	logger.Infof("login as %s (team: %s) on %s", m.credentials.Login, m.credentials.Team, m.credentials.Server)
 
-	err := mc.Login()
-	if err != nil {
+	if err := mc.Login(); err != nil {
 		logger.Error("login failed", err)
 		return nil, err
 	}
@@ -105,6 +132,7 @@ func (m *Mattermost) loginToMattermost(onWsConnect func()) (*matterclient.Client
 	return mc, nil
 }
 
+//nolint:cyclop
 func (m *Mattermost) handleWsMessage(quitChan chan struct{}) {
 	updateChannelsThrottle := time.NewTicker(time.Second * 60)
 
@@ -123,29 +151,36 @@ func (m *Mattermost) handleWsMessage(quitChan chan struct{}) {
 		case message := <-m.mc.MessageChan:
 			logger.Debugf("MMUser WsReceiver: %#v", message.Raw)
 			logger.Tracef("handleWsMessage %s", spew.Sdump(message))
-			// check if we have the users/channels in our cache. If not update
-			m.checkWsActionMessage(message.Raw, updateChannelsThrottle)
 
-			switch message.Raw.Event {
-			case model.WEBSOCKET_EVENT_POSTED:
+			switch message.Raw.EventType() {
+			case model.WebsocketEventPosted:
 				m.handleWsActionPost(message.Raw)
-			case model.WEBSOCKET_EVENT_POST_EDITED:
+			case model.WebsocketEventPostEdited:
 				m.handleWsActionPost(message.Raw)
-			case model.WEBSOCKET_EVENT_POST_DELETED:
+			case model.WebsocketEventPostDeleted:
 				m.handleWsActionPost(message.Raw)
-			case model.WEBSOCKET_EVENT_USER_REMOVED:
+			case model.WebsocketEventUserRemoved:
 				m.handleWsActionUserRemoved(message.Raw)
-			case model.WEBSOCKET_EVENT_USER_ADDED:
+			case model.WebsocketEventUserAdded:
+				// check if we have the users/channels in our cache. If not update
+				m.checkWsActionMessage(message.Raw, updateChannelsThrottle)
 				m.handleWsActionUserAdded(message.Raw)
-			case model.WEBSOCKET_EVENT_CHANNEL_CREATED:
+			case model.WebsocketEventChannelCreated:
+				// check if we have the users/channels in our cache. If not update
+				m.checkWsActionMessage(message.Raw, updateChannelsThrottle)
 				m.handleWsActionChannelCreated(message.Raw)
-			case model.WEBSOCKET_EVENT_CHANNEL_DELETED:
+			case model.WebsocketEventChannelDeleted:
+				// check if we have the users/channels in our cache. If not update
+				m.checkWsActionMessage(message.Raw, updateChannelsThrottle)
 				m.handleWsActionChannelDeleted(message.Raw)
-			case model.WEBSOCKET_EVENT_USER_UPDATED:
+			case model.WebsocketEventChannelRestored:
+				// check if we have the users/channels in our cache. If not update
+				m.checkWsActionMessage(message.Raw, updateChannelsThrottle)
+			case model.WebsocketEventUserUpdated:
 				m.handleWsActionUserUpdated(message.Raw)
-			case model.WEBSOCKET_EVENT_STATUS_CHANGE:
+			case model.WebsocketEventStatusChange:
 				m.handleStatusChangeEvent(message.Raw)
-			case model.WEBSOCKET_EVENT_REACTION_ADDED, model.WEBSOCKET_EVENT_REACTION_REMOVED:
+			case model.WebsocketEventReactionAdded, model.WebsocketEventReactionRemoved:
 				m.handleReactionEvent(message.Raw)
 			}
 		}
@@ -153,43 +188,22 @@ func (m *Mattermost) handleWsMessage(quitChan chan struct{}) {
 }
 
 func (m *Mattermost) checkWsActionMessage(rmsg *model.WebSocketEvent, throttle *time.Ticker) {
-	if m.GetChannelName(rmsg.Broadcast.ChannelId) != "" {
+	if m.GetChannelName(rmsg.GetBroadcast().ChannelId) != "" {
 		return
 	}
 
 	select {
 	case <-throttle.C:
-		logger.Debugf("Updating channels for %#v", rmsg.Broadcast)
+		logger.Debugf("Updating channels for %#v", rmsg.GetBroadcast())
 		go m.UpdateChannels()
 	default:
 	}
 }
 
-// antiIdle does a lastviewed every 60 seconds so that the user is shown as online instead of away
-func (m *Mattermost) antiIdle(channelID string, quitChan chan struct{}) {
-	ticker := time.NewTicker(time.Second * 60)
-
-	for {
-		select {
-		case <-quitChan:
-			logger.Debugf("stopping antiIdle loop for %s", channelID)
-			return
-		case <-ticker.C:
-			if m.mc == nil {
-				logger.Error("antiidle: don't have a connection, exiting loop.")
-				return
-			}
-
-			logger.Tracef("antiIdle %s", channelID)
-			m.mc.UpdateLastViewed(channelID)
-		}
-	}
-}
-
 func (m *Mattermost) Invite(channelID, username string) error {
-	_, resp := m.mc.Client.AddChannelMember(channelID, username)
-	if resp.Error != nil {
-		return resp.Error
+	_, _, err := m.mc.Client.AddChannelMember(channelID, username)
+	if err != nil {
+		return err
 	}
 
 	return nil
@@ -200,7 +214,7 @@ func (m *Mattermost) Join(channelName string) (string, string, error) {
 
 	sp := strings.Split(channelName, "/")
 	if len(sp) > 1 {
-		team, _ := m.mc.Client.GetTeamByName(sp[0], "")
+		team, _, _ := m.mc.Client.GetTeamByName(sp[0], "")
 		if team == nil {
 			return "", "", fmt.Errorf("cannot join channel (+i)")
 		}
@@ -287,33 +301,16 @@ func (m *Mattermost) MsgUser(userID, text string) (string, error) {
 }
 
 func (m *Mattermost) MsgUserThread(userID, parentID, text string) (string, error) {
-	props := make(map[string]interface{})
-
-	props["matterircd_"+m.mc.User.Id] = true
-
 	// create DM channel (only happens on first message)
-	dchannel, resp := m.mc.Client.CreateDirectChannel(m.mc.User.Id, userID)
-	if resp.Error != nil {
-		return "", resp.Error
+	dchannel, _, err := m.mc.Client.CreateDirectChannel(m.mc.User.Id, userID)
+	if err != nil {
+		return "", err
 	}
 
 	// build & send the message
 	text = strings.ReplaceAll(text, "\r", "")
-	post := &model.Post{
-		ChannelId: dchannel.Id,
-		Message:   text,
-		RootId:    parentID,
-	}
 
-	post.SetProps(props)
-
-	rp, resp := m.mc.Client.CreatePost(post)
-
-	if resp.Error != nil {
-		return "", resp.Error
-	}
-
-	return rp.Id, nil
+	return m.MsgChannelThread(dchannel.Id, parentID, text)
 }
 
 func (m *Mattermost) MsgChannel(channelID, text string) (string, error) {
@@ -322,7 +319,7 @@ func (m *Mattermost) MsgChannel(channelID, text string) (string, error) {
 
 func (m *Mattermost) MsgChannelThread(channelID, parentID, text string) (string, error) {
 	props := make(map[string]interface{})
-	props["matterircd_"+m.mc.User.Id] = true
+	props["matterircd_"+m.mc.User.Id] = m.instanceTag
 
 	post := &model.Post{
 		ChannelId: channelID,
@@ -332,31 +329,86 @@ func (m *Mattermost) MsgChannelThread(channelID, parentID, text string) (string,
 
 	post.SetProps(props)
 
-	rp, resp := m.mc.Client.CreatePost(post)
-
-	if resp.Error != nil {
-		return "", resp.Error
+	rp, _, err := m.mc.Client.CreatePost(post)
+	if err == nil {
+		return rp.Id, nil
 	}
 
-	return rp.Id, nil
+	if parentID == "" {
+		return "", err
+	}
+
+	// Try to work out if we're trying to reply to a post within a thread.
+	replyPost, _, err := m.mc.Client.GetPost(parentID, "")
+	if err != nil {
+		return "", err
+	}
+
+	post = &model.Post{
+		ChannelId: channelID,
+		Message:   text,
+		RootId:    replyPost.RootId,
+	}
+
+	post.SetProps(props)
+
+	rp, _, err = m.mc.Client.CreatePost(post)
+	if err == nil {
+		return rp.Id, nil
+	}
+
+	return "", err
 }
 
 func (m *Mattermost) ModifyPost(msgID, text string) error {
 	if text == "" {
-		_, resp := m.mc.Client.DeletePost(msgID)
-		if resp.Error != nil {
-			return resp.Error
+		_, err := m.mc.Client.DeletePost(msgID)
+		if err != nil {
+			return err
 		}
 
 		return nil
 	}
 
-	_, resp := m.mc.Client.PatchPost(msgID, &model.PostPatch{
+	_, _, err := m.mc.Client.PatchPost(msgID, &model.PostPatch{
 		Message: &text,
 	})
+	if err != nil {
+		return err
+	}
 
-	if resp.Error != nil {
-		return resp.Error
+	return nil
+}
+
+func (m *Mattermost) AddReaction(msgID, emoji string) error {
+	logger.Debugf("adding reaction %#v, %#v", msgID, emoji)
+	reaction := &model.Reaction{
+		UserId:    m.mc.User.Id,
+		PostId:    msgID,
+		EmojiName: emoji,
+		CreateAt:  0,
+	}
+
+	_, _, err := m.mc.Client.SaveReaction(reaction)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (m *Mattermost) RemoveReaction(msgID, emoji string) error {
+	logger.Debugf("removing reaction %#v, %#v", msgID, emoji)
+	reaction := &model.Reaction{
+		UserId:    m.mc.User.Id,
+		PostId:    msgID,
+		EmojiName: emoji,
+		CreateAt:  0,
+	}
+
+	_, err := m.mc.Client.DeleteReaction(reaction)
+	if err != nil {
+		return err
 	}
 
 	return nil
@@ -372,9 +424,9 @@ func (m *Mattermost) SetTopic(channelID, text string) error {
 		Header: &text,
 	}
 
-	_, resp := m.mc.Client.PatchChannel(channelID, patch)
-	if resp.Error != nil {
-		return resp.Error
+	_, _, err := m.mc.Client.PatchChannel(channelID, patch)
+	if err != nil {
+		return err
 	}
 
 	return nil
@@ -393,21 +445,21 @@ func (m *Mattermost) Protocol() string {
 }
 
 func (m *Mattermost) Kick(channelID, username string) error {
-	_, resp := m.mc.Client.RemoveUserFromChannel(channelID, username)
-	if resp.Error != nil {
-		return resp.Error
+	_, err := m.mc.Client.RemoveUserFromChannel(channelID, username)
+	if err != nil {
+		return err
 	}
 
 	return nil
 }
 
 func (m *Mattermost) SetStatus(status string) error {
-	_, resp := m.mc.Client.UpdateUserStatus(m.mc.User.Id, &model.Status{
+	_, _, err := m.mc.Client.UpdateUserStatus(m.mc.User.Id, &model.Status{
 		Status: status,
 		UserId: m.mc.User.Id,
 	})
-	if resp.Error != nil {
-		return resp.Error
+	if err != nil {
+		return err
 	}
 
 	return nil
@@ -419,6 +471,10 @@ func (m *Mattermost) Nick(name string) error {
 
 func (m *Mattermost) GetChannelName(channelID string) string {
 	var name string
+
+	if channelID == "" || strings.HasPrefix(channelID, "&") || channelID == m.mc.User.Nickname || channelID == m.mc.User.Username {
+		return channelID
+	}
 
 	channelName := m.mc.GetChannelName(channelID)
 
@@ -457,6 +513,7 @@ func (m *Mattermost) GetChannelUsers(channelID string) ([]*bridge.UserInfo, erro
 	var (
 		mmusers, mmusersPaged []*model.User
 		users                 []*bridge.UserInfo
+		err                   error
 		resp                  *model.Response
 	)
 
@@ -464,20 +521,20 @@ func (m *Mattermost) GetChannelUsers(channelID string) ([]*bridge.UserInfo, erro
 	max := 200
 
 	for {
-		mmusersPaged, resp = m.mc.Client.GetUsersInChannel(channelID, idx, max, "")
-		if resp.Error == nil {
+		mmusersPaged, resp, err = m.mc.Client.GetUsersInChannel(channelID, idx, max, "")
+		if err == nil {
 			break
 		}
 
-		if err := m.mc.HandleRatelimit("GetUsersInChannel", resp); err != nil {
+		if err = m.mc.HandleRatelimit("GetUsersInChannel", resp); err != nil {
 			return nil, err
 		}
 	}
 
 	for len(mmusersPaged) > 0 {
 		for {
-			mmusersPaged, resp = m.mc.Client.GetUsersInChannel(channelID, idx, max, "")
-			if resp.Error == nil {
+			mmusersPaged, resp, err = m.mc.Client.GetUsersInChannel(channelID, idx, max, "")
+			if err == nil {
 				idx++
 				time.Sleep(time.Millisecond * 200)
 				mmusers = append(mmusers, mmusersPaged...)
@@ -535,6 +592,10 @@ func (m *Mattermost) GetChannels() []*bridge.ChannelInfo {
 }
 
 func (m *Mattermost) GetChannel(channelID string) (*bridge.ChannelInfo, error) {
+	if channelID == "" || strings.HasPrefix(channelID, "&") || channelID == m.mc.User.Nickname || channelID == m.mc.User.Username {
+		return nil, errors.New("channel not found")
+	}
+
 	for _, channel := range m.GetChannels() {
 		if channel.ID == channelID {
 			return channel, nil
@@ -549,7 +610,18 @@ func (m *Mattermost) GetChannel(channelID string) (*bridge.ChannelInfo, error) {
 		}
 	}
 
-	return nil, errors.New("channel not found")
+	// Fallback if it's not found in the cache.
+	mmchannel, _, err := m.mc.Client.GetChannel(channelID, "")
+	if err != nil {
+		return nil, errors.New("channel not found")
+	}
+	return &bridge.ChannelInfo{
+		Name:    mmchannel.Name,
+		ID:      mmchannel.Id,
+		TeamID:  mmchannel.TeamId,
+		DM:      mmchannel.IsGroupOrDirect(),
+		Private: !mmchannel.IsOpen(),
+	}, nil
 }
 
 func (m *Mattermost) GetUser(userID string) *bridge.UserInfo {
@@ -562,8 +634,8 @@ func (m *Mattermost) GetMe() *bridge.UserInfo {
 
 func (m *Mattermost) GetUserByUsername(username string) *bridge.UserInfo {
 	for {
-		mmuser, resp := m.mc.Client.GetUserByUsername(username, "")
-		if resp.Error == nil {
+		mmuser, resp, err := m.mc.Client.GetUserByUsername(username, "")
+		if err == nil {
 			return m.createUser(mmuser)
 		}
 
@@ -598,7 +670,7 @@ func (m *Mattermost) createUser(mmuser *model.User) *bridge.UserInfo {
 		Nick:        nick,
 		User:        mmuser.Id,
 		Real:        mmuser.FirstName + " " + mmuser.LastName,
-		Host:        m.mc.Client.Url,
+		Host:        m.mc.Client.URL,
 		Roles:       mmuser.Roles,
 		Ghost:       true,
 		Me:          me,
@@ -612,6 +684,7 @@ func (m *Mattermost) createUser(mmuser *model.User) *bridge.UserInfo {
 	return info
 }
 
+//nolint:cyclop
 func isValidNick(s string) bool {
 	/* IRC RFC ([0] - see below) mentions a limit of 9 chars for
 	 * IRC nicks, but modern clients allow more than that. Let's
@@ -648,33 +721,63 @@ func isValidNick(s string) bool {
 	return true
 }
 
+//nolint:forcetypeassert
 func (m *Mattermost) wsActionPostSkip(rmsg *model.WebSocketEvent) bool {
-	data := model.PostFromJson(strings.NewReader(rmsg.Data["post"].(string)))
-	extraProps := model.StringInterfaceFromJson(strings.NewReader(rmsg.Data["post"].(string)))["props"].(map[string]interface{})
+	var data model.Post
+	if err := json.NewDecoder(strings.NewReader(rmsg.GetData()["post"].(string))).Decode(&data); err != nil {
+		return true
+	}
 
-	if rmsg.Event == model.WEBSOCKET_EVENT_POST_EDITED && data.HasReactions {
+	extraProps := data.GetProps()
+
+	if rmsg.EventType() == model.WebsocketEventPostEdited && data.HasReactions {
 		logger.Debugf("edit post with reactions, do not relay. We don't know if a reaction is added or the post has been edited")
 		return true
 	}
 
-	if data.UserId == m.GetMe().User {
-		if _, ok := extraProps["matterircd_"+m.GetMe().User].(bool); ok {
-			logger.Debugf("message is sent from matterirc, not relaying %#v", data.Message)
-			return true
-		}
+	if data.UserId != m.GetMe().User {
+		return false
+	}
 
-		if data.Type == model.POST_JOIN_LEAVE || data.Type == model.POST_JOIN_CHANNEL {
-			logger.Debugf("our own join/leave message. not relaying %#v", data.Message)
-			return true
+	if tag, ok := extraProps["matterircd_"+m.GetMe().User]; !ok || tag != m.instanceTag {
+		return false
+	}
+
+	if data.Type == model.PostTypeLeaveChannel || data.Type == model.PostTypeJoinChannel {
+		logger.Debugf("our own join/leave message. not relaying %#v", data.Message)
+		return true
+	}
+
+	msgID := data.Id
+	msg := data.Message
+	channel := m.GetChannelName(data.ChannelId)
+
+	if strings.Contains(channel, "__") {
+		receiver := m.getDMUser(channel)
+		channel = receiver.Username
+	}
+
+	if data.RootId != "" {
+		msgID = data.RootId
+		if !m.v.GetBool("mattermost.hidereplies") {
+			newMsg, err := m.addParentMsg(data.RootId, data.Message, m.v.GetInt("mattermost.ShortenRepliesTo"), "@", m.v.GetBool("mattermost.unicode"))
+			if err == nil {
+				msg = newMsg
+			}
 		}
 	}
 
-	return false
+	m.msgLastSentCache.Add(msgID, fmt.Sprintf("%s: %s", channel, msg))
+
+	logger.Debugf("message is sent from this matterircd instance, not relaying %#v", data.Message)
+	return true
 }
 
 // maybeShorten returns a prefix of msg that is approximately newLen
 // characters long, followed by "...".  Words that start with uncounted
 // are included in the result but are not reckoned against newLen.
+//
+//nolint:cyclop
 func maybeShorten(msg string, newLen int, uncounted string, unicode bool) string {
 	if newLen == 0 || len(msg) < newLen {
 		return msg
@@ -709,30 +812,57 @@ func maybeShorten(msg string, newLen int, uncounted string, unicode bool) string
 	return fmt.Sprintf("%s %s", newMsg, ellipsis)
 }
 
-// nolint:funlen,gocognit,gocyclo
+func (m *Mattermost) addParentMsg(parentID string, msg string, newLen int, uncounted string, unicode bool) (string, error) {
+	var replyMessage string
+
+	// Search and use cached reply if it exists.
+	// None found, so we'll need to create one and save it for future uses.
+	if v, ok := m.msgParentCache.Get(parentID); !ok {
+		parentPost, _, err := m.mc.Client.GetPost(parentID, "")
+		// Retry once on failure.
+		if err != nil {
+			parentPost, _, err = m.mc.Client.GetPost(parentID, "")
+		}
+		if err != nil {
+			return msg, err
+		}
+
+		parentUser := m.GetUser(parentPost.UserId)
+		parentMessage := maybeShorten(parentPost.Message, newLen, uncounted, unicode)
+		replyMessage = fmt.Sprintf(" (re @%s: %s)", parentUser.Nick, parentMessage)
+		logger.Debugf("Created reply for parent post %s:%s", parentID, replyMessage)
+
+		m.msgParentCache.Add(parentID, replyMessage)
+	} else if replyMessage, ok = v.(string); ok {
+		logger.Debugf("Found saved reply for parent post %s, using:%s", parentID, replyMessage)
+	}
+
+	return strings.TrimRight(msg, "\n") + replyMessage, nil
+}
+
+var validIRCNickRegExp = regexp.MustCompile("^[a-zA-Z0-9_]*$")
+
+//nolint:funlen,gocognit,gocyclo,cyclop,forcetypeassert
 func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
-	data := model.PostFromJson(strings.NewReader(rmsg.Data["post"].(string)))
-	props := rmsg.Data
-	extraProps := model.StringInterfaceFromJson(strings.NewReader(rmsg.Data["post"].(string)))["props"].(map[string]interface{})
+	var data model.Post
+	if err := json.NewDecoder(strings.NewReader(rmsg.GetData()["post"].(string))).Decode(&data); err != nil {
+		return
+	}
+
+	props := rmsg.GetData()
+	extraProps := data.GetProps()
 
 	logger.Debugf("handleWsActionPost() receiving userid %s", data.UserId)
 	if m.wsActionPostSkip(rmsg) {
 		return
 	}
 
-	// nolint:nestif
-	if data.ParentId != "" {
-		parentPost, resp := m.mc.Client.GetPost(data.ParentId, "")
-		if resp.Error != nil {
-			logger.Errorf("Unable to get parent post for %#v", data)
-		} else {
-			parentGhost := m.GetUser(parentPost.UserId)
-
-			if !m.v.GetBool("mattermost.hidereplies") {
-				parentMessage := maybeShorten(parentPost.Message, m.v.GetInt("mattermost.ShortenRepliesTo"), "@", m.v.GetBool("mattermost.unicode"))
-				data.Message = fmt.Sprintf("%s (re @%s: %s)", data.Message, parentGhost.Nick, parentMessage)
-			}
+	if !m.v.GetBool("mattermost.hidereplies") && data.RootId != "" {
+		message, err := m.addParentMsg(data.RootId, data.Message, m.v.GetInt("mattermost.ShortenRepliesTo"), "@", m.v.GetBool("mattermost.unicode"))
+		if err != nil {
+			logger.Errorf("Unable to get parent post for %#v", data) //nolint:govet
 		}
+		data.Message = message
 	}
 
 	// create new "ghost" user
@@ -762,24 +892,23 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	if overrideUsername != "" {
 		logger.Debugf("found override username %s", overrideUsername)
 		// only allow valid irc nicks
-		re := regexp.MustCompile("^[a-zA-Z0-9_]*$")
-		if re.MatchString(overrideUsername) {
+		if validIRCNickRegExp.MatchString(overrideUsername) {
 			ghost.Nick = overrideUsername
 			ghost.Me = false
 		}
 	}
 
-	if data.Type == model.POST_JOIN_LEAVE || data.Type == "system_leave_channel" ||
-		data.Type == "system_join_channel" || data.Type == "system_add_to_channel" ||
-		data.Type == "system_remove_from_channel" {
+	if data.Type == model.PostTypeJoinChannel || data.Type == model.PostTypeLeaveChannel ||
+		data.Type == model.PostTypeAddToChannel ||
+		data.Type == model.PostTypeRemoveFromChannel {
 		logger.Debugf("join/leave message. not relaying %#v", data.Message)
 		m.UpdateChannels()
 
-		m.wsActionPostJoinLeave(data, extraProps)
+		m.wsActionPostJoinLeave(&data, extraProps)
 		return
 	}
 
-	if data.Type == "system_header_change" {
+	if data.Type == model.PostTypeHeaderChange {
 		if topic, ok := extraProps["new_header"].(string); ok {
 			event := &bridge.Event{
 				Type: "channel_topic",
@@ -795,21 +924,28 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		return
 	}
 
-	msgs := strings.Split(data.Message, "\n")
+	if data.Type == model.PostTypeAddToTeam || data.Type == model.PostTypeRemoveFromTeam {
+		ghost = &bridge.UserInfo{
+			Nick: "system",
+		}
+	}
+
+	// msgs := strings.Split(data.Message, "\n")
+	msgs := []string{data.Message}
 
 	channelType := ""
 	if t, ok := props["channel_type"].(string); ok {
 		channelType = t
 	}
 
-	dmchannel, _ := rmsg.Data["channel_name"].(string)
+	dmchannel, _ := rmsg.GetData()["channel_name"].(string)
 
 	// add an edited/deleted string when messages are edited/deleted
-	if len(msgs) > 0 && (rmsg.Event == model.WEBSOCKET_EVENT_POST_EDITED ||
-		rmsg.Event == model.WEBSOCKET_EVENT_POST_DELETED) {
+	if len(msgs) > 0 && (rmsg.EventType() == model.WebsocketEventPostEdited ||
+		rmsg.EventType() == model.WebsocketEventPostDeleted) {
 		postfix := " (edited)"
 
-		if rmsg.Event == model.WEBSOCKET_EVENT_POST_DELETED {
+		if rmsg.EventType() == model.WebsocketEventPostDeleted {
 			postfix = " (deleted)"
 		}
 
@@ -821,13 +957,12 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 			channelType = "D"
 		}
 		dmchannel = name
+
+		// We need to remove it from the cache so that replies use the latest msg.
+		m.msgParentCache.Remove(data.Id)
 	}
 
 	for _, msg := range msgs {
-		if msg == "" {
-			continue
-		}
-
 		switch {
 		// DirectMessage
 		case channelType == "D":
@@ -843,11 +978,10 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 
 			d := &bridge.DirectMessageEvent{
 				Text:      msg,
-				Files:     m.getFilesFromData(data),
 				ChannelID: data.ChannelId,
 				MessageID: data.Id,
-				Event:     rmsg.Event,
-				ParentID:  data.ParentId,
+				Event:     rmsg.EventType(),
+				ParentID:  data.RootId,
 			}
 
 			if ghost.Me {
@@ -872,18 +1006,22 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 			}
 		case strings.Contains(data.Message, "@channel") || strings.Contains(data.Message, "@here") ||
 			strings.Contains(data.Message, "@all"):
+
+			messageType := "notice"
+			if m.v.GetBool("mattermost.disabledefaultmentions") {
+				messageType = ""
+			}
 			event := &bridge.Event{
 				Type: "channel_message",
 				Data: &bridge.ChannelMessageEvent{
 					Text:        msg,
 					ChannelID:   data.ChannelId,
 					Sender:      ghost,
-					MessageType: "notice",
+					MessageType: messageType,
 					ChannelType: channelType,
-					Files:       m.getFilesFromData(data),
 					MessageID:   data.Id,
-					Event:       rmsg.Event,
-					ParentID:    data.ParentId,
+					Event:       rmsg.EventType(),
+					ParentID:    data.RootId,
 				},
 			}
 
@@ -893,6 +1031,12 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 				msg = strings.TrimLeft(msg, "*")
 				msg = strings.TrimRight(msg, "*")
 				msg = "\x01ACTION " + msg + " \x01"
+			} else if data.Type == "custom_matterpoll" {
+				pollMsg := parseMatterpollToMsg(data.Attachments())
+				if pollMsg == "" {
+					break
+				}
+				msg = pollMsg + msg
 			}
 
 			event := &bridge.Event{
@@ -902,10 +1046,9 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 					ChannelID:   data.ChannelId,
 					Sender:      ghost,
 					ChannelType: channelType,
-					Files:       m.getFilesFromData(data),
 					MessageID:   data.Id,
-					Event:       rmsg.Event,
-					ParentID:    data.ParentId,
+					Event:       rmsg.EventType(),
+					ParentID:    data.RootId,
 				},
 			}
 
@@ -917,10 +1060,12 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		}
 	}
 
-	m.handleFileEvent(channelType, ghost, data, rmsg)
+	if len(data.FileIds) > 0 {
+		m.handleFileEvent(channelType, ghost, &data, rmsg)
+	}
 
-	logger.Debugf("handleWsActionPost() user %s sent %s", m.mc.GetUser(data.UserId).Username, data.Message)
-	logger.Debugf("%#v", data)
+	logger.Debugf("handleWsActionPost() user %s sent %#v", m.mc.GetUser(data.UserId).Username, data.Message)
+	logger.Debugf("%#v", data) //nolint:govet
 }
 
 func (m *Mattermost) getFilesFromData(data *model.Post) []*bridge.File {
@@ -945,6 +1090,8 @@ func (m *Mattermost) handleFileEvent(channelType string, ghost *bridge.UserInfo,
 		Receiver:    ghost,
 		ChannelType: channelType,
 		ChannelID:   data.ChannelId,
+		MessageID:   data.Id,
+		ParentID:    data.RootId,
 	}
 
 	event.Data = fileEvent
@@ -955,27 +1102,32 @@ func (m *Mattermost) handleFileEvent(channelType string, ghost *bridge.UserInfo,
 		})
 	}
 
-	if len(fileEvent.Files) > 0 {
-		switch {
-		case channelType == "D":
-			if ghost.Me {
-				fileEvent.Sender = ghost
-				fileEvent.Receiver = m.getDMUser(rmsg.Data["channel_name"])
-			} else {
-				fileEvent.Sender = m.getDMUser(rmsg.Data["channel_name"])
-				fileEvent.Receiver = ghost
-			}
-
-			if fileEvent.Sender == nil || fileEvent.Receiver == nil {
-				logger.Errorf("filedm: couldn't resolve sender or receiver: %#v", rmsg)
-				return
-			}
-
-			m.eventChan <- event
-		default:
-			m.eventChan <- event
-		}
+	if len(fileEvent.Files) == 0 {
+		logger.Debugf("handleFileEvent() user %s sent 0 files %#v", m.mc.GetUser(data.UserId).Username, data.FileIds)
+		return
 	}
+
+	switch {
+	case channelType == "D":
+		if ghost.Me {
+			fileEvent.Sender = ghost
+			fileEvent.Receiver = m.getDMUser(rmsg.GetData()["channel_name"])
+		} else {
+			fileEvent.Sender = m.getDMUser(rmsg.GetData()["channel_name"])
+			fileEvent.Receiver = ghost
+		}
+
+		if fileEvent.Sender == nil || fileEvent.Receiver == nil {
+			logger.Errorf("filedm: couldn't resolve sender or receiver: %#v", rmsg)
+			return
+		}
+
+		m.eventChan <- event
+	default:
+		m.eventChan <- event
+	}
+
+	logger.Debugf("handleFileEvent() user %s sent %d files %#v", m.mc.GetUser(data.UserId).Username, len(fileEvent.Files), data.FileIds)
 }
 
 func (m *Mattermost) wsActionPostJoinLeave(data *model.Post, extraProps map[string]interface{}) {
@@ -1016,7 +1168,7 @@ func (m *Mattermost) wsActionPostJoinLeave(data *model.Post, extraProps map[stri
 }
 
 func (m *Mattermost) handleWsActionUserAdded(rmsg *model.WebSocketEvent) {
-	userID, ok := rmsg.Data["user_id"].(string)
+	userID, ok := rmsg.GetData()["user_id"].(string)
 	if !ok {
 		return
 	}
@@ -1030,7 +1182,7 @@ func (m *Mattermost) handleWsActionUserAdded(rmsg *model.WebSocketEvent) {
 			Adder: &bridge.UserInfo{
 				Nick: "system",
 			},
-			ChannelID: rmsg.Broadcast.ChannelId,
+			ChannelID: rmsg.GetBroadcast().ChannelId,
 		},
 	}
 
@@ -1038,20 +1190,20 @@ func (m *Mattermost) handleWsActionUserAdded(rmsg *model.WebSocketEvent) {
 }
 
 func (m *Mattermost) handleWsActionUserRemoved(rmsg *model.WebSocketEvent) {
-	userID, ok := rmsg.Data["user_id"].(string)
+	userID, ok := rmsg.GetData()["user_id"].(string)
 	if !ok {
-		userID = rmsg.Broadcast.UserId
+		userID = rmsg.GetBroadcast().UserId
 	}
 
-	removerID, ok := rmsg.Data["remover_id"].(string)
+	removerID, ok := rmsg.GetData()["remover_id"].(string)
 	if !ok {
 		fmt.Println("not ok removerID", removerID)
 		return
 	}
 
-	channelID, ok := rmsg.Data["channel_id"].(string)
+	channelID, ok := rmsg.GetData()["channel_id"].(string)
 	if !ok {
-		channelID = rmsg.Broadcast.ChannelId
+		channelID = rmsg.GetBroadcast().ChannelId
 	}
 
 	event := &bridge.Event{
@@ -1071,7 +1223,7 @@ func (m *Mattermost) handleWsActionUserRemoved(rmsg *model.WebSocketEvent) {
 func (m *Mattermost) handleWsActionUserUpdated(rmsg *model.WebSocketEvent) {
 	var info model.User
 
-	err := Decode(rmsg.Data["user"], &info)
+	err := Decode(rmsg.GetData()["user"], &info)
 	if err != nil {
 		fmt.Println("decode", err)
 		return
@@ -1088,7 +1240,7 @@ func (m *Mattermost) handleWsActionUserUpdated(rmsg *model.WebSocketEvent) {
 }
 
 func (m *Mattermost) handleWsActionChannelCreated(rmsg *model.WebSocketEvent) {
-	channelID, ok := rmsg.Data["channel_id"].(string)
+	channelID, ok := rmsg.GetData()["channel_id"].(string)
 	if !ok {
 		return
 	}
@@ -1104,7 +1256,7 @@ func (m *Mattermost) handleWsActionChannelCreated(rmsg *model.WebSocketEvent) {
 }
 
 func (m *Mattermost) handleWsActionChannelDeleted(rmsg *model.WebSocketEvent) {
-	channelID, ok := rmsg.Data["channel_id"].(string)
+	channelID, ok := rmsg.GetData()["channel_id"].(string)
 	if !ok {
 		return
 	}
@@ -1122,7 +1274,7 @@ func (m *Mattermost) handleWsActionChannelDeleted(rmsg *model.WebSocketEvent) {
 func (m *Mattermost) handleStatusChangeEvent(rmsg *model.WebSocketEvent) {
 	var info model.Status
 
-	err := Decode(rmsg.Data, &info)
+	err := Decode(rmsg.GetData(), &info)
 	if err != nil {
 		fmt.Println("decode", err)
 
@@ -1140,39 +1292,74 @@ func (m *Mattermost) handleStatusChangeEvent(rmsg *model.WebSocketEvent) {
 	m.eventChan <- event
 }
 
+//nolint:forcetypeassert
 func (m *Mattermost) handleReactionEvent(rmsg *model.WebSocketEvent) {
-	reaction := model.ReactionFromJson(strings.NewReader(rmsg.Data["reaction"].(string)))
+	var reaction model.Reaction
+	if err := json.NewDecoder(strings.NewReader(rmsg.GetData()["reaction"].(string))).Decode(&reaction); err != nil {
+		return
+	}
+
+	userID := m.GetUser(reaction.UserId)
+
+	// No need to show added/removed reaction messages for our own.
+	if userID.Me {
+		logger.Debugf("Not showing own reaction: %s: %s", rmsg.EventType(), reaction.EmojiName)
+		return
+	}
 
 	var event *bridge.Event
 
 	channelType := ""
+	channelID := rmsg.GetBroadcast().ChannelId
 
-	name := m.GetChannelName(rmsg.Broadcast.ChannelId)
+	name := m.GetChannelName(channelID)
 	if strings.Contains(name, "__") {
 		channelType = "D"
 	}
 
-	switch rmsg.Event {
-	case model.WEBSOCKET_EVENT_REACTION_ADDED:
+	var parentUser *bridge.UserInfo
+	rMessage := ""
+	if !m.v.GetBool("mattermost.hidereplies") {
+		message, err := m.addParentMsg(reaction.PostId, "", m.v.GetInt("mattermost.ShortenRepliesTo"), "@", m.v.GetBool("mattermost.unicode"))
+		if err != nil {
+			logger.Errorf("Unable to get parent post for %#v", reaction)
+		}
+		rMessage = message
+	}
+
+	parentID := reaction.PostId
+	parentPost, _, err := m.mc.Client.GetPost(reaction.PostId, "")
+	if err == nil {
+		parentID = parentPost.RootId
+	}
+
+	switch rmsg.EventType() {
+	case model.WebsocketEventReactionAdded:
 		event = &bridge.Event{
 			Type: "reaction_add",
 			Data: &bridge.ReactionAddEvent{
-				ChannelID:   rmsg.Broadcast.ChannelId,
+				ChannelID:   channelID,
 				MessageID:   reaction.PostId,
-				Sender:      m.GetUser(reaction.UserId),
+				Sender:      userID,
 				Reaction:    reaction.EmojiName,
 				ChannelType: channelType,
+				ParentUser:  parentUser,
+				Message:     rMessage,
+				ParentID:    parentID,
 			},
 		}
-	case model.WEBSOCKET_EVENT_REACTION_REMOVED:
+	case model.WebsocketEventReactionRemoved:
 		event = &bridge.Event{
 			Type: "reaction_remove",
 			Data: &bridge.ReactionRemoveEvent{
-				ChannelID:   rmsg.Broadcast.ChannelId,
+				ChannelID:   channelID,
 				MessageID:   reaction.PostId,
-				Sender:      m.GetUser(reaction.UserId),
+				Sender:      userID,
 				Reaction:    reaction.EmojiName,
 				ChannelType: channelType,
+				ParentUser:  parentUser,
+				Message:     rMessage,
+				ParentID:    parentID,
 			},
 		}
 	}
@@ -1205,8 +1392,8 @@ func (m *Mattermost) UpdateLastViewed(channelID string) {
 
 func (m *Mattermost) UpdateLastViewedUser(userID string) error {
 	for {
-		dc, resp := m.mc.Client.CreateDirectChannel(m.mc.User.Id, userID)
-		if resp.Error == nil {
+		dc, resp, err := m.mc.Client.CreateDirectChannel(m.mc.User.Id, userID)
+		if err == nil {
 			return m.mc.UpdateLastViewed(dc.Id)
 		}
 
@@ -1225,9 +1412,9 @@ func (m *Mattermost) GetFileLinks(fileIDs []string) []string {
 }
 
 func (m *Mattermost) SearchUsers(query string) ([]*bridge.UserInfo, error) {
-	users, resp := m.mc.Client.SearchUsers(&model.UserSearch{Term: query})
-	if resp.Error != nil {
-		return nil, resp.Error
+	users, _, err := m.mc.Client.SearchUsers(&model.UserSearch{Term: query})
+	if err != nil {
+		return nil, err
 	}
 
 	var brusers []*bridge.UserInfo
@@ -1241,6 +1428,10 @@ func (m *Mattermost) SearchUsers(query string) ([]*bridge.UserInfo, error) {
 
 func (m *Mattermost) GetPosts(channelID string, limit int) interface{} {
 	return m.mc.GetPosts(channelID, limit)
+}
+
+func (m *Mattermost) GetPostThread(postID string) interface{} {
+	return m.mc.GetPostThread(postID)
 }
 
 func (m *Mattermost) GetChannelID(name, teamID string) string {
@@ -1288,4 +1479,39 @@ func (m *Mattermost) getDMUser(name interface{}) *bridge.UserInfo {
 	}
 
 	return nil
+}
+
+func parseMatterpollToMsg(attachments []*model.SlackAttachment) string {
+	msg := ""
+	for _, attachment := range attachments {
+		if strings.HasPrefix(attachment.Text, "This poll has ended.") {
+			return ""
+		}
+
+		options := ""
+		for _, action := range attachment.Actions {
+			if strings.HasPrefix(action.Id, "vote") {
+				options += "* " + action.Name + "\n"
+			}
+		}
+
+		text := strings.TrimSuffix(attachment.Text, "\n")
+		text = strings.Replace(text, "**Total votes**", "*Total votes*", 1)
+		msg = fmt.Sprintf("%s: %s\n%s%s", attachment.AuthorName, attachment.Title, options, text)
+	}
+
+	return msg
+}
+
+func (m *Mattermost) GetLastSentMsgs() []string {
+	data := make([]string, 0)
+
+	for _, k := range m.msgLastSentCache.Keys() {
+		if v, ok := m.msgLastSentCache.Get(k); ok {
+			msg, _ := v.(string)
+			data = append(data, fmt.Sprintf("[@@%s] %s", k, msg))
+		}
+	}
+
+	return data
 }
