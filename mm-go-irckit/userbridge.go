@@ -15,8 +15,8 @@ import (
 	bolt "go.etcd.io/bbolt"
 
 	"github.com/42wim/matterircd/bridge"
-	"github.com/42wim/matterircd/bridge/matrix"
 	"github.com/42wim/matterircd/bridge/mastodon"
+	"github.com/42wim/matterircd/bridge/matrix"
 	"github.com/42wim/matterircd/bridge/mattermost"
 	"github.com/42wim/matterircd/bridge/slack"
 	"github.com/alecthomas/chroma/v2/quick"
@@ -1027,7 +1027,7 @@ func (u *User) prefixContext(channelID, messageID, parentID, event string) strin
 		prefixChar = "↪"
 	}
 
-	if u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" || u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost+post" {
+	if u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" || u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost+post" { //nolint:goconst
 		if parentID == "" {
 			return fmt.Sprintf("[@@%s]", messageID)
 		}

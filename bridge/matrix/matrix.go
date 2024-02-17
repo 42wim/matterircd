@@ -8,26 +8,27 @@ import (
 	"sync"
 	"time"
 
+	"maunium.net/go/mautrix"
+	"maunium.net/go/mautrix/event"
+	"maunium.net/go/mautrix/id"
+
 	"github.com/42wim/matterbridge/bridge/helper"
 	"github.com/42wim/matterircd/bridge"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/spf13/viper"
-	"maunium.net/go/mautrix"
-	"maunium.net/go/mautrix/event"
-	"maunium.net/go/mautrix/id"
 )
 
 type Matrix struct {
 	mc          *mautrix.Client
 	credentials bridge.Credentials
-	quitChan    []chan struct{}
-	eventChan   chan *bridge.Event
-	v           *viper.Viper
-	connected   bool
-	firstSync   bool
-	dmChannels  map[id.RoomID][]id.UserID
-	channels    map[id.RoomID]*Channel
-	users       map[id.UserID]*User
+	// quitChan    []chan struct{}
+	eventChan  chan *bridge.Event
+	v          *viper.Viper
+	connected  bool
+	firstSync  bool
+	dmChannels map[id.RoomID][]id.UserID
+	channels   map[id.RoomID]*Channel
+	users      map[id.UserID]*User
 	sync.RWMutex
 }
 
@@ -68,7 +69,7 @@ func New(v *viper.Viper, cred bridge.Credentials, eventChan chan *bridge.Event, 
 }
 
 func (m *Matrix) syncCallback(resp *mautrix.RespSync, since string) bool {
-	//spew.Dump(resp)
+	// spew.Dump(resp)
 	fmt.Println("synccallback", len(resp.AccountData.Events), resp.NextBatch)
 
 	m.firstSync = true
@@ -76,6 +77,7 @@ func (m *Matrix) syncCallback(resp *mautrix.RespSync, since string) bool {
 	return true
 }
 
+//nolint:funlen,forcetypeassert
 func (m *Matrix) handleMatrix(onConnect func()) {
 	syncer := m.mc.Syncer.(*mautrix.DefaultSyncer)
 
@@ -87,7 +89,7 @@ func (m *Matrix) handleMatrix(onConnect func()) {
 	syncer.OnEventType(event.StateMember, m.handleMember)
 	syncer.OnEventType(event.StateCreate, m.handleCreate)
 	syncer.OnEventType(event.StateRoomName, m.handleRoomName)
-	//syncer.OnEventType(event.AccountDataDirectChats, m.handleDM)
+	// syncer.OnEventType(event.AccountDataDirectChats, m.handleDM)
 	syncer.OnEventType(event.StateCanonicalAlias, m.handleCanonicalAlias)
 	syncer.OnEvent(func(source mautrix.EventSource, evt *event.Event) {
 		// sync is almost complete
@@ -147,6 +149,7 @@ func (m *Matrix) handleMatrix(onConnect func()) {
 	go onConnect()
 }
 
+//nolint:unparam
 func (m *Matrix) handleDM(source mautrix.EventSource, ev *event.Event) {
 	m.Lock()
 
@@ -176,7 +179,7 @@ func (m *Matrix) handleDM(source mautrix.EventSource, ev *event.Event) {
 			}
 
 			m.channels[roomID].Unlock()
-			//m.dmChannels[room] = []id.UserID{u}
+			// m.dmChannels[room] = []id.UserID{u}
 		}
 	}
 
@@ -211,7 +214,6 @@ func (m *Matrix) handleMember(source mautrix.EventSource, ev *event.Event) {
 
 			spew.Dump(m.channels)
 			spew.Dump(m.users)
-
 		}
 	}
 
@@ -253,7 +255,7 @@ func (m *Matrix) handleCanonicalAlias(source mautrix.EventSource, ev *event.Even
 	m.channels[ev.RoomID].AltAliases = ev.Content.AsCanonicalAlias().AltAliases
 	m.channels[ev.RoomID].Unlock()
 
-	//m.mc.JoinedMembers(ev.RoomID)
+	// m.mc.JoinedMembers(ev.RoomID)
 }
 
 func (m *Matrix) handleEvent(source mautrix.EventSource, ev *event.Event) {
@@ -270,17 +272,17 @@ func (m *Matrix) handleEvent(source mautrix.EventSource, ev *event.Event) {
 	m.RUnlock()
 
 	if ok {
-		event := &bridge.Event{
+		event := &bridge.Event{ //nolint:gocritic
 			Type: "direct_message",
 			Data: &bridge.DirectMessageEvent{
 				Text:      text,
 				ChannelID: ev.RoomID.String(),
 				Sender:    ghost,
 				Receiver:  m.GetMe(),
-				//Files:       m.getFilesFromData(data),
+				// Files:       m.getFilesFromData(data),
 				MessageID: string(ev.ID),
-				//Event:       rmsg.Event,
-				//ParentID:    mxEvent
+				// Event:       rmsg.Event,
+				// ParentID:    mxEvent
 			},
 		}
 
@@ -288,17 +290,17 @@ func (m *Matrix) handleEvent(source mautrix.EventSource, ev *event.Event) {
 		return
 	}
 
-	event := &bridge.Event{
+	event := &bridge.Event{ //nolint:gocritic
 		Type: "channel_message",
 		Data: &bridge.ChannelMessageEvent{
 			Text:        text,
 			ChannelID:   ev.RoomID.String(),
 			Sender:      ghost,
 			ChannelType: "P",
-			//Files:       m.getFilesFromData(data),
+			// Files:       m.getFilesFromData(data),
 			MessageID: string(ev.ID),
-			//Event:       rmsg.Event,
-			//ParentID:    mxEvent
+			// Event:       rmsg.Event,
+			// ParentID:    mxEvent
 		},
 	}
 
@@ -374,7 +376,7 @@ func (m *Matrix) MsgUserThread(userID, parentID, text string) (string, error) {
 		fmt.Println("msguserthread sending message: error,resp", err, resp)
 
 		m.Lock()
-		m.dmChannels[id.RoomID(resp.RoomID)] = invites
+		m.dmChannels[resp.RoomID] = invites
 		m.Unlock()
 
 		roomID = resp.RoomID
@@ -432,7 +434,7 @@ func (m *Matrix) SetTopic(channelID, text string) error {
 
 func (m *Matrix) StatusUser(userID string) (string, error) {
 	return "", nil
-	//return m.mc.GetStatus(userID), nil
+	// return m.mc.GetStatus(userID), nil
 }
 
 func (m *Matrix) StatusUsers() (map[string]string, error) {
@@ -473,7 +475,7 @@ func (m *Matrix) SetStatus(status string) error {
 
 func (m *Matrix) Nick(name string) error {
 	return nil
-	//return m.mc.UpdateUserNick(name)
+	// return m.mc.UpdateUserNick(name)
 }
 
 func (m *Matrix) GetChannelName(channelID string) string {
@@ -487,8 +489,7 @@ func (m *Matrix) GetChannelName(channelID string) string {
 }
 
 func (m *Matrix) GetChannelUsers(channelID string) ([]*bridge.UserInfo, error) {
-
-	//return m.channels[id.RoomID(channelID)].Members
+	// return m.channels[id.RoomID(channelID)].Members
 	var users []*bridge.UserInfo
 
 	resp, err := m.mc.JoinedMembers(id.RoomID(channelID))
@@ -496,7 +497,7 @@ func (m *Matrix) GetChannelUsers(channelID string) ([]*bridge.UserInfo, error) {
 		return nil, err
 	}
 
-	//fmt.Println("getchannelusers", channelID, len(resp.Joined))
+	// fmt.Println("getchannelusers", channelID, len(resp.Joined))
 
 	for user := range resp.Joined {
 		users = append(users, m.createUser(user))
@@ -514,7 +515,7 @@ func (m *Matrix) GetUsers() []*bridge.UserInfo {
 
 	m.RLock()
 	for userID := range m.users {
-		users = append(users, m.createUser(id.UserID(userID)))
+		users = append(users, m.createUser(userID))
 	}
 
 	m.RUnlock()
@@ -616,19 +617,20 @@ func (m *Matrix) createUser(userID id.UserID) *bridge.UserInfo {
 		User: userID.String(),
 		Real: displayName,
 		Host: host,
-		//Roles:       mmuser.Roles,
+		// Roles:       mmuser.Roles,
 		Ghost: true,
 		Me:    me,
-		//TeamID:      teamID,
+		// TeamID:      teamID,
 		Username: nick,
-		//FirstName:   mmuser.FirstName,
-		//LastName:    mmuser.LastName,
-		//MentionKeys: strings.Split(mentionkeys, ","),
+		// FirstName:   mmuser.FirstName,
+		// LastName:    mmuser.LastName,
+		// MentionKeys: strings.Split(mentionkeys, ","),
 	}
 
 	return info
 }
 
+//nolint:unused
 func isValidNick(s string) bool {
 	/* IRC RFC ([0] - see below) mentions a limit of 9 chars for
 	 * IRC nicks, but modern clients allow more than that. Let's
@@ -668,6 +670,8 @@ func isValidNick(s string) bool {
 // maybeShorten returns a prefix of msg that is approximately newLen
 // characters long, followed by "...".  Words that start with uncounted
 // are included in the result but are not reckoned against newLen.
+//
+//nolint:unused
 func maybeShorten(msg string, newLen int, uncounted string, unicode bool) string {
 	if newLen == 0 || len(msg) < newLen {
 		return msg
@@ -723,8 +727,6 @@ func (m *Matrix) GetPostsSince(channelID string, since int64) interface{} {
 }
 
 func (m *Matrix) UpdateLastViewed(channelID string) {
-	return
-
 }
 
 func (m *Matrix) UpdateLastViewedUser(userID string) error {
@@ -744,7 +746,7 @@ func (m *Matrix) SearchUsers(query string) ([]*bridge.UserInfo, error) {
 	return brusers, nil
 }
 
-func (s *Matrix) GetPostThread(channelID string) interface{} {
+func (m *Matrix) GetPostThread(channelID string) interface{} {
 	return nil
 }
 
@@ -768,14 +770,14 @@ func (m *Matrix) Connected() bool {
 	return m.connected
 }
 
-func (s *Matrix) AddReaction(msgID, emoji string) error {
+func (m *Matrix) AddReaction(msgID, emoji string) error {
 	return nil
 }
 
-func (s *Matrix) RemoveReaction(msgID, emoji string) error {
+func (m *Matrix) RemoveReaction(msgID, emoji string) error {
 	return nil
 }
 
-func (s *Matrix) GetLastSentMsgs() []string {
+func (m *Matrix) GetLastSentMsgs() []string {
 	return []string{}
 }

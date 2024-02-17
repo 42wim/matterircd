@@ -40,7 +40,7 @@ func login(u *User, toUser *User, args []string, service string) {
 		return
 	}
 
-	if service == "matrix" {
+	if service == "matrix" { //nolint:nestif
 		var err error
 
 		if len(args) != 1 && len(args) != 3 {
@@ -84,7 +84,7 @@ func login(u *User, toUser *User, args []string, service string) {
 
 		u.MsgUser(toUser, "login OK")
 		if u.Credentials.Token != "" {
-			u.MsgUser(toUser, "token used: "+u.Credentials.Token)
+			u.MsgUser(toUser, "token used: "+u.Credentials.Token) //nolint:goconst
 		}
 
 		return
@@ -182,7 +182,7 @@ func login(u *User, toUser *User, args []string, service string) {
 		datalen--
 	}
 
-	if len(args) >= datalen { // nolint:nestif
+	if len(args) >= datalen { //nolint:nestif
 		logger.Debugf("args_len: %d", len(args))
 		logger.Debugf("team: %s", cred.Team)
 		logger.Debugf("server: %s", cred.Server)
@@ -299,7 +299,7 @@ func search(u *User, toUser *User, args []string, service string) {
 
 		if len(postlist.Posts[postlist.Order[i]].FileIds) > 0 {
 			for _, fname := range u.br.GetFileLinks(postlist.Posts[postlist.Order[i]].FileIds) {
-				u.MsgUser(toUser, "\x1ddownload file - "+fname+"\x1d")
+				u.MsgUser(toUser, "\x1ddownload file - "+fname+"\x1d") //nolint:goconst
 			}
 		}
 

@@ -4,10 +4,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/davecgh/go-spew/spew"
 	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
+
+	"github.com/davecgh/go-spew/spew"
 )
 
 type Syncer struct {
@@ -28,7 +29,7 @@ func (s *Syncer) ProcessResponse(resp *mautrix.RespSync, since string) error {
 			append(sync.State.Events, sync.Timeline.Events...),
 			sync.Ephemeral.Events...),
 			sync.AccountData.Events...) {
-			ev.Content.ParseRaw(ev.Type)
+			ev.Content.ParseRaw(ev.Type) //nolint:errcheck
 			ev.RoomID = room
 			spew.Dump(ev)
 

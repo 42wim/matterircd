@@ -447,7 +447,7 @@ outerloop:
 			case irc.PASS:
 				u.Pass = msg.Params
 			case irc.JOIN:
-				s.EncodeMessage(u, irc.ERR_NOTREGISTERED, []string{"*"}, "Please register first")
+				s.EncodeMessage(u, irc.ERR_NOTREGISTERED, []string{"*"}, "Please register first") //nolint:errcheck
 			// https://ircv3.net/specs/extensions/capability-negotiation.html
 			case irc.CAP:
 				subcommand := msg.Params[0]
@@ -475,7 +475,7 @@ outerloop:
 
 			ok := s.add(u)
 			if !ok {
-				s.EncodeMessage(u, irc.ERR_NICKNAMEINUSE, []string{u.Nick}, "Nickname is already in use")
+				s.EncodeMessage(u, irc.ERR_NICKNAMEINUSE, []string{u.Nick}, "Nickname is already in use") //nolint:errcheck
 				continue
 			}
 			s.u = u
