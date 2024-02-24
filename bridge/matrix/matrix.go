@@ -47,19 +47,18 @@ func New(v *viper.Viper, cred bridge.Credentials, eventChan chan *bridge.Event, 
 		return nil, nil, err
 	}
 
-	resp, err := mc.Login(&mautrix.ReqLogin{
+	_, err2 := mc.Login(&mautrix.ReqLogin{
 		Type: "m.login.password",
 		Identifier: mautrix.UserIdentifier{
 			Type: "m.id.user",
 			User: cred.Login,
 		},
-		Password: cred.Pass,
+		Password:         cred.Pass,
+		StoreCredentials: true,
 	})
-	if err != nil {
-		return nil, nil, err
+	if err2 != nil {
+		return nil, nil, err2
 	}
-
-	mc.SetCredentials(resp.UserID, resp.AccessToken)
 
 	m.mc = mc
 
