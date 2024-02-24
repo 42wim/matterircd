@@ -15,6 +15,8 @@ import (
 	"github.com/42wim/matterbridge/bridge/helper"
 	"github.com/42wim/matterircd/bridge"
 	"github.com/davecgh/go-spew/spew"
+	prefixed "github.com/matterbridge/logrus-prefixed-formatter"
+	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 )
 
@@ -32,6 +34,8 @@ type Matrix struct {
 	sync.RWMutex
 }
 
+var logger *logrus.Entry
+
 func New(v *viper.Viper, cred bridge.Credentials, eventChan chan *bridge.Event, onWsConnect func()) (bridge.Bridger, *mautrix.Client, error) {
 	m := &Matrix{
 		credentials: cred,
@@ -40,6 +44,20 @@ func New(v *viper.Viper, cred bridge.Credentials, eventChan chan *bridge.Event, 
 		channels:    make(map[id.RoomID]*Channel),
 		dmChannels:  make(map[id.RoomID][]id.UserID),
 		users:       make(map[id.UserID]*User),
+	}
+
+	ourlog := logrus.New()
+	ourlog.SetFormatter(&prefixed.TextFormatter{
+		PrefixPadding: 14,
+		FullTimestamp: true,
+	})
+	logger = ourlog.WithFields(logrus.Fields{"prefix": "bridge/matrix"})
+	if v.GetBool("debug") {
+		ourlog.SetLevel(logrus.DebugLevel)
+	}
+
+	if v.GetBool("trace") {
+		ourlog.SetLevel(logrus.TraceLevel)
 	}
 
 	mc, err := mautrix.NewClient(cred.Server, "", "")
@@ -68,8 +86,8 @@ func New(v *viper.Viper, cred bridge.Credentials, eventChan chan *bridge.Event, 
 }
 
 func (m *Matrix) syncCallback(resp *mautrix.RespSync, since string) bool {
-	// spew.Dump(resp)
-	fmt.Println("synccallback", len(resp.AccountData.Events), resp.NextBatch)
+	logger.Trace("synccallback ", len(resp.AccountData.Events), resp.NextBatch)
+	logger.Tracef("syncCallback %s", spew.Sdump(resp))
 
 	m.firstSync = true
 
@@ -79,9 +97,6 @@ func (m *Matrix) syncCallback(resp *mautrix.RespSync, since string) bool {
 //nolint:funlen,forcetypeassert
 func (m *Matrix) handleMatrix(onConnect func()) {
 	syncer := m.mc.Syncer.(*mautrix.DefaultSyncer)
-
-	fmt.Println("dumping")
-	//	spew.Dump(resp)
 
 	syncer.OnEventType(event.EventRedaction, m.handleEvent)
 	syncer.OnEventType(event.EventMessage, m.handleEvent)
@@ -95,8 +110,8 @@ func (m *Matrix) handleMatrix(onConnect func()) {
 		if evt.RoomID.String() == "marker" {
 			m.firstSync = true
 		}
-		fmt.Println(source.String())
-		spew.Dump(evt)
+		logger.Tracef("handleMatrix source.String() %s", source.String())
+		logger.Tracef("handleMatrix evt %s", spew.Sdump(evt))
 	})
 
 	syncer.OnSync(m.syncCallback)
@@ -110,7 +125,7 @@ func (m *Matrix) handleMatrix(onConnect func()) {
 	}()
 
 	for !m.firstSync {
-		fmt.Println("syncing..")
+		logger.Trace("syncing..")
 		time.Sleep(time.Second)
 	}
 
@@ -130,7 +145,7 @@ func (m *Matrix) handleMatrix(onConnect func()) {
 
 	for {
 		time.Sleep(time.Second)
-		fmt.Println("syncing..")
+		logger.Trace("syncing..")
 
 		if current == len(m.eventChan) {
 			count++
@@ -143,7 +158,7 @@ func (m *Matrix) handleMatrix(onConnect func()) {
 		current = len(m.eventChan)
 	}
 
-	fmt.Println("sync complete", len(m.eventChan))
+	logger.Trace("sync complete ", len(m.eventChan))
 
 	go onConnect()
 }
@@ -153,7 +168,7 @@ func (m *Matrix) handleDM(source mautrix.EventSource, ev *event.Event) {
 	m.Lock()
 
 	for userID, rooms := range *ev.Content.AsDirectChats() {
-		fmt.Printf("direct chat %#v\n", rooms)
+		logger.Tracef("direct chat %#v\n", rooms)
 		for _, roomID := range rooms {
 			if _, ok := m.channels[roomID]; !ok {
 				m.channels[roomID] = &Channel{
@@ -195,7 +210,7 @@ func (m *Matrix) handleMember(source mautrix.EventSource, ev *event.Event) {
 				MemberEventContent: member,
 			}
 		} else if member.IsDirect {
-			fmt.Println("found direct member", *ev.StateKey)
+			logger.Trace("found direct member ", *ev.StateKey)
 			user.IsDirect = true
 			if _, ok := m.channels[ev.RoomID]; !ok {
 				m.channels[ev.RoomID] = &Channel{
@@ -211,8 +226,8 @@ func (m *Matrix) handleMember(source mautrix.EventSource, ev *event.Event) {
 			m.channels[ev.RoomID].Members[id.UserID(*ev.StateKey)] = m.users[id.UserID(*ev.StateKey)]
 			m.dmChannels[ev.RoomID] = append(m.dmChannels[ev.RoomID], id.UserID(*ev.StateKey))
 
-			spew.Dump(m.channels)
-			spew.Dump(m.users)
+			logger.Tracef("handleMember channels %s", spew.Sdump(m.channels))
+			logger.Tracef("handleMember users %s", spew.Sdump(m.users))
 		}
 	}
 
@@ -244,7 +259,7 @@ func (m *Matrix) handleCreate(source mautrix.EventSource, ev *event.Event) {
 }
 
 func (m *Matrix) handleCanonicalAlias(source mautrix.EventSource, ev *event.Event) {
-	fmt.Println("running handleCanonicalAlias for", ev)
+	logger.Trace("running handleCanonicalAlias for ", ev)
 	if _, ok := m.channels[ev.RoomID]; !ok {
 		m.channels[ev.RoomID] = &Channel{}
 	}
@@ -343,7 +358,7 @@ func (m *Matrix) MsgUser(userID, text string) (string, error) {
 }
 
 func (m *Matrix) MsgUserThread(userID, parentID, text string) (string, error) {
-	fmt.Println("sending message", userID, parentID, text)
+	logger.Debug("sending message ", userID, parentID, text)
 	invites := []id.UserID{id.UserID(userID)}
 
 	var roomID id.RoomID
@@ -368,11 +383,11 @@ func (m *Matrix) MsgUserThread(userID, parentID, text string) (string, error) {
 
 		resp, err := m.mc.CreateRoom(req)
 		if err != nil {
-			fmt.Println("msguserthread sending message: error", err)
+			logger.Error("msguserthread sending message: error ", err)
 			return "", err
 		}
 
-		fmt.Println("msguserthread sending message: error,resp", err, resp)
+		logger.Trace("msguserthread sending message: error,resp ", err, resp)
 
 		m.Lock()
 		m.dmChannels[resp.RoomID] = invites
@@ -389,7 +404,7 @@ func (m *Matrix) MsgChannel(channelID, text string) (string, error) {
 }
 
 func (m *Matrix) MsgChannelThread(channelID, parentID, text string) (string, error) {
-	fmt.Println("msgchannelthread: sending message thread", channelID, parentID, text)
+	logger.Debug("msgchannelthread: sending message thread ", channelID, parentID, text)
 	resp, err := m.mc.SendMessageEvent(id.RoomID(channelID), event.EventMessage, event.MessageEventContent{
 		MsgType:       "m.text",
 		Body:          text,
@@ -400,7 +415,7 @@ func (m *Matrix) MsgChannelThread(channelID, parentID, text string) (string, err
 		return "", err
 	}
 
-	fmt.Println("msgchannelthread: error,resp", err, resp)
+	logger.Trace("msgchannelthread: error,resp ", err, resp)
 
 	return resp.EventID.String(), nil
 }
@@ -496,7 +511,7 @@ func (m *Matrix) GetChannelUsers(channelID string) ([]*bridge.UserInfo, error) {
 		return nil, err
 	}
 
-	// fmt.Println("getchannelusers", channelID, len(resp.Joined))
+	logger.Tracef("GetChannelUsers %s %d", channelID, len(resp.Joined))
 
 	for user := range resp.Joined {
 		users = append(users, m.createUser(user))
@@ -508,9 +523,8 @@ func (m *Matrix) GetChannelUsers(channelID string) ([]*bridge.UserInfo, error) {
 func (m *Matrix) GetUsers() []*bridge.UserInfo {
 	var users []*bridge.UserInfo
 
-	fmt.Println("GetUsers()", m.users)
-
-	spew.Dump(m.users)
+	logger.Trace("GetUsers ", m.users)
+	logger.Trace("GetUsers ", spew.Sdump(m.users))
 
 	m.RLock()
 	for userID := range m.users {
@@ -519,7 +533,7 @@ func (m *Matrix) GetUsers() []*bridge.UserInfo {
 
 	m.RUnlock()
 
-	spew.Dump(users)
+	logger.Tracef("GetUsers users %s", spew.Sdump(users))
 
 	return users
 }
