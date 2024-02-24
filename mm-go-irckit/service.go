@@ -43,9 +43,9 @@ func login(u *User, toUser *User, args []string, service string) {
 	if service == "matrix" { //nolint:nestif
 		var err error
 
-		warningMsg := "WARNING: Matrix support is very much experimental and a work in progress. Use at your own risk."
-		u.MsgUser(toUser, warningMsg)
-		logger.Warn(warningMsg)
+		wMsg := "Matrix support is very much experimental and a work in progress. Use at your own risk."
+		u.MsgUser(toUser, "WARNING: "+wMsg)
+		logger.Warn(wMsg)
 
 		if len(args) != 1 && len(args) != 3 {
 			u.MsgUser(toUser, "need LOGIN <server> <login> <pass> or LOGIN <token>")

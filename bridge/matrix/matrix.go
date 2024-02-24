@@ -98,20 +98,21 @@ func (m *Matrix) syncCallback(resp *mautrix.RespSync, since string) bool {
 func (m *Matrix) handleMatrix(onConnect func()) {
 	syncer := m.mc.Syncer.(*mautrix.DefaultSyncer)
 
-	syncer.OnEventType(event.EventRedaction, m.handleEvent)
-	syncer.OnEventType(event.EventMessage, m.handleEvent)
+	syncer.OnEventType(event.EventMessage, m.handleMessageEvent)
+	syncer.OnEventType(event.EventReaction, m.handleReactionEvent)
+	syncer.OnEventType(event.EventRedaction, m.handleMessageEvent)
 	syncer.OnEventType(event.StateMember, m.handleMember)
 	syncer.OnEventType(event.StateCreate, m.handleCreate)
 	syncer.OnEventType(event.StateRoomName, m.handleRoomName)
 	// syncer.OnEventType(event.AccountDataDirectChats, m.handleDM)
 	syncer.OnEventType(event.StateCanonicalAlias, m.handleCanonicalAlias)
-	syncer.OnEvent(func(source mautrix.EventSource, evt *event.Event) {
+	syncer.OnEvent(func(source mautrix.EventSource, ev *event.Event) {
 		// sync is almost complete
-		if evt.RoomID.String() == "marker" {
+		if ev.RoomID.String() == "marker" {
 			m.firstSync = true
 		}
 		logger.Tracef("handleMatrix source.String() %s", source.String())
-		logger.Tracef("handleMatrix evt %s", spew.Sdump(evt))
+		logger.Tracef("handleMatrix ev %s", spew.Sdump(ev))
 	})
 
 	syncer.OnSync(m.syncCallback)
@@ -272,13 +273,29 @@ func (m *Matrix) handleCanonicalAlias(source mautrix.EventSource, ev *event.Even
 	// m.mc.JoinedMembers(ev.RoomID)
 }
 
-func (m *Matrix) handleEvent(source mautrix.EventSource, ev *event.Event) {
-	text, _ := ev.Content.Raw["body"].(string)
+//nolint:funlen
+func (m *Matrix) handleMessageEvent(source mautrix.EventSource, ev *event.Event) {
+	logger.Tracef("handleMessageEvent ev %s", spew.Sdump(ev))
 
 	ghost := m.createUser(ev.Sender)
 
 	if ghost.Me {
+		logger.Trace("handleMessageEvent ghost.Me")
 		return
+	}
+
+	var text string
+	var parentID string
+
+	switch {
+	case ev.Type.String() == "m.text":
+		msgEventContent, _ := ev.Content.Parsed.(*event.MessageEventContent)
+		text = msgEventContent.Body
+		if msgEventContent.RelatesTo != nil {
+			parentID = msgEventContent.RelatesTo.EventID.String()
+		}
+	default:
+		logger.Debugf("handleMessageEvent unsupported event type %s", ev.Type.String())
 	}
 
 	m.RLock()
@@ -296,7 +313,7 @@ func (m *Matrix) handleEvent(source mautrix.EventSource, ev *event.Event) {
 				// Files:       m.getFilesFromData(data),
 				MessageID: string(ev.ID),
 				// Event:       rmsg.Event,
-				// ParentID:    mxEvent
+				ParentID: parentID,
 			},
 		}
 
@@ -314,7 +331,54 @@ func (m *Matrix) handleEvent(source mautrix.EventSource, ev *event.Event) {
 			// Files:       m.getFilesFromData(data),
 			MessageID: string(ev.ID),
 			// Event:       rmsg.Event,
-			// ParentID:    mxEvent
+			ParentID: parentID,
+		},
+	}
+
+	m.eventChan <- event
+}
+
+func (m *Matrix) handleReactionEvent(source mautrix.EventSource, ev *event.Event) {
+	logger.Tracef("handleReactionEvent ev %s", spew.Sdump(ev))
+
+	ghost := m.createUser(ev.Sender)
+
+	if ghost.Me {
+		logger.Trace("handleReactionEvent ghost.Me")
+		return
+	}
+
+	var reaction string
+	var parentID string
+
+	switch {
+	case ev.Type.String() == "m.reaction":
+		reactionEventContent, _ := ev.Content.Parsed.(*event.ReactionEventContent)
+		reaction = reactionEventContent.RelatesTo.Key
+		parentID = reactionEventContent.RelatesTo.EventID.String()
+	default:
+		logger.Debugf("handleEvent unsupported event type %s", ev.Type.String())
+	}
+
+	m.RLock()
+	_, ok := m.dmChannels[ev.RoomID]
+	m.RUnlock()
+
+	channelType := ""
+	if ok {
+		channelType = "D"
+	}
+
+	event := &bridge.Event{ //nolint:gocritic
+		Type: "reaction_add",
+		Data: &bridge.ReactionAddEvent{
+			ChannelID:   ev.RoomID.String(),
+			MessageID:   string(ev.ID),
+			Sender:      ghost,
+			Reaction:    reaction,
+			ChannelType: channelType,
+			Message:     "",
+			ParentID:    parentID,
 		},
 	}
 
