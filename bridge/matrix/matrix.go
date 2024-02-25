@@ -288,14 +288,14 @@ func (m *Matrix) handleMessageEvent(source mautrix.EventSource, ev *event.Event)
 	var parentID string
 
 	switch {
-	case ev.Type.String() == "m.text":
+	case ev.Type.String() == "m.text" || ev.Type.String() == "m.room.message":
 		msgEventContent, _ := ev.Content.Parsed.(*event.MessageEventContent)
 		text = msgEventContent.Body
 		if msgEventContent.RelatesTo != nil {
 			parentID = msgEventContent.RelatesTo.EventID.String()
 		}
 	default:
-		logger.Debugf("handleMessageEvent unsupported event type %s", ev.Type.String())
+		logger.Warnf("handleMessageEvent unsupported event type %s", ev.Type.String())
 	}
 
 	m.RLock()
@@ -357,7 +357,7 @@ func (m *Matrix) handleReactionEvent(source mautrix.EventSource, ev *event.Event
 		reaction = reactionEventContent.RelatesTo.Key
 		parentID = reactionEventContent.RelatesTo.EventID.String()
 	default:
-		logger.Debugf("handleEvent unsupported event type %s", ev.Type.String())
+		logger.Warnf("handleEvent unsupported event type %s", ev.Type.String())
 	}
 
 	m.RLock()
@@ -422,7 +422,7 @@ func (m *Matrix) MsgUser(userID, text string) (string, error) {
 }
 
 func (m *Matrix) MsgUserThread(userID, parentID, text string) (string, error) {
-	logger.Debug("sending message ", userID, parentID, text)
+	logger.Debugf("sending message '%s' '%s' '%s'", userID, parentID, text)
 	invites := []id.UserID{id.UserID(userID)}
 
 	var roomID id.RoomID
@@ -468,13 +468,30 @@ func (m *Matrix) MsgChannel(channelID, text string) (string, error) {
 }
 
 func (m *Matrix) MsgChannelThread(channelID, parentID, text string) (string, error) {
-	logger.Debug("msgchannelthread: sending message thread ", channelID, parentID, text)
-	resp, err := m.mc.SendMessageEvent(id.RoomID(channelID), event.EventMessage, event.MessageEventContent{
-		MsgType:       "m.text",
-		Body:          text,
-		FormattedBody: helper.ParseMarkdown(text),
-		Format:        "org.matrix.custom.html",
-	})
+	logger.Debugf("msgchannelthread: sending message thread '%s' '%s' '%s'", channelID, parentID, text)
+
+	var context event.MessageEventContent
+	if parentID != "" {
+		rel := event.RelatesTo{
+			Type:    "m.thread",
+			EventID: id.EventID(parentID),
+		}
+		context = event.MessageEventContent{
+			MsgType:       "m.text",
+			Body:          text,
+			FormattedBody: helper.ParseMarkdown(text),
+			Format:        "org.matrix.custom.html",
+			RelatesTo:     &rel,
+		}
+	} else {
+		context = event.MessageEventContent{
+			MsgType:       "m.text",
+			Body:          text,
+			FormattedBody: helper.ParseMarkdown(text),
+			Format:        "org.matrix.custom.html",
+		}
+	}
+	resp, err := m.mc.SendMessageEvent(id.RoomID(channelID), event.EventMessage, context)
 	if err != nil {
 		return "", err
 	}

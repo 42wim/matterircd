@@ -1027,7 +1027,7 @@ func (u *User) prefixContext(channelID, messageID, parentID, event string) strin
 		prefixChar = "↪"
 	}
 
-	if u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" || u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost+post" { //nolint:goconst
+	if u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" || u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost+post" || u.v.GetString(u.br.Protocol()+".threadcontext") == "matrix" { //nolint:goconst
 		if parentID == "" {
 			return fmt.Sprintf("[@@%s]", messageID)
 		}
