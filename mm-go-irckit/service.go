@@ -40,6 +40,60 @@ func login(u *User, toUser *User, args []string, service string) {
 		return
 	}
 
+	if service == "matrix" { //nolint:nestif
+		var err error
+
+		wMsg := "Matrix support is very much experimental and a work in progress. Use at your own risk."
+		u.MsgUser(toUser, "WARNING: "+wMsg)
+		logger.Warn(wMsg)
+
+		if len(args) != 1 && len(args) != 3 {
+			u.MsgUser(toUser, "need LOGIN <server> <login> <pass> or LOGIN <token>")
+			return
+		}
+
+		if len(args) == 1 {
+			u.Credentials.Token = args[len(args)-1]
+		}
+
+		if u.Credentials.Token == "help" {
+			u.MsgUser(toUser, "need LOGIN <server> <login> <pass> or LOGIN <token>")
+			return
+		}
+
+		if len(args) == 3 {
+			u.Credentials = bridge.Credentials{
+				Server: args[0],
+				Login:  args[1],
+				Pass:   args[2],
+			}
+		}
+
+		if u.br != nil && u.br.Connected() {
+			err = u.br.Logout()
+			if err != nil {
+				u.MsgUser(toUser, err.Error())
+				return
+			}
+		}
+
+		u.inprogress = true
+		defer func() { u.inprogress = false }()
+
+		err = u.loginTo("matrix")
+		if err != nil {
+			u.MsgUser(toUser, err.Error())
+			return
+		}
+
+		u.MsgUser(toUser, "login OK")
+		if u.Credentials.Token != "" {
+			u.MsgUser(toUser, "token used: "+u.Credentials.Token) //nolint:goconst
+		}
+
+		return
+	}
+
 	if service == "mastodon" {
 		fmt.Println("login mastodon")
 		err := u.loginTo("mastodon")
@@ -49,6 +103,9 @@ func login(u *User, toUser *User, args []string, service string) {
 		}
 
 		u.MsgUser(toUser, "login OK")
+		if u.Credentials.Token != "" {
+			u.MsgUser(toUser, "token used: "+u.Credentials.Token)
+		}
 
 		return
 	}
@@ -129,7 +186,7 @@ func login(u *User, toUser *User, args []string, service string) {
 		datalen--
 	}
 
-	if len(args) >= datalen { // nolint:nestif
+	if len(args) >= datalen { //nolint:nestif
 		logger.Debugf("args_len: %d", len(args))
 		logger.Debugf("team: %s", cred.Team)
 		logger.Debugf("server: %s", cred.Server)
@@ -246,7 +303,7 @@ func search(u *User, toUser *User, args []string, service string) {
 
 		if len(postlist.Posts[postlist.Order[i]].FileIds) > 0 {
 			for _, fname := range u.br.GetFileLinks(postlist.Posts[postlist.Order[i]].FileIds) {
-				u.MsgUser(toUser, "\x1ddownload file - "+fname+"\x1d")
+				u.MsgUser(toUser, "\x1ddownload file - "+fname+"\x1d") //nolint:goconst
 			}
 		}
 
