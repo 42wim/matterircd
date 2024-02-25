@@ -719,26 +719,30 @@ func (m *Matrix) createUser(userID id.UserID) *bridge.UserInfo {
 		me = true
 	}
 
-	nick, host, err := userID.Parse()
+	localpart, homeserver, err := userID.Parse()
 	if err != nil {
 		return nil
 	}
 
-	displayName := nick + "@" + host
-
 	m.RLock()
-
+	displayName := localpart + "@" + homeserver
 	if user, ok := m.users[userID]; ok {
 		displayName = user.Displayname
 	}
-
 	m.RUnlock()
 
+	// Drop the homeserver/host part if it's a user on the same homeserver as us.
+	nick := localpart + "@" + homeserver
+	myUser := strings.Split(m.mc.UserID.String(), ":")
+	if homeserver == myUser[1] {
+		nick = localpart
+	}
+
 	info := &bridge.UserInfo{
-		Nick: nick + "@" + host,
-		User: userID.String(),
+		Nick: nick,
+		User: "~" + localpart,
 		Real: displayName,
-		Host: host,
+		Host: homeserver,
 		// Roles:       mmuser.Roles,
 		Ghost: true,
 		Me:    me,
