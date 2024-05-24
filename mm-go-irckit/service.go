@@ -436,7 +436,7 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 		}
 	}
 
-	if !u.v.GetBool(u.br.Protocol() + ".collapsescrollback") { //nolint:goconst
+	if !u.v.GetBool(u.br.Protocol() + ".collapsescrollback") {
 		u.MsgUser(toUser, fmt.Sprintf("scrollback results shown in %s", search))
 	}
 }
