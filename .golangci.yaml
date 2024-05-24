@@ -152,7 +152,7 @@ linters:
     - wsl
     - gomnd
     - godox
-    - goerr113
+    - err113
     - testpackage
     - godot
     - interfacer

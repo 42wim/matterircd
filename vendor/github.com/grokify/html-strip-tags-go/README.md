@@ -40,7 +40,7 @@ func main() {
  [used-by-link]: https://sourcegraph.com/github.com/grokify/html-strip-tags-go?badge
  [goreport-svg]: https://goreportcard.com/badge/github.com/grokify/html-strip-tags-go
  [goreport-link]: https://goreportcard.com/report/github.com/grokify/html-strip-tags-go
- [build-status-svg]: https://github.com/grokify/html-strip-tags-go/workflows/build/badge.svg
+ [build-status-svg]: https://github.com/grokify/html-strip-tags-go/workflows/test/badge.svg
  [build-status-link]: https://github.com/grokify/html-strip-tags-go/actions
  [coverage-status-svg]: https://coveralls.io/repos/grokify/html-strip-tags-go/badge.svg?branch=master
  [coverage-status-link]: https://coveralls.io/r/grokify/html-strip-tags-go?branch=master

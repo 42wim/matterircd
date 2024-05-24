@@ -1,6 +1,7 @@
 package mattermost
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,7 +15,7 @@ import (
 	lru "github.com/hashicorp/golang-lru"
 	prefixed "github.com/matterbridge/logrus-prefixed-formatter"
 	"github.com/matterbridge/matterclient"
-	"github.com/mattermost/mattermost-server/v6/model"
+	"github.com/mattermost/mattermost/server/public/model"
 	"github.com/mitchellh/mapstructure"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
@@ -201,7 +202,7 @@ func (m *Mattermost) checkWsActionMessage(rmsg *model.WebSocketEvent, throttle *
 }
 
 func (m *Mattermost) Invite(channelID, username string) error {
-	_, _, err := m.mc.Client.AddChannelMember(channelID, username)
+	_, _, err := m.mc.Client.AddChannelMember(context.TODO(), channelID, username)
 	if err != nil {
 		return err
 	}
@@ -214,7 +215,7 @@ func (m *Mattermost) Join(channelName string) (string, string, error) {
 
 	sp := strings.Split(channelName, "/")
 	if len(sp) > 1 {
-		team, _, _ := m.mc.Client.GetTeamByName(sp[0], "")
+		team, _, _ := m.mc.Client.GetTeamByName(context.TODO(), sp[0], "")
 		if team == nil {
 			return "", "", fmt.Errorf("cannot join channel (+i)")
 		}
@@ -262,9 +263,9 @@ func (m *Mattermost) List() (map[string]string, error) {
 }
 
 func (m *Mattermost) Part(channelID string) error {
-	m.mc.Client.RemoveUserFromChannel(channelID, m.mc.User.Id)
+	_, err := m.mc.Client.RemoveUserFromChannel(context.TODO(), channelID, m.mc.User.Id)
 
-	return nil
+	return err
 }
 
 func (m *Mattermost) UpdateChannels() error {
@@ -302,7 +303,7 @@ func (m *Mattermost) MsgUser(userID, text string) (string, error) {
 
 func (m *Mattermost) MsgUserThread(userID, parentID, text string) (string, error) {
 	// create DM channel (only happens on first message)
-	dchannel, _, err := m.mc.Client.CreateDirectChannel(m.mc.User.Id, userID)
+	dchannel, _, err := m.mc.Client.CreateDirectChannel(context.TODO(), m.mc.User.Id, userID)
 	if err != nil {
 		return "", err
 	}
@@ -329,7 +330,7 @@ func (m *Mattermost) MsgChannelThread(channelID, parentID, text string) (string,
 
 	post.SetProps(props)
 
-	rp, _, err := m.mc.Client.CreatePost(post)
+	rp, _, err := m.mc.Client.CreatePost(context.TODO(), post)
 	if err == nil {
 		return rp.Id, nil
 	}
@@ -339,7 +340,7 @@ func (m *Mattermost) MsgChannelThread(channelID, parentID, text string) (string,
 	}
 
 	// Try to work out if we're trying to reply to a post within a thread.
-	replyPost, _, err := m.mc.Client.GetPost(parentID, "")
+	replyPost, _, err := m.mc.Client.GetPost(context.TODO(), parentID, "")
 	if err != nil {
 		return "", err
 	}
@@ -352,7 +353,7 @@ func (m *Mattermost) MsgChannelThread(channelID, parentID, text string) (string,
 
 	post.SetProps(props)
 
-	rp, _, err = m.mc.Client.CreatePost(post)
+	rp, _, err = m.mc.Client.CreatePost(context.TODO(), post)
 	if err == nil {
 		return rp.Id, nil
 	}
@@ -362,7 +363,7 @@ func (m *Mattermost) MsgChannelThread(channelID, parentID, text string) (string,
 
 func (m *Mattermost) ModifyPost(msgID, text string) error {
 	if text == "" {
-		_, err := m.mc.Client.DeletePost(msgID)
+		_, err := m.mc.Client.DeletePost(context.TODO(), msgID)
 		if err != nil {
 			return err
 		}
@@ -370,7 +371,7 @@ func (m *Mattermost) ModifyPost(msgID, text string) error {
 		return nil
 	}
 
-	_, _, err := m.mc.Client.PatchPost(msgID, &model.PostPatch{
+	_, _, err := m.mc.Client.PatchPost(context.TODO(), msgID, &model.PostPatch{
 		Message: &text,
 	})
 	if err != nil {
@@ -389,7 +390,7 @@ func (m *Mattermost) AddReaction(msgID, emoji string) error {
 		CreateAt:  0,
 	}
 
-	_, _, err := m.mc.Client.SaveReaction(reaction)
+	_, _, err := m.mc.Client.SaveReaction(context.TODO(), reaction)
 	if err != nil {
 		return err
 	}
@@ -406,7 +407,7 @@ func (m *Mattermost) RemoveReaction(msgID, emoji string) error {
 		CreateAt:  0,
 	}
 
-	_, err := m.mc.Client.DeleteReaction(reaction)
+	_, err := m.mc.Client.DeleteReaction(context.TODO(), reaction)
 	if err != nil {
 		return err
 	}
@@ -424,7 +425,7 @@ func (m *Mattermost) SetTopic(channelID, text string) error {
 		Header: &text,
 	}
 
-	_, _, err := m.mc.Client.PatchChannel(channelID, patch)
+	_, _, err := m.mc.Client.PatchChannel(context.TODO(), channelID, patch)
 	if err != nil {
 		return err
 	}
@@ -445,7 +446,7 @@ func (m *Mattermost) Protocol() string {
 }
 
 func (m *Mattermost) Kick(channelID, username string) error {
-	_, err := m.mc.Client.RemoveUserFromChannel(channelID, username)
+	_, err := m.mc.Client.RemoveUserFromChannel(context.TODO(), channelID, username)
 	if err != nil {
 		return err
 	}
@@ -454,7 +455,7 @@ func (m *Mattermost) Kick(channelID, username string) error {
 }
 
 func (m *Mattermost) SetStatus(status string) error {
-	_, _, err := m.mc.Client.UpdateUserStatus(m.mc.User.Id, &model.Status{
+	_, _, err := m.mc.Client.UpdateUserStatus(context.TODO(), m.mc.User.Id, &model.Status{
 		Status: status,
 		UserId: m.mc.User.Id,
 	})
@@ -521,7 +522,7 @@ func (m *Mattermost) GetChannelUsers(channelID string) ([]*bridge.UserInfo, erro
 	max := 200
 
 	for {
-		mmusersPaged, resp, err = m.mc.Client.GetUsersInChannel(channelID, idx, max, "")
+		mmusersPaged, resp, err = m.mc.Client.GetUsersInChannel(context.TODO(), channelID, idx, max, "")
 		if err == nil {
 			break
 		}
@@ -533,7 +534,7 @@ func (m *Mattermost) GetChannelUsers(channelID string) ([]*bridge.UserInfo, erro
 
 	for len(mmusersPaged) > 0 {
 		for {
-			mmusersPaged, resp, err = m.mc.Client.GetUsersInChannel(channelID, idx, max, "")
+			mmusersPaged, resp, err = m.mc.Client.GetUsersInChannel(context.TODO(), channelID, idx, max, "")
 			if err == nil {
 				idx++
 				time.Sleep(time.Millisecond * 200)
@@ -611,7 +612,7 @@ func (m *Mattermost) GetChannel(channelID string) (*bridge.ChannelInfo, error) {
 	}
 
 	// Fallback if it's not found in the cache.
-	mmchannel, _, err := m.mc.Client.GetChannel(channelID, "")
+	mmchannel, _, err := m.mc.Client.GetChannel(context.TODO(), channelID, "")
 	if err != nil {
 		return nil, errors.New("channel not found")
 	}
@@ -634,7 +635,7 @@ func (m *Mattermost) GetMe() *bridge.UserInfo {
 
 func (m *Mattermost) GetUserByUsername(username string) *bridge.UserInfo {
 	for {
-		mmuser, resp, err := m.mc.Client.GetUserByUsername(username, "")
+		mmuser, resp, err := m.mc.Client.GetUserByUsername(context.TODO(), username, "")
 		if err == nil {
 			return m.createUser(mmuser)
 		}
@@ -818,10 +819,10 @@ func (m *Mattermost) addParentMsg(parentID string, msg string, newLen int, uncou
 	// Search and use cached reply if it exists.
 	// None found, so we'll need to create one and save it for future uses.
 	if v, ok := m.msgParentCache.Get(parentID); !ok {
-		parentPost, _, err := m.mc.Client.GetPost(parentID, "")
+		parentPost, _, err := m.mc.Client.GetPost(context.TODO(), parentID, "")
 		// Retry once on failure.
 		if err != nil {
-			parentPost, _, err = m.mc.Client.GetPost(parentID, "")
+			parentPost, _, err = m.mc.Client.GetPost(context.TODO(), parentID, "")
 		}
 		if err != nil {
 			return msg, err
@@ -980,7 +981,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 				Text:      msg,
 				ChannelID: data.ChannelId,
 				MessageID: data.Id,
-				Event:     rmsg.EventType(),
+				Event:     string(rmsg.EventType()),
 				ParentID:  data.RootId,
 			}
 
@@ -1020,7 +1021,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 					MessageType: messageType,
 					ChannelType: channelType,
 					MessageID:   data.Id,
-					Event:       rmsg.EventType(),
+					Event:       string(rmsg.EventType()),
 					ParentID:    data.RootId,
 				},
 			}
@@ -1047,7 +1048,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 					Sender:      ghost,
 					ChannelType: channelType,
 					MessageID:   data.Id,
-					Event:       rmsg.EventType(),
+					Event:       string(rmsg.EventType()),
 					ParentID:    data.RootId,
 				},
 			}
@@ -1328,7 +1329,7 @@ func (m *Mattermost) handleReactionEvent(rmsg *model.WebSocketEvent) {
 	}
 
 	parentID := reaction.PostId
-	parentPost, _, err := m.mc.Client.GetPost(reaction.PostId, "")
+	parentPost, _, err := m.mc.Client.GetPost(context.TODO(), reaction.PostId, "")
 	if err == nil {
 		parentID = parentPost.RootId
 	}
@@ -1392,7 +1393,7 @@ func (m *Mattermost) UpdateLastViewed(channelID string) {
 
 func (m *Mattermost) UpdateLastViewedUser(userID string) error {
 	for {
-		dc, resp, err := m.mc.Client.CreateDirectChannel(m.mc.User.Id, userID)
+		dc, resp, err := m.mc.Client.CreateDirectChannel(context.TODO(), m.mc.User.Id, userID)
 		if err == nil {
 			return m.mc.UpdateLastViewed(dc.Id)
 		}
@@ -1412,7 +1413,7 @@ func (m *Mattermost) GetFileLinks(fileIDs []string) []string {
 }
 
 func (m *Mattermost) SearchUsers(query string) ([]*bridge.UserInfo, error) {
-	users, _, err := m.mc.Client.SearchUsers(&model.UserSearch{Term: query})
+	users, _, err := m.mc.Client.SearchUsers(context.TODO(), &model.UserSearch{Term: query})
 	if err != nil {
 		return nil, err
 	}
