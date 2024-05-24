@@ -1,6 +1,7 @@
 package irckit
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"sort"
@@ -8,6 +9,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	bolt "go.etcd.io/bbolt"
 
 	"github.com/42wim/matterircd/bridge"
 	"github.com/mattermost/mattermost-server/v6/model"
@@ -207,6 +210,174 @@ func login(u *User, toUser *User, args []string, service string) {
 	}
 
 	u.MsgUser(toUser, "login OK")
+}
+
+func createSpoof(u *User, mmchannel *bridge.ChannelInfo) func(string, string, ...int) {
+	if strings.Contains(mmchannel.Name, "__") {
+		return func(nick string, msg string, maxlen ...int) {
+			if usr, ok := u.Srv.HasUser(nick); ok {
+				u.MsgSpoofUser(usr, u.Nick, msg)
+			} else {
+				logger.Errorf("%s not found for replay msg", nick)
+			}
+		}
+	}
+
+	channelName := mmchannel.Name
+
+	if mmchannel.TeamID != u.br.GetMe().TeamID || u.v.GetBool(u.br.Protocol()+".prefixmainteam") {
+		channelName = u.br.GetTeamName(mmchannel.TeamID) + "/" + mmchannel.Name
+	}
+
+	u.syncChannel(mmchannel.ID, "#"+channelName)
+	ch := u.Srv.Channel(mmchannel.ID)
+
+	return ch.SpoofMessage
+}
+
+//nolint:funlen,gocognit,gocyclo,cyclop
+func replay(u *User, toUser *User, args []string, service string) {
+	if len(args) == 0 || len(args) > 2 {
+		u.MsgUser(toUser, "need REPLAY (#<channel>|<user>)")
+		u.MsgUser(toUser, "e.g. REPLAY #bugs")
+		return
+	}
+
+	channelName := strings.TrimPrefix(args[0], "#")
+	channelTeamID := u.br.GetMe().TeamID
+	if len(args) == 2 {
+		channelTeamID = args[1]
+	}
+	channelID := u.br.GetChannelID(channelName, channelTeamID)
+	brchannel, err := u.br.GetChannel(channelID)
+	if err != nil {
+		logger.Errorf("%s not found", channelName)
+		return
+	}
+
+	// exclude direct messages
+	spoof := createSpoof(u, brchannel)
+
+	since := u.br.GetLastViewedAt(brchannel.ID)
+	// ignore invalid/deleted/old channels
+	if since == 0 {
+		return
+	}
+
+	logSince := "server"
+	channame := brchannel.Name
+	if !brchannel.DM {
+		channame = fmt.Sprintf("#%s", brchannel.Name)
+	}
+
+	// We used to stored last viewed at if present.
+	var lastViewedAt int64
+	key := brchannel.ID
+	err = u.lastViewedAtDB.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(u.User))
+		if v := b.Get([]byte(key)); v != nil {
+			lastViewedAt = int64(binary.LittleEndian.Uint64(v))
+		}
+		return nil
+	})
+	if err != nil {
+		logger.Errorf("something wrong with u.lastViewedAtDB.View for %s for channel %s (%s)", u.Nick, channame, brchannel.ID)
+		lastViewedAt = since
+	}
+
+	// But only use the stored last viewed if it's later than what the server knows.
+	if lastViewedAt > since {
+		since = lastViewedAt + 1
+		logSince = "stored"
+	}
+
+	// post everything to the channel you haven't seen yet
+	postlist := u.br.GetPostsSince(brchannel.ID, since)
+	if postlist == nil {
+		// if the channel is not from the primary team id, we can't get posts
+		if brchannel.TeamID == u.br.GetMe().TeamID {
+			logger.Errorf("something wrong with getPostsSince for %s for channel %s (%s)", u.Nick, channame, brchannel.ID)
+		}
+		return
+	}
+
+	showReplayHdr := true
+
+	mmPostList, _ := postlist.(*model.PostList)
+	if mmPostList == nil {
+		return
+	}
+	// traverse the order in reverse
+	for i := len(mmPostList.Order) - 1; i >= 0; i-- {
+		p := mmPostList.Posts[mmPostList.Order[i]]
+		if p.Type == model.PostTypeJoinLeave {
+			continue
+		}
+
+		if p.DeleteAt > p.CreateAt {
+			continue
+		}
+
+		// GetPostsSince will return older messages with reaction
+		// changes since LastViewedAt. This will be confusing as
+		// the user will think it's a duplicate, or a post out of
+		// order. Plus, we don't show reaction changes when
+		// relaying messages/logs so let's skip these.
+		if p.CreateAt < since {
+			continue
+		}
+
+		ts := time.Unix(0, p.CreateAt*int64(time.Millisecond))
+
+		props := p.GetProps()
+		botname, override := props["override_username"].(string)
+		user := u.br.GetUser(p.UserId)
+		nick := user.Nick
+		if override {
+			nick = botname
+		}
+
+		if p.Type == model.PostTypeAddToTeam || p.Type == model.PostTypeRemoveFromTeam {
+			nick = systemUser
+		}
+
+		for _, post := range strings.Split(p.Message, "\n") {
+			if showReplayHdr {
+				date := ts.Format("2006-01-02 15:04:05")
+				if brchannel.DM {
+					spoof(nick, fmt.Sprintf("\x02Replaying msgs since %s\x0f (%s)", date, logSince))
+				} else {
+					spoof("matterircd", fmt.Sprintf("\x02Replaying msgs since %s\x0f (%s)", date, logSince))
+				}
+				logger.Infof("Replaying msgs for %s for %s (%s) since %s (%s)", u.Nick, channame, brchannel.ID, date, logSince)
+				showReplayHdr = false
+			}
+
+			if nick == systemUser {
+				post = "\x1d" + post + "\x1d"
+			}
+
+			replayMsg := fmt.Sprintf("[%s] %s", ts.Format("15:04"), post)
+			if (u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext")) && nick != systemUser {
+				threadMsgID := u.prefixContext(brchannel.ID, p.Id, p.RootId, "replay")
+				replayMsg = u.formatContextMessage(ts.Format("15:04"), threadMsgID, post)
+			}
+			spoof(nick, replayMsg)
+		}
+
+		if len(p.FileIds) == 0 {
+			continue
+		}
+
+		for _, fname := range u.br.GetFileLinks(p.FileIds) {
+			fileMsg := "\x1ddownload file - " + fname + "\x1d" //nolint:goconst
+			if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
+				threadMsgID := u.prefixContext(brchannel.ID, p.Id, p.RootId, "replay_file")
+				fileMsg = u.formatContextMessage(ts.Format("15:04"), threadMsgID, fileMsg)
+			}
+			spoof(nick, fileMsg)
+		}
+	}
 }
 
 //nolint:cyclop
@@ -514,6 +685,7 @@ var cmds = map[string]Command{
 	"lastsent":         {handler: lastsent, login: true, minParams: 0, maxParams: 0},
 	"logout":           {handler: logout, login: true, minParams: 0, maxParams: 0},
 	"login":            {handler: login, minParams: 2, maxParams: 5},
+	"replay":           {handler: replay, login: true, minParams: 1, maxParams: 2},
 	"part":             {handler: part, login: true, minParams: 1, maxParams: 1},
 	"search":           {handler: search, login: true, minParams: 1, maxParams: -1},
 	"searchusers":      {handler: searchUsers, login: true, minParams: 1, maxParams: -1},
