@@ -10,7 +10,7 @@ import (
 	"unicode"
 
 	"github.com/42wim/matterircd/bridge"
-	"github.com/mattermost/mattermost-server/v6/model"
+	"github.com/mattermost/mattermost/server/public/model"
 )
 
 type CommandHandler interface {

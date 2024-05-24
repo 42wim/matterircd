@@ -20,7 +20,7 @@ import (
 	"github.com/42wim/matterircd/bridge/slack"
 	"github.com/alecthomas/chroma/v2/quick"
 	"github.com/davecgh/go-spew/spew"
-	"github.com/mattermost/mattermost-server/v6/model"
+	"github.com/mattermost/mattermost/server/public/model"
 	"github.com/muesli/reflow/wordwrap"
 	"github.com/sorcix/irc"
 	"github.com/spf13/viper"

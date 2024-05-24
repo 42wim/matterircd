@@ -690,7 +690,9 @@ func (s *Slack) getSlackUserFromMessage(rmsg *slack.MessageEvent) (*slack.User, 
 		}
 
 		if rmsg.Username == "" {
-			bot, err := s.rtm.GetBotInfo(rmsg.BotID)
+			bot, err := s.rtm.GetBotInfo(slack.GetBotInfoParameters{
+				Bot: rmsg.BotID,
+			})
 			if err != nil {
 				suser.Profile.DisplayName = "bot"
 				suser.Name = "bot"
