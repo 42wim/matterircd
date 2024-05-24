@@ -23,7 +23,7 @@ run:
   # default value is empty list, but next dirs are always skipped independently
   # from this option's value:
   #   	vendor$, third_party$, testdata$, examples$, Godeps$, builtin$
-  skip-dirs: gateway/bridgemap$
+  issues.exclude-dirs: gateway/bridgemap$
 
   # which files to skip: they will be analyzed, but issues from them
   # won't be reported. Default value is empty list, but there is
@@ -35,7 +35,7 @@ run:
 # output configuration options
 output:
   # colored-line-number|line-number|json|tab|checkstyle, default is "colored-line-number"
-  format: colored-line-number
+  formats: colored-line-number
 
   # print lines of code with issue, default is true
   print-issued-lines: true
@@ -55,9 +55,6 @@ linters-settings:
     # report about assignment of errors to blank identifier: `num, _ := strconv.Atoi(numStr)`;
     # default is false: such cases aren't reported by default.
     check-blank: false
-  govet:
-    # report about shadowed variables
-    check-shadowing: true
   golint:
     # minimal confidence for issues, default is 0.8
     min-confidence: 0.8
@@ -130,39 +127,17 @@ linters-settings:
     # all checks list: https://github.com/go-critic/checkers
     # disabled for now - hugeParam
     enabled-checks:
-      - appendAssign
-      - assignOp
       - boolExprSimplify
       - builtinShadow
-      - captLocal
-      - caseOrder
       - commentedOutImport
-      - defaultCaseOrder
-      - dupArg
-      - dupBranchBody
-      - dupCase
-      - dupSubExpr
-      - elseif
       - emptyFallthrough
-      - ifElseChain
       - importShadow
       - indexAlloc
       - methodExprCall
       - nestingReduce
-      - offBy1
       - ptrToRefParam
-      - regexpMust
-      - singleCaseSwitch
-      - sloppyLen
-      - switchTrue
-      - typeSwitchVar
       - typeUnparen
-      - underef
-      - unlambda
       - unnecessaryBlock
-      - unslice
-      - valSwap
-      - wrapperFunc
       - yodaStyleExpr
 
 
@@ -223,6 +198,8 @@ linters:
     - gosmopolitan
     - zerologlint
     - tagalign
+    - mnd
+    - perfsprint
 
 # rules to deal with reported isues
 issues:
