@@ -154,8 +154,8 @@ func (u *User) Encode(msgs ...*irc.Message) (err error) {
 }
 
 var (
-	replyRegExp  = regexp.MustCompile(`\@\@(?:[0-9a-z]{26}|[0-9a-f]{3}|!!)\s`)
-	modifyRegExp = regexp.MustCompile(`^s/(?:[0-9a-z]{26}|[0-9a-f]{3}|!!)?/`)
+	replyRegExp  = regexp.MustCompile(`\@\@(?:!!|[0-9a-z]{26}|[0-9a-f]{3}|\$[0-9A-Za-z\-_\.]{43})\s`)
+	modifyRegExp = regexp.MustCompile(`^s/(?:!!|[0-9a-z]{26}|[0-9a-f]{3}|\$[0-9A-Za-z\-_\.]{43})?/`)
 )
 
 // Decode will receive and return a decoded message, or an error.
