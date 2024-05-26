@@ -1031,6 +1031,16 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 				msg = strings.TrimLeft(msg, "*")
 				msg = strings.TrimRight(msg, "*")
 				msg = "\x01ACTION " + msg + " \x01"
+			} else if data.Type == "slack_attachment" {
+				attachmentMsg := parseSlackAttachmentMsg(data.Attachments())
+				if attachmentMsg == "" {
+					break
+				}
+				if msg == "" {
+					msg = attachmentMsg
+				} else {
+					msg += attachmentMsg
+				}
 			} else if data.Type == "custom_matterpoll" {
 				pollMsg := parseMatterpollToMsg(data.Attachments())
 				if pollMsg == "" {
@@ -1498,6 +1508,50 @@ func parseMatterpollToMsg(attachments []*model.SlackAttachment) string {
 		text := strings.TrimSuffix(attachment.Text, "\n")
 		text = strings.Replace(text, "**Total votes**", "*Total votes*", 1)
 		msg = fmt.Sprintf("%s: %s\n%s%s", attachment.AuthorName, attachment.Title, options, text)
+	}
+
+	return msg
+}
+
+func parseSlackAttachmentMsg(attachments []*model.SlackAttachment) string {
+	msg := ""
+	for _, attachment := range attachments {
+		prefix := "| "
+		// XXX: Figure out how to use mIRC codes here without it being
+		// stripped further down. With that, also support hex color codes.
+		if attachment.Color == "danger" {
+			prefix = "\033[31m| \033[0m"
+		} else if attachment.Color == "good" {
+			prefix = "\033[32m| \033[0m"
+		}
+
+		if attachment.Text == "" {
+			continue
+		}
+		if attachment.AuthorName != "" {
+			msg += prefix + attachment.AuthorName
+			if attachment.AuthorLink != "" {
+				msg += " (" + attachment.AuthorLink + ")"
+			}
+			msg += "\n"
+		}
+		if attachment.Title != "" {
+			msg += prefix + attachment.Title
+			if attachment.TitleLink != "" {
+				msg += attachment.TitleLink
+			}
+			msg += "\n"
+		}
+		lines := strings.Split(attachment.Text, "\n")
+		for _, text := range lines {
+			msg += prefix + text + "\n"
+		}
+		if attachment.ImageURL != "" {
+			msg += prefix + attachment.ImageURL + "\n"
+		}
+		for _, field := range attachment.Fields {
+			msg += prefix + field.Title + ": " + fmt.Sprintf("%s", field.Value) + "\n"
+		}
 	}
 
 	return msg
