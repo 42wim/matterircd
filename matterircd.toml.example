@@ -133,6 +133,10 @@ ShortenRepliesTo = 0
 Unicode = false
 # Disable showing reactions
 HideReactions = false
+# Disable converting Mattermost markdown of text emphasis to IRC text emphasis
+#DisableIRCEmphasis
+# Disable converting emoji strings/aliases to their unicode equivalent. Best with fonts-noto-color-emoji installed.
+#DisableEmoji = true
 
 #Only join direct/group messages when someone talks. This stops from cluttering your 
 #irc client with lots of windows.
