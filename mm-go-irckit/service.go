@@ -3,6 +3,7 @@ package irckit
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -216,6 +217,21 @@ func search(u *User, toUser *User, args []string, service string) {
 		return
 	}
 
+	limit := 0
+	if len(args) > 1 {
+		var err error
+		limit, err = strconv.Atoi(args[0])
+		if err == nil {
+			args = args[1:]
+		}
+	}
+
+	if len(args) == 0 || args[0] == "help" {
+		u.MsgUser(toUser, "need SEARCH <limit> <text>")
+		u.MsgUser(toUser, "e.g. SEARCH 10 matterircd")
+		return
+	}
+
 	list := u.br.SearchPosts(strings.Join(args, " "))
 
 	if list == nil || list.(*model.PostList) == nil || len(list.(*model.PostList).Order) == 0 {
@@ -225,33 +241,85 @@ func search(u *User, toUser *User, args []string, service string) {
 
 	postlist, _ := list.(*model.PostList)
 
-	for i := len(postlist.Order) - 1; i >= 0; i-- {
-		if postlist.Posts[postlist.Order[i]].DeleteAt > postlist.Posts[postlist.Order[i]].CreateAt {
+	if limit == 0 || limit > len(postlist.Order) {
+		limit = len(postlist.Order)
+	}
+
+	for i := limit - 1; i >= 0; i-- {
+		p := postlist.Posts[postlist.Order[i]]
+		if p.Type == model.PostTypeJoinLeave {
 			continue
 		}
 
-		timestamp := time.Unix(postlist.Posts[postlist.Order[i]].CreateAt/1000, 0).Format("January 02, 2006 15:04")
-		channelname := u.br.GetChannelName(postlist.Posts[postlist.Order[i]].ChannelId)
-
-		nick := u.br.GetUser(postlist.Posts[postlist.Order[i]].UserId).Nick
-
-		u.MsgUser(toUser, "#"+channelname+" <"+nick+"> "+timestamp)
-		u.MsgUser(toUser, strings.Repeat("=", len("#"+channelname+" <"+nick+"> "+timestamp)))
-
-		for _, post := range strings.Split(postlist.Posts[postlist.Order[i]].Message, "\n") {
-			if post != "" {
-				u.MsgUser(toUser, post)
-			}
+		if p.DeleteAt > p.CreateAt {
+			continue
 		}
 
-		if len(postlist.Posts[postlist.Order[i]].FileIds) > 0 {
-			for _, fname := range u.br.GetFileLinks(postlist.Posts[postlist.Order[i]].FileIds) {
-				u.MsgUser(toUser, "\x1ddownload file - "+fname+"\x1d")
-			}
+		props := p.GetProps()
+		botname, override := props["override_username"].(string)
+		user := u.br.GetUser(p.UserId)
+		nick := user.Nick
+		if override {
+			nick = botname
 		}
 
-		u.MsgUser(toUser, "")
-		u.MsgUser(toUser, "")
+		channelname := getMattermostChannelName(u, p.ChannelId)
+
+		if p.Type == model.PostTypeAddToTeam || p.Type == model.PostTypeRemoveFromTeam {
+			nick = systemUser
+		}
+
+		for _, post := range strings.Split(p.Message, "\n") {
+			if nick == systemUser {
+				post = "\x1d" + post + "\x1d"
+			}
+			for _, term := range args {
+				re := regexp.MustCompile(`(?i)(` + regexp.QuoteMeta(term) + `)`)
+				post = re.ReplaceAllString(post, "\x02$1\x02")
+			}
+			formatSearchMsg(u, p.ChannelId, channelname, toUser, nick, p, post)
+		}
+
+		if len(p.FileIds) == 0 {
+			continue
+		}
+
+		for _, fname := range u.br.GetFileLinks(p.FileIds) {
+			fileMsg := "\x1ddownload file - " + fname + "\x1d" //nolint:goconst
+			formatSearchMsg(u, p.ChannelId, channelname, toUser, nick, p, fileMsg)
+		}
+	}
+}
+
+func formatSearchMsg(u *User, channelID string, channel string, user *User, nick string, p *model.Post, msgText string) {
+	ts := time.Unix(0, p.CreateAt*int64(time.Millisecond))
+
+	switch {
+	case (u.v.GetBool(u.br.Protocol()+".collapsescrollback") && strings.HasPrefix(channel, "#")):
+		threadMsgID := u.prefixContext(channelID, p.Id, p.RootId, "scrollback")
+		msg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, msgText)
+		nick += "/" + channel
+		u.Srv.Channel("&messages").SpoofMessage(nick, msg)
+	case u.v.GetBool(u.br.Protocol() + ".collapsescrollback"):
+		threadMsgID := u.prefixContext(channelID, p.Id, p.RootId, "scrollback")
+		msg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, msgText)
+		u.Srv.Channel("&messages").SpoofMessage(nick, msg)
+	case (u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext")) && strings.HasPrefix(channel, "#"):
+		threadMsgID := u.prefixContext(channelID, p.Id, p.RootId, "scrollback")
+		nick += "/" + channel
+		msg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, "<"+nick+"> "+msgText)
+		u.MsgUser(user, msg)
+	case strings.HasPrefix(channel, "#"):
+		nick += "/" + channel
+		msg := "[" + ts.Format("2006-01-02 15:04") + "] <" + nick + "> " + msgText
+		u.MsgUser(user, msg)
+	case u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext"):
+		threadMsgID := u.prefixContext(channelID, p.Id, p.RootId, "scrollback")
+		msg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, "<"+nick+"> "+msgText)
+		u.MsgUser(user, msg)
+	default:
+		msg := "[" + ts.Format("2006-01-02 15:04") + "] <" + nick + "> " + msgText
+		u.MsgUser(user, msg)
 	}
 }
 
