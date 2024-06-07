@@ -162,17 +162,14 @@ func (ch *channel) Part(u *User, text string) {
 
 	if _, ok := ch.usersIdx[u.ID()]; !ok {
 		ch.mu.Unlock()
-		for _, to := range ch.usersIdx {
-			if !to.Ghost && to.Nick != u.Nick {
-				to.Encode(msg) //nolint:errcheck
-			}
-		}
+
 		u.Encode(&irc.Message{
 			Prefix:   ch.Prefix(),
 			Command:  irc.ERR_NOTONCHANNEL,
 			Params:   []string{ch.name},
 			Trailing: "User not on that channel",
 		})
+
 		return
 	}
 
@@ -338,20 +335,8 @@ func (ch *channel) Join(u *User) error {
 		return nil
 	}
 
-	msg := &irc.Message{
-		Prefix:  u.Prefix(),
-		Command: irc.JOIN,
-		Params:  []string{ch.name},
-	}
-
 	if _, exists := ch.usersIdx[u.ID()]; exists {
 		ch.mu.Unlock()
-		for _, to := range ch.usersIdx {
-			// only send join messages to real users
-			if !to.Ghost && to.Nick != u.Nick {
-				to.Encode(msg) //nolint:errcheck
-			}
-		}
 		return nil
 	}
 
@@ -367,6 +352,12 @@ func (ch *channel) Join(u *User) error {
 	// speed up &users join
 	if ch.name == "&users" && u.Ghost {
 		return nil
+	}
+
+	msg := &irc.Message{
+		Prefix:  u.Prefix(),
+		Command: irc.JOIN,
+		Params:  []string{ch.name},
 	}
 
 	// send regular users a notification of the join
