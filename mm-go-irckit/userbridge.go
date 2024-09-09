@@ -145,11 +145,23 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 		}
 	}
 
-	prefixUser := event.Sender.User
-	if event.Sender.Me {
-		prefixUser = event.Receiver.User
+	var text string
+	var showContext bool
+	var maxlen int
+
+	prefix := ""
+	suffix := ""
+	if event.Event == "dm_topic" {
+		text = event.Text
+		showContext = false
+		maxlen = 0
+	} else {
+		prefixUser := event.Sender.User
+		if event.Sender.Me {
+			prefixUser = event.Receiver.User
+		}
+		text, prefix, suffix, showContext, maxlen = u.handleMessageThreadContext(prefixUser, event.MessageID, event.ParentID, event.Event, event.Text)
 	}
-	text, prefix, suffix, showContext, maxlen := u.handleMessageThreadContext(prefixUser, event.MessageID, event.ParentID, event.Event, event.Text)
 
 	lexer := ""
 	codeBlockBackTick := false
