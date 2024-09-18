@@ -907,7 +907,7 @@ func (u *User) loginTo(protocol string) error {
 		u.br, err = slack.New(u.v, u.Credentials, u.eventChan, u.addUsersToChannels)
 	case "mattermost":
 		u.eventChan = make(chan *bridge.Event)
-		if u.v.GetBool("mattermost.ignoreserverversion") || strings.HasPrefix(u.getMattermostVersion(), "7.") || strings.HasPrefix(u.getMattermostVersion(), "8.") || strings.HasPrefix(u.getMattermostVersion(), "9." || strings.HasPrefix(u.getMattermostVersion(), "10.") {
+		if u.v.GetBool("mattermost.ignoreserverversion") || strings.HasPrefix(u.getMattermostVersion(), "7.") || strings.HasPrefix(u.getMattermostVersion(), "8.") || strings.HasPrefix(u.getMattermostVersion(), "9.") || strings.HasPrefix(u.getMattermostVersion(), "10.") {
 			u.br, _, err = mattermost.New(u.v, u.Credentials, u.eventChan, u.addUsersToChannels)
 		} else {
 			return fmt.Errorf("mattermost version %s not supported", u.getMattermostVersion())
