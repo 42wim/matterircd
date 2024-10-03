@@ -20,6 +20,7 @@ import (
 	"github.com/42wim/matterircd/bridge/slack"
 	"github.com/alecthomas/chroma/v2/quick"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/kenshaw/emoji"
 	"github.com/mattermost/mattermost-server/v6/model"
 	"github.com/muesli/reflow/wordwrap"
 	"github.com/sorcix/irc"
@@ -167,6 +168,10 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 
 		if !u.v.GetBool(u.br.Protocol()+".disableircemphasis") && !codeBlockBackTick && !codeBlockTilde {
 			text = markdown2irc(text)
+		}
+
+		if !u.v.GetBool(u.br.Protocol()+".disableemoji") && !codeBlockBackTick && !codeBlockTilde { //nolint:goconst
+			text = emoji.ReplaceAliases(text)
 		}
 
 		if showContext {
@@ -328,6 +333,10 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 			text = markdown2irc(text)
 		}
 
+		if !u.v.GetBool(u.br.Protocol()+".disableemoji") && !codeBlockBackTick && !codeBlockTilde {
+			text = emoji.ReplaceAliases(text)
+		}
+
 		if showContext {
 			text = prefix + text + suffix
 		}
@@ -466,6 +475,13 @@ func (u *User) handleReactionEvent(event interface{}) {
 	if u.v.GetBool(u.br.Protocol() + ".hidereactions") {
 		logger.Debug("Not showing reaction: " + text + reaction)
 		return
+	}
+
+	if !u.v.GetBool(u.br.Protocol() + ".disableemoji") {
+		reactionEmoji := emoji.FromAlias(reaction)
+		if reactionEmoji != nil {
+			reaction = fmt.Sprintf("%s", reactionEmoji)
+		}
 	}
 
 	if channelType == "D" {
