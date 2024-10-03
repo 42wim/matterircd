@@ -167,7 +167,7 @@ func (ch *channel) Part(u *User, text string) {
 			Prefix:   ch.Prefix(),
 			Command:  irc.ERR_NOTONCHANNEL,
 			Params:   []string{ch.name},
-			Trailing: "You're not on that channel",
+			Trailing: "User not on that channel",
 		})
 
 		return
