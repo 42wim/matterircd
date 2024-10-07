@@ -1,4 +1,14 @@
-# github.com/alecthomas/chroma/v2 v2.9.1
+# github.com/42wim/matterbridge v1.26.0
+## explicit; go 1.18
+github.com/42wim/matterbridge/bridge/config
+github.com/42wim/matterbridge/bridge/helper
+# github.com/Benau/go_rlottie v0.0.0-20210807002906-98c1b2421989
+## explicit
+github.com/Benau/go_rlottie
+# github.com/Benau/tgsconverter v0.0.0-20210809170556-99f4a4f6337f
+## explicit
+github.com/Benau/tgsconverter/libtgsconverter
+# github.com/alecthomas/chroma/v2 v2.12.0
 ## explicit; go 1.19
 github.com/alecthomas/chroma/v2
 github.com/alecthomas/chroma/v2/formatters
@@ -7,9 +17,15 @@ github.com/alecthomas/chroma/v2/formatters/svg
 github.com/alecthomas/chroma/v2/lexers
 github.com/alecthomas/chroma/v2/quick
 github.com/alecthomas/chroma/v2/styles
+# github.com/av-elier/go-decimal-to-rational v0.0.0-20191127152832-89e6aad02ecf
+## explicit
+github.com/av-elier/go-decimal-to-rational
 # github.com/blang/semver v3.5.1+incompatible
 ## explicit
 github.com/blang/semver
+# github.com/btcsuite/btcutil v1.0.2
+## explicit; go 1.13
+github.com/btcsuite/btcutil/base58
 # github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc
 ## explicit
 github.com/davecgh/go-spew/spew
@@ -35,6 +51,12 @@ github.com/fsnotify/fsnotify
 # github.com/go-asn1-ber/asn1-ber v1.5.3
 ## explicit; go 1.13
 github.com/go-asn1-ber/asn1-ber
+# github.com/gomarkdown/markdown v0.0.0-20221013030248-663e2500819c
+## explicit; go 1.12
+github.com/gomarkdown/markdown
+github.com/gomarkdown/markdown/ast
+github.com/gomarkdown/markdown/html
+github.com/gomarkdown/markdown/parser
 # github.com/google/gops v0.3.27
 ## explicit; go 1.17
 github.com/google/gops/agent
@@ -88,6 +110,9 @@ github.com/jpillora/backoff
 # github.com/json-iterator/go v1.1.12
 ## explicit; go 1.12
 github.com/json-iterator/go
+# github.com/kettek/apng v0.0.0-20191108220231-414630eed80f
+## explicit
+github.com/kettek/apng
 # github.com/klauspost/compress v1.17.0
 ## explicit; go 1.18
 github.com/klauspost/compress/s2
@@ -130,7 +155,7 @@ github.com/mattermost/mattermost-server/v6/utils/jsonutils
 # github.com/mattn/go-colorable v0.1.13
 ## explicit; go 1.15
 github.com/mattn/go-colorable
-# github.com/mattn/go-isatty v0.0.17
+# github.com/mattn/go-isatty v0.0.19
 ## explicit; go 1.15
 github.com/mattn/go-isatty
 # github.com/mattn/go-mastodon v0.0.6
@@ -207,7 +232,7 @@ github.com/pmezard/go-difflib/difflib
 # github.com/rivo/uniseg v0.2.0
 ## explicit; go 1.12
 github.com/rivo/uniseg
-# github.com/rs/xid v1.4.0
+# github.com/rs/xid v1.5.0
 ## explicit; go 1.12
 github.com/rs/xid
 # github.com/sagikazarmark/locafero v0.3.0
@@ -219,6 +244,9 @@ github.com/sagikazarmark/slog-shim
 # github.com/sirupsen/logrus v1.9.3
 ## explicit; go 1.13
 github.com/sirupsen/logrus
+# github.com/sizeofint/webpanimation v0.0.0-20210809145948-1d2b32119882
+## explicit; go 1.16
+github.com/sizeofint/webpanimation
 # github.com/slack-go/slack v0.12.3
 ## explicit; go 1.16
 github.com/slack-go/slack
@@ -293,41 +321,47 @@ go.uber.org/atomic
 # go.uber.org/multierr v1.9.0
 ## explicit; go 1.19
 go.uber.org/multierr
-# golang.org/x/crypto v0.13.0
-## explicit; go 1.17
+# golang.org/x/crypto v0.18.0
+## explicit; go 1.18
 golang.org/x/crypto/argon2
 golang.org/x/crypto/bcrypt
 golang.org/x/crypto/blake2b
 golang.org/x/crypto/blowfish
+golang.org/x/crypto/hkdf
 golang.org/x/crypto/pbkdf2
 golang.org/x/crypto/scrypt
 golang.org/x/crypto/ssh/terminal
-# golang.org/x/exp v0.0.0-20230905200255-921286631fa9
+# golang.org/x/exp v0.0.0-20240112132812-db7319d0e0e3
 ## explicit; go 1.20
 golang.org/x/exp/constraints
 golang.org/x/exp/slices
 golang.org/x/exp/slog
 golang.org/x/exp/slog/internal
 golang.org/x/exp/slog/internal/buffer
-# golang.org/x/net v0.15.0
-## explicit; go 1.17
+# golang.org/x/image v0.3.0
+## explicit; go 1.12
+golang.org/x/image/riff
+golang.org/x/image/vp8
+golang.org/x/image/vp8l
+golang.org/x/image/webp
+# golang.org/x/net v0.20.0
+## explicit; go 1.18
 golang.org/x/net/html
 golang.org/x/net/html/atom
 golang.org/x/net/http/httpguts
 golang.org/x/net/idna
 golang.org/x/net/publicsuffix
-# golang.org/x/sys v0.12.0
-## explicit; go 1.17
+# golang.org/x/sys v0.16.0
+## explicit; go 1.18
 golang.org/x/sys/cpu
-golang.org/x/sys/internal/unsafeheader
 golang.org/x/sys/plan9
 golang.org/x/sys/unix
 golang.org/x/sys/windows
-# golang.org/x/term v0.12.0
-## explicit; go 1.17
+# golang.org/x/term v0.16.0
+## explicit; go 1.18
 golang.org/x/term
-# golang.org/x/text v0.13.0
-## explicit; go 1.17
+# golang.org/x/text v0.14.0
+## explicit; go 1.18
 golang.org/x/text/encoding
 golang.org/x/text/encoding/internal
 golang.org/x/text/encoding/internal/identifier
@@ -345,8 +379,8 @@ golang.org/x/text/unicode/norm
 # gopkg.in/ini.v1 v1.67.0
 ## explicit
 gopkg.in/ini.v1
-# gopkg.in/natefinch/lumberjack.v2 v2.0.0
-## explicit
+# gopkg.in/natefinch/lumberjack.v2 v2.2.1
+## explicit; go 1.13
 gopkg.in/natefinch/lumberjack.v2
 # gopkg.in/yaml.v2 v2.4.0
 ## explicit; go 1.15
@@ -354,3 +388,12 @@ gopkg.in/yaml.v2
 # gopkg.in/yaml.v3 v3.0.1
 ## explicit
 gopkg.in/yaml.v3
+# maunium.net/go/mautrix v0.8.0
+## explicit; go 1.14
+maunium.net/go/mautrix
+maunium.net/go/mautrix/crypto/attachment
+maunium.net/go/mautrix/crypto/utils
+maunium.net/go/mautrix/event
+maunium.net/go/mautrix/id
+maunium.net/go/mautrix/pushrules
+maunium.net/go/mautrix/pushrules/glob

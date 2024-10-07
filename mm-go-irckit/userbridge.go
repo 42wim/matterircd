@@ -16,6 +16,7 @@ import (
 
 	"github.com/42wim/matterircd/bridge"
 	"github.com/42wim/matterircd/bridge/mastodon"
+	"github.com/42wim/matterircd/bridge/matrix"
 	"github.com/42wim/matterircd/bridge/mattermost"
 	"github.com/42wim/matterircd/bridge/slack"
 	"github.com/alecthomas/chroma/v2/quick"
@@ -73,6 +74,7 @@ func NewUserBridge(c net.Conn, srv Server, cfg *viper.Viper, db *bolt.DB) *User 
 	// used for login
 	u.createService("mattermost", "loginservice")
 	u.createService("slack", "loginservice")
+	u.createService("matrix", "loginservice")
 	u.createService("mastodon", "loginservice")
 	u.createService("matterircd", "systemservice")
 	return u
@@ -905,6 +907,9 @@ func (u *User) loginTo(protocol string) error {
 	case "slack":
 		u.eventChan = make(chan *bridge.Event)
 		u.br, err = slack.New(u.v, u.Credentials, u.eventChan, u.addUsersToChannels)
+	case "matrix":
+		u.eventChan = make(chan *bridge.Event)
+		u.br, _, err = matrix.New(u.v, u.Credentials, u.eventChan, u.addUsersToChannels)
 	case "mattermost":
 		u.eventChan = make(chan *bridge.Event)
 		if u.v.GetBool("mattermost.ignoreserverversion") || strings.HasPrefix(u.getMattermostVersion(), "7.") || strings.HasPrefix(u.getMattermostVersion(), "8.") || strings.HasPrefix(u.getMattermostVersion(), "9.") || strings.HasPrefix(u.getMattermostVersion(), "10.") {
@@ -1022,7 +1027,7 @@ func (u *User) prefixContext(channelID, messageID, parentID, event string) strin
 		prefixChar = "↪"
 	}
 
-	if u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" || u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost+post" {
+	if u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" || u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost+post" || u.v.GetString(u.br.Protocol()+".threadcontext") == "matrix" { //nolint:goconst
 		if parentID == "" {
 			return fmt.Sprintf("[@@%s]", messageID)
 		}

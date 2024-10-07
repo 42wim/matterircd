@@ -392,7 +392,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 
 		msgID, err2 := u.br.MsgChannel(ch.ID(), msg.Trailing)
 		if err2 != nil {
-			u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+msg.Trailing+" could not be sent "+err2.Error())
+			u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+msg.Trailing+" could not be sent "+err2.Error()) //nolint:goconst
 			return err2
 		}
 
@@ -411,7 +411,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 	// or a user
 	if toUser, exists := s.HasUser(query); exists {
 		switch {
-		case query == "mattermost" || query == "slack" || query == "mastodon": //nolint:goconst
+		case query == "mattermost" || query == "slack" || query == "mastodon" || query == "matrix": //nolint:goconst
 			go u.handleServiceBot(query, toUser, msg.Trailing)
 			msg.Trailing = "<redacted>"
 		case toUser.Ghost, toUser.Me:
@@ -439,6 +439,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 
 			msgID, err2 := u.br.MsgUser(toUser.User, msg.Trailing)
 			if err2 != nil {
+				u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+msg.Trailing+" could not be send: "+err2.Error())
 				return err2
 			}
 			u.msgLastMutex.Lock()
@@ -460,7 +461,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 	return s.EncodeMessage(u, irc.ERR_NOSUCHNICK, msg.Params, "No such nick/channel")
 }
 
-var parseReactionToMsgRegExp = regexp.MustCompile(`^\@\@([0-9a-f]{3}|[0-9a-z]{26})\s+([\-\+]):(\S+):\s*$`)
+var parseReactionToMsgRegExp = regexp.MustCompile(`^\@\@([0-9a-f]{3}|[0-9a-z]{26}|\$[0-9A-Za-z\-_\.]{43})\s+([\-\+]):(\S+):\s*$`)
 
 func parseReactionToMsg(u *User, msg *irc.Message, channelID string) bool {
 	matches := parseReactionToMsgRegExp.FindStringSubmatch(msg.Trailing)
@@ -504,7 +505,7 @@ func parseReactionToMsg(u *User, msg *irc.Message, channelID string) bool {
 	return true
 }
 
-var parseModifyMsgRegExp = regexp.MustCompile(`^s(\/(?:[0-9a-f]{3}|[0-9a-z]{26}|!!)?\/)(.*)`)
+var parseModifyMsgRegExp = regexp.MustCompile(`^s(\/(?:!!|[0-9a-f]{3}|[0-9a-z]{26}|\$[0-9A-Za-z\-_\.]{43})?\/)(.*)`)
 
 func parseModifyMsg(u *User, msg *irc.Message, channelID string) bool {
 	matches := parseModifyMsgRegExp.FindStringSubmatch(msg.Trailing)
@@ -578,7 +579,7 @@ func parseModifyMsg(u *User, msg *irc.Message, channelID string) bool {
 	return true
 }
 
-var parseThreadIDRegExp = regexp.MustCompile(`(?s)^\@\@(?:(!!|[0-9a-f]{3}|[0-9a-z]{26})\s)(.*)`)
+var parseThreadIDRegExp = regexp.MustCompile(`(?s)^\@\@(?:(!!|[0-9a-f]{3}|[0-9a-z]{26}|\$[0-9A-Za-z\-_\.]{43})\s)(.*)`)
 
 func parseThreadID(u *User, msg *irc.Message, channelID string) (string, string) {
 	matches := parseThreadIDRegExp.FindStringSubmatch(msg.Trailing)
@@ -604,6 +605,7 @@ func parseThreadID(u *User, msg *irc.Message, channelID string) (string, string)
 			parentID = msgLast[1]
 		}
 		return parentID, matches[2]
+	// matterircd's hexadecimal format.
 	case len(matches[1]) == 3:
 		id, err := strconv.ParseInt(matches[1], 16, 0)
 		if err != nil {
@@ -617,7 +619,13 @@ func parseThreadID(u *User, msg *irc.Message, channelID string) (string, string)
 		if _, ok := u.msgMapIndex[channelID][int(id)]; ok {
 			return u.msgMapIndex[channelID][int(id)], matches[2]
 		}
+	// Mattermost's ID format.
 	case len(matches[1]) == 26:
+		return matches[1], matches[2]
+	// Matrix's Event ID format:
+	//   https://spec.matrix.org/latest/appendices/#common-identifier-format
+	//   https://spec.matrix.org/latest/appendices/#common-namespaced-identifier-grammar
+	case len(matches[1]) == 44:
 		return matches[1], matches[2]
 	default:
 		logger.Errorf("parseThreadID: could not parse reply ID %q", matches[1])
