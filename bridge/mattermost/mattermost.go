@@ -888,7 +888,16 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	if entries, ok := extraProps["attachments"].([]interface{}); ok {
 		for _, entry := range entries {
 			if f, ok := entry.(map[string]interface{}); ok {
-				data.Message = data.Message + "\n" + f["fallback"].(string)
+				if data.Message == "" && f["fallback"].(string) == "" {
+					data.Message = "\n"
+				} else {
+					if data.Message != "" {
+						data.Message += "\n"
+					}
+					if f["fallback"].(string) != "" {
+						data.Message += f["fallback"].(string) + "\n"
+					}
+				}
 			}
 		}
 	}
@@ -1562,12 +1571,9 @@ func parseSlackAttachmentMsg(attachments []*model.SlackAttachment) string {
 		if attachment.Color == "danger" {
 			prefix = "\033[31m| \033[0m"
 		} else if attachment.Color == "good" {
-			prefix = "\033[32m| \033[0m"
+			prefix = "\033[1;32m| \033[0m"
 		}
 
-		if attachment.Text == "" {
-			continue
-		}
 		if attachment.AuthorName != "" {
 			msg += prefix + attachment.AuthorName
 			if attachment.AuthorLink != "" {
@@ -1578,13 +1584,15 @@ func parseSlackAttachmentMsg(attachments []*model.SlackAttachment) string {
 		if attachment.Title != "" {
 			msg += prefix + attachment.Title
 			if attachment.TitleLink != "" {
-				msg += attachment.TitleLink
+				msg += " (" + attachment.TitleLink + ")"
 			}
 			msg += "\n"
 		}
-		lines := strings.Split(attachment.Text, "\n")
-		for _, text := range lines {
-			msg += prefix + text + "\n"
+		if attachment.Text != "" {
+			lines := strings.Split(attachment.Text, "\n")
+			for _, text := range lines {
+				msg += prefix + text + "\n"
+			}
 		}
 		if attachment.ImageURL != "" {
 			msg += prefix + attachment.ImageURL + "\n"
