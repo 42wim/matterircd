@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/rand"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -1565,13 +1566,22 @@ func parseMatterpollToMsg(attachments []*model.SlackAttachment) string {
 func parseSlackAttachmentMsg(attachments []*model.SlackAttachment) string {
 	msg := ""
 	for _, attachment := range attachments {
-		prefix := "| "
-		// TODO: Figure out how to use mIRC codes here without it being
-		// stripped further down. With that, also support hex color codes.
-		if attachment.Color == "danger" {
-			prefix = "\033[31m| \033[0m"
-		} else if attachment.Color == "good" {
-			prefix = "\033[1;32m| \033[0m"
+		prefix := "\033[1m|\033[0m "
+		switch {
+		// https://docs.slack.dev/tools/node-slack-sdk/reference/web-api/interfaces/MessageAttachment/#color
+		case attachment.Color == "danger":
+			prefix = "\033[31m|\033[0m "
+		case attachment.Color == "good":
+			prefix = "\033[1;32m|\033[0m "
+		case attachment.Color == "warning":
+			prefix = "\033[33m|\033[0m "
+		case strings.HasPrefix(attachment.Color, "#"):
+			hex := strings.TrimPrefix(attachment.Color, "#")
+			rr, _ := strconv.ParseInt(hex[0:2], 16, 0)
+			gg, _ := strconv.ParseInt(hex[2:4], 16, 0)
+			bb, _ := strconv.ParseInt(hex[4:6], 16, 0)
+			// https://modern.ircdocs.horse/formatting.html#hex-color
+			prefix = fmt.Sprintf("\033[1;38;2;%d;%d;%dm|\033[0m ", int(rr), int(gg), int(bb))
 		}
 
 		if attachment.AuthorName != "" {
@@ -1598,7 +1608,13 @@ func parseSlackAttachmentMsg(attachments []*model.SlackAttachment) string {
 			msg += prefix + attachment.ImageURL + "\n"
 		}
 		for _, field := range attachment.Fields {
-			msg += prefix + field.Title + ": " + fmt.Sprintf("%s", field.Value) + "\n"
+			msg += prefix + field.Title + ": "
+			lines := strings.Split(fmt.Sprintf("%s", field.Value), "\n")
+			newPrefix := ""
+			for _, text := range lines {
+				msg += newPrefix + text + "\n"
+				newPrefix = prefix
+			}
 		}
 	}
 
