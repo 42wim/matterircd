@@ -20,6 +20,7 @@ import (
 	"github.com/42wim/matterircd/bridge/slack"
 	"github.com/alecthomas/chroma/v2/quick"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/kenshaw/emoji"
 	"github.com/mattermost/mattermost-server/v6/model"
 	"github.com/muesli/reflow/wordwrap"
 	"github.com/sorcix/irc"
@@ -145,11 +146,23 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 		}
 	}
 
-	prefixUser := event.Sender.User
-	if event.Sender.Me {
-		prefixUser = event.Receiver.User
+	var text string
+	var showContext bool
+	var maxlen int
+
+	prefix := ""
+	suffix := ""
+	if event.Event == "dm_topic" {
+		text = event.Text
+		showContext = false
+		maxlen = 0
+	} else {
+		prefixUser := event.Sender.User
+		if event.Sender.Me {
+			prefixUser = event.Receiver.User
+		}
+		text, prefix, suffix, showContext, maxlen = u.handleMessageThreadContext(prefixUser, event.MessageID, event.ParentID, event.Event, event.Text)
 	}
-	text, prefix, suffix, showContext, maxlen := u.handleMessageThreadContext(prefixUser, event.MessageID, event.ParentID, event.Event, event.Text)
 
 	lexer := ""
 	codeBlockBackTick := false
@@ -167,6 +180,10 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 
 		if !u.v.GetBool(u.br.Protocol()+".disableircemphasis") && !codeBlockBackTick && !codeBlockTilde {
 			text = markdown2irc(text)
+		}
+
+		if !u.v.GetBool(u.br.Protocol()+".disableemoji") && !codeBlockBackTick && !codeBlockTilde {
+			text = emoji.ReplaceAliases(text)
 		}
 
 		if showContext {
@@ -328,6 +345,10 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 			text = markdown2irc(text)
 		}
 
+		if !u.v.GetBool(u.br.Protocol()+".disableemoji") && !codeBlockBackTick && !codeBlockTilde {
+			text = emoji.ReplaceAliases(text)
+		}
+
 		if showContext {
 			text = prefix + text + suffix
 		}
@@ -466,6 +487,13 @@ func (u *User) handleReactionEvent(event interface{}) {
 	if u.v.GetBool(u.br.Protocol() + ".hidereactions") {
 		logger.Debug("Not showing reaction: " + text + reaction)
 		return
+	}
+
+	if !u.v.GetBool(u.br.Protocol() + ".disableemoji") {
+		reactionEmoji := emoji.FromAlias(reaction)
+		if reactionEmoji != nil {
+			reaction = fmt.Sprintf("%s", reactionEmoji)
+		}
 	}
 
 	if channelType == "D" {
@@ -705,9 +733,6 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 		// traverse the order in reverse
 		for i := len(mmPostList.Order) - 1; i >= 0; i-- {
 			p := mmPostList.Posts[mmPostList.Order[i]]
-			if p.Type == model.PostTypeJoinLeave {
-				continue
-			}
 
 			if p.DeleteAt > p.CreateAt {
 				continue
@@ -732,8 +757,31 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 				nick = botname
 			}
 
-			if p.Type == model.PostTypeAddToTeam || p.Type == model.PostTypeRemoveFromTeam {
+			switch {
+			case p.Type == model.PostTypeAddToTeam:
 				nick = systemUser
+				ghost := u.createUserFromInfo(user)
+				u.Srv.Channel(brchannel.ID).Join(ghost) //nolint:errcheck
+			case p.Type == model.PostTypeRemoveFromTeam:
+				nick = systemUser
+				ghost := u.createUserFromInfo(user)
+				u.Srv.Channel(brchannel.ID).Part(ghost, "")
+			case p.Type == model.PostTypeJoinChannel:
+				ghost := u.createUserFromInfo(user)
+				u.Srv.Channel(brchannel.ID).Join(ghost) //nolint:errcheck
+			case p.Type == model.PostTypeLeaveChannel:
+				ghost := u.createUserFromInfo(user)
+				u.Srv.Channel(brchannel.ID).Part(ghost, "")
+			case p.Type == model.PostTypeAddToChannel:
+				if addedUserID, ok := props["addedUserId"].(string); ok {
+					ghost := u.createUserFromInfo(u.br.GetUser(addedUserID))
+					u.Srv.Channel(brchannel.ID).Join(ghost) //nolint:errcheck
+				}
+			case p.Type == model.PostTypeRemoveFromChannel:
+				if removedUserID, ok := props["removedUserId"].(string); ok {
+					ghost := u.createUserFromInfo(u.br.GetUser(removedUserID))
+					u.Srv.Channel(brchannel.ID).Part(ghost, "")
+				}
 			}
 
 			for _, post := range strings.Split(p.Message, "\n") {

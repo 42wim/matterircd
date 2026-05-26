@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/rand"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -176,6 +177,8 @@ func (m *Mattermost) handleWsMessage(quitChan chan struct{}) {
 			case model.WebsocketEventChannelRestored:
 				// check if we have the users/channels in our cache. If not update
 				m.checkWsActionMessage(message.Raw, updateChannelsThrottle)
+			case model.WebsocketEventChannelUpdated:
+				m.handleWsActionPost(message.Raw)
 			case model.WebsocketEventUserUpdated:
 				m.handleWsActionUserUpdated(message.Raw)
 			case model.WebsocketEventStatusChange:
@@ -844,6 +847,10 @@ var validIRCNickRegExp = regexp.MustCompile("^[a-zA-Z0-9_]*$")
 
 //nolint:funlen,gocognit,gocyclo,cyclop,forcetypeassert
 func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
+	if rmsg.GetData()["post"] == nil {
+		return
+	}
+
 	var data model.Post
 	if err := json.NewDecoder(strings.NewReader(rmsg.GetData()["post"].(string))).Decode(&data); err != nil {
 		return
@@ -882,7 +889,16 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	if entries, ok := extraProps["attachments"].([]interface{}); ok {
 		for _, entry := range entries {
 			if f, ok := entry.(map[string]interface{}); ok {
-				data.Message = data.Message + "\n" + f["fallback"].(string)
+				if data.Message == "" && f["fallback"].(string) == "" {
+					data.Message = "\n"
+				} else {
+					if data.Message != "" {
+						data.Message += "\n"
+					}
+					if f["fallback"].(string) != "" {
+						data.Message += f["fallback"].(string) + "\n"
+					}
+				}
 			}
 		}
 	}
@@ -908,19 +924,61 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		return
 	}
 
+	channelType := ""
+	if t, ok := props["channel_type"].(string); ok {
+		channelType = t
+	}
+
+	dmchannel, _ := rmsg.GetData()["channel_name"].(string)
+
 	if data.Type == model.PostTypeHeaderChange {
-		if topic, ok := extraProps["new_header"].(string); ok {
+		if _, ok := extraProps["new_header"].(string); !ok {
+			return
+		}
+		topic := extraProps["new_header"].(string)
+
+		if channelType == "D" {
 			event := &bridge.Event{
-				Type: "channel_topic",
-				Data: &bridge.ChannelTopicEvent{
-					Text:      topic,
-					ChannelID: data.ChannelId,
-					UserID:    data.UserId,
-				},
+				Type: "direct_message",
 			}
+
+			d := &bridge.DirectMessageEvent{
+				Text:      "\x01ACTION updated topic to: " + topic + " \x01",
+				ChannelID: data.ChannelId,
+				MessageID: data.Id,
+				Event:     "dm_topic",
+			}
+
+			userUpdated := extraProps["username"].(string)
+			if userUpdated == m.GetMe().Nick {
+				d.Sender = ghost
+				d.Receiver = m.getDMUser(dmchannel)
+			} else {
+				d.Sender = m.getDMUser(dmchannel)
+				d.Receiver = ghost
+			}
+
+			if d.Sender == nil || d.Receiver == nil {
+				logger.Errorf("dm: couldn't resolve sender or receiver: %#v", rmsg)
+				return
+			}
+
+			event.Data = d
+
 			m.eventChan <- event
+			return
 		}
 
+		event := &bridge.Event{
+			Type: "channel_topic",
+			Data: &bridge.ChannelTopicEvent{
+				Text:      topic,
+				ChannelID: data.ChannelId,
+				UserID:    data.UserId,
+			},
+		}
+
+		m.eventChan <- event
 		return
 	}
 
@@ -932,13 +990,6 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 
 	// msgs := strings.Split(data.Message, "\n")
 	msgs := []string{data.Message}
-
-	channelType := ""
-	if t, ok := props["channel_type"].(string); ok {
-		channelType = t
-	}
-
-	dmchannel, _ := rmsg.GetData()["channel_name"].(string)
 
 	// add an edited/deleted string when messages are edited/deleted
 	if len(msgs) > 0 && (rmsg.EventType() == model.WebsocketEventPostEdited ||
@@ -964,7 +1015,6 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 
 	for _, msg := range msgs {
 		switch {
-		// DirectMessage
 		case channelType == "D":
 			event := &bridge.Event{
 				Type: "direct_message",
@@ -1031,6 +1081,16 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 				msg = strings.TrimLeft(msg, "*")
 				msg = strings.TrimRight(msg, "*")
 				msg = "\x01ACTION " + msg + " \x01"
+			} else if data.Type == "slack_attachment" {
+				attachmentMsg := parseSlackAttachmentMsg(data.Attachments())
+				if attachmentMsg == "" {
+					break
+				}
+				if msg == "" {
+					msg = attachmentMsg
+				} else {
+					msg += attachmentMsg
+				}
 			} else if data.Type == "custom_matterpoll" {
 				pollMsg := parseMatterpollToMsg(data.Attachments())
 				if pollMsg == "" {
@@ -1498,6 +1558,64 @@ func parseMatterpollToMsg(attachments []*model.SlackAttachment) string {
 		text := strings.TrimSuffix(attachment.Text, "\n")
 		text = strings.Replace(text, "**Total votes**", "*Total votes*", 1)
 		msg = fmt.Sprintf("%s: %s\n%s%s", attachment.AuthorName, attachment.Title, options, text)
+	}
+
+	return msg
+}
+
+func parseSlackAttachmentMsg(attachments []*model.SlackAttachment) string {
+	msg := ""
+	for _, attachment := range attachments {
+		prefix := "\033[1m|\033[0m "
+		switch {
+		// https://docs.slack.dev/tools/node-slack-sdk/reference/web-api/interfaces/MessageAttachment/#color
+		case attachment.Color == "danger":
+			prefix = "\033[31m|\033[0m "
+		case attachment.Color == "good":
+			prefix = "\033[1;32m|\033[0m "
+		case attachment.Color == "warning":
+			prefix = "\033[33m|\033[0m "
+		case strings.HasPrefix(attachment.Color, "#"):
+			hex := strings.TrimPrefix(attachment.Color, "#")
+			rr, _ := strconv.ParseInt(hex[0:2], 16, 0)
+			gg, _ := strconv.ParseInt(hex[2:4], 16, 0)
+			bb, _ := strconv.ParseInt(hex[4:6], 16, 0)
+			// https://modern.ircdocs.horse/formatting.html#hex-color
+			prefix = fmt.Sprintf("\033[1;38;2;%d;%d;%dm|\033[0m ", int(rr), int(gg), int(bb))
+		}
+
+		if attachment.AuthorName != "" {
+			msg += prefix + attachment.AuthorName
+			if attachment.AuthorLink != "" {
+				msg += " (" + attachment.AuthorLink + ")"
+			}
+			msg += "\n"
+		}
+		if attachment.Title != "" {
+			msg += prefix + attachment.Title
+			if attachment.TitleLink != "" {
+				msg += " (" + attachment.TitleLink + ")"
+			}
+			msg += "\n"
+		}
+		if attachment.Text != "" {
+			lines := strings.Split(attachment.Text, "\n")
+			for _, text := range lines {
+				msg += prefix + text + "\n"
+			}
+		}
+		if attachment.ImageURL != "" {
+			msg += prefix + attachment.ImageURL + "\n"
+		}
+		for _, field := range attachment.Fields {
+			msg += prefix + field.Title + ": "
+			lines := strings.Split(fmt.Sprintf("%s", field.Value), "\n")
+			newPrefix := ""
+			for _, text := range lines {
+				msg += newPrefix + text + "\n"
+				newPrefix = prefix
+			}
+		}
 	}
 
 	return msg

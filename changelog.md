@@ -1,3 +1,17 @@
+# v0.29.0
+
+## Enhancement
+
+- mattermost: Add option to only show messages in joined channels, nothing in &messages (#563)
+- mattermost: Add option to only show messages in joined channels for file events also (#566)
+- mattermost: Add option to show scrollback messages in the single/catchall &messages (#552)
+- mattermost: Add command to part/leave channels (#569)
+
+## Bugfix
+
+- mattermost: Fix mentions for every message (#562)
+- mattermost: Fix channels created for file events via DM - #571 (#573)
+
 # v0.28.0
 
 ## New features

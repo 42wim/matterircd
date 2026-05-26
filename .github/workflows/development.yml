@@ -5,7 +5,7 @@ jobs:
     name: golangci-lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 20
       - name: Run golangci-lint
@@ -21,11 +21,11 @@ jobs:
     runs-on: ${{ matrix.platform }}
     steps:
     - name: Install Go
-      uses: actions/setup-go@v4
+      uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
       with:
         go-version: ${{ matrix.go-version }}
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       with:
           fetch-depth: 0
     - name: Test
@@ -39,19 +39,19 @@ jobs:
         GOOS=darwin GOARCH=amd64 go build -mod=vendor -ldflags "-s -X main.githash=$(git log --pretty=format:'%h' -n 1)" -o output/mac/matterircd-$VERSION-darwin-amd64
     - name: Upload linux 64-bit
       if: startsWith(matrix.go-version,'1.22')
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
         name: matterircd-linux-64bit
         path: output/lin
     - name: Upload windows 64-bit
       if: startsWith(matrix.go-version,'1.22')
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
         name: matterircd-windows-64bit
         path: output/win
     - name: Upload darwin 64-bit
       if: startsWith(matrix.go-version,'1.22')
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
         name: matterircd-darwin-64bit
         path: output/mac
