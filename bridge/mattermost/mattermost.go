@@ -992,16 +992,15 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	// msgs := strings.Split(data.Message, "\n")
 	msgs := []string{data.Message}
 
+	postfix := ""
 	// add an edited/deleted string when messages are edited/deleted
 	if len(msgs) > 0 && (rmsg.EventType() == model.WebsocketEventPostEdited ||
 		rmsg.EventType() == model.WebsocketEventPostDeleted) {
-		postfix := " (edited)"
+		postfix = " *(edited)*"
 
 		if rmsg.EventType() == model.WebsocketEventPostDeleted {
-			postfix = " (deleted)"
+			postfix = " *(deleted)*"
 		}
-
-		msgs[len(msgs)-1] = msgs[len(msgs)-1] + postfix
 
 		// check if we have an edited direct message (channels have __)
 		name := m.GetChannelName(data.ChannelId)
@@ -1028,7 +1027,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 			}
 
 			d := &bridge.DirectMessageEvent{
-				Text:      msg,
+				Text:      msg + postfix,
 				ChannelID: data.ChannelId,
 				MessageID: data.Id,
 				Event:     rmsg.EventType(),
@@ -1071,7 +1070,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 			event := &bridge.Event{
 				Type: "channel_message",
 				Data: &bridge.ChannelMessageEvent{
-					Text:        msg,
+					Text:        msg + postfix,
 					ChannelID:   data.ChannelId,
 					Sender:      ghost,
 					ChannelType: channelType,
@@ -1086,7 +1085,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 				event = &bridge.Event{
 					Type: "channel_message",
 					Data: &bridge.ChannelMessageEvent{
-						Text:        msg,
+						Text:        msg + postfix,
 						ChannelID:   data.ChannelId,
 						Sender:      ghost,
 						MessageType: messageType,
