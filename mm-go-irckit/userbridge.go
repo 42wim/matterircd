@@ -1217,6 +1217,7 @@ func (u *User) formatCodeBlockText(text string, prefix string, codeBlockBackTick
 	}
 
 	syntaxHighlighting := u.v.GetString(u.br.Protocol() + ".syntaxhighlighting")
+	linePrefix := u.v.GetString(u.br.Protocol() + ".codeblockprefix")
 
 	if (strings.HasPrefix(text, "```") || strings.HasPrefix(text, prefix+"```")) && !codeBlockTilde {
 		codeBlockBackTick = !codeBlockBackTick
@@ -1233,8 +1234,12 @@ func (u *User) formatCodeBlockText(text string, prefix string, codeBlockBackTick
 		return text, codeBlockBackTick, codeBlockTilde, lexer
 	}
 
-	if !(codeBlockBackTick || codeBlockTilde) || syntaxHighlighting == "" || lexer == "" {
+	if !(codeBlockBackTick || codeBlockTilde) {
 		return text, codeBlockBackTick, codeBlockTilde, lexer
+	}
+
+	if syntaxHighlighting == "" || lexer == "" {
+		return linePrefix + text, codeBlockBackTick, codeBlockTilde, lexer
 	}
 
 	formatter := "terminal256"
@@ -1248,7 +1253,7 @@ func (u *User) formatCodeBlockText(text string, prefix string, codeBlockBackTick
 	var b bytes.Buffer
 	err := quick.Highlight(&b, text, lexer, formatter, style)
 	if err == nil {
-		text = b.String()
+		text = linePrefix + b.String()
 		// Work around https://github.com/alecthomas/chroma/issues/716
 		text = strings.ReplaceAll(text, "\n", "")
 	}
