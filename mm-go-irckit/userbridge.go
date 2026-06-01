@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -1218,6 +1219,12 @@ func (u *User) formatCodeBlockText(text string, prefix string, codeBlockBackTick
 
 	syntaxHighlighting := u.v.GetString(u.br.Protocol() + ".syntaxhighlighting")
 	linePrefix := u.v.GetString(u.br.Protocol() + ".codeblockprefix")
+	if linePrefix != "" {
+		unq, err := strconv.Unquote(`"` + linePrefix + `"`)
+		if err == nil {
+			linePrefix = unq
+		}
+	}
 
 	if (strings.HasPrefix(text, "```") || strings.HasPrefix(text, prefix+"```")) && !codeBlockTilde {
 		codeBlockBackTick = !codeBlockBackTick

@@ -177,7 +177,7 @@ ShowMentions = false
 #   https://github.com/alecthomas/chroma/tree/master/styles
 # These are different colour schemes/styles. E.g. pygments, emacs, autumn, etc.
 SyntaxHighlighting = "terminal256:pygments"
-CodeBlockPrefix = ""
+CodeBlockPrefix = "\\x1b[1;38;2;0;82;204m|\\x1b[0m "
 
 # Path to file to store last viewed information. This is useful for replying only
 # the messages missed.
