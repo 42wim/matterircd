@@ -839,8 +839,20 @@ func (m *Mattermost) addParentMsg(parentID string, msg string, newLen int, uncou
 			return msg, err
 		}
 
+		msg := parentPost.Message
+		if msg == "" {
+			// If we have message attachments and there is a fallback message, use it.
+			if attachments := parentPost.Attachments(); len(attachments) > 0 {
+				if attachments[0].Fallback != "" {
+					msg = attachments[0].Fallback
+				} else if attachments[0].Text != "" {
+					msg = attachments[0].Text
+				}
+			}
+		}
+
 		parentUser := m.GetUser(parentPost.UserId)
-		parentMessage := maybeShorten(parentPost.Message, newLen, uncounted, unicode)
+		parentMessage := maybeShorten(msg, newLen, uncounted, unicode)
 		replyMessage = fmt.Sprintf(" (re @%s: %s)", parentUser.Nick, parentMessage)
 		logger.Debugf("Created reply for parent post %s:%s", parentID, replyMessage)
 
