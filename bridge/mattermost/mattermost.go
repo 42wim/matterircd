@@ -1065,15 +1065,23 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 				msg = strings.TrimRight(msg, "*")
 				msg = "\x01ACTION " + msg + " \x01"
 			} else if data.Type == "slack_attachment" {
+				useFallback := msg == ""
 				// https://docs.slack.dev/tools/node-slack-sdk/reference/web-api/interfaces/MessageAttachment/
-				attachmentMsg := parseMessageAttachments(data.Attachments())
+				attachmentMsg := parseMessageAttachments(data.Attachments(), useFallback)
+				if msg != "" && attachmentMsg != "" {
+					msg += "\n"
+				}
 				msg += attachmentMsg
 			} else if data.Type == "custom_matterpoll" {
 				pollMsg := parseMatterpollToMsg(data.Attachments())
 				msg += pollMsg
 			} else if attachments := data.Attachments(); len(attachments) > 0 {
+				useFallback := msg == ""
 				// https://developers.mattermost.com/integrate/reference/message-attachments/
-				attachmentMsg := parseMessageAttachments(attachments)
+				attachmentMsg := parseMessageAttachments(attachments, useFallback)
+				if msg != "" && attachmentMsg != "" {
+					msg += "\n"
+				}
 				msg += attachmentMsg
 			}
 
@@ -1585,7 +1593,8 @@ func parseMatterpollToMsg(attachments []*model.SlackAttachment) string {
 	return msg
 }
 
-func parseMessageAttachments(attachments []*model.SlackAttachment) string {
+//nolint:funlen,gocyclo
+func parseMessageAttachments(attachments []*model.SlackAttachment, useFallback bool) string {
 	msg := ""
 	for _, attachment := range attachments {
 		prefix := "\033[1m|\033[0m "
@@ -1604,6 +1613,10 @@ func parseMessageAttachments(attachments []*model.SlackAttachment) string {
 			bb, _ := strconv.ParseInt(hex[4:6], 16, 0)
 			// https://modern.ircdocs.horse/formatting.html#hex-color
 			prefix = fmt.Sprintf("\033[1;38;2;%d;%d;%dm|\033[0m ", int(rr), int(gg), int(bb))
+		}
+
+		if useFallback {
+			msg += attachment.Fallback
 		}
 
 		if attachment.AuthorName != "" {
