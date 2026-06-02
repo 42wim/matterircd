@@ -726,8 +726,13 @@ func isValidNick(s string) bool {
 
 //nolint:forcetypeassert
 func (m *Mattermost) wsActionPostSkip(rmsg *model.WebSocketEvent) bool {
+	postData, ok := rmsg.GetData()["post"].(string)
+	if !ok {
+		return true
+	}
+
 	var data model.Post
-	if err := json.NewDecoder(strings.NewReader(rmsg.GetData()["post"].(string))).Decode(&data); err != nil {
+	if err := json.NewDecoder(strings.NewReader(postData)).Decode(&data); err != nil {
 		return true
 	}
 
@@ -853,16 +858,16 @@ var channelMentionsRegExp = regexp.MustCompile(`@(channel|all|here)\W`)
 
 //nolint:funlen,gocognit,gocyclo,cyclop,forcetypeassert
 func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
-	if rmsg.GetData()["post"] == nil {
+	wsData := rmsg.GetData()
+	postData, ok := wsData["post"].(string)
+	if !ok {
 		return
 	}
 
 	var data model.Post
-	if err := json.NewDecoder(strings.NewReader(rmsg.GetData()["post"].(string))).Decode(&data); err != nil {
+	if err := json.NewDecoder(strings.NewReader(postData)).Decode(&data); err != nil {
 		return
 	}
-
-	props := rmsg.GetData()
 	extraProps := data.GetProps()
 
 	logger.Debugf("handleWsActionPost() receiving userid %s", data.UserId)
@@ -931,11 +936,13 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	}
 
 	channelType := ""
-	if t, ok := props["channel_type"].(string); ok {
+	if t, ok := wsData["channel_type"].(string); ok {
 		channelType = t
 	}
-
-	dmchannel, _ := rmsg.GetData()["channel_name"].(string)
+	dmchannel := ""
+	if t, ok := wsData["channel_name"].(string); ok {
+		dmchannel = t
+	}
 
 	if data.Type == model.PostTypeHeaderChange {
 		if _, ok := extraProps["new_header"].(string); !ok {
@@ -1240,18 +1247,19 @@ func (m *Mattermost) handleWsActionUserAdded(rmsg *model.WebSocketEvent) {
 }
 
 func (m *Mattermost) handleWsActionUserRemoved(rmsg *model.WebSocketEvent) {
-	userID, ok := rmsg.GetData()["user_id"].(string)
+	wsData := rmsg.GetData()
+	userID, ok := wsData["user_id"].(string)
 	if !ok {
 		userID = rmsg.GetBroadcast().UserId
 	}
 
-	removerID, ok := rmsg.GetData()["remover_id"].(string)
+	removerID, ok := wsData["remover_id"].(string)
 	if !ok {
 		fmt.Println("not ok removerID", removerID)
 		return
 	}
 
-	channelID, ok := rmsg.GetData()["channel_id"].(string)
+	channelID, ok := wsData["channel_id"].(string)
 	if !ok {
 		channelID = rmsg.GetBroadcast().ChannelId
 	}
@@ -1344,8 +1352,13 @@ func (m *Mattermost) handleStatusChangeEvent(rmsg *model.WebSocketEvent) {
 
 //nolint:forcetypeassert
 func (m *Mattermost) handleReactionEvent(rmsg *model.WebSocketEvent) {
+	reactionData, ok := rmsg.GetData()["reaction"].(string)
+	if !ok {
+		return
+	}
+
 	var reaction model.Reaction
-	if err := json.NewDecoder(strings.NewReader(rmsg.GetData()["reaction"].(string))).Decode(&reaction); err != nil {
+	if err := json.NewDecoder(strings.NewReader(reactionData)).Decode(&reaction); err != nil {
 		return
 	}
 
