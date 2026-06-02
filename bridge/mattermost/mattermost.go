@@ -48,6 +48,7 @@ func New(v *viper.Viper, cred bridge.Credentials, eventChan chan *bridge.Event, 
 	ourlog := logrus.New()
 	ourlog.SetFormatter(&prefixed.TextFormatter{
 		PrefixPadding: 18,
+		DisableColors: false,
 		FullTimestamp: true,
 	})
 	logger = ourlog.WithFields(logrus.Fields{"prefix": "bridge/mattermost"})
@@ -58,8 +59,6 @@ func New(v *viper.Viper, cred bridge.Credentials, eventChan chan *bridge.Event, 
 	if v.GetBool("trace") {
 		ourlog.SetLevel(logrus.TraceLevel)
 	}
-
-	fmt.Println("loggerlevel:", ourlog.GetLevel())
 
 	mc, err := m.loginToMattermost(onWsConnect)
 	if err != nil {
@@ -896,24 +895,6 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		}
 	}
 
-	// if we got attachments (eg slack attachments) and we have a fallback message, show this.
-	if entries, ok := extraProps["attachments"].([]interface{}); ok {
-		for _, entry := range entries {
-			if f, ok := entry.(map[string]interface{}); ok {
-				if data.Message == "" && f["fallback"].(string) == "" {
-					data.Message = "\n"
-				} else {
-					if data.Message != "" {
-						data.Message += "\n"
-					}
-					if f["fallback"].(string) != "" {
-						data.Message += f["fallback"].(string) + "\n"
-					}
-				}
-			}
-		}
-	}
-
 	// check if we have a override_username (from webhooks) and use it
 	overrideUsername, _ := extraProps["override_username"].(string)
 	if overrideUsername != "" {
@@ -1072,11 +1053,16 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 				msg = strings.TrimRight(msg, "*")
 				msg = "\x01ACTION " + msg + " \x01"
 			} else if data.Type == "slack_attachment" {
-				attachmentMsg := parseSlackAttachmentMsg(data.Attachments())
+				// https://docs.slack.dev/tools/node-slack-sdk/reference/web-api/interfaces/MessageAttachment/
+				attachmentMsg := parseMessageAttachments(data.Attachments())
 				msg += attachmentMsg
 			} else if data.Type == "custom_matterpoll" {
 				pollMsg := parseMatterpollToMsg(data.Attachments())
 				msg += pollMsg
+			} else if attachments := data.Attachments(); len(attachments) > 0 {
+				// https://developers.mattermost.com/integrate/reference/message-attachments/
+				attachmentMsg := parseMessageAttachments(attachments)
+				msg += attachmentMsg
 			}
 
 			event := &bridge.Event{
@@ -1587,7 +1573,7 @@ func parseMatterpollToMsg(attachments []*model.SlackAttachment) string {
 	return msg
 }
 
-func parseSlackAttachmentMsg(attachments []*model.SlackAttachment) string {
+func parseMessageAttachments(attachments []*model.SlackAttachment) string {
 	msg := ""
 	for _, attachment := range attachments {
 		prefix := "\033[1m|\033[0m "
