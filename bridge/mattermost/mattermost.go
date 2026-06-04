@@ -991,7 +991,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		return
 	}
 
-	if data.Type == model.PostTypeAddToTeam || data.Type == model.PostTypeRemoveFromTeam {
+	if data.Type == model.PostTypeSystemGeneric || data.Type == model.PostTypeAddToTeam || data.Type == model.PostTypeRemoveFromTeam {
 		ghost = &bridge.UserInfo{
 			Nick: "system",
 		}
