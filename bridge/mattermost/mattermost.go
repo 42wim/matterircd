@@ -1601,7 +1601,7 @@ func parseMatterpollToMsg(attachments []*model.SlackAttachment, unicode bool) st
 	return strings.TrimRight(msg, "\n")
 }
 
-//nolint:funlen,gocyclo
+//nolint:funlen,gocognit,gocyclo
 func parseMessageAttachments(attachments []*model.SlackAttachment, useFallback bool, unicode bool) string {
 	msg := ""
 	prefixChar := "|"
@@ -1654,13 +1654,48 @@ func parseMessageAttachments(attachments []*model.SlackAttachment, useFallback b
 		if attachment.ImageURL != "" {
 			msg += prefix + attachment.ImageURL + "\n"
 		}
-		for _, field := range attachment.Fields {
-			msg += prefix + "\x02" + field.Title + "\x02: "
-			lines := strings.Split(fmt.Sprintf("%s", field.Value), "\n")
-			newPrefix := ""
-			for _, text := range lines {
-				msg += newPrefix + text + "\n"
-				newPrefix = prefix
+
+		for i := 0; i < len(attachment.Fields); {
+			field := attachment.Fields[i]
+			// In case the value has any new lines, strip it to avoid messing with our table format
+			val1Str := strings.TrimPrefix(fmt.Sprintf("%v", field.Value), "\n")
+
+			// Check if this field and the next field are both flagged as "short"
+			if field.Short && i+1 < len(attachment.Fields) && attachment.Fields[i+1].Short {
+				nextField := attachment.Fields[i+1]
+				// Same, avoid messing with our table format
+				val2Str := strings.TrimPrefix(fmt.Sprintf("%v", nextField.Value), "\n")
+
+				msg += prefix + fmt.Sprintf("\x02%-30s %s", field.Title, nextField.Title) + "\x02\n"
+
+				val1Lines := strings.Split(val1Str, "\n")
+				val2Lines := strings.Split(val2Str, "\n")
+
+				maxLines := len(val1Lines)
+				if len(val2Lines) > maxLines {
+					maxLines = len(val2Lines)
+				}
+
+				for j := 0; j < maxLines; j++ {
+					v1, v2 := "", ""
+					if j < len(val1Lines) {
+						v1 = val1Lines[j]
+					}
+					if j < len(val2Lines) {
+						v2 = val2Lines[j]
+					}
+					msg += prefix + fmt.Sprintf("%-30s %s", v1, v2) + "\n"
+				}
+
+				i += 2
+			} else {
+				// Fallback to original behavior for long fields or unpaired short fields
+				msg += prefix + "\x02" + field.Title + "\x02\n"
+				lines := strings.Split(val1Str, "\n")
+				for _, text := range lines {
+					msg += prefix + text + "\n"
+				}
+				i++
 			}
 		}
 	}
