@@ -888,9 +888,10 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		return
 	}
 
+	useUnicode := m.v.GetBool("mattermost.unicode")
 	postfix := ""
 	if !m.v.GetBool("mattermost.hidereplies") && data.RootId != "" {
-		message, err := m.addParentMsg(data.RootId, postfix, m.v.GetInt("mattermost.ShortenRepliesTo"), "@", m.v.GetBool("mattermost.unicode"))
+		message, err := m.addParentMsg(data.RootId, postfix, m.v.GetInt("mattermost.ShortenRepliesTo"), "@", useUnicode)
 		if err != nil {
 			logger.Errorf("Unable to get parent post for %#v", data) //nolint:govet
 		}
@@ -1070,18 +1071,18 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 			} else if data.Type == "slack_attachment" {
 				useFallback := msg == ""
 				// https://docs.slack.dev/tools/node-slack-sdk/reference/web-api/interfaces/MessageAttachment/
-				attachmentMsg := parseMessageAttachments(data.Attachments(), useFallback)
+				attachmentMsg := parseMessageAttachments(data.Attachments(), useFallback, useUnicode)
 				if msg != "" && attachmentMsg != "" {
 					msg += "\n"
 				}
 				msg += attachmentMsg
 			} else if data.Type == "custom_matterpoll" {
-				pollMsg := parseMatterpollToMsg(data.Attachments())
+				pollMsg := parseMatterpollToMsg(data.Attachments(), useUnicode)
 				msg += pollMsg
 			} else if attachments := data.Attachments(); len(attachments) > 0 {
 				useFallback := msg == ""
 				// https://developers.mattermost.com/integrate/reference/message-attachments/
-				attachmentMsg := parseMessageAttachments(attachments, useFallback)
+				attachmentMsg := parseMessageAttachments(attachments, useFallback, useUnicode)
 				if msg != "" && attachmentMsg != "" {
 					msg += "\n"
 				}
@@ -1553,10 +1554,14 @@ func (m *Mattermost) getDMUser(name interface{}) *bridge.UserInfo {
 	return nil
 }
 
-func parseMatterpollToMsg(attachments []*model.SlackAttachment) string {
+func parseMatterpollToMsg(attachments []*model.SlackAttachment, unicode bool) string {
 	msg := ""
+	prefixChar := "|"
+	if unicode {
+		prefixChar = "┃"
+	}
 	for _, attachment := range attachments {
-		prefix := "\033[1;38;2;0;82;204m|\033[0m "
+		prefix := "\033[1;38;2;0;82;204m" + prefixChar + "\033[0m "
 
 		if attachment.AuthorName != "" {
 			msg += prefix + "@" + attachment.AuthorName + "\n"
@@ -1597,25 +1602,29 @@ func parseMatterpollToMsg(attachments []*model.SlackAttachment) string {
 }
 
 //nolint:funlen,gocyclo
-func parseMessageAttachments(attachments []*model.SlackAttachment, useFallback bool) string {
+func parseMessageAttachments(attachments []*model.SlackAttachment, useFallback bool, unicode bool) string {
 	msg := ""
+	prefixChar := "|"
+	if unicode {
+		prefixChar = "┃"
+	}
 	for _, attachment := range attachments {
-		prefix := "\033[1m|\033[0m "
+		prefix := "\033[1m" + prefixChar + "\033[0m "
 		switch {
 		// https://docs.slack.dev/tools/node-slack-sdk/reference/web-api/interfaces/MessageAttachment/#color
 		case attachment.Color == "danger":
-			prefix = "\033[31m|\033[0m "
+			prefix = "\033[31m" + prefixChar + "\033[0m "
 		case attachment.Color == "good":
-			prefix = "\033[1;32m|\033[0m "
+			prefix = "\033[32m" + prefixChar + "\033[0m "
 		case attachment.Color == "warning":
-			prefix = "\033[33m|\033[0m "
+			prefix = "\033[33m" + prefixChar + "\033[0m "
 		case strings.HasPrefix(attachment.Color, "#"):
 			hex := strings.TrimPrefix(attachment.Color, "#")
 			rr, _ := strconv.ParseInt(hex[0:2], 16, 0)
 			gg, _ := strconv.ParseInt(hex[2:4], 16, 0)
 			bb, _ := strconv.ParseInt(hex[4:6], 16, 0)
 			// https://modern.ircdocs.horse/formatting.html#hex-color
-			prefix = fmt.Sprintf("\033[1;38;2;%d;%d;%dm|\033[0m ", int(rr), int(gg), int(bb))
+			prefix = fmt.Sprintf("\033[1;38;2;%d;%d;%dm%s\033[0m ", int(rr), int(gg), int(bb), prefixChar)
 		}
 
 		if useFallback {
@@ -1630,9 +1639,9 @@ func parseMessageAttachments(attachments []*model.SlackAttachment, useFallback b
 			msg += "\n"
 		}
 		if attachment.Title != "" {
-			msg += prefix + attachment.Title
+			msg += prefix + "\x02" + attachment.Title + "\x02"
 			if attachment.TitleLink != "" {
-				msg += " (" + attachment.TitleLink + ")"
+				msg += " (\x1d" + attachment.TitleLink + "\x1d)"
 			}
 			msg += "\n"
 		}
@@ -1646,7 +1655,7 @@ func parseMessageAttachments(attachments []*model.SlackAttachment, useFallback b
 			msg += prefix + attachment.ImageURL + "\n"
 		}
 		for _, field := range attachment.Fields {
-			msg += prefix + field.Title + ": "
+			msg += prefix + "\x02" + field.Title + "\x02: "
 			lines := strings.Split(fmt.Sprintf("%s", field.Value), "\n")
 			newPrefix := ""
 			for _, text := range lines {
