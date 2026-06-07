@@ -3,6 +3,7 @@ package irckit
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -113,75 +114,73 @@ func login(u *User, toUser *User, args []string, service string) {
 	}
 
 	cred := bridge.Credentials{}
-	datalen := 4
+	datalen := len(args)
 
 	if len(args) > 1 && strings.Contains(args[len(args)-1], "MFAToken=") {
-		datalen = 5
-	}
-
-	if u.v.GetString("mattermost.DefaultTeam") != "" {
-		cred.Team = u.v.GetString("mattermost.DefaultTeam")
+		MFAToken := strings.Split(args[len(args)-1], "=")
+		cred.MFAToken = MFAToken[1]
 		datalen--
 	}
 
-	if u.v.GetString("mattermost.DefaultServer") != "" {
+	teamOrServer := ""
+	creds := []*string{&cred.Server, &teamOrServer, &cred.Login, &cred.Pass}
+	for argsIdx, credsIdx := datalen, len(creds); argsIdx > 0 && credsIdx > 0; argsIdx-- {
+		*creds[credsIdx-1] = args[argsIdx-1]
+		creds = creds[:credsIdx-1]
+		credsIdx--
+	}
+
+	switch {
+	// All params provided (server, team, username, & password) so set the team to provided.
+	case cred.Server != "":
+		cred.Team = teamOrServer
+	// Missing both server and team, let's use DefaultServer and DefaultTeam.
+	case teamOrServer == "" && u.v.GetString("mattermost.DefaultServer") != "" && u.v.GetString("mattermost.DefaultTeam") != "":
 		cred.Server = u.v.GetString("mattermost.DefaultServer")
-		datalen--
+		cred.Team = u.v.GetString("mattermost.DefaultTeam")
+	// Missing server, let's use DefaultServer.
+	case u.v.GetString("mattermost.DefaultServer") != "":
+		cred.Server = u.v.GetString("mattermost.DefaultServer")
+		cred.Team = teamOrServer
+	// Missing team, let's use DefaultTeam.
+	case u.v.GetString("mattermost.DefaultTeam") != "":
+		cred.Server = teamOrServer
+		cred.Team = u.v.GetString("mattermost.DefaultTeam")
+	default:
+		cred.Server = teamOrServer
 	}
 
-	if len(args) >= datalen { // nolint:nestif
-		logger.Debugf("args_len: %d", len(args))
-		logger.Debugf("team: %s", cred.Team)
-		logger.Debugf("server: %s", cred.Server)
-		if strings.Contains(args[len(args)-1], "MFAToken=") {
-			logger.Debug("found MFAToken")
-			MFAToken := strings.Split(args[len(args)-1], "=")
-			cred.MFAToken = MFAToken[1]
-			cred.Pass = args[len(args)-2]
-			cred.Login = args[len(args)-3]
-		} else {
-			cred.Pass = args[len(args)-1]
-			cred.Login = args[len(args)-2]
-		}
-		// no default server or team specified
-		if cred.Server == "" && cred.Team == "" {
-			cred.Server = args[0]
-			cred.Team = args[1]
-		}
-
-		if cred.Team == "" {
-			cred.Team = args[0]
-		}
-
-		if cred.Server == "" {
-			cred.Server = args[0]
-		}
+	logger.Debugf("args_len: %d", len(args))
+	logger.Debugf("team: %s", cred.Team)
+	logger.Debugf("server: %s", cred.Server)
+	if cred.MFAToken != "" {
+		logger.Debug("found MFAToken")
 	}
 
-	// incorrect arguments
-	if len(args) < datalen {
-		switch {
-		// no server or team
-		case cred.Team != "" && cred.Server != "":
-			u.MsgUser(toUser, "need LOGIN <login> <pass>")
-			u.MsgUser(toUser, "when using a personal token replace <pass> with token=<yourtoken>")
-			u.MsgUser(toUser, "when using a mfa token use LOGIN <login> <pass> MFAToken=<yourmfatoken>")
-		// server missing
-		case cred.Team != "":
-			u.MsgUser(toUser, "need LOGIN <server> <login> <pass>")
-			u.MsgUser(toUser, "when using a personal token replace <pass> with token=<yourtoken>")
-			u.MsgUser(toUser, "when using a mfa token use LOGIN <server> <login> <pass> MFAToken=<yourmfatoken>")
-		// team missing
-		case cred.Server != "":
-			u.MsgUser(toUser, "need LOGIN <team> <login> <pass>")
-			u.MsgUser(toUser, "when using a personal token replace <pass> with token=<yourtoken>")
-			u.MsgUser(toUser, "when using a mfa token use LOGIN <team> <login> <pass> MFAToken=<yourmfatoken>")
-		default:
-			u.MsgUser(toUser, "need LOGIN <server> <team> <login> <pass>")
-			u.MsgUser(toUser, "when using a personal token replace <pass> with token=<yourtoken>")
-			u.MsgUser(toUser, "when using a mfa token use LOGIN <server> <team> <login> <pass> MFAToken=<yourmfatoken>")
-		}
-
+	switch {
+	// Both server and team missing
+	case cred.Team == "" && cred.Server == "":
+		u.MsgUser(toUser, "need LOGIN <server> <team> <login> <pass>")
+		u.MsgUser(toUser, "when using a personal token replace <pass> with token=<yourtoken>")
+		u.MsgUser(toUser, "when using a mfa token use LOGIN <server> <team> <login> <pass> MFAToken=<yourmfatoken>")
+		return
+	// server missing
+	case cred.Server == "":
+		u.MsgUser(toUser, "need LOGIN <server> <login> <pass>")
+		u.MsgUser(toUser, "when using a personal token replace <pass> with token=<yourtoken>")
+		u.MsgUser(toUser, "when using a mfa token use LOGIN <server> <login> <pass> MFAToken=<yourmfatoken>")
+		return
+	// team missing
+	case cred.Team == "":
+		u.MsgUser(toUser, "need LOGIN <team> <login> <pass>")
+		u.MsgUser(toUser, "when using a personal token replace <pass> with token=<yourtoken>")
+		u.MsgUser(toUser, "when using a mfa token use LOGIN <team> <login> <pass> MFAToken=<yourmfatoken>")
+		return
+	// login/username or password/token missing
+	case cred.Login == "" || cred.Pass == "":
+		u.MsgUser(toUser, "need LOGIN <login> <pass>")
+		u.MsgUser(toUser, "when using a personal token replace <pass> with token=<yourtoken>")
+		u.MsgUser(toUser, "when using a mfa token use LOGIN <login> <pass> MFAToken=<yourmfatoken>")
 		return
 	}
 
@@ -209,10 +208,83 @@ func login(u *User, toUser *User, args []string, service string) {
 	u.MsgUser(toUser, "login OK")
 }
 
+//nolint:forcetypeassert,goconst
+func details(u *User, toUser *User, args []string, service string) {
+	if service == "slack" {
+		u.MsgUser(toUser, "not implemented")
+		return
+	}
+
+	if len(args) != 1 {
+		u.MsgUser(toUser, "need DETAILS <post/thread ID>")
+		u.MsgUser(toUser, "e.g. DETAILS zhqrffbxupgepj1yquxaftfk4a")
+		return
+	}
+
+	postID := args[0]
+
+	proto := "https"
+	if u.v.GetBool(u.br.Protocol() + ".insecure") {
+		proto = "http"
+	}
+	postlistURL := proto + "://" + u.Credentials.Server + "/" + u.Credentials.Team + "/pl/"
+
+	switch {
+	case len(postID) == 26:
+		// Do nothing
+	case strings.HasPrefix(postID, "@@"):
+		postID = strings.TrimPrefix(postID, "@@")
+	case strings.HasPrefix(strings.ToLower(postID), postlistURL):
+		postID = strings.TrimPrefix(postID, postlistURL)
+	default:
+		u.MsgUser(toUser, "need DETAILS <post/thread ID>")
+		u.MsgUser(toUser, "e.g. DETAILS zhqrffbxupgepj1yquxaftfk4a")
+		return
+	}
+
+	list := u.br.GetPostThread(postID)
+	if list == nil || list.(*model.PostList) == nil || len(list.(*model.PostList).Order) == 0 {
+		u.MsgUser(toUser, "post not found")
+		return
+	}
+
+	postlist, _ := list.(*model.PostList)
+	post := postlist.Posts[postlist.Order[0]]
+	channel := getMattermostChannelName(u, post.ChannelId)
+	user := u.br.GetUser(post.UserId)
+	nick := user.Nick
+
+	prefix := "\033[1;38;2;0;82;204m|\033[0m "
+	u.MsgUser(toUser, prefix+postlistURL+postID+"\n")
+	if strings.HasPrefix(channel, "#") {
+		u.MsgUser(toUser, prefix+"Channel: "+channel+"\n")
+	}
+	u.MsgUser(toUser, prefix+"User: "+nick+"\n")
+	u.MsgUser(toUser, prefix+"\n")
+	for _, msg := range strings.Split(post.Message, "\n") {
+		u.MsgUser(toUser, prefix+"  "+msg+"\n")
+	}
+}
+
 //nolint:cyclop
 func search(u *User, toUser *User, args []string, service string) {
 	if service == "slack" {
 		u.MsgUser(toUser, "not implemented")
+		return
+	}
+
+	limit := 0
+	if len(args) > 1 {
+		var err error
+		limit, err = strconv.Atoi(args[0])
+		if err == nil {
+			args = args[1:]
+		}
+	}
+
+	if len(args) == 0 || args[0] == "help" {
+		u.MsgUser(toUser, "need SEARCH <limit> <text>")
+		u.MsgUser(toUser, "e.g. SEARCH 10 matterircd")
 		return
 	}
 
@@ -225,33 +297,85 @@ func search(u *User, toUser *User, args []string, service string) {
 
 	postlist, _ := list.(*model.PostList)
 
-	for i := len(postlist.Order) - 1; i >= 0; i-- {
-		if postlist.Posts[postlist.Order[i]].DeleteAt > postlist.Posts[postlist.Order[i]].CreateAt {
+	if limit == 0 || limit > len(postlist.Order) {
+		limit = len(postlist.Order)
+	}
+
+	for i := limit - 1; i >= 0; i-- {
+		p := postlist.Posts[postlist.Order[i]]
+		if p.Type == model.PostTypeJoinLeave {
 			continue
 		}
 
-		timestamp := time.Unix(postlist.Posts[postlist.Order[i]].CreateAt/1000, 0).Format("January 02, 2006 15:04")
-		channelname := u.br.GetChannelName(postlist.Posts[postlist.Order[i]].ChannelId)
-
-		nick := u.br.GetUser(postlist.Posts[postlist.Order[i]].UserId).Nick
-
-		u.MsgUser(toUser, "#"+channelname+" <"+nick+"> "+timestamp)
-		u.MsgUser(toUser, strings.Repeat("=", len("#"+channelname+" <"+nick+"> "+timestamp)))
-
-		for _, post := range strings.Split(postlist.Posts[postlist.Order[i]].Message, "\n") {
-			if post != "" {
-				u.MsgUser(toUser, post)
-			}
+		if p.DeleteAt > p.CreateAt {
+			continue
 		}
 
-		if len(postlist.Posts[postlist.Order[i]].FileIds) > 0 {
-			for _, fname := range u.br.GetFileLinks(postlist.Posts[postlist.Order[i]].FileIds) {
-				u.MsgUser(toUser, "\x1ddownload file - "+fname+"\x1d")
-			}
+		props := p.GetProps()
+		botname, override := props["override_username"].(string)
+		user := u.br.GetUser(p.UserId)
+		nick := user.Nick
+		if override {
+			nick = botname
 		}
 
-		u.MsgUser(toUser, "")
-		u.MsgUser(toUser, "")
+		channelname := getMattermostChannelName(u, p.ChannelId)
+
+		if p.Type == model.PostTypeAddToTeam || p.Type == model.PostTypeRemoveFromTeam {
+			nick = systemUser
+		}
+
+		for _, post := range strings.Split(p.Message, "\n") {
+			if nick == systemUser {
+				post = "\x1d" + post + "\x1d"
+			}
+			for _, term := range args {
+				re := regexp.MustCompile(`(?i)(` + regexp.QuoteMeta(term) + `)`)
+				post = re.ReplaceAllString(post, "\x02$1\x02")
+			}
+			formatSearchMsg(u, p.ChannelId, channelname, toUser, nick, p, post)
+		}
+
+		if len(p.FileIds) == 0 {
+			continue
+		}
+
+		for _, fname := range u.br.GetFileLinks(p.FileIds) {
+			fileMsg := "\x1ddownload file - " + fname + "\x1d"
+			formatSearchMsg(u, p.ChannelId, channelname, toUser, nick, p, fileMsg)
+		}
+	}
+}
+
+func formatSearchMsg(u *User, channelID string, channel string, user *User, nick string, p *model.Post, msgText string) {
+	ts := time.Unix(0, p.CreateAt*int64(time.Millisecond))
+
+	switch {
+	case (u.v.GetBool(u.br.Protocol()+".collapsescrollback") && strings.HasPrefix(channel, "#")):
+		threadMsgID := u.prefixContext(channelID, p.Id, p.RootId, "scrollback")
+		msg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, msgText)
+		nick += "/" + channel
+		u.Srv.Channel("&messages").SpoofMessage(nick, msg)
+	case u.v.GetBool(u.br.Protocol() + ".collapsescrollback"):
+		threadMsgID := u.prefixContext(channelID, p.Id, p.RootId, "scrollback")
+		msg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, msgText)
+		u.Srv.Channel("&messages").SpoofMessage(nick, msg)
+	case (u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext")) && strings.HasPrefix(channel, "#"):
+		threadMsgID := u.prefixContext(channelID, p.Id, p.RootId, "scrollback")
+		nick += "/" + channel
+		msg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, "<"+nick+"> "+msgText)
+		u.MsgUser(user, msg)
+	case strings.HasPrefix(channel, "#"):
+		nick += "/" + channel
+		msg := "[" + ts.Format("2006-01-02 15:04") + "] <" + nick + "> " + msgText
+		u.MsgUser(user, msg)
+	case u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext"):
+		threadMsgID := u.prefixContext(channelID, p.Id, p.RootId, "scrollback")
+		msg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, "<"+nick+"> "+msgText)
+		u.MsgUser(user, msg)
+	default:
+		msg := "[" + ts.Format("2006-01-02 15:04") + "] <" + nick + "> " + msgText
+		u.MsgUser(user, msg)
 	}
 }
 
@@ -417,6 +541,10 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 				}
 				scrollbackUser, _ = u.Srv.HasUser(search)
 			}
+			if search == "" {
+				u.MsgUser(toUser, "no results; either channel not found, no access, or not joined in")
+				return
+			}
 		}
 
 		for _, post := range strings.Split(p.Message, "\n") {
@@ -511,6 +639,7 @@ func updatelastviewed(u *User, toUser *User, args []string, service string) {
 }
 
 var cmds = map[string]Command{
+	"details":          {handler: details, login: true, minParams: 1, maxParams: 1},
 	"lastsent":         {handler: lastsent, login: true, minParams: 0, maxParams: 0},
 	"logout":           {handler: logout, login: true, minParams: 0, maxParams: 0},
 	"login":            {handler: login, minParams: 2, maxParams: 5},

@@ -133,6 +133,10 @@ ShortenRepliesTo = 0
 Unicode = false
 # Disable showing reactions
 HideReactions = false
+# Disable converting Mattermost MarkDown of text emphasis to IRC text emphasis
+#DisableIRCEmphasis
+# Disable converting emoji strings/aliases to their unicode equivalent. Best with fonts-noto-color-emoji installed.
+#DisableEmoji = true
 
 #Only join direct/group messages when someone talks. This stops from cluttering your 
 #irc client with lots of windows.
@@ -163,6 +167,9 @@ ShowMentions = false
 # Disable formatting / emphasis of text from Mattermost markdown to IRC (bold & italics)
 #DisableIRCEmphasis = true
 
+# Disable showing own edited or deleted posts from mattermost
+#DisableShowOwnModified = true
+
 # Enable syntax highlighting for code blocks.
 # Formatter and Style are passed through to the chroma v2 package.
 #   https://github.com/alecthomas/chroma/blob/master/formatters/tty_indexed.go#L262
@@ -170,6 +177,7 @@ ShowMentions = false
 #   https://github.com/alecthomas/chroma/tree/master/styles
 # These are different colour schemes/styles. E.g. pygments, emacs, autumn, etc.
 SyntaxHighlighting = "terminal256:pygments"
+CodeBlockPrefix = "\\x1b[1;38;2;0;82;204m|\\x1b[0m "
 
 # Path to file to store last viewed information. This is useful for replying only
 # the messages missed.
