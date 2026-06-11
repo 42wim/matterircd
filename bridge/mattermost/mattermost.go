@@ -11,8 +11,10 @@ import (
 	"time"
 
 	"github.com/42wim/matterircd/bridge"
+	"github.com/42wim/matterircd/utils"
 	"github.com/davecgh/go-spew/spew"
 	lru "github.com/hashicorp/golang-lru"
+	"github.com/kenshaw/emoji"
 	prefixed "github.com/matterbridge/logrus-prefixed-formatter"
 	"github.com/matterbridge/matterclient"
 	"github.com/mattermost/mattermost-server/v6/model"
@@ -889,7 +891,6 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	}
 
 	useUnicode := m.v.GetBool("mattermost.unicode")
-	disableIrcEphasis := m.v.GetBool("mattermost.disableircemphasis")
 
 	postfix := ""
 	if !m.v.GetBool("mattermost.hidereplies") && data.RootId != "" {
@@ -1070,7 +1071,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 			} else if data.Type == "slack_attachment" {
 				useFallback := msg == ""
 				// https://docs.slack.dev/tools/node-slack-sdk/reference/web-api/interfaces/MessageAttachment/
-				attachmentMsg := parseMessageAttachments(data.Attachments(), useFallback, useUnicode, disableIrcEphasis)
+				attachmentMsg := m.parseMessageAttachments(data.Attachments(), useFallback)
 				if msg != "" && attachmentMsg != "" {
 					msg += "\n"
 				}
@@ -1081,7 +1082,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 			} else if attachments := data.Attachments(); len(attachments) > 0 {
 				useFallback := msg == ""
 				// https://developers.mattermost.com/integrate/reference/message-attachments/
-				attachmentMsg := parseMessageAttachments(attachments, useFallback, useUnicode, disableIrcEphasis)
+				attachmentMsg := m.parseMessageAttachments(attachments, useFallback)
 				if msg != "" && attachmentMsg != "" {
 					msg += "\n"
 				}
@@ -1557,7 +1558,7 @@ func parseMatterpollToMsg(attachments []*model.SlackAttachment, unicode bool) st
 	msg := ""
 	prefixChar := "|"
 	if unicode {
-		prefixChar = "┃"
+		prefixChar = "🮇"
 	}
 	for _, attachment := range attachments {
 		prefix := "\033[1;38;2;0;82;204m" + prefixChar + "\033[0m "
@@ -1601,11 +1602,23 @@ func parseMatterpollToMsg(attachments []*model.SlackAttachment, unicode bool) st
 }
 
 //nolint:funlen,gocognit,gocyclo
-func parseMessageAttachments(attachments []*model.SlackAttachment, useFallback bool, unicode bool, disableIrcEphasis bool) string {
+func (m *Mattermost) parseMessageAttachments(attachments []*model.SlackAttachment, useFallback bool) string {
+	useUnicode := m.v.GetBool("mattermost.unicode")
+	syntaxHighlighting := m.v.GetString("mattermost.syntaxhighlighting")
+	codeBlockPrefix := m.v.GetString("mattermost.codeblockprefix")
+	disableIrcEphasis := m.v.GetBool("mattermost.disableircemphasis")
+	disableEmoji := m.v.GetBool("mattermost.disableemoji")
+
 	msg := ""
 	prefixChar := "|"
-	if unicode {
-		prefixChar = "┃"
+	blockquoteChar := "|"
+	if useUnicode {
+		prefixChar = "🮇"
+		blockquoteChar = "▕"
+		// Downgrade heavy vertical to light as we're using heavy already
+		codeBlockPrefix = strings.Replace(codeBlockPrefix, "┃", "│", 1)
+		codeBlockPrefix = strings.Replace(codeBlockPrefix, "🮇", "▕", 1)
+		codeBlockPrefix = strings.Replace(codeBlockPrefix, "▎", "▏", 1)
 	}
 	for _, attachment := range attachments {
 		prefix := "\033[1m" + prefixChar + "\033[0m "
@@ -1656,8 +1669,21 @@ func parseMessageAttachments(attachments []*model.SlackAttachment, useFallback b
 			msg += "\n"
 		}
 		if attachment.Text != "" {
+			lexer := ""
+			codeBlockBackTick := false
+			codeBlockTilde := false
 			lines := strings.Split(attachment.Text, "\n")
 			for _, text := range lines {
+				text, codeBlockBackTick, codeBlockTilde, lexer = utils.FormatCodeBlockText(text, "", codeBlockBackTick, codeBlockTilde, lexer, syntaxHighlighting, codeBlockPrefix)
+
+				if !disableIrcEphasis && !codeBlockBackTick && !codeBlockTilde {
+					text = utils.Markdown2irc(text, blockquoteChar)
+				}
+
+				if !disableEmoji && !codeBlockBackTick && !codeBlockTilde {
+					text = emoji.ReplaceAliases(text)
+				}
+
 				msg += prefix + text + "\n"
 			}
 		}
@@ -1706,8 +1732,22 @@ func parseMessageAttachments(attachments []*model.SlackAttachment, useFallback b
 			} else {
 				// Fallback to original behavior for long fields or unpaired short fields
 				msg += prefix + "\x02" + field.Title + "\x02\n"
+
+				lexer := ""
+				codeBlockBackTick := false
+				codeBlockTilde := false
 				lines := strings.Split(val1Str, "\n")
 				for _, text := range lines {
+					text, codeBlockBackTick, codeBlockTilde, lexer = utils.FormatCodeBlockText(text, "", codeBlockBackTick, codeBlockTilde, lexer, syntaxHighlighting, codeBlockPrefix)
+
+					if !disableIrcEphasis && !codeBlockBackTick && !codeBlockTilde {
+						text = utils.Markdown2irc(text, blockquoteChar)
+					}
+
+					if !disableEmoji && !codeBlockBackTick && !codeBlockTilde {
+						text = emoji.ReplaceAliases(text)
+					}
+
 					msg += prefix + text + "\n"
 				}
 				i++

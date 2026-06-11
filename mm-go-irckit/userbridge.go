@@ -1,14 +1,11 @@
 package irckit
 
 import (
-	"bytes"
 	"encoding/binary"
 	"fmt"
 	"math/rand"
 	"net"
 	"net/http"
-	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -19,7 +16,7 @@ import (
 	"github.com/42wim/matterircd/bridge/mastodon"
 	"github.com/42wim/matterircd/bridge/mattermost"
 	"github.com/42wim/matterircd/bridge/slack"
-	"github.com/alecthomas/chroma/v2/quick"
+	"github.com/42wim/matterircd/utils"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/kenshaw/emoji"
 	"github.com/mattermost/mattermost-server/v6/model"
@@ -152,7 +149,7 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 
 	prefixChar := "|"
 	if u.v.GetBool(u.br.Protocol() + ".unicode") {
-		prefixChar = "┃"
+		prefixChar = "🮇"
 	}
 
 	text := event.Text
@@ -173,25 +170,24 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 		text, prefix, suffix, showContext, maxlen = u.handleMessageThreadContext(prefixUser, event.MessageID, event.ParentID, event.Event, text)
 	}
 
+	syntaxHighlighting := u.v.GetString(u.br.Protocol() + ".syntaxhighlighting")
 	lexer := ""
 	codeBlockBackTick := false
 	codeBlockTilde := false
+	codeBlockPrefix := u.v.GetString(u.br.Protocol() + ".codeblockprefix")
 	text = wordwrap.String(text, maxlen)
 	lines := strings.Split(text, "\n")
 	for _, text := range lines {
 
 		// TODO: Ideally, we want to read the whole code block and syntax highlight on that, but let's go with per-line for now.
-		text, codeBlockBackTick, codeBlockTilde, lexer = u.formatCodeBlockText(text, prefix, codeBlockBackTick, codeBlockTilde, lexer)
+		text, codeBlockBackTick, codeBlockTilde, lexer = utils.FormatCodeBlockText(text, prefix, codeBlockBackTick, codeBlockTilde, lexer, syntaxHighlighting, codeBlockPrefix)
 
 		if text == "" {
 			continue
 		}
 
 		if !u.v.GetBool(u.br.Protocol()+".disableircemphasis") && !codeBlockBackTick && !codeBlockTilde {
-			text = markdown2irc(text)
-			if strings.HasPrefix(text, ">") {
-				text = strings.Replace(text, ">", prefixChar, 1)
-			}
+			text = utils.Markdown2irc(text, prefixChar)
 		}
 
 		if !u.v.GetBool(u.br.Protocol()+".disableemoji") && !codeBlockBackTick && !codeBlockTilde {
@@ -330,7 +326,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 
 	prefixChar := "|"
 	if u.v.GetBool(u.br.Protocol() + ".unicode") {
-		prefixChar = "┃"
+		prefixChar = "🮇"
 	}
 
 	text := event.Text
@@ -348,25 +344,24 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		text = "\x1d" + event.Text + "\x1d"
 	}
 
+	syntaxHighlighting := u.v.GetString(u.br.Protocol() + ".syntaxhighlighting")
 	lexer := ""
 	codeBlockBackTick := false
 	codeBlockTilde := false
+	codeBlockPrefix := u.v.GetString(u.br.Protocol() + ".codeblockprefix")
 	text = wordwrap.String(text, maxlen)
 	lines := strings.Split(text, "\n")
 	for _, text := range lines {
 
 		// TODO: Ideally, we want to read the whole code block and syntax highlight on that, but let's go with per-line for now.
-		text, codeBlockBackTick, codeBlockTilde, lexer = u.formatCodeBlockText(text, prefix, codeBlockBackTick, codeBlockTilde, lexer)
+		text, codeBlockBackTick, codeBlockTilde, lexer = utils.FormatCodeBlockText(text, prefix, codeBlockBackTick, codeBlockTilde, lexer, syntaxHighlighting, codeBlockPrefix)
 
 		if text == "" {
 			continue
 		}
 
 		if !u.v.GetBool(u.br.Protocol()+".disableircemphasis") && !codeBlockBackTick && !codeBlockTilde {
-			text = markdown2irc(text)
-			if strings.HasPrefix(text, ">") {
-				text = strings.Replace(text, ">", prefixChar, 1)
-			}
+			text = utils.Markdown2irc(text, prefixChar)
 		}
 
 		if !u.v.GetBool(u.br.Protocol()+".disableemoji") && !codeBlockBackTick && !codeBlockTilde {
@@ -1228,106 +1223,4 @@ func (u *User) handleMessageThreadContext(channelID, messageID, parentID, event,
 	}
 
 	return newText, prefix, suffix, showContext, maxlen
-}
-
-//nolint:gocyclo
-func (u *User) formatCodeBlockText(text string, prefix string, codeBlockBackTick bool, codeBlockTilde bool, lexer string) (string, bool, bool, string) {
-	linePrefix := u.v.GetString(u.br.Protocol() + ".codeblockprefix")
-	if linePrefix != "" {
-		unq, err := strconv.Unquote(`"` + linePrefix + `"`)
-		if err == nil {
-			linePrefix = unq
-		}
-	}
-
-	// skip empty lines for anything not part of a code block.
-	if text == "" {
-		if codeBlockBackTick || codeBlockTilde {
-			return linePrefix + " ", codeBlockBackTick, codeBlockTilde, lexer
-		}
-		return "", codeBlockBackTick, codeBlockTilde, lexer
-	}
-
-	syntaxHighlighting := u.v.GetString(u.br.Protocol() + ".syntaxhighlighting")
-
-	if (strings.HasPrefix(text, "```") || strings.HasPrefix(text, prefix+"```")) && !codeBlockTilde {
-		codeBlockBackTick = !codeBlockBackTick
-		if codeBlockBackTick {
-			lexer = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(text, "```"), prefix+"```"))
-		}
-		return text, codeBlockBackTick, codeBlockTilde, lexer
-	}
-	if (strings.HasPrefix(text, "~~~") || strings.HasPrefix(text, prefix+"~~~")) && !codeBlockBackTick {
-		codeBlockTilde = !codeBlockTilde
-		if codeBlockTilde {
-			lexer = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(text, "~~~"), prefix+"~~~"))
-		}
-		return text, codeBlockBackTick, codeBlockTilde, lexer
-	}
-
-	if !(codeBlockBackTick || codeBlockTilde) {
-		return text, codeBlockBackTick, codeBlockTilde, lexer
-	}
-
-	if syntaxHighlighting == "" || lexer == "" {
-		return linePrefix + text, codeBlockBackTick, codeBlockTilde, lexer
-	}
-
-	formatter := "terminal256"
-	style := "pygments"
-	v := strings.SplitN(syntaxHighlighting, ":", 2)
-	if len(v) == 2 {
-		formatter = v[0]
-		style = v[1]
-	}
-
-	var b bytes.Buffer
-	err := quick.Highlight(&b, text, lexer, formatter, style)
-	if err == nil {
-		text = linePrefix + b.String()
-		// Work around https://github.com/alecthomas/chroma/issues/716
-		text = strings.ReplaceAll(text, "\n", "")
-	}
-
-	return text, codeBlockBackTick, codeBlockTilde, lexer
-}
-
-// Use static initialisation to optimize.
-// Bold & Italic - https://www.markdownguide.org/basic-syntax#bold-and-italic
-var boldItalicRegExp = []*regexp.Regexp{
-	regexp.MustCompile(`(?:\*\*\*)+?(.+?)(?:\*\*\*)+?`),
-	regexp.MustCompile(`\b(?:\_\_\_)+?(.+?)(?:\_\_\_)+?\b`),
-	regexp.MustCompile(`\b(?:\_\_\*)+?(.+?)(?:\*\_\_)+?\b`),
-	regexp.MustCompile(`\b(?:\*\*\_)+?(.+?)(?:\_\*\*)+?\b`),
-}
-
-// Bold - https://www.markdownguide.org/basic-syntax#bold
-var boldRegExp = []*regexp.Regexp{
-	regexp.MustCompile(`(?:\*\*)+?(.+?)(?:\*\*)+?`),
-	regexp.MustCompile(`\b(?:\_\_)+?(.+?)(?:\_\_)+?\b`),
-}
-
-// Italic - https://www.markdownguide.org/basic-syntax#italic
-var italicRegExp = []*regexp.Regexp{
-	regexp.MustCompile(`(?:\*)+?([^\*]+?)(?:\*)+?`),
-	regexp.MustCompile(`\b(?:\_)+?([^_]+?)(?:\_)+?\b`),
-}
-
-func markdown2irc(msg string) string {
-	// Bold & Italic 0x02+0x1d
-	for _, re := range boldItalicRegExp {
-		msg = re.ReplaceAllString(msg, "\x02\x1d$1\x1d\x02")
-	}
-
-	// Bold 0x02
-	for _, re := range boldRegExp {
-		msg = re.ReplaceAllString(msg, "\x02$1\x02")
-	}
-
-	// Italic 0x1d
-	for _, re := range italicRegExp {
-		msg = re.ReplaceAllString(msg, "\x1d$1\x1d")
-	}
-
-	return msg
 }
