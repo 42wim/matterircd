@@ -33,6 +33,7 @@ func FormatCodeBlockText(text string, prefix string, codeBlockBackTick bool, cod
 			lexer = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(text, "```"), prefix+"```"))
 			if lexer != "" {
 				newText = strings.Replace(text, "```", linePrefix, 1)
+				newText = strings.Replace(newText, lexer, "\x16"+lexer+"\x16", 1)
 			}
 		}
 		return newText, codeBlockBackTick, codeBlockTilde, lexer
@@ -44,6 +45,7 @@ func FormatCodeBlockText(text string, prefix string, codeBlockBackTick bool, cod
 			lexer = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(text, "~~~"), prefix+"~~~"))
 			if lexer != "" {
 				newText = strings.Replace(text, "~~~", linePrefix, 1)
+				newText = strings.Replace(newText, lexer, "\x16"+lexer+"\x16", 1)
 			}
 		}
 		return newText, codeBlockBackTick, codeBlockTilde, lexer
@@ -120,7 +122,7 @@ func Markdown2irc(msg string, prefixChar string) string {
 
 	// Code / Monospace 0x11
 	for _, re := range codeRegExp {
-		msg = re.ReplaceAllString(msg, "\x11\x0399,14 $1 \x03\x11")
+		msg = re.ReplaceAllString(msg, "\x11\x030,14$1\x03\x11")
 	}
 
 	// Block quotes
