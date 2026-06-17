@@ -97,6 +97,11 @@ var italicRegExp = []*regexp.Regexp{
 	regexp.MustCompile(`\b(?:\_)+?([^_]+?)(?:\_)+?\b`),
 }
 
+// Code / Monospace - https://markdownguide.offshoot.io/basic-syntax/#code
+var codeRegExp = []*regexp.Regexp{
+	regexp.MustCompile("(?:`)+?([^`]+?)(?:`)+?"),
+}
+
 func Markdown2irc(msg string, prefixChar string) string {
 	// Bold & Italic 0x02+0x1d
 	for _, re := range boldItalicRegExp {
@@ -111,6 +116,11 @@ func Markdown2irc(msg string, prefixChar string) string {
 	// Italic 0x1d
 	for _, re := range italicRegExp {
 		msg = re.ReplaceAllString(msg, "\x1d$1\x1d")
+	}
+
+	// Code / Monospace 0x11
+	for _, re := range codeRegExp {
+		msg = re.ReplaceAllString(msg, "\x11\x0399,14 $1 \x03\x11")
 	}
 
 	// Block quotes
