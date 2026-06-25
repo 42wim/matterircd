@@ -1611,17 +1611,23 @@ func (m *Mattermost) getDMUser(name interface{}) *bridge.UserInfo {
 
 const (
 	messageAttachmentCharNonUnicode = "|"
-	messageAttachmentCharUnicode    = "🮇"
+	// right one quarter block (U+1FB87)
+	messageAttachmentCharUnicode     = "🮇"
+	messageAttachmentSpaceNonUnicode = " "
+	// non-breaking space / no-break space / nbsp (U+00A0)
+	messageAttachmentSpaceUnicode = " "
 )
 
 func parseMatterpollToMsg(attachments []*model.SlackAttachment, unicode bool) string {
 	msg := ""
 	prefixChar := messageAttachmentCharNonUnicode
+	spaceChar := messageAttachmentSpaceNonUnicode
 	if unicode {
 		prefixChar = messageAttachmentCharUnicode
+		spaceChar = messageAttachmentSpaceUnicode
 	}
 	for _, attachment := range attachments {
-		prefix := "\033[1;38;2;0;82;204m" + prefixChar + "\033[0m "
+		prefix := "\033[1;38;2;0;82;204m" + prefixChar + "\033[0m" + spaceChar
 
 		if attachment.AuthorName != "" {
 			msg += prefix + "@" + attachment.AuthorName + "\n"
@@ -1632,7 +1638,7 @@ func parseMatterpollToMsg(attachments []*model.SlackAttachment, unicode bool) st
 
 		for _, action := range attachment.Actions {
 			if strings.HasPrefix(action.Id, "vote") {
-				msg += prefix + "• " + action.Name + "\n"
+				msg += prefix + "•" + spaceChar + action.Name + "\n"
 			}
 		}
 
@@ -1648,7 +1654,7 @@ func parseMatterpollToMsg(attachments []*model.SlackAttachment, unicode bool) st
 		}
 
 		for _, field := range attachment.Fields {
-			msg += prefix + "• " + field.Title + ": "
+			msg += prefix + "•" + spaceChar + field.Title + ":" + spaceChar
 			lines := strings.Split(fmt.Sprintf("%s", field.Value), "\n")
 			newPrefix := ""
 			for _, text := range lines {
@@ -1671,9 +1677,11 @@ func (m *Mattermost) parseMessageAttachments(attachments []*model.SlackAttachmen
 
 	msg := ""
 	prefixChar := messageAttachmentCharNonUnicode
+	spaceChar := messageAttachmentSpaceNonUnicode
 	blockquoteChar := blockquoteCharNonUnicode
 	if useUnicode {
 		prefixChar = messageAttachmentCharUnicode
+		spaceChar = messageAttachmentSpaceUnicode
 		blockquoteChar = blockquoteCharUnicode
 		// Downgrade heavy vertical to light as we're using heavy already
 		codeBlockPrefix = strings.Replace(codeBlockPrefix, "┃", "│", 1)
@@ -1682,22 +1690,22 @@ func (m *Mattermost) parseMessageAttachments(attachments []*model.SlackAttachmen
 	}
 	fallbackText := ""
 	for _, attachment := range attachments {
-		prefix := "\033[1m" + prefixChar + "\033[0m "
+		prefix := "\033[1m" + prefixChar + "\033[0m" + spaceChar
 		switch {
 		// https://docs.slack.dev/tools/node-slack-sdk/reference/web-api/interfaces/MessageAttachment/#color
 		case attachment.Color == "danger":
-			prefix = "\033[31m" + prefixChar + "\033[0m "
+			prefix = "\033[31m" + prefixChar + "\033[0m" + spaceChar
 		case attachment.Color == "good":
-			prefix = "\033[32m" + prefixChar + "\033[0m "
+			prefix = "\033[32m" + prefixChar + "\033[0m" + spaceChar
 		case attachment.Color == "warning":
-			prefix = "\033[33m" + prefixChar + "\033[0m "
+			prefix = "\033[33m" + prefixChar + "\033[0m" + spaceChar
 		case strings.HasPrefix(attachment.Color, "#"):
 			hex := strings.TrimPrefix(attachment.Color, "#")
 			rr, _ := strconv.ParseInt(hex[0:2], 16, 0)
 			gg, _ := strconv.ParseInt(hex[2:4], 16, 0)
 			bb, _ := strconv.ParseInt(hex[4:6], 16, 0)
 			// https://modern.ircdocs.horse/formatting.html#hex-color
-			prefix = fmt.Sprintf("\033[1;38;2;%d;%d;%dm%s\033[0m ", int(rr), int(gg), int(bb), prefixChar)
+			prefix = fmt.Sprintf("\033[1;38;2;%d;%d;%dm%s\033[0m%s", int(rr), int(gg), int(bb), prefixChar, spaceChar)
 		}
 
 		if useFallback {
@@ -1708,7 +1716,7 @@ func (m *Mattermost) parseMessageAttachments(attachments []*model.SlackAttachmen
 			if fallbackText == "" {
 				fallbackText, _, _ = strings.Cut(attachment.Text, "\n")
 				if attachment.AuthorName != "" {
-					fallbackText = attachment.AuthorName + ": " + fallbackText
+					fallbackText = attachment.AuthorName + ":" + spaceChar + fallbackText
 				}
 			}
 
@@ -1726,7 +1734,7 @@ func (m *Mattermost) parseMessageAttachments(attachments []*model.SlackAttachmen
 		if attachment.AuthorName != "" {
 			msg += prefix + attachment.AuthorName
 			if attachment.AuthorLink != "" {
-				msg += " (" + attachment.AuthorLink + ")"
+				msg += spaceChar + "(" + attachment.AuthorLink + ")"
 			}
 			msg += "\n"
 		}
