@@ -135,11 +135,11 @@ Unicode = false
 HideReactions = false
 # Show own reactions
 # ShowOwnReactions = true
-# Disable converting Mattermost MarkDown of text emphasis to IRC text emphasis
-#DisableIRCEmphasis
 # Disable converting emoji strings/aliases to their unicode equivalent. Best with fonts-noto-color-emoji installed.
 #DisableEmoji = true
 
+# Disable formatting of text from Mattermost Markdown to IRC (bold, italics, block quotes, etc.)
+#DisableMarkdown = true
 #DisableMarkdownBlockQuote = true
 #MarkdownBlockQuoteChar = "|"
 
@@ -168,9 +168,6 @@ ShowMentions = false
 # Channel wide default mentions @channel, @all, and @here are shown as IRC NOTICEs.
 # This disables that making them appear as normal PRIVMSGs.
 #DisableDefaultMentions = true
-
-# Disable formatting / emphasis of text from Mattermost markdown to IRC (bold & italics)
-#DisableIRCEmphasis = true
 
 # Disable showing own edited or deleted posts from mattermost
 #DisableShowOwnModified = true

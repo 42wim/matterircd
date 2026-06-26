@@ -106,7 +106,9 @@ var codeRegExp = []*regexp.Regexp{
 	regexp.MustCompile("(?:`)+?([^`]+?)(?:`)+?"),
 }
 
-func Markdown2irc(msg string, prefixChar string) string {
+const blockQuoteCharDefault = ">"
+
+func Markdown2irc(msg string, blockQuoteChar string) string {
 	// Bold & Italic 0x02+0x1d
 	for _, re := range boldItalicRegExp {
 		msg = re.ReplaceAllString(msg, "\x02\x1d$1\x1d\x02")
@@ -128,8 +130,8 @@ func Markdown2irc(msg string, prefixChar string) string {
 	}
 
 	// Block quotes
-	if strings.HasPrefix(msg, ">") {
-		msg = strings.Replace(msg, ">", prefixChar, 1)
+	if strings.HasPrefix(msg, blockQuoteCharDefault) {
+		msg = strings.Replace(msg, blockQuoteCharDefault, blockQuoteChar, 1)
 	}
 
 	return msg
