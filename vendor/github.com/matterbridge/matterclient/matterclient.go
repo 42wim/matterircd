@@ -319,8 +319,7 @@ func (m *Client) serverAlive(b *backoff.Backoff) error {
 // initialize user and teams
 // nolint:funlen
 func (m *Client) initUser() error {
-	m.Lock()
-	defer m.Unlock()
+
 	// we only load all team data on initial login.
 	// all other updates are for channels from our (primary) team only.
 	teams, _, err := m.Client.GetTeamsForUser(m.User.Id, "")
@@ -330,22 +329,21 @@ func (m *Client) initUser() error {
 
 	for _, team := range teams {
 		idx := 0
-		max := 200
+		const batchSize = 200
 		usermap := make(map[string]*model.User)
 
-		mmusers, _, err := m.Client.GetUsersInTeam(team.Id, idx, max, "")
-		if err != nil {
-			return err
-		}
+		for {
+			mmusers, _, err := m.Client.GetUsersInTeam(team.Id, idx, batchSize, "")
+			if err != nil {
+				return err
+			}
 
-		for len(mmusers) > 0 {
 			for _, user := range mmusers {
 				usermap[user.Id] = user
 			}
 
-			mmusers, _, err = m.Client.GetUsersInTeam(team.Id, idx, max, "")
-			if err != nil {
-				return err
+			if len(mmusers) < batchSize {
+				break
 			}
 
 			idx++
@@ -353,6 +351,9 @@ func (m *Client) initUser() error {
 			time.Sleep(time.Millisecond * 200)
 		}
 		m.logger.Debugf("found %d users in team %s", len(usermap), team.Name)
+
+		m.Lock()
+
 		// add all users
 		for k, v := range usermap {
 			m.Users[k] = v
@@ -370,6 +371,8 @@ func (m *Client) initUser() error {
 			m.Team = t
 			m.logger.Debugf("initUser(): found our team %s (id: %s)", team.Name, team.Id)
 		}
+
+		m.Unlock()
 	}
 
 	return nil

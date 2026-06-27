@@ -223,52 +223,36 @@ func (m *Client) UpdateChannelsTeam(teamID string) error {
 		}
 	}
 
-	for idx, t := range m.OtherTeams {
-		if t.ID == teamID {
-			m.Lock()
-			m.OtherTeams[idx].Channels = mmchannels
-			m.Unlock()
-		}
-	}
-
 	idx := 0
-	max := 200
+	const batchSize = 200
 
 	var moreChannels []*model.Channel
 
 	for {
-		mmchannels, resp, err = m.Client.GetPublicChannelsForTeam(teamID, idx, max, "")
-		if err == nil {
+		channels, resp, err := m.Client.GetPublicChannelsForTeam(teamID, idx, batchSize, "")
+		if err != nil {
+			if rlErr := m.HandleRatelimit("GetPublicChannelsForTeam", resp); rlErr != nil {
+				return rlErr
+			}
+			continue
+		}
+
+		moreChannels = append(moreChannels, channels...)
+
+		if len(channels) < batchSize {
 			break
 		}
-
-		if err := m.HandleRatelimit("GetPublicChannelsForTeam", resp); err != nil {
-			return err
-		}
+		idx++
 	}
 
-	for len(mmchannels) > 0 {
-		moreChannels = append(moreChannels, mmchannels...)
-
-		for {
-			mmchannels, resp, err = m.Client.GetPublicChannelsForTeam(teamID, idx, max, "")
-			if err == nil {
-				idx++
-
-				break
-			}
-
-			if err := m.HandleRatelimit("GetPublicChannelsForTeam", resp); err != nil {
-				return err
-			}
-		}
-	}
+	m.Lock()
+	defer m.Unlock()
 
 	for idx, t := range m.OtherTeams {
 		if t.ID == teamID {
-			m.Lock()
+			m.OtherTeams[idx].Channels = mmchannels
 			m.OtherTeams[idx].MoreChannels = moreChannels
-			m.Unlock()
+			break
 		}
 	}
 
