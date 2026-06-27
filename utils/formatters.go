@@ -127,7 +127,7 @@ func Markdown2irc(msg string, blockQuoteChar string) string {
 	// Code / Monospace 0x11
 	for _, re := range codeRegExp {
 		// Not all IRC clients support monospace (0x11) so keep the fence and make it bold as well
-		msg = re.ReplaceAllString(msg, "`\x11\x02$1\x02\x11`")
+		msg = re.ReplaceAllString(msg, "`\x11\x02\x030,14$1\x03\x02\x11`")
 	}
 
 	// Block quotes
