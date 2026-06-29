@@ -1660,7 +1660,6 @@ func (m *Mattermost) parseMessageAttachments(attachments []*model.SlackAttachmen
 	disableMarkdown := m.v.GetBool("mattermost.disablemarkdown")
 	disableEmoji := m.v.GetBool("mattermost.disableemoji")
 
-	msg := ""
 	prefixChar := messageAttachmentCharNonUnicode
 	spaceChar := messageAttachmentSpaceNonUnicode
 	blockquoteChar := blockquoteCharNonUnicode
@@ -1675,7 +1674,9 @@ func (m *Mattermost) parseMessageAttachments(attachments []*model.SlackAttachmen
 			codeBlockPrefix = strings.Replace(codeBlockPrefix, "▎", "▏", 1)
 		}
 	}
-	fallbackText := ""
+
+	var b strings.Builder
+
 	for _, attachment := range attachments {
 		prefix := "\033[1m" + prefixChar + "\033[0m" + spaceChar
 		switch {
@@ -1692,9 +1693,14 @@ func (m *Mattermost) parseMessageAttachments(attachments []*model.SlackAttachmen
 			gg, _ := strconv.ParseInt(hex[2:4], 16, 0)
 			bb, _ := strconv.ParseInt(hex[4:6], 16, 0)
 			// https://modern.ircdocs.horse/formatting.html#hex-color
-			prefix = fmt.Sprintf("\033[1;38;2;%d;%d;%dm%s\033[0m%s", int(rr), int(gg), int(bb), prefixChar, spaceChar)
+			prefix = "\033[1;38;2;" +
+				strconv.Itoa(int(rr)) + ";" +
+				strconv.Itoa(int(gg)) + ";" +
+				strconv.Itoa(int(bb)) + "m" +
+				prefixChar + "\033[0m" + spaceChar
 		}
 
+		var fallbackText string
 		if useFallback {
 			fallbackText, _, _ = strings.Cut(attachment.Fallback, "\n")
 
@@ -1715,22 +1721,33 @@ func (m *Mattermost) parseMessageAttachments(attachments []*model.SlackAttachmen
 				fallbackText = emoji.ReplaceAliases(fallbackText)
 			}
 
-			msg += fallbackText + "\n"
+			b.WriteString(fallbackText)
+			b.WriteByte('\n')
 		}
 
 		if attachment.AuthorName != "" {
-			msg += prefix + attachment.AuthorName
+			b.WriteString(prefix)
+			b.WriteString(attachment.AuthorName)
 			if attachment.AuthorLink != "" {
-				msg += spaceChar + "(" + attachment.AuthorLink + ")"
+				b.WriteString(spaceChar)
+				b.WriteString("(")
+				b.WriteString(attachment.AuthorLink)
+				b.WriteString(")")
 			}
-			msg += "\n"
+			b.WriteByte('\n')
 		}
 		if attachment.Title != "" {
-			msg += prefix + "\x02" + attachment.Title + "\x02"
+			b.WriteString(prefix)
+			b.WriteByte('\x02')
+			b.WriteString(attachment.Title)
+			b.WriteByte('\x02')
 			if attachment.TitleLink != "" {
-				msg += " (\x1d" + attachment.TitleLink + "\x1d)"
+				b.WriteString(" (\x1d")
+				b.WriteString(attachment.TitleLink)
+				b.WriteByte('\x1d')
+				b.WriteByte(')')
 			}
-			msg += "\n"
+			b.WriteByte('\n')
 		}
 		if attachment.Text != "" {
 			lexer := ""
@@ -1748,11 +1765,15 @@ func (m *Mattermost) parseMessageAttachments(attachments []*model.SlackAttachmen
 					text = emoji.ReplaceAliases(text)
 				}
 
-				msg += prefix + text + "\n"
+				b.WriteString(prefix)
+				b.WriteString(text)
+				b.WriteByte('\n')
 			}
 		}
 		if attachment.ImageURL != "" {
-			msg += prefix + attachment.ImageURL + "\n"
+			b.WriteString(prefix)
+			b.WriteString(attachment.ImageURL)
+			b.WriteByte('\n')
 		}
 
 		for i := 0; i < len(attachment.Fields); {
@@ -1771,7 +1792,11 @@ func (m *Mattermost) parseMessageAttachments(attachments []*model.SlackAttachmen
 				// Same, avoid messing with our table format
 				val2Str := strings.TrimPrefix(fmt.Sprintf("%v", nextField.Value), "\n")
 
-				msg += prefix + fmt.Sprintf("\x02%-30s %s", field.Title, nextField.Title) + "\x02\n"
+				b.WriteString(prefix)
+				b.WriteByte('\x02')
+				b.WriteString(fmt.Sprintf("%-30s %s", field.Title, nextField.Title))
+				b.WriteByte('\x02')
+				b.WriteByte('\n')
 
 				val1Lines := strings.Split(val1Str, "\n")
 				val2Lines := strings.Split(val2Str, "\n")
@@ -1789,7 +1814,9 @@ func (m *Mattermost) parseMessageAttachments(attachments []*model.SlackAttachmen
 					if j < len(val2Lines) {
 						v2 = val2Lines[j]
 					}
-					msg += prefix + fmt.Sprintf("%-30s %s", v1, v2) + "\n"
+					b.WriteString(prefix)
+					b.WriteString(fmt.Sprintf("%-30s %s", v1, v2))
+					b.WriteByte('\n')
 				}
 
 				i += 2
@@ -1797,7 +1824,11 @@ func (m *Mattermost) parseMessageAttachments(attachments []*model.SlackAttachmen
 				// Fallback to original behavior for long fields or unpaired short fields
 
 				if field.Title != "" {
-					msg += prefix + "\x02" + field.Title + "\x02\n"
+					b.WriteString(prefix)
+					b.WriteByte('\x02')
+					b.WriteString(field.Title)
+					b.WriteByte('\x02')
+					b.WriteByte('\n')
 				}
 
 				lexer := ""
@@ -1821,14 +1852,16 @@ func (m *Mattermost) parseMessageAttachments(attachments []*model.SlackAttachmen
 						continue
 					}
 
-					msg += prefix + text + "\n"
+					b.WriteString(prefix)
+					b.WriteString(text)
+					b.WriteByte('\n')
 				}
 				i++
 			}
 		}
 	}
 
-	return strings.TrimRight(msg, "\n")
+	return strings.TrimRight(b.String(), "\n")
 }
 
 func (m *Mattermost) GetLastSentMsgs() []string {
@@ -1837,7 +1870,7 @@ func (m *Mattermost) GetLastSentMsgs() []string {
 	for _, k := range m.msgLastSentCache.Keys() {
 		if v, ok := m.msgLastSentCache.Get(k); ok {
 			msg, _ := v.(string)
-			data = append(data, fmt.Sprintf("[@@%s] %s", k, msg))
+			data = append(data, "[@@"+fmt.Sprint(k)+"] "+msg)
 		}
 	}
 
