@@ -575,7 +575,7 @@ func (u *User) handleReactionEvent(event interface{}) {
 	if !u.v.GetBool(u.br.Protocol() + ".disableemoji") {
 		reactionEmoji := emoji.FromAlias(reaction)
 		if reactionEmoji != nil {
-			reaction = fmt.Sprintf("%s", reactionEmoji)
+			reaction = reactionEmoji.Emoji
 		}
 	}
 
@@ -773,7 +773,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 		logSince := "server"
 		channame := brchannel.Name
 		if !brchannel.DM {
-			channame = fmt.Sprintf("#%s", brchannel.Name)
+			channame = "#" + brchannel.Name
 		}
 
 		// We used to stored last viewed at if present.

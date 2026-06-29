@@ -792,7 +792,7 @@ func (m *Mattermost) wsActionPostSkip(rmsg *model.WebSocketEvent) bool {
 	}
 
 	lastSentMsg = maybeShorten(lastSentMsg, 90, "@", useUnicode)
-	m.msgLastSentCache.Add(msgID, fmt.Sprintf("%s: %s", channel, lastSentMsg+postfix))
+	m.msgLastSentCache.Add(msgID, channel+": "+lastSentMsg+postfix)
 
 	logger.Debugf("message is sent from this matterircd instance, not relaying %#v", data.Message)
 	return true
@@ -1861,7 +1861,11 @@ func (m *Mattermost) parseMessageAttachments(attachments []*model.SlackAttachmen
 		}
 	}
 
-	return strings.TrimRight(b.String(), "\n")
+	msg := b.String()
+	if strings.HasSuffix(msg, "\n") { //nolint:gosimple
+		msg = msg[:len(msg)-1]
+	}
+	return msg
 }
 
 func (m *Mattermost) GetLastSentMsgs() []string {

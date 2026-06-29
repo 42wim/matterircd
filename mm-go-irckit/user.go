@@ -1,7 +1,6 @@
 package irckit
 
 import (
-	"fmt"
 	"net"
 	"regexp"
 	"strings"
@@ -233,12 +232,12 @@ func (u *User) Decode() {
 			continue
 		}
 
-		dmsg := fmt.Sprintf("<- %s", msg)
+		dmsg := "<- " + msg.String()
 		if msg.Command == "PRIVMSG" && msg.Params != nil && (msg.Params[0] == "slack" || msg.Params[0] == "mattermost") {
 			// Don't log sensitive information
 			trail := strings.Split(msg.Trailing, " ")
 			if (msg.Trailing != "" && trail[0] == "login") || (len(msg.Params) > 1 && msg.Params[1] == "login") {
-				dmsg = fmt.Sprintf("<- PRIVMSG %s :login [redacted]", msg.Params[0])
+				dmsg = "<- PRIVMSG " + msg.Params[0] + " :login [redacted]"
 			}
 		}
 		// PRIVMSG can be buffered
