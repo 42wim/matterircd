@@ -807,34 +807,42 @@ func maybeShorten(msg string, newLen int, uncounted string, unicode bool) string
 	if newLen == 0 || len(msg) < newLen {
 		return msg
 	}
+
 	ellipsis := "..."
 	if unicode {
 		ellipsis = "…"
 	}
-	newMsg := ""
-	for _, word := range strings.Split(strings.ReplaceAll(msg, "\n", " "), " ") {
-		if newMsg == "" {
-			newMsg = word
-			continue
-		}
-		if len(newMsg) < newLen {
-			skipped := false
-			if uncounted != "" && strings.HasPrefix(word, uncounted) {
-				newLen += len(word) + 1
-				skipped = true
+
+	var b strings.Builder
+	b.Grow(min(len(msg), newLen+8))
+
+	fields := strings.FieldsFunc(msg, func(r rune) bool {
+		return r == ' ' || r == '\n'
+	})
+
+	for _, word := range fields {
+		if b.Len() > 0 {
+			if b.Len() >= newLen {
+				break
 			}
+			b.WriteByte(' ')
+		}
+
+		if uncounted != "" && strings.HasPrefix(word, uncounted) {
+			newLen += len(word) + 1
+		} else if len(word) > newLen {
 			// Truncate very long words, but only if they were not skipped, on the
 			// assumption that such words are important enough to be preserved whole.
-			if !skipped && len(word) > newLen {
-				word = fmt.Sprintf("%s[%s]", word[0:(newLen*2/3)], ellipsis)
-			}
-			newMsg = fmt.Sprintf("%s %s", newMsg, word)
-			continue
+			word = word[:newLen*2/3] + "[" + ellipsis + "]"
 		}
-		break
+
+		b.WriteString(word)
 	}
 
-	return fmt.Sprintf("%s %s", newMsg, ellipsis)
+	b.WriteByte(' ')
+	b.WriteString(ellipsis)
+
+	return b.String()
 }
 
 func (m *Mattermost) addParentMsg(parentID string, msg string, newLen int, uncounted string, unicode bool) (string, error) {
@@ -886,7 +894,7 @@ func (m *Mattermost) addParentMsg(parentID string, msg string, newLen int, uncou
 
 		parentUser := m.GetUser(parentPost.UserId)
 		parentMessage := maybeShorten(msg, newLen, uncounted, unicode)
-		replyMessage = fmt.Sprintf(" (re @%s: %s)", parentUser.Nick, parentMessage)
+		replyMessage = " (re @" + parentUser.Nick + ": " + parentMessage + ")"
 		logger.Debugf("Created reply for parent post %s:%s", parentID, replyMessage)
 
 		m.msgParentCache.Add(parentID, replyMessage)
@@ -894,7 +902,10 @@ func (m *Mattermost) addParentMsg(parentID string, msg string, newLen int, uncou
 		logger.Debugf("Found saved reply for parent post %s, using:%s", parentID, replyMessage)
 	}
 
-	return strings.TrimRight(msg, "\n") + replyMessage, nil
+	if strings.HasSuffix(msg, "\n") { //nolint:gosimple
+		msg = msg[:len(msg)-1]
+	}
+	return msg + replyMessage, nil
 }
 
 var (
@@ -1676,9 +1687,11 @@ func (m *Mattermost) parseMessageAttachments(attachments []*model.SlackAttachmen
 		spaceChar = messageAttachmentSpaceUnicode
 		blockquoteChar = blockquoteCharUnicode
 		// Downgrade heavy vertical to light as we're using heavy already
-		codeBlockPrefix = strings.Replace(codeBlockPrefix, "┃", "│", 1)
-		codeBlockPrefix = strings.Replace(codeBlockPrefix, "🮇", "▕", 1)
-		codeBlockPrefix = strings.Replace(codeBlockPrefix, "▎", "▏", 1)
+		if strings.ContainsAny(codeBlockPrefix, "┃🮇▎") {
+			codeBlockPrefix = strings.Replace(codeBlockPrefix, "┃", "│", 1)
+			codeBlockPrefix = strings.Replace(codeBlockPrefix, "🮇", "▕", 1)
+			codeBlockPrefix = strings.Replace(codeBlockPrefix, "▎", "▏", 1)
+		}
 	}
 	fallbackText := ""
 	for _, attachment := range attachments {

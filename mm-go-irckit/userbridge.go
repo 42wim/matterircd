@@ -175,12 +175,19 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 		}
 		// Block quotes
 		if !u.v.GetBool(u.br.Protocol()+".disablemarkdown") && strings.HasPrefix(text, blockQuoteCharDefault) {
-			text = strings.Replace(text, blockQuoteCharDefault, blockQuoteChar, 1)
+			text = blockQuoteChar + text[1:]
 		}
 		text, prefix, suffix, showContext, maxlen = u.handleMessageThreadContext(prefixUser, event.MessageID, event.ParentID, event.Event, text)
 	}
+	trimmedPrefix := strings.TrimSpace(prefix)
+	trimmedSuffix := strings.TrimSpace(suffix)
 
+	disableMarkdown := u.v.GetBool(u.br.Protocol() + ".disablemarkdown")
+	disableEmoji := u.v.GetBool(u.br.Protocol() + ".disableemoji")
+	prefixContext := u.v.GetBool(u.br.Protocol() + ".prefixcontext")
+	showContextMulti := u.v.GetBool(u.br.Protocol() + ".showcontextmulti")
 	syntaxHighlighting := u.v.GetString(u.br.Protocol() + ".syntaxhighlighting")
+
 	lexer := ""
 	codeBlockBackTick := false
 	codeBlockTilde := false
@@ -196,7 +203,7 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 	for _, text := range lines {
 
 		// Remove message thread context prefix for formatting and remember to add it back
-		if !addPrefix && u.v.GetBool(u.br.Protocol()+".prefixcontext") && !u.v.GetBool(u.br.Protocol()+".showcontextmulti") && strings.HasPrefix(text, prefix) {
+		if !addPrefix && prefixContext && !showContextMulti && strings.HasPrefix(text, prefix) {
 			text = strings.TrimPrefix(text, prefix)
 			addPrefix = true
 		}
@@ -204,20 +211,25 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 		// TODO: Ideally, we want to read the whole code block and syntax highlight on that, but let's go with per-line for now.
 		text, codeBlockBackTick, codeBlockTilde, lexer = utils.FormatCodeBlockText(text, codeBlockBackTick, codeBlockTilde, lexer, syntaxHighlighting, codeBlockPrefix)
 
-		if text == "" || text == strings.TrimSpace(prefix) || text == strings.TrimSpace(suffix) {
+		if text == "" || text == trimmedPrefix || text == trimmedSuffix {
 			continue
 		}
 
-		if !u.v.GetBool(u.br.Protocol()+".disablemarkdown") && !codeBlockBackTick && !codeBlockTilde {
+		if !disableMarkdown && !codeBlockBackTick && !codeBlockTilde {
 			text = utils.Markdown2irc(text, blockQuoteChar)
 		}
 
-		if !u.v.GetBool(u.br.Protocol()+".disableemoji") && !codeBlockBackTick && !codeBlockTilde {
+		if !disableEmoji && !codeBlockBackTick && !codeBlockTilde {
 			text = emoji.ReplaceAliases(text)
 		}
 
 		if showContext || addPrefix {
-			text = prefix + text + suffix
+			var b strings.Builder
+			b.Grow(len(prefix) + len(text) + len(suffix))
+			b.WriteString(prefix)
+			b.WriteString(text)
+			b.WriteString(suffix)
+			text = b.String()
 			addPrefix = false
 		}
 
@@ -362,14 +374,21 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 	if u.Nick != systemUser {
 		// Block quotes
 		if !u.v.GetBool(u.br.Protocol()+".disablemarkdown") && strings.HasPrefix(text, blockQuoteCharDefault) {
-			text = strings.Replace(text, blockQuoteCharDefault, blockQuoteChar, 1)
+			text = blockQuoteChar + text[1:]
 		}
 		text, prefix, suffix, showContext, maxlen = u.handleMessageThreadContext(event.ChannelID, event.MessageID, event.ParentID, event.Event, text)
 	} else {
 		text = "\x1d" + event.Text + "\x1d"
 	}
+	trimmedPrefix := strings.TrimSpace(prefix)
+	trimmedSuffix := strings.TrimSpace(suffix)
 
+	disableMarkdown := u.v.GetBool(u.br.Protocol() + ".disablemarkdown")
+	disableEmoji := u.v.GetBool(u.br.Protocol() + ".disableemoji")
+	prefixContext := u.v.GetBool(u.br.Protocol() + ".prefixcontext")
+	showContextMulti := u.v.GetBool(u.br.Protocol() + ".showcontextmulti")
 	syntaxHighlighting := u.v.GetString(u.br.Protocol() + ".syntaxhighlighting")
+
 	lexer := ""
 	codeBlockBackTick := false
 	codeBlockTilde := false
@@ -385,7 +404,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 	for _, text := range lines {
 
 		// Remove message thread context prefix for formatting and remember to add it back
-		if !addPrefix && u.v.GetBool(u.br.Protocol()+".prefixcontext") && !u.v.GetBool(u.br.Protocol()+".showcontextmulti") && strings.HasPrefix(text, prefix) {
+		if !addPrefix && prefixContext && !showContextMulti && strings.HasPrefix(text, prefix) {
 			text = strings.TrimPrefix(text, prefix)
 			addPrefix = true
 		}
@@ -393,20 +412,25 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		// TODO: Ideally, we want to read the whole code block and syntax highlight on that, but let's go with per-line for now.
 		text, codeBlockBackTick, codeBlockTilde, lexer = utils.FormatCodeBlockText(text, codeBlockBackTick, codeBlockTilde, lexer, syntaxHighlighting, codeBlockPrefix)
 
-		if text == "" || text == strings.TrimSpace(prefix) || text == strings.TrimSpace(suffix) {
+		if text == "" || text == trimmedPrefix || text == trimmedSuffix {
 			continue
 		}
 
-		if !u.v.GetBool(u.br.Protocol()+".disablemarkdown") && !codeBlockBackTick && !codeBlockTilde {
+		if !disableMarkdown && !codeBlockBackTick && !codeBlockTilde {
 			text = utils.Markdown2irc(text, blockQuoteChar)
 		}
 
-		if !u.v.GetBool(u.br.Protocol()+".disableemoji") && !codeBlockBackTick && !codeBlockTilde {
+		if !disableEmoji && !codeBlockBackTick && !codeBlockTilde {
 			text = emoji.ReplaceAliases(text)
 		}
 
 		if showContext || addPrefix {
-			text = prefix + text + suffix
+			var b strings.Builder
+			b.Grow(len(prefix) + len(text) + len(suffix))
+			b.WriteString(prefix)
+			b.WriteString(text)
+			b.WriteString(suffix)
+			text = b.String()
 			addPrefix = false
 		}
 
@@ -1131,12 +1155,12 @@ func (u *User) prefixContext(channelID, messageID, parentID, event string) strin
 
 	if u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" || u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost+post" {
 		if parentID == "" {
-			return fmt.Sprintf("[@@%s]", messageID)
+			return "[@@" + messageID + "]"
 		}
 		if u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" || parentID == messageID {
-			return fmt.Sprintf("[%s@@%s]", prefixChar, parentID)
+			return "[" + prefixChar + "@@" + "parentID" + "]"
 		}
-		return fmt.Sprintf("[%s@@%s,@@%s]", prefixChar, parentID, messageID)
+		return "[" + prefixChar + "@@" + parentID + ",@@" + messageID + "]"
 	}
 
 	u.msgMapMutex.Lock()
