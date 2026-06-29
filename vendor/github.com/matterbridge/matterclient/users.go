@@ -133,15 +133,15 @@ func (m *Client) GetUsers() map[string]*model.User {
 }
 
 func (m *Client) UpdateUsers() error {
-	idx := 0
-	const batchSize = 200
-
 	var (
-		mmusers []*model.User
-		resp    *model.Response
-		err     error
+		resp *model.Response
+		err  error
 	)
 
+	const batchSize = 200
+
+	idx := 0
+	mmusers := make([]*model.User, 0, batchSize)
 	for {
 		mmusers, resp, err = m.Client.GetUsers(idx, batchSize, "")
 		if err != nil {

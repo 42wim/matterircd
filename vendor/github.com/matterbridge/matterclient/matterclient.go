@@ -327,11 +327,11 @@ func (m *Client) initUser() error {
 		return err
 	}
 
+	const batchSize = 200
+
 	for _, team := range teams {
 		idx := 0
-		const batchSize = 200
 		usermap := make(map[string]*model.User)
-
 		for {
 			mmusers, _, err := m.Client.GetUsersInTeam(team.Id, idx, batchSize, "")
 			if err != nil {

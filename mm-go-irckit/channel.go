@@ -300,22 +300,18 @@ func (ch *channel) SendNamesResponse(u *User) error {
 
 func (ch *channel) BatchJoin(inputusers []*User) error {
 	// TODO: Check if user is already here?
-	var users []*User
+	users := make([]*User, 0, len(inputusers))
 
 	ch.mu.Lock()
-
 	for _, u := range inputusers {
 		if _, exists := ch.usersIdx[u.ID()]; !exists {
+			ch.usersIdx[u.ID()] = u
 			users = append(users, u)
 		}
 	}
-
 	ch.mu.Unlock()
 
 	for _, u := range users {
-		ch.mu.Lock()
-		ch.usersIdx[u.ID()] = u
-		ch.mu.Unlock()
 		u.Lock()
 		u.channels[ch] = struct{}{}
 		u.Unlock()

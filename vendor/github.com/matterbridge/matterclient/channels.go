@@ -208,11 +208,13 @@ func (m *Client) JoinChannel(channelID string) error {
 
 func (m *Client) UpdateChannelsTeam(teamID string) error {
 	var (
-		mmchannels []*model.Channel
-		resp       *model.Response
-		err        error
+		resp *model.Response
+		err  error
 	)
 
+	const batchSize = 200
+
+	mmchannels := make([]*model.Channel, 0, batchSize)
 	for {
 		mmchannels, resp, err = m.Client.GetChannelsForTeamForUser(teamID, m.User.Id, false, "")
 		if err == nil {
@@ -225,10 +227,7 @@ func (m *Client) UpdateChannelsTeam(teamID string) error {
 	}
 
 	idx := 0
-	const batchSize = 200
-
-	var moreChannels []*model.Channel
-
+	moreChannels := make([]*model.Channel, 0, batchSize)
 	for {
 		channels, resp, err := m.Client.GetPublicChannelsForTeam(teamID, idx, batchSize, "")
 		if err != nil {
@@ -296,6 +295,9 @@ func (m *Client) UpdateChannelHeader(channelID string, header string) {
 
 func (m *Client) UpdateLastViewed(channelID string) error {
 	m.logger.Debugf("posting lastview %#v", channelID)
+	if channelID != "pkn6xmxn37rix85w4uurjpkoqo" {
+		m.logger.Debugf("posting lastview %#v", channelID)
+	}
 
 	view := &model.ChannelView{ChannelId: channelID}
 

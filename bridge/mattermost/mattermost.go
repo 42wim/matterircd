@@ -518,13 +518,13 @@ func (m *Mattermost) GetChannelName(channelID string) string {
 func (m *Mattermost) GetChannelUsers(channelID string) ([]*bridge.UserInfo, error) {
 	var (
 		mmusersPaged []*model.User
-		users        []*bridge.UserInfo
 		err          error
 		resp         *model.Response
 	)
 
 	idx := 0
 	const batchSize = 200
+	users := make([]*bridge.UserInfo, 0, batchSize)
 
 	for {
 		mmusersPaged, resp, err = m.mc.Client.GetUsersInChannel(channelID, idx, batchSize, "")
@@ -550,9 +550,10 @@ func (m *Mattermost) GetChannelUsers(channelID string) ([]*bridge.UserInfo, erro
 }
 
 func (m *Mattermost) GetUsers() []*bridge.UserInfo {
-	var users []*bridge.UserInfo
+	mmusers := m.mc.GetUsers()
+	users := make([]*bridge.UserInfo, 0, len(mmusers))
 
-	for _, mmuser := range m.mc.GetUsers() {
+	for _, mmuser := range mmusers {
 		users = append(users, m.createUser(mmuser))
 	}
 
@@ -640,8 +641,6 @@ func (m *Mattermost) GetUserByUsername(username string) *bridge.UserInfo {
 }
 
 func (m *Mattermost) createUser(mmuser *model.User) *bridge.UserInfo {
-	teamID := ""
-
 	if mmuser == nil {
 		return &bridge.UserInfo{}
 	}
@@ -651,14 +650,17 @@ func (m *Mattermost) createUser(mmuser *model.User) *bridge.UserInfo {
 		nick = mmuser.Nickname
 	}
 
-	me := false
-
-	if mmuser.Id == m.mc.User.Id {
-		me = true
+	me := mmuser.Id == m.mc.User.Id
+	teamID := ""
+	if me {
 		teamID = m.mc.Team.ID
 	}
 
-	mentionkeys := mmuser.NotifyProps["mention_keys"]
+	// We only care about mentions for ourselves
+	var mentionKeys []string
+	if keys := mmuser.NotifyProps["mention_keys"]; me && keys != "" {
+		mentionKeys = strings.Split(keys, ",")
+	}
 
 	info := &bridge.UserInfo{
 		Nick:        nick,
@@ -672,7 +674,7 @@ func (m *Mattermost) createUser(mmuser *model.User) *bridge.UserInfo {
 		Username:    mmuser.Username,
 		FirstName:   mmuser.FirstName,
 		LastName:    mmuser.LastName,
-		MentionKeys: strings.Split(mentionkeys, ","),
+		MentionKeys: mentionKeys,
 	}
 
 	return info
@@ -1533,7 +1535,7 @@ func (m *Mattermost) SearchUsers(query string) ([]*bridge.UserInfo, error) {
 		return nil, err
 	}
 
-	var brusers []*bridge.UserInfo
+	brusers := make([]*bridge.UserInfo, 0, len(users))
 
 	for _, u := range users {
 		brusers = append(brusers, m.createUser(u))

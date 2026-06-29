@@ -588,7 +588,7 @@ func (u *User) CreateUserFromInfo(info *bridge.UserInfo) *User {
 }
 
 func (u *User) CreateUsersFromInfo(info []*bridge.UserInfo) []*User {
-	var users []*User
+	users := make([]*User, 0, len(info))
 
 	for _, userinfo := range info {
 		if userinfo.Me {
