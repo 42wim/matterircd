@@ -939,8 +939,9 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		message, err := m.addParentMsg(data.RootId, postfix, m.v.GetInt("mattermost.ShortenRepliesTo"), "@", useUnicode)
 		if err != nil {
 			logger.Errorf("Unable to get parent post for %#v", data) //nolint:govet
+		} else {
+			postfix = message
 		}
-		postfix += message
 	}
 
 	// create new "ghost" user
@@ -1040,14 +1041,12 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		}
 	}
 
-	// msgs := strings.Split(data.Message, "\n")
-	msgs := []string{data.Message}
+	msg := data.Message
+	eventType := rmsg.EventType()
 
 	// add an edited/deleted string when messages are edited/deleted
-	if len(msgs) > 0 && (rmsg.EventType() == model.WebsocketEventPostEdited ||
-		rmsg.EventType() == model.WebsocketEventPostDeleted) {
-
-		if rmsg.EventType() == model.WebsocketEventPostDeleted {
+	if eventType == model.WebsocketEventPostEdited || eventType == model.WebsocketEventPostDeleted {
+		if eventType == model.WebsocketEventPostDeleted {
 			postfix += " \x1d(deleted)\x1d"
 		} else {
 			postfix += " \x1d(edited)\x1d"
@@ -1064,109 +1063,92 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		m.msgParentCache.Remove(data.Id)
 	}
 
-	for _, msg := range msgs {
-		switch {
-		case channelType == "D":
-			event := &bridge.Event{
-				Type: "direct_message",
-			}
+	attachments := data.Attachments()
 
-			if data.Type == "me" {
-				msg = strings.TrimLeft(msg, "*")
-				msg = strings.TrimRight(msg, "*")
-				msg = "\x01ACTION " + msg + " \x01"
-			}
-
-			d := &bridge.DirectMessageEvent{
-				Text:      strings.TrimRight(msg, "\n") + postfix,
-				ChannelID: data.ChannelId,
-				MessageID: data.Id,
-				Event:     rmsg.EventType(),
-				ParentID:  data.RootId,
-			}
-
-			if ghost.Me {
-				d.Sender = ghost
-				d.Receiver = m.getDMUser(dmchannel)
-			} else {
-				d.Sender = m.getDMUser(dmchannel)
-				d.Receiver = ghost
-			}
-
-			if d.Sender == nil || d.Receiver == nil {
-				logger.Errorf("dm: couldn't resolve sender or receiver: %#v", rmsg)
-				return
-			}
-
-			event.Data = d
-
-			m.eventChan <- event
-
-			if data.Type == "me" {
-				break
-			}
-		default:
-			if data.Type == "me" {
-				msg = strings.TrimLeft(msg, "*")
-				msg = strings.TrimRight(msg, "*")
-				msg = "\x01ACTION " + msg + " \x01"
-			} else if data.Type == "slack_attachment" {
-				useFallback := msg == ""
-				// https://docs.slack.dev/tools/node-slack-sdk/reference/web-api/interfaces/MessageAttachment/
-				attachmentMsg := m.parseMessageAttachments(data.Attachments(), useFallback)
-				if msg != "" && attachmentMsg != "" {
-					msg += "\n"
-				}
-				msg += attachmentMsg
-			} else if data.Type == "custom_matterpoll" {
-				pollMsg := parseMatterpollToMsg(data.Attachments(), useUnicode)
-				msg += pollMsg
-			} else if attachments := data.Attachments(); len(attachments) > 0 {
-				useFallback := msg == ""
-				// https://developers.mattermost.com/integrate/reference/message-attachments/
-				attachmentMsg := m.parseMessageAttachments(attachments, useFallback)
-				if msg != "" && attachmentMsg != "" {
-					msg += "\n"
-				}
-				msg += attachmentMsg
-			}
-
-			event := &bridge.Event{
-				Type: "channel_message",
-				Data: &bridge.ChannelMessageEvent{
-					Text:        strings.TrimRight(msg, "\n") + postfix,
-					ChannelID:   data.ChannelId,
-					Sender:      ghost,
-					ChannelType: channelType,
-					MessageID:   data.Id,
-					Event:       rmsg.EventType(),
-					ParentID:    data.RootId,
-				},
-			}
-
-			if !m.v.GetBool("mattermost.disabledefaultmentions") && channelMentionsRegExp.MatchString(data.Message) {
-				messageType := "notice"
-				event = &bridge.Event{
-					Type: "channel_message",
-					Data: &bridge.ChannelMessageEvent{
-						Text:        strings.TrimRight(msg, "\n") + postfix,
-						ChannelID:   data.ChannelId,
-						Sender:      ghost,
-						MessageType: messageType,
-						ChannelType: channelType,
-						MessageID:   data.Id,
-						Event:       rmsg.EventType(),
-						ParentID:    data.RootId,
-					},
-				}
-			}
-
-			m.eventChan <- event
-
-			if data.Type == "me" {
-				break
-			}
+	switch {
+	case data.Type == "me":
+		msg = "\x01ACTION " + strings.Trim(msg, "*") + " \x01"
+	case data.Type == "slack_attachment":
+		useFallback := msg == ""
+		// https://docs.slack.dev/tools/node-slack-sdk/reference/web-api/interfaces/MessageAttachment/
+		attachmentMsg := m.parseMessageAttachments(data.Attachments(), useFallback)
+		if msg == "" {
+			msg = attachmentMsg
+		} else if attachmentMsg != "" {
+			msg = msg + "\n" + attachmentMsg
 		}
+	case data.Type == "custom_matterpoll":
+		pollMsg := parseMatterpollToMsg(data.Attachments(), useUnicode)
+		msg += pollMsg
+	case len(attachments) > 0:
+		useFallback := msg == ""
+		// https://developers.mattermost.com/integrate/reference/message-attachments/
+		attachmentMsg := m.parseMessageAttachments(attachments, useFallback)
+		if msg == "" {
+			msg = attachmentMsg
+		} else if attachmentMsg != "" {
+			msg = msg + "\n" + attachmentMsg
+		}
+	}
+
+	if strings.HasSuffix(msg, "\n") { //nolint:gosimple
+		msg = msg[:len(msg)-1]
+	}
+	if postfix != "" {
+		msg += postfix
+	}
+
+	switch {
+	case channelType == "D":
+		event := &bridge.Event{
+			Type: "direct_message",
+		}
+
+		d := &bridge.DirectMessageEvent{
+			Text:      msg,
+			ChannelID: data.ChannelId,
+			MessageID: data.Id,
+			Event:     eventType,
+			ParentID:  data.RootId,
+		}
+
+		if ghost.Me {
+			d.Sender = ghost
+			d.Receiver = m.getDMUser(dmchannel)
+		} else {
+			d.Sender = m.getDMUser(dmchannel)
+			d.Receiver = ghost
+		}
+
+		if d.Sender == nil || d.Receiver == nil {
+			logger.Errorf("dm: couldn't resolve sender or receiver: %#v", rmsg)
+			return
+		}
+
+		event.Data = d
+
+		m.eventChan <- event
+	default:
+		messageType := ""
+		if !m.v.GetBool("mattermost.disabledefaultmentions") && channelMentionsRegExp.MatchString(data.Message) {
+			messageType = "notice"
+		}
+
+		event := &bridge.Event{
+			Type: "channel_message",
+			Data: &bridge.ChannelMessageEvent{
+				Text:        msg,
+				ChannelID:   data.ChannelId,
+				Sender:      ghost,
+				MessageType: messageType,
+				ChannelType: channelType,
+				MessageID:   data.Id,
+				Event:       eventType,
+				ParentID:    data.RootId,
+			},
+		}
+
+		m.eventChan <- event
 	}
 
 	if len(data.FileIds) > 0 {
