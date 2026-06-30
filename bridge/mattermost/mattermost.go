@@ -781,13 +781,13 @@ func (m *Mattermost) wsActionPostSkip(rmsg *model.WebSocketEvent) bool {
 	}
 
 	msgID := data.Id
-	postfix := ""
+	var sbSuffix strings.Builder
 	if data.RootId != "" {
 		msgID = data.RootId
 		if !m.v.GetBool("mattermost.hidereplies") {
-			newMsg, err := m.addParentMsg(data.RootId, postfix, shortenMsgLen, "@", useUnicode)
+			parentReplyMsg, err := m.getParentReplyMsg(data.RootId, shortenMsgLen, "@", useUnicode)
 			if err == nil {
-				postfix += newMsg
+				sbSuffix.WriteString(parentReplyMsg)
 			}
 		}
 	}
@@ -803,7 +803,12 @@ func (m *Mattermost) wsActionPostSkip(rmsg *model.WebSocketEvent) bool {
 	}
 
 	lastSentMsg = maybeShorten(lastSentMsg, 90, "@", useUnicode)
-	m.msgLastSentCache.Add(msgID, channel+": "+lastSentMsg+postfix)
+	var sb strings.Builder
+	sb.WriteString(channel)
+	sb.WriteString(": ")
+	sb.WriteString(lastSentMsg)
+	sb.WriteString(sbSuffix.String())
+	m.msgLastSentCache.Add(msgID, sb.String())
 
 	logger.Debugf("message is sent from this matterircd instance, not relaying %#v", data.Message)
 	return true
@@ -865,7 +870,7 @@ var markdownReplacer = strings.NewReplacer(
 	"~~~", "`",
 )
 
-func (m *Mattermost) addParentMsg(parentID string, msg string, newLen int, uncounted string, unicode bool) (string, error) {
+func (m *Mattermost) getParentReplyMsg(parentID string, newLen int, uncounted string, unicode bool) (string, error) {
 	var replyMessage string
 
 	disableMarkdown := m.v.GetBool("mattermost.disablemarkdown")
@@ -885,7 +890,7 @@ func (m *Mattermost) addParentMsg(parentID string, msg string, newLen int, uncou
 			parentPost, _, err = m.mc.Client.GetPost(parentID, "")
 		}
 		if err != nil {
-			return msg, err
+			return "", err
 		}
 
 		msg := parentPost.Message
@@ -921,10 +926,7 @@ func (m *Mattermost) addParentMsg(parentID string, msg string, newLen int, uncou
 		logger.Debugf("Found saved reply for parent post %s, using:%s", parentID, replyMessage)
 	}
 
-	if strings.HasSuffix(msg, "\n") { //nolint:gosimple
-		msg = msg[:len(msg)-1]
-	}
-	return msg + replyMessage, nil
+	return replyMessage, nil
 }
 
 var (
@@ -953,13 +955,13 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 
 	useUnicode := m.v.GetBool("mattermost.unicode")
 
-	postfix := ""
+	var sbSuffix strings.Builder
 	if !m.v.GetBool("mattermost.hidereplies") && data.RootId != "" {
-		message, err := m.addParentMsg(data.RootId, postfix, m.v.GetInt("mattermost.ShortenRepliesTo"), "@", useUnicode)
+		parentReplyMsg, err := m.getParentReplyMsg(data.RootId, m.v.GetInt("mattermost.ShortenRepliesTo"), "@", useUnicode)
 		if err != nil {
 			logger.Errorf("Unable to get parent post for %#v", data) //nolint:govet
 		} else {
-			postfix = message
+			sbSuffix.WriteString(parentReplyMsg)
 		}
 	}
 
@@ -1060,15 +1062,13 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		}
 	}
 
-	msg := data.Message
 	eventType := rmsg.EventType()
-
 	// add an edited/deleted string when messages are edited/deleted
 	if eventType == model.WebsocketEventPostEdited || eventType == model.WebsocketEventPostDeleted {
 		if eventType == model.WebsocketEventPostDeleted {
-			postfix += " \x1d(deleted)\x1d"
+			sbSuffix.WriteString(" \x1d(deleted)\x1d")
 		} else {
-			postfix += " \x1d(edited)\x1d"
+			sbSuffix.WriteString(" \x1d(edited)\x1d")
 		}
 
 		// check if we have an edited direct message (channels have __)
@@ -1082,39 +1082,48 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		m.msgParentCache.Remove(data.Id)
 	}
 
+	msg := data.Message
+	var sbMsg strings.Builder
 	attachments := data.Attachments()
 
 	switch {
 	case data.Type == "me":
-		msg = "\x01ACTION " + msg + postfix + "\x01"
+		sbMsg.WriteString("\x01ACTION ")
+		sbMsg.WriteString(msg)
+		sbMsg.WriteString(sbSuffix.String())
+		sbMsg.WriteString("\x01")
 	case data.Type == "slack_attachment":
 		useFallback := msg == ""
 		// https://docs.slack.dev/tools/node-slack-sdk/reference/web-api/interfaces/MessageAttachment/
-		attachmentMsg := m.parseMessageAttachments(data.Attachments(), useFallback)
+		attachmentMsg := m.parseMessageAttachments(attachments, useFallback)
 		if msg == "" {
-			msg = attachmentMsg
+			sbMsg.WriteString(attachmentMsg)
 		} else if attachmentMsg != "" {
-			msg = msg + "\n" + attachmentMsg
+			sbMsg.WriteString(msg)
+			sbMsg.WriteString("\n")
+			sbMsg.WriteString(attachmentMsg)
 		}
 	case data.Type == "custom_matterpoll":
-		pollMsg := parseMatterpollToMsg(data.Attachments(), useUnicode)
-		msg += pollMsg
+		pollMsg := parseMatterpollToMsg(attachments, useUnicode)
+		sbMsg.WriteString(msg)
+		sbMsg.WriteString(pollMsg)
 	case len(attachments) > 0:
 		useFallback := msg == ""
 		// https://developers.mattermost.com/integrate/reference/message-attachments/
 		attachmentMsg := m.parseMessageAttachments(attachments, useFallback)
 		if msg == "" {
-			msg = attachmentMsg
+			sbMsg.WriteString(attachmentMsg)
 		} else if attachmentMsg != "" {
-			msg = msg + "\n" + attachmentMsg
+			sbMsg.WriteString(msg)
+			sbMsg.WriteString("\n")
+			sbMsg.WriteString(attachmentMsg)
 		}
+	default:
+		sbMsg.WriteString(msg)
 	}
 
-	if strings.HasSuffix(msg, "\n") { //nolint:gosimple
-		msg = msg[:len(msg)-1]
-	}
-	if postfix != "" && data.Type != "me" {
-		msg += postfix
+	if sbSuffix.Len() > 0 && data.Type != "me" {
+		sbMsg.WriteString(sbSuffix.String())
 	}
 
 	switch {
@@ -1124,7 +1133,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		}
 
 		d := &bridge.DirectMessageEvent{
-			Text:      msg,
+			Text:      sbMsg.String(),
 			ChannelID: data.ChannelId,
 			MessageID: data.Id,
 			Event:     eventType,
@@ -1156,7 +1165,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		event := &bridge.Event{
 			Type: "channel_message",
 			Data: &bridge.ChannelMessageEvent{
-				Text:        msg,
+				Text:        sbMsg.String(),
 				ChannelID:   data.ChannelId,
 				Sender:      ghost,
 				MessageType: messageType,
@@ -1446,13 +1455,13 @@ func (m *Mattermost) handleReactionEvent(rmsg *model.WebSocketEvent) {
 	}
 
 	var parentUser *bridge.UserInfo
-	postfix := ""
+	var sbSuffix strings.Builder
 	if !m.v.GetBool("mattermost.hidereplies") {
-		message, err := m.addParentMsg(reaction.PostId, postfix, m.v.GetInt("mattermost.ShortenRepliesTo"), "@", m.v.GetBool("mattermost.unicode"))
+		parentReplyMsg, err := m.getParentReplyMsg(reaction.PostId, m.v.GetInt("mattermost.ShortenRepliesTo"), "@", m.v.GetBool("mattermost.unicode"))
 		if err != nil {
 			logger.Errorf("Unable to get parent post for %#v", reaction)
 		}
-		postfix += message
+		sbSuffix.WriteString(parentReplyMsg)
 	}
 
 	parentID := reaction.PostId
@@ -1473,7 +1482,7 @@ func (m *Mattermost) handleReactionEvent(rmsg *model.WebSocketEvent) {
 				Reaction:    reaction.EmojiName,
 				ChannelType: channelType,
 				ParentUser:  parentUser,
-				Message:     postfix,
+				Message:     sbSuffix.String(),
 				ParentID:    parentID,
 			},
 		}
@@ -1488,7 +1497,7 @@ func (m *Mattermost) handleReactionEvent(rmsg *model.WebSocketEvent) {
 				Reaction:    reaction.EmojiName,
 				ChannelType: channelType,
 				ParentUser:  parentUser,
-				Message:     postfix,
+				Message:     sbSuffix.String(),
 				ParentID:    parentID,
 			},
 		}
