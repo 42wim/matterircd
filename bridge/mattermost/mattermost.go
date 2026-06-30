@@ -858,6 +858,13 @@ func maybeShorten(msg string, newLen int, uncounted string, unicode bool) string
 	return b.String()
 }
 
+var markdownReplacer = strings.NewReplacer(
+	"\n", " ",
+	// Since we're combining multi lines into one, make code blocks single code/monospace
+	"```", "`",
+	"~~~", "`",
+)
+
 func (m *Mattermost) addParentMsg(parentID string, msg string, newLen int, uncounted string, unicode bool) (string, error) {
 	var replyMessage string
 
@@ -892,13 +899,12 @@ func (m *Mattermost) addParentMsg(parentID string, msg string, newLen int, uncou
 				}
 			}
 		}
-		msg = strings.ReplaceAll(msg, "\n", " ")
-		// Since we're combining multi lines into one, make code blocks single code/monospace
-		msg = strings.ReplaceAll(msg, "```", "`")
-		msg = strings.ReplaceAll(msg, "~~~", "`")
 
 		if !disableMarkdown {
+			msg = markdownReplacer.Replace(msg)
 			msg = utils.Markdown2irc(msg, blockquoteChar)
+		} else {
+			msg = strings.ReplaceAll(msg, "\n", " ")
 		}
 
 		if !disableEmoji {
