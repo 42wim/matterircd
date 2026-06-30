@@ -70,9 +70,18 @@ func FormatCodeBlockText(text string, codeBlockBackTick bool, codeBlockTilde boo
 	if err := quick.Highlight(&b, text, lexer, formatter, style); err == nil {
 		bs := b.Bytes()
 		// Work around https://github.com/alecthomas/chroma/issues/716
+		const resetSeq = "\x1b[0m"
+		hasReset := bytes.HasSuffix(bs, []byte(resetSeq))
+		if hasReset {
+			bs = bs[:len(bs)-len(resetSeq)]
+		}
 		if len(bs) > 0 && bs[len(bs)-1] == '\n' {
 			bs = bs[:len(bs)-1]
 		}
+		if hasReset {
+			bs = append(bs, resetSeq...)
+		}
+
 		sb.Write(bs)
 	} else {
 		sb.WriteString(text)
