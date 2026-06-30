@@ -17,47 +17,46 @@ func FormatCodeBlockText(text string, codeBlockBackTick bool, codeBlockTilde boo
 		}
 	}
 
-	// skip empty lines for anything not part of a code block.
-	if text == "" {
-		if codeBlockBackTick || codeBlockTilde {
-			return linePrefix + " ", codeBlockBackTick, codeBlockTilde, lexer
+	trimmedText := strings.TrimLeft(text, " \t")
+
+	handleToggle := func(prefix string, isActive bool) string {
+		if isActive {
+			lexer = strings.TrimSpace(strings.TrimPrefix(trimmedText, prefix))
+			if lexer != "" {
+				return linePrefix + "\x16" + lexer + "\x16"
+			}
+			return ""
 		}
-		return "", codeBlockBackTick, codeBlockTilde, lexer
+		lexer = ""
+		return ""
 	}
 
-	if strings.HasPrefix(text, "```") && !codeBlockTilde {
+	if strings.HasPrefix(trimmedText, "```") && !codeBlockTilde {
 		codeBlockBackTick = !codeBlockBackTick
-		newText := ""
-		if codeBlockBackTick {
-			lexer = strings.TrimSpace(strings.TrimPrefix(text, "```"))
-			if lexer != "" {
-				newText = strings.Replace(text, "``` ", linePrefix, 1)
-				newText = strings.Replace(newText, "```", linePrefix, 1)
-				newText = strings.Replace(newText, lexer, "\x16"+lexer+"\x16", 1)
-			}
-		}
-		return newText, codeBlockBackTick, codeBlockTilde, lexer
-	}
-	if strings.HasPrefix(text, "~~~") && !codeBlockBackTick {
-		codeBlockTilde = !codeBlockTilde
-		newText := ""
-		if codeBlockTilde {
-			lexer = strings.TrimSpace(strings.TrimPrefix(text, "~~~"))
-			if lexer != "" {
-				newText = strings.Replace(text, "~~~ ", linePrefix, 1)
-				newText = strings.Replace(newText, "~~~", linePrefix, 1)
-				newText = strings.Replace(newText, lexer, "\x16"+lexer+"\x16", 1)
-			}
-		}
-		return newText, codeBlockBackTick, codeBlockTilde, lexer
+		return handleToggle("```", codeBlockBackTick), codeBlockBackTick, codeBlockTilde, lexer
 	}
 
-	if !(codeBlockBackTick || codeBlockTilde) {
+	if strings.HasPrefix(trimmedText, "~~~") && !codeBlockBackTick {
+		codeBlockTilde = !codeBlockTilde
+		return handleToggle("~~~", codeBlockTilde), codeBlockBackTick, codeBlockTilde, lexer
+	}
+
+	codeBlock := codeBlockBackTick || codeBlockTilde
+	if !codeBlock {
 		return text, codeBlockBackTick, codeBlockTilde, lexer
 	}
 
+	var sb strings.Builder
+	sb.WriteString(linePrefix)
+
+	if text == "" {
+		sb.WriteByte(' ')
+		return sb.String(), codeBlockBackTick, codeBlockTilde, lexer
+	}
+
 	if syntaxHighlighting == "" || lexer == "" {
-		return linePrefix + text, codeBlockBackTick, codeBlockTilde, lexer
+		sb.WriteString(text)
+		return sb.String(), codeBlockBackTick, codeBlockTilde, lexer
 	}
 
 	formatter := "terminal256"
@@ -69,12 +68,17 @@ func FormatCodeBlockText(text string, codeBlockBackTick bool, codeBlockTilde boo
 
 	var b bytes.Buffer
 	if err := quick.Highlight(&b, text, lexer, formatter, style); err == nil {
-		text = linePrefix + b.String()
+		bs := b.Bytes()
 		// Work around https://github.com/alecthomas/chroma/issues/716
-		text = strings.ReplaceAll(text, "\n", "")
+		if len(bs) > 0 && bs[len(bs)-1] == '\n' {
+			bs = bs[:len(bs)-1]
+		}
+		sb.Write(bs)
+	} else {
+		sb.WriteString(text)
 	}
 
-	return text, codeBlockBackTick, codeBlockTilde, lexer
+	return sb.String(), codeBlockBackTick, codeBlockTilde, lexer
 }
 
 // Use static initialisation to optimize.
