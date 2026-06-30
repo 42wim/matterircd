@@ -21,8 +21,9 @@ func FormatCodeBlockText(text string, codeBlockBackTick bool, codeBlockTilde boo
 
 	handleToggle := func(prefix string, isActive bool) string {
 		if isActive {
-			lexer = strings.TrimSpace(strings.TrimPrefix(trimmedText, prefix))
-			if lexer != "" {
+			newLexer := strings.TrimSpace(strings.TrimPrefix(trimmedText, prefix))
+			if newLexer != "" {
+				lexer = newLexer
 				return linePrefix + "\x16" + lexer + "\x16"
 			}
 			return ""
