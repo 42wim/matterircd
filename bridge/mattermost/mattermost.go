@@ -1183,7 +1183,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		m.handleFileEvent(channelType, ghost, &data, rmsg)
 	}
 
-	logger.Debugf("handleWsActionPost() user %s sent %#v", m.mc.GetUser(data.UserId).Username, data.Message)
+	logger.Debugf("handleWsActionPost() user %s sent %#v", ghost.Nick, data.Message)
 	logger.Debugf("%#v", data) //nolint:govet
 }
 
@@ -1222,7 +1222,7 @@ func (m *Mattermost) handleFileEvent(channelType string, ghost *bridge.UserInfo,
 	}
 
 	if len(fileEvent.Files) == 0 {
-		logger.Debugf("handleFileEvent() user %s sent 0 files %#v", m.mc.GetUser(data.UserId).Username, data.FileIds)
+		logger.Debugf("handleFileEvent() user %s sent 0 files %#v", ghost.Nick, data.FileIds)
 		return
 	}
 
@@ -1246,7 +1246,7 @@ func (m *Mattermost) handleFileEvent(channelType string, ghost *bridge.UserInfo,
 		m.eventChan <- event
 	}
 
-	logger.Debugf("handleFileEvent() user %s sent %d files %#v", m.mc.GetUser(data.UserId).Username, len(fileEvent.Files), data.FileIds)
+	logger.Debugf("handleFileEvent() user %s sent %d files %#v", ghost.Nick, len(fileEvent.Files), data.FileIds)
 }
 
 func (m *Mattermost) wsActionPostJoinLeave(data *model.Post, extraProps map[string]interface{}) {
