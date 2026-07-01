@@ -220,50 +220,59 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 	codeBlockBackTick := false
 	codeBlockTilde := false
 	text = wordwrap.String(text, maxlen)
-	lines := strings.Split(text, "\n")
 	addPrefix := false
-	for _, text := range lines {
+	for {
+		line, rest, found := strings.Cut(text, "\n")
 
 		// Remove message thread context prefix for formatting and remember to add it back
-		if !addPrefix && prefixContext && !showContextMulti && strings.HasPrefix(text, prefix) {
-			text = strings.TrimPrefix(text, prefix)
+		if !addPrefix && prefixContext && !showContextMulti && strings.HasPrefix(line, prefix) {
+			line = strings.TrimPrefix(line, prefix)
 			addPrefix = true
 		}
 
 		// TODO: Ideally, we want to read the whole code block and syntax highlight on that, but let's go with per-line for now.
-		text, codeBlockBackTick, codeBlockTilde, lexer = utils.FormatCodeBlockText(text, codeBlockBackTick, codeBlockTilde, lexer, syntaxHighlighting, codeBlockPrefix)
+		line, codeBlockBackTick, codeBlockTilde, lexer = utils.FormatCodeBlockText(line, codeBlockBackTick, codeBlockTilde, lexer, syntaxHighlighting, codeBlockPrefix)
 
-		if text == "" || text == trimmedPrefix || text == trimmedSuffix {
+		if line == "" || line == trimmedPrefix || line == trimmedSuffix {
+			if !found {
+				break
+			}
+			text = rest
 			continue
 		}
 
 		if !disableMarkdown && !codeBlockBackTick && !codeBlockTilde {
-			text = utils.Markdown2irc(text, blockQuoteChar)
+			line = utils.Markdown2irc(line, blockQuoteChar)
 		}
 
 		if !disableEmoji && !codeBlockBackTick && !codeBlockTilde {
-			text = emoji.ReplaceAliases(text)
+			line = emoji.ReplaceAliases(line)
 		}
 
 		if showContext || addPrefix {
 			var b strings.Builder
-			b.Grow(len(prefix) + len(text) + len(suffix))
+			b.Grow(len(prefix) + len(line) + len(suffix))
 			b.WriteString(prefix)
-			b.WriteString(text)
+			b.WriteString(line)
 			b.WriteString(suffix)
-			text = b.String()
+			line = b.String()
 			addPrefix = false
 		}
 
 		if event.Sender.Me {
 			if event.Receiver.Me {
-				u.MsgSpoofUser(u, u.Nick, text, len(text))
+				u.MsgSpoofUser(u, u.Nick, line, len(line))
 			} else {
-				u.MsgSpoofUser(u, event.Receiver.Nick, text, len(text))
+				u.MsgSpoofUser(u, event.Receiver.Nick, line, len(line))
 			}
 		} else {
-			u.MsgSpoofUser(u.createUserFromInfo(event.Sender), u.Nick, text, len(text))
+			u.MsgSpoofUser(u.createUserFromInfo(event.Sender), u.Nick, line, len(line))
 		}
+
+		if !found {
+			break
+		}
+		text = rest
 	}
 
 	if !u.v.GetBool(u.br.Protocol() + ".disableautoview") {
@@ -411,47 +420,56 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 	codeBlockBackTick := false
 	codeBlockTilde := false
 	text = wordwrap.String(text, maxlen)
-	lines := strings.Split(text, "\n")
 	addPrefix := false
-	for _, text := range lines {
+	for {
+		line, rest, found := strings.Cut(text, "\n")
 
 		// Remove message thread context prefix for formatting and remember to add it back
-		if !addPrefix && prefixContext && !showContextMulti && strings.HasPrefix(text, prefix) {
-			text = strings.TrimPrefix(text, prefix)
+		if !addPrefix && prefixContext && !showContextMulti && strings.HasPrefix(line, prefix) {
+			line = strings.TrimPrefix(line, prefix)
 			addPrefix = true
 		}
 
 		// TODO: Ideally, we want to read the whole code block and syntax highlight on that, but let's go with per-line for now.
-		text, codeBlockBackTick, codeBlockTilde, lexer = utils.FormatCodeBlockText(text, codeBlockBackTick, codeBlockTilde, lexer, syntaxHighlighting, codeBlockPrefix)
+		line, codeBlockBackTick, codeBlockTilde, lexer = utils.FormatCodeBlockText(line, codeBlockBackTick, codeBlockTilde, lexer, syntaxHighlighting, codeBlockPrefix)
 
-		if text == "" || text == trimmedPrefix || text == trimmedSuffix {
+		if line == "" || line == trimmedPrefix || line == trimmedSuffix {
+			if !found {
+				break
+			}
+			text = rest
 			continue
 		}
 
 		if !disableMarkdown && !codeBlockBackTick && !codeBlockTilde {
-			text = utils.Markdown2irc(text, blockQuoteChar)
+			line = utils.Markdown2irc(line, blockQuoteChar)
 		}
 
 		if !disableEmoji && !codeBlockBackTick && !codeBlockTilde {
-			text = emoji.ReplaceAliases(text)
+			line = emoji.ReplaceAliases(line)
 		}
 
 		if showContext || addPrefix {
 			var b strings.Builder
-			b.Grow(len(prefix) + len(text) + len(suffix))
+			b.Grow(len(prefix) + len(line) + len(suffix))
 			b.WriteString(prefix)
-			b.WriteString(text)
+			b.WriteString(line)
 			b.WriteString(suffix)
-			text = b.String()
+			line = b.String()
 			addPrefix = false
 		}
 
 		switch event.MessageType {
 		case "notice":
-			ch.SpoofNotice(nick, text, len(text))
+			ch.SpoofNotice(nick, line, len(line))
 		default:
-			ch.SpoofMessage(nick, text, len(text))
+			ch.SpoofMessage(nick, line, len(line))
 		}
+
+		if !found {
+			break
+		}
+		text = rest
 	}
 
 	if !u.v.GetBool(u.br.Protocol() + ".disableautoview") {
@@ -936,25 +954,35 @@ func (u *User) MsgUser(toUser *User, msg string) {
 	})
 }
 
-func (u *User) MsgSpoofUser(sender *User, rcvuser string, msg string, maxlen ...int) {
+func (u *User) MsgSpoofUser(sender *User, rcvuser string, text string, maxlen ...int) {
 	if len(maxlen) == 0 {
-		msg = wordwrap.String(msg, 440)
+		text = wordwrap.String(text, 440)
 	} else {
-		msg = wordwrap.String(msg, maxlen[0])
+		text = wordwrap.String(text, maxlen[0])
 	}
-	lines := strings.Split(msg, "\n")
-	for _, l := range lines {
-		u.Encode(&irc.Message{
-			Prefix: &irc.Prefix{
-				Name: sender.Nick,
-				User: sender.Nick,
-				Host: sender.Host,
-			},
-			Command:       irc.PRIVMSG,
-			Params:        []string{rcvuser},
-			Trailing:      l,
-			EmptyTrailing: true,
-		})
+
+	prefix := irc.Prefix{
+		Name: sender.Nick,
+		User: sender.Nick,
+		Host: sender.Host,
+	}
+	msg := irc.Message{
+		Prefix:        &prefix,
+		Command:       irc.PRIVMSG,
+		Params:        []string{rcvuser},
+		EmptyTrailing: true,
+	}
+
+	for {
+		line, rest, found := strings.Cut(text, "\n")
+		msg.Trailing = line
+
+		u.Encode(&msg) //nolint:errcheck
+
+		if !found {
+			break
+		}
+		text = rest
 	}
 }
 

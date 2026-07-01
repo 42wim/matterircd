@@ -129,23 +129,30 @@ func (ch *channel) ID() string {
 
 func (ch *channel) Message(from *User, text string) {
 	text = wordwrap.String(text, 440)
-	lines := strings.Split(text, "\n")
-	for _, l := range lines {
-		msg := &irc.Message{
-			Prefix:        from.Prefix(),
-			Command:       irc.PRIVMSG,
-			Params:        []string{ch.name},
-			Trailing:      l,
-			EmptyTrailing: true,
-		}
+
+	msg := irc.Message{
+		Prefix:        from.Prefix(),
+		Command:       irc.PRIVMSG,
+		Params:        []string{ch.name},
+		EmptyTrailing: true,
+	}
+
+	for {
+		line, rest, found := strings.Cut(text, "\n")
+		msg.Trailing = line
 
 		ch.mu.RLock()
 
 		for _, to := range ch.usersIdx {
-			to.Encode(msg)
+			to.Encode(&msg) //nolint:errcheck
 		}
 
 		ch.mu.RUnlock()
+
+		if !found {
+			break
+		}
+		text = rest
 	}
 }
 
@@ -445,23 +452,35 @@ func (ch *channel) Spoof(from string, text string, cmd string, maxlen ...int) {
 	} else {
 		text = wordwrap.String(text, maxlen[0])
 	}
-	lines := strings.Split(text, "\n")
-	for _, l := range lines {
-		msg := &irc.Message{
-			Prefix:        &irc.Prefix{Name: from, User: from, Host: from},
-			Command:       cmd,
-			Params:        []string{ch.name},
-			Trailing:      l,
-			EmptyTrailing: true,
-		}
+
+	prefix := irc.Prefix{
+		Name: from,
+		User: from,
+		Host: from,
+	}
+	msg := irc.Message{
+		Prefix:        &prefix,
+		Command:       cmd,
+		Params:        []string{ch.name},
+		EmptyTrailing: true,
+	}
+
+	for {
+		line, rest, found := strings.Cut(text, "\n")
+		msg.Trailing = line
 
 		ch.mu.RLock()
 
 		for _, to := range ch.usersIdx {
-			to.Encode(msg)
+			to.Encode(&msg) //nolint:errcheck
 		}
 
 		ch.mu.RUnlock()
+
+		if !found {
+			break
+		}
+		text = rest
 	}
 }
 
