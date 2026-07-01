@@ -1082,7 +1082,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		m.msgParentCache.Remove(data.Id)
 	}
 
-	msg := data.Message
+	msg := strings.TrimRight(data.Message, "\n")
 	var sbMsg strings.Builder
 	attachments := data.Attachments()
 
@@ -1889,10 +1889,7 @@ func (m *Mattermost) parseMessageAttachments(attachments []*model.SlackAttachmen
 		}
 	}
 
-	msg := b.String()
-	if strings.HasSuffix(msg, "\n") { //nolint:gosimple
-		msg = msg[:len(msg)-1]
-	}
+	msg := strings.TrimRight(b.String(), "\n")
 	return msg
 }
 
