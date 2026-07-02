@@ -1781,21 +1781,28 @@ func (m *Mattermost) parseMessageAttachments(attachments []*model.SlackAttachmen
 			lexer := ""
 			codeBlockBackTick := false
 			codeBlockTilde := false
-			lines := strings.Split(attachment.Text, "\n")
-			for _, text := range lines {
-				text, codeBlockBackTick, codeBlockTilde, lexer = utils.FormatCodeBlockText(text, codeBlockBackTick, codeBlockTilde, lexer, syntaxHighlighting, codeBlockPrefix)
+			text := attachment.Text
+			for {
+				line, rest, found := strings.Cut(text, "\n")
+
+				line, codeBlockBackTick, codeBlockTilde, lexer = utils.FormatCodeBlockText(line, codeBlockBackTick, codeBlockTilde, lexer, syntaxHighlighting, codeBlockPrefix)
 
 				if !disableMarkdown && !codeBlockBackTick && !codeBlockTilde {
-					text = utils.Markdown2irc(text, blockquoteChar)
+					line = utils.Markdown2irc(line, blockquoteChar)
 				}
 
 				if !disableEmoji && !codeBlockBackTick && !codeBlockTilde {
-					text = emoji.ReplaceAliases(text)
+					line = emoji.ReplaceAliases(line)
 				}
 
 				b.WriteString(prefix)
-				b.WriteString(text)
+				b.WriteString(line)
 				b.WriteByte('\n')
+
+				if !found {
+					break
+				}
+				text = rest
 			}
 		}
 		if attachment.ImageURL != "" {
@@ -1862,27 +1869,34 @@ func (m *Mattermost) parseMessageAttachments(attachments []*model.SlackAttachmen
 				lexer := ""
 				codeBlockBackTick := false
 				codeBlockTilde := false
-				lines := strings.Split(val1Str, "\n")
-				for _, text := range lines {
-					text, codeBlockBackTick, codeBlockTilde, lexer = utils.FormatCodeBlockText(text, codeBlockBackTick, codeBlockTilde, lexer, syntaxHighlighting, codeBlockPrefix)
+				text := val1Str
+				for {
+					line, rest, found := strings.Cut(text, "\n")
+
+					line, codeBlockBackTick, codeBlockTilde, lexer = utils.FormatCodeBlockText(line, codeBlockBackTick, codeBlockTilde, lexer, syntaxHighlighting, codeBlockPrefix)
 
 					if !disableMarkdown && !codeBlockBackTick && !codeBlockTilde {
-						text = utils.Markdown2irc(text, blockquoteChar)
+						line = utils.Markdown2irc(line, blockquoteChar)
 					}
 
 					if !disableEmoji && !codeBlockBackTick && !codeBlockTilde {
-						text = emoji.ReplaceAliases(text)
+						line = emoji.ReplaceAliases(line)
 					}
 
 					// Ignore duplicate content when field value is the same as fallback
 					// e.g. https://github.com/jenkinsci/mattermost-plugin/pull/18
-					if useFallback && fallbackText != "" && text == fallbackText {
+					if useFallback && fallbackText != "" && line == fallbackText {
 						continue
 					}
 
 					b.WriteString(prefix)
-					b.WriteString(text)
+					b.WriteString(line)
 					b.WriteByte('\n')
+
+					if !found {
+						break
+					}
+					text = rest
 				}
 				i++
 			}
