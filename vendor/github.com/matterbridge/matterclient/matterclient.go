@@ -609,11 +609,25 @@ func (m *Client) checkAlive(ctx context.Context) {
 
 			return
 		case <-ticker.C:
+			var err error
+
 			// check if session still is valid
-			err := m.doCheckAlive()
+			for i := 0; i < 3; i++ {
+				err = m.doCheckAlive()
+				if err == nil {
+					break
+				}
+
+				if i < 2 {
+					m.logger.Warnf("alive check failed, retrying %d/3: %s", i+1, err)
+					time.Sleep(time.Second * 2)
+				}
+			}
+
 			if err != nil {
 				m.logger.Errorf("connection not alive: %s", err)
 				m.aliveChan <- false
+				continue
 			}
 
 			m.aliveChan <- true
