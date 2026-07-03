@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -83,7 +84,7 @@ type Client struct {
 	aliveChan   chan bool
 	loginCancel context.CancelFunc
 
-	lastWsActivity time.Time
+	lastWsActivity atomic.Int64
 }
 
 var Matterircd bool
@@ -568,7 +569,7 @@ func (m *Client) wsConnect() {
 
 	m.WsClient.Listen()
 
-	m.lastWsActivity = time.Now()
+	m.lastWsActivity.Store(time.Now().Unix())
 
 	m.logger.Debug("WsClient: connected")
 
@@ -581,9 +582,8 @@ func (m *Client) doCheckAlive() error {
 		return fmt.Errorf("websocket listen error: %w", m.WsClient.ListenError)
 	}
 
-	m.RLock()
-	timeSinceActivity := time.Since(m.lastWsActivity)
-	m.RUnlock()
+	lastActiveUnix := m.lastWsActivity.Load()
+	timeSinceActivity := time.Since(time.Unix(lastActiveUnix, 0))
 
 	if timeSinceActivity < 90*time.Second {
 		m.logger.Debugf("websocket is active (last event %v ago), skipping HTTP ping", timeSinceActivity.Round(time.Second))
@@ -596,9 +596,7 @@ func (m *Client) doCheckAlive() error {
 		return fmt.Errorf("fallback HTTP ping failed: %w", err)
 	}
 
-	m.Lock()
-	m.lastWsActivity = time.Now()
-	m.Unlock()
+	m.lastWsActivity.Store(time.Now().Unix())
 
 	return nil
 }
@@ -679,9 +677,7 @@ func (m *Client) WsReceiver(ctx context.Context) {
 				continue
 			}
 
-			m.Lock()
-			m.lastWsActivity = time.Now()
-			m.Unlock()
+			m.lastWsActivity.Store(time.Now().Unix())
 
 			m.logger.Debugf("WsReceiver event: %#v", event)
 
@@ -706,9 +702,7 @@ func (m *Client) WsReceiver(ctx context.Context) {
 				continue
 			}
 
-			m.Lock()
-			m.lastWsActivity = time.Now()
-			m.Unlock()
+			m.lastWsActivity.Store(time.Now().Unix())
 
 			m.logger.Debugf("WsReceiver response: %#v", response)
 
