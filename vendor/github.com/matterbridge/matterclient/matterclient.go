@@ -82,7 +82,8 @@ type Client struct {
 	lruCache    *lru.Cache
 	aliveChan   chan bool
 	loginCancel context.CancelFunc
-	lastPong    time.Time
+
+	lastWsActivity time.Time
 }
 
 var Matterircd bool
@@ -567,7 +568,7 @@ func (m *Client) wsConnect() {
 
 	m.WsClient.Listen()
 
-	m.lastPong = time.Now()
+	m.lastWsActivity = time.Now()
 
 	m.logger.Debug("WsClient: connected")
 
@@ -576,25 +577,28 @@ func (m *Client) wsConnect() {
 }
 
 func (m *Client) doCheckAlive() error {
-	if _, _, err := m.Client.GetPing(); err != nil {
-		return err
+	if m.WsClient != nil && m.WsClient.ListenError != nil {
+		return fmt.Errorf("websocket listen error: %w", m.WsClient.ListenError)
 	}
 
-	if m.reconnectBusy {
+	m.RLock()
+	timeSinceActivity := time.Since(m.lastWsActivity)
+	m.RUnlock()
+
+	if timeSinceActivity < 90*time.Second {
+		m.logger.Debugf("websocket is active (last event %v ago), skipping HTTP ping", timeSinceActivity.Round(time.Second))
 		return nil
 	}
 
-	if m.WsClient.ListenError == nil {
-		m.WsClient.SendMessage("ping", nil)
-	} else {
-		m.logger.Errorf("got a listen error: %#v", m.WsClient.ListenError)
+	m.logger.Debug("websocket has been quiet, falling back to HTTP GetPing")
 
-		return m.WsClient.ListenError
+	if _, _, err := m.Client.GetPing(); err != nil {
+		return fmt.Errorf("fallback HTTP ping failed: %w", err)
 	}
 
-	if time.Since(m.lastPong) > 90*time.Second {
-		return errors.New("no pong received in 90 seconds")
-	}
+	m.Lock()
+	m.lastWsActivity = time.Now()
+	m.Unlock()
 
 	return nil
 }
@@ -675,6 +679,10 @@ func (m *Client) WsReceiver(ctx context.Context) {
 				continue
 			}
 
+			m.Lock()
+			m.lastWsActivity = time.Now()
+			m.Unlock()
+
 			m.logger.Debugf("WsReceiver event: %#v", event)
 
 			eventType := event.EventType()
@@ -698,13 +706,11 @@ func (m *Client) WsReceiver(ctx context.Context) {
 				continue
 			}
 
-			m.logger.Debugf("WsReceiver response: %#v", response)
+			m.Lock()
+			m.lastWsActivity = time.Now()
+			m.Unlock()
 
-			if text, ok := response.Data["text"].(string); ok {
-				if text == "pong" {
-					m.lastPong = time.Now()
-				}
-			}
+			m.logger.Debugf("WsReceiver response: %#v", response)
 
 			m.parseResponse(response)
 		case <-m.WsClient.PingTimeoutChannel:
