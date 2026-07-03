@@ -344,7 +344,7 @@ func (m *Client) initUser() error {
 		existingTeam, exists := m.OtherTeams[team.Id]
 		m.Unlock()
 
-		if exists && time.Since(existingTeam.LastUserSync) < 15*time.Minute {
+		if exists && time.Since(existingTeam.LastUserSync) < 20*time.Minute {
                         m.logger.Debugf("skipping user fetch for team %s: cache is only %v old", team.Name, time.Since(existingTeam.LastUserSync).Round(time.Second))
                         m.Lock()
                         if team.Name == m.Credentials.Team {
@@ -696,7 +696,12 @@ func (m *Client) WsReceiver(ctx context.Context) {
 				m.parseMessage(msg)
 			}
 
-			m.MessageChan <- msg
+			select {
+			case m.MessageChan <- msg:
+				// Message sent successfully
+			case <-time.After(15*time.Second):
+				m.logger.Errorf("CRITICAL: MessageChan is blocked! Downstream processor is hung. Dropping event: %s", event.EventType())
+			}
 		case response := <-m.WsClient.ResponseChannel:
 			if response == nil || !response.IsValid() {
 				continue
