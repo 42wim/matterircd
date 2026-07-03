@@ -156,38 +156,44 @@ func (m *Mattermost) handleWsMessage(quitChan chan struct{}) {
 
 			switch message.Raw.EventType() {
 			case model.WebsocketEventPosted:
-				m.handleWsActionPost(message.Raw)
+				go m.handleWsActionPost(message.Raw)
 			case model.WebsocketEventPostEdited:
-				m.handleWsActionPost(message.Raw)
+				go m.handleWsActionPost(message.Raw)
 			case model.WebsocketEventPostDeleted:
-				m.handleWsActionPost(message.Raw)
+				go m.handleWsActionPost(message.Raw)
 			case model.WebsocketEventEphemeralMessage:
-				m.handleWsActionPost(message.Raw)
+				go m.handleWsActionPost(message.Raw)
 			case model.WebsocketEventUserRemoved:
-				m.handleWsActionUserRemoved(message.Raw)
+				go m.handleWsActionUserRemoved(message.Raw)
 			case model.WebsocketEventUserAdded:
 				// check if we have the users/channels in our cache. If not update
-				m.checkWsActionMessage(message.Raw, updateChannelsThrottle)
-				m.handleWsActionUserAdded(message.Raw)
+				go func(raw *model.WebSocketEvent) {
+					m.checkWsActionMessage(raw, updateChannelsThrottle)
+					m.handleWsActionUserAdded(raw)
+				}(message.Raw)
 			case model.WebsocketEventChannelCreated:
 				// check if we have the users/channels in our cache. If not update
-				m.checkWsActionMessage(message.Raw, updateChannelsThrottle)
-				m.handleWsActionChannelCreated(message.Raw)
+				go func(raw *model.WebSocketEvent) {
+					m.checkWsActionMessage(raw, updateChannelsThrottle)
+					m.handleWsActionChannelCreated(raw)
+				}(message.Raw)
 			case model.WebsocketEventChannelDeleted:
 				// check if we have the users/channels in our cache. If not update
-				m.checkWsActionMessage(message.Raw, updateChannelsThrottle)
-				m.handleWsActionChannelDeleted(message.Raw)
+				go func(raw *model.WebSocketEvent) {
+					m.checkWsActionMessage(raw, updateChannelsThrottle)
+					m.handleWsActionChannelDeleted(raw)
+				}(message.Raw)
 			case model.WebsocketEventChannelRestored:
 				// check if we have the users/channels in our cache. If not update
-				m.checkWsActionMessage(message.Raw, updateChannelsThrottle)
+				go m.checkWsActionMessage(message.Raw, updateChannelsThrottle)
 			case model.WebsocketEventChannelUpdated:
-				m.handleWsActionPost(message.Raw)
+				go m.handleWsActionPost(message.Raw)
 			case model.WebsocketEventUserUpdated:
-				m.handleWsActionUserUpdated(message.Raw)
+				go m.handleWsActionUserUpdated(message.Raw)
 			case model.WebsocketEventStatusChange:
-				m.handleStatusChangeEvent(message.Raw)
+				go m.handleStatusChangeEvent(message.Raw)
 			case model.WebsocketEventReactionAdded, model.WebsocketEventReactionRemoved:
-				m.handleReactionEvent(message.Raw)
+				go m.handleReactionEvent(message.Raw)
 			}
 		}
 	}
