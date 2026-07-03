@@ -41,6 +41,9 @@ type Team struct {
 	Channels     []*model.Channel
 	MoreChannels []*model.Channel
 	Users        map[string]*model.User
+
+	LastUserSync    time.Time
+	LastChannelSync time.Time
 }
 
 type Message struct {
@@ -59,7 +62,7 @@ type Client struct {
 	*Credentials
 
 	Team          *Team
-	OtherTeams    []*Team
+	OtherTeams    map[string]*Team
 	Client        *model.Client4
 	User          *model.User
 	Users         map[string]*model.User
@@ -147,8 +150,8 @@ func (m *Client) Login() error {
 
 	if m.Team == nil {
 		validTeamNames := make([]string, len(m.OtherTeams))
-		for i, t := range m.OtherTeams {
-			validTeamNames[i] = t.Team.Name
+		for _, t := range m.OtherTeams {
+			validTeamNames = append(validTeamNames, t.Team.Name)
 		}
 
 		return fmt.Errorf("Team '%s' not found in %v", m.Credentials.Team, validTeamNames)
@@ -319,6 +322,11 @@ func (m *Client) serverAlive(b *backoff.Backoff) error {
 // initialize user and teams
 // nolint:funlen
 func (m *Client) initUser() error {
+	m.Lock()
+	if m.OtherTeams == nil {
+		m.OtherTeams = make(map[string]*Team)
+	}
+	m.Unlock()
 
 	// we only load all team data on initial login.
 	// all other updates are for channels from our (primary) team only.
@@ -330,6 +338,22 @@ func (m *Client) initUser() error {
 	const batchSize = 200
 
 	for _, team := range teams {
+		m.Lock()
+		existingTeam, exists := m.OtherTeams[team.Id]
+		m.Unlock()
+
+		if exists && time.Since(existingTeam.LastUserSync) < 15*time.Minute {
+                        m.logger.Debugf("skipping user fetch for team %s: cache is only %v old", team.Name, time.Since(existingTeam.LastUserSync).Round(time.Second))
+                        m.Lock()
+                        if team.Name == m.Credentials.Team {
+                                m.Team = existingTeam
+                        }
+                        m.Unlock()
+                        continue
+                }
+
+		m.logger.Debugf("fetching users for team %s (cache expired or missing)", team.Name)
+
 		idx := 0
 		usermap := make(map[string]*model.User)
 		for {
@@ -352,6 +376,13 @@ func (m *Client) initUser() error {
 		}
 		m.logger.Debugf("found %d users in team %s", len(usermap), team.Name)
 
+		t := &Team{
+			Team:         team,
+			Users:        usermap,
+			ID:           team.Id,
+			LastUserSync: time.Now(),
+		}
+
 		m.Lock()
 
 		// add all users
@@ -359,13 +390,7 @@ func (m *Client) initUser() error {
 			m.Users[k] = v
 		}
 
-		t := &Team{
-			Team:  team,
-			Users: usermap,
-			ID:    team.Id,
-		}
-
-		m.OtherTeams = append(m.OtherTeams, t)
+		m.OtherTeams[team.Id] = t
 
 		if team.Name == m.Credentials.Team {
 			m.Team = t
@@ -638,6 +663,12 @@ func (m *Client) WsReceiver(ctx context.Context) {
 
 			m.logger.Debugf("WsReceiver event: %#v", event)
 
+			eventType := event.EventType()
+
+			if eventType == model.WebsocketEventNewUser || eventType == model.WebsocketEventUserUpdated {
+                                go m.syncSingleUser(event)
+                        }
+
 			msg := &Message{
 				Raw:  event,
 				Team: m.Credentials.Team,
@@ -776,4 +807,37 @@ func (m *Client) antiIdle(ctx context.Context, channelID string, interval int) {
 			m.UpdateLastViewed(channelID)
 		}
 	}
+}
+
+func (m *Client) syncSingleUser(event *model.WebSocketEvent) {
+        userID, ok := event.GetData()["user_id"].(string)
+        if !ok {
+                return
+        }
+
+        user, _, err := m.Client.GetUser(userID, "")
+        if err != nil {
+                m.logger.Errorf("syncSingleUser failed to get user %s: %v", userID, err)
+                return
+        }
+
+        m.logger.Debugf("dynamically caching updated/new user: %s", user.Username)
+
+        m.Lock()
+        defer m.Unlock()
+
+        if m.Users == nil {
+                m.Users = make(map[string]*model.User)
+        }
+        m.Users[user.Id] = user
+
+        if teamID, hasTeam := event.GetData()["team_id"].(string); hasTeam {
+                if team, exists := m.OtherTeams[teamID]; exists {
+                        if team.Users == nil {
+                                team.Users = make(map[string]*model.User)
+                        }
+                        team.Users[user.Id] = user
+                        m.logger.Debugf("added/updated user %s in map for team %s", user.Username, team.Team.Name)
+                }
+        }
 }
