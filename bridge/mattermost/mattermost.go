@@ -129,7 +129,10 @@ func (m *Mattermost) loginToMattermost(onWsConnect func()) (*matterclient.Client
 	quitChan := make(chan struct{})
 	m.quitChan = append(m.quitChan, quitChan)
 
-	go m.handleWsMessage(quitChan)
+	// Start a pool of 10 concurrent workers
+	for i := 0; i < 10; i++ {
+		go m.handleWsMessage(quitChan)
+	}
 
 	return mc, nil
 }
@@ -156,44 +159,38 @@ func (m *Mattermost) handleWsMessage(quitChan chan struct{}) {
 
 			switch message.Raw.EventType() {
 			case model.WebsocketEventPosted:
-				go m.handleWsActionPost(message.Raw)
+				m.handleWsActionPost(message.Raw)
 			case model.WebsocketEventPostEdited:
-				go m.handleWsActionPost(message.Raw)
+				m.handleWsActionPost(message.Raw)
 			case model.WebsocketEventPostDeleted:
-				go m.handleWsActionPost(message.Raw)
+				m.handleWsActionPost(message.Raw)
 			case model.WebsocketEventEphemeralMessage:
-				go m.handleWsActionPost(message.Raw)
+				m.handleWsActionPost(message.Raw)
 			case model.WebsocketEventUserRemoved:
-				go m.handleWsActionUserRemoved(message.Raw)
+				m.handleWsActionUserRemoved(message.Raw)
 			case model.WebsocketEventUserAdded:
 				// check if we have the users/channels in our cache. If not update
-				go func(raw *model.WebSocketEvent) {
-					m.checkWsActionMessage(raw, updateChannelsThrottle)
-					m.handleWsActionUserAdded(raw)
-				}(message.Raw)
+				m.checkWsActionMessage(message.Raw, updateChannelsThrottle)
+				m.handleWsActionUserAdded(message.Raw)
 			case model.WebsocketEventChannelCreated:
 				// check if we have the users/channels in our cache. If not update
-				go func(raw *model.WebSocketEvent) {
-					m.checkWsActionMessage(raw, updateChannelsThrottle)
-					m.handleWsActionChannelCreated(raw)
-				}(message.Raw)
+				m.checkWsActionMessage(message.Raw, updateChannelsThrottle)
+				m.handleWsActionChannelCreated(message.Raw)
 			case model.WebsocketEventChannelDeleted:
 				// check if we have the users/channels in our cache. If not update
-				go func(raw *model.WebSocketEvent) {
-					m.checkWsActionMessage(raw, updateChannelsThrottle)
-					m.handleWsActionChannelDeleted(raw)
-				}(message.Raw)
+				m.checkWsActionMessage(message.Raw, updateChannelsThrottle)
+				m.handleWsActionChannelDeleted(message.Raw)
 			case model.WebsocketEventChannelRestored:
 				// check if we have the users/channels in our cache. If not update
-				go m.checkWsActionMessage(message.Raw, updateChannelsThrottle)
+				m.checkWsActionMessage(message.Raw, updateChannelsThrottle)
 			case model.WebsocketEventChannelUpdated:
-				go m.handleWsActionPost(message.Raw)
+				m.handleWsActionPost(message.Raw)
 			case model.WebsocketEventUserUpdated:
-				go m.handleWsActionUserUpdated(message.Raw)
+				m.handleWsActionUserUpdated(message.Raw)
 			case model.WebsocketEventStatusChange:
-				go m.handleStatusChangeEvent(message.Raw)
+				m.handleStatusChangeEvent(message.Raw)
 			case model.WebsocketEventReactionAdded, model.WebsocketEventReactionRemoved:
-				go m.handleReactionEvent(message.Raw)
+				m.handleReactionEvent(message.Raw)
 			}
 		}
 	}
