@@ -41,7 +41,9 @@ type Team struct {
 	Channels     []*model.Channel
 	MoreChannels []*model.Channel
 	Users        map[string]*model.User
-	LastUserSync time.Time
+
+	LastUserSync    time.Time
+	LastChannelSync time.Time
 }
 
 type Message struct {

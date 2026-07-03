@@ -3,6 +3,7 @@ package matterclient
 import (
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/mattermost/mattermost-server/v6/model"
 )
@@ -231,6 +232,15 @@ func (m *Client) JoinChannel(channelID string) error {
 }
 
 func (m *Client) UpdateChannelsTeam(teamID string) error {
+	m.RLock()
+	if team, exists := m.OtherTeams[teamID]; exists {
+		if time.Since(team.LastChannelSync) < 30*time.Minute {
+			m.RUnlock()
+			m.logger.Debugf("skipping channel fetch for team %s: cache is only %v old", teamID, time.Since(team.LastChannelSync).Round(time.Second))
+			return nil
+		}
+	}
+	m.RUnlock()
 
 	var (
 		resp *model.Response
@@ -273,12 +283,10 @@ func (m *Client) UpdateChannelsTeam(teamID string) error {
 	m.Lock()
 	defer m.Unlock()
 
-	for idx, t := range m.OtherTeams {
-		if t.ID == teamID {
-			m.OtherTeams[idx].Channels = mmchannels
-			m.OtherTeams[idx].MoreChannels = moreChannels
-			break
-		}
+	if team, exists := m.OtherTeams[teamID]; exists {
+		team.Channels = mmchannels
+		team.MoreChannels = moreChannels
+		team.LastChannelSync = time.Now()
 	}
 
 	return nil
