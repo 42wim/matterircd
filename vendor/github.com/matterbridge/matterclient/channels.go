@@ -114,8 +114,32 @@ func (m *Client) GetChannelTeamID(id string) string {
 	m.RLock()
 	defer m.RUnlock()
 
-	for _, t := range append(m.OtherTeams, m.Team) {
-		for _, channel := range append(t.Channels, t.MoreChannels...) {
+	if m.Team != nil {
+		for _, channel := range m.Team.Channels {
+			if channel.Id == id {
+				return channel.TeamId
+			}
+		}
+
+		for _, channel := range m.Team.MoreChannels {
+			if channel.Id == id {
+				return channel.TeamId
+			}
+		}
+	}
+
+	for _, t := range m.OtherTeams {
+		if m.Team != nil && t.ID == m.Team.ID {
+			continue
+		}
+
+		for _, channel := range t.Channels {
+			if channel.Id == id {
+				return channel.TeamId
+			}
+		}
+
+		for _, channel := range t.MoreChannels {
 			if channel.Id == id {
 				return channel.TeamId
 			}
@@ -207,6 +231,7 @@ func (m *Client) JoinChannel(channelID string) error {
 }
 
 func (m *Client) UpdateChannelsTeam(teamID string) error {
+
 	var (
 		resp *model.Response
 		err  error
@@ -295,9 +320,6 @@ func (m *Client) UpdateChannelHeader(channelID string, header string) {
 
 func (m *Client) UpdateLastViewed(channelID string) error {
 	m.logger.Debugf("posting lastview %#v", channelID)
-	if channelID != "pkn6xmxn37rix85w4uurjpkoqo" {
-		m.logger.Debugf("posting lastview %#v", channelID)
-	}
 
 	view := &model.ChannelView{ChannelId: channelID}
 
