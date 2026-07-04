@@ -85,6 +85,7 @@ type Client struct {
 	loginCancel context.CancelFunc
 
 	lastWsActivity atomic.Int64
+	connectedAt    atomic.Int64
 }
 
 var Matterircd bool
@@ -344,7 +345,7 @@ func (m *Client) initUser() error {
 		existingTeam, exists := m.OtherTeams[team.Id]
 		m.Unlock()
 
-		if exists && time.Since(existingTeam.LastUserSync) < 20*time.Minute {
+		if exists && time.Since(existingTeam.LastUserSync) < 15*time.Minute {
                         m.logger.Debugf("skipping user fetch for team %s: cache is only %v old", team.Name, time.Since(existingTeam.LastUserSync).Round(time.Second))
                         m.Lock()
                         if team.Name == m.Credentials.Team {
@@ -570,6 +571,7 @@ func (m *Client) wsConnect() {
 	m.WsClient.Listen()
 
 	m.lastWsActivity.Store(time.Now().Unix())
+	m.connectedAt.Store(time.Now().Unix())
 
 	m.logger.Debug("WsClient: connected")
 
@@ -585,15 +587,27 @@ func (m *Client) doCheckAlive() error {
 	lastActiveUnix := m.lastWsActivity.Load()
 	timeSinceActivity := time.Since(time.Unix(lastActiveUnix, 0))
 
-	if timeSinceActivity < 90*time.Second {
-		m.logger.Debugf("websocket is active (last event %v ago), skipping HTTP ping", timeSinceActivity.Round(time.Second))
+	if timeSinceActivity < 20*time.Second {
+		m.logger.Debugf("websocket is active (last event %v ago), skipping ping", timeSinceActivity.Round(time.Second))
 		return nil
 	}
 
-	m.logger.Debug("websocket has been quiet, falling back to HTTP GetPing")
+	connectedUnix := m.connectedAt.Load()
+	uptime := time.Since(time.Unix(connectedUnix, 0)).Round(time.Second)
 
+	if timeSinceActivity < 55*time.Second {
+		// Send a ping down the websocket to try to keep it active/alive
+		if m.WsClient != nil {
+			m.logger.Debugf("websocket has been quiet (last event %v ago; up %s), sending websocket ping", timeSinceActivity.Round(time.Second), uptime)
+			m.WsClient.SendMessage("ping", nil)
+			return nil
+		}
+	}
+
+	m.logger.Debugf("websocket has been quiet (last event %v ago; up %s), falling back to HTTP GetPing", timeSinceActivity.Round(time.Second), uptime)
 	if _, _, err := m.Client.GetPing(); err != nil {
-		return fmt.Errorf("fallback HTTP ping failed: %w", err)
+		m.logger.Warnf("fallback HTTP ping failed (up %s): %w", uptime, err)
+		return fmt.Errorf("fallback HTTP ping failed (up %s): %w", uptime, err)
 	}
 
 	m.lastWsActivity.Store(time.Now().Unix())
@@ -602,7 +616,7 @@ func (m *Client) doCheckAlive() error {
 }
 
 func (m *Client) checkAlive(ctx context.Context) {
-	ticker := time.NewTicker(time.Second * 45)
+	ticker := time.NewTicker(time.Second * 30)
 
 	for {
 		select {
@@ -699,7 +713,8 @@ func (m *Client) WsReceiver(ctx context.Context) {
 			select {
 			case m.MessageChan <- msg:
 				// Message sent successfully
-			case <-time.After(15*time.Second):
+			default:
+				// Message channel buffer full, drop/discard
 				m.logger.Errorf("CRITICAL: MessageChan is blocked! Downstream processor is hung. Dropping event: %s", event.EventType())
 			}
 		case response := <-m.WsClient.ResponseChannel:
@@ -707,9 +722,9 @@ func (m *Client) WsReceiver(ctx context.Context) {
 				continue
 			}
 
-			m.lastWsActivity.Store(time.Now().Unix())
-
 			m.logger.Debugf("WsReceiver response: %#v", response)
+
+			m.lastWsActivity.Store(time.Now().Unix())
 
 			m.parseResponse(response)
 		case <-m.WsClient.PingTimeoutChannel:

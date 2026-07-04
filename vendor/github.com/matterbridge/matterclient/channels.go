@@ -234,7 +234,7 @@ func (m *Client) JoinChannel(channelID string) error {
 func (m *Client) UpdateChannelsTeam(teamID string) error {
 	m.RLock()
 	if team, exists := m.OtherTeams[teamID]; exists {
-		if time.Since(team.LastChannelSync) < 20*time.Minute {
+		if time.Since(team.LastChannelSync) < 30*time.Minute {
 			m.RUnlock()
 			m.logger.Debugf("skipping channel fetch for team %s: cache is only %v old", teamID, time.Since(team.LastChannelSync).Round(time.Second))
 			return nil
