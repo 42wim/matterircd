@@ -86,6 +86,9 @@ type Client struct {
 
 	lastWsActivity atomic.Int64
 	connectedAt    atomic.Int64
+
+	UserStatusMutex sync.RWMutex
+	UserStatuses    map[string]string
 }
 
 var Matterircd bool
@@ -109,13 +112,14 @@ func New(login string, pass string, team string, server string, mfatoken string)
 	cache, _ := lru.New(500)
 
 	return &Client{
-		Credentials: cred,
-		MessageChan: make(chan *Message, 100),
-		Users:       make(map[string]*model.User),
-		rootLogger:  rootLogger,
-		lruCache:    cache,
-		logger:      rootLogger.WithFields(logrus.Fields{"prefix": "matterclient"}),
-		aliveChan:   make(chan bool),
+		Credentials:  cred,
+		MessageChan:  make(chan *Message, 100),
+		Users:        make(map[string]*model.User),
+		UserStatuses: make(map[string]string),
+		rootLogger:   rootLogger,
+		lruCache:     cache,
+		logger:       rootLogger.WithFields(logrus.Fields{"prefix": "matterclient"}),
+		aliveChan:    make(chan bool),
 	}
 }
 
@@ -173,6 +177,11 @@ func (m *Client) Login() error {
 	m.logger.Debug("starting wsreceiver")
 
 	go m.WsReceiver(ctx)
+
+	if m.WsClient != nil {
+		m.logger.Debug("requesting initial user statuses for cache")
+		m.WsClient.GetStatuses()
+	}
 
 	if m.OnWsConnect != nil {
 		m.logger.Debug("executing OnWsConnect()")
@@ -586,6 +595,7 @@ func (m *Client) doCheckAlive() error {
 
 	connectedUnix := m.connectedAt.Load()
 	uptime := time.Since(time.Unix(connectedUnix, 0)).Round(time.Second)
+
 	lastActiveUnix := m.lastWsActivity.Load()
 	timeSinceActivity := time.Since(time.Unix(lastActiveUnix, 0))
 
@@ -690,9 +700,9 @@ func (m *Client) WsReceiver(ctx context.Context) {
 				continue
 			}
 
-			m.lastWsActivity.Store(time.Now().Unix())
-
 			m.logger.Debugf("WsReceiver event: %#v", event)
+
+			m.lastWsActivity.Store(time.Now().Unix())
 
 			eventType := event.EventType()
 

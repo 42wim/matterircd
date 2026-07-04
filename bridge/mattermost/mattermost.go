@@ -1406,6 +1406,8 @@ func (m *Mattermost) handleStatusChangeEvent(rmsg *model.WebSocketEvent) {
 		return
 	}
 
+	m.mc.SetUserStatus(info.UserId, info.Status)
+
 	event := &bridge.Event{
 		Type: "status_change",
 		Data: &bridge.StatusChangeEvent{

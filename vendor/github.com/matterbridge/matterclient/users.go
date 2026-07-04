@@ -13,64 +13,61 @@ func (m *Client) GetNickName(userID string) string {
 }
 
 func (m *Client) GetStatus(userID string) string {
+	m.UserStatusMutex.RLock()
+	status, ok := m.UserStatuses[userID]
+	m.UserStatusMutex.RUnlock()
+	if ok {
+		return status
+	}
+
 	res, _, err := m.Client.GetUserStatus(userID, "")
 	if err != nil {
-		return ""
+		return "offline"
 	}
 
-	if res.Status == model.StatusAway {
-		return "away"
-	}
-
-	if res.Status == model.StatusOnline {
-		return "online"
-	}
-
-	return "offline"
+	return m.SetUserStatus(userID, res.Status)
 }
 
 func (m *Client) GetStatuses() map[string]string {
 	statuses := make(map[string]string, len(m.Users))
+	var missingIDs []string
+
+	m.UserStatusMutex.RLock()
+	for id := range m.Users {
+		if status, ok := m.UserStatuses[id]; ok {
+			statuses[id] = status
+		} else {
+			missingIDs = append(missingIDs, id)
+		}
+	}
+	m.UserStatusMutex.RUnlock()
+
+	if len(missingIDs) == 0 {
+		return statuses
+	}
 
 	const batchSize = 5000
-	batch := make([]string, 0, batchSize)
+	for i := 0; i < len(missingIDs); i += batchSize {
+		end := i + batchSize
+		if end > len(missingIDs) {
+			end = len(missingIDs)
+		}
 
-	// Inline helper to handle the API call and mapping for a specific batch
-	processBatch := func(ids []string) error {
-		res, _, err := m.Client.GetUsersStatusesByIds(ids)
+		batch := missingIDs[i:end]
+		res, _, err := m.Client.GetUsersStatusesByIds(batch)
 		if err != nil {
-			return err
+			continue
 		}
 
-		for _, status := range res {
-			switch status.Status {
-			case model.StatusOnline:
-				statuses[status.UserId] = "online"
-			case model.StatusAway:
-				statuses[status.UserId] = "away"
-			default:
-				statuses[status.UserId] = "offline"
-			}
-		}
-		return nil
-	}
-
-	for id := range m.Users {
-		batch = append(batch, id)
-
-		// Once we hit the batch limit, execute the API call
-		if len(batch) == batchSize {
-			if err := processBatch(batch); err != nil {
-				return statuses
-			}
-			// Reset the batch slice length to 0, while keeping its underlying capacity
-			batch = batch[:0]
+		for _, st := range res {
+			statuses[st.UserId] = m.SetUserStatus(st.UserId, st.Status)
 		}
 	}
 
-	// Catch any remaining IDs that didn't cleanly fill up the final batch
-	if len(batch) > 0 {
-		_ = processBatch(batch)
+	for _, id := range missingIDs {
+		if _, ok := statuses[id]; !ok {
+			statuses[id] = "offline"
+		}
 	}
 
 	return statuses
@@ -130,6 +127,25 @@ func (m *Client) GetUsers() map[string]*model.User {
 	}
 
 	return users
+}
+
+func (m *Client) SetUserStatus(userID string, rawStatus string) string {
+	statusStr := "offline"
+	switch rawStatus {
+	case model.StatusOnline:
+		statusStr = "online"
+	case model.StatusAway:
+		statusStr = "away"
+	}
+
+	m.UserStatusMutex.Lock()
+	if m.UserStatuses == nil {
+		m.UserStatuses = make(map[string]string)
+	}
+	m.UserStatuses[userID] = statusStr
+	m.UserStatusMutex.Unlock()
+
+	return statusStr
 }
 
 func (m *Client) UpdateUsers() error {
