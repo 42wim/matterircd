@@ -94,32 +94,36 @@ func FormatCodeBlockText(text string, codeBlockBackTick bool, codeBlockTilde boo
 // Use static initialisation to optimize.
 // Bold & Italic - https://www.markdownguide.org/basic-syntax#bold-and-italic
 var boldItalicRegExp = []*regexp.Regexp{
-	regexp.MustCompile(`(?:\*\*\*)+?(.+?)(?:\*\*\*)+?`),
-	regexp.MustCompile(`\b(?:\_\_\_)+?(.+?)(?:\_\_\_)+?\b`),
-	regexp.MustCompile(`\b(?:\_\_\*)+?(.+?)(?:\*\_\_)+?\b`),
-	regexp.MustCompile(`\b(?:\*\*\_)+?(.+?)(?:\_\*\*)+?\b`),
+	regexp.MustCompile(`\*\*\*([^\*]+)\*\*\*`),
+	regexp.MustCompile(`\b\_\_\_([^\_]+)\_\_\_\b`),
 }
 
 // Bold - https://www.markdownguide.org/basic-syntax#bold
 var boldRegExp = []*regexp.Regexp{
-	regexp.MustCompile(`(?:\*\*)+?(.+?)(?:\*\*)+?`),
-	regexp.MustCompile(`\b(?:\_\_)+?(.+?)(?:\_\_)+?\b`),
+	regexp.MustCompile(`\*\*([^\*]+)\*\*`),
+	regexp.MustCompile(`\b\_\_([^\_]+)\_\_\b`),
 }
 
 // Italic - https://www.markdownguide.org/basic-syntax#italic
 var italicRegExp = []*regexp.Regexp{
-	regexp.MustCompile(`(?:\*)+?([^\*]+?)(?:\*)+?`),
-	regexp.MustCompile(`\b(?:\_)+?([^_]+?)(?:\_)+?\b`),
+	regexp.MustCompile(`\*([^\*]+)\*`),
+	regexp.MustCompile(`\b\_([^\_]+)\_\b`),
 }
 
 // Code / Monospace - https://markdownguide.offshoot.io/basic-syntax/#code
 var codeRegExp = []*regexp.Regexp{
-	regexp.MustCompile("(?:`)+?([^`]+?)(?:`)+?"),
+	regexp.MustCompile("`+([^`]+)`+"),
 }
 
 const blockQuoteCharDefault = ">"
 
 func Markdown2irc(msg string, blockQuoteChar string) string {
+	// Safety valve: Prevent CPU hangs on massive copy-paste blocks (e.g. log files).
+	// IRC splits messages at 512 bytes anyway, so formatting massive blocks is wasted CPU.
+	if len(msg) > 4096 {
+		return msg
+	}
+
 	if !strings.ContainsAny(msg, "*_`>") {
 		return msg
 	}
@@ -127,33 +131,25 @@ func Markdown2irc(msg string, blockQuoteChar string) string {
 	// Bold & Italic 0x02+0x1d
 	if strings.ContainsAny(msg, "*_") {
 		for _, re := range boldItalicRegExp {
-			if re.MatchString(msg) {
-				msg = re.ReplaceAllString(msg, "\x02\x1d$1\x1d\x02")
-			}
+			msg = re.ReplaceAllString(msg, "\x02\x1d$1\x1d\x02")
 		}
 
 		// Bold 0x02
 		for _, re := range boldRegExp {
-			if re.MatchString(msg) {
-				msg = re.ReplaceAllString(msg, "\x02$1\x02")
-			}
+			msg = re.ReplaceAllString(msg, "\x02$1\x02")
 		}
 
 		// Italic 0x1d
 		for _, re := range italicRegExp {
-			if re.MatchString(msg) {
-				msg = re.ReplaceAllString(msg, "\x1d$1\x1d")
-			}
+			msg = re.ReplaceAllString(msg, "\x1d$1\x1d")
 		}
 	}
 
 	// Code / Monospace 0x11
 	if strings.Contains(msg, "`") {
 		for _, re := range codeRegExp {
-			if re.MatchString(msg) {
-				// Not all IRC clients support monospace (0x11) so keep the fence and make it bold as well
-				msg = re.ReplaceAllString(msg, "`\x11\x02\x030,14$1\x03\x02\x11`")
-			}
+			// Not all IRC clients support monospace (0x11) so keep the fence and make it bold as well
+			msg = re.ReplaceAllString(msg, "`\x11\x02\x030,14$1\x03\x02\x11`")
 		}
 	}
 
