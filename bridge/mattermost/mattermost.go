@@ -1761,7 +1761,11 @@ func (m *Mattermost) parseMessageAttachments(attachments []*model.SlackAttachmen
 
 		if attachment.AuthorName != "" {
 			b.WriteString(prefix)
-			b.WriteString(attachment.AuthorName)
+			authorName := attachment.AuthorName
+			if !disableEmoji {
+				authorName = emoji.ReplaceAliases(authorName)
+			}
+			b.WriteString(authorName)
 			if attachment.AuthorLink != "" {
 				b.WriteString(spaceChar)
 				b.WriteString("(")
@@ -1773,7 +1777,11 @@ func (m *Mattermost) parseMessageAttachments(attachments []*model.SlackAttachmen
 		if attachment.Title != "" {
 			b.WriteString(prefix)
 			b.WriteByte('\x02')
-			b.WriteString(attachment.Title)
+			title := attachment.Title
+			if !disableEmoji {
+				title = emoji.ReplaceAliases(title)
+			}
+			b.WriteString(title)
 			b.WriteByte('\x02')
 			if attachment.TitleLink != "" {
 				b.WriteString(" (\x1d")
@@ -1835,7 +1843,13 @@ func (m *Mattermost) parseMessageAttachments(attachments []*model.SlackAttachmen
 
 				b.WriteString(prefix)
 				b.WriteByte('\x02')
-				b.WriteString(fmt.Sprintf("%-30s %s", field.Title, nextField.Title))
+				title := field.Title
+				nextTitle := nextField.Title
+				if !disableEmoji {
+					title = emoji.ReplaceAliases(title)
+					nextTitle = emoji.ReplaceAliases(nextTitle)
+				}
+				b.WriteString(fmt.Sprintf("%-30s %s", title, nextTitle))
 				b.WriteByte('\x02')
 				b.WriteByte('\n')
 
@@ -1856,6 +1870,14 @@ func (m *Mattermost) parseMessageAttachments(attachments []*model.SlackAttachmen
 						v2 = val2Lines[j]
 					}
 					b.WriteString(prefix)
+					if !disableMarkdown {
+						v1 = utils.Markdown2irc(v1, blockquoteChar)
+						v2 = utils.Markdown2irc(v2, blockquoteChar)
+					}
+					if !disableEmoji {
+						v1 = emoji.ReplaceAliases(v1)
+						v2 = emoji.ReplaceAliases(v2)
+					}
 					b.WriteString(fmt.Sprintf("%-30s %s", v1, v2))
 					b.WriteByte('\n')
 				}
@@ -1867,7 +1889,11 @@ func (m *Mattermost) parseMessageAttachments(attachments []*model.SlackAttachmen
 				if field.Title != "" {
 					b.WriteString(prefix)
 					b.WriteByte('\x02')
-					b.WriteString(field.Title)
+					title := field.Title
+					if !disableEmoji {
+						title = emoji.ReplaceAliases(title)
+					}
+					b.WriteString(title)
 					b.WriteByte('\x02')
 					b.WriteByte('\n')
 				}
