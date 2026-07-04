@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -82,7 +83,9 @@ type Client struct {
 	lruCache    *lru.Cache
 	aliveChan   chan bool
 	loginCancel context.CancelFunc
-	lastPong    time.Time
+
+	lastWsActivity atomic.Int64
+	connectedAt    atomic.Int64
 }
 
 var Matterircd bool
@@ -567,7 +570,8 @@ func (m *Client) wsConnect() {
 
 	m.WsClient.Listen()
 
-	m.lastPong = time.Now()
+	m.lastWsActivity.Store(time.Now().Unix())
+	m.connectedAt.Store(time.Now().Unix())
 
 	m.logger.Debug("WsClient: connected")
 
@@ -576,31 +580,43 @@ func (m *Client) wsConnect() {
 }
 
 func (m *Client) doCheckAlive() error {
-	if _, _, err := m.Client.GetPing(); err != nil {
-		return err
+	if m.WsClient != nil && m.WsClient.ListenError != nil {
+		return fmt.Errorf("websocket listen error: %w", m.WsClient.ListenError)
 	}
 
-	if m.reconnectBusy {
+	lastActiveUnix := m.lastWsActivity.Load()
+	timeSinceActivity := time.Since(time.Unix(lastActiveUnix, 0))
+
+	if timeSinceActivity < 20*time.Second {
+		m.logger.Debugf("websocket is active (last event %v ago), skipping ping", timeSinceActivity.Round(time.Second))
 		return nil
 	}
 
-	if m.WsClient.ListenError == nil {
-		m.WsClient.SendMessage("ping", nil)
-	} else {
-		m.logger.Errorf("got a listen error: %#v", m.WsClient.ListenError)
+	connectedUnix := m.connectedAt.Load()
+	uptime := time.Since(time.Unix(connectedUnix, 0)).Round(time.Second)
 
-		return m.WsClient.ListenError
+	if timeSinceActivity < 55*time.Second {
+		// Send a ping down the websocket to try to keep it active/alive
+		if m.WsClient != nil {
+			m.logger.Debugf("websocket has been quiet (last event %v ago; up %s), sending websocket ping", timeSinceActivity.Round(time.Second), uptime)
+			m.WsClient.SendMessage("ping", nil)
+			return nil
+		}
 	}
 
-	if time.Since(m.lastPong) > 90*time.Second {
-		return errors.New("no pong received in 90 seconds")
+	m.logger.Debugf("websocket has been quiet (last event %v ago; up %s), falling back to HTTP GetPing", timeSinceActivity.Round(time.Second), uptime)
+	if _, _, err := m.Client.GetPing(); err != nil {
+		m.logger.Warnf("fallback HTTP ping failed (up %s): %w", uptime, err)
+		return fmt.Errorf("fallback HTTP ping failed (up %s): %w", uptime, err)
 	}
+
+	m.lastWsActivity.Store(time.Now().Unix())
 
 	return nil
 }
 
 func (m *Client) checkAlive(ctx context.Context) {
-	ticker := time.NewTicker(time.Second * 45)
+	ticker := time.NewTicker(time.Second * 30)
 
 	for {
 		select {
@@ -609,11 +625,25 @@ func (m *Client) checkAlive(ctx context.Context) {
 
 			return
 		case <-ticker.C:
+			var err error
+
 			// check if session still is valid
-			err := m.doCheckAlive()
+			for i := 0; i < 3; i++ {
+				err = m.doCheckAlive()
+				if err == nil {
+					break
+				}
+
+				if i < 2 {
+					m.logger.Warnf("alive check failed, retrying %d/3: %s", i+1, err)
+					time.Sleep(time.Second * 2)
+				}
+			}
+
 			if err != nil {
 				m.logger.Errorf("connection not alive: %s", err)
 				m.aliveChan <- false
+				continue
 			}
 
 			m.aliveChan <- true
@@ -661,6 +691,8 @@ func (m *Client) WsReceiver(ctx context.Context) {
 				continue
 			}
 
+			m.lastWsActivity.Store(time.Now().Unix())
+
 			m.logger.Debugf("WsReceiver event: %#v", event)
 
 			eventType := event.EventType()
@@ -678,7 +710,13 @@ func (m *Client) WsReceiver(ctx context.Context) {
 				m.parseMessage(msg)
 			}
 
-			m.MessageChan <- msg
+			select {
+			case m.MessageChan <- msg:
+				// Message sent successfully
+			default:
+				// Message channel buffer full, drop/discard
+				m.logger.Errorf("CRITICAL: MessageChan is blocked! Downstream processor is hung. Dropping event: %s", event.EventType())
+			}
 		case response := <-m.WsClient.ResponseChannel:
 			if response == nil || !response.IsValid() {
 				continue
@@ -686,11 +724,7 @@ func (m *Client) WsReceiver(ctx context.Context) {
 
 			m.logger.Debugf("WsReceiver response: %#v", response)
 
-			if text, ok := response.Data["text"].(string); ok {
-				if text == "pong" {
-					m.lastPong = time.Now()
-				}
-			}
+			m.lastWsActivity.Store(time.Now().Unix())
 
 			m.parseResponse(response)
 		case <-m.WsClient.PingTimeoutChannel:
