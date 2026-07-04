@@ -130,7 +130,7 @@ func (m *Mattermost) loginToMattermost(onWsConnect func()) (*matterclient.Client
 	m.quitChan = append(m.quitChan, quitChan)
 
 	// Start a pool of 10 concurrent workers
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		go m.handleWsMessage(quitChan)
 	}
 
