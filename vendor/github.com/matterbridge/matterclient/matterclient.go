@@ -584,16 +584,15 @@ func (m *Client) doCheckAlive() error {
 		return fmt.Errorf("websocket listen error: %w", m.WsClient.ListenError)
 	}
 
+	connectedUnix := m.connectedAt.Load()
+	uptime := time.Since(time.Unix(connectedUnix, 0)).Round(time.Second)
 	lastActiveUnix := m.lastWsActivity.Load()
 	timeSinceActivity := time.Since(time.Unix(lastActiveUnix, 0))
 
 	if timeSinceActivity < 20*time.Second {
-		m.logger.Tracef("websocket is active (last event %v ago), skipping ping", timeSinceActivity.Round(time.Second))
+		m.logger.Tracef("websocket is active (last event %v ago; up %s), skipping ping", timeSinceActivity.Round(time.Second), uptime)
 		return nil
 	}
-
-	connectedUnix := m.connectedAt.Load()
-	uptime := time.Since(time.Unix(connectedUnix, 0)).Round(time.Second)
 
 	if timeSinceActivity < 55*time.Second {
 		// Send a ping down the websocket to try to keep it active/alive
