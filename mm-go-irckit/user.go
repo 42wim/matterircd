@@ -1,6 +1,8 @@
 package irckit
 
 import (
+	"errors"
+	"io"
 	"net"
 	"regexp"
 	"strings"
@@ -222,8 +224,11 @@ func (u *User) Decode() {
 		msg, err := u.Conn.Decode()
 		if err != nil {
 			close(stop)
-			if err.Error() != "EOF" {
-				logger.Errorf("msg: %s err: %s", msg, err)
+
+			isEOF := errors.Is(err, io.EOF) || err.Error() == "EOF"
+			isClosed := errors.Is(err, net.ErrClosed) || strings.Contains(err.Error(), "use of closed network connection")
+			if !isEOF && !isClosed {
+				logger.Errorf("msg: %v err: %v", msg, err)
 			}
 			break
 		}
