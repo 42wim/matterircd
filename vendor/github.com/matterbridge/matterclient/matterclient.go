@@ -588,7 +588,7 @@ func (m *Client) doCheckAlive() error {
 	timeSinceActivity := time.Since(time.Unix(lastActiveUnix, 0))
 
 	if timeSinceActivity < 20*time.Second {
-		m.logger.Debugf("websocket is active (last event %v ago), skipping ping", timeSinceActivity.Round(time.Second))
+		m.logger.Tracef("websocket is active (last event %v ago), skipping ping", timeSinceActivity.Round(time.Second))
 		return nil
 	}
 
@@ -598,13 +598,13 @@ func (m *Client) doCheckAlive() error {
 	if timeSinceActivity < 55*time.Second {
 		// Send a ping down the websocket to try to keep it active/alive
 		if m.WsClient != nil {
-			m.logger.Debugf("websocket has been quiet (last event %v ago; up %s), sending websocket ping", timeSinceActivity.Round(time.Second), uptime)
+			m.logger.Tracef("websocket has been quiet (last event %v ago; up %s), sending websocket ping", timeSinceActivity.Round(time.Second), uptime)
 			m.WsClient.SendMessage("ping", nil)
 			return nil
 		}
 	}
 
-	m.logger.Debugf("websocket has been quiet (last event %v ago; up %s), falling back to HTTP GetPing", timeSinceActivity.Round(time.Second), uptime)
+	m.logger.Tracef("websocket has been quiet (last event %v ago; up %s), falling back to HTTP GetPing", timeSinceActivity.Round(time.Second), uptime)
 	if _, _, err := m.Client.GetPing(); err != nil {
 		m.logger.Warnf("fallback HTTP ping failed (up %s): %w", uptime, err)
 		return fmt.Errorf("fallback HTTP ping failed (up %s): %w", uptime, err)
