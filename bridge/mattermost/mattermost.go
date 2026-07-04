@@ -753,7 +753,8 @@ func (m *Mattermost) wsActionPostSkip(rmsg *model.WebSocketEvent) bool {
 	shortenMsgLen := m.v.GetInt("mattermost.ShortenRepliesTo")
 
 	var data model.Post
-	if err := json.NewDecoder(strings.NewReader(postData)).Decode(&data); err != nil {
+	if err := json.Unmarshal([]byte(postData), &data); err != nil {
+		logger.Errorf("failed to unmarshal post: %v", err)
 		return true
 	}
 
@@ -946,7 +947,8 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	}
 
 	var data model.Post
-	if err := json.NewDecoder(strings.NewReader(postData)).Decode(&data); err != nil {
+	if err := json.Unmarshal([]byte(postData), &data); err != nil {
+		logger.Errorf("failed to unmarshal postData: %v", err)
 		return
 	}
 	extraProps := data.GetProps()
@@ -1423,7 +1425,8 @@ func (m *Mattermost) handleReactionEvent(rmsg *model.WebSocketEvent) {
 	}
 
 	var reaction model.Reaction
-	if err := json.NewDecoder(strings.NewReader(reactionData)).Decode(&reaction); err != nil {
+	if err := json.Unmarshal([]byte(reactionData), &reaction); err != nil {
+		logger.Errorf("failed to unmarshal reactionData: %v", err)
 		return
 	}
 

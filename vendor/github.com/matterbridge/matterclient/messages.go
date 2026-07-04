@@ -242,7 +242,13 @@ func (m *Client) parseActionPost(rmsg *Message) {
 	}
 
 	var data model.Post
-	if err := json.NewDecoder(strings.NewReader(rmsg.Raw.GetData()["post"].(string))).Decode(&data); err != nil {
+	postStr, ok := rmsg.Raw.GetData()["post"].(string)
+	if !ok {
+		m.logger.Error("payload 'post' was missing or not a string")
+		return
+	}
+	if err := json.Unmarshal([]byte(postStr), &data); err != nil {
+		m.logger.Errorf("failed to unmarshal post: %v", err)
 		return
 	}
 	// we don't have the user, refresh the userlist
