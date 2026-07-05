@@ -1917,13 +1917,12 @@ func (m *Mattermost) parseMessageAttachments(attachments []*model.SlackAttachmen
 
 					// Ignore duplicate content when field value is the same as fallback
 					// e.g. https://github.com/jenkinsci/mattermost-plugin/pull/18
-					if useFallback && fallbackText != "" && line == fallbackText {
-						continue
+					isDuplicate := useFallback && fallbackText != "" && line == fallbackText
+					if !isDuplicate {
+						b.WriteString(prefix)
+						b.WriteString(line)
+						b.WriteByte('\n')
 					}
-
-					b.WriteString(prefix)
-					b.WriteString(line)
-					b.WriteByte('\n')
 
 					if !found {
 						break
