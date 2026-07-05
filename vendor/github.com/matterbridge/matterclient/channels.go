@@ -150,6 +150,56 @@ func (m *Client) GetChannelTeamID(id string) string {
 	return ""
 }
 
+func (m *Client) GetChannelUsers(channelID string) ([]*model.User, error) {
+	m.Users.mu.RLock()
+	if userIDs, exists := m.Users.channels[channelID]; exists {
+		users := make([]*model.User, 0, len(userIDs))
+		for uid := range userIDs {
+			if user, ok := m.Users.users[uid]; ok {
+				users = append(users, user)
+			}
+		}
+		m.Users.mu.RUnlock()
+		return users, nil
+	}
+	m.Users.mu.RUnlock()
+
+	var allUsers []*model.User
+	idx := 0
+	const batchSize = 200
+
+	for {
+		mmusersPaged, resp, err := m.Client.GetUsersInChannel(channelID, idx, batchSize, "")
+		if err != nil {
+			if rlErr := m.HandleRatelimit("GetUsersInChannel", resp); rlErr != nil {
+				return nil, rlErr
+			}
+			continue
+		}
+
+		allUsers = append(allUsers, mmusersPaged...)
+
+		if len(mmusersPaged) < batchSize {
+			break
+		}
+		idx++
+	}
+
+	m.Users.mu.Lock()
+	defer m.Users.mu.Unlock()
+
+	if m.Users.channels[channelID] == nil {
+		m.Users.channels[channelID] = make(map[string]struct{})
+	}
+
+	for _, u := range allUsers {
+		m.Users.users[u.Id] = u
+		m.Users.channels[channelID][u.Id] = struct{}{}
+	}
+
+	return allUsers, nil
+}
+
 func (m *Client) GetLastViewedAt(channelID string) int64 {
 	m.RLock()
 	defer m.RUnlock()
@@ -323,6 +373,28 @@ func (m *Client) UpdateChannelHeader(channelID string, header string) {
 	_, _, err := m.Client.UpdateChannel(channel)
 	if err != nil {
 		m.logger.Error(err)
+	}
+}
+
+func (m *Client) UpdateChannelUsersCache(channelID string, user *model.User) {
+	m.Users.mu.Lock()
+	defer m.Users.mu.Unlock()
+
+	m.Users.users[user.Id] = user
+
+	if channelID != "" {
+		if m.Users.channels[channelID] != nil {
+			m.Users.channels[channelID][user.Id] = struct{}{}
+		}
+	}
+}
+
+func (m *Client) UpdateChannelUsersCacheRemove(channelID string, userID string) {
+	m.Users.mu.Lock()
+	defer m.Users.mu.Unlock()
+
+	if m.Users.channels != nil && m.Users.channels[channelID] != nil {
+		delete(m.Users.channels[channelID], userID)
 	}
 }
 

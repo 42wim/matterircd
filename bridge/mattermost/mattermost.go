@@ -530,34 +530,14 @@ func (m *Mattermost) GetChannelName(channelID string) string {
 }
 
 func (m *Mattermost) GetChannelUsers(channelID string) ([]*bridge.UserInfo, error) {
-	var (
-		mmusersPaged []*model.User
-		err          error
-		resp         *model.Response
-	)
+	mmUsers, err := m.mc.GetChannelUsers(channelID)
+	if err != nil {
+		return nil, err
+	}
 
-	idx := 0
-	const batchSize = 200
-	users := make([]*bridge.UserInfo, 0, batchSize)
-
-	for {
-		mmusersPaged, resp, err = m.mc.Client.GetUsersInChannel(channelID, idx, batchSize, "")
-		if err != nil {
-			if rlErr := m.mc.HandleRatelimit("GetUsersInChannel", resp); rlErr != nil {
-				return nil, rlErr
-			}
-			continue
-		}
-
-		for _, mmuser := range mmusersPaged {
-			users = append(users, m.createUser(mmuser))
-		}
-
-		if len(mmusersPaged) < batchSize {
-			break
-		}
-
-		idx++
+	users := make([]*bridge.UserInfo, 0, len(mmUsers))
+	for _, mmuser := range mmUsers {
+		users = append(users, m.createUser(mmuser))
 	}
 
 	return users, nil
