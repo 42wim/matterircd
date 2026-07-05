@@ -582,28 +582,14 @@ func (m *Mattermost) GetChannels() []*bridge.ChannelInfo {
 
 func (m *Mattermost) GetChannel(channelID string) (*bridge.ChannelInfo, error) {
 	if channelID == "" || strings.HasPrefix(channelID, "&") || channelID == m.mc.User.Nickname || channelID == m.mc.User.Username {
+		return nil, errors.New("invalid channel id")
+	}
+
+	mmchannel := m.mc.GetChannel(channelID)
+	if mmchannel == nil {
 		return nil, errors.New("channel not found")
 	}
 
-	for _, channel := range m.GetChannels() {
-		if channel.ID == channelID {
-			return channel, nil
-		}
-	}
-
-	m.UpdateChannels()
-
-	for _, channel := range m.GetChannels() {
-		if channel.ID == channelID {
-			return channel, nil
-		}
-	}
-
-	// Fallback if it's not found in the cache.
-	mmchannel, _, err := m.mc.Client.GetChannel(channelID, "")
-	if err != nil {
-		return nil, errors.New("channel not found")
-	}
 	return &bridge.ChannelInfo{
 		Name:    mmchannel.Name,
 		ID:      mmchannel.Id,
