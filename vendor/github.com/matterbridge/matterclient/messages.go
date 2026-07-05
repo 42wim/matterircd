@@ -288,7 +288,7 @@ func (m *Client) parseMessage(rmsg *Message) {
 		m.parseActionPost(rmsg)
 	case "user_updated":
 		if user, ok := rmsg.Raw.GetData()["user"].(*model.User); ok {
-			m.UpdateUser(user.Id)
+			m.UpdateUser(user)
 		}
 	case "group_added":
 		if err := m.UpdateChannels(); err != nil {

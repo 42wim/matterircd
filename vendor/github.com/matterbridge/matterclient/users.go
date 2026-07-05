@@ -1,6 +1,9 @@
 package matterclient
 
 import (
+	"fmt"
+	"time"
+
 	"github.com/mattermost/mattermost-server/v6/model"
 )
 
@@ -13,9 +16,9 @@ func (m *Client) GetNickName(userID string) string {
 }
 
 func (m *Client) GetStatus(userID string) string {
-	m.UserStatusMutex.RLock()
-	status, ok := m.UserStatuses[userID]
-	m.UserStatusMutex.RUnlock()
+	m.Users.mu.RLock()
+	status, ok := m.Users.statuses[userID]
+	m.Users.mu.RUnlock()
 	if ok {
 		return status
 	}
@@ -29,24 +32,25 @@ func (m *Client) GetStatus(userID string) string {
 }
 
 func (m *Client) GetStatuses() map[string]string {
-	statuses := make(map[string]string, len(m.Users))
+	statuses := make(map[string]string, len(m.Users.users))
 	var missingIDs []string
 
-	m.UserStatusMutex.RLock()
-	for id := range m.Users {
-		if status, ok := m.UserStatuses[id]; ok {
+	m.Users.mu.RLock()
+	for id := range m.Users.users {
+		if status, ok := m.Users.statuses[id]; ok {
 			statuses[id] = status
 		} else {
 			missingIDs = append(missingIDs, id)
 		}
 	}
-	m.UserStatusMutex.RUnlock()
+	m.Users.mu.RUnlock()
 
 	if len(missingIDs) == 0 {
 		return statuses
 	}
 
 	const batchSize = 5000
+
 	for i := 0; i < len(missingIDs); i += batchSize {
 		end := i + batchSize
 		if end > len(missingIDs) {
@@ -92,20 +96,23 @@ func (m *Client) GetTeamName(teamID string) string {
 }
 
 func (m *Client) GetUser(userID string) *model.User {
-	m.Lock()
-	defer m.Unlock()
+	m.Users.mu.RLock()
+	user, exists := m.Users.users[userID]
+	m.Users.mu.RUnlock()
 
-	_, ok := m.Users[userID]
-	if !ok {
-		res, _, err := m.Client.GetUser(userID, "")
-		if err != nil {
-			return nil
-		}
-
-		m.Users[userID] = res
+	if exists {
+		return user
 	}
 
-	return m.Users[userID]
+	res, _, err := m.Client.GetUser(userID, "")
+	if err != nil {
+		m.logger.Debugf("GetUser failed to fetch missing user %s: %s", userID, err)
+		return nil
+	}
+
+	m.UpdateUser(res)
+
+	return res
 }
 
 func (m *Client) GetUserName(userID string) string {
@@ -117,12 +124,12 @@ func (m *Client) GetUserName(userID string) string {
 }
 
 func (m *Client) GetUsers() map[string]*model.User {
-	users := make(map[string]*model.User)
+	users := make(map[string]*model.User, len(m.Users.users))
 
-	m.RLock()
-	defer m.RUnlock()
+	m.Users.mu.RLock()
+	defer m.Users.mu.RUnlock()
 
-	for k, v := range m.Users {
+	for k, v := range m.Users.users {
 		users[k] = v
 	}
 
@@ -138,12 +145,11 @@ func (m *Client) SetUserStatus(userID string, rawStatus string) string {
 		statusStr = "away"
 	}
 
-	m.UserStatusMutex.Lock()
-	if m.UserStatuses == nil {
-		m.UserStatuses = make(map[string]string)
-	}
-	m.UserStatuses[userID] = statusStr
-	m.UserStatusMutex.Unlock()
+	m.Users.mu.Lock()
+	defer m.Users.mu.Unlock()
+
+	m.Users.statuses[userID] = statusStr
+	m.Users.lastUpdated.Store(time.Now().Unix())
 
 	return statusStr
 }
@@ -167,11 +173,12 @@ func (m *Client) UpdateUsers() error {
 			continue
 		}
 
-		m.Lock()
+		m.Users.mu.Lock()
 		for _, user := range mmusers {
-			m.Users[user.Id] = user
+			m.Users.users[user.Id] = user
+			m.Users.lastUpdated.Store(time.Now().Unix())
 		}
-		m.Unlock()
+		m.Users.mu.Unlock()
 
 		if len(mmusers) < batchSize {
 			break
@@ -184,13 +191,24 @@ func (m *Client) UpdateUsers() error {
 }
 
 func (m *Client) UpdateUserNick(nick string) error {
-	user := m.User
-	user.Nickname = nick
+	m.RLock()
+	if m.User == nil {
+		m.RUnlock()
+		return fmt.Errorf("current user profile is not loaded")
+	}
+	userClone := *m.User
+	m.RUnlock()
+	userClone.Nickname = nick
 
-	_, _, err := m.Client.UpdateUser(user)
+	updatedUser, _, err := m.Client.UpdateUser(&userClone)
 	if err != nil {
 		return err
 	}
+
+	m.Lock()
+	m.User = updatedUser
+	m.Unlock()
+	m.UpdateUser(updatedUser)
 
 	return nil
 }
@@ -219,17 +237,15 @@ func (m *Client) UpdateStatus(userID string, status string) error {
 		return err
 	}
 
+	m.SetUserStatus(userID, status)
+
 	return nil
 }
 
-func (m *Client) UpdateUser(userID string) {
-	m.Lock()
-	defer m.Unlock()
+func (m *Client) UpdateUser(user *model.User) {
+	m.Users.mu.Lock()
+	defer m.Users.mu.Unlock()
 
-	res, _, err := m.Client.GetUser(userID, "")
-	if err != nil {
-		return
-	}
-
-	m.Users[userID] = res
+	m.Users.users[user.Id] = user
+	m.Users.lastUpdated.Store(time.Now().Unix())
 }
