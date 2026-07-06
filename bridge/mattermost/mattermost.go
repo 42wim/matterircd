@@ -287,19 +287,20 @@ func (m *Mattermost) Logout() error {
 			logger.Error("logout failed")
 		}
 		logger.Info("logout succeeded")
-
-		m.eventChan <- &bridge.Event{
-			Type: "logout",
-			Data: &bridge.LogoutEvent{},
-		}
-
-		m.mc.WsQuit = true
-
-		for _, c := range m.quitChan {
-			c <- struct{}{}
-		}
 	}
 
+	m.eventChan <- &bridge.Event{
+		Type: "logout",
+		Data: &bridge.LogoutEvent{},
+	}
+
+	m.mc.WsQuit = true
+
+	for _, c := range m.quitChan {
+		close(c)
+	}
+
+	m.quitChan = nil
 	m.connected = false
 
 	return nil
