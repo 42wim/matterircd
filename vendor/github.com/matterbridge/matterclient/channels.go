@@ -8,18 +8,36 @@ import (
 	"github.com/mattermost/mattermost-server/v6/model"
 )
 
+func (m *Client) GetChannel(channelID string) *model.Channel {
+	m.Users.mu.RLock()
+	ch, exists := m.Users.channelData[channelID]
+	m.Users.mu.RUnlock()
+
+	if exists {
+		return ch
+	}
+
+	mmchannel, _, err := m.Client.GetChannel(channelID, "")
+	if err != nil {
+		return nil
+	}
+
+	m.Users.mu.Lock()
+	m.Users.channelData[channelID] = mmchannel
+	m.Users.mu.Unlock()
+
+	return mmchannel
+}
+
 // GetChannels returns all channels we're members off
 func (m *Client) GetChannels() []*model.Channel {
-	m.RLock()
-	defer m.RUnlock()
+	m.Users.mu.RLock()
+	defer m.Users.mu.RUnlock()
 
 	var channels []*model.Channel
-	// our primary team channels first
-	channels = append(channels, m.Team.Channels...)
-
-	for _, t := range m.OtherTeams {
-		if t.ID != m.Team.ID {
-			channels = append(channels, t.Channels...)
+	for id := range m.Users.joinedChannels {
+		if ch, exists := m.Users.channelData[id]; exists {
+			channels = append(channels, ch)
 		}
 	}
 
@@ -27,17 +45,9 @@ func (m *Client) GetChannels() []*model.Channel {
 }
 
 func (m *Client) GetChannelHeader(channelID string) string {
-	m.RLock()
-	defer m.RUnlock()
-
-	for _, t := range m.OtherTeams {
-		for _, channel := range append(t.Channels, t.MoreChannels...) {
-			if channel.Id == channelID {
-				return channel.Header
-			}
-		}
+	if ch := m.GetChannel(channelID); ch != nil {
+		return ch.Header
 	}
-
 	return ""
 }
 
@@ -53,18 +63,16 @@ func getNormalisedName(channel *model.Channel) string {
 }
 
 func (m *Client) GetChannelID(name string, teamID string) string {
-	m.RLock()
-	defer m.RUnlock()
-
 	if teamID != "" {
 		return m.getChannelIDTeam(name, teamID)
 	}
 
-	for _, t := range m.OtherTeams {
-		for _, channel := range append(t.Channels, t.MoreChannels...) {
-			if getNormalisedName(channel) == name {
-				return channel.Id
-			}
+	m.Users.mu.RLock()
+	defer m.Users.mu.RUnlock()
+
+	for _, ch := range m.Users.channelData {
+		if getNormalisedName(ch) == name {
+			return ch.Id
 		}
 	}
 
@@ -72,15 +80,14 @@ func (m *Client) GetChannelID(name string, teamID string) string {
 }
 
 func (m *Client) getChannelIDTeam(name string, teamID string) string {
-	for _, t := range m.OtherTeams {
-		if t.ID == teamID {
-			for _, channel := range append(t.Channels, t.MoreChannels...) {
-				if getNormalisedName(channel) == name {
-					return channel.Id
-				}
-			}
+	m.Users.mu.RLock()
+	for _, ch := range m.Users.channelData {
+		if ch.TeamId == teamID && getNormalisedName(ch) == name {
+			m.Users.mu.RUnlock()
+			return ch.Id
 		}
 	}
+	m.Users.mu.RUnlock()
 
 	// Fallback if it's not found in the t.Channels or t.MoreChannels cache.
 	// This also let's us join private channels.
@@ -89,64 +96,27 @@ func (m *Client) getChannelIDTeam(name string, teamID string) string {
 		return ""
 	}
 
+	m.Users.mu.Lock()
+	if m.Users.channelData == nil {
+		m.Users.channelData = make(map[string]*model.Channel)
+	}
+	m.Users.channelData[channel.Id] = channel
+	m.Users.mu.Unlock()
+
 	return channel.Id
 }
 
 func (m *Client) GetChannelName(channelID string) string {
-	m.RLock()
-	defer m.RUnlock()
-
-	for _, t := range m.OtherTeams {
-		if t == nil {
-			continue
-		}
-
-		for _, channel := range append(t.Channels, t.MoreChannels...) {
-			if channel.Id == channelID {
-				return getNormalisedName(channel)
-			}
-		}
+	if ch := m.GetChannel(channelID); ch != nil {
+		return getNormalisedName(ch)
 	}
-
 	return ""
 }
 
 func (m *Client) GetChannelTeamID(id string) string {
-	m.RLock()
-	defer m.RUnlock()
-
-	if m.Team != nil {
-		for _, channel := range m.Team.Channels {
-			if channel.Id == id {
-				return channel.TeamId
-			}
-		}
-
-		for _, channel := range m.Team.MoreChannels {
-			if channel.Id == id {
-				return channel.TeamId
-			}
-		}
+	if ch := m.GetChannel(id); ch != nil {
+		return ch.TeamId
 	}
-
-	for _, t := range m.OtherTeams {
-		if m.Team != nil && t.ID == m.Team.ID {
-			continue
-		}
-
-		for _, channel := range t.Channels {
-			if channel.Id == id {
-				return channel.TeamId
-			}
-		}
-
-		for _, channel := range t.MoreChannels {
-			if channel.Id == id {
-				return channel.TeamId
-			}
-		}
-	}
-
 	return ""
 }
 
@@ -216,14 +186,16 @@ func (m *Client) GetLastViewedAt(channelID string) int64 {
 	}
 }
 
-// GetMoreChannels returns existing channels where we're not a member off.
+// GetMoreChannels returns existing channels where we're not a member of.
 func (m *Client) GetMoreChannels() []*model.Channel {
-	m.RLock()
-	defer m.RUnlock()
+	m.Users.mu.RLock()
+	defer m.Users.mu.RUnlock()
 
 	var channels []*model.Channel
-	for _, t := range m.OtherTeams {
-		channels = append(channels, t.MoreChannels...)
+	for id, ch := range m.Users.channelData {
+		if _, joined := m.Users.joinedChannels[id]; !joined {
+			channels = append(channels, ch)
+		}
 	}
 
 	return channels
@@ -231,44 +203,23 @@ func (m *Client) GetMoreChannels() []*model.Channel {
 
 // GetTeamFromChannel returns teamId belonging to channel (DM channels have no teamId).
 func (m *Client) GetTeamFromChannel(channelID string) string {
-	m.RLock()
-	defer m.RUnlock()
-
-	var channels []*model.Channel
-
-	for _, t := range m.OtherTeams {
-		channels = append(channels, t.Channels...)
-
-		if t.MoreChannels != nil {
-			channels = append(channels, t.MoreChannels...)
+	if ch := m.GetChannel(channelID); ch != nil {
+		if ch.Type == model.ChannelTypeGroup {
+			return "G"
 		}
-
-		for _, c := range channels {
-			if c.Id == channelID {
-				if c.Type == model.ChannelTypeGroup {
-					return "G"
-				}
-
-				return t.ID
-			}
-		}
-
-		channels = nil
+		return ch.TeamId
 	}
-
 	return ""
 }
 
 func (m *Client) JoinChannel(channelID string) error {
-	m.RLock()
-	defer m.RUnlock()
+	m.Users.mu.RLock()
+	_, joined := m.Users.joinedChannels[channelID]
+	m.Users.mu.RUnlock()
 
-	for _, c := range m.Team.Channels {
-		if c.Id == channelID {
-			m.logger.Debug("Not joining ", channelID, " already joined.")
-
-			return nil
-		}
+	if joined {
+		m.logger.Debug("Not joining ", channelID, " already joined.")
+		return nil
 	}
 
 	m.logger.Debug("Joining ", channelID)
@@ -277,6 +228,13 @@ func (m *Client) JoinChannel(channelID string) error {
 	if err != nil {
 		return err
 	}
+
+	m.Users.mu.Lock()
+	if m.Users.joinedChannels == nil {
+		m.Users.joinedChannels = make(map[string]struct{})
+	}
+	m.Users.joinedChannels[channelID] = struct{}{}
+	m.Users.mu.Unlock()
 
 	return nil
 }
@@ -296,7 +254,6 @@ func (m *Client) UpdateChannelsTeam(teamID string) error {
 		resp *model.Response
 		err  error
 	)
-
 	const batchSize = 200
 
 	mmchannels := make([]*model.Channel, 0, batchSize)
@@ -305,7 +262,6 @@ func (m *Client) UpdateChannelsTeam(teamID string) error {
 		if err == nil {
 			break
 		}
-
 		if err = m.HandleRatelimit("GetChannelsForTeamForUser", resp); err != nil {
 			return err
 		}
@@ -321,23 +277,34 @@ func (m *Client) UpdateChannelsTeam(teamID string) error {
 			}
 			continue
 		}
-
 		moreChannels = append(moreChannels, channels...)
-
 		if len(channels) < batchSize {
 			break
 		}
 		idx++
 	}
 
-	m.Lock()
-	defer m.Unlock()
+	m.Users.mu.Lock()
+	if m.Users.channelData == nil {
+		m.Users.channelData = make(map[string]*model.Channel)
+		m.Users.joinedChannels = make(map[string]struct{})
+	}
 
+	for _, ch := range mmchannels {
+		m.Users.channelData[ch.Id] = ch
+		m.Users.joinedChannels[ch.Id] = struct{}{}
+	}
+	for _, ch := range moreChannels {
+		m.Users.channelData[ch.Id] = ch
+	}
+	m.Users.mu.Unlock()
+	m.Users.lastUpdated.Store(time.Now().Unix())
+
+	m.Lock()
 	if team, exists := m.OtherTeams[teamID]; exists {
-		team.Channels = mmchannels
-		team.MoreChannels = moreChannels
 		team.LastChannelSync = time.Now()
 	}
+	m.Unlock()
 
 	return nil
 }

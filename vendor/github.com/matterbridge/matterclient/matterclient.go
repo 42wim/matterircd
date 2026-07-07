@@ -44,14 +44,15 @@ type UsersCache struct {
 	teams    map[string]map[string]struct{}
 	statuses map[string]string
 
+	channelData    map[string]*model.Channel
+	joinedChannels map[string]struct{}
+
 	lastUpdated atomic.Int64
 }
 
 type Team struct {
 	Team         *model.Team
 	ID           string
-	Channels     []*model.Channel
-	MoreChannels []*model.Channel
 
 	LastUserSync    time.Time
 	LastChannelSync time.Time
@@ -126,6 +127,9 @@ func New(login string, pass string, team string, server string, mfatoken string)
 			channels: make(map[string]map[string]struct{}),
 			teams:    make(map[string]map[string]struct{}),
 			statuses: make(map[string]string),
+
+			channelData:    make(map[string]*model.Channel),
+			joinedChannels: make(map[string]struct{}),
 		},
 		rootLogger:   rootLogger,
 		lruCache:     cache,
@@ -456,9 +460,41 @@ func (m *Client) initUserChannels() error {
 		return err
 	}
 
+	m.RLock()
+	teams := make([]*Team, 0, len(m.OtherTeams))
 	for _, t := range m.OtherTeams {
-		m.logger.Debugf("found %d channels for user in team %s", len(t.Channels), t.Team.Name)
-		m.logger.Debugf("found %d public channels in team %s", len(t.MoreChannels), t.Team.Name)
+		teams = append(teams, t)
+	}
+	m.RUnlock()
+
+	m.Users.mu.RLock()
+	defer m.Users.mu.RUnlock()
+
+	var dmCount int
+	for id, ch := range m.Users.channelData {
+		if ch.TeamId == "" {
+			if _, joined := m.Users.joinedChannels[id]; joined {
+				dmCount++
+			}
+		}
+	}
+	m.logger.Debugf("found %d direct/group message channels", dmCount)
+
+	for _, t := range teams {
+		var joinedCount, publicCount int
+
+		for id, ch := range m.Users.channelData {
+			if ch.TeamId == t.ID {
+				if _, joined := m.Users.joinedChannels[id]; joined {
+					joinedCount++
+				} else {
+					publicCount++
+				}
+			}
+		}
+
+		m.logger.Debugf("found %d channels for user in team %s", joinedCount, t.Team.Name)
+		m.logger.Debugf("found %d public channels in team team %s", publicCount, t.Team.Name)
 	}
 
 	return nil
@@ -983,6 +1019,43 @@ func (m *Client) maintainUsersCache(event *model.WebSocketEvent) {
 					m.Users.lastUpdated.Store(time.Now().Unix())
 				}
 			}
+		}
+
+	case model.WebsocketEventChannelCreated, model.WebsocketEventDirectAdded:
+		if channelStr, ok := event.GetData()["channel"].(string); ok {
+			channel := &model.Channel{}
+			if err := json.Unmarshal([]byte(channelStr), channel); err == nil {
+				m.Users.mu.Lock()
+				m.Users.channelData[channel.Id] = channel
+				if channel.Type == model.ChannelTypeDirect || channel.Type == model.ChannelTypeGroup {
+					m.Users.joinedChannels[channel.Id] = struct{}{}
+				}
+				m.Users.mu.Unlock()
+				m.Users.lastUpdated.Store(time.Now().Unix())
+			}
+		} else if channelID, ok := event.GetData()["channel_id"].(string); ok && channelID != "" {
+			m.GetChannel(channelID)
+		}
+
+	case model.WebsocketEventChannelUpdated:
+		if channelStr, ok := event.GetData()["channel"].(string); ok {
+			channel := &model.Channel{}
+			if err := json.Unmarshal([]byte(channelStr), channel); err == nil {
+				m.Users.mu.Lock()
+				m.Users.channelData[channel.Id] = channel
+				m.Users.mu.Unlock()
+				m.Users.lastUpdated.Store(time.Now().Unix())
+			}
+		}
+
+	case model.WebsocketEventChannelDeleted:
+		if channelID, ok := event.GetData()["channel_id"].(string); ok && channelID != "" {
+			m.Users.mu.Lock()
+			delete(m.Users.channelData, channelID)
+			delete(m.Users.joinedChannels, channelID)
+			delete(m.Users.channels, channelID)
+			m.Users.mu.Unlock()
+			m.Users.lastUpdated.Store(time.Now().Unix())
 		}
 	}
 }
