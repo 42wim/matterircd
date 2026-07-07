@@ -887,9 +887,22 @@ func (m *Client) HandleRatelimit(name string, resp *model.Response) error {
 		return fmt.Errorf("StatusCode error: %d", resp.StatusCode)
 	}
 
-	waitTime, err := strconv.Atoi(resp.Header.Get("X-RateLimit-Reset"))
+	resetEpochStr := resp.Header.Get("X-RateLimit-Reset")
+	if resetEpochStr == "" {
+		time.Sleep(3 * time.Second)
+		return nil
+	}
+
+	resetEpoch, err := strconv.ParseInt(resetEpochStr, 10, 64)
 	if err != nil {
 		return err
+	}
+
+	now := time.Now().Unix()
+	waitTime := resetEpoch - now
+
+	if waitTime < 1 {
+		waitTime = 1
 	}
 
 	m.logger.Warnf("Ratelimited on %s for %d", name, waitTime)
