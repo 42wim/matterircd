@@ -134,6 +134,19 @@ func (m *Client) GetChannelUsers(channelID string) ([]*model.User, error) {
 	}
 	m.Users.mu.RUnlock()
 
+	m.Users.mu.Lock()
+	defer m.Users.mu.Unlock()
+
+	if userIDs, exists := m.Users.channels[channelID]; exists {
+		users := make([]*model.User, 0, len(userIDs))
+		for uid := range userIDs {
+			if user, ok := m.Users.users[uid]; ok {
+				users = append(users, user)
+			}
+		}
+		return users, nil
+	}
+
 	var allUsers []*model.User
 	idx := 0
 	const batchSize = 200
@@ -141,10 +154,14 @@ func (m *Client) GetChannelUsers(channelID string) ([]*model.User, error) {
 	for {
 		mmusersPaged, resp, err := m.Client.GetUsersInChannel(channelID, idx, batchSize, "")
 		if err != nil {
-			if rlErr := m.HandleRatelimit("GetUsersInChannel", resp); rlErr != nil {
-				return nil, rlErr
+			if resp != nil && resp.StatusCode == 429 {
+				if rlErr := m.HandleRatelimit("GetUsersInChannel", resp); rlErr != nil {
+					return nil, rlErr
+				}
+				continue
+
 			}
-			continue
+			return nil, err
 		}
 
 		allUsers = append(allUsers, mmusersPaged...)
@@ -154,9 +171,6 @@ func (m *Client) GetChannelUsers(channelID string) ([]*model.User, error) {
 		}
 		idx++
 	}
-
-	m.Users.mu.Lock()
-	defer m.Users.mu.Unlock()
 
 	if m.Users.channels[channelID] == nil {
 		m.Users.channels[channelID] = make(map[string]struct{})
@@ -180,9 +194,14 @@ func (m *Client) GetLastViewedAt(channelID string) int64 {
 			return res.LastViewedAt
 		}
 
-		if err := m.HandleRatelimit("GetChannelMember", resp); err != nil {
-			return model.GetMillis()
+		if resp != nil && resp.StatusCode == 429 {
+			if rlErr := m.HandleRatelimit("GetChannelMember", resp); rlErr == nil {
+				continue
+			}
 		}
+
+		m.logger.Errorf("GetChannelMember failed for %s: %v", channelID, err)
+		return model.GetMillis()
 	}
 }
 
@@ -240,15 +259,16 @@ func (m *Client) JoinChannel(channelID string) error {
 }
 
 func (m *Client) UpdateChannelsTeam(teamID string) error {
-	m.RLock()
+	m.Lock()
 	if team, exists := m.OtherTeams[teamID]; exists {
 		if time.Since(team.LastChannelSync) < 30*time.Minute {
-			m.RUnlock()
+			m.Unlock()
 			m.logger.Debugf("skipping channel fetch for team %s: cache is only %v old", teamID, time.Since(team.LastChannelSync).Round(time.Second))
 			return nil
 		}
+		team.LastChannelSync = time.Now()
 	}
-	m.RUnlock()
+	m.Unlock()
 
 	var (
 		resp *model.Response
@@ -259,12 +279,16 @@ func (m *Client) UpdateChannelsTeam(teamID string) error {
 	mmchannels := make([]*model.Channel, 0, batchSize)
 	for {
 		mmchannels, resp, err = m.Client.GetChannelsForTeamForUser(teamID, m.User.Id, false, "")
-		if err == nil {
-			break
-		}
-		if err = m.HandleRatelimit("GetChannelsForTeamForUser", resp); err != nil {
+		if err != nil {
+			if resp != nil && resp.StatusCode == 429 {
+				if rlErr := m.HandleRatelimit("GetChannelsForTeamForUser", resp); rlErr != nil {
+					return rlErr
+				}
+				continue
+			}
 			return err
 		}
+		break
 	}
 
 	idx := 0
@@ -272,10 +296,13 @@ func (m *Client) UpdateChannelsTeam(teamID string) error {
 	for {
 		channels, resp, err := m.Client.GetPublicChannelsForTeam(teamID, idx, batchSize, "")
 		if err != nil {
-			if rlErr := m.HandleRatelimit("GetPublicChannelsForTeam", resp); rlErr != nil {
-				return rlErr
+			if resp != nil && resp.StatusCode == 429 {
+				if rlErr := m.HandleRatelimit("GetPublicChannelsForTeam", resp); rlErr != nil {
+					return rlErr
+				}
+				continue
 			}
-			continue
+			return err
 		}
 		moreChannels = append(moreChannels, channels...)
 		if len(channels) < batchSize {
@@ -298,13 +325,8 @@ func (m *Client) UpdateChannelsTeam(teamID string) error {
 		m.Users.channelData[ch.Id] = ch
 	}
 	m.Users.mu.Unlock()
-	m.Users.lastUpdated.Store(time.Now().Unix())
 
-	m.Lock()
-	if team, exists := m.OtherTeams[teamID]; exists {
-		team.LastChannelSync = time.Now()
-	}
-	m.Unlock()
+	m.Users.lastUpdated.Store(time.Now().Unix())
 
 	return nil
 }
@@ -376,10 +398,13 @@ func (m *Client) UpdateLastViewed(channelID string) error {
 			return nil
 		}
 
-		if err := m.HandleRatelimit("ViewChannel", resp); err != nil {
-			m.logger.Errorf("ChannelView update for %s failed: %s", channelID, err)
-
-			return err
+		if resp != nil && resp.StatusCode == 429 {
+			if rlErr := m.HandleRatelimit("ViewChannel", resp); rlErr == nil {
+				continue
+			}
 		}
+
+		m.logger.Errorf("ChannelView update for %s failed: %v", channelID, err)
+		return err
 	}
 }

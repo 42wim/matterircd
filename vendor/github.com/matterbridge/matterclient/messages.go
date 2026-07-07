@@ -63,16 +63,21 @@ func (m *Client) GetPosts(channelID string, limit int) *model.PostList {
 			return res
 		}
 
-		if err := m.HandleRatelimit("GetPostsForChannel", resp); err != nil {
-			return nil
+		if resp != nil && resp.StatusCode == 429 {
+			if rlErr := m.HandleRatelimit("GetPostsForChannel", resp); rlErr == nil {
+				continue
+			}
 		}
+
+		m.logger.Errorf("GetPostsForChannel failed for %s: %v", channelID, err)
+		return nil
 	}
 }
 
 func (m *Client) GetPostThread(postID string) *model.PostList {
 	opts := model.GetPostsOptions{
 		CollapsedThreads: false,
-		Direction: "up",
+		Direction:        "up",
 	}
 	for {
 		res, resp, err := m.Client.GetPostThreadWithOpts(postID, "", opts)
@@ -80,9 +85,14 @@ func (m *Client) GetPostThread(postID string) *model.PostList {
 			return res
 		}
 
-		if err := m.HandleRatelimit("GetPostThread", resp); err != nil {
-			return nil
+		if resp != nil && resp.StatusCode == 429 {
+			if rlErr := m.HandleRatelimit("GetPostThread", resp); rlErr == nil {
+				continue
+			}
 		}
+
+		m.logger.Errorf("GetPostThread failed for %s: %v", postID, err)
+		return nil
 	}
 }
 
@@ -93,9 +103,14 @@ func (m *Client) GetPostsSince(channelID string, time int64) *model.PostList {
 			return res
 		}
 
-		if err := m.HandleRatelimit("GetPostsSince", resp); err != nil {
-			return nil
+		if resp != nil && resp.StatusCode == 429 {
+			if rlErr := m.HandleRatelimit("GetPostsSince", resp); rlErr == nil {
+				continue
+			}
 		}
+
+		m.logger.Errorf("GetPostsSince failed for %s: %v", channelID, err)
+		return nil
 	}
 }
 
@@ -136,9 +151,13 @@ func (m *Client) PostMessage(channelID string, text string, rootID string) (stri
 			return res.Id, nil
 		}
 
-		if err := m.HandleRatelimit("CreatePost", resp); err != nil {
-			return "", err
+		if resp != nil && resp.StatusCode == 429 {
+			if rlErr := m.HandleRatelimit("CreatePost", resp); rlErr == nil {
+				continue // Waited out the 429, try again
+			}
 		}
+
+		return "", err
 	}
 }
 
@@ -151,23 +170,30 @@ func (m *Client) PostMessageWithFiles(channelID string, text string, rootID stri
 	}
 
 	for {
+		// create DM channel (only happens on first message)
 		res, resp, err := m.Client.CreatePost(post)
 		if err == nil {
 			return res.Id, nil
 		}
 
-		if err := m.HandleRatelimit("CreatePost", resp); err != nil {
-			return "", err
+		if resp != nil && resp.StatusCode == 429 {
+			if rlErr := m.HandleRatelimit("CreatePost", resp); rlErr == nil {
+				continue
+			}
 		}
+
+		return "", err
 	}
 }
 
 func (m *Client) SearchPosts(query string) *model.PostList {
-	res, _, err := m.Client.SearchPosts(m.Team.ID, query, false)
+	res, resp, err := m.Client.SearchPosts(m.Team.ID, query, false)
 	if err != nil {
+		if resp != nil && resp.StatusCode == 429 {
+			_ = m.HandleRatelimit("SearchPosts", resp)
+		}
 		return nil
 	}
-
 	return res
 }
 
@@ -186,11 +212,14 @@ func (m *Client) SendDirectMessageProps(toUserID string, msg string, rootID stri
 			break
 		}
 
-		if err := m.HandleRatelimit("CreateDirectChannel", resp); err != nil {
-			m.logger.Debugf("SendDirectMessage to %#v failed: %s", toUserID, err)
-
-			return err
+		if resp != nil && resp.StatusCode == 429 {
+			if rlErr := m.HandleRatelimit("CreateDirectChannel", resp); rlErr == nil {
+				continue
+			}
 		}
+
+		m.logger.Errorf("CreateDirectChannel to %s failed: %v", toUserID, err)
+		return err
 	}
 
 	channelName := model.GetDMNameFromIds(toUserID, m.User.Id)
@@ -216,9 +245,14 @@ func (m *Client) SendDirectMessageProps(toUserID string, msg string, rootID stri
 			return nil
 		}
 
-		if err := m.HandleRatelimit("CreatePost", resp); err != nil {
-			return err
+		if resp != nil && resp.StatusCode == 429 {
+			if rlErr := m.HandleRatelimit("CreatePost", resp); rlErr == nil {
+				continue
+			}
 		}
+
+		m.logger.Errorf("CreatePost failed for channel %s: %v", post.ChannelId, err)
+		return err
 	}
 }
 

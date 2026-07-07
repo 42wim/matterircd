@@ -402,8 +402,14 @@ func (m *Client) initUser() error {
 		var teamUsers []*model.User
 
 		for {
-			mmusers, _, err := m.Client.GetUsersInTeam(team.Id, idx, batchSize, "")
+			mmusers, resp, err := m.Client.GetUsersInTeam(team.Id, idx, batchSize, "")
 			if err != nil {
+				if resp != nil && resp.StatusCode == 429 {
+					if rlErr := m.HandleRatelimit("GetUsersInTeam", resp); rlErr == nil {
+						continue
+					}
+				}
+				m.logger.Errorf("failed to fetch users for team %s: %v", team.Name, err)
 				return err
 			}
 
@@ -423,29 +429,24 @@ func (m *Client) initUser() error {
 		if m.Users.teams == nil {
 			m.Users.teams = make(map[string]map[string]struct{})
 		}
-		if m.Users.teams[team.Id] == nil {
-			m.Users.teams[team.Id] = make(map[string]struct{})
-		}
 
+		m.Users.teams[team.Id] = make(map[string]struct{})
 		for _, u := range teamUsers {
 			m.Users.users[u.Id] = u
 			m.Users.teams[team.Id][u.Id] = struct{}{}
-			m.Users.lastUpdated.Store(time.Now().Unix())
 		}
+		m.Users.lastUpdated.Store(time.Now().Unix())
 		m.Users.mu.Unlock()
 
-		t := &Team{
+		m.Lock()
+		m.OtherTeams[team.Id] = &Team{
 			Team:         team,
 			ID:           team.Id,
 			LastUserSync: time.Now(),
 		}
 
-		m.Lock()
-
-		m.OtherTeams[team.Id] = t
-
 		if team.Name == m.Credentials.Team {
-			m.Team = t
+			m.Team = m.OtherTeams[team.Id]
 			m.logger.Debugf("initUser(): found our team %s (id: %s)", team.Name, team.Id)
 		}
 
