@@ -158,13 +158,14 @@ func (m *Client) UpdateUsers() error {
 	const batchSize = 200
 	idx := 0
 
+	retryCount := 0
 	for {
 		mmusers, resp, err := m.Client.GetUsers(idx, batchSize, "")
 		if err != nil {
-			if resp != nil && resp.StatusCode == 429 {
-				if rlErr := m.HandleRatelimit("GetUsers", resp); rlErr == nil {
-					continue
-				}
+			shouldRetry, hErr := m.HandleRetry("GetUsers", retryCount, 10, resp)
+			if hErr == nil && shouldRetry {
+				retryCount++
+				continue
 			}
 
 			m.logger.Errorf("UpdateUsers failed at batch %d: %v", idx, err)

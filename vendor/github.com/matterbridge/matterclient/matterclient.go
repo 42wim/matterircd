@@ -401,17 +401,19 @@ func (m *Client) initUser() error {
 		idx := 0
 		var teamUsers []*model.User
 
+		retryCount := 0
 		for {
 			mmusers, resp, err := m.Client.GetUsersInTeam(team.Id, idx, batchSize, "")
 			if err != nil {
-				if resp != nil && resp.StatusCode == 429 {
-					if rlErr := m.HandleRatelimit("GetUsersInTeam", resp); rlErr == nil {
-						continue
-					}
+				shouldRetry, hErr := m.HandleRetry("GetUsersInTeam", retryCount, 10, resp)
+				if hErr == nil && shouldRetry {
+					retryCount++
+					continue
 				}
 				m.logger.Errorf("failed to fetch users for team %s: %v", team.Name, err)
 				return err
 			}
+			retryCount = 0
 
 			teamUsers = append(teamUsers, mmusers...)
 
@@ -887,29 +889,67 @@ func (m *Client) HandleRatelimit(name string, resp *model.Response) error {
 		return fmt.Errorf("StatusCode error: %d", resp.StatusCode)
 	}
 
-	resetEpochStr := resp.Header.Get("X-RateLimit-Reset")
-	if resetEpochStr == "" {
+	resetHeaderStr := resp.Header.Get("X-RateLimit-Reset")
+	if resetHeaderStr == "" {
 		time.Sleep(3 * time.Second)
 		return nil
 	}
 
-	resetEpoch, err := strconv.ParseInt(resetEpochStr, 10, 64)
+	headerValue, err := strconv.ParseInt(resetHeaderStr, 10, 64)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to parse rate limit header: %v", err)
 	}
 
-	now := time.Now().Unix()
-	waitTime := resetEpoch - now
+	var waitTime int64
+
+	// Handle epoch vs. delta
+	if headerValue > 1000000 {
+		now := time.Now().Unix()
+		waitTime = headerValue - now
+	} else {
+		waitTime = headerValue
+	}
 
 	if waitTime < 1 {
 		waitTime = 1
 	}
 
-	m.logger.Warnf("Ratelimited on %s for %d", name, waitTime)
+	if waitTime > 300 {
+		m.logger.Warnf("Rate limit reset time (%d seconds) looks suspiciously long; capping sleep to 5 seconds", waitTime)
+		waitTime = 5
+	}
 
+	m.logger.Warnf("Ratelimited on %s for %d", name, waitTime)
 	time.Sleep(time.Duration(waitTime) * time.Second)
 
 	return nil
+}
+
+func (m *Client) HandleRetry(name string, current int, maxLimit int, resp *model.Response) (bool, error) {
+	if resp == nil {
+		return false, fmt.Errorf("got a nil model response from %s", name)
+	}
+
+	shouldRetry := current < maxLimit
+
+	switch {
+	case resp.StatusCode == 429:
+		_ = m.HandleRatelimit(name, resp)
+		return shouldRetry, nil
+
+	case resp.StatusCode >= 500:
+		m.logger.Warnf("Transient error %d on %s, backing off: %ds (attempt %d/%d)",
+			resp.StatusCode, name, current+1, current+1, maxLimit)
+		time.Sleep(time.Duration(current+1) * time.Second)
+		return shouldRetry, nil
+
+	case resp.StatusCode >= 300 && resp.StatusCode < 500:
+		return false, nil
+
+	default:
+		time.Sleep(time.Duration(current+1) * time.Second)
+		return shouldRetry, nil
+	}
 }
 
 func (m *Client) antiIdle(ctx context.Context, channelID string, interval int) {

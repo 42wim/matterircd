@@ -57,16 +57,17 @@ func (m *Client) GetFileLinks(filenames []string) []string {
 }
 
 func (m *Client) GetPosts(channelID string, limit int) *model.PostList {
+	retryCount := 0
 	for {
 		res, resp, err := m.Client.GetPostsForChannel(channelID, 0, limit, "", false)
 		if err == nil {
 			return res
 		}
 
-		if resp != nil && resp.StatusCode == 429 {
-			if rlErr := m.HandleRatelimit("GetPostsForChannel", resp); rlErr == nil {
-				continue
-			}
+		shouldRetry, hErr := m.HandleRetry("GetPostsForChannel", retryCount, 10, resp)
+		if hErr == nil && shouldRetry {
+			retryCount++
+			continue
 		}
 
 		m.logger.Errorf("GetPostsForChannel failed for %s: %v", channelID, err)
@@ -79,16 +80,17 @@ func (m *Client) GetPostThread(postID string) *model.PostList {
 		CollapsedThreads: false,
 		Direction:        "up",
 	}
+	retryCount := 0
 	for {
 		res, resp, err := m.Client.GetPostThreadWithOpts(postID, "", opts)
 		if err == nil {
 			return res
 		}
 
-		if resp != nil && resp.StatusCode == 429 {
-			if rlErr := m.HandleRatelimit("GetPostThread", resp); rlErr == nil {
-				continue
-			}
+		shouldRetry, hErr := m.HandleRetry("GetPostThread", retryCount, 10, resp)
+		if hErr == nil && shouldRetry {
+			retryCount++
+			continue
 		}
 
 		m.logger.Errorf("GetPostThread failed for %s: %v", postID, err)
@@ -97,16 +99,17 @@ func (m *Client) GetPostThread(postID string) *model.PostList {
 }
 
 func (m *Client) GetPostsSince(channelID string, time int64) *model.PostList {
+	retryCount := 0
 	for {
 		res, resp, err := m.Client.GetPostsSince(channelID, time, false)
 		if err == nil {
 			return res
 		}
 
-		if resp != nil && resp.StatusCode == 429 {
-			if rlErr := m.HandleRatelimit("GetPostsSince", resp); rlErr == nil {
-				continue
-			}
+		shouldRetry, hErr := m.HandleRetry("GetPostsSince", retryCount, 10, resp)
+		if hErr == nil && shouldRetry {
+			retryCount++
+			continue
 		}
 
 		m.logger.Errorf("GetPostsSince failed for %s: %v", channelID, err)
@@ -145,16 +148,17 @@ func (m *Client) PostMessage(channelID string, text string, rootID string) (stri
 		RootId:    rootID,
 	}
 
+	retryCount := 0
 	for {
 		res, resp, err := m.Client.CreatePost(post)
 		if err == nil {
 			return res.Id, nil
 		}
 
-		if resp != nil && resp.StatusCode == 429 {
-			if rlErr := m.HandleRatelimit("CreatePost", resp); rlErr == nil {
-				continue // Waited out the 429, try again
-			}
+		shouldRetry, hErr := m.HandleRetry("CreatePost", retryCount, 10, resp)
+		if hErr == nil && shouldRetry {
+			retryCount++
+			continue
 		}
 
 		return "", err
@@ -169,6 +173,7 @@ func (m *Client) PostMessageWithFiles(channelID string, text string, rootID stri
 		FileIds:   fileIds,
 	}
 
+	retryCount := 0
 	for {
 		// create DM channel (only happens on first message)
 		res, resp, err := m.Client.CreatePost(post)
@@ -176,10 +181,10 @@ func (m *Client) PostMessageWithFiles(channelID string, text string, rootID stri
 			return res.Id, nil
 		}
 
-		if resp != nil && resp.StatusCode == 429 {
-			if rlErr := m.HandleRatelimit("CreatePost", resp); rlErr == nil {
-				continue
-			}
+		shouldRetry, hErr := m.HandleRetry("CreatePost", retryCount, 10, resp)
+		if hErr == nil && shouldRetry {
+			retryCount++
+			continue
 		}
 
 		return "", err
@@ -187,14 +192,21 @@ func (m *Client) PostMessageWithFiles(channelID string, text string, rootID stri
 }
 
 func (m *Client) SearchPosts(query string) *model.PostList {
-	res, resp, err := m.Client.SearchPosts(m.Team.ID, query, false)
-	if err != nil {
-		if resp != nil && resp.StatusCode == 429 {
-			_ = m.HandleRatelimit("SearchPosts", resp)
+	retryCount := 0
+	for {
+		res, resp, err := m.Client.SearchPosts(m.Team.ID, query, false)
+		if err == nil {
+			return res
 		}
+
+		shouldRetry, hErr := m.HandleRetry("SearchPosts", retryCount, 10, resp)
+		if hErr == nil && shouldRetry {
+			retryCount++
+			continue
+		}
+
 		return nil
 	}
-	return res
 }
 
 // SendDirectMessage sends a direct message to specified user
@@ -205,6 +217,7 @@ func (m *Client) SendDirectMessage(toUserID string, msg string, rootID string) e
 func (m *Client) SendDirectMessageProps(toUserID string, msg string, rootID string, props map[string]interface{}) error {
 	m.logger.Debugf("SendDirectMessage to %s, msg %s", toUserID, msg)
 
+	retryCount := 0
 	for {
 		// create DM channel (only happens on first message)
 		_, resp, err := m.Client.CreateDirectChannel(m.User.Id, toUserID)
@@ -212,10 +225,10 @@ func (m *Client) SendDirectMessageProps(toUserID string, msg string, rootID stri
 			break
 		}
 
-		if resp != nil && resp.StatusCode == 429 {
-			if rlErr := m.HandleRatelimit("CreateDirectChannel", resp); rlErr == nil {
-				continue
-			}
+		shouldRetry, hErr := m.HandleRetry("CreateDirectChannel", retryCount, 10, resp)
+		if hErr == nil && shouldRetry {
+			retryCount++
+			continue
 		}
 
 		m.logger.Errorf("CreateDirectChannel to %s failed: %v", toUserID, err)
@@ -239,16 +252,17 @@ func (m *Client) SendDirectMessageProps(toUserID string, msg string, rootID stri
 
 	post.SetProps(props)
 
+	retryCount = 0
 	for {
 		_, resp, err := m.Client.CreatePost(post)
 		if err == nil {
 			return nil
 		}
 
-		if resp != nil && resp.StatusCode == 429 {
-			if rlErr := m.HandleRatelimit("CreatePost", resp); rlErr == nil {
-				continue
-			}
+		shouldRetry, hErr := m.HandleRetry("CreatePost", retryCount, 10, resp)
+		if hErr == nil && shouldRetry {
+			retryCount++
+			continue
 		}
 
 		m.logger.Errorf("CreatePost failed for channel %s: %v", post.ChannelId, err)
