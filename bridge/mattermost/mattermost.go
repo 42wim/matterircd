@@ -714,6 +714,7 @@ func (m *Mattermost) wsActionPostSkip(rmsg *model.WebSocketEvent) bool {
 	disableEmoji := m.v.GetBool("mattermost.disableemoji")
 	useUnicode := m.v.GetBool("mattermost.unicode")
 	blockquoteChar := blockquoteCharNonUnicode
+	inlineCode := m.v.GetString("mattermost.markdowninlinecode")
 	if useUnicode {
 		blockquoteChar = blockquoteCharUnicode
 	}
@@ -766,7 +767,7 @@ func (m *Mattermost) wsActionPostSkip(rmsg *model.WebSocketEvent) bool {
 	lastSentMsg := strings.ReplaceAll(data.Message, "\n", " ")
 
 	if !disableMarkdown {
-		lastSentMsg = utils.Markdown2irc(lastSentMsg, blockquoteChar)
+		lastSentMsg = utils.Markdown2irc(lastSentMsg, blockquoteChar, inlineCode)
 	}
 
 	if !disableEmoji {
@@ -848,6 +849,7 @@ func (m *Mattermost) getParentReplyMsg(parentID string, newLen int, uncounted st
 	disableEmoji := m.v.GetBool("mattermost.disableemoji")
 	useUnicode := m.v.GetBool("mattermost.unicode")
 	blockquoteChar := blockquoteCharNonUnicode
+	inlineCode := m.v.GetString("mattermost.markdowninlinecode")
 	if useUnicode {
 		blockquoteChar = blockquoteCharUnicode
 	}
@@ -878,7 +880,7 @@ func (m *Mattermost) getParentReplyMsg(parentID string, newLen int, uncounted st
 
 		if !disableMarkdown {
 			msg = markdownReplacer.Replace(msg)
-			msg = utils.Markdown2irc(msg, blockquoteChar)
+			msg = utils.Markdown2irc(msg, blockquoteChar, inlineCode)
 		} else {
 			msg = strings.ReplaceAll(msg, "\n", " ")
 		}
@@ -1666,6 +1668,7 @@ func (m *Mattermost) parseMessageAttachments(attachments []*model.SlackAttachmen
 	prefixChar := messageAttachmentCharNonUnicode
 	spaceChar := messageAttachmentSpaceNonUnicode
 	blockquoteChar := blockquoteCharNonUnicode
+	inlineCode := m.v.GetString("mattermost.markdowninlinecode")
 	if useUnicode {
 		prefixChar = messageAttachmentCharUnicode
 		spaceChar = messageAttachmentSpaceUnicode
@@ -1717,7 +1720,7 @@ func (m *Mattermost) parseMessageAttachments(attachments []*model.SlackAttachmen
 			}
 
 			if !disableMarkdown {
-				fallbackText = utils.Markdown2irc(fallbackText, blockquoteChar)
+				fallbackText = utils.Markdown2irc(fallbackText, blockquoteChar, inlineCode)
 			}
 
 			if !disableEmoji {
@@ -1771,7 +1774,7 @@ func (m *Mattermost) parseMessageAttachments(attachments []*model.SlackAttachmen
 				line, codeBlockBackTick, codeBlockTilde, lexer = utils.FormatCodeBlockText(line, codeBlockBackTick, codeBlockTilde, lexer, syntaxHighlighting, codeBlockPrefix)
 
 				if !disableMarkdown && !codeBlockBackTick && !codeBlockTilde {
-					line = utils.Markdown2irc(line, blockquoteChar)
+					line = utils.Markdown2irc(line, blockquoteChar, inlineCode)
 				}
 
 				if !disableEmoji && !codeBlockBackTick && !codeBlockTilde {
@@ -1840,8 +1843,8 @@ func (m *Mattermost) parseMessageAttachments(attachments []*model.SlackAttachmen
 					}
 					b.WriteString(prefix)
 					if !disableMarkdown {
-						v1 = utils.Markdown2irc(v1, blockquoteChar)
-						v2 = utils.Markdown2irc(v2, blockquoteChar)
+						v1 = utils.Markdown2irc(v1, blockquoteChar, inlineCode)
+						v2 = utils.Markdown2irc(v2, blockquoteChar, inlineCode)
 					}
 					if !disableEmoji {
 						v1 = emoji.ReplaceAliases(v1)
@@ -1877,7 +1880,7 @@ func (m *Mattermost) parseMessageAttachments(attachments []*model.SlackAttachmen
 					line, codeBlockBackTick, codeBlockTilde, lexer = utils.FormatCodeBlockText(line, codeBlockBackTick, codeBlockTilde, lexer, syntaxHighlighting, codeBlockPrefix)
 
 					if !disableMarkdown && !codeBlockBackTick && !codeBlockTilde {
-						line = utils.Markdown2irc(line, blockquoteChar)
+						line = utils.Markdown2irc(line, blockquoteChar, inlineCode)
 					}
 
 					if !disableEmoji && !codeBlockBackTick && !codeBlockTilde {
