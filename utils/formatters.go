@@ -117,13 +117,7 @@ var codeRegExp = []*regexp.Regexp{
 
 const blockQuoteCharDefault = ">"
 
-func Markdown2irc(msg string, blockQuoteChar string) string {
-	// Safety valve: Prevent CPU hangs on massive copy-paste blocks (e.g. log files).
-	// IRC splits messages at 512 bytes anyway, so formatting massive blocks is wasted CPU.
-	if len(msg) > 4096 {
-		return msg
-	}
-
+func Markdown2irc(msg string, blockQuoteChar string, inlineCode string) string {
 	if !strings.ContainsAny(msg, "*_`>") {
 		return msg
 	}
@@ -131,31 +125,46 @@ func Markdown2irc(msg string, blockQuoteChar string) string {
 	// Bold & Italic 0x02+0x1d
 	if strings.ContainsAny(msg, "*_") {
 		for _, re := range boldItalicRegExp {
-			msg = re.ReplaceAllString(msg, "\x02\x1d$1\x1d\x02")
+			msg = re.ReplaceAllString(msg, "\x02\x1d${1}\x1d\x02")
 		}
 
 		// Bold 0x02
 		for _, re := range boldRegExp {
-			msg = re.ReplaceAllString(msg, "\x02$1\x02")
+			msg = re.ReplaceAllString(msg, "\x02${1}\x02")
 		}
 
 		// Italic 0x1d
 		for _, re := range italicRegExp {
-			msg = re.ReplaceAllString(msg, "\x1d$1\x1d")
+			msg = re.ReplaceAllString(msg, "\x1d${1}\x1d")
 		}
 	}
 
 	// Code / Monospace 0x11
 	if strings.Contains(msg, "`") {
+		inlineCodeStart := "\x0f`\x11\x02\x030,14"
+		inlineCodeEnd := "\x11\x0f`"
+		if inlineCode != "" {
+			if unq, err := strconv.Unquote(`"` + inlineCode + `"`); err == nil {
+				inlineCode = unq
+			}
+			inlineCodeStart = inlineCode
+			// Remove fence if not present
+			if !strings.Contains(inlineCode, "`") {
+				inlineCodeEnd = "\x11\x0f"
+			}
+		}
 		for _, re := range codeRegExp {
-			// Not all IRC clients support monospace (0x11) so keep the fence and make it bold as well
-			msg = re.ReplaceAllString(msg, "`\x11\x02\x030,14$1\x03\x02\x11`")
+			// Not all IRC clients support monospace (0x11) so keep the fence
+			msg = re.ReplaceAllString(msg, inlineCodeStart+"${1}"+inlineCodeEnd)
 		}
 	}
 
 	// Block quotes
 	trimmedText := strings.TrimLeft(msg, " \t")
 	if strings.HasPrefix(trimmedText, blockQuoteCharDefault) && blockQuoteChar != blockQuoteCharDefault {
+		if unq, err := strconv.Unquote(`"` + blockQuoteChar + `"`); err == nil {
+			blockQuoteChar = unq
+		}
 		msg = strings.Replace(msg, blockQuoteCharDefault, blockQuoteChar, 1)
 	}
 

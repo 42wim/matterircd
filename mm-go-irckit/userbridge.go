@@ -189,6 +189,7 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 
 	disableMarkdown := u.v.GetBool(u.br.Protocol() + ".disablemarkdown")
 	blockQuoteChar, codeBlockPrefix := u.getMarkdownBlockCodePrefix()
+	inlineCode := u.v.GetString(u.br.Protocol() + ".markdowninlinecode")
 
 	text := event.Text
 	prefix := ""
@@ -242,7 +243,7 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 		}
 
 		if !disableMarkdown && !codeBlockBackTick && !codeBlockTilde {
-			line = utils.Markdown2irc(line, blockQuoteChar)
+			line = utils.Markdown2irc(line, blockQuoteChar, inlineCode)
 		}
 
 		if !disableEmoji && !codeBlockBackTick && !codeBlockTilde {
@@ -392,6 +393,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 
 	disableMarkdown := u.v.GetBool(u.br.Protocol() + ".disablemarkdown")
 	blockQuoteChar, codeBlockPrefix := u.getMarkdownBlockCodePrefix()
+	inlineCode := u.v.GetString(u.br.Protocol() + ".markdowninlinecode")
 
 	text := event.Text
 	prefix := ""
@@ -442,7 +444,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		}
 
 		if !disableMarkdown && !codeBlockBackTick && !codeBlockTilde {
-			line = utils.Markdown2irc(line, blockQuoteChar)
+			line = utils.Markdown2irc(line, blockQuoteChar, inlineCode)
 		}
 
 		if !disableEmoji && !codeBlockBackTick && !codeBlockTilde {
