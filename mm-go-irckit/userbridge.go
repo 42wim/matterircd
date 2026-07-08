@@ -1198,7 +1198,7 @@ func (u *User) prefixContext(channelID, messageID, parentID, event string) strin
 			return "[@@" + messageID + "]"
 		}
 		if u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" || parentID == messageID {
-			return "[" + prefixChar + "@@" + "parentID" + "]"
+			return "[" + prefixChar + "@@" + parentID + "]"
 		}
 		return "[" + prefixChar + "@@" + parentID + ",@@" + messageID + "]"
 	}
