@@ -141,16 +141,21 @@ func Markdown2irc(msg string, blockQuoteChar string, inlineCode string) string {
 
 	// Code / Monospace 0x11
 	if strings.Contains(msg, "`") {
+		inlineCodeStart := "\x0f`\x11\x02\x030,14"
+		inlineCodeEnd := "\x11\x0f`"
 		if inlineCode != "" {
 			if unq, err := strconv.Unquote(`"` + inlineCode + `"`); err == nil {
 				inlineCode = unq
 			}
-		} else {
-			inlineCode = "\x02\x030,14"
+			inlineCodeStart = inlineCode
+			// Remove fence if not present
+			if !strings.Contains(inlineCode, "`") {
+				inlineCodeEnd = "\x11\x0f"
+			}
 		}
 		for _, re := range codeRegExp {
 			// Not all IRC clients support monospace (0x11) so keep the fence
-			msg = re.ReplaceAllString(msg, "\x0f`\x11"+inlineCode+"${1}"+"\x11\x0f`")
+			msg = re.ReplaceAllString(msg, inlineCodeStart+"${1}"+inlineCodeEnd)
 		}
 	}
 
