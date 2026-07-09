@@ -134,24 +134,11 @@ func (m *Client) GetChannelUsers(channelID string) ([]*model.User, error) {
 	}
 	m.Users.mu.RUnlock()
 
-	m.Users.mu.Lock()
-	defer m.Users.mu.Unlock()
-
-	if userIDs, exists := m.Users.channels[channelID]; exists {
-		users := make([]*model.User, 0, len(userIDs))
-		for uid := range userIDs {
-			if user, ok := m.Users.users[uid]; ok {
-				users = append(users, user)
-			}
-		}
-		return users, nil
-	}
-
 	var allUsers []*model.User
 	idx := 0
 	const batchSize = 200
-
 	retryCount := 0
+
 	for {
 		mmusersPaged, resp, err := m.Client.GetUsersInChannel(channelID, idx, batchSize, "")
 		if err != nil {
@@ -172,6 +159,9 @@ func (m *Client) GetChannelUsers(channelID string) ([]*model.User, error) {
 		idx++
 	}
 
+	m.Users.mu.Lock()
+	defer m.Users.mu.Unlock()
+
 	if m.Users.channels[channelID] == nil {
 		m.Users.channels[channelID] = make(map[string]struct{})
 	}
@@ -186,11 +176,12 @@ func (m *Client) GetChannelUsers(channelID string) ([]*model.User, error) {
 
 func (m *Client) GetLastViewedAt(channelID string) int64 {
 	m.RLock()
-	defer m.RUnlock()
+	userID := m.User.Id
+	m.RUnlock()
 
 	retryCount := 0
 	for {
-		res, resp, err := m.Client.GetChannelMember(channelID, m.User.Id, "")
+		res, resp, err := m.Client.GetChannelMember(channelID, userID, "")
 		if err == nil {
 			return res.LastViewedAt
 		}
@@ -260,26 +251,23 @@ func (m *Client) JoinChannel(channelID string) error {
 }
 
 func (m *Client) UpdateChannelsTeam(teamID string) error {
-	m.Lock()
+	m.RLock()
 	if team, exists := m.OtherTeams[teamID]; exists {
 		if time.Since(team.LastChannelSync) < 30*time.Minute {
-			m.Unlock()
+			m.RUnlock()
 			m.logger.Debugf("skipping channel fetch for team %s: cache is only %v old", teamID, time.Since(team.LastChannelSync).Round(time.Second))
 			return nil
 		}
-		team.LastChannelSync = time.Now()
 	}
-	m.Unlock()
+	m.RUnlock()
 
-	var (
-		resp *model.Response
-		err  error
-	)
 	const batchSize = 200
-
-	mmchannels := make([]*model.Channel, 0, batchSize)
+	var mmchannels []*model.Channel
 	retryCount := 0
+
 	for {
+		var resp *model.Response
+		var err error
 		mmchannels, resp, err = m.Client.GetChannelsForTeamForUser(teamID, m.User.Id, false, "")
 		if err == nil {
 			break
@@ -290,13 +278,13 @@ func (m *Client) UpdateChannelsTeam(teamID string) error {
 			retryCount++
 			continue
 		}
-
 		return err
 	}
 
 	idx := 0
 	moreChannels := make([]*model.Channel, 0, batchSize)
 	retryCount = 0
+
 	for {
 		channels, resp, err := m.Client.GetPublicChannelsForTeam(teamID, idx, batchSize, "")
 		if err != nil {
@@ -307,6 +295,8 @@ func (m *Client) UpdateChannelsTeam(teamID string) error {
 			}
 			return err
 		}
+		retryCount = 0
+
 		moreChannels = append(moreChannels, channels...)
 		if len(channels) < batchSize {
 			break
@@ -330,6 +320,12 @@ func (m *Client) UpdateChannelsTeam(teamID string) error {
 	m.Users.mu.Unlock()
 
 	m.Users.lastUpdated.Store(time.Now().Unix())
+
+	m.Lock()
+	if team, exists := m.OtherTeams[teamID]; exists {
+		team.LastChannelSync = time.Now()
+	}
+	m.Unlock()
 
 	return nil
 }

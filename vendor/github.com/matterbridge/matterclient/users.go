@@ -157,8 +157,8 @@ func (m *Client) SetUserStatus(userID string, rawStatus string) string {
 func (m *Client) UpdateUsers() error {
 	const batchSize = 200
 	idx := 0
-
 	retryCount := 0
+
 	for {
 		mmusers, resp, err := m.Client.GetUsers(idx, batchSize, "")
 		if err != nil {
@@ -171,6 +171,7 @@ func (m *Client) UpdateUsers() error {
 			m.logger.Errorf("UpdateUsers failed at batch %d: %v", idx, err)
 			return err
 		}
+		retryCount = 0
 
 		m.Users.mu.Lock()
 		for _, user := range mmusers {

@@ -370,12 +370,23 @@ func (m *Client) initUser() error {
 	if m.OtherTeams == nil {
 		m.OtherTeams = make(map[string]*Team)
 	}
+	userID := m.User.Id
 	m.Unlock()
 
-	// we only load all team data on initial login.
-	// all other updates are for channels from our (primary) team only.
-	teams, _, err := m.Client.GetTeamsForUser(m.User.Id, "")
-	if err != nil {
+	var teams []*model.Team
+	retryCount := 0
+	for {
+		var resp *model.Response
+		var err error
+		teams, resp, err = m.Client.GetTeamsForUser(userID, "")
+		if err == nil {
+			break
+		}
+		shouldRetry, hErr := m.HandleRetry("GetTeamsForUser", retryCount, 10, resp)
+		if hErr == nil && shouldRetry {
+			retryCount++
+			continue
+		}
 		return err
 	}
 
@@ -400,20 +411,20 @@ func (m *Client) initUser() error {
 
 		idx := 0
 		var teamUsers []*model.User
+		pageRetryCount := 0
 
-		retryCount := 0
 		for {
 			mmusers, resp, err := m.Client.GetUsersInTeam(team.Id, idx, batchSize, "")
 			if err != nil {
-				shouldRetry, hErr := m.HandleRetry("GetUsersInTeam", retryCount, 10, resp)
+				shouldRetry, hErr := m.HandleRetry("GetUsersInTeam", pageRetryCount, 10, resp)
 				if hErr == nil && shouldRetry {
-					retryCount++
+					pageRetryCount++
 					continue
 				}
 				m.logger.Errorf("failed to fetch users for team %s: %v", team.Name, err)
 				return err
 			}
-			retryCount = 0
+			pageRetryCount = 0
 
 			teamUsers = append(teamUsers, mmusers...)
 
@@ -422,7 +433,6 @@ func (m *Client) initUser() error {
 			}
 
 			idx++
-
 			time.Sleep(time.Millisecond * 200)
 		}
 		m.logger.Debugf("found %d users in team %s", len(teamUsers), team.Name)
@@ -431,7 +441,6 @@ func (m *Client) initUser() error {
 		if m.Users.teams == nil {
 			m.Users.teams = make(map[string]map[string]struct{})
 		}
-
 		m.Users.teams[team.Id] = make(map[string]struct{})
 		for _, u := range teamUsers {
 			m.Users.users[u.Id] = u
@@ -451,7 +460,6 @@ func (m *Client) initUser() error {
 			m.Team = m.OtherTeams[team.Id]
 			m.logger.Debugf("initUser(): found our team %s (id: %s)", team.Name, team.Id)
 		}
-
 		m.Unlock()
 	}
 
@@ -926,29 +934,34 @@ func (m *Client) HandleRatelimit(name string, resp *model.Response) error {
 }
 
 func (m *Client) HandleRetry(name string, current int, maxLimit int, resp *model.Response) (bool, error) {
-	if resp == nil {
-		return false, fmt.Errorf("got a nil model response from %s", name)
+	if current >= maxLimit {
+		return false, nil
 	}
 
-	shouldRetry := current < maxLimit
+	if resp == nil {
+		m.logger.Warnf("Network error on %s (resp is nil), backing off: %ds (attempt %d/%d)",
+			name, current+1, current+1, maxLimit)
+		time.Sleep(time.Duration(current+1) * time.Second)
+		return true, nil
+	}
 
 	switch {
 	case resp.StatusCode == 429:
 		_ = m.HandleRatelimit(name, resp)
-		return shouldRetry, nil
+		return true, nil
 
 	case resp.StatusCode >= 500:
 		m.logger.Warnf("Transient error %d on %s, backing off: %ds (attempt %d/%d)",
 			resp.StatusCode, name, current+1, current+1, maxLimit)
 		time.Sleep(time.Duration(current+1) * time.Second)
-		return shouldRetry, nil
+		return true, nil
 
 	case resp.StatusCode >= 300 && resp.StatusCode < 500:
 		return false, nil
 
 	default:
 		time.Sleep(time.Duration(current+1) * time.Second)
-		return shouldRetry, nil
+		return true, nil
 	}
 }
 
