@@ -370,12 +370,23 @@ func (m *Client) initUser() error {
 	if m.OtherTeams == nil {
 		m.OtherTeams = make(map[string]*Team)
 	}
+	userID := m.User.Id
 	m.Unlock()
 
-	// we only load all team data on initial login.
-	// all other updates are for channels from our (primary) team only.
-	teams, _, err := m.Client.GetTeamsForUser(m.User.Id, "")
-	if err != nil {
+	var teams []*model.Team
+	retryCount := 0
+	for {
+		var resp *model.Response
+		var err error
+		teams, resp, err = m.Client.GetTeamsForUser(userID, "")
+		if err == nil {
+			break
+		}
+		shouldRetry, hErr := m.HandleRetry("GetTeamsForUser", retryCount, 10, resp)
+		if hErr == nil && shouldRetry {
+			retryCount++
+			continue
+		}
 		return err
 	}
 
@@ -400,12 +411,20 @@ func (m *Client) initUser() error {
 
 		idx := 0
 		var teamUsers []*model.User
+		pageRetryCount := 0
 
 		for {
-			mmusers, _, err := m.Client.GetUsersInTeam(team.Id, idx, batchSize, "")
+			mmusers, resp, err := m.Client.GetUsersInTeam(team.Id, idx, batchSize, "")
 			if err != nil {
+				shouldRetry, hErr := m.HandleRetry("GetUsersInTeam", pageRetryCount, 10, resp)
+				if hErr == nil && shouldRetry {
+					pageRetryCount++
+					continue
+				}
+				m.logger.Errorf("failed to fetch users for team %s: %v", team.Name, err)
 				return err
 			}
+			pageRetryCount = 0
 
 			teamUsers = append(teamUsers, mmusers...)
 
@@ -414,7 +433,6 @@ func (m *Client) initUser() error {
 			}
 
 			idx++
-
 			time.Sleep(time.Millisecond * 200)
 		}
 		m.logger.Debugf("found %d users in team %s", len(teamUsers), team.Name)
@@ -423,32 +441,25 @@ func (m *Client) initUser() error {
 		if m.Users.teams == nil {
 			m.Users.teams = make(map[string]map[string]struct{})
 		}
-		if m.Users.teams[team.Id] == nil {
-			m.Users.teams[team.Id] = make(map[string]struct{})
-		}
-
+		m.Users.teams[team.Id] = make(map[string]struct{})
 		for _, u := range teamUsers {
 			m.Users.users[u.Id] = u
 			m.Users.teams[team.Id][u.Id] = struct{}{}
-			m.Users.lastUpdated.Store(time.Now().Unix())
 		}
+		m.Users.lastUpdated.Store(time.Now().Unix())
 		m.Users.mu.Unlock()
 
-		t := &Team{
+		m.Lock()
+		m.OtherTeams[team.Id] = &Team{
 			Team:         team,
 			ID:           team.Id,
 			LastUserSync: time.Now(),
 		}
 
-		m.Lock()
-
-		m.OtherTeams[team.Id] = t
-
 		if team.Name == m.Credentials.Team {
-			m.Team = t
+			m.Team = m.OtherTeams[team.Id]
 			m.logger.Debugf("initUser(): found our team %s (id: %s)", team.Name, team.Id)
 		}
-
 		m.Unlock()
 	}
 
@@ -886,16 +897,72 @@ func (m *Client) HandleRatelimit(name string, resp *model.Response) error {
 		return fmt.Errorf("StatusCode error: %d", resp.StatusCode)
 	}
 
-	waitTime, err := strconv.Atoi(resp.Header.Get("X-RateLimit-Reset"))
+	resetHeaderStr := resp.Header.Get("X-RateLimit-Reset")
+	if resetHeaderStr == "" {
+		time.Sleep(3 * time.Second)
+		return nil
+	}
+
+	headerValue, err := strconv.ParseInt(resetHeaderStr, 10, 64)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to parse rate limit header: %v", err)
+	}
+
+	var waitTime int64
+
+	// Handle epoch vs. delta
+	if headerValue > 1000000 {
+		now := time.Now().Unix()
+		waitTime = headerValue - now
+	} else {
+		waitTime = headerValue
+	}
+
+	if waitTime < 1 {
+		waitTime = 1
+	}
+
+	if waitTime > 300 {
+		m.logger.Warnf("Rate limit reset time (%d seconds) looks suspiciously long; capping sleep to 5 seconds", waitTime)
+		waitTime = 5
 	}
 
 	m.logger.Warnf("Ratelimited on %s for %d", name, waitTime)
-
 	time.Sleep(time.Duration(waitTime) * time.Second)
 
 	return nil
+}
+
+func (m *Client) HandleRetry(name string, current int, maxLimit int, resp *model.Response) (bool, error) {
+	if current >= maxLimit {
+		return false, nil
+	}
+
+	if resp == nil {
+		m.logger.Warnf("Network error on %s (resp is nil), backing off: %ds (attempt %d/%d)",
+			name, current+1, current+1, maxLimit)
+		time.Sleep(time.Duration(current+1) * time.Second)
+		return true, nil
+	}
+
+	switch {
+	case resp.StatusCode == 429:
+		_ = m.HandleRatelimit(name, resp)
+		return true, nil
+
+	case resp.StatusCode >= 500:
+		m.logger.Warnf("Transient error %d on %s, backing off: %ds (attempt %d/%d)",
+			resp.StatusCode, name, current+1, current+1, maxLimit)
+		time.Sleep(time.Duration(current+1) * time.Second)
+		return true, nil
+
+	case resp.StatusCode >= 300 && resp.StatusCode < 500:
+		return false, nil
+
+	default:
+		time.Sleep(time.Duration(current+1) * time.Second)
+		return true, nil
+	}
 }
 
 func (m *Client) antiIdle(ctx context.Context, channelID string, interval int) {

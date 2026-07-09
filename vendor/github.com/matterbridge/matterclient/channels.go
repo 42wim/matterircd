@@ -137,15 +137,19 @@ func (m *Client) GetChannelUsers(channelID string) ([]*model.User, error) {
 	var allUsers []*model.User
 	idx := 0
 	const batchSize = 200
+	retryCount := 0
 
 	for {
 		mmusersPaged, resp, err := m.Client.GetUsersInChannel(channelID, idx, batchSize, "")
 		if err != nil {
-			if rlErr := m.HandleRatelimit("GetUsersInChannel", resp); rlErr != nil {
-				return nil, rlErr
+			shouldRetry, hErr := m.HandleRetry("GetUsersInChannel", retryCount, 10, resp)
+			if hErr == nil && shouldRetry {
+				retryCount++
+				continue
 			}
-			continue
+			return nil, err
 		}
+		retryCount = 0
 
 		allUsers = append(allUsers, mmusersPaged...)
 
@@ -172,17 +176,24 @@ func (m *Client) GetChannelUsers(channelID string) ([]*model.User, error) {
 
 func (m *Client) GetLastViewedAt(channelID string) int64 {
 	m.RLock()
-	defer m.RUnlock()
+	userID := m.User.Id
+	m.RUnlock()
 
+	retryCount := 0
 	for {
-		res, resp, err := m.Client.GetChannelMember(channelID, m.User.Id, "")
+		res, resp, err := m.Client.GetChannelMember(channelID, userID, "")
 		if err == nil {
 			return res.LastViewedAt
 		}
 
-		if err := m.HandleRatelimit("GetChannelMember", resp); err != nil {
-			return model.GetMillis()
+		shouldRetry, hErr := m.HandleRetry("GetChannelMember", retryCount, 10, resp)
+		if hErr == nil && shouldRetry {
+			retryCount++
+			continue
 		}
+
+		m.logger.Errorf("GetChannelMember failed for %s: %v", channelID, err)
+		return model.GetMillis()
 	}
 }
 
@@ -250,33 +261,42 @@ func (m *Client) UpdateChannelsTeam(teamID string) error {
 	}
 	m.RUnlock()
 
-	var (
-		resp *model.Response
-		err  error
-	)
 	const batchSize = 200
+	var mmchannels []*model.Channel
+	retryCount := 0
 
-	mmchannels := make([]*model.Channel, 0, batchSize)
 	for {
+		var resp *model.Response
+		var err error
 		mmchannels, resp, err = m.Client.GetChannelsForTeamForUser(teamID, m.User.Id, false, "")
 		if err == nil {
 			break
 		}
-		if err = m.HandleRatelimit("GetChannelsForTeamForUser", resp); err != nil {
-			return err
+
+		shouldRetry, hErr := m.HandleRetry("GetChannelsForTeamForUser", retryCount, 10, resp)
+		if hErr == nil && shouldRetry {
+			retryCount++
+			continue
 		}
+		return err
 	}
 
 	idx := 0
 	moreChannels := make([]*model.Channel, 0, batchSize)
+	retryCount = 0
+
 	for {
 		channels, resp, err := m.Client.GetPublicChannelsForTeam(teamID, idx, batchSize, "")
 		if err != nil {
-			if rlErr := m.HandleRatelimit("GetPublicChannelsForTeam", resp); rlErr != nil {
-				return rlErr
+			shouldRetry, hErr := m.HandleRetry("GetPublicChannelsForTeam", retryCount, 10, resp)
+			if hErr == nil && shouldRetry {
+				retryCount++
+				continue
 			}
-			continue
+			return err
 		}
+		retryCount = 0
+
 		moreChannels = append(moreChannels, channels...)
 		if len(channels) < batchSize {
 			break
@@ -298,6 +318,7 @@ func (m *Client) UpdateChannelsTeam(teamID string) error {
 		m.Users.channelData[ch.Id] = ch
 	}
 	m.Users.mu.Unlock()
+
 	m.Users.lastUpdated.Store(time.Now().Unix())
 
 	m.Lock()
@@ -370,16 +391,20 @@ func (m *Client) UpdateLastViewed(channelID string) error {
 
 	view := &model.ChannelView{ChannelId: channelID}
 
+	retryCount := 0
 	for {
 		_, resp, err := m.Client.ViewChannel(m.User.Id, view)
 		if err == nil {
 			return nil
 		}
 
-		if err := m.HandleRatelimit("ViewChannel", resp); err != nil {
-			m.logger.Errorf("ChannelView update for %s failed: %s", channelID, err)
-
-			return err
+		shouldRetry, hErr := m.HandleRetry("ViewChannel", retryCount, 10, resp)
+		if hErr == nil && shouldRetry {
+			retryCount++
+			continue
 		}
+
+		m.logger.Errorf("ChannelView update for %s failed: %v", channelID, err)
+		return err
 	}
 }
