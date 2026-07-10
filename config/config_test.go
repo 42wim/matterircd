@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 )
 
 func TestLoadConfigDoesNotAutoReloadChangedFile(t *testing.T) {
@@ -28,8 +27,6 @@ func TestLoadConfigDoesNotAutoReloadChangedFile(t *testing.T) {
 	if err := os.WriteFile(cfgFile, []byte("debug = true\n"), 0o600); err != nil {
 		t.Fatalf("write updated config: %v", err)
 	}
-
-	time.Sleep(250 * time.Millisecond)
 
 	if v.GetBool("debug") {
 		t.Fatal("expected config value to stay unchanged without automatic reload")
