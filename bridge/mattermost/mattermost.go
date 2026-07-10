@@ -904,14 +904,25 @@ func (m *Mattermost) getParentReplyMsg(parentID string, newLen int, uncounted st
 }
 
 func (m *Mattermost) safeEventSend(event *bridge.Event) {
-	t := time.NewTimer(2 * time.Second)
-	defer t.Stop()
+	start := time.Now()
 
-	select {
-	case m.eventChan <- event:
-		return
-	case <-t.C:
-		logger.Warnf("WARNING: m.eventChan is blocked! Dropping %s event to prevent worker deadlock: %s", event.Type, spew.Sdump(event))
+	timer := time.AfterFunc(5*time.Second, func() {
+		logger.Warnf(
+			"eventChan send blocked for >5s (type=%s): %s",
+			event.Type,
+			spew.Sdump(event),
+		)
+	})
+	defer timer.Stop()
+
+	m.eventChan <- event
+
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		logger.Warnf(
+			"eventChan send recovered after %v (type=%s)",
+			elapsed,
+			event.Type,
+		)
 	}
 }
 

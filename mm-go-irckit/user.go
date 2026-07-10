@@ -182,15 +182,17 @@ func (u *User) Decode() {
 	t.Stop()
 
 	safeSend := func(msg *irc.Message) {
-		t := time.NewTimer(2 * time.Second)
-		defer t.Stop()
+		start := time.Now()
 
-		select {
-		case u.DecodeCh <- msg:
-			return
-		case <-t.C:
-			logger.Warnf("WARNING: DecodeCh is blocked! Dropping  message due to prevent worker deadlock: %#v", msg)
-			return
+		timer := time.AfterFunc(5*time.Second, func() {
+			logger.Warnf("DecodeCh send blocked for >5s: %#v", msg)
+		})
+		defer timer.Stop()
+
+		u.DecodeCh <- msg
+
+		if elapsed := time.Since(start); elapsed > 5*time.Second {
+			logger.Warnf("DecodeCh send recovered after %v", elapsed)
 		}
 	}
 
