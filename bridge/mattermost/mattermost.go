@@ -137,9 +137,39 @@ func (m *Mattermost) loginToMattermost(onWsConnect func()) (*matterclient.Client
 	return mc, nil
 }
 
+// executeWithWatchdog wraps an event execution block with a 5-second long-running handler warning log.
+func (m *Mattermost) executeWithWatchdog(label string, rawEvent *model.WebSocketEvent, action func(*model.WebSocketEvent)) {
+	start := time.Now()
+
+	timer := time.AfterFunc(5*time.Second, func() {
+		logger.Warnf(
+			"Worker blocked for >5s (label=%s channel=%s user=%s event=%s)\n",
+			label,
+			rawEvent.GetBroadcast().ChannelId,
+			rawEvent.GetBroadcast().UserId,
+			rawEvent.EventType(),
+		)
+	})
+	defer timer.Stop()
+
+	action(rawEvent)
+
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		logger.Warnf(
+			"Worker recovered after %v (label=%s channel=%s user=%s event=%s)",
+			elapsed,
+			label,
+			rawEvent.GetBroadcast().ChannelId,
+			rawEvent.GetBroadcast().UserId,
+			rawEvent.EventType(),
+		)
+	}
+}
+
 //nolint:cyclop
 func (m *Mattermost) handleWsMessage(quitChan chan struct{}) {
 	updateChannelsThrottle := time.NewTicker(time.Second * 60)
+	defer updateChannelsThrottle.Stop()
 
 	for {
 		if m.mc.WsQuit {
@@ -159,38 +189,38 @@ func (m *Mattermost) handleWsMessage(quitChan chan struct{}) {
 
 			switch message.Raw.EventType() {
 			case model.WebsocketEventPosted:
-				m.handleWsActionPost(message.Raw)
+				m.executeWithWatchdog("PostAction", message.Raw, m.handleWsActionPost)
 			case model.WebsocketEventPostEdited:
-				m.handleWsActionPost(message.Raw)
+				m.executeWithWatchdog("PostEditedAction", message.Raw, m.handleWsActionPost)
 			case model.WebsocketEventPostDeleted:
-				m.handleWsActionPost(message.Raw)
+				m.executeWithWatchdog("PostDeletedAction", message.Raw, m.handleWsActionPost)
 			case model.WebsocketEventEphemeralMessage:
-				m.handleWsActionPost(message.Raw)
+				m.executeWithWatchdog("EphemeralPostAction", message.Raw, m.handleWsActionPost)
 			case model.WebsocketEventUserRemoved:
-				m.handleWsActionUserRemoved(message.Raw)
+				m.executeWithWatchdog("UserRemovedAction", message.Raw, m.handleWsActionUserRemoved)
 			case model.WebsocketEventUserAdded:
 				// check if we have the users/channels in our cache. If not update
 				m.checkWsActionMessage(message.Raw, updateChannelsThrottle)
-				m.handleWsActionUserAdded(message.Raw)
+				m.executeWithWatchdog("UserAddedAction", message.Raw, m.handleWsActionUserAdded)
 			case model.WebsocketEventChannelCreated:
 				// check if we have the users/channels in our cache. If not update
 				m.checkWsActionMessage(message.Raw, updateChannelsThrottle)
-				m.handleWsActionChannelCreated(message.Raw)
+				m.executeWithWatchdog("ChannelCreatedAction", message.Raw, m.handleWsActionChannelCreated)
 			case model.WebsocketEventChannelDeleted:
 				// check if we have the users/channels in our cache. If not update
 				m.checkWsActionMessage(message.Raw, updateChannelsThrottle)
-				m.handleWsActionChannelDeleted(message.Raw)
+				m.executeWithWatchdog("ChannelDeletedAction", message.Raw, m.handleWsActionChannelDeleted)
 			case model.WebsocketEventChannelRestored:
 				// check if we have the users/channels in our cache. If not update
 				m.checkWsActionMessage(message.Raw, updateChannelsThrottle)
 			case model.WebsocketEventChannelUpdated:
-				m.handleWsActionPost(message.Raw)
+				m.executeWithWatchdog("ChannelUpdatedAction", message.Raw, m.handleWsActionPost)
 			case model.WebsocketEventUserUpdated:
-				m.handleWsActionUserUpdated(message.Raw)
+				m.executeWithWatchdog("UserUpdatedAction", message.Raw, m.handleWsActionUserUpdated)
 			case model.WebsocketEventStatusChange:
-				m.handleStatusChangeEvent(message.Raw)
+				m.executeWithWatchdog("StatusChangeAction", message.Raw, m.handleStatusChangeEvent)
 			case model.WebsocketEventReactionAdded, model.WebsocketEventReactionRemoved:
-				m.handleReactionEvent(message.Raw)
+				m.executeWithWatchdog("ReactionAction", message.Raw, m.handleReactionEvent)
 			}
 		}
 	}
