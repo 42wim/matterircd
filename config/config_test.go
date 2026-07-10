@@ -4,9 +4,10 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
-func TestLoadConfigDoesNotAutoReloadChangedFile(t *testing.T) {
+func TestLoadConfigAutoReloadsChangedFile(t *testing.T) {
 	t.Setenv("MATTERIRCD_DEBUG", "")
 
 	dir := t.TempDir()
@@ -28,7 +29,14 @@ func TestLoadConfigDoesNotAutoReloadChangedFile(t *testing.T) {
 		t.Fatalf("write updated config: %v", err)
 	}
 
-	if v.GetBool("debug") {
-		t.Fatal("expected config value to stay unchanged without automatic reload")
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if v.GetBool("debug") {
+			return
+		}
+
+		time.Sleep(10 * time.Millisecond)
 	}
+
+	t.Fatal("expected config value to reload after file change")
 }

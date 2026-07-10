@@ -8,11 +8,11 @@ import (
 	"sync"
 
 	"github.com/42wim/matterircd/bridge"
+	"github.com/42wim/matterircd/config"
 	"github.com/davecgh/go-spew/spew"
 	strip "github.com/grokify/html-strip-tags-go"
 	"github.com/mattn/go-mastodon"
 	logger "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 )
 
 type Mastodon struct {
@@ -23,10 +23,10 @@ type Mastodon struct {
 	eventChanIn chan mastodon.Event
 	onConnect   func()
 	sync.RWMutex
-	v *viper.Viper
+	v *config.Viper
 }
 
-func New(v *viper.Viper, cred bridge.Credentials, eventChan chan *bridge.Event, onConnect func()) (bridge.Bridger, error) {
+func New(v *config.Viper, cred bridge.Credentials, eventChan chan *bridge.Event, onConnect func()) (bridge.Bridger, error) {
 	m := &Mastodon{
 		credentials: cred,
 		eventChan:   eventChan,

@@ -18,14 +18,13 @@ import (
 	prefixed "github.com/matterbridge/logrus-prefixed-formatter"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
-	"github.com/spf13/viper"
 )
 
 var (
 	version = "0.31.0-dev"
 	githash string
 	logger  *logrus.Entry
-	v       *viper.Viper
+	v       *config.Viper
 
 	LastViewedSaveDB *bolt.DB
 )
@@ -63,7 +62,7 @@ func main() {
 			log.Fatal(err)
 		}
 	} else {
-		v = viper.New()
+		v = config.New()
 	}
 
 	v.BindPFlags(pflag.CommandLine)

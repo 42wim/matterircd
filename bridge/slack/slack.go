@@ -8,11 +8,11 @@ import (
 	"time"
 
 	"github.com/42wim/matterircd/bridge"
+	"github.com/42wim/matterircd/config"
 	"github.com/davecgh/go-spew/spew"
 	prefixed "github.com/matterbridge/logrus-prefixed-formatter"
 	"github.com/sirupsen/logrus"
 	"github.com/slack-go/slack"
-	"github.com/spf13/viper"
 )
 
 type Slack struct {
@@ -27,12 +27,12 @@ type Slack struct {
 	onConnect    func()
 	msgLast      map[string]string
 	sync.RWMutex
-	v *viper.Viper
+	v *config.Viper
 }
 
 var logger *logrus.Entry
 
-func New(v *viper.Viper, cred bridge.Credentials, eventChan chan *bridge.Event, onConnect func()) (bridge.Bridger, error) {
+func New(v *config.Viper, cred bridge.Credentials, eventChan chan *bridge.Event, onConnect func()) (bridge.Bridger, error) {
 	s := &Slack{
 		credentials: cred,
 		eventChan:   eventChan,
