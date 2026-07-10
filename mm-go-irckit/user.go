@@ -167,63 +167,77 @@ func (u *User) Decode() {
 		c := make(chan struct{})
 		<-c
 	}
-	buffer := make(chan *irc.Message)
+
+	buffer := make(chan *irc.Message, 512)
 	stop := make(chan struct{})
+
 	bufferTimeout := u.v.GetInt("PasteBufferTimeout")
 	// we need at least 100
 	if bufferTimeout < 100 {
 		bufferTimeout = 100
 	}
 	logger.Debugf("using paste buffer timeout: %#v", bufferTimeout)
+
 	t := timer.NewTimer(time.Duration(bufferTimeout) * time.Millisecond)
 	t.Stop()
+
 	go func(buffer chan *irc.Message, stop chan struct{}) {
+		var localBufferedMsg *irc.Message
+
 		for {
 			select {
-			case msg := <-buffer:
+			case msg, ok := <-buffer:
+				if !ok {
+					return
+				}
 				// are we starting a new buffer ?
-				if u.BufferedMsg == nil {
-					u.BufferedMsg = msg
-					// start timer now
+				if localBufferedMsg == nil {
+					localBufferedMsg = msg
 					t.Reset(time.Duration(bufferTimeout) * time.Millisecond)
 				} else {
 					if strings.HasPrefix(msg.Trailing, "\x01ACTION") || replyRegExp.MatchString(msg.Trailing) || modifyRegExp.MatchString(msg.Trailing) {
 						// flush buffer
 						logger.Debug("flushing buffer because of /me, replies to threads, and message modifications")
-						u.BufferedMsg.Trailing = strings.TrimSpace(u.BufferedMsg.Trailing)
-						u.DecodeCh <- u.BufferedMsg
-						u.BufferedMsg = nil
+						localBufferedMsg.Trailing = strings.TrimSpace(localBufferedMsg.Trailing)
+						u.DecodeCh <- localBufferedMsg
+						localBufferedMsg = nil
 						// send CTCP message
 						u.DecodeCh <- msg
 						continue
 					}
 					// make sure we're sending to the same recipient in the buffer
-					if u.BufferedMsg.Params[0] == msg.Params[0] {
-						u.BufferedMsg.Trailing += "\n" + msg.Trailing
+					if localBufferedMsg.Params[0] == msg.Params[0] {
+						localBufferedMsg.Trailing += "\n" + msg.Trailing
 					} else {
 						u.DecodeCh <- msg
 					}
 				}
 			case <-t.C:
-				if u.BufferedMsg != nil {
+				if localBufferedMsg != nil {
 					// trim last newline
-					u.BufferedMsg.Trailing = strings.TrimSpace(u.BufferedMsg.Trailing)
-					logger.Debugf("flushing buffer: %#v", u.BufferedMsg)
-					u.DecodeCh <- u.BufferedMsg
+					localBufferedMsg.Trailing = strings.TrimSpace(localBufferedMsg.Trailing)
+					logger.Debugf("flushing buffer: %#v", localBufferedMsg)
+					u.DecodeCh <- localBufferedMsg
+					localBufferedMsg = nil
 					// clear buffer
-					u.BufferedMsg = nil
 					t.Stop()
 				}
 			case <-stop:
 				logger.Debug("closing decode()")
+				if localBufferedMsg != nil {
+					localBufferedMsg.Trailing = strings.TrimSpace(localBufferedMsg.Trailing)
+					u.DecodeCh <- localBufferedMsg
+				}
 				return
 			}
 		}
 	}(buffer, stop)
+
 	for {
 		msg, err := u.Conn.Decode()
 		if err != nil {
 			close(stop)
+			close(buffer) // Signals the background worker that it's time to pack up
 
 			isEOF := errors.Is(err, io.EOF) || err.Error() == "EOF"
 			isClosed := errors.Is(err, net.ErrClosed) || strings.Contains(err.Error(), "use of closed network connection")
@@ -239,16 +253,23 @@ func (u *User) Decode() {
 
 		dmsg := "<- " + msg.String()
 		if msg.Command == "PRIVMSG" && msg.Params != nil && (msg.Params[0] == "slack" || msg.Params[0] == "mattermost") {
-			// Don't log sensitive information
 			trail := strings.Split(msg.Trailing, " ")
 			if (msg.Trailing != "" && trail[0] == "login") || (len(msg.Params) > 1 && msg.Params[1] == "login") {
 				dmsg = "<- PRIVMSG " + msg.Params[0] + " :login [redacted]"
 			}
 		}
 		// PRIVMSG can be buffered
+
 		if msg.Command == "PRIVMSG" {
 			logger.Debugf("B: %#v", dmsg)
-			buffer <- msg
+
+			// Safe non-blocking channel push guard
+			select {
+			case buffer <- msg:
+			default:
+				logger.Warn("Paste buffer capacity breached, processing immediately to prevent thread hang")
+				u.DecodeCh <- msg
+			}
 		} else {
 			logger.Debug(dmsg)
 			u.DecodeCh <- msg
