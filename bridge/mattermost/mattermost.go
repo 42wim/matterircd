@@ -903,6 +903,18 @@ func (m *Mattermost) getParentReplyMsg(parentID string, newLen int, uncounted st
 	return replyMessage, nil
 }
 
+func (m *Mattermost) safeEventSend(event *bridge.Event) {
+	t := time.NewTimer(2 * time.Second)
+	defer t.Stop()
+
+	select {
+	case m.eventChan <- event:
+		return
+	case <-t.C:
+		logger.Warnf("WARNING: m.eventChan is blocked! Dropping %s event to prevent worker deadlock: %s", event.Type, spew.Sdump(event))
+	}
+}
+
 var (
 	validIRCNickRegExp    = regexp.MustCompile("^[a-zA-Z0-9_]*$")
 	channelMentionsRegExp = regexp.MustCompile(`@(channel|all|here)\W`)
@@ -1015,7 +1027,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 
 			event.Data = d
 
-			m.eventChan <- event
+			m.safeEventSend(event)
 			return
 		}
 
@@ -1028,7 +1040,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 			},
 		}
 
-		m.eventChan <- event
+		m.safeEventSend(event)
 		return
 
 	case model.PostTypeSystemGeneric, model.PostTypeEphemeral, model.PostTypeAddToTeam, model.PostTypeRemoveFromTeam:
@@ -1130,7 +1142,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 
 		event.Data = d
 
-		m.eventChan <- event
+		m.safeEventSend(event)
 	default:
 		messageType := ""
 		if !m.v.GetBool("mattermost.disabledefaultmentions") && channelMentionsRegExp.MatchString(data.Message) {
@@ -1151,7 +1163,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 			},
 		}
 
-		m.eventChan <- event
+		m.safeEventSend(event)
 	}
 
 	if len(data.FileIds) > 0 {
@@ -1216,9 +1228,9 @@ func (m *Mattermost) handleFileEvent(channelType string, ghost *bridge.UserInfo,
 			return
 		}
 
-		m.eventChan <- event
+		m.safeEventSend(event)
 	default:
-		m.eventChan <- event
+		m.safeEventSend(event)
 	}
 
 	logger.Debugf("handleFileEvent() user %s sent %d files %#v", ghost.Nick, len(fileEvent.Files), data.FileIds)
@@ -1481,7 +1493,7 @@ func (m *Mattermost) handleReactionEvent(rmsg *model.WebSocketEvent) {
 		}
 	}
 
-	m.eventChan <- event
+	m.safeEventSend(event)
 }
 
 func (m *Mattermost) GetTeamName(teamID string) string {
