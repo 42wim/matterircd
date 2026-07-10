@@ -152,7 +152,7 @@ func (v *Viper) watchConfig(watcher *fsnotify.Watcher, filename string) {
 	defer watcher.Close()
 
 	configFile := filepath.Clean(filename)
-	realConfigFile, _ := filepath.EvalSymlinks(filename)
+	realConfigFile := evalSymlinks(filename)
 
 	for {
 		select {
@@ -161,7 +161,7 @@ func (v *Viper) watchConfig(watcher *fsnotify.Watcher, filename string) {
 				return
 			}
 
-			currentConfigFile, _ := filepath.EvalSymlinks(filename)
+			currentConfigFile := evalSymlinks(filename)
 			isDirectFileChange := filepath.Clean(event.Name) == configFile &&
 				(event.Has(fsnotify.Write) || event.Has(fsnotify.Create))
 			isSymlinkChange := currentConfigFile != "" && currentConfigFile != realConfigFile
@@ -211,4 +211,14 @@ func logError(message string, err error) {
 	}
 
 	_, _ = fmt.Fprintf(os.Stderr, "%s: %v\n", message, err)
+}
+
+func evalSymlinks(path string) string {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		logError("resolve config symlink", err)
+		return ""
+	}
+
+	return resolved
 }
