@@ -111,11 +111,12 @@ func (v *Viper) GetStringSlice(key string) []string {
 	v.mu.RLock()
 
 	values := v.v.GetStringSlice(key)
-	values = append([]string(nil), values...)
+	clonedValues := make([]string, len(values))
+	copy(clonedValues, values)
 
 	v.mu.RUnlock()
 
-	return values
+	return clonedValues
 }
 
 func (v *Viper) Set(key string, value any) {
