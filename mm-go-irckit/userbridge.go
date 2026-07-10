@@ -716,6 +716,7 @@ func (u *User) addUsersToChannels() {
 
 	srv := u.Srv
 	throttle := time.NewTicker(time.Millisecond * 200)
+	defer throttle.Stop()
 
 	logger.Debug("in addUsersToChannels()")
 	// add all users, also who are not on channels
