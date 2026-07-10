@@ -109,10 +109,13 @@ func (v *Viper) GetInt(key string) int {
 
 func (v *Viper) GetStringSlice(key string) []string {
 	v.mu.RLock()
-	defer v.mu.RUnlock()
 
 	values := v.v.GetStringSlice(key)
-	return append([]string(nil), values...)
+	values = append([]string(nil), values...)
+
+	v.mu.RUnlock()
+
+	return values
 }
 
 func (v *Viper) Set(key string, value any) {
@@ -159,9 +162,10 @@ func (v *Viper) watchConfig(watcher *fsnotify.Watcher, filename string) {
 			}
 
 			currentConfigFile, _ := filepath.EvalSymlinks(filename)
-			if (filepath.Clean(event.Name) == configFile &&
-				(event.Has(fsnotify.Write) || event.Has(fsnotify.Create))) ||
-				(currentConfigFile != "" && currentConfigFile != realConfigFile) {
+			isDirectFileChange := filepath.Clean(event.Name) == configFile &&
+				(event.Has(fsnotify.Write) || event.Has(fsnotify.Create))
+			isSymlinkChange := currentConfigFile != "" && currentConfigFile != realConfigFile
+			if isDirectFileChange || isSymlinkChange {
 				realConfigFile = currentConfigFile
 
 				if err := v.ReadInConfig(); err != nil {
