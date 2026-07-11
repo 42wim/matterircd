@@ -140,6 +140,7 @@ func (m *Mattermost) loginToMattermost(onWsConnect func()) (*matterclient.Client
 //nolint:cyclop
 func (m *Mattermost) handleWsMessage(quitChan chan struct{}) {
 	updateChannelsThrottle := time.NewTicker(time.Second * 60)
+	defer updateChannelsThrottle.Stop()
 
 	for {
 		if m.mc.WsQuit {
