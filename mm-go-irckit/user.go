@@ -169,67 +169,91 @@ var (
 // nolint:funlen,gocognit,gocyclo
 func (u *User) Decode() {
 	if u.Ghost {
-		// block
-		c := make(chan struct{})
-		<-c
+		logger.Debug("ghost user, skipping Decode()")
+		return
 	}
-	buffer := make(chan *irc.Message)
-	stop := make(chan struct{})
+	buffer := make(chan *irc.Message, 512)
 	bufferTimeout := u.v.GetInt("PasteBufferTimeout")
 	// we need at least 100
 	if bufferTimeout < 100 {
 		bufferTimeout = 100
 	}
 	logger.Debugf("using paste buffer timeout: %#v", bufferTimeout)
-	t := timer.NewTimer(time.Duration(bufferTimeout) * time.Millisecond)
+	timeout := time.Duration(bufferTimeout) * time.Millisecond
+	t := timer.NewTimer(timeout)
 	t.Stop()
-	go func(buffer chan *irc.Message, stop chan struct{}) {
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func(buffer chan *irc.Message) {
+		defer wg.Done()
+
+		var bufferedMsg *irc.Message
+
+		flush := func() {
+			t.Stop()
+			if bufferedMsg == nil {
+				return
+			}
+
+			// trim last newline
+			bufferedMsg.Trailing = strings.TrimSpace(bufferedMsg.Trailing)
+			logger.Debugf("flushing buffer: %#v", bufferedMsg)
+			u.DecodeCh <- bufferedMsg
+			// clear buffer
+			bufferedMsg = nil
+		}
 		for {
 			select {
-			case msg := <-buffer:
+			case msg, ok := <-buffer:
+				if !ok {
+					// Best-effort flush on shutdown. Avoid blocking forever if nobody is draining DecodeCh.
+					t.Stop()
+					if bufferedMsg != nil {
+						// trim last newline
+						bufferedMsg.Trailing = strings.TrimSpace(bufferedMsg.Trailing)
+						select {
+						case u.DecodeCh <- bufferedMsg:
+						case <-time.After(1 * time.Second):
+							logger.Warnf("timed out flushing decode buffer for %s", u.Nick)
+						}
+						bufferedMsg = nil
+					}
+					logger.Debugf("decode buffer goroutine exiting for %s", u.Nick)
+					return
+				}
 				// are we starting a new buffer ?
-				if u.BufferedMsg == nil {
-					u.BufferedMsg = msg
+				if bufferedMsg == nil {
+					bufferedMsg = msg
 					// start timer now
-					t.Reset(time.Duration(bufferTimeout) * time.Millisecond)
+					t.Reset(timeout)
 				} else {
 					if strings.HasPrefix(msg.Trailing, "\x01ACTION") || replyRegExp.MatchString(msg.Trailing) || modifyRegExp.MatchString(msg.Trailing) {
 						// flush buffer
 						logger.Debug("flushing buffer because of /me, replies to threads, and message modifications")
-						u.BufferedMsg.Trailing = strings.TrimSpace(u.BufferedMsg.Trailing)
-						u.DecodeCh <- u.BufferedMsg
-						u.BufferedMsg = nil
+						flush()
 						// send CTCP message
 						u.DecodeCh <- msg
 						continue
 					}
 					// make sure we're sending to the same recipient in the buffer
-					if u.BufferedMsg.Params[0] == msg.Params[0] {
-						u.BufferedMsg.Trailing += "\n" + msg.Trailing
+					if bufferedMsg.Params[0] == msg.Params[0] {
+						bufferedMsg.Trailing += "\n" + msg.Trailing
 					} else {
-						u.DecodeCh <- msg
+						flush()
+						bufferedMsg = msg
+						t.Reset(timeout)
 					}
 				}
 			case <-t.C:
-				if u.BufferedMsg != nil {
-					// trim last newline
-					u.BufferedMsg.Trailing = strings.TrimSpace(u.BufferedMsg.Trailing)
-					logger.Debugf("flushing buffer: %#v", u.BufferedMsg)
-					u.DecodeCh <- u.BufferedMsg
-					// clear buffer
-					u.BufferedMsg = nil
-					t.Stop()
-				}
-			case <-stop:
-				logger.Debug("closing decode()")
-				return
+				flush()
 			}
 		}
-	}(buffer, stop)
+	}(buffer)
 	for {
 		msg, err := u.Conn.Decode()
 		if err != nil {
-			close(stop)
+			close(buffer)
+			wg.Wait()
 
 			isEOF := errors.Is(err, io.EOF) || err.Error() == "EOF"
 			isClosed := errors.Is(err, net.ErrClosed) || strings.Contains(err.Error(), "use of closed network connection")
