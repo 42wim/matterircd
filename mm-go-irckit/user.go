@@ -125,6 +125,8 @@ func (u *User) VisibleTo() []*User {
 	return users
 }
 
+const writeTimeout = 10 * time.Second
+
 // Encode and send each msg until an error occurs, then returns.
 func (u *User) Encode(msgs ...*irc.Message) (err error) {
 	if u.Ghost {
@@ -132,6 +134,10 @@ func (u *User) Encode(msgs ...*irc.Message) (err error) {
 	}
 
 	for _, msg := range msgs {
+		if err := u.Conn.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil {
+			logger.Warnf("failed to set write deadline for %s: %v", u.Nick, err)
+		}
+
 		if msg.Command == "PRIVMSG" && (msg.Prefix.Name == "slack" || msg.Prefix.Name == "mattermost") && msg.Prefix.Host == "service" && strings.Contains(msg.Trailing, "token") {
 			logger.Debugf("-> %s %s %s", msg.Command, msg.Prefix.Name, "[token redacted]")
 

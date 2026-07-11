@@ -3,6 +3,7 @@ package irckit
 import (
 	"net"
 	"strings"
+	"time"
 
 	"github.com/sorcix/irc"
 )
@@ -15,6 +16,9 @@ type Conn interface {
 
 	// ResolveHost returns the resolved host of the RemoteAddr
 	ResolveHost() string
+
+	// SetWriteDeadline bounds how long a single write can block.
+	SetWriteDeadline(t time.Time) error
 }
 
 type conn struct {
