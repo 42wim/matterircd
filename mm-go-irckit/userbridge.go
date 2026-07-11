@@ -30,26 +30,26 @@ const systemUser = "system"
 type UserBridge struct {
 	Srv         Server
 	Credentials bridge.Credentials
-	br          bridge.Bridger     //nolint:structcheck
-	inprogress  bool               //nolint:structcheck
-	eventChan   chan *bridge.Event //nolint:structcheck
-	away        bool               //nolint:structcheck
+	br          bridge.Bridger
+	inprogress  bool
+	eventChan   chan *bridge.Event
+	away        bool
 
-	lastViewedAtDB *bolt.DB //nolint:structcheck
+	lastViewedAtDB *bolt.DB
 
-	msgCounterMutex sync.RWMutex   //nolint:structcheck
-	msgCounter      map[string]int //nolint:structcheck
+	msgCounterMutex sync.RWMutex
+	msgCounter      map[string]int
 
-	msgLastMutex sync.RWMutex         //nolint:structcheck
-	msgLast      map[string][2]string //nolint:structcheck
+	msgLastMutex sync.RWMutex
+	msgLast      map[string][2]string
 
-	msgMapMutex      sync.RWMutex              //nolint:structcheck
-	msgMap           map[string]map[string]int //nolint:structcheck
-	msgMapIndexMutex sync.RWMutex              //nolint:structcheck
-	msgMapIndex      map[string]map[int]string //nolint:structcheck
+	msgMapMutex      sync.RWMutex
+	msgMap           map[string]map[string]int
+	msgMapIndexMutex sync.RWMutex
+	msgMapIndex      map[string]map[int]string
 
-	updateCounterMutex sync.Mutex           //nolint:structcheck
-	updateCounter      map[string]time.Time //nolint:structcheck
+	updateCounterMutex sync.Mutex
+	updateCounter      map[string]time.Time
 }
 
 func NewUserBridge(c net.Conn, srv Server, cfg *viper.Viper, db *bolt.DB) *User {
