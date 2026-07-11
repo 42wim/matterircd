@@ -206,7 +206,18 @@ func (u *User) Decode() {
 			select {
 			case msg, ok := <-buffer:
 				if !ok {
-					flush()
+					// Best-effort flush on shutdown. Avoid blocking forever if nobody is draining DecodeCh.
+					t.Stop()
+					if bufferedMsg != nil {
+						// trim last newline
+						bufferedMsg.Trailing = strings.TrimSpace(bufferedMsg.Trailing)
+						select {
+						case u.DecodeCh <- bufferedMsg:
+						case <-time.After(1 * time.Second):
+							logger.Warnf("timed out flushing decode buffer for %s", u.Nick)
+						}
+						bufferedMsg = nil
+					}
 					logger.Debugf("decode buffer goroutine exiting for %s", u.Nick)
 					return
 				}
