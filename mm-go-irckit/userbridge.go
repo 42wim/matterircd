@@ -741,8 +741,14 @@ func (u *User) addUsersToChannels() {
 	ch.Join(u)
 
 	channels := make(chan *bridge.ChannelInfo, 5)
+	var wg sync.WaitGroup
+
 	for i := 0; i < 10; i++ {
-		go u.addUserToChannelWorker(channels, throttle)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			u.addUserToChannelWorker(channels, throttle)
+		}()
 	}
 
 	for _, brchannel := range u.br.GetChannels() {
@@ -759,6 +765,12 @@ func (u *User) addUsersToChannels() {
 	}
 
 	close(channels)
+
+	// clean up tickers/timers after workers have finished
+	go func() {
+		wg.Wait()
+		throttle.Stop()
+	}()
 
 	// we did all the initialization, now listen for events
 	go u.handleEventChan()
