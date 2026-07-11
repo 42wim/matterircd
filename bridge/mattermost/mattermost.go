@@ -1863,6 +1863,7 @@ func (m *Mattermost) parseMessageAttachments(attachments []*model.SlackAttachmen
 
 				for j := 0; j < maxLines; j++ {
 					v1, v2 := "", ""
+
 					if j < len(val1Lines) {
 						v1 = val1Lines[j]
 					}
@@ -1929,6 +1930,7 @@ func (m *Mattermost) parseMessageAttachments(attachments []*model.SlackAttachmen
 					}
 					text = rest
 				}
+
 				i++
 			}
 		}
