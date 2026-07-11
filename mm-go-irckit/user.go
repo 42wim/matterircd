@@ -125,6 +125,8 @@ func (u *User) VisibleTo() []*User {
 	return users
 }
 
+const writeTimeout = 10 * time.Second
+
 // Encode and send each msg until an error occurs, then returns.
 func (u *User) Encode(msgs ...*irc.Message) (err error) {
 	if u.Ghost {
@@ -132,6 +134,10 @@ func (u *User) Encode(msgs ...*irc.Message) (err error) {
 	}
 
 	for _, msg := range msgs {
+		if err := u.Conn.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil {
+			logger.Warnf("failed to set write deadline for %s: %v", u.Nick, err)
+		}
+
 		if msg.Command == "PRIVMSG" && (msg.Prefix.Name == "slack" || msg.Prefix.Name == "mattermost") && msg.Prefix.Host == "service" && strings.Contains(msg.Trailing, "token") {
 			logger.Debugf("-> %s %s %s", msg.Command, msg.Prefix.Name, "[token redacted]")
 
@@ -163,23 +169,16 @@ var (
 // nolint:funlen,gocognit,gocyclo
 func (u *User) Decode() {
 	if u.Ghost {
-		// block
-		c := make(chan struct{})
-		<-c
+		logger.Debug("ghost user, skipping Decode()")
+		return
 	}
-
 	buffer := make(chan *irc.Message, 512)
-	stop := make(chan struct{})
-
 	bufferTimeout := u.v.GetInt("PasteBufferTimeout")
 	// we need at least 100
 	if bufferTimeout < 100 {
 		bufferTimeout = 100
 	}
 	logger.Debugf("using paste buffer timeout: %#v", bufferTimeout)
-
-	t := timer.NewTimer(time.Duration(bufferTimeout) * time.Millisecond)
-	t.Stop()
 
 	safeSend := func(msg *irc.Message) {
 		start := time.Now()
@@ -196,65 +195,81 @@ func (u *User) Decode() {
 		}
 	}
 
-	go func(buffer chan *irc.Message, stop chan struct{}) {
-		var localBufferedMsg *irc.Message
+	timeout := time.Duration(bufferTimeout) * time.Millisecond
+	t := timer.NewTimer(timeout)
+	t.Stop()
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func(buffer chan *irc.Message) {
+		defer wg.Done()
 
+		var bufferedMsg *irc.Message
+
+		flush := func() {
+			t.Stop()
+			if bufferedMsg == nil {
+				return
+			}
+
+			// trim last newline
+			bufferedMsg.Trailing = strings.TrimSpace(bufferedMsg.Trailing)
+			logger.Debugf("flushing buffer: %#v", bufferedMsg)
+			u.DecodeCh <- bufferedMsg
+			// clear buffer
+			bufferedMsg = nil
+		}
 		for {
 			select {
 			case msg, ok := <-buffer:
 				if !ok {
+					// Best-effort flush on shutdown. Avoid blocking forever if nobody is draining DecodeCh.
+					t.Stop()
+					if bufferedMsg != nil {
+						// trim last newline
+						bufferedMsg.Trailing = strings.TrimSpace(bufferedMsg.Trailing)
+						select {
+						case u.DecodeCh <- bufferedMsg:
+						case <-time.After(1 * time.Second):
+							logger.Warnf("timed out flushing decode buffer for %s", u.Nick)
+						}
+						bufferedMsg = nil
+					}
+					logger.Debugf("decode buffer goroutine exiting for %s", u.Nick)
 					return
 				}
 				// are we starting a new buffer ?
-				if localBufferedMsg == nil {
-					localBufferedMsg = msg
-					t.Reset(time.Duration(bufferTimeout) * time.Millisecond)
+				if bufferedMsg == nil {
+					bufferedMsg = msg
+					// start timer now
+					t.Reset(timeout)
 				} else {
 					if strings.HasPrefix(msg.Trailing, "\x01ACTION") || replyRegExp.MatchString(msg.Trailing) || modifyRegExp.MatchString(msg.Trailing) {
 						// flush buffer
 						logger.Debug("flushing buffer because of /me, replies to threads, and message modifications")
-						localBufferedMsg.Trailing = strings.TrimSpace(localBufferedMsg.Trailing)
-						safeSend(localBufferedMsg)
-						localBufferedMsg = nil
+						flush()
 						// send CTCP message
 						safeSend(msg)
 						continue
 					}
 					// make sure we're sending to the same recipient in the buffer
-					if localBufferedMsg.Params[0] == msg.Params[0] {
-						localBufferedMsg.Trailing += "\n" + msg.Trailing
+					if bufferedMsg.Params[0] == msg.Params[0] {
+						bufferedMsg.Trailing += "\n" + msg.Trailing
 					} else {
-						localBufferedMsg.Trailing = strings.TrimSpace(localBufferedMsg.Trailing)
-						safeSend(localBufferedMsg)
-						localBufferedMsg = msg
-						t.Reset(time.Duration(bufferTimeout) * time.Millisecond)
+						flush()
+						bufferedMsg = msg
+						t.Reset(timeout)
 					}
 				}
 			case <-t.C:
-				if localBufferedMsg != nil {
-					// trim last newline
-					localBufferedMsg.Trailing = strings.TrimSpace(localBufferedMsg.Trailing)
-					logger.Debugf("flushing buffer: %#v", localBufferedMsg)
-					safeSend(localBufferedMsg)
-					localBufferedMsg = nil
-					// clear buffer
-					t.Stop()
-				}
-			case <-stop:
-				logger.Debug("closing decode()")
-				if localBufferedMsg != nil {
-					localBufferedMsg.Trailing = strings.TrimSpace(localBufferedMsg.Trailing)
-					safeSend(localBufferedMsg)
-				}
-				return
+				flush()
 			}
 		}
-	}(buffer, stop)
-
+	}(buffer)
 	for {
 		msg, err := u.Conn.Decode()
 		if err != nil {
-			close(stop)
+			close(buffer)
+			wg.Wait()
 
 			isEOF := errors.Is(err, io.EOF) || err.Error() == "EOF"
 			isClosed := errors.Is(err, net.ErrClosed) || strings.Contains(err.Error(), "use of closed network connection")

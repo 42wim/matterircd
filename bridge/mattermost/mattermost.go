@@ -996,6 +996,36 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		dmchannel = t
 	}
 
+	sendSystemDM := func(text string, eventType string) {
+		d := &bridge.DirectMessageEvent{
+			Text:      text,
+			ChannelID: data.ChannelId,
+			MessageID: data.Id,
+			Event:     eventType,
+		}
+
+		userUpdated, _ := extraProps["username"].(string)
+
+		if userUpdated == m.GetMe().Nick {
+			d.Sender = ghost
+			d.Receiver = m.getDMUser(dmchannel)
+		} else {
+			d.Sender = m.getDMUser(dmchannel)
+			d.Receiver = ghost
+		}
+
+		if d.Sender == nil || d.Receiver == nil {
+			logger.Errorf("dm: couldn't resolve sender or receiver: %#v", rmsg)
+			return
+		}
+
+		event := &bridge.Event{
+			Type: "direct_message",
+			Data: d,
+		}
+		m.safeEventSend(event)
+	}
+
 	switch data.Type {
 	case model.PostTypeJoinChannel, model.PostTypeLeaveChannel, model.PostTypeAddToChannel, model.PostTypeRemoveFromChannel:
 		logger.Debugf("join/leave message. not relaying %#v", data.Message)
@@ -1005,40 +1035,13 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		return
 
 	case model.PostTypeHeaderChange:
-		if _, ok := extraProps["new_header"].(string); !ok {
+		topic, ok := extraProps["new_header"].(string)
+		if !ok {
 			return
 		}
-		topic := extraProps["new_header"].(string)
 
 		if channelType == "D" {
-			event := &bridge.Event{
-				Type: "direct_message",
-			}
-
-			d := &bridge.DirectMessageEvent{
-				Text:      "\x01ACTION updated topic to: " + topic + "\x01",
-				ChannelID: data.ChannelId,
-				MessageID: data.Id,
-				Event:     "dm_topic",
-			}
-
-			userUpdated := extraProps["username"].(string)
-			if userUpdated == m.GetMe().Nick {
-				d.Sender = ghost
-				d.Receiver = m.getDMUser(dmchannel)
-			} else {
-				d.Sender = m.getDMUser(dmchannel)
-				d.Receiver = ghost
-			}
-
-			if d.Sender == nil || d.Receiver == nil {
-				logger.Errorf("dm: couldn't resolve sender or receiver: %#v", rmsg)
-				return
-			}
-
-			event.Data = d
-
-			m.safeEventSend(event)
+			sendSystemDM("\x01ACTION updated topic to: "+topic+"\x01", "dm_topic")
 			return
 		}
 
@@ -1054,10 +1057,34 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		m.safeEventSend(event)
 		return
 
-	case model.PostTypeSystemGeneric, model.PostTypeEphemeral, model.PostTypeAddToTeam, model.PostTypeRemoveFromTeam:
+	default:
+		if !strings.HasPrefix(data.Type, model.PostSystemMessagePrefix) {
+			break
+		}
+
 		ghost = &bridge.UserInfo{
 			Nick: "system",
 		}
+
+		if channelType == "D" {
+			sendSystemDM(data.Message, rmsg.EventType())
+			return
+		}
+
+		event := &bridge.Event{
+			Type: "channel_message",
+			Data: &bridge.ChannelMessageEvent{
+				Text:        data.Message,
+				ChannelID:   data.ChannelId,
+				Sender:      ghost,
+				ChannelType: channelType,
+				MessageID:   data.Id,
+				Event:       rmsg.EventType(),
+			},
+		}
+
+		m.safeEventSend(event)
+		return
 	}
 
 	eventType := rmsg.EventType()
