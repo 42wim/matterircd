@@ -55,9 +55,6 @@ linters-settings:
     # report about assignment of errors to blank identifier: `num, _ := strconv.Atoi(numStr)`;
     # default is false: such cases aren't reported by default.
     check-blank: false
-  golint:
-    # minimal confidence for issues, default is 0.8
-    min-confidence: 0.8
   gofmt:
     # simplify code: gofmt with `-s` option, true by default
     simplify: true
@@ -68,9 +65,6 @@ linters-settings:
   gocyclo:
     # minimal code complexity to report, 30 by default (but we recommend 10-20)
     min-complexity: 15
-  maligned:
-    # print struct with more effective memory layout or not, false by default
-    suggest-new: true
   dupl:
     # tokens count to trigger issue, 150 by default
     threshold: 150
@@ -147,26 +141,20 @@ linters:
   disable:
     - gochecknoglobals
     - lll
-    - maligned
     - prealloc
     - wsl
-    - gomnd
     - godox
-    - goerr113
+    - err113
     - testpackage
     - godot
-    - interfacer
     - goheader
     - noctx
     - gci
     - errorlint
     - nlreturn
-    - exhaustivestruct
     - forbidigo
     - wrapcheck
     - varnamelen
-    - golint
-    - scopelint
     - ireturn
     - errorlint
     - tparallel
@@ -187,19 +175,14 @@ linters:
     - maintidx
     - exhaustruct
     - asasalint
-    - execinquery
-    - nosnakecase
     - exhaustive
     - depguard
-    - deadcode
-    - structcheck
-    - varcheck
-    - ifshort
     - gosmopolitan
     - zerologlint
     - tagalign
     - mnd
     - perfsprint
+    - tenv
 
 # rules to deal with reported isues
 issues:
