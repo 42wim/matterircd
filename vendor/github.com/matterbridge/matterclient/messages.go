@@ -2,10 +2,10 @@ package matterclient
 
 import (
 	"crypto/md5"
-	"encoding/json"
 	"fmt"
 	"strings"
 
+	json "github.com/goccy/go-json"
 	"github.com/mattermost/mattermost-server/v6/model"
 )
 

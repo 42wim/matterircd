@@ -1,7 +1,6 @@
 package mattermost
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -13,6 +12,7 @@ import (
 	"github.com/42wim/matterircd/bridge"
 	"github.com/42wim/matterircd/utils"
 	"github.com/davecgh/go-spew/spew"
+	json "github.com/goccy/go-json"
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/kenshaw/emoji"
 	prefixed "github.com/matterbridge/logrus-prefixed-formatter"
