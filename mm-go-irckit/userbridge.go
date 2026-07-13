@@ -518,8 +518,6 @@ func (u *User) handleFileEvent(event *bridge.FileEvent) {
 }
 
 func (u *User) handleChannelCreateEvent(event *bridge.ChannelCreateEvent) {
-	u.br.UpdateChannels()
-
 	logger.Debugf("ACTION_CHANNEL_CREATED adding myself to %s (%s)", u.br.GetChannelName(event.ChannelID), event.ChannelID)
 
 	u.syncChannel(event.ChannelID, u.br.GetChannelName(event.ChannelID))

@@ -1005,8 +1005,17 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 
 	switch data.Type {
 	case model.PostTypeJoinChannel, model.PostTypeLeaveChannel, model.PostTypeAddToChannel, model.PostTypeRemoveFromChannel:
-		logger.Debugf("join/leave message. not relaying %#v", data.Message)
-		_ = m.UpdateChannels()
+		myUser := m.GetMe().User
+		addedUserID, _ := data.GetProps()["addedUserId"].(string)
+		if data.UserId != myUser && addedUserID != myUser {
+			logger.Debugf("Skipping channel sync because user %s joined/left, not us.", data.UserId)
+		} else if data.Type == model.PostTypeLeaveChannel {
+			logger.Debugf("Left channel %s, skipping full channel sync", data.ChannelId)
+		} else if _, err := m.GetChannel(data.ChannelId); err != nil {
+			logger.Errorf("Failed to fetch new channel %s: %v", data.ChannelId, err)
+		} else {
+			logger.Debugf("Successfully synced single channel %s", data.ChannelId)
+		}
 
 		m.wsActionPostJoinLeave(&data, extraProps)
 		return
