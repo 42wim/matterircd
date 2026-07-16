@@ -323,8 +323,6 @@ func CmdPart(s Server, u *User, msg *irc.Message) error {
 		}
 	}
 
-	u.br.UpdateChannels()
-
 	return err
 }
 

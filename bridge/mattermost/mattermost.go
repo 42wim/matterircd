@@ -139,9 +139,6 @@ func (m *Mattermost) loginToMattermost(onWsConnect func()) (*matterclient.Client
 
 //nolint:cyclop
 func (m *Mattermost) handleWsMessage(quitChan chan struct{}) {
-	updateChannelsThrottle := time.NewTicker(time.Second * 60)
-	defer updateChannelsThrottle.Stop()
-
 	for {
 		if m.mc.WsQuit {
 			logger.Debug("exiting handleWsMessage")
@@ -170,20 +167,13 @@ func (m *Mattermost) handleWsMessage(quitChan chan struct{}) {
 			case model.WebsocketEventUserRemoved:
 				m.handleWsActionUserRemoved(message.Raw)
 			case model.WebsocketEventUserAdded:
-				// check if we have the users/channels in our cache. If not update
-				m.checkWsActionMessage(message.Raw, updateChannelsThrottle)
 				m.handleWsActionUserAdded(message.Raw)
 			case model.WebsocketEventChannelCreated:
-				// check if we have the users/channels in our cache. If not update
-				m.checkWsActionMessage(message.Raw, updateChannelsThrottle)
 				m.handleWsActionChannelCreated(message.Raw)
 			case model.WebsocketEventChannelDeleted:
-				// check if we have the users/channels in our cache. If not update
-				m.checkWsActionMessage(message.Raw, updateChannelsThrottle)
 				m.handleWsActionChannelDeleted(message.Raw)
 			case model.WebsocketEventChannelRestored:
-				// check if we have the users/channels in our cache. If not update
-				m.checkWsActionMessage(message.Raw, updateChannelsThrottle)
+				m.handleWsActionChannelCreated(message.Raw)
 			case model.WebsocketEventChannelUpdated:
 				m.handleWsActionPost(message.Raw)
 			case model.WebsocketEventUserUpdated:
@@ -501,7 +491,10 @@ func (m *Mattermost) GetChannelName(channelID string) string {
 	channelName := m.mc.GetChannelName(channelID)
 
 	if channelName == "" {
-		m.mc.UpdateChannels()
+		channel := m.mc.GetChannel(channelID)
+		if channel == nil {
+			logger.Debugf("Could not resolve missing channel name for %s", channelID)
+		}
 	}
 
 	channelName = m.mc.GetChannelName(channelID)
