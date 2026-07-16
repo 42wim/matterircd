@@ -1117,11 +1117,8 @@ func (m *Client) maintainUsersCache(event *model.WebSocketEvent) {
 
 	case model.WebsocketEventChannelDeleted:
 		if channelID, ok := event.GetData()["channel_id"].(string); ok && channelID != "" {
-			m.Users.mu.Lock()
-			delete(m.Users.channelData, channelID)
-			delete(m.Users.joinedChannels, channelID)
-			delete(m.Users.channels, channelID)
-			m.Users.mu.Unlock()
+			// Mattermost soft-deletes channels. We keep the channel and users in our
+			// local cache to gracefully handle history, references, or restorations.
 			m.Users.lastUpdated.Store(time.Now().Unix())
 		}
 	}
