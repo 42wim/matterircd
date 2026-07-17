@@ -751,7 +751,7 @@ func (m *Mattermost) wsActionPostSkip(rmsg *model.WebSocketEvent) bool {
 	if data.RootId != "" {
 		msgID = data.RootId
 		if !m.v.GetBool("mattermost.hidereplies") {
-			parentReplyMsg, err := m.getParentReplyMsg(data.RootId, shortenMsgLen, "@", useUnicode)
+			parentReplyMsg, err := m.getParentReplyMsg(data.RootId, nil, shortenMsgLen, "@", useUnicode)
 			if err == nil {
 				sbSuffix.WriteString(parentReplyMsg)
 			}
@@ -836,7 +836,8 @@ var markdownReplacer = strings.NewReplacer(
 	"~~~", "`",
 )
 
-func (m *Mattermost) getParentReplyMsg(parentID string, newLen int, uncounted string, unicode bool) (string, error) {
+//nolint:funlen
+func (m *Mattermost) getParentReplyMsg(parentID string, preFetchedPost *model.Post, newLen int, uncounted string, unicode bool) (string, error) {
 	var replyMessage string
 
 	disableMarkdown := m.v.GetBool("mattermost.disablemarkdown")
@@ -850,8 +851,20 @@ func (m *Mattermost) getParentReplyMsg(parentID string, newLen int, uncounted st
 
 	// Search and use cached reply if it exists.
 	// None found, so we'll need to create one and save it for future uses.
-	if v, ok := m.msgParentCache.Get(parentID); !ok {
-		parentPost, _, err := m.mc.Client.GetPost(parentID, "")
+	if v, ok := m.msgParentCache.Get(parentID); ok {
+		if replyMessage, ok = v.(string); ok {
+			logger.Debugf("Found saved reply for parent post %s, using:%s", parentID, replyMessage)
+			return replyMessage, nil
+		}
+	}
+
+	var parentPost *model.Post
+	var err error
+
+	if preFetchedPost != nil {
+		parentPost = preFetchedPost
+	} else {
+		parentPost, _, err = m.mc.Client.GetPost(parentID, "")
 		// Retry once on failure.
 		if err != nil {
 			parentPost, _, err = m.mc.Client.GetPost(parentID, "")
@@ -859,39 +872,37 @@ func (m *Mattermost) getParentReplyMsg(parentID string, newLen int, uncounted st
 		if err != nil {
 			return "", err
 		}
+	}
 
-		msg := parentPost.Message
-		if msg == "" {
-			// If we have message attachments and there is a fallback message, use it.
-			if attachments := parentPost.Attachments(); len(attachments) > 0 {
-				if attachments[0].Fallback != "" {
-					msg = attachments[0].Fallback
-				} else if attachments[0].Text != "" {
-					msg = attachments[0].Text
-				}
+	msg := parentPost.Message
+	if msg == "" {
+		// If we have message attachments and there is a fallback message, use it.
+		if attachments := parentPost.Attachments(); len(attachments) > 0 {
+			if attachments[0].Fallback != "" {
+				msg = attachments[0].Fallback
+			} else if attachments[0].Text != "" {
+				msg = attachments[0].Text
 			}
 		}
-
-		if !disableMarkdown {
-			msg = markdownReplacer.Replace(msg)
-			msg = utils.Markdown2irc(msg, blockquoteChar, inlineCode)
-		} else {
-			msg = strings.ReplaceAll(msg, "\n", " ")
-		}
-
-		if !disableEmoji {
-			msg = emoji.ReplaceAliases(msg)
-		}
-
-		parentUser := m.GetUser(parentPost.UserId)
-		parentMessage := maybeShorten(msg, newLen, uncounted, unicode)
-		replyMessage = " (re @" + parentUser.Nick + ": " + parentMessage + ")"
-		logger.Debugf("Created reply for parent post %s:%s", parentID, replyMessage)
-
-		m.msgParentCache.Add(parentID, replyMessage)
-	} else if replyMessage, ok = v.(string); ok {
-		logger.Debugf("Found saved reply for parent post %s, using:%s", parentID, replyMessage)
 	}
+
+	if !disableMarkdown {
+		msg = markdownReplacer.Replace(msg)
+		msg = utils.Markdown2irc(msg, blockquoteChar, inlineCode)
+	} else {
+		msg = strings.ReplaceAll(msg, "\n", " ")
+	}
+
+	if !disableEmoji {
+		msg = emoji.ReplaceAliases(msg)
+	}
+
+	parentUser := m.GetUser(parentPost.UserId)
+	parentMessage := maybeShorten(msg, newLen, uncounted, unicode)
+	replyMessage = " (re @" + parentUser.Nick + ": " + parentMessage + ")"
+	logger.Debugf("Created reply for parent post %s:%s", parentID, replyMessage)
+
+	m.msgParentCache.Add(parentID, replyMessage)
 
 	return replyMessage, nil
 }
@@ -925,7 +936,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 
 	var sbSuffix strings.Builder
 	if !m.v.GetBool("mattermost.hidereplies") && data.RootId != "" {
-		parentReplyMsg, err := m.getParentReplyMsg(data.RootId, m.v.GetInt("mattermost.ShortenRepliesTo"), "@", useUnicode)
+		parentReplyMsg, err := m.getParentReplyMsg(data.RootId, nil, m.v.GetInt("mattermost.ShortenRepliesTo"), "@", useUnicode)
 		if err != nil {
 			logger.Errorf("Unable to get parent post for %#v", data) //nolint:govet
 		} else {
@@ -1463,18 +1474,25 @@ func (m *Mattermost) handleReactionEvent(rmsg *model.WebSocketEvent) {
 
 	var parentUser *bridge.UserInfo
 	var sbSuffix strings.Builder
-	if !m.v.GetBool("mattermost.hidereplies") {
-		parentReplyMsg, err := m.getParentReplyMsg(reaction.PostId, m.v.GetInt("mattermost.ShortenRepliesTo"), "@", m.v.GetBool("mattermost.unicode"))
-		if err != nil {
-			logger.Errorf("Unable to get parent post for %#v", reaction)
-		}
-		sbSuffix.WriteString(parentReplyMsg)
-	}
 
 	parentID := reaction.PostId
 	parentPost, _, err := m.mc.Client.GetPost(reaction.PostId, "")
+	if err != nil {
+		parentPost, _, err = m.mc.Client.GetPost(reaction.PostId, "")
+	}
+
 	if err == nil {
-		parentID = parentPost.RootId
+		if parentPost.RootId != "" {
+			parentID = parentPost.RootId
+		}
+		if !m.v.GetBool("mattermost.hidereplies") {
+			replyMsg, err := m.getParentReplyMsg(reaction.PostId, parentPost, m.v.GetInt("mattermost.ShortenRepliesTo"), "@", m.v.GetBool("mattermost.unicode"))
+			if err == nil {
+				sbSuffix.WriteString(replyMsg)
+			}
+		}
+	} else {
+		logger.Errorf("Unable to get parent post for reaction %#v: %v", reaction, err)
 	}
 
 	switch rmsg.EventType() {
