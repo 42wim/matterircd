@@ -7,15 +7,23 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          # Fetch full history so the linter can accurately diff the PR base
           fetch-depth: 0
-      - name: Run golangci-lint
+
+      # Run on Pull Requests (diffs against the target branch)
+      - name: Run golangci-lint (PR)
+        if: github.event_name == 'pull_request'
         uses: golangci/golangci-lint-action@55c2c1448f86e01eaae002a5a3a9624417608d84 # v6.5.2
         with:
-          version: latest
-          # Natively handles PR diffs and inline annotations
-          only-new-issues: true
-          args: "-v"
+          version: v1.64
+          args: "--new-from-rev=origin/${{ github.base_ref }}"
+
+      # Run on Pushes (standard run)
+      - name: Run golangci-lint (Push)
+        if: github.event_name == 'push'
+        uses: golangci/golangci-lint-action@55c2c1448f86e01eaae002a5a3a9624417608d84 # v6.5.2
+        with:
+          version: v1.64
+
   test-build-upload:
     strategy:
       matrix:
