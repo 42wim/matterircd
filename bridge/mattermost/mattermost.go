@@ -836,6 +836,7 @@ var markdownReplacer = strings.NewReplacer(
 	"~~~", "`",
 )
 
+//nolint:funlen
 func (m *Mattermost) getParentReplyMsg(parentID string, preFetchedPost *model.Post, newLen int, uncounted string, unicode bool) (string, error) {
 	var replyMessage string
 
