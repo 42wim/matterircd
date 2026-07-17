@@ -33,16 +33,16 @@ run:
 
 
 # output configuration options
-output:
+#output:
   # colored-line-number|line-number|json|tab|checkstyle, default is "colored-line-number"
-  formats:
-    - format: colored-line-number
+  #formats:
+  #  - format: colored-line-number
 
   # print lines of code with issue, default is true
-  print-issued-lines: true
+  #print-issued-lines: true
 
   # print linter name in the end of issue text, default is true
-  print-linter-name: true
+  #print-linter-name: true
 
 
 # all available settings of specific linters, we can set an option for
@@ -201,7 +201,7 @@ issues:
   # large codebase. It's not practical to fix all existing issues at the moment
   # of integration: much better don't allow issues in new code.
   # Default is false.
-  new: false
+  #new: false
 
   # Show only new issues created after git revision `REV`
-  new-from-rev: "HEAD~10"
+  #new-from-rev: "HEAD~10"
