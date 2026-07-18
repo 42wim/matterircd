@@ -18,14 +18,13 @@ import (
 	prefixed "github.com/matterbridge/logrus-prefixed-formatter"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
-	"github.com/spf13/viper"
 )
 
 var (
 	version = "0.31.0-dev"
 	githash string
 	logger  *logrus.Entry
-	v       *viper.Viper
+	cfg      *config.Config
 
 	LastViewedSaveDB *bolt.DB
 )
@@ -37,7 +36,7 @@ func main() {
 		FullTimestamp: true,
 	}
 	logger = ourlog.WithFields(logrus.Fields{"prefix": "matterircd"})
-	config.Logger = logger
+	config.SetLogger(logger)
 
 	// config related. instantiate a new config.Config to store flags
 	flagConfig := flag.String("conf", "matterircd.toml", "config file")
@@ -57,36 +56,31 @@ func main() {
 	pflag.Parse()
 
 	// Attempt to load values from the config file
-	if _, err := os.Stat(*flagConfig); err == nil {
-		v, err = config.LoadConfig(*flagConfig)
-		if err != nil {
-			log.Fatal(err)
-		}
-	} else {
-		v = viper.New()
+	cfg, err := config.Load(*flagConfig, pflag.CommandLine)
+	if err != nil {
+		log.Fatal(err)
 	}
+	rc := cfg.Current()
 
-	v.BindPFlags(pflag.CommandLine)
-
-	if v.GetBool("debug") {
+	if rc.Debug {
 		logger.Info("enabling debug")
-		ourlog.Level = logrus.DebugLevel
+		config.SetLogLevel(logrus.DebugLevel)
 		irckit.SetLogLevel("debug")
 	}
 
-	if v.GetBool("trace") {
+	if rc.Trace {
 		logger.Info("enabling trace")
-		ourlog.Level = logrus.TraceLevel
+		config.SetLogLevel(logrus.TraceLevel)
 		irckit.SetLogLevel("trace")
 	}
 
-	if v.GetBool("gops") {
+	if rc.Gops {
 		if err := agent.Listen(agent.Options{}); err != nil {
 			log.Fatal(err)
 		}
 	}
 
-	if v.GetBool("version") {
+	if flag.Lookup("version").Value.String() == "true" {
 		fmt.Printf("version: %s %s\n", version, githash)
 		return
 	}
@@ -98,9 +92,9 @@ func main() {
 		logger.Infof("WARNING: THIS IS A DEVELOPMENT VERSION. Things may break.")
 	}
 
-	if v.GetString("tlsbind") != "" {
+	if rc.TLSBind != "" {
 		go func() {
-			logger.Infof("Listening on %s (TLS)", v.GetString("tlsbind"))
+			logger.Infof("Listening on %s (TLS)", rc.TLSBind)
 			socket := tlsbind()
 			defer socket.Close()
 			start(socket)
@@ -108,7 +102,7 @@ func main() {
 	}
 
 	mmLastViewedFile := "matterircd-lastsaved.db"
-	if statePath := v.GetString("mattermost.LastViewedSaveFile"); statePath != "" {
+	if statePath := rc.Mattermost.LastViewedSaveFile; statePath != "" {
 		mmLastViewedFile = statePath
 	}
 	db, err := bolt.Open(mmLastViewedFile, 0o600, &bolt.Options{Timeout: 1 * time.Second})
@@ -120,22 +114,22 @@ func main() {
 
 	// backwards compatible
 
-	if v.GetString("bind") != "" {
+	if rc.Bind != "" {
 		go func() {
 			var network string
-			if strings.ContainsRune(v.GetString("bind"), os.PathSeparator) {
+			if strings.ContainsRune(rc.Bind, os.PathSeparator) {
 				network = "unix"
 			} else {
 				network = "tcp"
 			}
 
-			socket, err := net.Listen(network, v.GetString("bind"))
+			socket, err := net.Listen(network, rc.Bind)
 			if err != nil {
-				logger.Errorf("Can not listen on %s: %v", v.GetString("bind"), err)
+				logger.Errorf("Can not listen on %s: %v", rc.Bind, err)
 				os.Exit(1)
 			}
 
-			logger.Infof("Listening on %s", v.GetString("bind"))
+			logger.Infof("Listening on %s", rc.Bind)
 
 			defer socket.Close()
 			start(socket)
@@ -146,15 +140,16 @@ func main() {
 }
 
 func tlsbind() net.Listener {
-	certPath := v.GetString("tlsdir") + "/cert.pem"
-	keyPath := v.GetString("tlsdir") + "/key.pem"
+	rc := cfg.Current()
+	certPath := rc.TLSDir + "/cert.pem"
+	keyPath := rc.TLSDir + "/key.pem"
 
-	if v.GetString("tlscert") != "" {
-		certPath = v.GetString("tlscert")
+	if rc.TLSCert != "" {
+		certPath = rc.TLSCert
 	}
 
-	if v.GetString("tlskey") != "" {
-		keyPath = v.GetString("tlskey")
+	if rc.TLSKey != "" {
+		keyPath = rc.TLSKey
 	}
 
 	kpr, err := NewKeypairReloader(certPath, keyPath)
@@ -167,13 +162,13 @@ func tlsbind() net.Listener {
 		GetCertificate: kpr.GetCertificateFunc(),
 	}
 
-	listenerTLS, err := tls.Listen("tcp", v.GetString("tlsbind"), &tlsConfig)
+	listenerTLS, err := tls.Listen("tcp", rc.TLSBind, &tlsConfig)
 	if err != nil {
-		logger.Errorf("Can not listen on %s: %v\n", v.GetString("tlsbind"), err)
+		logger.Errorf("Can not listen on %s: %v\n", rc.TLSBind, err)
 		os.Exit(1)
 	}
 
-	logger.Info("TLS listening on ", v.GetString("tlsbind"))
+	logger.Info("TLS listening on ", rc.TLSBind)
 
 	return listenerTLS
 }
@@ -191,7 +186,7 @@ func start(socket net.Listener) {
 
 			logger.Infof("New connection: %s", conn.RemoteAddr())
 
-			user := irckit.NewUserBridge(conn, newsrv, v, LastViewedSaveDB)
+			user := irckit.NewUserBridge(conn, newsrv, cfg, LastViewedSaveDB)
 			err = newsrv.Connect(user)
 			if err != nil {
 				logger.Errorf("Failed to join: %v", err)

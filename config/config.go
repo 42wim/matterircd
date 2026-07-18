@@ -2,16 +2,21 @@ package config
 
 import (
 	"fmt"
+	"os"
 	"runtime"
 	"strings"
 	"sync/atomic"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/sirupsen/logrus"
+	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 )
 
-var Logger *logrus.Entry
+var (
+	logger   *logrus.Entry
+	LogLevel string
+)
 
 type Config struct {
 	current atomic.Pointer[RuntimeConfig]
@@ -34,9 +39,9 @@ type RuntimeConfig struct {
 type GlobalConfig struct {
 	Bind string
 
-	Debug bool
-	Trace bool
-	Gops  bool
+	Debug   bool
+	Trace   bool
+	Gops    bool
 
 	TLSBind string
 	TLSDir  string
@@ -54,6 +59,8 @@ type MattermostConfig struct {
 	DefaultTeam   string
 
 	Insecure bool
+
+	LastViewedSaveFile string
 
 	DisableMarkdown bool
 	DisableEmoji    bool
@@ -104,6 +111,8 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 
 			Insecure: c.v.GetBool("mattermost.Insecure"),
 
+			LastViewedSaveFile: c.v.GetString("mattermost.LastViewedSaveFile"),
+
 			DisableMarkdown: c.v.GetBool("mattermost.DisableMarkdown"),
 			DisableEmoji:    c.v.GetBool("mattermost.DisableEmoji"),
 			Unicode:         c.v.GetBool("mattermost.Unicode"),
@@ -129,35 +138,11 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 	}
 }
 
-func (c *Config) reload() error {
-	if err := c.v.ReadInConfig(); err != nil {
-		return err
-	}
-
-	runtimeCfg := c.buildRuntimeCfg()
-
-	if err := validate(runtimeCfg); err != nil {
-		return err
-	}
-
-	c.current.Store(runtimeCfg)
-
-	if Logger != nil {
-		Logger.Info("configuration reloaded")
-	}
-
-	return nil
-}
-
-func validate(runtimeCfg *RuntimeConfig) error {
-	return nil
-}
-
 func (c *Config) Current() *RuntimeConfig {
 	return c.current.Load()
 }
 
-func Load(cfgfile string) (*Config, error) {
+func Load(cfgfile string, flags *pflag.FlagSet) (*Config, error) {
 	v := viper.New()
 	v.SetConfigFile(cfgfile)
 
@@ -170,22 +155,84 @@ func Load(cfgfile string) (*Config, error) {
 		v: v,
 	}
 
+	if err := c.v.BindPFlags(flags); err != nil {
+		return nil, err
+	}
+
+	if _, err := os.Stat(cfgfile); err != nil {
+		if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("unable to access config file %q: %w", cfgfile, err)
+		}
+
+		if err := c.publishRuntimeConfig(); err != nil {
+			return nil, err
+		}
+
+		return c, nil
+	}
+
 	if err := c.reload(); err != nil {
 		return nil, fmt.Errorf("error reading config file: %w", err)
 	}
 
-	// reload config on file changes
-	if runtime.GOOS != "illumos" {
-		v.OnConfigChange(func(e fsnotify.Event) {
-			if err := c.reload(); err != nil {
-				if Logger != nil {
-					Logger.Errorf("config reload failed: %v", err)
-				}
-			}
-		})
-
-		v.WatchConfig()
-	}
+	c.watch()
 
 	return c, nil
+}
+
+func (c *Config) publishRuntimeConfig() error {
+	runtimeCfg := c.buildRuntimeCfg()
+
+	if err := validate(runtimeCfg); err != nil {
+		return err
+	}
+
+	c.current.Store(runtimeCfg)
+
+	return nil
+}
+
+func (c *Config) reload() error {
+	if err := c.v.ReadInConfig(); err != nil {
+		return err
+	}
+
+	if err := c.publishRuntimeConfig(); err != nil {
+		return err
+	}
+
+	if logger != nil {
+		logger.Info("configuration reloaded")
+	}
+
+	return nil
+}
+
+func SetLogger(l *logrus.Entry) {
+	logger = l
+}
+
+func SetLogLevel(level logrus.Level) {
+	if logger != nil {
+		logger.Logger.SetLevel(level)
+	}
+}
+
+func validate(runtimeCfg *RuntimeConfig) error {
+	return nil
+}
+
+func (c *Config) watch() {
+	// reload config on file changes
+	if runtime.GOOS == "illumos" {
+		return
+	}
+
+	c.v.OnConfigChange(func(_ fsnotify.Event) {
+		if err := c.reload(); err != nil && logger != nil {
+			logger.WithError(err).Error("config reload failed")
+		}
+	})
+
+	c.v.WatchConfig()
 }
