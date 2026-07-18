@@ -74,7 +74,16 @@ type MattermostConfig struct {
 }
 
 type SlackConfig struct {
-	Restrict []string
+	DenyUsers      []string
+	JoinDM         bool
+	Restrict       []string
+	UseDisplayName bool
+	PreferNickname bool
+	JoinOnly       []string
+	JoinExclude    []string
+	JoinInclude    []string
+	ShowOnlyJoined bool
+	PrefixContext  bool
 }
 
 type MastodonConfig struct {
@@ -124,8 +133,18 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 		},
 
 		Slack: SlackConfig{
-			Restrict: append([]string(nil),
-				c.v.GetStringSlice("slack.Restrict")...),
+			DenyUsers:      append([]string(nil), c.v.GetStringSlice("slack.DenyUsers")...),
+			JoinDM:         c.v.GetBool("slack.JoinDM"),
+			Restrict:       append([]string(nil), c.v.GetStringSlice("slack.Restrict")...),
+			UseDisplayName: c.v.GetBool("slack.UseDisplayName"),
+			PreferNickname: c.v.GetBool("slack.PreferNickname"),
+
+			JoinOnly:    append([]string(nil), c.v.GetStringSlice("slack.JoinOnly")...),
+			JoinExclude: append([]string(nil), c.v.GetStringSlice("slack.JoinExclude")...),
+			JoinInclude: append([]string(nil), c.v.GetStringSlice("slack.JoinInclude")...),
+
+			ShowOnlyJoined: c.v.GetBool("slack.ShowOnlyJoined"),
+			PrefixContext:  c.v.GetBool("slack.PrefixContext"),
 		},
 
 		Mastodon: MastodonConfig{
