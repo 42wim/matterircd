@@ -43,6 +43,8 @@ func New(cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Eve
 
 	var err error
 
+	rc := cfg.Current()
+
 	ourlog := logrus.New()
 	ourlog.SetFormatter(&prefixed.TextFormatter{
 		PrefixPadding: 13,
@@ -50,9 +52,6 @@ func New(cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Eve
 		FullTimestamp: true,
 	})
 	logger = ourlog.WithFields(logrus.Fields{"prefix": "bridge/slack"})
-
-	rc := cfg.Current()
-
 	if rc.Debug {
 		ourlog.SetLevel(logrus.DebugLevel)
 	}
