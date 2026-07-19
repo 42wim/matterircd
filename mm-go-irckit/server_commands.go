@@ -130,11 +130,6 @@ func CmdJoin(s Server, u *User, msg *irc.Message) error {
 
 		sync = u.syncChannel
 
-		if len(u.br.BridgeConfig().JoinInclude) > 0 {
-			channels := u.br.BridgeConfig().JoinInclude
-			channels = append(channels, channel)
-		}
-
 		ch := s.Channel(channelID)
 		sync(channelID, channelName)
 		ch.Join(u)
