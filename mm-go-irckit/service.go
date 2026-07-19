@@ -563,7 +563,7 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 		}
 	}
 
-	if u.cfg.Mattermost().CollapseScrollback {
+	if !u.cfg.Mattermost().CollapseScrollback {
 		u.MsgUser(toUser, fmt.Sprintf("scrollback results shown in %s", search))
 	}
 }
