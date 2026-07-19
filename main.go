@@ -56,7 +56,8 @@ func main() {
 	pflag.Parse()
 
 	// Attempt to load values from the config file
-	cfg, err := config.Load(*flagConfig, pflag.CommandLine)
+	var err error
+	cfg, err = config.Load(*flagConfig, pflag.CommandLine)
 	if err != nil {
 		log.Fatal(err)
 	}

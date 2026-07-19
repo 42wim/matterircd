@@ -60,6 +60,7 @@ func NewUserBridge(c net.Conn, srv Server, cfg *config.Config, db *bolt.DB) *Use
 	})
 
 	u.Srv = srv
+	u.cfg = cfg
 	u.lastViewedAtDB = db
 	u.msgLast = make(map[string][2]string)
 	u.msgMap = make(map[string]map[string]int)
@@ -1062,13 +1063,29 @@ func (u *User) mayJoin(channelID string) bool {
 }
 
 func (u *User) isValidServer(server, protocol string) bool {
-	if len(u.br.BridgeConfig().Restrict) == 0 {
+	var restrict []string
+
+	switch protocol {
+	case "mattermost":
+		restrict = u.cfg.Mattermost().Bridge.Restrict
+
+	case "slack":
+		restrict = u.cfg.Slack().Bridge.Restrict
+
+	case "mastodon":
+		restrict = u.cfg.Mastodon().Bridge.Restrict
+
+	default:
 		return true
 	}
 
-	logger.Debugf("restrict: %s", u.br.BridgeConfig().Restrict)
+	if len(restrict) == 0 {
+		return true
+	}
 
-	for _, srv := range u.br.BridgeConfig().Restrict {
+	logger.Debugf("restrict: %v", restrict)
+
+	for _, srv := range restrict {
 		if srv == server {
 			return true
 		}
