@@ -753,7 +753,7 @@ func (u *User) addUsersToChannels() {
 		logger.Debugf("Adding channel %#v", brchannel)
 
 		// only joindm when specified
-		if brchannel.DM && u.br.Protocol() == "mattermost" && !u.cfg.Mattermost().JoinDM {
+		if brchannel.DM && !u.br.BridgeConfig().JoinDM {
 			logger.Debugf("Skipping IM channel %s", brchannel.Name)
 
 			continue

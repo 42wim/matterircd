@@ -60,6 +60,7 @@ type BridgeConfig struct {
 	JoinOnly    []string
 	JoinExclude []string
 	JoinInclude []string
+	JoinDM      bool
 
 	ShowJoinPart   bool
 	ShowOnlyJoined bool
@@ -115,8 +116,6 @@ type MattermostConfig struct {
 	HideReactions    bool
 	ShowOwnReactions bool
 
-	JoinDM bool
-
 	ShowMentions bool
 
 	DisableDefaultMentions bool
@@ -131,7 +130,6 @@ type SlackConfig struct {
 	Formatter FormatterConfig
 
 	DenyUsers      []string
-	JoinDM         bool
 	UseDisplayName bool
 	PreferNickname bool
 }
@@ -155,6 +153,7 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 		JoinOnly:    append([]string(nil), c.v.GetStringSlice("mattermost.JoinOnly")...),
 		JoinExclude: append([]string(nil), c.v.GetStringSlice("mattermost.JoinExclude")...),
 		JoinInclude: append([]string(nil), c.v.GetStringSlice("mattermost.JoinInclude")...),
+		JoinDM:      c.v.GetBool("mattermost.JoinDM"),
 
 		ShowJoinPart:   c.v.GetBool("mattermost.ShowJoinPart"),
 		ShowOnlyJoined: c.v.GetBool("mattermost.ShowOnlyJoined"),
@@ -171,6 +170,7 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 		JoinOnly:    append([]string(nil), c.v.GetStringSlice("slack.JoinOnly")...),
 		JoinExclude: append([]string(nil), c.v.GetStringSlice("slack.JoinExclude")...),
 		JoinInclude: append([]string(nil), c.v.GetStringSlice("slack.JoinInclude")...),
+		JoinDM:      c.v.GetBool("slack.JoinDM"),
 
 		ShowJoinPart:   c.v.GetBool("slack.ShowJoinPart"),
 		ShowOnlyJoined: c.v.GetBool("slack.ShowOnlyJoined"),
@@ -187,6 +187,7 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 		JoinOnly:    append([]string(nil), c.v.GetStringSlice("mastodon.JoinOnly")...),
 		JoinExclude: append([]string(nil), c.v.GetStringSlice("mastodon.JoinExclude")...),
 		JoinInclude: append([]string(nil), c.v.GetStringSlice("mastodon.JoinInclude")...),
+		JoinDM:      c.v.GetBool("mastodon.JoinDM"),
 
 		ShowJoinPart:   c.v.GetBool("mastodon.ShowJoinPart"),
 		ShowOnlyJoined: c.v.GetBool("mastodon.ShowOnlyJoined"),
@@ -288,8 +289,6 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 			HideReactions:    c.v.GetBool("mattermost.HideReactions"),
 			ShowOwnReactions: c.v.GetBool("mattermost.ShowOwnReactions"),
 
-			JoinDM: c.v.GetBool("mattermost.JoinDM"),
-
 			ShowMentions: c.v.GetBool("mattermost.ShowMentions"),
 
 			DisableDefaultMentions: c.v.GetBool("mattermost.DisableDefaultMentions"),
@@ -304,7 +303,6 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 			Formatter: slFormatter,
 
 			DenyUsers:      append([]string(nil), c.v.GetStringSlice("slack.DenyUsers")...),
-			JoinDM:         c.v.GetBool("slack.JoinDM"),
 			UseDisplayName: c.v.GetBool("slack.UseDisplayName"),
 			PreferNickname: c.v.GetBool("slack.PreferNickname"),
 		},
