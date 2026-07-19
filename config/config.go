@@ -326,21 +326,6 @@ func (c *Config) Current() *RuntimeConfig {
 	return c.current.Load()
 }
 
-func (c *Config) ProtocolConfig(protocol string) any {
-	rc := c.Current()
-
-	switch protocol {
-	case "mattermost":
-		return &rc.Mattermost
-	case "slack":
-		return &rc.Slack
-	case "mastodon":
-		return &rc.Mastodon
-	default:
-		return nil
-	}
-}
-
 func (c *Config) Mattermost() *MattermostConfig {
 	return &c.Current().Mattermost
 }
