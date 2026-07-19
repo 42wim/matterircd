@@ -152,9 +152,9 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 	mmBridge := BridgeConfig{
 		Restrict: append([]string(nil), c.v.GetStringSlice("mattermost.Restrict")...),
 
-		JoinOnly:    c.v.GetStringSlice("mattermost.JoinOnly"),
-		JoinExclude: c.v.GetStringSlice("mattermost.JoinExclude"),
-		JoinInclude: c.v.GetStringSlice("mattermost.JoinInclude"),
+		JoinOnly:    append([]string(nil), c.v.GetStringSlice("mattermost.joinonly")...),
+		JoinExclude: append([]string(nil), c.v.GetStringSlice("mattermost.joininclude")...),
+		JoinInclude: append([]string(nil), c.v.GetStringSlice("mattermost.joinexclude")...),
 
 		ShowJoinPart:   c.v.GetBool("mattermost.ShowJoinPart"),
 		ShowOnlyJoined: c.v.GetBool("mattermost.ShowOnlyJoined"),
@@ -168,9 +168,9 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 	slBridge := BridgeConfig{
 		Restrict: append([]string(nil), c.v.GetStringSlice("slack.Restrict")...),
 
-		JoinOnly:    c.v.GetStringSlice("slack.JoinOnly"),
-		JoinExclude: c.v.GetStringSlice("slack.JoinExclude"),
-		JoinInclude: c.v.GetStringSlice("slack.JoinInclude"),
+		JoinOnly:    append([]string(nil), c.v.GetStringSlice("slack.JoinOnly")...),
+		JoinExclude: append([]string(nil), c.v.GetStringSlice("slack.JoinExclude")...),
+		JoinInclude: append([]string(nil), c.v.GetStringSlice("slack.JoinInclude")...),
 
 		ShowJoinPart:   c.v.GetBool("slack.ShowJoinPart"),
 		ShowOnlyJoined: c.v.GetBool("slack.ShowOnlyJoined"),
@@ -184,9 +184,9 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 	mdBridge := BridgeConfig{
 		Restrict: append([]string(nil), c.v.GetStringSlice("mastodon.Restrict")...),
 
-		JoinOnly:    c.v.GetStringSlice("mastodon.JoinOnly"),
-		JoinExclude: c.v.GetStringSlice("mastodon.JoinExclude"),
-		JoinInclude: c.v.GetStringSlice("mastodon.JoinInclude"),
+		JoinOnly:    append([]string(nil), c.v.GetStringSlice("mastodon.JoinOnly")...),
+		JoinExclude: append([]string(nil), c.v.GetStringSlice("mastodon.JoinExclude")...),
+		JoinInclude: append([]string(nil), c.v.GetStringSlice("mastodon.JoinInclude")...),
 
 		ShowJoinPart:   c.v.GetBool("mastodon.ShowJoinPart"),
 		ShowOnlyJoined: c.v.GetBool("mastodon.ShowOnlyJoined"),
