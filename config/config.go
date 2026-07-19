@@ -58,19 +58,63 @@ type MattermostConfig struct {
 	DefaultServer string
 	DefaultTeam   string
 
-	Insecure bool
+	Insecure           bool
+	IgnoreServerVersion bool
 
-	LastViewedSaveFile string
+	JoinOnly    []string
+	JoinExclude []string
+	JoinInclude []string
 
-	DisableMarkdown bool
-	DisableEmoji    bool
+	CollapseScrollback bool
+	ShowOnlyJoined     bool
+	PartFake           bool
+
+	Restrict []string
+
+	SkipTLSVerify bool
+
+	PrefixMainTeam bool
+	DisableAutoView bool
+
+	ForceAntiIdle   bool
+	AntiIdleChannel string
+	AntiIdleInterval int
+
+	PreferNickname bool
+
+	HideReplies      bool
+	ShortenRepliesTo int
 
 	Unicode bool
+
+	HideReactions    bool
+	ShowOwnReactions bool
+
+	DisableEmoji bool
+
+	DisableMarkdown           bool
+	DisableMarkdownBlockQuote bool
+	MarkdownBlockQuoteChar    string
+	MarkdownInlineCode        string
+
+	JoinDM bool
 
 	PrefixContext bool
 	SuffixContext bool
 
+	ThreadContext   string
+	ShowContextMulti bool
+
 	ShowMentions bool
+
+	DisableDefaultMentions bool
+	DisableShowOwnModified bool
+
+	SyntaxHighlighting     string
+	DisableCodeBlockPrefix bool
+	CodeBlockPrefix        string
+
+	LastViewedSaveFile string
 }
 
 type SlackConfig struct {
@@ -115,27 +159,71 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 		},
 
 		Mattermost: MattermostConfig{
+			Restrict:      append([]string(nil), c.v.GetStringSlice("mattermost.Restrict")...),
 			DefaultServer: c.v.GetString("mattermost.DefaultServer"),
 			DefaultTeam:   c.v.GetString("mattermost.DefaultTeam"),
 
-			Insecure: c.v.GetBool("mattermost.Insecure"),
+			Insecure:            c.v.GetBool("mattermost.Insecure"),
+			IgnoreServerVersion: c.v.GetBool("mattermost.IgnoreServerVersion"),
 
-			LastViewedSaveFile: c.v.GetString("mattermost.LastViewedSaveFile"),
+			JoinOnly: append([]string(nil), c.v.GetStringSlice("mattermost.JoinOnly")...),
+			JoinExclude: append([]string(nil), c.v.GetStringSlice("mattermost.JoinExclude")...),
+			JoinInclude: append([]string(nil), c.v.GetStringSlice("mattermost.JoinInclude")...),
 
-			DisableMarkdown: c.v.GetBool("mattermost.DisableMarkdown"),
-			DisableEmoji:    c.v.GetBool("mattermost.DisableEmoji"),
-			Unicode:         c.v.GetBool("mattermost.Unicode"),
+			CollapseScrollback: c.v.GetBool("mattermost.CollapseScrollback"),
+			ShowOnlyJoined:     c.v.GetBool("mattermost.ShowOnlyJoined"),
+			PartFake:           c.v.GetBool("mattermost.PartFake"),
+
+			SkipTLSVerify: c.v.GetBool("mattermost.SkipTLSVerify"),
+
+			PrefixMainTeam: c.v.GetBool("mattermost.PrefixMainTeam"),
+			DisableAutoView: c.v.GetBool("mattermost.DisableAutoView"),
+
+			ForceAntiIdle:   c.v.GetBool("mattermost.ForceAntiIdle"),
+			AntiIdleChannel: c.v.GetString("mattermost.AntiIdleChannel"),
+			AntiIdleInterval: c.v.GetInt("mattermost.AntiIdleInterval"),
+
+			PreferNickname: c.v.GetBool("mattermost.PreferNickname"),
+
+			HideReplies:      c.v.GetBool("mattermost.HideReplies"),
+			ShortenRepliesTo: c.v.GetInt("mattermost.ShortenRepliesTo"),
+
+			Unicode: c.v.GetBool("mattermost.Unicode"),
+
+			HideReactions:    c.v.GetBool("mattermost.HideReactions"),
+			ShowOwnReactions: c.v.GetBool("mattermost.ShowOwnReactions"),
+
+			DisableEmoji: c.v.GetBool("mattermost.DisableEmoji"),
+
+			DisableMarkdown:           c.v.GetBool("mattermost.DisableMarkdown"),
+			DisableMarkdownBlockQuote: c.v.GetBool("mattermost.DisableMarkdownBlockQuote"),
+			MarkdownBlockQuoteChar:    c.v.GetString("mattermost.MarkdownBlockQuoteChar"),
+			MarkdownInlineCode:        c.v.GetString("mattermost.MarkdownInlineCode"),
+
+			JoinDM: c.v.GetBool("mattermost.JoinDM"),
 
 			PrefixContext: c.v.GetBool("mattermost.PrefixContext"),
 			SuffixContext: c.v.GetBool("mattermost.SuffixContext"),
 
+			ThreadContext:    c.v.GetString("mattermost.ThreadContext"),
+			ShowContextMulti: c.v.GetBool("mattermost.ShowContextMulti"),
+
 			ShowMentions: c.v.GetBool("mattermost.ShowMentions"),
+
+			DisableDefaultMentions: c.v.GetBool("mattermost.DisableDefaultMentions"),
+			DisableShowOwnModified: c.v.GetBool("mattermost.DisableShowOwnModified"),
+
+			SyntaxHighlighting:     c.v.GetString("mattermost.SyntaxHighlighting"),
+			DisableCodeBlockPrefix: c.v.GetBool("mattermost.DisableCodeBlockPrefix"),
+			CodeBlockPrefix:        c.v.GetString("mattermost.CodeBlockPrefix"),
+
+			LastViewedSaveFile: c.v.GetString("mattermost.LastViewedSaveFile"),
 		},
 
 		Slack: SlackConfig{
+			Restrict:       append([]string(nil), c.v.GetStringSlice("slack.Restrict")...),
 			DenyUsers:      append([]string(nil), c.v.GetStringSlice("slack.DenyUsers")...),
 			JoinDM:         c.v.GetBool("slack.JoinDM"),
-			Restrict:       append([]string(nil), c.v.GetStringSlice("slack.Restrict")...),
 			UseDisplayName: c.v.GetBool("slack.UseDisplayName"),
 			PreferNickname: c.v.GetBool("slack.PreferNickname"),
 
