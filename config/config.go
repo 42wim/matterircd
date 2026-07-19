@@ -152,9 +152,9 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 	mmBridge := BridgeConfig{
 		Restrict: append([]string(nil), c.v.GetStringSlice("mattermost.Restrict")...),
 
-		JoinOnly:    append([]string(nil), c.v.GetStringSlice("mattermost.joinonly")...),
-		JoinExclude: append([]string(nil), c.v.GetStringSlice("mattermost.joininclude")...),
-		JoinInclude: append([]string(nil), c.v.GetStringSlice("mattermost.joinexclude")...),
+		JoinOnly:    append([]string(nil), c.v.GetStringSlice("mattermost.JoinOnly")...),
+		JoinExclude: append([]string(nil), c.v.GetStringSlice("mattermost.JoinExclude")...),
+		JoinInclude: append([]string(nil), c.v.GetStringSlice("mattermost.JoinInclude")...),
 
 		ShowJoinPart:   c.v.GetBool("mattermost.ShowJoinPart"),
 		ShowOnlyJoined: c.v.GetBool("mattermost.ShowOnlyJoined"),
@@ -162,8 +162,8 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 
 		PrefixContext:    c.v.GetBool("mattermost.PrefixContext"),
 		SuffixContext:    c.v.GetBool("mattermost.SuffixContext"),
-		ThreadContext:    c.v.GetString("mattermost.ThreadContext"),
 		ShowContextMulti: c.v.GetBool("mattermost.ShowContextMulti"),
+		ThreadContext:    c.v.GetString("mattermost.ThreadContext"),
 	}
 	slBridge := BridgeConfig{
 		Restrict: append([]string(nil), c.v.GetStringSlice("slack.Restrict")...),
@@ -178,8 +178,8 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 
 		PrefixContext:    c.v.GetBool("slack.PrefixContext"),
 		SuffixContext:    c.v.GetBool("slack.SuffixContext"),
-		ThreadContext:    c.v.GetString("slack.ThreadContext"),
 		ShowContextMulti: c.v.GetBool("slack.ShowContextMulti"),
+		ThreadContext:    c.v.GetString("slack.ThreadContext"),
 	}
 	mdBridge := BridgeConfig{
 		Restrict: append([]string(nil), c.v.GetStringSlice("mastodon.Restrict")...),
@@ -194,8 +194,8 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 
 		PrefixContext:    c.v.GetBool("mastodon.PrefixContext"),
 		SuffixContext:    c.v.GetBool("mastodon.SuffixContext"),
-		ThreadContext:    c.v.GetString("mastodon.ThreadContext"),
 		ShowContextMulti: c.v.GetBool("mastodon.ShowContextMulti"),
+		ThreadContext:    c.v.GetString("mastodon.ThreadContext"),
 	}
 
 	mmFormatter := FormatterConfig{
@@ -206,9 +206,9 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 		MarkdownBlockQuoteChar:    c.v.GetString("mattermost.MarkdownBlockQuoteChar"),
 		MarkdownInlineCode:        c.v.GetString("mattermost.MarkdownInlineCode"),
 
-		SyntaxHighlighting:     c.v.GetString("mattermost.SyntaxHighlighting"),
 		DisableCodeBlockPrefix: c.v.GetBool("mattermost.DisableCodeBlockPrefix"),
 		CodeBlockPrefix:        c.v.GetString("mattermost.CodeBlockPrefix"),
+		SyntaxHighlighting:     c.v.GetString("mattermost.SyntaxHighlighting"),
 
 		Unicode: c.v.GetBool("mattermost.Unicode"),
 	}
@@ -220,9 +220,9 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 		MarkdownBlockQuoteChar:    c.v.GetString("slack.MarkdownBlockQuoteChar"),
 		MarkdownInlineCode:        c.v.GetString("slack.MarkdownInlineCode"),
 
-		SyntaxHighlighting:     c.v.GetString("slack.SyntaxHighlighting"),
 		DisableCodeBlockPrefix: c.v.GetBool("slack.DisableCodeBlockPrefix"),
 		CodeBlockPrefix:        c.v.GetString("slack.CodeBlockPrefix"),
+		SyntaxHighlighting:     c.v.GetString("slack.SyntaxHighlighting"),
 
 		Unicode: c.v.GetBool("slack.Unicode"),
 	}
@@ -234,9 +234,9 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 		MarkdownBlockQuoteChar:    c.v.GetString("mastodon.MarkdownBlockQuoteChar"),
 		MarkdownInlineCode:        c.v.GetString("mastodon.MarkdownInlineCode"),
 
-		SyntaxHighlighting:     c.v.GetString("mastodon.SyntaxHighlighting"),
 		DisableCodeBlockPrefix: c.v.GetBool("mastodon.DisableCodeBlockPrefix"),
 		CodeBlockPrefix:        c.v.GetString("mastodon.CodeBlockPrefix"),
+		SyntaxHighlighting:     c.v.GetString("mastodon.SyntaxHighlighting"),
 
 		Unicode: c.v.GetBool("mastodon.Unicode"),
 	}
