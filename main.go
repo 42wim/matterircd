@@ -24,7 +24,7 @@ var (
 	version = "0.31.0-dev"
 	githash string
 	logger  *logrus.Entry
-	cfg      *config.Config
+	cfg     *config.Config
 
 	LastViewedSaveDB *bolt.DB
 )

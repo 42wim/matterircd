@@ -296,16 +296,3 @@ func (u *User) createService(nick string, what string) {
 			Ghost: true,
 		})
 }
-
-func (u *User) protocolConfig() any {
-	switch u.br.Protocol() {
-	case "mattermost":
-		return &u.cfg.Current().Mattermost
-	case "slack":
-		return &u.cfg.Current().Slack
-	case "mastodon":
-		return &u.cfg.Current().Mastodon
-	default:
-		return nil
-	}
-}

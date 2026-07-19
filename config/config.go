@@ -39,9 +39,9 @@ type RuntimeConfig struct {
 type GlobalConfig struct {
 	Bind string
 
-	Debug   bool
-	Trace   bool
-	Gops    bool
+	Debug bool
+	Trace bool
+	Gops  bool
 
 	TLSBind string
 	TLSDir  string
@@ -73,7 +73,7 @@ type BridgeConfig struct {
 }
 
 type FormatterConfig struct {
-	DisableEmoji              bool
+	DisableEmoji bool
 
 	DisableMarkdown           bool
 	DisableMarkdownBlockQuote bool
@@ -84,7 +84,7 @@ type FormatterConfig struct {
 	DisableCodeBlockPrefix bool
 	CodeBlockPrefix        string
 
-	Unicode            bool
+	Unicode bool
 }
 
 type MattermostConfig struct {
@@ -94,7 +94,7 @@ type MattermostConfig struct {
 	DefaultServer string
 	DefaultTeam   string
 
-	Insecure           bool
+	Insecure            bool
 	IgnoreServerVersion bool
 
 	CollapseScrollback bool
@@ -103,15 +103,14 @@ type MattermostConfig struct {
 
 	PrefixMainTeam bool
 
-	ForceAntiIdle   bool
-	AntiIdleChannel string
+	ForceAntiIdle    bool
+	AntiIdleChannel  string
 	AntiIdleInterval int
 
 	PreferNickname bool
 
 	HideReplies      bool
 	ShortenRepliesTo int
-
 
 	HideReactions    bool
 	ShowOwnReactions bool
@@ -148,9 +147,10 @@ type MastodonConfig struct {
 	AccessToken  string
 }
 
+//nolint:funlen
 func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 	mmBridge := BridgeConfig{
-		Restrict:      append([]string(nil), c.v.GetStringSlice("mattermost.Restrict")...),
+		Restrict: append([]string(nil), c.v.GetStringSlice("mattermost.Restrict")...),
 
 		JoinOnly:    c.v.GetStringSlice("mattermost.JoinOnly"),
 		JoinExclude: c.v.GetStringSlice("mattermost.JoinExclude"),
@@ -164,10 +164,9 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 		SuffixContext:    c.v.GetBool("mattermost.SuffixContext"),
 		ThreadContext:    c.v.GetString("mattermost.ThreadContext"),
 		ShowContextMulti: c.v.GetBool("mattermost.ShowContextMulti"),
-
 	}
 	slBridge := BridgeConfig{
-		Restrict:      append([]string(nil), c.v.GetStringSlice("slack.Restrict")...),
+		Restrict: append([]string(nil), c.v.GetStringSlice("slack.Restrict")...),
 
 		JoinOnly:    c.v.GetStringSlice("slack.JoinOnly"),
 		JoinExclude: c.v.GetStringSlice("slack.JoinExclude"),
@@ -183,7 +182,7 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 		ShowContextMulti: c.v.GetBool("slack.ShowContextMulti"),
 	}
 	mdBridge := BridgeConfig{
-		Restrict:      append([]string(nil), c.v.GetStringSlice("mastodon.Restrict")...),
+		Restrict: append([]string(nil), c.v.GetStringSlice("mastodon.Restrict")...),
 
 		JoinOnly:    c.v.GetStringSlice("mastodon.JoinOnly"),
 		JoinExclude: c.v.GetStringSlice("mastodon.JoinExclude"),
@@ -296,7 +295,7 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 			DisableDefaultMentions: c.v.GetBool("mattermost.DisableDefaultMentions"),
 			DisableShowOwnModified: c.v.GetBool("mattermost.DisableShowOwnModified"),
 
-			DisableAutoView: c.v.GetBool("mattermost.DisableAutoView"),
+			DisableAutoView:    c.v.GetBool("mattermost.DisableAutoView"),
 			LastViewedSaveFile: c.v.GetString("mattermost.LastViewedSaveFile"),
 		},
 
