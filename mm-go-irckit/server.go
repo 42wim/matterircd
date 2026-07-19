@@ -413,7 +413,7 @@ func (s *server) handshake(u *User) error {
 	u.Host = u.ResolveHost()
 	go u.Decode()
 
-	timeout := u.v.GetInt("HandshakeTimeout")
+	timeout := u.cfg.Current().HandshakeTimeout
 	if timeout == 0 {
 		timeout = 10
 	}

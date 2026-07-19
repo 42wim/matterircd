@@ -57,12 +57,19 @@ type GlobalConfig struct {
 type BridgeConfig struct {
 	Restrict []string
 
-	JoinOnly    bool
+	JoinOnly    []string
 	JoinExclude []string
 	JoinInclude []string
 
 	ShowJoinPart   bool
 	ShowOnlyJoined bool
+	PartFake       bool
+
+	// Threading / context related
+	PrefixContext    bool
+	SuffixContext    bool
+	ThreadContext    string
+	ShowContextMulti bool
 }
 
 type FormatterConfig struct {
@@ -91,7 +98,6 @@ type MattermostConfig struct {
 	IgnoreServerVersion bool
 
 	CollapseScrollback bool
-	PartFake           bool
 
 	SkipTLSVerify bool
 
@@ -111,12 +117,6 @@ type MattermostConfig struct {
 	ShowOwnReactions bool
 
 	JoinDM bool
-
-	// Threading / context related
-	PrefixContext    bool
-	SuffixContext    bool
-	ThreadContext    string
-	ShowContextMulti bool
 
 	ShowMentions bool
 
@@ -152,32 +152,51 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 	mmBridge := BridgeConfig{
 		Restrict:      append([]string(nil), c.v.GetStringSlice("mattermost.Restrict")...),
 
-		JoinOnly:    c.v.GetBool("mattermost.JoinOnly"),
+		JoinOnly:    c.v.GetStringSlice("mattermost.JoinOnly"),
 		JoinExclude: c.v.GetStringSlice("mattermost.JoinExclude"),
 		JoinInclude: c.v.GetStringSlice("mattermost.JoinInclude"),
 
 		ShowJoinPart:   c.v.GetBool("mattermost.ShowJoinPart"),
 		ShowOnlyJoined: c.v.GetBool("mattermost.ShowOnlyJoined"),
+		PartFake:       c.v.GetBool("mattermost.PartFake"),
+
+		PrefixContext:    c.v.GetBool("mattermost.PrefixContext"),
+		SuffixContext:    c.v.GetBool("mattermost.SuffixContext"),
+		ThreadContext:    c.v.GetString("mattermost.ThreadContext"),
+		ShowContextMulti: c.v.GetBool("mattermost.ShowContextMulti"),
+
 	}
 	slBridge := BridgeConfig{
 		Restrict:      append([]string(nil), c.v.GetStringSlice("slack.Restrict")...),
 
-		JoinOnly:    c.v.GetBool("slack.JoinOnly"),
+		JoinOnly:    c.v.GetStringSlice("slack.JoinOnly"),
 		JoinExclude: c.v.GetStringSlice("slack.JoinExclude"),
 		JoinInclude: c.v.GetStringSlice("slack.JoinInclude"),
 
 		ShowJoinPart:   c.v.GetBool("slack.ShowJoinPart"),
 		ShowOnlyJoined: c.v.GetBool("slack.ShowOnlyJoined"),
+		PartFake:       c.v.GetBool("slack.PartFake"),
+
+		PrefixContext:    c.v.GetBool("slack.PrefixContext"),
+		SuffixContext:    c.v.GetBool("slack.SuffixContext"),
+		ThreadContext:    c.v.GetString("slack.ThreadContext"),
+		ShowContextMulti: c.v.GetBool("slack.ShowContextMulti"),
 	}
 	mdBridge := BridgeConfig{
 		Restrict:      append([]string(nil), c.v.GetStringSlice("mastodon.Restrict")...),
 
-		JoinOnly:    c.v.GetBool("mastodon.JoinOnly"),
+		JoinOnly:    c.v.GetStringSlice("mastodon.JoinOnly"),
 		JoinExclude: c.v.GetStringSlice("mastodon.JoinExclude"),
 		JoinInclude: c.v.GetStringSlice("mastodon.JoinInclude"),
 
 		ShowJoinPart:   c.v.GetBool("mastodon.ShowJoinPart"),
 		ShowOnlyJoined: c.v.GetBool("mastodon.ShowOnlyJoined"),
+		PartFake:       c.v.GetBool("mastodon.PartFake"),
+
+		PrefixContext:    c.v.GetBool("mastodon.PrefixContext"),
+		SuffixContext:    c.v.GetBool("mastodon.SuffixContext"),
+		ThreadContext:    c.v.GetString("mastodon.ThreadContext"),
+		ShowContextMulti: c.v.GetBool("mastodon.ShowContextMulti"),
 	}
 
 	mmFormatter := FormatterConfig{
@@ -253,7 +272,6 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 			IgnoreServerVersion: c.v.GetBool("mattermost.IgnoreServerVersion"),
 
 			CollapseScrollback: c.v.GetBool("mattermost.CollapseScrollback"),
-			PartFake:           c.v.GetBool("mattermost.PartFake"),
 
 			SkipTLSVerify: c.v.GetBool("mattermost.SkipTLSVerify"),
 
@@ -272,11 +290,6 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 			ShowOwnReactions: c.v.GetBool("mattermost.ShowOwnReactions"),
 
 			JoinDM: c.v.GetBool("mattermost.JoinDM"),
-
-			PrefixContext:    c.v.GetBool("mattermost.PrefixContext"),
-			SuffixContext:    c.v.GetBool("mattermost.SuffixContext"),
-			ThreadContext:    c.v.GetString("mattermost.ThreadContext"),
-			ShowContextMulti: c.v.GetBool("mattermost.ShowContextMulti"),
 
 			ShowMentions: c.v.GetBool("mattermost.ShowMentions"),
 
@@ -314,7 +327,7 @@ func (c *Config) Current() *RuntimeConfig {
 	return c.current.Load()
 }
 
-func (c *Config) CurrentProtocol(protocol string) any {
+func (c *Config) ProtocolConfig(protocol string) any {
 	rc := c.Current()
 
 	switch protocol {
@@ -327,6 +340,18 @@ func (c *Config) CurrentProtocol(protocol string) any {
 	default:
 		return nil
 	}
+}
+
+func (c *Config) Mattermost() *MattermostConfig {
+	return &c.Current().Mattermost
+}
+
+func (c *Config) Slack() *SlackConfig {
+	return &c.Current().Slack
+}
+
+func (c *Config) Mastodon() *MastodonConfig {
+	return &c.Current().Mastodon
 }
 
 func Load(cfgfile string, flags *pflag.FlagSet) (*Config, error) {

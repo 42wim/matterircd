@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/42wim/matterircd/bridge"
+	"github.com/42wim/matterircd/config"
 	"github.com/desertbit/timer"
 	"github.com/sorcix/irc"
-	"github.com/spf13/viper"
 )
 
 // NewUser creates a *User, wrapping a connection with metadata we need for our server.
@@ -49,7 +49,7 @@ type User struct {
 
 	channels map[Channel]struct{}
 
-	v *viper.Viper
+	cfg *config.Config
 
 	UserBridge
 }
@@ -173,7 +173,7 @@ func (u *User) Decode() {
 		return
 	}
 	buffer := make(chan *irc.Message, 512)
-	bufferTimeout := u.v.GetInt("PasteBufferTimeout")
+	bufferTimeout := u.cfg.Current().PasteBufferTimeout
 	// we need at least 100
 	if bufferTimeout < 100 {
 		bufferTimeout = 100
@@ -295,4 +295,17 @@ func (u *User) createService(nick string, what string) {
 			Host:  "service",
 			Ghost: true,
 		})
+}
+
+func (u *User) protocolConfig() any {
+	switch u.br.Protocol() {
+	case "mattermost":
+		return &u.cfg.Current().Mattermost
+	case "slack":
+		return &u.cfg.Current().Slack
+	case "mastodon":
+		return &u.cfg.Current().Mastodon
+	default:
+		return nil
+	}
 }

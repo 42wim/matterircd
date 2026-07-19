@@ -130,16 +130,9 @@ func CmdJoin(s Server, u *User, msg *irc.Message) error {
 
 		sync = u.syncChannel
 
-		/*u.v.GetStringSlice(u.br.Protocol()+".joinexclude")
-		u.v.Set(key string, value interface{})
-		*/
-		// if we joined, remove channel from exclude and add to include
-		u.v.Set(u.br.Protocol()+".joinexclude", removeStringInSlice(channel, u.v.GetStringSlice(u.br.Protocol()+".joinexclude")))
-
-		if len(u.v.GetStringSlice(u.br.Protocol()+".joininclude")) > 0 {
-			channels := u.v.GetStringSlice(u.br.Protocol() + ".joininclude")
+		if len(u.br.BridgeConfig().JoinInclude) > 0 {
+			channels := u.br.BridgeConfig().JoinInclude
 			channels = append(channels, channel)
-			u.v.Set(u.br.Protocol()+".joininclude", channels)
 		}
 
 		ch := s.Channel(channelID)
@@ -308,7 +301,7 @@ func CmdPart(s Server, u *User, msg *irc.Message) error {
 		// first part on irc
 		ch.Part(u, msg.Trailing)
 		// now part on mattermost/slack
-		if !u.v.GetBool(u.br.Protocol() + ".PartFake") {
+		if !u.br.BridgeConfig().PartFake {
 			err = u.br.Part(ch.ID())
 			if err != nil {
 				return err
@@ -317,9 +310,6 @@ func CmdPart(s Server, u *User, msg *irc.Message) error {
 		// part all other (ghost)users on the channel
 		for _, k := range ch.Users() {
 			ch.Part(k, "")
-			// if we parted, remove channel from include
-			u.v.Set(u.br.Protocol()+".joininclude",
-				removeStringInSlice(chName, u.v.GetStringSlice(u.br.Protocol()+".joininclude")))
 		}
 	}
 
@@ -403,7 +393,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 		u.msgLast[ch.ID()] = [2]string{msgID, ""}
 		u.saveLastViewedAt(ch.ID())
 
-		if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
+		if u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext {
 			u.prefixContext(ch.ID(), msgID, "", "posted_self")
 		}
 
@@ -449,7 +439,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 			u.msgLast[toUser.User] = [2]string{msgID, ""}
 			u.saveLastViewedAt(toUser.User)
 
-			if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
+			if u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext {
 				u.prefixContext(toUser.User, msgID, "", "posted_self")
 			}
 
@@ -652,7 +642,7 @@ func threadMsgChannelUser(u *User, msg *irc.Message, channelID string, toUser bo
 	u.msgLast[channelID] = [2]string{msgID, threadID}
 	u.saveLastViewedAt(channelID)
 
-	if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
+	if u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext {
 		u.prefixContext(channelID, msgID, threadID, "posted_self")
 	}
 
