@@ -716,11 +716,11 @@ func (m *Mattermost) wsActionPostSkip(rmsg *model.WebSocketEvent) bool {
 
 	rc := m.cfg.Current()
 
-	disableMarkdown := rc.Mattermost.DisableMarkdown
-	disableEmoji := rc.Mattermost.DisableEmoji
-	useUnicode := rc.Mattermost.Unicode
+	disableMarkdown := rc.Mattermost.Formatter.DisableMarkdown
+	disableEmoji := rc.Mattermost.Formatter.DisableEmoji
+	useUnicode := rc.Mattermost.Formatter.Unicode
 	blockquoteChar := blockquoteCharNonUnicode
-	inlineCode := rc.Mattermost.MarkdownInlineCode
+	inlineCode := rc.Mattermost.Formatter.MarkdownInlineCode
 	if useUnicode {
 		blockquoteChar = blockquoteCharUnicode
 	}
@@ -854,11 +854,11 @@ func (m *Mattermost) getParentReplyMsg(parentID string, preFetchedPost *model.Po
 
 	rc := m.cfg.Current()
 
-	disableMarkdown := rc.Mattermost.DisableMarkdown
-	disableEmoji := rc.Mattermost.DisableEmoji
-	useUnicode := rc.Mattermost.Unicode
+	disableMarkdown := rc.Mattermost.Formatter.DisableMarkdown
+	disableEmoji := rc.Mattermost.Formatter.DisableEmoji
+	useUnicode := rc.Mattermost.Formatter.Unicode
 	blockquoteChar := blockquoteCharNonUnicode
-	inlineCode := rc.Mattermost.MarkdownInlineCode
+	inlineCode := rc.Mattermost.Formatter.MarkdownInlineCode
 	if useUnicode {
 		blockquoteChar = blockquoteCharUnicode
 	}
@@ -948,7 +948,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 
 	rc := m.cfg.Current()
 
-	useUnicode := rc.Mattermost.Unicode
+	useUnicode := rc.Mattermost.Formatter.Unicode
 
 	var sbSuffix strings.Builder
 	if !rc.Mattermost.HideReplies && data.RootId != "" {
@@ -1503,7 +1503,7 @@ func (m *Mattermost) handleReactionEvent(rmsg *model.WebSocketEvent) {
 			parentID = parentPost.RootId
 		}
 		if !rc.Mattermost.HideReplies {
-			replyMsg, err := m.getParentReplyMsg(reaction.PostId, parentPost, rc.Mattermost.ShortenRepliesTo, "@", rc.Mattermost.Unicode)
+			replyMsg, err := m.getParentReplyMsg(reaction.PostId, parentPost, rc.Mattermost.ShortenRepliesTo, "@", rc.Mattermost.Formatter.Unicode)
 			if err == nil {
 				sbSuffix.WriteString(replyMsg)
 			}
@@ -1726,16 +1726,16 @@ const blockQuoteCharDefault = ">"
 func (m *Mattermost) parseMessageAttachments(attachments []*model.SlackAttachment, useFallback bool) string {
 	rc := m.cfg.Current()
 
-	useUnicode := rc.Mattermost.Unicode
-	syntaxHighlighting := rc.Mattermost.SyntaxHighlighting
-	codeBlockPrefix := rc.Mattermost.CodeBlockPrefix
-	disableMarkdown := rc.Mattermost.DisableMarkdown
-	disableEmoji := rc.Mattermost.DisableEmoji
+	useUnicode := rc.Mattermost.Formatter.Unicode
+	syntaxHighlighting := rc.Mattermost.Formatter.SyntaxHighlighting
+	codeBlockPrefix := rc.Mattermost.Formatter.CodeBlockPrefix
+	disableMarkdown := rc.Mattermost.Formatter.DisableMarkdown
+	disableEmoji := rc.Mattermost.Formatter.DisableEmoji
 
 	prefixChar := messageAttachmentCharNonUnicode
 	spaceChar := messageAttachmentSpaceNonUnicode
 	blockquoteChar := blockquoteCharNonUnicode
-	inlineCode := rc.Mattermost.MarkdownInlineCode
+	inlineCode := rc.Mattermost.Formatter.MarkdownInlineCode
 	if useUnicode {
 		prefixChar = messageAttachmentCharUnicode
 		spaceChar = messageAttachmentSpaceUnicode
@@ -1990,4 +1990,16 @@ func (m *Mattermost) GetLastSentMsgs() []string {
 	}
 
 	return data
+}
+
+func (m *Mattermost) Config() any {
+	return &m.cfg.Current().Mattermost
+}
+
+func (m *Mattermost) BridgeConfig() *config.BridgeConfig {
+	return &m.cfg.Current().Mattermost.Bridge
+}
+
+func (m *Mattermost) FormatterConfig() *config.FormatterConfig {
+	return &m.cfg.Current().Mattermost.Formatter
 }

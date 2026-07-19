@@ -54,27 +54,48 @@ type GlobalConfig struct {
 	PasteBufferTimeout int
 }
 
+type BridgeConfig struct {
+	Restrict []string
+
+	JoinOnly    bool
+	JoinExclude []string
+	JoinInclude []string
+
+	ShowJoinPart   bool
+	ShowOnlyJoined bool
+}
+
+type FormatterConfig struct {
+	DisableEmoji              bool
+
+	DisableMarkdown           bool
+	DisableMarkdownBlockQuote bool
+	MarkdownBlockQuoteChar    string
+	MarkdownInlineCode        string
+
+	SyntaxHighlighting     string
+	DisableCodeBlockPrefix bool
+	CodeBlockPrefix        string
+
+	Unicode            bool
+}
+
 type MattermostConfig struct {
+	Bridge    BridgeConfig
+	Formatter FormatterConfig
+
 	DefaultServer string
 	DefaultTeam   string
 
 	Insecure           bool
 	IgnoreServerVersion bool
 
-	JoinOnly    []string
-	JoinExclude []string
-	JoinInclude []string
-
 	CollapseScrollback bool
-	ShowOnlyJoined     bool
 	PartFake           bool
-
-	Restrict []string
 
 	SkipTLSVerify bool
 
 	PrefixMainTeam bool
-	DisableAutoView bool
 
 	ForceAntiIdle   bool
 	AntiIdleChannel string
@@ -85,24 +106,16 @@ type MattermostConfig struct {
 	HideReplies      bool
 	ShortenRepliesTo int
 
-	Unicode bool
 
 	HideReactions    bool
 	ShowOwnReactions bool
 
-	DisableEmoji bool
-
-	DisableMarkdown           bool
-	DisableMarkdownBlockQuote bool
-	MarkdownBlockQuoteChar    string
-	MarkdownInlineCode        string
-
 	JoinDM bool
 
-	PrefixContext bool
-	SuffixContext bool
-
-	ThreadContext   string
+	// Threading / context related
+	PrefixContext    bool
+	SuffixContext    bool
+	ThreadContext    string
 	ShowContextMulti bool
 
 	ShowMentions bool
@@ -110,27 +123,24 @@ type MattermostConfig struct {
 	DisableDefaultMentions bool
 	DisableShowOwnModified bool
 
-	SyntaxHighlighting     string
-	DisableCodeBlockPrefix bool
-	CodeBlockPrefix        string
-
+	DisableAutoView    bool
 	LastViewedSaveFile string
 }
 
 type SlackConfig struct {
+	Bridge    BridgeConfig
+	Formatter FormatterConfig
+
 	DenyUsers      []string
 	JoinDM         bool
-	Restrict       []string
 	UseDisplayName bool
 	PreferNickname bool
-	JoinOnly       []string
-	JoinExclude    []string
-	JoinInclude    []string
-	ShowOnlyJoined bool
-	PrefixContext  bool
 }
 
 type MastodonConfig struct {
+	Bridge    BridgeConfig
+	Formatter FormatterConfig
+
 	Server string
 
 	ClientID     string
@@ -139,6 +149,80 @@ type MastodonConfig struct {
 }
 
 func (c *Config) buildRuntimeCfg() *RuntimeConfig {
+	mmBridge := BridgeConfig{
+		Restrict:      append([]string(nil), c.v.GetStringSlice("mattermost.Restrict")...),
+
+		JoinOnly:    c.v.GetBool("mattermost.JoinOnly"),
+		JoinExclude: c.v.GetStringSlice("mattermost.JoinExclude"),
+		JoinInclude: c.v.GetStringSlice("mattermost.JoinInclude"),
+
+		ShowJoinPart:   c.v.GetBool("mattermost.ShowJoinPart"),
+		ShowOnlyJoined: c.v.GetBool("mattermost.ShowOnlyJoined"),
+	}
+	slBridge := BridgeConfig{
+		Restrict:      append([]string(nil), c.v.GetStringSlice("slack.Restrict")...),
+
+		JoinOnly:    c.v.GetBool("slack.JoinOnly"),
+		JoinExclude: c.v.GetStringSlice("slack.JoinExclude"),
+		JoinInclude: c.v.GetStringSlice("slack.JoinInclude"),
+
+		ShowJoinPart:   c.v.GetBool("slack.ShowJoinPart"),
+		ShowOnlyJoined: c.v.GetBool("slack.ShowOnlyJoined"),
+	}
+	mdBridge := BridgeConfig{
+		Restrict:      append([]string(nil), c.v.GetStringSlice("mastodon.Restrict")...),
+
+		JoinOnly:    c.v.GetBool("mastodon.JoinOnly"),
+		JoinExclude: c.v.GetStringSlice("mastodon.JoinExclude"),
+		JoinInclude: c.v.GetStringSlice("mastodon.JoinInclude"),
+
+		ShowJoinPart:   c.v.GetBool("mastodon.ShowJoinPart"),
+		ShowOnlyJoined: c.v.GetBool("mastodon.ShowOnlyJoined"),
+	}
+
+	mmFormatter := FormatterConfig{
+		DisableEmoji: c.v.GetBool("mattermost.DisableEmoji"),
+
+		DisableMarkdown:           c.v.GetBool("mattermost.DisableMarkdown"),
+		DisableMarkdownBlockQuote: c.v.GetBool("mattermost.DisableMarkdownBlockQuote"),
+		MarkdownBlockQuoteChar:    c.v.GetString("mattermost.MarkdownBlockQuoteChar"),
+		MarkdownInlineCode:        c.v.GetString("mattermost.MarkdownInlineCode"),
+
+		SyntaxHighlighting:     c.v.GetString("mattermost.SyntaxHighlighting"),
+		DisableCodeBlockPrefix: c.v.GetBool("mattermost.DisableCodeBlockPrefix"),
+		CodeBlockPrefix:        c.v.GetString("mattermost.CodeBlockPrefix"),
+
+		Unicode: c.v.GetBool("mattermost.Unicode"),
+	}
+	slFormatter := FormatterConfig{
+		DisableEmoji: c.v.GetBool("slack.DisableEmoji"),
+
+		DisableMarkdown:           c.v.GetBool("slack.DisableMarkdown"),
+		DisableMarkdownBlockQuote: c.v.GetBool("slack.DisableMarkdownBlockQuote"),
+		MarkdownBlockQuoteChar:    c.v.GetString("slack.MarkdownBlockQuoteChar"),
+		MarkdownInlineCode:        c.v.GetString("slack.MarkdownInlineCode"),
+
+		SyntaxHighlighting:     c.v.GetString("slack.SyntaxHighlighting"),
+		DisableCodeBlockPrefix: c.v.GetBool("slack.DisableCodeBlockPrefix"),
+		CodeBlockPrefix:        c.v.GetString("slack.CodeBlockPrefix"),
+
+		Unicode: c.v.GetBool("slack.Unicode"),
+	}
+	mdFormatter := FormatterConfig{
+		DisableEmoji: c.v.GetBool("mastodon.DisableEmoji"),
+
+		DisableMarkdown:           c.v.GetBool("mastodon.DisableMarkdown"),
+		DisableMarkdownBlockQuote: c.v.GetBool("mastodon.DisableMarkdownBlockQuote"),
+		MarkdownBlockQuoteChar:    c.v.GetString("mastodon.MarkdownBlockQuoteChar"),
+		MarkdownInlineCode:        c.v.GetString("mastodon.MarkdownInlineCode"),
+
+		SyntaxHighlighting:     c.v.GetString("mastodon.SyntaxHighlighting"),
+		DisableCodeBlockPrefix: c.v.GetBool("mastodon.DisableCodeBlockPrefix"),
+		CodeBlockPrefix:        c.v.GetString("mastodon.CodeBlockPrefix"),
+
+		Unicode: c.v.GetBool("mastodon.Unicode"),
+	}
+
 	return &RuntimeConfig{
 		GlobalConfig: GlobalConfig{
 			Bind: c.v.GetString("bind"),
@@ -159,28 +243,24 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 		},
 
 		Mattermost: MattermostConfig{
-			Restrict:      append([]string(nil), c.v.GetStringSlice("mattermost.Restrict")...),
+			Bridge:    mmBridge,
+			Formatter: mmFormatter,
+
 			DefaultServer: c.v.GetString("mattermost.DefaultServer"),
 			DefaultTeam:   c.v.GetString("mattermost.DefaultTeam"),
 
 			Insecure:            c.v.GetBool("mattermost.Insecure"),
 			IgnoreServerVersion: c.v.GetBool("mattermost.IgnoreServerVersion"),
 
-			JoinOnly: append([]string(nil), c.v.GetStringSlice("mattermost.JoinOnly")...),
-			JoinExclude: append([]string(nil), c.v.GetStringSlice("mattermost.JoinExclude")...),
-			JoinInclude: append([]string(nil), c.v.GetStringSlice("mattermost.JoinInclude")...),
-
 			CollapseScrollback: c.v.GetBool("mattermost.CollapseScrollback"),
-			ShowOnlyJoined:     c.v.GetBool("mattermost.ShowOnlyJoined"),
 			PartFake:           c.v.GetBool("mattermost.PartFake"),
 
 			SkipTLSVerify: c.v.GetBool("mattermost.SkipTLSVerify"),
 
 			PrefixMainTeam: c.v.GetBool("mattermost.PrefixMainTeam"),
-			DisableAutoView: c.v.GetBool("mattermost.DisableAutoView"),
 
-			ForceAntiIdle:   c.v.GetBool("mattermost.ForceAntiIdle"),
-			AntiIdleChannel: c.v.GetString("mattermost.AntiIdleChannel"),
+			ForceAntiIdle:    c.v.GetBool("mattermost.ForceAntiIdle"),
+			AntiIdleChannel:  c.v.GetString("mattermost.AntiIdleChannel"),
 			AntiIdleInterval: c.v.GetInt("mattermost.AntiIdleInterval"),
 
 			PreferNickname: c.v.GetBool("mattermost.PreferNickname"),
@@ -188,23 +268,13 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 			HideReplies:      c.v.GetBool("mattermost.HideReplies"),
 			ShortenRepliesTo: c.v.GetInt("mattermost.ShortenRepliesTo"),
 
-			Unicode: c.v.GetBool("mattermost.Unicode"),
-
 			HideReactions:    c.v.GetBool("mattermost.HideReactions"),
 			ShowOwnReactions: c.v.GetBool("mattermost.ShowOwnReactions"),
 
-			DisableEmoji: c.v.GetBool("mattermost.DisableEmoji"),
-
-			DisableMarkdown:           c.v.GetBool("mattermost.DisableMarkdown"),
-			DisableMarkdownBlockQuote: c.v.GetBool("mattermost.DisableMarkdownBlockQuote"),
-			MarkdownBlockQuoteChar:    c.v.GetString("mattermost.MarkdownBlockQuoteChar"),
-			MarkdownInlineCode:        c.v.GetString("mattermost.MarkdownInlineCode"),
-
 			JoinDM: c.v.GetBool("mattermost.JoinDM"),
 
-			PrefixContext: c.v.GetBool("mattermost.PrefixContext"),
-			SuffixContext: c.v.GetBool("mattermost.SuffixContext"),
-
+			PrefixContext:    c.v.GetBool("mattermost.PrefixContext"),
+			SuffixContext:    c.v.GetBool("mattermost.SuffixContext"),
 			ThreadContext:    c.v.GetString("mattermost.ThreadContext"),
 			ShowContextMulti: c.v.GetBool("mattermost.ShowContextMulti"),
 
@@ -213,29 +283,24 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 			DisableDefaultMentions: c.v.GetBool("mattermost.DisableDefaultMentions"),
 			DisableShowOwnModified: c.v.GetBool("mattermost.DisableShowOwnModified"),
 
-			SyntaxHighlighting:     c.v.GetString("mattermost.SyntaxHighlighting"),
-			DisableCodeBlockPrefix: c.v.GetBool("mattermost.DisableCodeBlockPrefix"),
-			CodeBlockPrefix:        c.v.GetString("mattermost.CodeBlockPrefix"),
-
+			DisableAutoView: c.v.GetBool("mattermost.DisableAutoView"),
 			LastViewedSaveFile: c.v.GetString("mattermost.LastViewedSaveFile"),
 		},
 
 		Slack: SlackConfig{
-			Restrict:       append([]string(nil), c.v.GetStringSlice("slack.Restrict")...),
+			Bridge:    slBridge,
+			Formatter: slFormatter,
+
 			DenyUsers:      append([]string(nil), c.v.GetStringSlice("slack.DenyUsers")...),
 			JoinDM:         c.v.GetBool("slack.JoinDM"),
 			UseDisplayName: c.v.GetBool("slack.UseDisplayName"),
 			PreferNickname: c.v.GetBool("slack.PreferNickname"),
-
-			JoinOnly:    append([]string(nil), c.v.GetStringSlice("slack.JoinOnly")...),
-			JoinExclude: append([]string(nil), c.v.GetStringSlice("slack.JoinExclude")...),
-			JoinInclude: append([]string(nil), c.v.GetStringSlice("slack.JoinInclude")...),
-
-			ShowOnlyJoined: c.v.GetBool("slack.ShowOnlyJoined"),
-			PrefixContext:  c.v.GetBool("slack.PrefixContext"),
 		},
 
 		Mastodon: MastodonConfig{
+			Bridge:    mdBridge,
+			Formatter: mdFormatter,
+
 			Server: c.v.GetString("mastodon.server"),
 
 			ClientID:     c.v.GetString("mastodon.clientid"),
@@ -247,6 +312,21 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 
 func (c *Config) Current() *RuntimeConfig {
 	return c.current.Load()
+}
+
+func (c *Config) CurrentProtocol(protocol string) any {
+	rc := c.Current()
+
+	switch protocol {
+	case "mattermost":
+		return &rc.Mattermost
+	case "slack":
+		return &rc.Slack
+	case "mastodon":
+		return &rc.Mastodon
+	default:
+		return nil
+	}
 }
 
 func Load(cfgfile string, flags *pflag.FlagSet) (*Config, error) {

@@ -455,9 +455,9 @@ func (s *Slack) allowedLogin() error {
 	rc := s.cfg.Current()
 	// we only know which server we are connecting to when we actually are connected.
 	// disconnect if we're not allowed
-	if len(rc.Slack.Restrict) > 0 {
+	if len(rc.Slack.Bridge.Restrict) > 0 {
 		ok := false
-		for _, domain := range rc.Slack.Restrict {
+		for _, domain := range rc.Slack.Bridge.Restrict {
 			if domain == s.sinfo.Team.Domain {
 				ok = true
 				break
@@ -1002,4 +1002,16 @@ func (s *Slack) RemoveReaction(msgID, emoji string) error {
 
 func (s *Slack) GetLastSentMsgs() []string {
 	return []string{}
+}
+
+func (s *Slack) Config() any {
+	return &s.cfg.Current().Slack
+}
+
+func (s *Slack) BridgeConfig() *config.BridgeConfig {
+	return &s.cfg.Current().Slack.Bridge
+}
+
+func (s *Slack) FormatterConfig() *config.FormatterConfig {
+	return &s.cfg.Current().Slack.Formatter
 }

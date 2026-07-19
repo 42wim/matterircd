@@ -376,3 +376,15 @@ func (m *Mastodon) Topic(channelID string) string {
 func (m *Mastodon) GetLastSentMsgs() []string {
 	return []string{}
 }
+
+func (m *Mastodon) Config() any {
+	return &m.cfg.Current().Mastodon
+}
+
+func (m *Mastodon) BridgeConfig() *config.BridgeConfig {
+	return &m.cfg.Current().Mastodon.Bridge
+}
+
+func (m *Mastodon) FormatterConfig() *config.FormatterConfig {
+	return &m.cfg.Current().Mastodon.Formatter
+}
