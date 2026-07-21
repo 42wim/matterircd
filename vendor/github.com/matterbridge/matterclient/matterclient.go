@@ -641,7 +641,8 @@ func (m *Client) wsConnect() {
 			TLSClientConfig: &tls.Config{
 				InsecureSkipVerify: m.SkipTLSVerify, //nolint:gosec
 			},
-			Proxy: http.ProxyFromEnvironment,
+			Proxy:             http.ProxyFromEnvironment,
+			EnableCompression: false,
 		}
 
 		var err error
