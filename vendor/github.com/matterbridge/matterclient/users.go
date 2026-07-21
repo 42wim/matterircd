@@ -1,14 +1,15 @@
 package matterclient
 
 import (
+	"context"
 	"fmt"
 	"time"
 
-	"github.com/mattermost/mattermost-server/v6/model"
+	"github.com/mattermost/mattermost/server/public/model"
 )
 
 func (m *Client) GetNickName(userID string) string {
-	if user := m.GetUser(userID); user != nil {
+	if user := m.GetUser(context.TODO(), userID); user != nil {
 		return user.Nickname
 	}
 
@@ -23,7 +24,7 @@ func (m *Client) GetStatus(userID string) string {
 		return status
 	}
 
-	res, _, err := m.Client.GetUserStatus(userID, "")
+	res, _, err := m.Client.GetUserStatus(context.TODO(), userID, "")
 	if err != nil {
 		return "offline"
 	}
@@ -58,7 +59,7 @@ func (m *Client) GetStatuses() map[string]string {
 		}
 
 		batch := missingIDs[i:end]
-		res, _, err := m.Client.GetUsersStatusesByIds(batch)
+		res, _, err := m.Client.GetUsersStatusesByIds(context.TODO(), batch)
 		if err != nil {
 			continue
 		}
@@ -95,7 +96,7 @@ func (m *Client) GetTeamName(teamID string) string {
 	return ""
 }
 
-func (m *Client) GetUser(userID string) *model.User {
+func (m *Client) GetUser(ctx context.Context, userID string) *model.User {
 	m.Users.mu.RLock()
 	user, exists := m.Users.users[userID]
 	m.Users.mu.RUnlock()
@@ -104,7 +105,7 @@ func (m *Client) GetUser(userID string) *model.User {
 		return user
 	}
 
-	res, _, err := m.Client.GetUser(userID, "")
+	res, _, err := m.Client.GetUser(ctx, userID, "")
 	if err != nil {
 		m.logger.Debugf("GetUser failed to fetch missing user %s: %s", userID, err)
 		return nil
@@ -116,7 +117,7 @@ func (m *Client) GetUser(userID string) *model.User {
 }
 
 func (m *Client) GetUserName(userID string) string {
-	if user := m.GetUser(userID); user != nil {
+	if user := m.GetUser(context.TODO(), userID); user != nil {
 		return user.Username
 	}
 
@@ -156,11 +157,11 @@ func (m *Client) SetUserStatus(userID string, rawStatus string) string {
 
 func (m *Client) UpdateUsers() error {
 	const batchSize = 200
+
 	idx := 0
 	retryCount := 0
-
 	for {
-		mmusers, resp, err := m.Client.GetUsers(idx, batchSize, "")
+		mmusers, resp, err := m.Client.GetUsers(context.TODO(), idx, batchSize, "")
 		if err != nil {
 			shouldRetry, hErr := m.HandleRetry("GetUsers", retryCount, 10, resp)
 			if hErr == nil && shouldRetry {
@@ -200,7 +201,7 @@ func (m *Client) UpdateUserNick(nick string) error {
 	m.RUnlock()
 	userClone.Nickname = nick
 
-	updatedUser, _, err := m.Client.UpdateUser(&userClone)
+	updatedUser, _, err := m.Client.UpdateUser(context.TODO(), &userClone)
 	if err != nil {
 		return err
 	}
@@ -214,7 +215,7 @@ func (m *Client) UpdateUserNick(nick string) error {
 }
 
 func (m *Client) UsernamesInChannel(channelID string) []string {
-	res, _, err := m.Client.GetChannelMembers(channelID, 0, 50000, "")
+	res, _, err := m.Client.GetChannelMembers(context.TODO(), channelID, 0, 50000, "")
 	if err != nil {
 		m.logger.Errorf("UsernamesInChannel(%s) failed: %s", channelID, err)
 
@@ -232,7 +233,7 @@ func (m *Client) UsernamesInChannel(channelID string) []string {
 }
 
 func (m *Client) UpdateStatus(userID string, status string) error {
-	_, _, err := m.Client.UpdateUserStatus(userID, &model.Status{Status: status})
+	_, _, err := m.Client.UpdateUserStatus(context.TODO(), userID, &model.Status{Status: status})
 	if err != nil {
 		return err
 	}

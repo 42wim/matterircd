@@ -1,14 +1,15 @@
 package matterclient
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"time"
 
-	"github.com/mattermost/mattermost-server/v6/model"
+	"github.com/mattermost/mattermost/server/public/model"
 )
 
-func (m *Client) GetChannel(channelID string) *model.Channel {
+func (m *Client) GetChannel(ctx context.Context, channelID string) *model.Channel {
 	m.Users.mu.RLock()
 	ch, exists := m.Users.channelData[channelID]
 	m.Users.mu.RUnlock()
@@ -17,7 +18,7 @@ func (m *Client) GetChannel(channelID string) *model.Channel {
 		return ch
 	}
 
-	mmchannel, _, err := m.Client.GetChannel(channelID, "")
+	mmchannel, _, err := m.Client.GetChannel(ctx, channelID, "")
 	if err != nil {
 		return nil
 	}
@@ -45,7 +46,7 @@ func (m *Client) GetChannels() []*model.Channel {
 }
 
 func (m *Client) GetChannelHeader(channelID string) string {
-	if ch := m.GetChannel(channelID); ch != nil {
+	if ch := m.GetChannel(context.TODO(), channelID); ch != nil {
 		return ch.Header
 	}
 	return ""
@@ -91,7 +92,7 @@ func (m *Client) getChannelIDTeam(name string, teamID string) string {
 
 	// Fallback if it's not found in the t.Channels or t.MoreChannels cache.
 	// This also let's us join private channels.
-	channel, _, err := m.Client.GetChannelByName(name, teamID, "")
+	channel, _, err := m.Client.GetChannelByName(context.TODO(), name, teamID, "")
 	if err != nil {
 		return ""
 	}
@@ -107,14 +108,14 @@ func (m *Client) getChannelIDTeam(name string, teamID string) string {
 }
 
 func (m *Client) GetChannelName(channelID string) string {
-	if ch := m.GetChannel(channelID); ch != nil {
+	if ch := m.GetChannel(context.TODO(), channelID); ch != nil {
 		return getNormalisedName(ch)
 	}
 	return ""
 }
 
 func (m *Client) GetChannelTeamID(id string) string {
-	if ch := m.GetChannel(id); ch != nil {
+	if ch := m.GetChannel(context.TODO(), id); ch != nil {
 		return ch.TeamId
 	}
 	return ""
@@ -134,13 +135,13 @@ func (m *Client) GetChannelUsers(channelID string) ([]*model.User, error) {
 	}
 	m.Users.mu.RUnlock()
 
-	var allUsers []*model.User
-	idx := 0
 	const batchSize = 200
-	retryCount := 0
+	var allUsers []*model.User
 
+	idx := 0
+	retryCount := 0
 	for {
-		mmusersPaged, resp, err := m.Client.GetUsersInChannel(channelID, idx, batchSize, "")
+		mmusersPaged, resp, err := m.Client.GetUsersInChannel(context.TODO(), channelID, idx, batchSize, "")
 		if err != nil {
 			shouldRetry, hErr := m.HandleRetry("GetUsersInChannel", retryCount, 10, resp)
 			if hErr == nil && shouldRetry {
@@ -181,7 +182,7 @@ func (m *Client) GetLastViewedAt(channelID string) int64 {
 
 	retryCount := 0
 	for {
-		res, resp, err := m.Client.GetChannelMember(channelID, userID, "")
+		res, resp, err := m.Client.GetChannelMember(context.TODO(), channelID, userID, "")
 		if err == nil {
 			return res.LastViewedAt
 		}
@@ -214,7 +215,7 @@ func (m *Client) GetMoreChannels() []*model.Channel {
 
 // GetTeamFromChannel returns teamId belonging to channel (DM channels have no teamId).
 func (m *Client) GetTeamFromChannel(channelID string) string {
-	if ch := m.GetChannel(channelID); ch != nil {
+	if ch := m.GetChannel(context.TODO(), channelID); ch != nil {
 		if ch.Type == model.ChannelTypeGroup {
 			return "G"
 		}
@@ -235,7 +236,7 @@ func (m *Client) JoinChannel(channelID string) error {
 
 	m.logger.Debug("Joining ", channelID)
 
-	_, _, err := m.Client.AddChannelMember(channelID, m.User.Id)
+	_, _, err := m.Client.AddChannelMember(context.TODO(), channelID, m.User.Id)
 	if err != nil {
 		return err
 	}
@@ -261,14 +262,17 @@ func (m *Client) UpdateChannelsTeam(teamID string) error {
 	}
 	m.RUnlock()
 
+	ctx := context.TODO()
+
 	const batchSize = 200
 	var mmchannels []*model.Channel
-	retryCount := 0
 
+	retryCount := 0
 	for {
 		var resp *model.Response
 		var err error
-		mmchannels, resp, err = m.Client.GetChannelsForTeamForUser(teamID, m.User.Id, false, "")
+
+		mmchannels, resp, err = m.Client.GetChannelsForTeamForUser(ctx, teamID, m.User.Id, false, "")
 		if err == nil {
 			break
 		}
@@ -278,15 +282,16 @@ func (m *Client) UpdateChannelsTeam(teamID string) error {
 			retryCount++
 			continue
 		}
+
 		return err
 	}
 
-	idx := 0
 	moreChannels := make([]*model.Channel, 0, batchSize)
-	retryCount = 0
 
+	idx := 0
+	retryCount = 0
 	for {
-		channels, resp, err := m.Client.GetPublicChannelsForTeam(teamID, idx, batchSize, "")
+		channels, resp, err := m.Client.GetPublicChannelsForTeam(ctx, teamID, idx, batchSize, "")
 		if err != nil {
 			shouldRetry, hErr := m.HandleRetry("GetPublicChannelsForTeam", retryCount, 10, resp)
 			if hErr == nil && shouldRetry {
@@ -314,6 +319,7 @@ func (m *Client) UpdateChannelsTeam(teamID string) error {
 		m.Users.channelData[ch.Id] = ch
 		m.Users.joinedChannels[ch.Id] = struct{}{}
 	}
+
 	for _, ch := range moreChannels {
 		m.Users.channelData[ch.Id] = ch
 	}
@@ -358,7 +364,7 @@ func (m *Client) UpdateChannelHeader(channelID string, header string) {
 
 	m.logger.Debugf("updating channelheader %#v, %#v", channelID, header)
 
-	_, _, err := m.Client.UpdateChannel(channel)
+	_, _, err := m.Client.UpdateChannel(context.TODO(), channel)
 	if err != nil {
 		m.logger.Error(err)
 	}
@@ -393,7 +399,7 @@ func (m *Client) UpdateLastViewed(channelID string) error {
 
 	retryCount := 0
 	for {
-		_, resp, err := m.Client.ViewChannel(m.User.Id, view)
+		_, resp, err := m.Client.ViewChannel(context.TODO(), m.User.Id, view)
 		if err == nil {
 			return nil
 		}
