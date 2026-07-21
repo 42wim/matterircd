@@ -196,6 +196,15 @@ func initEmoji() {
 			aliasPairs = append(aliasPairs, ":"+alias+":", e.Emoji)
 			reactionMap[alias] = e.Emoji
 		}
+		// in addition to aliases, also include tags
+		for _, tag := range e.Tags {
+			if tag == "" {
+				continue
+			}
+			// but only if it doesn't already exist, e.g. "angry"
+			aliasPairs = append(aliasPairs, ":"+tag+":", e.Emoji)
+			reactionMap[tag] = e.Emoji
+		}
 	}
 
 	emojiReplacer = strings.NewReplacer(aliasPairs...)
