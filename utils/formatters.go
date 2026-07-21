@@ -177,6 +177,9 @@ var (
 	emojiInitOnce sync.Once
 	emojiReplacer *strings.Replacer
 	reactionMap   map[string]string
+
+	emojiSkinTonesRE   = regexp.MustCompile(`^(.+?)_((?:neutral|light|medium_light|medium|medium_dark|dark))_skin_tone$`)
+	emojiSkinTonesList = []string{"light", "medium_light", "medium", "medium_dark", "dark"}
 )
 
 func initEmoji() {
@@ -195,15 +198,37 @@ func initEmoji() {
 			}
 			aliasPairs = append(aliasPairs, ":"+alias+":", e.Emoji)
 			reactionMap[alias] = e.Emoji
+			if !e.SkinTones {
+				continue
+			}
+			// Include skin tones
+			for _, skinTone := range emojiSkinTonesList {
+				aWithTone := alias + "_" + skinTone + "_skin_tone"
+				tone, _ := emoji.ParseSkinTone(skinTone)
+				aliasPairs = append(aliasPairs, ":"+aWithTone+":", e.Tone(tone))
+				reactionMap[aWithTone] = e.Emoji
+			}
 		}
-		// in addition to aliases, also include tags
+		// In addition to emoji aliases, include emoji tags
 		for _, tag := range e.Tags {
 			if tag == "" {
 				continue
 			}
-			// but only if it doesn't already exist, e.g. "angry"
-			aliasPairs = append(aliasPairs, ":"+tag+":", e.Emoji)
-			reactionMap[tag] = e.Emoji
+			// But only if it doesn't already exist, e.g. "angry"
+			if _, ok := reactionMap[tag]; !ok {
+				aliasPairs = append(aliasPairs, ":"+tag+":", e.Emoji)
+				reactionMap[tag] = e.Emoji
+				if !e.SkinTones {
+					continue
+				}
+				// Include skin tones
+				for _, skinTone := range emojiSkinTonesList {
+					aWithTone := tag + "_" + skinTone + "_skin_tone"
+					tone, _ := emoji.ParseSkinTone(skinTone)
+					aliasPairs = append(aliasPairs, ":"+aWithTone+":", e.Tone(tone))
+					reactionMap[aWithTone] = e.Emoji
+				}
+			}
 		}
 	}
 
