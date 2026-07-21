@@ -5,8 +5,10 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/alecthomas/chroma/v2/quick"
+	"github.com/kenshaw/emoji"
 )
 
 //nolint:funlen,gocyclo
@@ -169,4 +171,43 @@ func Markdown2irc(msg string, blockQuoteChar string, inlineCode string) string {
 	}
 
 	return msg
+}
+
+var (
+	emojiInitOnce sync.Once
+	emojiReplacer *strings.Replacer
+	reactionMap   map[string]string
+)
+
+func initEmoji() {
+	data := emoji.Gemoji()
+
+	var aliasPairs []string
+	reactionMap = make(map[string]string, len(data))
+
+	for _, e := range data {
+		if e.Emoji == "" {
+			continue
+		}
+		for _, alias := range e.Aliases {
+			if alias == "" {
+				continue
+			}
+			aliasPairs = append(aliasPairs, ":"+alias+":", e.Emoji)
+			reactionMap[alias] = e.Emoji
+		}
+	}
+
+	emojiReplacer = strings.NewReplacer(aliasPairs...)
+}
+
+func EmojiReplaceAliases(s string) string {
+	emojiInitOnce.Do(initEmoji)
+	return emojiReplacer.Replace(s)
+}
+
+func EmojiFromAlias(alias string) (string, bool) {
+	emojiInitOnce.Do(initEmoji)
+	val, ok := reactionMap[alias]
+	return val, ok
 }

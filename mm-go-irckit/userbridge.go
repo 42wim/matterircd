@@ -19,7 +19,6 @@ import (
 	"github.com/42wim/matterircd/config"
 	"github.com/42wim/matterircd/utils"
 	"github.com/davecgh/go-spew/spew"
-	"github.com/kenshaw/emoji"
 	"github.com/mattermost/mattermost-server/v6/model"
 	"github.com/muesli/reflow/wordwrap"
 	"github.com/sorcix/irc"
@@ -247,7 +246,7 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 		}
 
 		if !disableEmoji && !codeBlockBackTick && !codeBlockTilde {
-			line = emoji.ReplaceAliases(line)
+			line = utils.EmojiReplaceAliases(line)
 		}
 
 		if showContext || addPrefix {
@@ -448,7 +447,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		}
 
 		if !disableEmoji && !codeBlockBackTick && !codeBlockTilde {
-			line = emoji.ReplaceAliases(line)
+			line = utils.EmojiReplaceAliases(line)
 		}
 
 		if showContext || addPrefix {
@@ -603,9 +602,8 @@ func (u *User) handleReactionEvent(event interface{}) {
 	}
 
 	if !u.br.FormatterConfig().DisableEmoji {
-		reactionEmoji := emoji.FromAlias(reaction)
-		if reactionEmoji != nil {
-			reaction = reactionEmoji.Emoji
+		if reactionEmoji, ok := utils.EmojiFromAlias(reaction); ok {
+			reaction = reactionEmoji
 		}
 	}
 
