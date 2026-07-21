@@ -224,36 +224,44 @@ func (s *server) HasChannel(channelID string) (Channel, bool) {
 
 // Channel returns an existing or new channel with the give name.
 func (s *server) Channel(channelID string) Channel {
-	s.Lock()
+	s.RLock()
 	ch, ok := s.channels[channelID]
-	if !ok {
-		service := s.u.br.Protocol()
-		name := s.u.br.GetChannelName(channelID)
+	s.RUnlock()
 
-		info, err := s.u.br.GetChannel(channelID)
-		if err != nil {
-			// don't error on our special channels
-			if channelID != "" && !strings.HasPrefix(channelID, "&") && channelID != s.u.Nick && channelID != s.u.Username {
-				logger.Errorf("didn't find channel %s (%s): %s", channelID, name, err)
-			}
-			info = &bridge.ChannelInfo{}
-		}
-
-		modes := make(map[string]bool)
-		modes["p"] = info.Private
-
-		newFn := s.config.NewChannel
-		ch = newFn(s, channelID, name, service, modes)
-
-		logger.Debugf("new channel id: %s, name: %s", channelID, name)
-
-		s.channels[channelID] = ch
-		s.channels[name] = ch
-		s.Unlock()
-	} else {
-		s.Unlock()
+	if ok {
+		return ch
 	}
-	return ch
+
+	service := s.u.br.Protocol()
+	name := s.u.br.GetChannelName(channelID)
+
+	info, err := s.u.br.GetChannel(channelID)
+	if err != nil {
+		// don't error on our special channels
+		if channelID != "" && !strings.HasPrefix(channelID, "&") && channelID != s.u.Nick && channelID != s.u.Username {
+			logger.Errorf("didn't find channel %s (%s): %s", channelID, name, err)
+		}
+		info = &bridge.ChannelInfo{}
+	}
+
+	modes := make(map[string]bool)
+	modes["p"] = info.Private
+
+	newCh := s.config.NewChannel(s, channelID, name, service, modes)
+
+	s.Lock()
+	defer s.Unlock()
+
+	if ch, ok := s.channels[channelID]; ok {
+		return ch
+	}
+
+	logger.Debugf("new channel id: %s, name: %s", channelID, name)
+
+	s.channels[channelID] = newCh
+	s.channels[name] = newCh
+
+	return newCh
 }
 
 // UnlinkChannel unlinks the channel from the server's storage, returns whether it existed.
@@ -405,7 +413,7 @@ func (s *server) handshake(u *User) error {
 	u.Host = u.ResolveHost()
 	go u.Decode()
 
-	timeout := u.v.GetInt("HandshakeTimeout")
+	timeout := u.cfg.Current().HandshakeTimeout
 	if timeout == 0 {
 		timeout = 10
 	}
@@ -508,11 +516,11 @@ outerloop:
 func (s *server) Logout(user *User) {
 	channels := user.Channels()
 	for _, ch := range channels {
+		s.Lock()
 		for _, other := range ch.Users() {
-			s.Lock()
 			delete(s.users, other.ID())
-			s.Unlock()
 		}
+		s.Unlock()
 		ch.Part(user, "")
 		ch.Unlink()
 	}

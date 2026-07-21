@@ -102,6 +102,9 @@ func NewChannel(server Server, channelID string, name string, service string, mo
 }
 
 func (ch *channel) GetTopic() string {
+	ch.mu.RLock()
+	defer ch.mu.RUnlock()
+
 	return ch.topic
 }
 
@@ -129,23 +132,28 @@ func (ch *channel) ID() string {
 
 func (ch *channel) Message(from *User, text string) {
 	text = wordwrap.String(text, 440)
-	lines := strings.Split(text, "\n")
-	for _, l := range lines {
-		msg := &irc.Message{
-			Prefix:        from.Prefix(),
-			Command:       irc.PRIVMSG,
-			Params:        []string{ch.name},
-			Trailing:      l,
-			EmptyTrailing: true,
+
+	msg := irc.Message{
+		Prefix:        from.Prefix(),
+		Command:       irc.PRIVMSG,
+		Params:        []string{ch.name},
+		EmptyTrailing: true,
+	}
+
+	users := ch.Users()
+
+	for {
+		line, rest, found := strings.Cut(text, "\n")
+		msg.Trailing = line
+
+		for _, to := range users {
+			to.Encode(&msg) //nolint:errcheck
 		}
 
-		ch.mu.RLock()
-
-		for _, to := range ch.usersIdx {
-			to.Encode(msg)
+		if !found {
+			break
 		}
-
-		ch.mu.RUnlock()
+		text = rest
 	}
 }
 
@@ -173,23 +181,24 @@ func (ch *channel) Part(u *User, text string) {
 		return
 	}
 
-	u.Encode(msg)
-
 	delete(ch.usersIdx, u.ID())
+	users := make([]*User, 0, len(ch.usersIdx))
+	for _, to := range ch.usersIdx {
+		users = append(users, to)
+	}
+	ch.mu.Unlock()
 
 	u.Lock()
-
 	delete(u.channels, ch)
-
 	u.Unlock()
 
-	for _, to := range ch.usersIdx {
+	u.Encode(msg) //nolint:errcheck
+
+	for _, to := range users {
 		if !to.Ghost {
 			to.Encode(msg)
 		}
 	}
-
-	ch.mu.Unlock()
 }
 
 // Unlink will disassociate the Channel from the Server.
@@ -200,18 +209,20 @@ func (ch *channel) Unlink() {
 // Close will evict all users in the channel.
 func (ch *channel) Close() error {
 	ch.mu.Lock()
+	users := make([]*User, 0, len(ch.usersIdx))
+	for _, u := range ch.usersIdx {
+		users = append(users, u)
+	}
+	ch.usersIdx = make(map[string]*User)
+	ch.mu.Unlock()
 
-	for _, to := range ch.usersIdx {
+	for _, to := range users {
 		to.Encode(&irc.Message{
 			Prefix:  to.Prefix(),
 			Command: irc.PART,
 			Params:  []string{ch.name},
 		})
 	}
-
-	ch.usersIdx = make(map[string]*User)
-
-	ch.mu.Unlock()
 
 	return nil
 }
@@ -228,18 +239,18 @@ func (ch *channel) Invite(from Prefixer, u *User) error {
 
 // Topic sets the topic of the channel (handler for TOPIC).
 func (ch *channel) Topic(from Prefixer, text string) {
-	ch.mu.RLock()
+	ch.mu.Lock()
 
 	// this probably an echo
 	if ch.topic == text {
-		ch.mu.RUnlock()
+		ch.mu.Unlock()
 		return
 	}
 
-	ch.topic = text
 	// no newlines in topic
-	ch.topic = strings.ReplaceAll(ch.topic, "\n", " ")
-	ch.topic = strings.ReplaceAll(ch.topic, "\r", " ")
+	text = strings.ReplaceAll(text, "\n", " ")
+	text = strings.ReplaceAll(text, "\r", " ")
+	ch.topic = text
 
 	msg := &irc.Message{
 		Prefix:   from.Prefix(),
@@ -248,14 +259,19 @@ func (ch *channel) Topic(from Prefixer, text string) {
 		Trailing: ch.topic,
 	}
 
+	users := make([]*User, 0, len(ch.usersIdx))
+	for _, u := range ch.usersIdx {
+		users = append(users, u)
+	}
+
+	ch.mu.Unlock()
+
 	// only send join messages to real users
-	for _, to := range ch.usersIdx {
+	for _, to := range users {
 		if !to.Ghost {
 			to.Encode(msg)
 		}
 	}
-
-	ch.mu.RUnlock()
 }
 
 // SendNamesResponse sends a User messages indicating the current members of the Channel.
@@ -372,16 +388,15 @@ func (ch *channel) Join(u *User) error {
 	}
 
 	// send regular users a notification of the join
-	ch.mu.RLock()
+	users := ch.Users()
 
-	for _, to := range ch.usersIdx {
+	for _, to := range users {
 		// only send join messages to real users
 		if !to.Ghost {
 			to.Encode(msg)
 		}
 	}
 
-	ch.mu.RUnlock()
 
 	ch.SendNamesResponse(u)
 
@@ -390,24 +405,21 @@ func (ch *channel) Join(u *User) error {
 
 func (ch *channel) HasUser(u *User) bool {
 	ch.mu.RLock()
+	defer ch.mu.RUnlock()
 
 	_, ok := ch.usersIdx[u.ID()]
-
-	ch.mu.RUnlock()
-
 	return ok
 }
 
 // Users returns an unsorted slice of users who are in the channel.
 func (ch *channel) Users() []*User {
 	ch.mu.RLock()
+	defer ch.mu.RUnlock()
 
 	users := make([]*User, 0, len(ch.usersIdx))
 	for _, u := range ch.usersIdx {
 		users = append(users, u)
 	}
-
-	ch.mu.RUnlock()
 
 	return users
 }
@@ -445,23 +457,33 @@ func (ch *channel) Spoof(from string, text string, cmd string, maxlen ...int) {
 	} else {
 		text = wordwrap.String(text, maxlen[0])
 	}
-	lines := strings.Split(text, "\n")
-	for _, l := range lines {
-		msg := &irc.Message{
-			Prefix:        &irc.Prefix{Name: from, User: from, Host: from},
-			Command:       cmd,
-			Params:        []string{ch.name},
-			Trailing:      l,
-			EmptyTrailing: true,
+
+	prefix := irc.Prefix{
+		Name: from,
+		User: from,
+		Host: from,
+	}
+	msg := irc.Message{
+		Prefix:        &prefix,
+		Command:       cmd,
+		Params:        []string{ch.name},
+		EmptyTrailing: true,
+	}
+
+	users := ch.Users()
+
+	for {
+		line, rest, found := strings.Cut(text, "\n")
+		msg.Trailing = line
+
+		for _, to := range users {
+			to.Encode(&msg) //nolint:errcheck
 		}
 
-		ch.mu.RLock()
-
-		for _, to := range ch.usersIdx {
-			to.Encode(msg)
+		if !found {
+			break
 		}
-
-		ch.mu.RUnlock()
+		text = rest
 	}
 }
 

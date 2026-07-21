@@ -3,22 +3,41 @@ package matterclient
 import (
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/mattermost/mattermost-server/v6/model"
 )
 
+func (m *Client) GetChannel(channelID string) *model.Channel {
+	m.Users.mu.RLock()
+	ch, exists := m.Users.channelData[channelID]
+	m.Users.mu.RUnlock()
+
+	if exists {
+		return ch
+	}
+
+	mmchannel, _, err := m.Client.GetChannel(channelID, "")
+	if err != nil {
+		return nil
+	}
+
+	m.Users.mu.Lock()
+	m.Users.channelData[channelID] = mmchannel
+	m.Users.mu.Unlock()
+
+	return mmchannel
+}
+
 // GetChannels returns all channels we're members off
 func (m *Client) GetChannels() []*model.Channel {
-	m.RLock()
-	defer m.RUnlock()
+	m.Users.mu.RLock()
+	defer m.Users.mu.RUnlock()
 
 	var channels []*model.Channel
-	// our primary team channels first
-	channels = append(channels, m.Team.Channels...)
-
-	for _, t := range m.OtherTeams {
-		if t.ID != m.Team.ID {
-			channels = append(channels, t.Channels...)
+	for id := range m.Users.joinedChannels {
+		if ch, exists := m.Users.channelData[id]; exists {
+			channels = append(channels, ch)
 		}
 	}
 
@@ -26,17 +45,9 @@ func (m *Client) GetChannels() []*model.Channel {
 }
 
 func (m *Client) GetChannelHeader(channelID string) string {
-	m.RLock()
-	defer m.RUnlock()
-
-	for _, t := range m.OtherTeams {
-		for _, channel := range append(t.Channels, t.MoreChannels...) {
-			if channel.Id == channelID {
-				return channel.Header
-			}
-		}
+	if ch := m.GetChannel(channelID); ch != nil {
+		return ch.Header
 	}
-
 	return ""
 }
 
@@ -52,18 +63,16 @@ func getNormalisedName(channel *model.Channel) string {
 }
 
 func (m *Client) GetChannelID(name string, teamID string) string {
-	m.RLock()
-	defer m.RUnlock()
-
 	if teamID != "" {
 		return m.getChannelIDTeam(name, teamID)
 	}
 
-	for _, t := range m.OtherTeams {
-		for _, channel := range append(t.Channels, t.MoreChannels...) {
-			if getNormalisedName(channel) == name {
-				return channel.Id
-			}
+	m.Users.mu.RLock()
+	defer m.Users.mu.RUnlock()
+
+	for _, ch := range m.Users.channelData {
+		if getNormalisedName(ch) == name {
+			return ch.Id
 		}
 	}
 
@@ -71,15 +80,14 @@ func (m *Client) GetChannelID(name string, teamID string) string {
 }
 
 func (m *Client) getChannelIDTeam(name string, teamID string) string {
-	for _, t := range m.OtherTeams {
-		if t.ID == teamID {
-			for _, channel := range append(t.Channels, t.MoreChannels...) {
-				if getNormalisedName(channel) == name {
-					return channel.Id
-				}
-			}
+	m.Users.mu.RLock()
+	for _, ch := range m.Users.channelData {
+		if ch.TeamId == teamID && getNormalisedName(ch) == name {
+			m.Users.mu.RUnlock()
+			return ch.Id
 		}
 	}
+	m.Users.mu.RUnlock()
 
 	// Fallback if it's not found in the t.Channels or t.MoreChannels cache.
 	// This also let's us join private channels.
@@ -88,67 +96,117 @@ func (m *Client) getChannelIDTeam(name string, teamID string) string {
 		return ""
 	}
 
+	m.Users.mu.Lock()
+	if m.Users.channelData == nil {
+		m.Users.channelData = make(map[string]*model.Channel)
+	}
+	m.Users.channelData[channel.Id] = channel
+	m.Users.mu.Unlock()
+
 	return channel.Id
 }
 
 func (m *Client) GetChannelName(channelID string) string {
-	m.RLock()
-	defer m.RUnlock()
-
-	for _, t := range m.OtherTeams {
-		if t == nil {
-			continue
-		}
-
-		for _, channel := range append(t.Channels, t.MoreChannels...) {
-			if channel.Id == channelID {
-				return getNormalisedName(channel)
-			}
-		}
+	if ch := m.GetChannel(channelID); ch != nil {
+		return getNormalisedName(ch)
 	}
-
 	return ""
 }
 
 func (m *Client) GetChannelTeamID(id string) string {
-	m.RLock()
-	defer m.RUnlock()
+	if ch := m.GetChannel(id); ch != nil {
+		return ch.TeamId
+	}
+	return ""
+}
 
-	for _, t := range append(m.OtherTeams, m.Team) {
-		for _, channel := range append(t.Channels, t.MoreChannels...) {
-			if channel.Id == id {
-				return channel.TeamId
+func (m *Client) GetChannelUsers(channelID string) ([]*model.User, error) {
+	m.Users.mu.RLock()
+	if userIDs, exists := m.Users.channels[channelID]; exists {
+		users := make([]*model.User, 0, len(userIDs))
+		for uid := range userIDs {
+			if user, ok := m.Users.users[uid]; ok {
+				users = append(users, user)
 			}
 		}
+		m.Users.mu.RUnlock()
+		return users, nil
+	}
+	m.Users.mu.RUnlock()
+
+	var allUsers []*model.User
+	idx := 0
+	const batchSize = 200
+	retryCount := 0
+
+	for {
+		mmusersPaged, resp, err := m.Client.GetUsersInChannel(channelID, idx, batchSize, "")
+		if err != nil {
+			shouldRetry, hErr := m.HandleRetry("GetUsersInChannel", retryCount, 10, resp)
+			if hErr == nil && shouldRetry {
+				retryCount++
+				continue
+			}
+			return nil, err
+		}
+		retryCount = 0
+
+		allUsers = append(allUsers, mmusersPaged...)
+
+		if len(mmusersPaged) < batchSize {
+			break
+		}
+		idx++
 	}
 
-	return ""
+	m.Users.mu.Lock()
+	defer m.Users.mu.Unlock()
+
+	if m.Users.channels[channelID] == nil {
+		m.Users.channels[channelID] = make(map[string]struct{})
+	}
+
+	for _, u := range allUsers {
+		m.Users.users[u.Id] = u
+		m.Users.channels[channelID][u.Id] = struct{}{}
+	}
+
+	return allUsers, nil
 }
 
 func (m *Client) GetLastViewedAt(channelID string) int64 {
 	m.RLock()
-	defer m.RUnlock()
+	userID := m.User.Id
+	m.RUnlock()
 
+	retryCount := 0
 	for {
-		res, resp, err := m.Client.GetChannelMember(channelID, m.User.Id, "")
+		res, resp, err := m.Client.GetChannelMember(channelID, userID, "")
 		if err == nil {
 			return res.LastViewedAt
 		}
 
-		if err := m.HandleRatelimit("GetChannelMember", resp); err != nil {
-			return model.GetMillis()
+		shouldRetry, hErr := m.HandleRetry("GetChannelMember", retryCount, 10, resp)
+		if hErr == nil && shouldRetry {
+			retryCount++
+			continue
 		}
+
+		m.logger.Errorf("GetChannelMember failed for %s: %v", channelID, err)
+		return model.GetMillis()
 	}
 }
 
-// GetMoreChannels returns existing channels where we're not a member off.
+// GetMoreChannels returns existing channels where we're not a member of.
 func (m *Client) GetMoreChannels() []*model.Channel {
-	m.RLock()
-	defer m.RUnlock()
+	m.Users.mu.RLock()
+	defer m.Users.mu.RUnlock()
 
 	var channels []*model.Channel
-	for _, t := range m.OtherTeams {
-		channels = append(channels, t.MoreChannels...)
+	for id, ch := range m.Users.channelData {
+		if _, joined := m.Users.joinedChannels[id]; !joined {
+			channels = append(channels, ch)
+		}
 	}
 
 	return channels
@@ -156,44 +214,23 @@ func (m *Client) GetMoreChannels() []*model.Channel {
 
 // GetTeamFromChannel returns teamId belonging to channel (DM channels have no teamId).
 func (m *Client) GetTeamFromChannel(channelID string) string {
-	m.RLock()
-	defer m.RUnlock()
-
-	var channels []*model.Channel
-
-	for _, t := range m.OtherTeams {
-		channels = append(channels, t.Channels...)
-
-		if t.MoreChannels != nil {
-			channels = append(channels, t.MoreChannels...)
+	if ch := m.GetChannel(channelID); ch != nil {
+		if ch.Type == model.ChannelTypeGroup {
+			return "G"
 		}
-
-		for _, c := range channels {
-			if c.Id == channelID {
-				if c.Type == model.ChannelTypeGroup {
-					return "G"
-				}
-
-				return t.ID
-			}
-		}
-
-		channels = nil
+		return ch.TeamId
 	}
-
 	return ""
 }
 
 func (m *Client) JoinChannel(channelID string) error {
-	m.RLock()
-	defer m.RUnlock()
+	m.Users.mu.RLock()
+	_, joined := m.Users.joinedChannels[channelID]
+	m.Users.mu.RUnlock()
 
-	for _, c := range m.Team.Channels {
-		if c.Id == channelID {
-			m.logger.Debug("Not joining ", channelID, " already joined.")
-
-			return nil
-		}
+	if joined {
+		m.logger.Debug("Not joining ", channelID, " already joined.")
+		return nil
 	}
 
 	m.logger.Debug("Joining ", channelID)
@@ -203,58 +240,92 @@ func (m *Client) JoinChannel(channelID string) error {
 		return err
 	}
 
+	m.Users.mu.Lock()
+	if m.Users.joinedChannels == nil {
+		m.Users.joinedChannels = make(map[string]struct{})
+	}
+	m.Users.joinedChannels[channelID] = struct{}{}
+	m.Users.mu.Unlock()
+
 	return nil
 }
 
 func (m *Client) UpdateChannelsTeam(teamID string) error {
-	var (
-		resp *model.Response
-		err  error
-	)
+	m.RLock()
+	if team, exists := m.OtherTeams[teamID]; exists {
+		if time.Since(team.LastChannelSync) < 30*time.Minute {
+			m.RUnlock()
+			m.logger.Debugf("skipping channel fetch for team %s: cache is only %v old", teamID, time.Since(team.LastChannelSync).Round(time.Second))
+			return nil
+		}
+	}
+	m.RUnlock()
 
 	const batchSize = 200
+	var mmchannels []*model.Channel
+	retryCount := 0
 
-	mmchannels := make([]*model.Channel, 0, batchSize)
 	for {
+		var resp *model.Response
+		var err error
 		mmchannels, resp, err = m.Client.GetChannelsForTeamForUser(teamID, m.User.Id, false, "")
 		if err == nil {
 			break
 		}
 
-		if err = m.HandleRatelimit("GetChannelsForTeamForUser", resp); err != nil {
-			return err
+		shouldRetry, hErr := m.HandleRetry("GetChannelsForTeamForUser", retryCount, 10, resp)
+		if hErr == nil && shouldRetry {
+			retryCount++
+			continue
 		}
+		return err
 	}
 
 	idx := 0
 	moreChannels := make([]*model.Channel, 0, batchSize)
+	retryCount = 0
+
 	for {
 		channels, resp, err := m.Client.GetPublicChannelsForTeam(teamID, idx, batchSize, "")
 		if err != nil {
-			if rlErr := m.HandleRatelimit("GetPublicChannelsForTeam", resp); rlErr != nil {
-				return rlErr
+			shouldRetry, hErr := m.HandleRetry("GetPublicChannelsForTeam", retryCount, 10, resp)
+			if hErr == nil && shouldRetry {
+				retryCount++
+				continue
 			}
-			continue
+			return err
 		}
+		retryCount = 0
 
 		moreChannels = append(moreChannels, channels...)
-
 		if len(channels) < batchSize {
 			break
 		}
 		idx++
 	}
 
-	m.Lock()
-	defer m.Unlock()
-
-	for idx, t := range m.OtherTeams {
-		if t.ID == teamID {
-			m.OtherTeams[idx].Channels = mmchannels
-			m.OtherTeams[idx].MoreChannels = moreChannels
-			break
-		}
+	m.Users.mu.Lock()
+	if m.Users.channelData == nil {
+		m.Users.channelData = make(map[string]*model.Channel)
+		m.Users.joinedChannels = make(map[string]struct{})
 	}
+
+	for _, ch := range mmchannels {
+		m.Users.channelData[ch.Id] = ch
+		m.Users.joinedChannels[ch.Id] = struct{}{}
+	}
+	for _, ch := range moreChannels {
+		m.Users.channelData[ch.Id] = ch
+	}
+	m.Users.mu.Unlock()
+
+	m.Users.lastUpdated.Store(time.Now().Unix())
+
+	m.Lock()
+	if team, exists := m.OtherTeams[teamID]; exists {
+		team.LastChannelSync = time.Now()
+	}
+	m.Unlock()
 
 	return nil
 }
@@ -293,24 +364,47 @@ func (m *Client) UpdateChannelHeader(channelID string, header string) {
 	}
 }
 
+func (m *Client) UpdateChannelUsersCache(channelID string, user *model.User) {
+	m.Users.mu.Lock()
+	defer m.Users.mu.Unlock()
+
+	m.Users.users[user.Id] = user
+
+	if channelID != "" {
+		if m.Users.channels[channelID] != nil {
+			m.Users.channels[channelID][user.Id] = struct{}{}
+		}
+	}
+}
+
+func (m *Client) UpdateChannelUsersCacheRemove(channelID string, userID string) {
+	m.Users.mu.Lock()
+	defer m.Users.mu.Unlock()
+
+	if m.Users.channels != nil && m.Users.channels[channelID] != nil {
+		delete(m.Users.channels[channelID], userID)
+	}
+}
+
 func (m *Client) UpdateLastViewed(channelID string) error {
 	m.logger.Debugf("posting lastview %#v", channelID)
-	if channelID != "pkn6xmxn37rix85w4uurjpkoqo" {
-		m.logger.Debugf("posting lastview %#v", channelID)
-	}
 
 	view := &model.ChannelView{ChannelId: channelID}
 
+	retryCount := 0
 	for {
 		_, resp, err := m.Client.ViewChannel(m.User.Id, view)
 		if err == nil {
 			return nil
 		}
 
-		if err := m.HandleRatelimit("ViewChannel", resp); err != nil {
-			m.logger.Errorf("ChannelView update for %s failed: %s", channelID, err)
-
-			return err
+		shouldRetry, hErr := m.HandleRetry("ViewChannel", retryCount, 10, resp)
+		if hErr == nil && shouldRetry {
+			retryCount++
+			continue
 		}
+
+		m.logger.Errorf("ChannelView update for %s failed: %v", channelID, err)
+		return err
 	}
 }

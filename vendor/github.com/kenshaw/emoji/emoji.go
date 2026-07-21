@@ -73,6 +73,41 @@ const (
 	Dark        SkinTone = 0x1f3ff
 )
 
+// ParseSkinTone parses the skin tone from the passed string.
+func ParseSkinTone(str string) (SkinTone, error) {
+	s := strings.TrimSpace(strings.ToLower(str))
+	if s == "" {
+		return Neutral, nil
+	}
+	switch cleanRE.ReplaceAllString(s, "") {
+	case "neutral", "none":
+		return Neutral, nil
+	case "light", "lite":
+		return Light, nil
+	case "mediumlight", "mediumlite":
+		return MediumLight, nil
+	case "medium":
+		return Medium, nil
+	case "mediumdark":
+		return MediumDark, nil
+	case "dark":
+		return Dark, nil
+	}
+	return Neutral, ErrInvalidSkinTone
+}
+
+// UnmarshalText satisfies the [encoding.TextUnmarshaler] interface.
+func (s *SkinTone) UnmarshalText(text []byte) error {
+	var err error
+	*s, err = ParseSkinTone(string(text))
+	return err
+}
+
+// MarshalText satisfies the [encoding.TextMarshaler] interface.
+func (s *SkinTone) MarshalText() ([]byte, error) {
+	return []byte(s.String()), nil
+}
+
 // String satisfies the [fmt.Stringer] interface.
 func (s SkinTone) String() string {
 	switch s {
@@ -93,10 +128,29 @@ func (s SkinTone) String() string {
 }
 
 var (
+	skinTonesRE   = regexp.MustCompile(`^(.+?)_((?:neutral|light|medium_light|medium|medium_dark|dark))_skin_tone$`)
+	skinTonesList = []string{"light", "medium_light", "medium", "medium_dark", "dark"}
+)
+
+// Error is a emoji package error.
+type Error string
+
+// Error satisfies the error interface.
+func (err Error) Error() string {
+	return string(err)
+}
+
+const (
+	// ErrInvalidSkinTone is the invalid skin tone error.
+	ErrInvalidSkinTone Error = "invalid skin tone"
+)
+
+var (
 	// codeMap provides a map of the emoji unicode code to its emoji data.
 	codeMap map[string]int
 	// aliasMap provides a map of the alias to its emoji data.
 	aliasMap map[string]int
+	aliasPairs []string
 	// codeReplacer is the string replacer for emoji codes.
 	codeReplacer *strings.Replacer
 	// aliasReplacer is the string replacer for emoji aliases.
@@ -120,7 +174,7 @@ func init() {
 	emoticonCodeMap = make(map[string]string)
 	emoticonAliasMap = make(map[string]string)
 	// process emoji codes and aliases
-	var codePairs, aliasPairs []string
+	var codePairs []string
 	for i, e := range data {
 		if e.Emoji == "" || len(e.Aliases) == 0 {
 			continue
@@ -132,6 +186,24 @@ func init() {
 				continue
 			}
 			aliasMap[a], aliasPairs = i, append(aliasPairs, ":"+a+":", e.Emoji)
+			// include skin tones
+			if e.SkinTones {
+				for _, t := range skinTonesList {
+					aWithTone := a + "_" + t + "_skin_tone"
+					tone, _ := ParseSkinTone(t)
+					aliasMap[aWithTone], aliasPairs = i, append(aliasPairs, ":"+aWithTone+":", e.Tone(tone))
+				}
+			}
+		}
+		// in addition to aliases, also include tags
+		for _, t := range e.Tags {
+			if t == "" {
+				continue
+			}
+			// but only if it doesn't already exist, e.g. "angry"
+			if _, ok := aliasMap[t]; !ok {
+				aliasMap[t], aliasPairs = i, append(aliasPairs, ":"+t+":", e.Emoji)
+			}
 		}
 	}
 	// process emoticons
@@ -172,11 +244,24 @@ func FromAlias(alias string) *Emoji {
 	if strings.HasPrefix(alias, ":") && strings.HasSuffix(alias, ":") {
 		alias = alias[1 : len(alias)-1]
 	}
+	tone := Neutral
+	// support skin tones
+	matches := skinTonesRE.FindStringSubmatch(alias)
+	if len(matches) == 3 {
+		alias = matches[1]
+		tone, _ = ParseSkinTone(matches[2])
+	}
 	i, ok := aliasMap[alias]
 	if !ok {
 		return nil
 	}
 	data := Gemoji()
+	if tone != Neutral {
+		modifiedEmoji := data[i]
+		tonedString := modifiedEmoji.Tone(tone)
+		modifiedEmoji.Emoji = tonedString
+		return &modifiedEmoji
+	}
 	return &data[i]
 }
 
@@ -268,4 +353,29 @@ var emoticonMap = map[string][]string{
 	"stuck_out_tongue_winking_eye": {";p", ";P", ";-p", ";-P", ";b", ";-b"},
 	"sunglasses":                   {"8)"},
 	"wink":                         {";)", ";-)"},
+}
+
+// cleanRE is matches non alpha characters.
+var cleanRE = regexp.MustCompile(`(?i)[^a-z]`)
+
+// AddAlias adds the specified emoji alias
+func AddAlias(alias string, dest string) error {
+	if strings.HasPrefix(alias, ":") && strings.HasSuffix(alias, ":") {
+		alias = alias[1 : len(alias)-1]
+	}
+	if strings.HasPrefix(dest, ":") && strings.HasSuffix(dest, ":") {
+		dest = dest[1 : len(dest)-1]
+	}
+
+	if _, ok := aliasMap[dest]; !ok {
+		return fmt.Errorf("destination emoji alias does not exist")
+	}
+
+	data := Gemoji()
+	idx := aliasMap[dest]
+	aliasMap[alias], aliasPairs = idx, append(aliasPairs, ":"+alias+":", data[idx].Emoji)
+
+	// update replacer with latest
+	aliasReplacer = strings.NewReplacer(aliasPairs...)
+	return nil
 }

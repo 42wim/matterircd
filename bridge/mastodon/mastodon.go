@@ -8,11 +8,11 @@ import (
 	"sync"
 
 	"github.com/42wim/matterircd/bridge"
+	"github.com/42wim/matterircd/config"
 	"github.com/davecgh/go-spew/spew"
 	strip "github.com/grokify/html-strip-tags-go"
 	"github.com/mattn/go-mastodon"
 	logger "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 )
 
 type Mastodon struct {
@@ -23,25 +23,28 @@ type Mastodon struct {
 	eventChanIn chan mastodon.Event
 	onConnect   func()
 	sync.RWMutex
-	v *viper.Viper
+
+	cfg *config.Config
 }
 
-func New(v *viper.Viper, cred bridge.Credentials, eventChan chan *bridge.Event, onConnect func()) (bridge.Bridger, error) {
+func New(cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Event, onConnect func()) (bridge.Bridger, error) {
 	m := &Mastodon{
 		credentials: cred,
 		eventChan:   eventChan,
 		onConnect:   onConnect,
-		v:           v,
+		cfg:         cfg,
 	}
 
 	var err error
 
+	rc := cfg.Current()
+
 	logger.SetFormatter(&logger.TextFormatter{FullTimestamp: true})
-	if v.GetBool("debug") {
+	if rc.Debug {
 		logger.SetLevel(logger.DebugLevel)
 	}
 
-	if v.GetBool("trace") {
+	if rc.Trace {
 		logger.SetLevel(logger.TraceLevel)
 	}
 
@@ -211,11 +214,13 @@ func (m *Mastodon) GetChannelID(name, teamID string) string {
 }
 
 func (m *Mastodon) loginToMastodon() (*mastodon.Client, error) {
+	rc := m.cfg.Current()
+
 	mc := mastodon.NewClient(&mastodon.Config{
-		Server:       m.v.GetString("mastodon.server"),
-		ClientID:     m.v.GetString("mastodon.clientid"),
-		ClientSecret: m.v.GetString("mastodon.clientsecret"),
-		AccessToken:  m.v.GetString("mastodon.accesstoken"),
+		Server:       rc.Mastodon.Server,
+		ClientID:     rc.Mastodon.ClientID,
+		ClientSecret: rc.Mastodon.ClientSecret,
+		AccessToken:  rc.Mastodon.AccessToken,
 	})
 
 	// events, err := mc.StreamingPublic(context.Background(), false)
@@ -370,4 +375,16 @@ func (m *Mastodon) Topic(channelID string) string {
 
 func (m *Mastodon) GetLastSentMsgs() []string {
 	return []string{}
+}
+
+func (m *Mastodon) Config() any {
+	return &m.cfg.Current().Mastodon
+}
+
+func (m *Mastodon) BridgeConfig() *config.BridgeConfig {
+	return &m.cfg.Current().Mastodon.Bridge
+}
+
+func (m *Mastodon) FormatterConfig() *config.FormatterConfig {
+	return &m.cfg.Current().Mastodon.Formatter
 }

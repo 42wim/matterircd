@@ -3,6 +3,7 @@ package matterclient
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -12,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -35,12 +37,25 @@ type Credentials struct {
 	MFAToken         string
 }
 
+type UsersCache struct {
+	mu sync.RWMutex
+	users    map[string]*model.User
+	channels map[string]map[string]struct{}
+	teams    map[string]map[string]struct{}
+	statuses map[string]string
+
+	channelData    map[string]*model.Channel
+	joinedChannels map[string]struct{}
+
+	lastUpdated atomic.Int64
+}
+
 type Team struct {
 	Team         *model.Team
 	ID           string
-	Channels     []*model.Channel
-	MoreChannels []*model.Channel
-	Users        map[string]*model.User
+
+	LastUserSync    time.Time
+	LastChannelSync time.Time
 }
 
 type Message struct {
@@ -59,10 +74,10 @@ type Client struct {
 	*Credentials
 
 	Team          *Team
-	OtherTeams    []*Team
+	OtherTeams    map[string]*Team
 	Client        *model.Client4
 	User          *model.User
-	Users         map[string]*model.User
+	Users         *UsersCache
 	MessageChan   chan *Message
 	WsClient      *model.WebSocketClient
 	AntiIdle      bool
@@ -79,7 +94,9 @@ type Client struct {
 	lruCache    *lru.Cache
 	aliveChan   chan bool
 	loginCancel context.CancelFunc
-	lastPong    time.Time
+
+	lastWsActivity atomic.Int64
+	connectedAt    atomic.Int64
 }
 
 var Matterircd bool
@@ -103,13 +120,21 @@ func New(login string, pass string, team string, server string, mfatoken string)
 	cache, _ := lru.New(500)
 
 	return &Client{
-		Credentials: cred,
-		MessageChan: make(chan *Message, 100),
-		Users:       make(map[string]*model.User),
-		rootLogger:  rootLogger,
-		lruCache:    cache,
-		logger:      rootLogger.WithFields(logrus.Fields{"prefix": "matterclient"}),
-		aliveChan:   make(chan bool),
+		Credentials:  cred,
+		MessageChan:  make(chan *Message, 100),
+		Users:        &UsersCache{
+			users:    make(map[string]*model.User),
+			channels: make(map[string]map[string]struct{}),
+			teams:    make(map[string]map[string]struct{}),
+			statuses: make(map[string]string),
+
+			channelData:    make(map[string]*model.Channel),
+			joinedChannels: make(map[string]struct{}),
+		},
+		rootLogger:   rootLogger,
+		lruCache:     cache,
+		logger:       rootLogger.WithFields(logrus.Fields{"prefix": "matterclient"}),
+		aliveChan:    make(chan bool),
 	}
 }
 
@@ -119,6 +144,23 @@ func (m *Client) Login() error {
 	firstConnection := true
 	if m.WsConnected {
 		firstConnection = false
+	}
+
+	if !firstConnection {
+		lastUpdatedUnix := m.Users.lastUpdated.Load()
+		timeOffline := time.Since(time.Unix(lastUpdatedUnix, 0))
+
+		if timeOffline > 15*time.Minute {
+			m.logger.Info("reconnect: flushing channel user cache to ensure state consistency")
+
+			m.Users.mu.Lock()
+			m.Users.channels = make(map[string]map[string]struct{})
+			m.Users.mu.Unlock()
+
+			m.Users.lastUpdated.Store(time.Now().Unix())
+		} else {
+			m.logger.Debugf("reconnect: preserving channel user cache (offline for only %v)", timeOffline.Round(time.Second))
+		}
 	}
 
 	m.WsConnected = false
@@ -147,8 +189,8 @@ func (m *Client) Login() error {
 
 	if m.Team == nil {
 		validTeamNames := make([]string, len(m.OtherTeams))
-		for i, t := range m.OtherTeams {
-			validTeamNames[i] = t.Team.Name
+		for _, t := range m.OtherTeams {
+			validTeamNames = append(validTeamNames, t.Team.Name)
 		}
 
 		return fmt.Errorf("Team '%s' not found in %v", m.Credentials.Team, validTeamNames)
@@ -167,6 +209,11 @@ func (m *Client) Login() error {
 	m.logger.Debug("starting wsreceiver")
 
 	go m.WsReceiver(ctx)
+
+	if m.WsClient != nil {
+		m.logger.Debug("requesting initial user statuses for cache")
+		m.WsClient.GetStatuses()
+	}
 
 	if m.OnWsConnect != nil {
 		m.logger.Debug("executing OnWsConnect()")
@@ -319,59 +366,100 @@ func (m *Client) serverAlive(b *backoff.Backoff) error {
 // initialize user and teams
 // nolint:funlen
 func (m *Client) initUser() error {
+	m.Lock()
+	if m.OtherTeams == nil {
+		m.OtherTeams = make(map[string]*Team)
+	}
+	userID := m.User.Id
+	m.Unlock()
 
-	// we only load all team data on initial login.
-	// all other updates are for channels from our (primary) team only.
-	teams, _, err := m.Client.GetTeamsForUser(m.User.Id, "")
-	if err != nil {
+	var teams []*model.Team
+	retryCount := 0
+	for {
+		var resp *model.Response
+		var err error
+		teams, resp, err = m.Client.GetTeamsForUser(userID, "")
+		if err == nil {
+			break
+		}
+		shouldRetry, hErr := m.HandleRetry("GetTeamsForUser", retryCount, 10, resp)
+		if hErr == nil && shouldRetry {
+			retryCount++
+			continue
+		}
 		return err
 	}
 
 	const batchSize = 200
 
 	for _, team := range teams {
+		m.Lock()
+		existingTeam, exists := m.OtherTeams[team.Id]
+		m.Unlock()
+
+		if exists && time.Since(existingTeam.LastUserSync) < 15*time.Minute {
+			m.logger.Debugf("skipping user fetch for team %s: cache is only %v old", team.Name, time.Since(existingTeam.LastUserSync).Round(time.Second))
+			m.Lock()
+			if team.Name == m.Credentials.Team {
+				m.Team = existingTeam
+			}
+			m.Unlock()
+			continue
+		}
+
+		m.logger.Debugf("fetching users for team %s (cache expired or missing)", team.Name)
+
 		idx := 0
-		usermap := make(map[string]*model.User)
+		var teamUsers []*model.User
+		pageRetryCount := 0
+
 		for {
-			mmusers, _, err := m.Client.GetUsersInTeam(team.Id, idx, batchSize, "")
+			mmusers, resp, err := m.Client.GetUsersInTeam(team.Id, idx, batchSize, "")
 			if err != nil {
+				shouldRetry, hErr := m.HandleRetry("GetUsersInTeam", pageRetryCount, 10, resp)
+				if hErr == nil && shouldRetry {
+					pageRetryCount++
+					continue
+				}
+				m.logger.Errorf("failed to fetch users for team %s: %v", team.Name, err)
 				return err
 			}
+			pageRetryCount = 0
 
-			for _, user := range mmusers {
-				usermap[user.Id] = user
-			}
+			teamUsers = append(teamUsers, mmusers...)
 
 			if len(mmusers) < batchSize {
 				break
 			}
 
 			idx++
-
 			time.Sleep(time.Millisecond * 200)
 		}
-		m.logger.Debugf("found %d users in team %s", len(usermap), team.Name)
+		m.logger.Debugf("found %d users in team %s", len(teamUsers), team.Name)
+
+		m.Users.mu.Lock()
+		if m.Users.teams == nil {
+			m.Users.teams = make(map[string]map[string]struct{})
+		}
+		m.Users.teams[team.Id] = make(map[string]struct{})
+		for _, u := range teamUsers {
+			m.Users.users[u.Id] = u
+			m.Users.teams[team.Id][u.Id] = struct{}{}
+		}
+		m.Users.lastUpdated.Store(time.Now().Unix())
+		m.Users.mu.Unlock()
 
 		m.Lock()
-
-		// add all users
-		for k, v := range usermap {
-			m.Users[k] = v
+		m.OtherTeams[team.Id] = &Team{
+			Team:         team,
+			ID:           team.Id,
+			LastUserSync: time.Now(),
 		}
-
-		t := &Team{
-			Team:  team,
-			Users: usermap,
-			ID:    team.Id,
-		}
-
-		m.OtherTeams = append(m.OtherTeams, t)
 
 		if team.Name == m.Credentials.Team {
-			m.Team = t
+			m.Team = m.OtherTeams[team.Id]
 			m.logger.Debugf("initUser(): found our team %s (id: %s)", team.Name, team.Id)
 		}
-
 		m.Unlock()
 	}
 
@@ -383,9 +471,41 @@ func (m *Client) initUserChannels() error {
 		return err
 	}
 
+	m.RLock()
+	teams := make([]*Team, 0, len(m.OtherTeams))
 	for _, t := range m.OtherTeams {
-		m.logger.Debugf("found %d channels for user in team %s", len(t.Channels), t.Team.Name)
-		m.logger.Debugf("found %d public channels in team %s", len(t.MoreChannels), t.Team.Name)
+		teams = append(teams, t)
+	}
+	m.RUnlock()
+
+	m.Users.mu.RLock()
+	defer m.Users.mu.RUnlock()
+
+	var dmCount int
+	for id, ch := range m.Users.channelData {
+		if ch.TeamId == "" {
+			if _, joined := m.Users.joinedChannels[id]; joined {
+				dmCount++
+			}
+		}
+	}
+	m.logger.Debugf("found %d direct/group message channels", dmCount)
+
+	for _, t := range teams {
+		var joinedCount, publicCount int
+
+		for id, ch := range m.Users.channelData {
+			if ch.TeamId == t.ID {
+				if _, joined := m.Users.joinedChannels[id]; joined {
+					joinedCount++
+				} else {
+					publicCount++
+				}
+			}
+		}
+
+		m.logger.Debugf("found %d channels for user in team %s", joinedCount, t.Team.Name)
+		m.logger.Debugf("found %d public channels in team team %s", publicCount, t.Team.Name)
 	}
 
 	return nil
@@ -521,7 +641,8 @@ func (m *Client) wsConnect() {
 			TLSClientConfig: &tls.Config{
 				InsecureSkipVerify: m.SkipTLSVerify, //nolint:gosec
 			},
-			Proxy: http.ProxyFromEnvironment,
+			Proxy:             http.ProxyFromEnvironment,
+			EnableCompression: false,
 		}
 
 		var err error
@@ -542,7 +663,8 @@ func (m *Client) wsConnect() {
 
 	m.WsClient.Listen()
 
-	m.lastPong = time.Now()
+	m.lastWsActivity.Store(time.Now().Unix())
+	m.connectedAt.Store(time.Now().Unix())
 
 	m.logger.Debug("WsClient: connected")
 
@@ -551,31 +673,43 @@ func (m *Client) wsConnect() {
 }
 
 func (m *Client) doCheckAlive() error {
-	if _, _, err := m.Client.GetPing(); err != nil {
-		return err
+	if m.WsClient != nil && m.WsClient.ListenError != nil {
+		return fmt.Errorf("websocket listen error: %w", m.WsClient.ListenError)
 	}
 
-	if m.reconnectBusy {
+	connectedUnix := m.connectedAt.Load()
+	uptime := time.Since(time.Unix(connectedUnix, 0)).Round(time.Second)
+
+	lastActiveUnix := m.lastWsActivity.Load()
+	timeSinceActivity := time.Since(time.Unix(lastActiveUnix, 0))
+
+	if timeSinceActivity < 20*time.Second {
+		m.logger.Tracef("websocket is active (last event %v ago; up %s), skipping ping", timeSinceActivity.Round(time.Second), uptime)
 		return nil
 	}
 
-	if m.WsClient.ListenError == nil {
-		m.WsClient.SendMessage("ping", nil)
-	} else {
-		m.logger.Errorf("got a listen error: %#v", m.WsClient.ListenError)
-
-		return m.WsClient.ListenError
+	if timeSinceActivity < 55*time.Second {
+		// Send a ping down the websocket to try to keep it active/alive
+		if m.WsClient != nil {
+			m.logger.Tracef("websocket has been quiet (last event %v ago; up %s), sending websocket ping", timeSinceActivity.Round(time.Second), uptime)
+			m.WsClient.SendMessage("ping", nil)
+			return nil
+		}
 	}
 
-	if time.Since(m.lastPong) > 90*time.Second {
-		return errors.New("no pong received in 90 seconds")
+	m.logger.Tracef("websocket has been quiet (last event %v ago; up %s), falling back to HTTP GetPing", timeSinceActivity.Round(time.Second), uptime)
+	if _, _, err := m.Client.GetPing(); err != nil {
+		m.logger.Warnf("fallback HTTP ping failed (up %s): %w", uptime, err)
+		return fmt.Errorf("fallback HTTP ping failed (up %s): %w", uptime, err)
 	}
+
+	m.lastWsActivity.Store(time.Now().Unix())
 
 	return nil
 }
 
 func (m *Client) checkAlive(ctx context.Context) {
-	ticker := time.NewTicker(time.Second * 45)
+	ticker := time.NewTicker(time.Second * 30)
 
 	for {
 		select {
@@ -584,11 +718,25 @@ func (m *Client) checkAlive(ctx context.Context) {
 
 			return
 		case <-ticker.C:
+			var err error
+
 			// check if session still is valid
-			err := m.doCheckAlive()
+			for i := 0; i < 3; i++ {
+				err = m.doCheckAlive()
+				if err == nil {
+					break
+				}
+
+				if i < 2 {
+					m.logger.Warnf("alive check failed, retrying %d/3: %s", i+1, err)
+					time.Sleep(time.Second * 2)
+				}
+			}
+
 			if err != nil {
 				m.logger.Errorf("connection not alive: %s", err)
 				m.aliveChan <- false
+				continue
 			}
 
 			m.aliveChan <- true
@@ -638,6 +786,10 @@ func (m *Client) WsReceiver(ctx context.Context) {
 
 			m.logger.Debugf("WsReceiver event: %#v", event)
 
+			m.lastWsActivity.Store(time.Now().Unix())
+
+			go m.maintainUsersCache(event)
+
 			msg := &Message{
 				Raw:  event,
 				Team: m.Credentials.Team,
@@ -647,7 +799,13 @@ func (m *Client) WsReceiver(ctx context.Context) {
 				m.parseMessage(msg)
 			}
 
-			m.MessageChan <- msg
+			select {
+			case m.MessageChan <- msg:
+				// Message sent successfully
+			default:
+				// Message channel buffer full, drop/discard
+				m.logger.Errorf("CRITICAL: MessageChan is blocked! Downstream processor is hung. Dropping event: %s", event.EventType())
+			}
 		case response := <-m.WsClient.ResponseChannel:
 			if response == nil || !response.IsValid() {
 				continue
@@ -655,11 +813,7 @@ func (m *Client) WsReceiver(ctx context.Context) {
 
 			m.logger.Debugf("WsReceiver response: %#v", response)
 
-			if text, ok := response.Data["text"].(string); ok {
-				if text == "pong" {
-					m.lastPong = time.Now()
-				}
-			}
+			m.lastWsActivity.Store(time.Now().Unix())
 
 			m.parseResponse(response)
 		case <-m.WsClient.PingTimeoutChannel:
@@ -744,16 +898,72 @@ func (m *Client) HandleRatelimit(name string, resp *model.Response) error {
 		return fmt.Errorf("StatusCode error: %d", resp.StatusCode)
 	}
 
-	waitTime, err := strconv.Atoi(resp.Header.Get("X-RateLimit-Reset"))
+	resetHeaderStr := resp.Header.Get("X-RateLimit-Reset")
+	if resetHeaderStr == "" {
+		time.Sleep(3 * time.Second)
+		return nil
+	}
+
+	headerValue, err := strconv.ParseInt(resetHeaderStr, 10, 64)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to parse rate limit header: %v", err)
+	}
+
+	var waitTime int64
+
+	// Handle epoch vs. delta
+	if headerValue > 1000000 {
+		now := time.Now().Unix()
+		waitTime = headerValue - now
+	} else {
+		waitTime = headerValue
+	}
+
+	if waitTime < 1 {
+		waitTime = 1
+	}
+
+	if waitTime > 300 {
+		m.logger.Warnf("Rate limit reset time (%d seconds) looks suspiciously long; capping sleep to 5 seconds", waitTime)
+		waitTime = 5
 	}
 
 	m.logger.Warnf("Ratelimited on %s for %d", name, waitTime)
-
 	time.Sleep(time.Duration(waitTime) * time.Second)
 
 	return nil
+}
+
+func (m *Client) HandleRetry(name string, current int, maxLimit int, resp *model.Response) (bool, error) {
+	if current >= maxLimit {
+		return false, nil
+	}
+
+	if resp == nil {
+		m.logger.Warnf("Network error on %s (resp is nil), backing off: %ds (attempt %d/%d)",
+			name, current+1, current+1, maxLimit)
+		time.Sleep(time.Duration(current+1) * time.Second)
+		return true, nil
+	}
+
+	switch {
+	case resp.StatusCode == 429:
+		_ = m.HandleRatelimit(name, resp)
+		return true, nil
+
+	case resp.StatusCode >= 500:
+		m.logger.Warnf("Transient error %d on %s, backing off: %ds (attempt %d/%d)",
+			resp.StatusCode, name, current+1, current+1, maxLimit)
+		time.Sleep(time.Duration(current+1) * time.Second)
+		return true, nil
+
+	case resp.StatusCode >= 300 && resp.StatusCode < 500:
+		return false, nil
+
+	default:
+		time.Sleep(time.Duration(current+1) * time.Second)
+		return true, nil
+	}
 }
 
 func (m *Client) antiIdle(ctx context.Context, channelID string, interval int) {
@@ -774,6 +984,143 @@ func (m *Client) antiIdle(ctx context.Context, channelID string, interval int) {
 			m.logger.Tracef("antiIdle %s", channelID)
 
 			m.UpdateLastViewed(channelID)
+		}
+	}
+}
+
+func (m *Client) UpdateTeamUsersCache(teamID string, user *model.User) {
+	m.Users.mu.Lock()
+	defer m.Users.mu.Unlock()
+
+	m.Users.users[user.Id] = user
+
+	if teamID != "" {
+		if m.Users.teams == nil {
+			m.Users.teams = make(map[string]map[string]struct{})
+		}
+		if m.Users.teams[teamID] == nil {
+			m.Users.teams[teamID] = make(map[string]struct{})
+		}
+
+		m.Users.teams[teamID][user.Id] = struct{}{}
+	}
+
+	m.Users.lastUpdated.Store(time.Now().Unix())
+}
+
+func (m *Client) syncSingleUser(event *model.WebSocketEvent) {
+	userID, ok := event.GetData()["user_id"].(string)
+	if !ok {
+		return
+	}
+
+	user, _, err := m.Client.GetUser(userID, "")
+	if err != nil {
+		m.logger.Errorf("syncSingleUser failed to get user %s: %v", userID, err)
+		return
+	}
+
+	m.logger.Debugf("dynamically caching updated/new user: %s", user.Username)
+
+	teamID, _ := event.GetData()["team_id"].(string)
+
+	m.UpdateTeamUsersCache(teamID, user)
+}
+
+func (m *Client) maintainUsersCache(event *model.WebSocketEvent) {
+	switch event.EventType() {
+	case model.WebsocketEventNewUser:
+		if userID, ok := event.GetData()["user_id"].(string); ok {
+			if user := m.GetUser(userID); user != nil {
+				if teamID, hasTeam := event.GetData()["team_id"].(string); hasTeam && teamID != "" {
+					m.UpdateTeamUsersCache(teamID, user)
+				}
+			}
+		}
+
+	case model.WebsocketEventUserUpdated:
+		if userStr, ok := event.GetData()["user"].(string); ok {
+			user := &model.User{}
+			if err := json.Unmarshal([]byte(userStr), user); err == nil {
+				if teamID, hasTeam := event.GetData()["team_id"].(string); hasTeam && teamID != "" {
+					m.UpdateTeamUsersCache(teamID, user)
+				} else {
+					m.UpdateUser(user)
+				}
+			}
+		}
+
+	case model.WebsocketEventUserAdded:
+		channelID := event.GetBroadcast().ChannelId
+		if userID, ok := event.GetData()["user_id"].(string); ok && channelID != "" {
+			if user := m.GetUser(userID); user != nil {
+				m.UpdateChannelUsersCache(channelID, user)
+				m.Users.lastUpdated.Store(time.Now().Unix())
+			}
+		}
+
+	case model.WebsocketEventUserRemoved:
+		channelID := event.GetBroadcast().ChannelId
+		if userID, ok := event.GetData()["user_id"].(string); ok && channelID != "" {
+			m.UpdateChannelUsersCacheRemove(channelID, userID)
+			m.Users.lastUpdated.Store(time.Now().Unix())
+		}
+
+	case model.WebsocketEventPosted:
+		channelID := event.GetBroadcast().ChannelId
+		if postStr, ok := event.GetData()["post"].(string); ok && channelID != "" {
+			post := &model.Post{}
+			if err := json.Unmarshal([]byte(postStr), post); err == nil {
+
+				m.Users.mu.RLock()
+				_, channelIsCached := m.Users.channels[channelID]
+				_, userIsCached := m.Users.channels[channelID][post.UserId]
+				m.Users.mu.RUnlock()
+
+				// If we are actively caching this channel, but the user isn't in our list, our cache is stale!
+				if channelIsCached && !userIsCached {
+					m.logger.Warnf("Unrecognized user %s spoke in %s. Invalidating channel cache.", post.UserId, channelID)
+
+					m.Users.mu.Lock()
+					delete(m.Users.channels, channelID)
+					m.Users.mu.Unlock()
+					m.Users.lastUpdated.Store(time.Now().Unix())
+				}
+			}
+		}
+
+	case model.WebsocketEventChannelCreated, model.WebsocketEventDirectAdded:
+		if channelStr, ok := event.GetData()["channel"].(string); ok {
+			channel := &model.Channel{}
+			if err := json.Unmarshal([]byte(channelStr), channel); err == nil {
+				m.Users.mu.Lock()
+				m.Users.channelData[channel.Id] = channel
+				if channel.Type == model.ChannelTypeDirect || channel.Type == model.ChannelTypeGroup {
+					m.Users.joinedChannels[channel.Id] = struct{}{}
+				}
+				m.Users.mu.Unlock()
+				m.Users.lastUpdated.Store(time.Now().Unix())
+			}
+		} else if channelID, ok := event.GetData()["channel_id"].(string); ok && channelID != "" {
+			m.GetChannel(channelID)
+		}
+
+	case model.WebsocketEventChannelUpdated:
+		if channelStr, ok := event.GetData()["channel"].(string); ok {
+			channel := &model.Channel{}
+			if err := json.Unmarshal([]byte(channelStr), channel); err == nil {
+				m.Users.mu.Lock()
+				m.Users.channelData[channel.Id] = channel
+				m.Users.mu.Unlock()
+				m.Users.lastUpdated.Store(time.Now().Unix())
+			}
+		}
+
+	case model.WebsocketEventChannelDeleted:
+		if channelID, ok := event.GetData()["channel_id"].(string); ok && channelID != "" {
+			// Mattermost soft-deletes channels. We keep the channel and users in our
+			// local cache to gracefully handle history, references, or restorations.
+			m.Users.lastUpdated.Store(time.Now().Unix())
 		}
 	}
 }

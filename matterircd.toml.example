@@ -142,6 +142,7 @@ HideReactions = false
 #DisableMarkdown = true
 #DisableMarkdownBlockQuote = true
 #MarkdownBlockQuoteChar = "|"
+MarkdownInlineCode = ""
 
 #Only join direct/group messages when someone talks. This stops from cluttering your 
 #irc client with lots of windows.

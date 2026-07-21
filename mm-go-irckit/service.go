@@ -22,7 +22,6 @@ type CommandHandler interface {
 	handle(u *User, c *Command, args []string, service string)
 }
 
-// nolint:structcheck
 type Command struct {
 	handler   func(u *User, toUser *User, args []string, service string)
 	minParams int
@@ -139,17 +138,17 @@ func login(u *User, toUser *User, args []string, service string) {
 	case cred.Server != "":
 		cred.Team = teamOrServer
 	// Missing both server and team, let's use DefaultServer and DefaultTeam.
-	case teamOrServer == "" && u.v.GetString("mattermost.DefaultServer") != "" && u.v.GetString("mattermost.DefaultTeam") != "":
-		cred.Server = u.v.GetString("mattermost.DefaultServer")
-		cred.Team = u.v.GetString("mattermost.DefaultTeam")
+	case teamOrServer == "" && u.cfg.Mattermost().DefaultServer != "" && u.cfg.Mattermost().DefaultTeam != "":
+		cred.Server = u.cfg.Mattermost().DefaultServer
+		cred.Team = u.cfg.Mattermost().DefaultTeam
 	// Missing server, let's use DefaultServer.
-	case u.v.GetString("mattermost.DefaultServer") != "":
-		cred.Server = u.v.GetString("mattermost.DefaultServer")
+	case u.cfg.Mattermost().DefaultServer != "":
+		cred.Server = u.cfg.Mattermost().DefaultServer
 		cred.Team = teamOrServer
 	// Missing team, let's use DefaultTeam.
-	case u.v.GetString("mattermost.DefaultTeam") != "":
+	case u.cfg.Mattermost().DefaultTeam != "":
 		cred.Server = teamOrServer
-		cred.Team = u.v.GetString("mattermost.DefaultTeam")
+		cred.Team = u.cfg.Mattermost().DefaultTeam
 	default:
 		cred.Server = teamOrServer
 	}
@@ -360,7 +359,7 @@ func replay(u *User, toUser *User, args []string, service string) {
 			}
 
 			replayMsg := fmt.Sprintf("[%s] %s", ts.Format("15:04"), post)
-			if (u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext")) && nick != systemUser {
+			if (u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext) && nick != systemUser {
 				threadMsgID := u.prefixContext(brchannel.ID, p.Id, p.RootId, "replay")
 				replayMsg = u.formatContextMessage(ts.Format("15:04"), threadMsgID, post)
 			}
@@ -373,7 +372,7 @@ func replay(u *User, toUser *User, args []string, service string) {
 
 		for _, fname := range u.br.GetFileLinks(p.FileIds) {
 			fileMsg := "\x1ddownload file - " + fname + "\x1d"
-			if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
+			if u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext {
 				threadMsgID := u.prefixContext(brchannel.ID, p.Id, p.RootId, "replay_file")
 				fileMsg = u.formatContextMessage(ts.Format("15:04"), threadMsgID, fileMsg)
 			}
@@ -398,7 +397,7 @@ func details(u *User, toUser *User, args []string, service string) {
 	postID := args[0]
 
 	proto := "https"
-	if u.v.GetBool(u.br.Protocol() + ".insecure") {
+	if u.cfg.Mattermost().Insecure {
 		proto = "http"
 	}
 	postlistURL := proto + "://" + u.Credentials.Server + "/" + u.Credentials.Team + "/pl/"
@@ -525,16 +524,16 @@ func formatSearchMsg(u *User, channelID string, channel string, user *User, nick
 	ts := time.Unix(0, p.CreateAt*int64(time.Millisecond))
 
 	switch {
-	case (u.v.GetBool(u.br.Protocol()+".collapsescrollback") && strings.HasPrefix(channel, "#")):
+	case (u.cfg.Mattermost().CollapseScrollback && strings.HasPrefix(channel, "#")):
 		threadMsgID := u.prefixContext(channelID, p.Id, p.RootId, "scrollback")
 		msg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, msgText)
 		nick += "/" + channel
 		u.Srv.Channel("&messages").SpoofMessage(nick, msg)
-	case u.v.GetBool(u.br.Protocol() + ".collapsescrollback"):
+	case u.cfg.Mattermost().CollapseScrollback:
 		threadMsgID := u.prefixContext(channelID, p.Id, p.RootId, "scrollback")
 		msg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, msgText)
 		u.Srv.Channel("&messages").SpoofMessage(nick, msg)
-	case (u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext")) && strings.HasPrefix(channel, "#"):
+	case (u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext) && strings.HasPrefix(channel, "#"):
 		threadMsgID := u.prefixContext(channelID, p.Id, p.RootId, "scrollback")
 		nick += "/" + channel
 		msg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, "<"+nick+"> "+msgText)
@@ -543,7 +542,7 @@ func formatSearchMsg(u *User, channelID string, channel string, user *User, nick
 		nick += "/" + channel
 		msg := "[" + ts.Format("2006-01-02 15:04") + "] <" + nick + "> " + msgText
 		u.MsgUser(user, msg)
-	case u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext"):
+	case u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext:
 		threadMsgID := u.prefixContext(channelID, p.Id, p.RootId, "scrollback")
 		msg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, "<"+nick+"> "+msgText)
 		u.MsgUser(user, msg)
@@ -629,7 +628,7 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 	scrollbackUser, exists := u.Srv.HasUser(search)
 
 	proto := "https"
-	if u.v.GetBool(u.br.Protocol() + ".insecure") {
+	if u.cfg.Mattermost().Insecure {
 		proto = "http"
 	}
 	postlistURL := proto + "://" + u.Credentials.Server + "/" + u.Credentials.Team + "/pl/"
@@ -738,7 +737,7 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 		}
 	}
 
-	if !u.v.GetBool(u.br.Protocol() + ".collapsescrollback") {
+	if !u.cfg.Mattermost().CollapseScrollback {
 		u.MsgUser(toUser, fmt.Sprintf("scrollback results shown in %s", search))
 	}
 }
@@ -747,24 +746,24 @@ func formatScrollbackMsg(u *User, channelID string, channel string, user *User, 
 	ts := time.Unix(0, p.CreateAt*int64(time.Millisecond))
 
 	switch {
-	case (u.v.GetBool(u.br.Protocol()+".collapsescrollback") && strings.HasPrefix(channel, "#")):
+	case (u.cfg.Mattermost().CollapseScrollback && strings.HasPrefix(channel, "#")):
 		threadMsgID := u.prefixContext(channelID, p.Id, p.RootId, "scrollback")
 		msg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, msgText)
 		nick += "/" + channel
 		u.Srv.Channel("&messages").SpoofMessage(nick, msg)
-	case u.v.GetBool(u.br.Protocol() + ".collapsescrollback"):
+	case u.cfg.Mattermost().CollapseScrollback:
 		threadMsgID := u.prefixContext(channelID, p.Id, p.RootId, "scrollback")
 		msg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, msgText)
 		nick += "/" + channel
 		u.Srv.Channel("&messages").SpoofMessage(nick, msg)
-	case (u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext")) && strings.HasPrefix(channel, "#") && nick != systemUser:
+	case (u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext) && strings.HasPrefix(channel, "#") && nick != systemUser:
 		threadMsgID := u.prefixContext(channelID, p.Id, p.RootId, "scrollback")
 		msg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, msgText)
 		u.Srv.Channel(channelID).SpoofMessage(nick, msg)
 	case strings.HasPrefix(channel, "#"):
 		msg := "[" + ts.Format("2006-01-02 15:04") + "] " + msgText
 		u.Srv.Channel(channelID).SpoofMessage(nick, msg)
-	case u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext"):
+	case u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext:
 		threadMsgID := u.prefixContext(channelID, p.Id, p.RootId, "scrollback")
 		msg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, msgText)
 		u.MsgSpoofUser(user, nick, msg)
