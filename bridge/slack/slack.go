@@ -8,11 +8,11 @@ import (
 	"time"
 
 	"github.com/42wim/matterircd/bridge"
+	"github.com/42wim/matterircd/config"
 	"github.com/davecgh/go-spew/spew"
 	prefixed "github.com/matterbridge/logrus-prefixed-formatter"
 	"github.com/sirupsen/logrus"
 	"github.com/slack-go/slack"
-	"github.com/spf13/viper"
 )
 
 type Slack struct {
@@ -27,20 +27,23 @@ type Slack struct {
 	onConnect    func()
 	msgLast      map[string]string
 	sync.RWMutex
-	v *viper.Viper
+
+	cfg *config.Config
 }
 
 var logger *logrus.Entry
 
-func New(v *viper.Viper, cred bridge.Credentials, eventChan chan *bridge.Event, onConnect func()) (bridge.Bridger, error) {
+func New(cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Event, onConnect func()) (bridge.Bridger, error) {
 	s := &Slack{
 		credentials: cred,
 		eventChan:   eventChan,
 		onConnect:   onConnect,
-		v:           v,
+		cfg:         cfg,
 	}
 
 	var err error
+
+	rc := cfg.Current()
 
 	ourlog := logrus.New()
 	ourlog.SetFormatter(&prefixed.TextFormatter{
@@ -49,11 +52,11 @@ func New(v *viper.Viper, cred bridge.Credentials, eventChan chan *bridge.Event, 
 		FullTimestamp: true,
 	})
 	logger = ourlog.WithFields(logrus.Fields{"prefix": "bridge/slack"})
-	if v.GetBool("debug") {
+	if rc.Debug {
 		ourlog.SetLevel(logrus.DebugLevel)
 	}
 
-	if v.GetBool("trace") {
+	if rc.Trace {
 		ourlog.SetLevel(logrus.TraceLevel)
 	}
 
@@ -449,11 +452,12 @@ func (s *Slack) GetChannelID(name, teamID string) string {
 }
 
 func (s *Slack) allowedLogin() error {
+	rc := s.cfg.Current()
 	// we only know which server we are connecting to when we actually are connected.
 	// disconnect if we're not allowed
-	if len(s.v.GetStringSlice("slack.restrict")) > 0 {
+	if len(rc.Slack.Bridge.Restrict) > 0 {
 		ok := false
-		for _, domain := range s.v.GetStringSlice("slack.restrict") {
+		for _, domain := range rc.Slack.Bridge.Restrict {
 			if domain == s.sinfo.Team.Domain {
 				ok = true
 				break
@@ -466,9 +470,9 @@ func (s *Slack) allowedLogin() error {
 	}
 	// we only know which user we are when we actually are connected.
 	// disconnect if we're not allowed
-	if len(s.v.GetStringSlice("slack.DenyUsers")) > 0 {
+	if len(rc.Slack.DenyUsers) > 0 {
 		ok := false
-		for _, user := range s.v.GetStringSlice("slack.DenyUsers") {
+		for _, user := range rc.Slack.DenyUsers {
 			if user == s.sinfo.User.Name {
 				ok = true
 				break
@@ -891,8 +895,10 @@ func (s *Slack) createUser(slackuser *slack.User) *bridge.UserInfo {
 		return &bridge.UserInfo{}
 	}
 
+	rc := s.cfg.Current()
+
 	nick := slackuser.Name
-	if (s.v.GetBool("slack.PreferNickname") || s.v.GetBool("slack.UseDisplayName")) && isValidNick(slackuser.Profile.DisplayName) {
+	if (rc.Slack.PreferNickname || rc.Slack.UseDisplayName) && isValidNick(slackuser.Profile.DisplayName) {
 		nick = slackuser.Profile.DisplayName
 	}
 
@@ -996,4 +1002,16 @@ func (s *Slack) RemoveReaction(msgID, emoji string) error {
 
 func (s *Slack) GetLastSentMsgs() []string {
 	return []string{}
+}
+
+func (s *Slack) Config() any {
+	return &s.cfg.Current().Slack
+}
+
+func (s *Slack) BridgeConfig() *config.BridgeConfig {
+	return &s.cfg.Current().Slack.Bridge
+}
+
+func (s *Slack) FormatterConfig() *config.FormatterConfig {
+	return &s.cfg.Current().Slack.Formatter
 }
