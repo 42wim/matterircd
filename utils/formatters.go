@@ -311,12 +311,9 @@ func WrapMessage(msg string, maxLen int) string {
 				word := msg[start:i]
 
 				// If adding this word exceeds the max. length, wrap to the next line
-				if lineLen > 0 && lineLen+1+len(word) > maxLen {
+				if lineLen > 0 && lineLen+len(word) > maxLen {
 					b.WriteByte('\n')
 					lineLen = 0
-				} else if lineLen > 0 {
-					b.WriteByte(' ')
-					lineLen++
 				}
 
 				// Handle massively long words (like URLs) similar to maybeShorten's truncation
@@ -340,10 +337,21 @@ func WrapMessage(msg string, maxLen int) string {
 				lineLen += len(word)
 			}
 
-			// Preserve intentional newlines from the original message
-			if i < len(msg) && msg[i] == '\n' {
-				b.WriteByte('\n')
-				lineLen = 0
+			// Explicitly preserve the delimiter (spaces and newlines)
+			if i < len(msg) {
+				if msg[i] == ' ' {
+					// If the space pushes us over the limit, wrap it
+					if lineLen > 0 && lineLen+1 > maxLen {
+						b.WriteByte('\n')
+						lineLen = 0
+					} else {
+						b.WriteByte(' ')
+						lineLen++
+					}
+				} else if msg[i] == '\n' {
+					b.WriteByte('\n')
+					lineLen = 0
+				}
 			}
 
 			// Move the start index past the current boundary character
