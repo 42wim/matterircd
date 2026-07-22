@@ -158,7 +158,9 @@ func (m *Mattermost) handleWsMessage(quitChan chan struct{}) {
 			return
 		case message := <-m.mc.MessageChan:
 			logger.Debugf("MMUser WsReceiver: %#v", message.Raw)
-			logger.Tracef("handleWsMessage %s", spew.Sdump(message))
+			if logger.Level.String() == "trace" {
+				logger.Tracef("handleWsMessage %s", spew.Sdump(message))
+			}
 
 			switch message.Raw.EventType() {
 			case model.WebsocketEventPosted:

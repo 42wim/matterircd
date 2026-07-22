@@ -77,7 +77,9 @@ func NewUserBridge(c net.Conn, srv Server, cfg *config.Config, db *bolt.DB) *Use
 
 func (u *User) handleEventChan() {
 	for event := range u.eventChan {
-		logger.Tracef("eventchan %s", spew.Sdump(event))
+		if logger.Level.String() == "trace" {
+			logger.Tracef("eventchan %s", spew.Sdump(event))
+		}
 		switch e := event.Data.(type) {
 		case *bridge.ChannelMessageEvent:
 			u.handleChannelMessageEvent(e)
