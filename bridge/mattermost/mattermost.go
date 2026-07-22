@@ -15,7 +15,6 @@ import (
 	"github.com/42wim/matterircd/utils"
 	"github.com/davecgh/go-spew/spew"
 	lru "github.com/hashicorp/golang-lru"
-	"github.com/kenshaw/emoji"
 	prefixed "github.com/matterbridge/logrus-prefixed-formatter"
 	"github.com/matterbridge/matterclient"
 	"github.com/mattermost/mattermost-server/v6/model"
@@ -777,7 +776,7 @@ func (m *Mattermost) wsActionPostSkip(rmsg *model.WebSocketEvent) bool {
 	}
 
 	if !disableEmoji {
-		lastSentMsg = emoji.ReplaceAliases(lastSentMsg)
+		lastSentMsg = utils.EmojiReplaceAliases(lastSentMsg)
 	}
 
 	lastSentMsg = maybeShorten(lastSentMsg, 90, "@", useUnicode)
@@ -908,7 +907,7 @@ func (m *Mattermost) getParentReplyMsg(parentID string, preFetchedPost *model.Po
 	}
 
 	if !disableEmoji {
-		msg = emoji.ReplaceAliases(msg)
+		msg = utils.EmojiReplaceAliases(msg)
 	}
 
 	parentUser := m.GetUser(parentPost.UserId)
@@ -1189,7 +1188,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		m.eventChan <- event
 	default:
 		messageType := ""
-		if !rc.Mattermost.DisableDefaultMentions && channelMentionsRegExp.MatchString(data.Message) {
+		if !rc.Mattermost.DisableDefaultMentions && channelMentionsRegExp.MatchString(sbMsg.String()) {
 			messageType = "notice"
 		}
 
@@ -1214,7 +1213,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		m.handleFileEvent(channelType, ghost, &data, rmsg)
 	}
 
-	logger.Debugf("handleWsActionPost() user %s sent %#v", ghost.Nick, data.Message)
+	logger.Debugf("handleWsActionPost() user %s sent %#v", ghost.Nick, sbMsg.String())
 	logger.Debugf("%#v", data) //nolint:govet
 }
 
@@ -1791,7 +1790,7 @@ func (m *Mattermost) parseMessageAttachments(attachments []*model.SlackAttachmen
 			}
 
 			if !disableEmoji {
-				fallbackText = emoji.ReplaceAliases(fallbackText)
+				fallbackText = utils.EmojiReplaceAliases(fallbackText)
 			}
 
 			b.WriteString(fallbackText)
@@ -1802,7 +1801,7 @@ func (m *Mattermost) parseMessageAttachments(attachments []*model.SlackAttachmen
 			b.WriteString(prefix)
 			authorName := attachment.AuthorName
 			if !disableEmoji {
-				authorName = emoji.ReplaceAliases(authorName)
+				authorName = utils.EmojiReplaceAliases(authorName)
 			}
 			b.WriteString(authorName)
 			if attachment.AuthorLink != "" {
@@ -1818,7 +1817,7 @@ func (m *Mattermost) parseMessageAttachments(attachments []*model.SlackAttachmen
 			b.WriteByte('\x02')
 			title := attachment.Title
 			if !disableEmoji {
-				title = emoji.ReplaceAliases(title)
+				title = utils.EmojiReplaceAliases(title)
 			}
 			b.WriteString(title)
 			b.WriteByte('\x02')
@@ -1845,7 +1844,7 @@ func (m *Mattermost) parseMessageAttachments(attachments []*model.SlackAttachmen
 				}
 
 				if !disableEmoji && !codeBlockBackTick && !codeBlockTilde {
-					line = emoji.ReplaceAliases(line)
+					line = utils.EmojiReplaceAliases(line)
 				}
 
 				b.WriteString(prefix)
@@ -1885,8 +1884,8 @@ func (m *Mattermost) parseMessageAttachments(attachments []*model.SlackAttachmen
 				title := field.Title
 				nextTitle := nextField.Title
 				if !disableEmoji {
-					title = emoji.ReplaceAliases(title)
-					nextTitle = emoji.ReplaceAliases(nextTitle)
+					title = utils.EmojiReplaceAliases(title)
+					nextTitle = utils.EmojiReplaceAliases(nextTitle)
 				}
 				b.WriteString(fmt.Sprintf("%-30s %s", title, nextTitle))
 				b.WriteByte('\x02')
@@ -1915,8 +1914,8 @@ func (m *Mattermost) parseMessageAttachments(attachments []*model.SlackAttachmen
 						v2 = utils.Markdown2irc(v2, blockquoteChar, inlineCode)
 					}
 					if !disableEmoji {
-						v1 = emoji.ReplaceAliases(v1)
-						v2 = emoji.ReplaceAliases(v2)
+						v1 = utils.EmojiReplaceAliases(v1)
+						v2 = utils.EmojiReplaceAliases(v2)
 					}
 					b.WriteString(fmt.Sprintf("%-30s %s", v1, v2))
 					b.WriteByte('\n')
@@ -1931,7 +1930,7 @@ func (m *Mattermost) parseMessageAttachments(attachments []*model.SlackAttachmen
 					b.WriteByte('\x02')
 					title := field.Title
 					if !disableEmoji {
-						title = emoji.ReplaceAliases(title)
+						title = utils.EmojiReplaceAliases(title)
 					}
 					b.WriteString(title)
 					b.WriteByte('\x02')
@@ -1952,7 +1951,7 @@ func (m *Mattermost) parseMessageAttachments(attachments []*model.SlackAttachmen
 					}
 
 					if !disableEmoji && !codeBlockBackTick && !codeBlockTilde {
-						line = emoji.ReplaceAliases(line)
+						line = utils.EmojiReplaceAliases(line)
 					}
 
 					// Ignore duplicate content when field value is the same as fallback

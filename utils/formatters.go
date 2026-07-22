@@ -5,8 +5,10 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/alecthomas/chroma/v2/quick"
+	"github.com/kenshaw/emoji"
 )
 
 //nolint:funlen,gocyclo
@@ -169,4 +171,122 @@ func Markdown2irc(msg string, blockQuoteChar string, inlineCode string) string {
 	}
 
 	return msg
+}
+
+var (
+	emojiInitOnce sync.Once
+	emojiData     []emoji.Emoji
+	emojiReplacer *strings.Replacer
+	emojiAliasMap map[string]int
+)
+
+type emojiSkinToneInfo struct {
+	suffix string
+	match  string
+	tone   emoji.SkinTone
+}
+
+var emojiSkinTones = []emojiSkinToneInfo{
+	{"light", "_light", emoji.Light},
+	{"medium_light", "_medium_light", emoji.MediumLight},
+	{"medium", "_medium", emoji.Medium},
+	{"medium_dark", "_medium_dark", emoji.MediumDark},
+	{"dark", "_dark", emoji.Dark},
+}
+
+func initEmoji() {
+	data := emoji.Gemoji()
+
+	var aliasPairs []string
+	emojiAliasMap = make(map[string]int, len(data))
+
+	for i, e := range data {
+		if e.Emoji == "" {
+			continue
+		}
+		for _, alias := range e.Aliases {
+			if alias == "" {
+				continue
+			}
+			emojiAliasMap[alias], aliasPairs = i, append(aliasPairs, ":"+alias+":", e.Emoji)
+			if !e.SkinTones {
+				continue
+			}
+			// Include skin tones
+			for _, st := range emojiSkinTones {
+				aliasTone := alias + "_" + st.suffix + "_skin_tone"
+				aliasPairs = append(aliasPairs, ":"+aliasTone+":", e.Tone(st.tone))
+			}
+		}
+		// In addition to emoji aliases, include emoji tags
+		for _, tag := range e.Tags {
+			if tag == "" {
+				continue
+			}
+			// But only if it doesn't already exist, e.g. "angry"
+			if _, ok := emojiAliasMap[tag]; !ok {
+				emojiAliasMap[tag], aliasPairs = i, append(aliasPairs, ":"+tag+":", e.Emoji)
+				if !e.SkinTones {
+					continue
+				}
+				// Include skin tones
+				for _, st := range emojiSkinTones {
+					aliasTone := tag + "_" + st.suffix + "_skin_tone"
+					aliasPairs = append(aliasPairs, ":"+aliasTone+":", e.Tone(st.tone))
+				}
+			}
+		}
+	}
+
+	emojiData = data
+	emojiReplacer = strings.NewReplacer(aliasPairs...)
+}
+
+func EmojiReplaceAliases(s string) string {
+	if strings.IndexByte(s, ':') < 0 {
+		return s
+	}
+	emojiInitOnce.Do(initEmoji)
+	return emojiReplacer.Replace(s)
+}
+
+func EmojiFromAlias(alias string) (string, bool) {
+	if alias == "" {
+		return "", false
+	}
+
+	emojiInitOnce.Do(initEmoji)
+
+	if a, ok := strings.CutPrefix(alias, ":"); ok {
+		if a, ok := strings.CutSuffix(a, ":"); ok {
+			alias = a
+		}
+	}
+
+	if idx, ok := emojiAliasMap[alias]; ok {
+		return emojiData[idx].Emoji, true
+	}
+
+	base, ok := strings.CutSuffix(alias, "_skin_tone")
+	if !ok {
+		return "", false
+	}
+
+	// Support skin tones
+	for _, st := range emojiSkinTones {
+		if !strings.HasSuffix(base, st.match) {
+			continue
+		}
+
+		baseAlias := strings.TrimSuffix(base, st.match)
+
+		idx, ok := emojiAliasMap[baseAlias]
+		if !ok {
+			return "", false
+		}
+
+		return emojiData[idx].Tone(st.tone), true
+	}
+
+	return "", false
 }
