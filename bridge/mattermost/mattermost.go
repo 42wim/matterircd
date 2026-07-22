@@ -809,29 +809,42 @@ func maybeShorten(msg string, newLen int, uncounted string, unicode bool) string
 	}
 
 	var b strings.Builder
-	b.Grow(min(len(msg), newLen+8))
+	// We know len(msg) >= newLen because of the check above,
+	// so we can size the buffer perfectly for the shortened string.
+	b.Grow(newLen + 8)
 
-	fields := strings.FieldsFunc(msg, func(r rune) bool {
-		return r == ' ' || r == '\n'
-	})
+	start := 0
 
-	for _, word := range fields {
-		if b.Len() > 0 {
-			if b.Len() >= newLen {
-				break
+	// Scan the string sequentially just like WrapMessage
+	for i := 0; i <= len(msg); i++ {
+		// Detect word boundaries: space, newline, or end of string
+		if i == len(msg) || msg[i] == ' ' || msg[i] == '\n' {
+			// Process the word if we actually captured characters (collapses double spaces/newlines)
+			if start < i {
+				word := msg[start:i]
+
+				// Stop if we hit the limit, otherwise add a space
+				if b.Len() > 0 {
+					if b.Len() >= newLen {
+						break
+					}
+					b.WriteByte(' ')
+				}
+
+				// Handle uncounted prefixes and word truncation
+				if uncounted != "" && strings.HasPrefix(word, uncounted) {
+					newLen += len(word) + 1
+				} else if len(word) > newLen {
+					// Truncate very long words, but only if they were not skipped, on the
+					// assumption that such words are important enough to be preserved whole.
+					word = word[:newLen*2/3] + "[" + ellipsis + "]"
+				}
+
+				b.WriteString(word)
 			}
-			b.WriteByte(' ')
-		}
 
-		if uncounted != "" && strings.HasPrefix(word, uncounted) {
-			newLen += len(word) + 1
-		} else if len(word) > newLen {
-			// Truncate very long words, but only if they were not skipped, on the
-			// assumption that such words are important enough to be preserved whole.
-			word = word[:newLen*2/3] + "[" + ellipsis + "]"
+			start = i + 1
 		}
-
-		b.WriteString(word)
 	}
 
 	// We also want to reset any formatting which can be carried over from shortening
