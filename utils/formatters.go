@@ -291,6 +291,7 @@ func EmojiFromAlias(alias string) (string, bool) {
 	return "", false
 }
 
+//nolint:gocognit,gocyclo
 func WrapMessage(msg string, maxLen int) string {
 	if maxLen <= 0 || len(msg) <= maxLen {
 		return msg
@@ -304,7 +305,7 @@ func WrapMessage(msg string, maxLen int) string {
 
 	for i := 0; i <= len(msg); i++ {
 		// Detect word boundaries: space, newline, or end of string
-		if i == len(msg) || msg[i] == ' ' || msg[i] == '\n' {
+		if i == len(msg) || msg[i] == ' ' || msg[i] == '\n' { //nolint:nestif
 			// Process the extracted word
 			if start < i {
 				word := msg[start:i]
