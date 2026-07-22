@@ -175,8 +175,9 @@ func Markdown2irc(msg string, blockQuoteChar string, inlineCode string) string {
 
 var (
 	emojiInitOnce sync.Once
+	emojiData     []emoji.Emoji
 	emojiReplacer *strings.Replacer
-	reactionMap   map[string]string
+	emojiAliasMap map[string]int
 
 	emojiSkinTonesRE   = regexp.MustCompile(`^(.+?)_((?:neutral|light|medium_light|medium|medium_dark|dark))_skin_tone$`)
 	emojiSkinTonesList = []string{"light", "medium_light", "medium", "medium_dark", "dark"}
@@ -186,9 +187,9 @@ func initEmoji() {
 	data := emoji.Gemoji()
 
 	var aliasPairs []string
-	reactionMap = make(map[string]string, len(data))
+	emojiAliasMap = make(map[string]int, len(data))
 
-	for _, e := range data {
+	for i, e := range data {
 		if e.Emoji == "" {
 			continue
 		}
@@ -196,17 +197,15 @@ func initEmoji() {
 			if alias == "" {
 				continue
 			}
-			aliasPairs = append(aliasPairs, ":"+alias+":", e.Emoji)
-			reactionMap[alias] = e.Emoji
+			emojiAliasMap[alias], aliasPairs = i, append(aliasPairs, ":"+alias+":", e.Emoji)
 			if !e.SkinTones {
 				continue
 			}
 			// Include skin tones
-			for _, skinTone := range emojiSkinTonesList {
-				aWithTone := alias + "_" + skinTone + "_skin_tone"
-				tone, _ := emoji.ParseSkinTone(skinTone)
-				aliasPairs = append(aliasPairs, ":"+aWithTone+":", e.Tone(tone))
-				reactionMap[aWithTone] = e.Emoji
+			for _, tone := range emojiSkinTonesList {
+				aliasTone := alias + "_" + tone + "_skin_tone"
+				skinTone, _ := emoji.ParseSkinTone(tone)
+				emojiAliasMap[aliasTone], aliasPairs = i, append(aliasPairs, ":"+aliasTone+":", e.Tone(skinTone))
 			}
 		}
 		// In addition to emoji aliases, include emoji tags
@@ -215,33 +214,54 @@ func initEmoji() {
 				continue
 			}
 			// But only if it doesn't already exist, e.g. "angry"
-			if _, ok := reactionMap[tag]; !ok {
-				aliasPairs = append(aliasPairs, ":"+tag+":", e.Emoji)
-				reactionMap[tag] = e.Emoji
+			if _, ok := emojiAliasMap[tag]; !ok {
+				emojiAliasMap[tag], aliasPairs = i, append(aliasPairs, ":"+tag+":", e.Emoji)
 				if !e.SkinTones {
 					continue
 				}
 				// Include skin tones
-				for _, skinTone := range emojiSkinTonesList {
-					aWithTone := tag + "_" + skinTone + "_skin_tone"
-					tone, _ := emoji.ParseSkinTone(skinTone)
-					aliasPairs = append(aliasPairs, ":"+aWithTone+":", e.Tone(tone))
-					reactionMap[aWithTone] = e.Emoji
+				for _, tone := range emojiSkinTonesList {
+					aliasTone := tag + "_" + tone + "_skin_tone"
+					skinTone, _ := emoji.ParseSkinTone(tone)
+					emojiAliasMap[aliasTone], aliasPairs = i, append(aliasPairs, ":"+aliasTone+":", e.Tone(skinTone))
 				}
 			}
 		}
 	}
 
+	emojiData = data
 	emojiReplacer = strings.NewReplacer(aliasPairs...)
 }
 
 func EmojiReplaceAliases(s string) string {
+	if !strings.Contains(s, ":") {
+		return s
+	}
 	emojiInitOnce.Do(initEmoji)
 	return emojiReplacer.Replace(s)
 }
 
-func EmojiFromAlias(alias string) (string, bool) {
+func EmojiFromAlias(alias string) (*emoji.Emoji, bool) {
 	emojiInitOnce.Do(initEmoji)
-	val, ok := reactionMap[alias]
-	return val, ok
+	if strings.HasPrefix(alias, ":") && strings.HasSuffix(alias, ":") {
+		alias = alias[1 : len(alias)-1]
+	}
+	skinTone := emoji.Neutral
+	// Support skin tones
+	matches := emojiSkinTonesRE.FindStringSubmatch(alias)
+	if len(matches) == 3 {
+		alias = matches[1]
+		skinTone, _ = emoji.ParseSkinTone(matches[2])
+	}
+	val, ok := emojiAliasMap[alias]
+	if !ok {
+		return nil, false
+	}
+	if skinTone == emoji.Neutral {
+		return &emojiData[val], true
+	}
+	modifiedEmoji := emojiData[val]
+	tonedString := modifiedEmoji.Tone(skinTone)
+	modifiedEmoji.Emoji = tonedString
+	return &modifiedEmoji, true
 }
