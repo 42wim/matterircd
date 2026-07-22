@@ -263,9 +263,9 @@ func (m *Mattermost) List() (map[string]string, error) {
 }
 
 func (m *Mattermost) Part(channelID string) error {
-	m.mc.Client.RemoveUserFromChannel(context.TODO(), channelID, m.mc.User.Id)
+	_, err := m.mc.Client.RemoveUserFromChannel(context.TODO(), channelID, m.mc.User.Id)
 
-	return nil
+	return err
 }
 
 func (m *Mattermost) UpdateChannels() error {
