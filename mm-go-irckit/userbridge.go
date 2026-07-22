@@ -20,7 +20,6 @@ import (
 	"github.com/42wim/matterircd/utils"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/mattermost/mattermost-server/v6/model"
-	"github.com/muesli/reflow/wordwrap"
 	"github.com/sorcix/irc"
 )
 
@@ -219,7 +218,7 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 	lexer := ""
 	codeBlockBackTick := false
 	codeBlockTilde := false
-	text = wordwrap.String(text, maxlen)
+	text = utils.WrapMessage(text, maxlen)
 	addPrefix := false
 	for {
 		line, rest, found := strings.Cut(text, "\n")
@@ -420,7 +419,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 	lexer := ""
 	codeBlockBackTick := false
 	codeBlockTilde := false
-	text = wordwrap.String(text, maxlen)
+	text = utils.WrapMessage(text, maxlen)
 	addPrefix := false
 	for {
 		line, rest, found := strings.Cut(text, "\n")
@@ -966,9 +965,9 @@ func (u *User) MsgUser(toUser *User, msg string) {
 
 func (u *User) MsgSpoofUser(sender *User, rcvuser string, text string, maxlen ...int) {
 	if len(maxlen) == 0 {
-		text = wordwrap.String(text, 440)
+		text = utils.WrapMessage(text, 440)
 	} else {
-		text = wordwrap.String(text, maxlen[0])
+		text = utils.WrapMessage(text, maxlen[0])
 	}
 
 	prefix := irc.Prefix{

@@ -290,3 +290,65 @@ func EmojiFromAlias(alias string) (string, bool) {
 
 	return "", false
 }
+
+func WrapMessage(msg string, maxLen int) string {
+	if maxLen <= 0 || len(msg) <= maxLen {
+		return msg
+	}
+
+	var b strings.Builder
+	b.Grow(len(msg) + (len(msg) / maxLen) + 1)
+
+	lineLen := 0
+	start := 0
+
+	for i := 0; i <= len(msg); i++ {
+		// Detect word boundaries: space, newline, or end of string
+		if i == len(msg) || msg[i] == ' ' || msg[i] == '\n' {
+			// Process the extracted word
+			if start < i {
+				word := msg[start:i]
+
+				// If adding this word exceeds the max. length, wrap to the next line
+				if lineLen > 0 && lineLen+1+len(word) > maxLen {
+					b.WriteByte('\n')
+					lineLen = 0
+				} else if lineLen > 0 {
+					b.WriteByte(' ')
+					lineLen++
+				}
+
+				// Handle massively long words (like URLs) similar to maybeShorten's truncation
+				for len(word) > maxLen {
+					cut := maxLen
+					// Ensure we don't slice a multi-byte UTF-8 character in half
+					for cut > 0 && (word[cut]&0xC0) == 0x80 {
+						cut--
+					}
+					if cut == 0 {
+						cut = maxLen // Fallback if the string contains invalid UTF-8
+					}
+
+					b.WriteString(word[:cut])
+					b.WriteByte('\n')
+					word = word[cut:]
+					lineLen = 0
+				}
+
+				b.WriteString(word)
+				lineLen += len(word)
+			}
+
+			// Preserve intentional newlines from the original message
+			if i < len(msg) && msg[i] == '\n' {
+				b.WriteByte('\n')
+				lineLen = 0
+			}
+
+			// Move the start index past the current boundary character
+			start = i + 1
+		}
+	}
+
+	return b.String()
+}
