@@ -1188,7 +1188,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		m.eventChan <- event
 	default:
 		messageType := ""
-		if !rc.Mattermost.DisableDefaultMentions && channelMentionsRegExp.MatchString(data.Message) {
+		if !rc.Mattermost.DisableDefaultMentions && channelMentionsRegExp.MatchString(sbMsg.String()) {
 			messageType = "notice"
 		}
 
@@ -1213,7 +1213,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		m.handleFileEvent(channelType, ghost, &data, rmsg)
 	}
 
-	logger.Debugf("handleWsActionPost() user %s sent %#v", ghost.Nick, data.Message)
+	logger.Debugf("handleWsActionPost() user %s sent %#v", ghost.Nick, sbMsg.String())
 	logger.Debugf("%#v", data) //nolint:govet
 }
 
