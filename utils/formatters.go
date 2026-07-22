@@ -241,27 +241,31 @@ func EmojiReplaceAliases(s string) string {
 	return emojiReplacer.Replace(s)
 }
 
-func EmojiFromAlias(alias string) (*emoji.Emoji, bool) {
+func EmojiFromAlias(alias string) (string, bool) {
 	emojiInitOnce.Do(initEmoji)
+
+	if alias == "" {
+		return "", false
+	}
 	if strings.HasPrefix(alias, ":") && strings.HasSuffix(alias, ":") {
 		alias = alias[1 : len(alias)-1]
 	}
-	skinTone := emoji.Neutral
+
 	// Support skin tones
-	matches := emojiSkinTonesRE.FindStringSubmatch(alias)
-	if len(matches) == 3 {
-		alias = matches[1]
-		skinTone, _ = emoji.ParseSkinTone(matches[2])
+	if m := emojiSkinTonesRE.FindStringSubmatch(alias); len(m) == 3 {
+		base := m[1]
+		tone := m[2]
+		idx, ok := emojiAliasMap[base]
+		if !ok {
+			return "", false
+		}
+		skinTone, _ := emoji.ParseSkinTone(tone)
+		return emojiData[idx].Tone(skinTone), true
 	}
-	val, ok := emojiAliasMap[alias]
+
+	idx, ok := emojiAliasMap[alias]
 	if !ok {
-		return nil, false
+		return "", false
 	}
-	if skinTone == emoji.Neutral {
-		return &emojiData[val], true
-	}
-	modifiedEmoji := emojiData[val]
-	tonedString := modifiedEmoji.Tone(skinTone)
-	modifiedEmoji.Emoji = tonedString
-	return &modifiedEmoji, true
+	return emojiData[idx].Emoji, true
 }
