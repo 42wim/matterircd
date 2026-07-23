@@ -296,13 +296,14 @@ func EmojiFromAlias(alias string) (string, bool) {
 // overflow their line rather than being split - fine here since IRC's real
 // line limit (512) leaves headroom above maxLen (440), and splitting mid-
 // word would corrupt URLs/tokens. Pure byte scanning throughout
+//nolint:gocyclo
 func WrapMessage(msg string, maxLen int) string {
 	if maxLen <= 0 || len(msg) <= maxLen {
 		return msg
 	}
 
 	var b strings.Builder
-	b.Grow(len(msg) + (len(msg) / maxLen) * 2)
+	b.Grow(len(msg) + (len(msg)/maxLen)*2)
 
 	lineLen := 0
 	spaceStart, spaceLen := 0, 0
@@ -321,7 +322,6 @@ func WrapMessage(msg string, maxLen int) string {
 			b.WriteByte('\n')
 			lineLen, spaceLen = 0, 0
 			i++
-
 
 		default:
 			start := i
