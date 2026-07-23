@@ -298,14 +298,14 @@ func WrapMessage(msg string, maxLen int) string {
 	}
 
 	var b strings.Builder
-	b.Grow(len(msg) + (len(msg) / maxLen) + 1)
+	b.Grow(len(msg) + (len(msg) / maxLen) * 2)
 
 	lineLen := 0
 	start := 0
 
 	for i := 0; i <= len(msg); i++ {
-		// Detect word boundaries: space, newline, or end of string
-		if i == len(msg) || msg[i] == ' ' || msg[i] == '\n' { //nolint:nestif
+		// Detect word boundaries: space, newline, tabs or end of string
+		if i == len(msg) || msg[i] == ' ' || msg[i] == '\n' || msg[i] == '\t' { //nolint:nestif
 			// Process the extracted word
 			if start < i {
 				word := msg[start:i]
@@ -339,13 +339,13 @@ func WrapMessage(msg string, maxLen int) string {
 
 			// Explicitly preserve the delimiter (spaces and newlines)
 			if i < len(msg) {
-				if msg[i] == ' ' {
+				if msg[i] == ' ' || msg[i] == '\t'{
 					// If the space pushes us over the limit, wrap it
 					if lineLen > 0 && lineLen+1 > maxLen {
 						b.WriteByte('\n')
 						lineLen = 0
 					} else {
-						b.WriteByte(' ')
+						b.WriteByte(msg[i])
 						lineLen++
 					}
 				} else if msg[i] == '\n' {

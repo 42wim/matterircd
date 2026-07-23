@@ -817,13 +817,10 @@ func maybeShorten(msg string, newLen int, uncounted string, unicode bool) string
 
 	// Scan the string sequentially just like WrapMessage
 	for i := 0; i <= len(msg); i++ {
-		// Detect word boundaries: space, newline, or end of string
-		if i == len(msg) || msg[i] == ' ' || msg[i] == '\n' { //nolint:nestif
-			// Process the extracted word
+		if i == len(msg) || msg[i] == ' ' || msg[i] == '\n' || msg[i] == '\t' { //nolint:nestif
 			if start < i {
 				word := msg[start:i]
 
-				// Stop if we hit the limit
 				if b.Len() >= newLen {
 					break
 				}
@@ -845,8 +842,8 @@ func maybeShorten(msg string, newLen int, uncounted string, unicode bool) string
 				if b.Len() >= newLen {
 					break
 				}
-				if msg[i] == ' ' {
-					b.WriteByte(' ')
+				if msg[i] == ' ' || msg[i] == '\t'{
+					b.WriteByte(msg[i])
 				} else if msg[i] == '\n' {
 					b.WriteByte(' ')
 				}
