@@ -796,31 +796,24 @@ func (m *Mattermost) wsActionPostSkip(rmsg *model.WebSocketEvent) bool {
 // maybeShorten returns a prefix of msg that is approximately newLen
 // characters long, followed by "...".  Words that start with uncounted
 // are included in the result but are not reckoned against newLen.
+//nolint:gocyclo
 func maybeShorten(msg string, newLen int, uncounted string, unicode bool) string {
 	if newLen == 0 || len(msg) < newLen {
 		return msg
 	}
-
 	ellipsis := "..."
 	if unicode {
 		ellipsis = "…"
 	}
-
 	var b strings.Builder
-	// We know len(msg) >= newLen because of the check above,
-	// so we can size the buffer perfectly for the shortened string.
 	b.Grow(newLen + 8)
-
 	i := 0
 	for i < len(msg) {
 		if b.Len() >= newLen {
 			break
 		}
-
 		switch {
 		case msg[i] == ' ' || msg[i] == '\t' || msg[i] == '\n':
-			// Preserve spaces/tabs verbatim; newlines collapse to a single
-			// space so the result stays a one-line preview.
 			for i < len(msg) && (msg[i] == ' ' || msg[i] == '\t' || msg[i] == '\n') {
 				if b.Len() >= newLen {
 					break
@@ -832,32 +825,30 @@ func maybeShorten(msg string, newLen int, uncounted string, unicode bool) string
 				}
 				i++
 			}
-
 		default:
 			start := i
 			for i < len(msg) && msg[i] != ' ' && msg[i] != '\t' && msg[i] != '\n' {
 				i++
 			}
 			word := msg[start:i]
-
-			// Handle uncounted prefixes and word truncation
 			if uncounted != "" && strings.HasPrefix(word, uncounted) {
 				newLen += len(word) + 1
 			} else if len(word) > newLen {
-				// Truncate very long words, but only if they were not skipped, on the
-				// assumption that such words are important enough to be preserved whole.
-				word = word[:newLen*2/3] + "[" + ellipsis + "]"
+				cut := newLen * 2 / 3
+				if cut > len(word) {
+					cut = len(word)
+				}
+				for cut > 0 && (word[cut]&0xC0) == 0x80 {
+					cut--
+				}
+				word = word[:cut] + "[" + ellipsis + "]"
 			}
-
 			b.WriteString(word)
 		}
 	}
-
-	// We also want to reset any formatting which can be carried over from shortening
 	b.WriteByte('\x0f')
 	b.WriteByte(' ')
 	b.WriteString(ellipsis)
-
 	return b.String()
 }
 
