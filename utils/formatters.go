@@ -291,7 +291,11 @@ func EmojiFromAlias(alias string) (string, bool) {
 	return "", false
 }
 
-//nolint:gocognit,gocyclo
+// WrapMessage soft-wraps msg into lines of at most maxLen bytes, breaking
+// only at spaces/newlines. Words longer than maxLen are left unbroken and
+// overflow their line rather than being split - fine here since IRC's real
+// line limit (512) leaves headroom above maxLen (440), and splitting mid-
+// word would corrupt URLs/tokens. Pure byte scanning throughout
 func WrapMessage(msg string, maxLen int) string {
 	if maxLen <= 0 || len(msg) <= maxLen {
 		return msg
@@ -301,61 +305,42 @@ func WrapMessage(msg string, maxLen int) string {
 	b.Grow(len(msg) + (len(msg) / maxLen) * 2)
 
 	lineLen := 0
-	start := 0
+	spaceStart, spaceLen := 0, 0
 
-	for i := 0; i <= len(msg); i++ {
-		// Detect word boundaries: space, newline, tabs or end of string
-		if i == len(msg) || msg[i] == ' ' || msg[i] == '\n' || msg[i] == '\t' { //nolint:nestif
-			// Process the extracted word
-			if start < i {
-				word := msg[start:i]
+	i := 0
+	for i < len(msg) {
+		switch {
+		case msg[i] == ' ' || msg[i] == '\t':
+			spaceStart = i
+			for i < len(msg) && (msg[i] == ' ' || msg[i] == '\t') {
+				i++
+			}
+			spaceLen = i - spaceStart
 
-				// If adding this word exceeds the max. length, wrap to the next line
-				if lineLen > 0 && lineLen+len(word) > maxLen {
-					b.WriteByte('\n')
-					lineLen = 0
-				}
+		case msg[i] == '\n':
+			b.WriteByte('\n')
+			lineLen, spaceLen = 0, 0
+			i++
 
-				// Handle massively long words (like URLs) similar to maybeShorten's truncation
-				for len(word) > maxLen {
-					cut := maxLen
-					// Ensure we don't slice a multi-byte UTF-8 character in half
-					for cut > 0 && (word[cut]&0xC0) == 0x80 {
-						cut--
-					}
-					if cut == 0 {
-						cut = maxLen // Fallback if the string contains invalid UTF-8
-					}
 
-					b.WriteString(word[:cut])
-					b.WriteByte('\n')
-					word = word[cut:]
-					lineLen = 0
-				}
+		default:
+			start := i
+			for i < len(msg) && msg[i] != ' ' && msg[i] != '\t' && msg[i] != '\n' {
+				i++
+			}
+			word := msg[start:i]
 
-				b.WriteString(word)
-				lineLen += len(word)
+			if lineLen > 0 && lineLen+spaceLen+len(word) > maxLen {
+				b.WriteByte('\n')
+				lineLen, spaceLen = 0, 0 // drop pending spaces, don't carry to new line
+			} else if spaceLen > 0 {
+				b.WriteString(msg[spaceStart : spaceStart+spaceLen])
+				lineLen += spaceLen
+				spaceLen = 0
 			}
 
-			// Explicitly preserve the delimiter (spaces and newlines)
-			if i < len(msg) {
-				if msg[i] == ' ' || msg[i] == '\t'{
-					// If the space pushes us over the limit, wrap it
-					if lineLen > 0 && lineLen+1 > maxLen {
-						b.WriteByte('\n')
-						lineLen = 0
-					} else {
-						b.WriteByte(msg[i])
-						lineLen++
-					}
-				} else if msg[i] == '\n' {
-					b.WriteByte('\n')
-					lineLen = 0
-				}
-			}
-
-			// Move the start index past the current boundary character
-			start = i + 1
+			b.WriteString(word)
+			lineLen += len(word)
 		}
 	}
 

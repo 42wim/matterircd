@@ -796,8 +796,6 @@ func (m *Mattermost) wsActionPostSkip(rmsg *model.WebSocketEvent) bool {
 // maybeShorten returns a prefix of msg that is approximately newLen
 // characters long, followed by "...".  Words that start with uncounted
 // are included in the result but are not reckoned against newLen.
-//
-//nolint:cyclop
 func maybeShorten(msg string, newLen int, uncounted string, unicode bool) string {
 	if newLen == 0 || len(msg) < newLen {
 		return msg
@@ -813,43 +811,45 @@ func maybeShorten(msg string, newLen int, uncounted string, unicode bool) string
 	// so we can size the buffer perfectly for the shortened string.
 	b.Grow(newLen + 8)
 
-	start := 0
+	i := 0
+	for i < len(msg) {
+		if b.Len() >= newLen {
+			break
+		}
 
-	// Scan the string sequentially just like WrapMessage
-	for i := 0; i <= len(msg); i++ {
-		if i == len(msg) || msg[i] == ' ' || msg[i] == '\n' || msg[i] == '\t' { //nolint:nestif
-			if start < i {
-				word := msg[start:i]
-
+		switch {
+		case msg[i] == ' ' || msg[i] == '\t' || msg[i] == '\n':
+			// Preserve spaces/tabs verbatim; newlines collapse to a single
+			// space so the result stays a one-line preview.
+			for i < len(msg) && (msg[i] == ' ' || msg[i] == '\t' || msg[i] == '\n') {
 				if b.Len() >= newLen {
 					break
 				}
-
-				// Handle uncounted prefixes and word truncation
-				if uncounted != "" && strings.HasPrefix(word, uncounted) {
-					newLen += len(word) + 1
-				} else if len(word) > newLen {
-					// Truncate very long words, but only if they were not skipped, on the
-					// assumption that such words are important enough to be preserved whole.
-					word = word[:newLen*2/3] + "[" + ellipsis + "]"
-				}
-
-				b.WriteString(word)
-			}
-
-			// Explicitly write the delimiters to preserve multiple spaces
-			if i < len(msg) {
-				if b.Len() >= newLen {
-					break
-				}
-				if msg[i] == ' ' || msg[i] == '\t'{
-					b.WriteByte(msg[i])
-				} else if msg[i] == '\n' {
+				if msg[i] == '\n' {
 					b.WriteByte(' ')
+				} else {
+					b.WriteByte(msg[i])
 				}
+				i++
 			}
 
-			start = i + 1
+		default:
+			start := i
+			for i < len(msg) && msg[i] != ' ' && msg[i] != '\t' && msg[i] != '\n' {
+				i++
+			}
+			word := msg[start:i]
+
+			// Handle uncounted prefixes and word truncation
+			if uncounted != "" && strings.HasPrefix(word, uncounted) {
+				newLen += len(word) + 1
+			} else if len(word) > newLen {
+				// Truncate very long words, but only if they were not skipped, on the
+				// assumption that such words are important enough to be preserved whole.
+				word = word[:newLen*2/3] + "[" + ellipsis + "]"
+			}
+
+			b.WriteString(word)
 		}
 	}
 
