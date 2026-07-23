@@ -796,6 +796,7 @@ func (m *Mattermost) wsActionPostSkip(rmsg *model.WebSocketEvent) bool {
 // maybeShorten returns a prefix of msg that is approximately newLen
 // characters long, followed by "...".  Words that start with uncounted
 // are included in the result but are not reckoned against newLen.
+//
 //nolint:gocyclo
 func maybeShorten(msg string, newLen int, uncounted string, unicode bool) string {
 	if newLen == 0 || len(msg) < newLen {
