@@ -132,13 +132,13 @@ func New(login string, pass string, team string, server string, mfatoken string)
 		Credentials:  cred,
 		MessageChan:  make(chan *Message, 100),
 		Users:        &UsersCache{
-			users:    make(map[string]*model.User),
-			channels: make(map[string]map[string]struct{}),
-			teams:    make(map[string]map[string]struct{}),
-			statuses: make(map[string]string),
+			users:    make(map[string]*model.User, 1000),
+			channels: make(map[string]map[string]struct{}, 1000),
+			teams:    make(map[string]map[string]struct{}, 10),
+			statuses: make(map[string]string, 1000),
 
-			channelData:    make(map[string]*model.Channel),
-			joinedChannels: make(map[string]struct{}),
+			channelData:    make(map[string]*model.Channel, 1000),
+			joinedChannels: make(map[string]struct{}, 200),
 		},
 		rootLogger:   rootLogger,
 		lruCache:     cache,
@@ -163,7 +163,7 @@ func (m *Client) Login() error {
 			m.logger.Info("reconnect: flushing channel user cache to ensure state consistency")
 
 			m.Users.mu.Lock()
-			m.Users.channels = make(map[string]map[string]struct{})
+			m.Users.channels = make(map[string]map[string]struct{}, 1000)
 			m.Users.mu.Unlock()
 
 			m.Users.lastUpdated.Store(time.Now().Unix())
@@ -419,7 +419,7 @@ func (m *Client) initUser() error {
 		m.logger.Debugf("fetching users for team %s (cache expired or missing)", team.Name)
 
 		idx := 0
-		var teamUsers []*model.User
+		teamUsers :=  make([]*model.User, 0, batchSize)
 		pageRetryCount := 0
 
 		for {

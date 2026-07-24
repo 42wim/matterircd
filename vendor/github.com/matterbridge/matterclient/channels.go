@@ -188,7 +188,7 @@ func (m *Client) GetChannelUsers(channelID string) ([]*model.User, error) {
 	defer m.Users.mu.Unlock()
 
 	if m.Users.channels[channelID] == nil {
-		m.Users.channels[channelID] = make(map[string]struct{})
+		m.Users.channels[channelID] = make(map[string]struct{}, len(allUsers))
 	}
 
 	for _, u := range allUsers {
