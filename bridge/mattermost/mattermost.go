@@ -643,15 +643,16 @@ func (m *Mattermost) createUser(mmuser *model.User) *bridge.UserInfo {
 	}
 
 	var realName string
-	if mmuser.FirstName != "" && mmuser.LastName != "" {
+	switch {
+	case mmuser.FirstName != "" && mmuser.LastName != "":
 		realName = mmuser.FirstName + " " + mmuser.LastName
-	} else if mmuser.FirstName != "" {
+	case mmuser.FirstName != "":
 		realName = mmuser.FirstName
-	} else if mmuser.Nickname != "" {
+	case mmuser.Nickname != "":
 		realName = mmuser.Nickname
-	} else if mmuser.LastName != "" {
+	case mmuser.LastName != "":
 		realName = mmuser.LastName
-	} else {
+	default:
 		realName = mmuser.Username
 	}
 
