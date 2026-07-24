@@ -642,6 +642,19 @@ func (m *Mattermost) createUser(mmuser *model.User) *bridge.UserInfo {
 		teamID = m.mc.Team.ID
 	}
 
+	var realName string
+	if mmuser.FirstName != "" && mmuser.LastName != "" {
+		realName = mmuser.FirstName + " " + mmuser.LastName
+	} else if mmuser.FirstName != "" {
+		realName = mmuser.FirstName
+	} else if mmuser.Nickname != "" {
+		realName = mmuser.Nickname
+	} else if mmuser.LastName != "" {
+		realName = mmuser.LastName
+	} else {
+		realName = mmuser.Username
+	}
+
 	// We only care about mentions for ourselves
 	var mentionKeys []string
 	if me && m.mc.User != nil && m.mc.User.NotifyProps != nil {
@@ -653,7 +666,7 @@ func (m *Mattermost) createUser(mmuser *model.User) *bridge.UserInfo {
 	info := &bridge.UserInfo{
 		Nick:        nick,
 		User:        mmuser.Id,
-		Real:        mmuser.FirstName + " " + mmuser.LastName,
+		Real:        realName,
 		Host:        m.mc.Client.URL,
 		Roles:       mmuser.Roles,
 		Ghost:       true,

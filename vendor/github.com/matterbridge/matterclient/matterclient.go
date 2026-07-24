@@ -57,7 +57,6 @@ type UserSummary struct {
         LastName  string `json:"last_name"`
         Nickname  string `json:"nickname"`
         Roles     string `json:"roles"`
-        Email     string `json:"email"`
 }
 
 type Team struct {

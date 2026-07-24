@@ -136,11 +136,11 @@ func (m *Client) GetChannelUsers(channelID string) ([]*model.User, error) {
 	}
 	m.Users.mu.RUnlock()
 
-	var allUsers []*model.User
-	idx := 0
 	const batchSize = 200
-	retryCount := 0
+	allUsers := make([]*model.User, 0, batchSize)
 
+	idx := 0
+	retryCount := 0
 	for {
 		query := fmt.Sprintf("/users?in_channel=%v&page=%v&per_page=%v", channelID, idx, batchSize)
 		resp, err := m.Client.DoAPIGet(query, "")
@@ -175,7 +175,6 @@ func (m *Client) GetChannelUsers(channelID string) ([]*model.User, error) {
 				LastName:  u.LastName,
 				Nickname:  u.Nickname,
 				Roles:     u.Roles,
-				Email:     u.Email,
 			})
 		}
 
