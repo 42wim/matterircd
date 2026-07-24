@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/42wim/matterircd/utils"
 	"github.com/mattermost/mattermost-server/v6/model"
-	"github.com/muesli/reflow/wordwrap"
 	"github.com/sorcix/irc"
 )
 
@@ -131,7 +131,7 @@ func (ch *channel) ID() string {
 }
 
 func (ch *channel) Message(from *User, text string) {
-	text = wordwrap.String(text, 440)
+	text = utils.WrapMessage(text, 440)
 
 	msg := irc.Message{
 		Prefix:        from.Prefix(),
@@ -453,9 +453,9 @@ func (ch *channel) Len() int {
 
 func (ch *channel) Spoof(from string, text string, cmd string, maxlen ...int) {
 	if len(maxlen) == 0 {
-		text = wordwrap.String(text, 440)
+		text = utils.WrapMessage(text, 440)
 	} else {
-		text = wordwrap.String(text, maxlen[0])
+		text = utils.WrapMessage(text, maxlen[0])
 	}
 
 	prefix := irc.Prefix{

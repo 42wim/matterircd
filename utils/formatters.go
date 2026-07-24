@@ -290,3 +290,60 @@ func EmojiFromAlias(alias string) (string, bool) {
 
 	return "", false
 }
+
+// WrapMessage soft-wraps msg into lines of at most maxLen bytes, breaking
+// only at spaces/newlines. Words longer than maxLen are left unbroken and
+// overflow their line rather than being split - fine here since IRC's real
+// line limit (512) leaves headroom above maxLen (440), and splitting mid-
+// word would corrupt URLs/tokens. Pure byte scanning throughout
+//
+//nolint:gocyclo
+func WrapMessage(msg string, maxLen int) string {
+	if maxLen <= 0 || len(msg) <= maxLen {
+		return msg
+	}
+
+	var b strings.Builder
+	b.Grow(len(msg) + (len(msg)/maxLen)*2)
+
+	lineLen := 0
+	spaceStart, spaceLen := 0, 0
+
+	i := 0
+	for i < len(msg) {
+		switch {
+		case msg[i] == ' ' || msg[i] == '\t':
+			spaceStart = i
+			for i < len(msg) && (msg[i] == ' ' || msg[i] == '\t') {
+				i++
+			}
+			spaceLen = i - spaceStart
+
+		case msg[i] == '\n':
+			b.WriteByte('\n')
+			lineLen, spaceLen = 0, 0
+			i++
+
+		default:
+			start := i
+			for i < len(msg) && msg[i] != ' ' && msg[i] != '\t' && msg[i] != '\n' {
+				i++
+			}
+			word := msg[start:i]
+
+			if lineLen > 0 && lineLen+spaceLen+len(word) > maxLen {
+				b.WriteByte('\n')
+				lineLen, spaceLen = 0, 0 // drop pending spaces, don't carry to new line
+			} else if spaceLen > 0 {
+				b.WriteString(msg[spaceStart : spaceStart+spaceLen])
+				lineLen += spaceLen
+				spaceLen = 0
+			}
+
+			b.WriteString(word)
+			lineLen += len(word)
+		}
+	}
+
+	return b.String()
+}

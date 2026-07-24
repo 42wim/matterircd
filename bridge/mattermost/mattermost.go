@@ -158,7 +158,9 @@ func (m *Mattermost) handleWsMessage(quitChan chan struct{}) {
 			return
 		case message := <-m.mc.MessageChan:
 			logger.Debugf("MMUser WsReceiver: %#v", message.Raw)
-			logger.Tracef("handleWsMessage %s", spew.Sdump(message))
+			if logger.Level.String() == "trace" {
+				logger.Tracef("handleWsMessage %s", spew.Sdump(message))
+			}
 
 			switch message.Raw.EventType() {
 			case model.WebsocketEventPosted:
@@ -795,48 +797,59 @@ func (m *Mattermost) wsActionPostSkip(rmsg *model.WebSocketEvent) bool {
 // characters long, followed by "...".  Words that start with uncounted
 // are included in the result but are not reckoned against newLen.
 //
-//nolint:cyclop
+//nolint:gocyclo
 func maybeShorten(msg string, newLen int, uncounted string, unicode bool) string {
 	if newLen == 0 || len(msg) < newLen {
 		return msg
 	}
-
 	ellipsis := "..."
 	if unicode {
 		ellipsis = "…"
 	}
-
 	var b strings.Builder
-	b.Grow(min(len(msg), newLen+8))
-
-	fields := strings.FieldsFunc(msg, func(r rune) bool {
-		return r == ' ' || r == '\n'
-	})
-
-	for _, word := range fields {
-		if b.Len() > 0 {
-			if b.Len() >= newLen {
-				break
+	b.Grow(newLen + 8)
+	i := 0
+	for i < len(msg) {
+		if b.Len() >= newLen {
+			break
+		}
+		switch {
+		case msg[i] == ' ' || msg[i] == '\t' || msg[i] == '\n':
+			for i < len(msg) && (msg[i] == ' ' || msg[i] == '\t' || msg[i] == '\n') {
+				if b.Len() >= newLen {
+					break
+				}
+				if msg[i] == '\n' {
+					b.WriteByte(' ')
+				} else {
+					b.WriteByte(msg[i])
+				}
+				i++
 			}
-			b.WriteByte(' ')
+		default:
+			start := i
+			for i < len(msg) && msg[i] != ' ' && msg[i] != '\t' && msg[i] != '\n' {
+				i++
+			}
+			word := msg[start:i]
+			if uncounted != "" && strings.HasPrefix(word, uncounted) {
+				newLen += len(word) + 1
+			} else if len(word) > newLen {
+				cut := newLen * 2 / 3
+				if cut > len(word) {
+					cut = len(word)
+				}
+				for cut > 0 && (word[cut]&0xC0) == 0x80 {
+					cut--
+				}
+				word = word[:cut] + "[" + ellipsis + "]"
+			}
+			b.WriteString(word)
 		}
-
-		if uncounted != "" && strings.HasPrefix(word, uncounted) {
-			newLen += len(word) + 1
-		} else if len(word) > newLen {
-			// Truncate very long words, but only if they were not skipped, on the
-			// assumption that such words are important enough to be preserved whole.
-			word = word[:newLen*2/3] + "[" + ellipsis + "]"
-		}
-
-		b.WriteString(word)
 	}
-
-	// We also want to reset any formatting which can be carried over from shortening
 	b.WriteByte('\x0f')
 	b.WriteByte(' ')
 	b.WriteString(ellipsis)
-
 	return b.String()
 }
 

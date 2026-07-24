@@ -20,7 +20,6 @@ import (
 	"github.com/42wim/matterircd/utils"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/mattermost/mattermost-server/v6/model"
-	"github.com/muesli/reflow/wordwrap"
 	"github.com/sorcix/irc"
 )
 
@@ -78,7 +77,9 @@ func NewUserBridge(c net.Conn, srv Server, cfg *config.Config, db *bolt.DB) *Use
 
 func (u *User) handleEventChan() {
 	for event := range u.eventChan {
-		logger.Tracef("eventchan %s", spew.Sdump(event))
+		if logger.Level.String() == "trace" {
+			logger.Tracef("eventchan %s", spew.Sdump(event))
+		}
 		switch e := event.Data.(type) {
 		case *bridge.ChannelMessageEvent:
 			u.handleChannelMessageEvent(e)
@@ -219,7 +220,7 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 	lexer := ""
 	codeBlockBackTick := false
 	codeBlockTilde := false
-	text = wordwrap.String(text, maxlen)
+	text = utils.WrapMessage(text, maxlen)
 	addPrefix := false
 	for {
 		line, rest, found := strings.Cut(text, "\n")
@@ -420,7 +421,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 	lexer := ""
 	codeBlockBackTick := false
 	codeBlockTilde := false
-	text = wordwrap.String(text, maxlen)
+	text = utils.WrapMessage(text, maxlen)
 	addPrefix := false
 	for {
 		line, rest, found := strings.Cut(text, "\n")
@@ -966,9 +967,9 @@ func (u *User) MsgUser(toUser *User, msg string) {
 
 func (u *User) MsgSpoofUser(sender *User, rcvuser string, text string, maxlen ...int) {
 	if len(maxlen) == 0 {
-		text = wordwrap.String(text, 440)
+		text = utils.WrapMessage(text, 440)
 	} else {
-		text = wordwrap.String(text, maxlen[0])
+		text = utils.WrapMessage(text, maxlen[0])
 	}
 
 	prefix := irc.Prefix{
