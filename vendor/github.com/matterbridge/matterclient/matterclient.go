@@ -38,7 +38,7 @@ type Credentials struct {
 }
 
 type UsersCache struct {
-	mu sync.RWMutex
+	mu       sync.RWMutex
 	users    map[string]*model.User
 	channels map[string]map[string]struct{}
 	teams    map[string]map[string]struct{}
@@ -48,6 +48,16 @@ type UsersCache struct {
 	joinedChannels map[string]struct{}
 
 	lastUpdated atomic.Int64
+}
+
+type UserSummary struct {
+        Id        string `json:"id"`
+        Username  string `json:"username"`
+        FirstName string `json:"first_name"`
+        LastName  string `json:"last_name"`
+        Nickname  string `json:"nickname"`
+        Roles     string `json:"roles"`
+        Email     string `json:"email"`
 }
 
 type Team struct {

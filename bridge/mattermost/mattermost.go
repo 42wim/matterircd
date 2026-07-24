@@ -644,8 +644,10 @@ func (m *Mattermost) createUser(mmuser *model.User) *bridge.UserInfo {
 
 	// We only care about mentions for ourselves
 	var mentionKeys []string
-	if keys := mmuser.NotifyProps["mention_keys"]; me && keys != "" {
-		mentionKeys = strings.Split(keys, ",")
+	if me && m.mc.User != nil && m.mc.User.NotifyProps != nil {
+		if keys := m.mc.User.NotifyProps["mention_keys"]; keys != "" {
+			mentionKeys = strings.Split(keys, ",")
+		}
 	}
 
 	info := &bridge.UserInfo{

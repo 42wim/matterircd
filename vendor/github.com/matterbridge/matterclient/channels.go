@@ -1,7 +1,9 @@
 package matterclient
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -140,9 +142,14 @@ func (m *Client) GetChannelUsers(channelID string) ([]*model.User, error) {
 	retryCount := 0
 
 	for {
-		mmusersPaged, resp, err := m.Client.GetUsersInChannel(channelID, idx, batchSize, "")
+		query := fmt.Sprintf("/users?in_channel=%v&page=%v&per_page=%v", channelID, idx, batchSize)
+		resp, err := m.Client.DoAPIGet(query, "")
 		if err != nil {
-			shouldRetry, hErr := m.HandleRetry("GetUsersInChannel", retryCount, 10, resp)
+			var mResp *model.Response
+			if resp != nil {
+				mResp = model.BuildResponse(resp)
+			}
+			shouldRetry, hErr := m.HandleRetry("GetUsersInChannel", retryCount, 10, mResp)
 			if hErr == nil && shouldRetry {
 				retryCount++
 				continue
@@ -151,9 +158,28 @@ func (m *Client) GetChannelUsers(channelID string) ([]*model.User, error) {
 		}
 		retryCount = 0
 
-		allUsers = append(allUsers, mmusersPaged...)
+		var list []UserSummary
+		if jsonErr := json.NewDecoder(resp.Body).Decode(&list); jsonErr != nil {
+			resp.Body.Close()
+			return nil, jsonErr
+		}
+		resp.Body.Close()
 
-		if len(mmusersPaged) < batchSize {
+		// Map our lightweight struct back to model.User.
+		// The maps (Props, NotifyProps, etc.) remain nil and take virtually zero memory!
+		for _, u := range list {
+			allUsers = append(allUsers, &model.User{
+				Id:        u.Id,
+				Username:  u.Username,
+				FirstName: u.FirstName,
+				LastName:  u.LastName,
+				Nickname:  u.Nickname,
+				Roles:     u.Roles,
+				Email:     u.Email,
+			})
+		}
+
+		if len(list) < batchSize {
 			break
 		}
 		idx++
