@@ -430,9 +430,7 @@ func (m *Client) UpdateChannelsTeam(teamID string) error {
 	}
 
 	for _, ch := range mmchannels {
-		if _, exists := m.Users.channelData[ch.Id]; !exists {
-			m.Users.channelData[ch.Id] = ch
-		}
+		m.Users.channelData[ch.Id] = ch
 		m.Users.joinedChannels[ch.Id] = struct{}{}
 	}
 
