@@ -200,21 +200,21 @@ func (m *Client) GetChannelUsers(channelID string) ([]*model.User, error) {
 		cachedUser, exists := m.Users.users[u.Id]
 		if !exists {
 			cachedUser = &model.User{
-				Id:        strings.Clone(u.Id),
-				Username:  strings.Clone(u.Username),
-				FirstName: strings.Clone(u.FirstName),
-				LastName:  strings.Clone(u.LastName),
-				Nickname:  strings.Clone(u.Nickname),
-				Roles:     strings.Clone(u.Roles),
+				Id:        u.Id,
+				Username:  u.Username,
+				FirstName: u.FirstName,
+				LastName:  u.LastName,
+				Nickname:  u.Nickname,
+				Roles:     u.Roles,
 			}
 			m.Users.users[u.Id] = cachedUser
 		} else {
 			// Ensure updated string fields are also cloned
-			cachedUser.Username = strings.Clone(u.Username)
-			cachedUser.FirstName = strings.Clone(u.FirstName)
-			cachedUser.LastName = strings.Clone(u.LastName)
-			cachedUser.Nickname = strings.Clone(u.Nickname)
-			cachedUser.Roles = strings.Clone(u.Roles)
+			cachedUser.Username = u.Username
+			cachedUser.FirstName = u.FirstName
+			cachedUser.LastName = u.LastName
+			cachedUser.Nickname = u.Nickname
+			cachedUser.Roles = u.Roles
 		}
 
 		allUsers = append(allUsers, cachedUser)
@@ -376,8 +376,10 @@ func (m *Client) UpdateChannelsTeam(teamID string) error {
 	}
 
 	for _, ch := range mmchannels {
-		cloneChannelStrings(ch)
-		m.Users.channelData[ch.Id] = ch
+		if _, exists := m.Users.channelData[ch.Id]; !exists {
+			cloneChannelStrings(ch)
+			m.Users.channelData[ch.Id] = ch
+		}
 		m.Users.joinedChannels[ch.Id] = struct{}{}
 	}
 
