@@ -3,6 +3,7 @@ package matterclient
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/mattermost/mattermost-server/v6/model"
@@ -65,7 +66,8 @@ func (m *Client) GetStatuses() map[string]string {
 		}
 
 		for _, st := range res {
-			statuses[st.UserId] = m.SetUserStatus(st.UserId, st.Status)
+			cleanID := strings.Clone(st.UserId)
+			statuses[cleanID] = m.SetUserStatus(cleanID, st.Status)
 		}
 	}
 
@@ -110,6 +112,13 @@ func (m *Client) GetUser(userID string) *model.User {
 		m.logger.Debugf("GetUser failed to fetch missing user %s: %s", userID, err)
 		return nil
 	}
+
+	res.Id = strings.Clone(res.Id)
+	res.Username = strings.Clone(res.Username)
+	res.FirstName = strings.Clone(res.FirstName)
+	res.LastName = strings.Clone(res.LastName)
+	res.Nickname = strings.Clone(res.Nickname)
+	res.Roles = strings.Clone(res.Roles)
 
 	m.UpdateUser(res)
 
@@ -187,14 +196,13 @@ func (m *Client) UpdateUsers() error {
 
 		m.Users.mu.Lock()
 		for _, u := range list {
-			// Convert directly into the cache to avoid maps
 			m.Users.users[u.Id] = &model.User{
-				Id:        u.Id,
-				Username:  u.Username,
-				FirstName: u.FirstName,
-				LastName:  u.LastName,
-				Nickname:  u.Nickname,
-				Roles:     u.Roles,
+				Id:        strings.Clone(u.Id),
+				Username:  strings.Clone(u.Username),
+				FirstName: strings.Clone(u.FirstName),
+				LastName:  strings.Clone(u.LastName),
+				Nickname:  strings.Clone(u.Nickname),
+				Roles:     strings.Clone(u.Roles),
 			}
 		}
 		m.Users.lastUpdated.Store(time.Now().Unix())
@@ -234,18 +242,38 @@ func (m *Client) UpdateUserNick(nick string) error {
 }
 
 func (m *Client) UsernamesInChannel(channelID string) []string {
-	res, _, err := m.Client.GetChannelMembers(channelID, 0, 50000, "")
-	if err != nil {
-		m.logger.Errorf("UsernamesInChannel(%s) failed: %s", channelID, err)
-
-		return []string{}
-	}
+	const batchSize = 200
 
 	allusers := m.GetUsers()
-	result := make([]string, 0, 1000)
+	result := make([]string, 0, batchSize)
 
-	for _, member := range res {
-		result = append(result, allusers[member.UserId].Nickname)
+	idx := 0
+	retryCount := 0
+	for {
+		res, resp, err := m.Client.GetChannelMembers(channelID, idx, batchSize, "")
+		if err != nil {
+			shouldRetry, hErr := m.HandleRetry("UsernamesInChannel", retryCount, 10, resp)
+			if hErr == nil && shouldRetry {
+				retryCount++
+				continue
+			}
+
+			m.logger.Errorf("UsernamesInChannel(%s) failed: %s", channelID, err)
+			return result
+		}
+		retryCount = 0
+
+		for _, member := range res {
+			if user, ok := allusers[member.UserId]; ok {
+				result = append(result, user.Nickname)
+			}
+		}
+
+		if len(res) < batchSize {
+			break
+		}
+
+		idx++
 	}
 
 	return result
