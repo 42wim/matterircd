@@ -379,8 +379,16 @@ func (s *server) handle(u *User) {
 }
 
 func (s *server) BatchAdd(users []*User) {
+	if len(users) == 0 {
+		return
+	}
+
 	s.Lock()
 	defer s.Unlock()
+
+	if s.users == nil {
+		s.users = make(map[string]*User, len(users))
+	}
 
 	for _, u := range users {
 		id := u.ID()

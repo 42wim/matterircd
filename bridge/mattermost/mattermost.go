@@ -671,7 +671,7 @@ func (m *Mattermost) createUser(mmuser *model.User) *bridge.UserInfo {
 		Nick:        nick,
 		User:        mmuser.Id,
 		Real:        realName,
-		Host:        m.mc.Client.URL,
+		Host:        m.credentials.Server,
 		Roles:       mmuser.Roles,
 		Ghost:       true,
 		Me:          me,

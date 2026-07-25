@@ -19,14 +19,12 @@ import (
 func NewUser(c Conn) *User {
 	u := &User{
 		Conn: c,
-		UserInfo: &bridge.UserInfo{
-			Host: "*",
-		},
-		channels: make(map[Channel]struct{}, 5),
 	}
 
-	// Only allocate the heavy concurrency channel for real IRC clients!
 	if c != nil {
+		u.UserInfo = &bridge.UserInfo{
+			Host: "*",
+		}
 		u.DecodeCh = make(chan *irc.Message)
 	}
 

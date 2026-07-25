@@ -197,12 +197,12 @@ func (m *Client) UpdateUsers() error {
 		m.Users.mu.Lock()
 		for _, u := range list {
 			m.Users.users[u.Id] = &model.User{
-				Id:        strings.Clone(u.Id),
-				Username:  strings.Clone(u.Username),
-				FirstName: strings.Clone(u.FirstName),
-				LastName:  strings.Clone(u.LastName),
-				Nickname:  strings.Clone(u.Nickname),
-				Roles:     strings.Clone(u.Roles),
+				Id:        u.Id,
+				Username:  u.Username,
+				FirstName: u.FirstName,
+				LastName:  u.LastName,
+				Nickname:  u.Nickname,
+				Roles:     u.Roles,
 			}
 		}
 		m.Users.lastUpdated.Store(time.Now().Unix())

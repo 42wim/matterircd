@@ -37,6 +37,18 @@ type Credentials struct {
 	MFAToken         string
 }
 
+//nolint:stylecheck
+type ChannelSummary struct {
+        Id          string `json:"id"`
+        TeamId      string `json:"team_id"`
+        Type        string `json:"type"`
+        DisplayName string `json:"display_name"`
+        Name        string `json:"name"`
+        Header      string `json:"header"`
+        Purpose     string `json:"purpose"`
+        CreatorId   string `json:"creator_id"`
+}
+
 type UsersCache struct {
 	mu       sync.RWMutex
 	users    map[string]*model.User
@@ -453,12 +465,12 @@ func (m *Client) initUser() error {
 
 			for _, u := range list {
 				teamUsers = append(teamUsers, &model.User{
-					Id:        strings.Clone(u.Id),
-					Username:  strings.Clone(u.Username),
-					FirstName: strings.Clone(u.FirstName),
-					LastName:  strings.Clone(u.LastName),
-					Nickname:  strings.Clone(u.Nickname),
-					Roles:     strings.Clone(u.Roles),
+					Id:        u.Id,
+					Username:  u.Username,
+					FirstName: u.FirstName,
+					LastName:  u.LastName,
+					Nickname:  u.Nickname,
+					Roles:     u.Roles,
 				})
 			}
 
