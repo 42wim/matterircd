@@ -153,7 +153,7 @@ func (m *Client) GetChannelUsers(channelID string) ([]*model.User, error) {
 	m.Users.mu.RUnlock()
 
 	const batchSize = 200
-	var fetchedUsers []UserSummary
+	fetchedUsers := make([]UserSummary, 0, batchSize)
 
 	idx := 0
 	retryCount := 0

@@ -636,10 +636,13 @@ func (m *Mattermost) createUser(mmuser *model.User) *bridge.UserInfo {
 		nick = mmuser.Nickname
 	}
 
-	me := mmuser.Id == m.mc.User.Id
+	me := false
 	teamID := ""
-	if me {
-		teamID = m.mc.Team.ID
+	if m.mc.User != nil {
+		me = mmuser.Id == m.mc.User.Id
+		if me && m.mc.Team != nil {
+			teamID = m.mc.Team.ID
+		}
 	}
 
 	var realName string

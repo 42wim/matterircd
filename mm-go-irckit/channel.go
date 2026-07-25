@@ -335,8 +335,9 @@ func (ch *channel) BatchJoin(inputusers []*User) error {
 
 	ch.mu.Lock()
 	for _, u := range inputusers {
-		if _, exists := ch.usersIdx[u.ID()]; !exists {
-			ch.usersIdx[u.ID()] = u
+		uid := u.ID()
+		if _, exists := ch.usersIdx[uid]; !exists {
+			ch.usersIdx[uid] = u
 			users = append(users, u)
 		}
 	}
