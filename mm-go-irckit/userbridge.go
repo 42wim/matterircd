@@ -651,7 +651,11 @@ func (u *User) CreateUsersFromInfo(info []*bridge.UserInfo) []*User {
 		if ghost, ok := u.Srv.HasUserID(userinfo.User); ok {
 			ghost.Lock()
 			ghost.UserInfo = userinfo
-			ghost.Nick = sanitizeNick(ghost.Nick)
+			nick := ghost.UserInfo.Nick
+			if nick == "" {
+				nick = ghost.UserInfo.Username
+			}
+			ghost.Nick = sanitizeNick(nick)
 			ghost.Unlock()
 			users = append(users, ghost)
 			continue
@@ -659,7 +663,11 @@ func (u *User) CreateUsersFromInfo(info []*bridge.UserInfo) []*User {
 
 		ghost := NewUser(nil)
 		ghost.UserInfo = userinfo
-		ghost.Nick = sanitizeNick(ghost.Nick)
+		nick := ghost.UserInfo.Nick
+		if nick == "" {
+			nick = ghost.UserInfo.Username
+		}
+		ghost.Nick = sanitizeNick(nick)
 
 		u.Srv.Add(ghost)
 
