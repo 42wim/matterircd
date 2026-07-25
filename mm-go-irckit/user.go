@@ -19,12 +19,12 @@ import (
 func NewUser(c Conn) *User {
 	u := &User{
 		Conn:     c,
-		UserInfo: &bridge.UserInfo{},
 	}
 
-	// Only allocate maps, channels, and dummy UserInfo for real connected IRC clients!
 	if c != nil {
-		u.UserInfo.Host = "*"
+		u.UserInfo = &bridge.UserInfo{
+			Host: "*",
+		}
 		u.DecodeCh = make(chan *irc.Message)
 	}
 
