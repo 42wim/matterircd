@@ -18,15 +18,13 @@ import (
 // NewUser creates a *User, wrapping a connection with metadata we need for our server.
 func NewUser(c Conn) *User {
 	u := &User{
-		Conn: c,
-		UserInfo: &bridge.UserInfo{
-			Host: "*",
-		},
-		channels: make(map[Channel]struct{}, 5),
+		Conn:     c,
+		UserInfo: &bridge.UserInfo{},
 	}
 
-	// Only allocate the heavy concurrency channel for real IRC clients!
+	// Only allocate maps, channels, and dummy UserInfo for real connected IRC clients!
 	if c != nil {
+		u.UserInfo.Host = "*"
 		u.DecodeCh = make(chan *irc.Message)
 	}
 

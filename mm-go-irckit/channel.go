@@ -330,21 +330,40 @@ func (ch *channel) SendNamesResponse(u *User) error {
 }
 
 func (ch *channel) BatchJoin(inputusers []*User) error {
-	// TODO: Check if user is already here?
-	users := make([]*User, 0, len(inputusers))
+	if len(inputusers) == 0 {
+		return nil
+	}
 
 	ch.mu.Lock()
+	if ch.usersIdx == nil {
+		ch.usersIdx = make(map[string]*User, len(inputusers))
+	}
+
+	// We only need to post-process the "Me" user to update their internal map.
+	// A tiny stack buffer is more than enough since there is typically only 1 "Me" user.
+	var inlineBuf [2]*User
+	meUsers := inlineBuf[:0]
+
 	for _, u := range inputusers {
 		uid := u.ID()
 		if _, exists := ch.usersIdx[uid]; !exists {
 			ch.usersIdx[uid] = u
-			users = append(users, u)
+
+			// Only gather the "Me" user(s) for the secondary loop.
+			// This prevents allocating a massive slice for ghost users.
+			if u.UserInfo != nil && u.UserInfo.Me {
+				meUsers = append(meUsers, u)
+			}
 		}
 	}
 	ch.mu.Unlock()
 
-	for _, u := range users {
+	// Process only the "Me" user(s)
+	for _, u := range meUsers {
 		u.Lock()
+		if u.channels == nil {
+			u.channels = make(map[Channel]struct{}, 2)
+		}
 		u.channels[ch] = struct{}{}
 		u.Unlock()
 	}

@@ -649,7 +649,7 @@ func (u *User) CreateUsersFromInfo(info []*bridge.UserInfo) []*User {
 		}
 
 		userinfo := userinfo
-		ghost := NewUser(u.Conn)
+		ghost := NewUser(nil)
 		ghost.UserInfo = userinfo
 		ghost.Nick = sanitizeNick(ghost.Nick)
 		users = append(users, ghost)
@@ -674,7 +674,7 @@ func (u *User) updateUserFromInfo(info *bridge.UserInfo) *User {
 		return ghost
 	}
 
-	ghost := NewUser(u.Conn)
+	ghost := NewUser(nil)
 	ghost.UserInfo = info
 
 	u.Srv.Add(ghost)
