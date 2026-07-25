@@ -10,7 +10,30 @@ import (
 )
 
 func (m *Client) parseResponse(rmsg *model.WebSocketResponse) {
-	m.logger.Debugf("getting response: %#v", rmsg)
+	text, ok := rmsg.Data["text"].(string)
+	if ok && text == "pong" {
+		m.logger.Tracef("getting response: %#v", rmsg)
+	} else {
+		m.logger.Debugf("getting response: %#v", rmsg)
+	}
+}
+
+func (m *Client) CreatePost(post *model.Post) (*model.Post, error) {
+	retryCount := 0
+	for {
+		res, resp, err := m.Client.CreatePost(post)
+		if err == nil {
+			return res, nil
+		}
+
+		shouldRetry, hErr := m.HandleRetry("CreatePost", retryCount, 10, resp)
+		if hErr == nil && shouldRetry {
+			retryCount++
+			continue
+		}
+
+		return nil, err
+	}
 }
 
 func (m *Client) DeleteMessage(postID string) error {
@@ -56,23 +79,83 @@ func (m *Client) GetFileLinks(filenames []string) []string {
 	return output
 }
 
-func (m *Client) GetPosts(channelID string, limit int) *model.PostList {
+func (m *Client) GetPost(postID string) (*model.Post, error) {
 	retryCount := 0
 	for {
-		res, resp, err := m.Client.GetPostsForChannel(channelID, 0, limit, "", false)
+		res, resp, err := m.Client.GetPost(postID, "")
 		if err == nil {
-			return res
+			return res, nil
 		}
 
-		shouldRetry, hErr := m.HandleRetry("GetPostsForChannel", retryCount, 10, resp)
+		shouldRetry, hErr := m.HandleRetry("GetPost", retryCount, 10, resp)
 		if hErr == nil && shouldRetry {
 			retryCount++
 			continue
 		}
 
-		m.logger.Errorf("GetPostsForChannel failed for %s: %v", channelID, err)
-		return nil
+		m.logger.Errorf("GetPost failed for %s: %v", postID, err)
+		return nil, err
 	}
+}
+
+func (m *Client) GetPosts(channelID string, limit int) *model.PostList {
+	const batchSize = 200
+
+	if limit <= 0 {
+		limit = 60
+	}
+
+	finalPostList := &model.PostList{
+		Order: []string{},
+		Posts: make(map[string]*model.Post),
+	}
+
+	idx := 0
+	retryCount := 0
+	fetched := 0
+	for fetched < limit {
+		// Figure out how many posts to fetch in this batch.
+		// It will be 200, unless we are close to the limit.
+		currentBatchSize := batchSize
+		if limit-fetched < batchSize {
+			currentBatchSize = limit - fetched
+		}
+
+		res, resp, err := m.Client.GetPostsForChannel(channelID, idx, currentBatchSize, "", false)
+		if err != nil {
+			shouldRetry, hErr := m.HandleRetry("GetPostsForChannel", retryCount, 10, resp)
+			if hErr == nil && shouldRetry {
+				retryCount++
+				continue
+			}
+
+			m.logger.Errorf("GetPostsForChannel failed for %s at page %d: %v", channelID, idx, err)
+			if len(finalPostList.Order) == 0 {
+				return nil
+			}
+			return finalPostList
+		}
+		retryCount = 0
+
+		if res != nil {
+			finalPostList.Order = append(finalPostList.Order, res.Order...)
+			for postID, post := range res.Posts {
+				finalPostList.Posts[postID] = post
+			}
+
+			fetched += len(res.Order)
+
+			if len(res.Order) < currentBatchSize {
+				break
+			}
+		} else {
+			break
+		}
+
+		idx++
+	}
+
+	return finalPostList
 }
 
 func (m *Client) GetPostThread(postID string) *model.PostList {
@@ -80,6 +163,7 @@ func (m *Client) GetPostThread(postID string) *model.PostList {
 		CollapsedThreads: false,
 		Direction:        "up",
 	}
+
 	retryCount := 0
 	for {
 		res, resp, err := m.Client.GetPostThreadWithOpts(postID, "", opts)
@@ -175,7 +259,6 @@ func (m *Client) PostMessageWithFiles(channelID string, text string, rootID stri
 
 	retryCount := 0
 	for {
-		// create DM channel (only happens on first message)
 		res, resp, err := m.Client.CreatePost(post)
 		if err == nil {
 			return res.Id, nil

@@ -38,7 +38,7 @@ type Credentials struct {
 }
 
 type UsersCache struct {
-	mu sync.RWMutex
+	mu       sync.RWMutex
 	users    map[string]*model.User
 	channels map[string]map[string]struct{}
 	teams    map[string]map[string]struct{}
@@ -50,9 +50,19 @@ type UsersCache struct {
 	lastUpdated atomic.Int64
 }
 
+//nolint:stylecheck
+type UserSummary struct {
+	Id        string `json:"id"`
+	Username  string `json:"username"`
+	FirstName string `json:"first_name"`
+	LastName  string `json:"last_name"`
+	Nickname  string `json:"nickname"`
+	Roles     string `json:"roles"`
+}
+
 type Team struct {
-	Team         *model.Team
-	ID           string
+	Team *model.Team
+	ID   string
 
 	LastUserSync    time.Time
 	LastChannelSync time.Time
@@ -120,21 +130,21 @@ func New(login string, pass string, team string, server string, mfatoken string)
 	cache, _ := lru.New(500)
 
 	return &Client{
-		Credentials:  cred,
-		MessageChan:  make(chan *Message, 100),
-		Users:        &UsersCache{
-			users:    make(map[string]*model.User),
-			channels: make(map[string]map[string]struct{}),
-			teams:    make(map[string]map[string]struct{}),
-			statuses: make(map[string]string),
+		Credentials: cred,
+		MessageChan: make(chan *Message, 100),
+		Users: &UsersCache{
+			users:    make(map[string]*model.User, 1000),
+			channels: make(map[string]map[string]struct{}, 1000),
+			teams:    make(map[string]map[string]struct{}, 10),
+			statuses: make(map[string]string, 1000),
 
-			channelData:    make(map[string]*model.Channel),
-			joinedChannels: make(map[string]struct{}),
+			channelData:    make(map[string]*model.Channel, 1000),
+			joinedChannels: make(map[string]struct{}, 200),
 		},
-		rootLogger:   rootLogger,
-		lruCache:     cache,
-		logger:       rootLogger.WithFields(logrus.Fields{"prefix": "matterclient"}),
-		aliveChan:    make(chan bool),
+		rootLogger: rootLogger,
+		lruCache:   cache,
+		logger:     rootLogger.WithFields(logrus.Fields{"prefix": "matterclient"}),
+		aliveChan:  make(chan bool),
 	}
 }
 
@@ -154,7 +164,7 @@ func (m *Client) Login() error {
 			m.logger.Info("reconnect: flushing channel user cache to ensure state consistency")
 
 			m.Users.mu.Lock()
-			m.Users.channels = make(map[string]map[string]struct{})
+			m.Users.channels = make(map[string]map[string]struct{}, 1000)
 			m.Users.mu.Unlock()
 
 			m.Users.lastUpdated.Store(time.Now().Unix())
@@ -188,7 +198,7 @@ func (m *Client) Login() error {
 	}
 
 	if m.Team == nil {
-		validTeamNames := make([]string, len(m.OtherTeams))
+		validTeamNames := make([]string, 0, len(m.OtherTeams))
 		for _, t := range m.OtherTeams {
 			validTeamNames = append(validTeamNames, t.Team.Name)
 		}
@@ -374,6 +384,7 @@ func (m *Client) initUser() error {
 	m.Unlock()
 
 	var teams []*model.Team
+
 	retryCount := 0
 	for {
 		var resp *model.Response
@@ -382,11 +393,13 @@ func (m *Client) initUser() error {
 		if err == nil {
 			break
 		}
+
 		shouldRetry, hErr := m.HandleRetry("GetTeamsForUser", retryCount, 10, resp)
 		if hErr == nil && shouldRetry {
 			retryCount++
 			continue
 		}
+
 		return err
 	}
 
@@ -409,14 +422,19 @@ func (m *Client) initUser() error {
 
 		m.logger.Debugf("fetching users for team %s (cache expired or missing)", team.Name)
 
-		idx := 0
-		var teamUsers []*model.User
-		pageRetryCount := 0
+		teamUsers := make([]*model.User, 0, batchSize)
 
+		idx := 0
+		pageRetryCount := 0
 		for {
-			mmusers, resp, err := m.Client.GetUsersInTeam(team.Id, idx, batchSize, "")
+			query := fmt.Sprintf("/users?in_team=%v&page=%v&per_page=%v", team.Id, idx, batchSize)
+			resp, err := m.Client.DoAPIGet(query, "")
 			if err != nil {
-				shouldRetry, hErr := m.HandleRetry("GetUsersInTeam", pageRetryCount, 10, resp)
+				var mResp *model.Response
+				if resp != nil {
+					mResp = model.BuildResponse(resp)
+				}
+				shouldRetry, hErr := m.HandleRetry("GetUsersInTeam", pageRetryCount, 10, mResp)
 				if hErr == nil && shouldRetry {
 					pageRetryCount++
 					continue
@@ -426,9 +444,25 @@ func (m *Client) initUser() error {
 			}
 			pageRetryCount = 0
 
-			teamUsers = append(teamUsers, mmusers...)
+			var list []UserSummary
+			if jsonErr := json.NewDecoder(resp.Body).Decode(&list); jsonErr != nil {
+				resp.Body.Close()
+				return jsonErr
+			}
+			resp.Body.Close()
 
-			if len(mmusers) < batchSize {
+			for _, u := range list {
+				teamUsers = append(teamUsers, &model.User{
+					Id:        strings.Clone(u.Id),
+					Username:  strings.Clone(u.Username),
+					FirstName: strings.Clone(u.FirstName),
+					LastName:  strings.Clone(u.LastName),
+					Nickname:  strings.Clone(u.Nickname),
+					Roles:     strings.Clone(u.Roles),
+				})
+			}
+
+			if len(list) < batchSize {
 				break
 			}
 
@@ -441,7 +475,7 @@ func (m *Client) initUser() error {
 		if m.Users.teams == nil {
 			m.Users.teams = make(map[string]map[string]struct{})
 		}
-		m.Users.teams[team.Id] = make(map[string]struct{})
+		m.Users.teams[team.Id] = make(map[string]struct{}, len(teamUsers))
 		for _, u := range teamUsers {
 			m.Users.users[u.Id] = u
 			m.Users.teams[team.Id][u.Id] = struct{}{}
@@ -505,7 +539,7 @@ func (m *Client) initUserChannels() error {
 		}
 
 		m.logger.Debugf("found %d channels for user in team %s", joinedCount, t.Team.Name)
-		m.logger.Debugf("found %d public channels in team team %s", publicCount, t.Team.Name)
+		m.logger.Debugf("found %d public channels in team %s", publicCount, t.Team.Name)
 	}
 
 	return nil
@@ -641,7 +675,8 @@ func (m *Client) wsConnect() {
 			TLSClientConfig: &tls.Config{
 				InsecureSkipVerify: m.SkipTLSVerify, //nolint:gosec
 			},
-			Proxy: http.ProxyFromEnvironment,
+			Proxy:             http.ProxyFromEnvironment,
+			EnableCompression: false,
 		}
 
 		var err error
@@ -698,7 +733,7 @@ func (m *Client) doCheckAlive() error {
 
 	m.logger.Tracef("websocket has been quiet (last event %v ago; up %s), falling back to HTTP GetPing", timeSinceActivity.Round(time.Second), uptime)
 	if _, _, err := m.Client.GetPing(); err != nil {
-		m.logger.Warnf("fallback HTTP ping failed (up %s): %w", uptime, err)
+		m.logger.Warnf("fallback HTTP ping failed (up %s): %s", uptime, err)
 		return fmt.Errorf("fallback HTTP ping failed (up %s): %w", uptime, err)
 	}
 
@@ -783,7 +818,12 @@ func (m *Client) WsReceiver(ctx context.Context) {
 				continue
 			}
 
-			m.logger.Debugf("WsReceiver event: %#v", event)
+			eventType := event.EventType()
+			if eventType == model.WebsocketEventTyping {
+				m.logger.Tracef("WsReceiver event: %#v", event)
+			} else {
+				m.logger.Debugf("WsReceiver event: %#v", event)
+			}
 
 			m.lastWsActivity.Store(time.Now().Unix())
 
@@ -810,7 +850,12 @@ func (m *Client) WsReceiver(ctx context.Context) {
 				continue
 			}
 
-			m.logger.Debugf("WsReceiver response: %#v", response)
+			text, ok := response.Data["text"].(string)
+			if ok && text == "pong" {
+				m.logger.Tracef("WsReceiver response: %#v", response)
+			} else {
+				m.logger.Debugf("WsReceiver response: %#v", response)
+			}
 
 			m.lastWsActivity.Store(time.Now().Unix())
 
@@ -897,7 +942,7 @@ func (m *Client) HandleRatelimit(name string, resp *model.Response) error {
 		return fmt.Errorf("StatusCode error: %d", resp.StatusCode)
 	}
 
-	resetHeaderStr := resp.Header.Get("X-RateLimit-Reset")
+	resetHeaderStr := resp.Header.Get("X-RateLimit-Reset") //nolint:canonicalheader
 	if resetHeaderStr == "" {
 		time.Sleep(3 * time.Second)
 		return nil
@@ -946,11 +991,11 @@ func (m *Client) HandleRetry(name string, current int, maxLimit int, resp *model
 	}
 
 	switch {
-	case resp.StatusCode == 429:
+	case resp.StatusCode == http.StatusTooManyRequests:
 		_ = m.HandleRatelimit(name, resp)
 		return true, nil
 
-	case resp.StatusCode >= 500:
+	case resp.StatusCode >= http.StatusInternalServerError:
 		m.logger.Warnf("Transient error %d on %s, backing off: %ds (attempt %d/%d)",
 			resp.StatusCode, name, current+1, current+1, maxLimit)
 		time.Sleep(time.Duration(current+1) * time.Second)
@@ -1007,6 +1052,7 @@ func (m *Client) UpdateTeamUsersCache(teamID string, user *model.User) {
 	m.Users.lastUpdated.Store(time.Now().Unix())
 }
 
+//nolint:unused
 func (m *Client) syncSingleUser(event *model.WebSocketEvent) {
 	userID, ok := event.GetData()["user_id"].(string)
 	if !ok {
@@ -1026,6 +1072,7 @@ func (m *Client) syncSingleUser(event *model.WebSocketEvent) {
 	m.UpdateTeamUsersCache(teamID, user)
 }
 
+//nolint:gocognit,gocyclo,funlen
 func (m *Client) maintainUsersCache(event *model.WebSocketEvent) {
 	switch event.EventType() {
 	case model.WebsocketEventNewUser:
@@ -1070,7 +1117,6 @@ func (m *Client) maintainUsersCache(event *model.WebSocketEvent) {
 		if postStr, ok := event.GetData()["post"].(string); ok && channelID != "" {
 			post := &model.Post{}
 			if err := json.Unmarshal([]byte(postStr), post); err == nil {
-
 				m.Users.mu.RLock()
 				_, channelIsCached := m.Users.channels[channelID]
 				_, userIsCached := m.Users.channels[channelID][post.UserId]

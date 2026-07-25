@@ -1,7 +1,9 @@
 package matterclient
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -22,6 +24,14 @@ func (m *Client) GetChannel(channelID string) *model.Channel {
 		return nil
 	}
 
+	mmchannel.Id = strings.Clone(mmchannel.Id)
+	mmchannel.TeamId = strings.Clone(mmchannel.TeamId)
+	mmchannel.Type = model.ChannelType(strings.Clone(string(mmchannel.Type)))
+	mmchannel.DisplayName = strings.Clone(mmchannel.DisplayName)
+	mmchannel.Name = strings.Clone(mmchannel.Name)
+	mmchannel.Header = strings.Clone(mmchannel.Header)
+	mmchannel.Purpose = strings.Clone(mmchannel.Purpose)
+
 	m.Users.mu.Lock()
 	m.Users.channelData[channelID] = mmchannel
 	m.Users.mu.Unlock()
@@ -34,7 +44,7 @@ func (m *Client) GetChannels() []*model.Channel {
 	m.Users.mu.RLock()
 	defer m.Users.mu.RUnlock()
 
-	var channels []*model.Channel
+	channels := make([]*model.Channel, 0, 200)
 	for id := range m.Users.joinedChannels {
 		if ch, exists := m.Users.channelData[id]; exists {
 			channels = append(channels, ch)
@@ -96,6 +106,14 @@ func (m *Client) getChannelIDTeam(name string, teamID string) string {
 		return ""
 	}
 
+	channel.Id = strings.Clone(channel.Id)
+	channel.TeamId = strings.Clone(channel.TeamId)
+	channel.Type = model.ChannelType(strings.Clone(string(channel.Type)))
+	channel.DisplayName = strings.Clone(channel.DisplayName)
+	channel.Name = strings.Clone(channel.Name)
+	channel.Header = strings.Clone(channel.Header)
+	channel.Purpose = strings.Clone(channel.Purpose)
+
 	m.Users.mu.Lock()
 	if m.Users.channelData == nil {
 		m.Users.channelData = make(map[string]*model.Channel)
@@ -134,15 +152,20 @@ func (m *Client) GetChannelUsers(channelID string) ([]*model.User, error) {
 	}
 	m.Users.mu.RUnlock()
 
-	var allUsers []*model.User
-	idx := 0
 	const batchSize = 200
-	retryCount := 0
+	var fetchedUsers []UserSummary
 
+	idx := 0
+	retryCount := 0
 	for {
-		mmusersPaged, resp, err := m.Client.GetUsersInChannel(channelID, idx, batchSize, "")
+		query := fmt.Sprintf("/users?in_channel=%v&page=%v&per_page=%v", channelID, idx, batchSize)
+		resp, err := m.Client.DoAPIGet(query, "")
 		if err != nil {
-			shouldRetry, hErr := m.HandleRetry("GetUsersInChannel", retryCount, 10, resp)
+			var mResp *model.Response
+			if resp != nil {
+				mResp = model.BuildResponse(resp)
+			}
+			shouldRetry, hErr := m.HandleRetry("GetUsersInChannel", retryCount, 10, mResp)
 			if hErr == nil && shouldRetry {
 				retryCount++
 				continue
@@ -151,25 +174,53 @@ func (m *Client) GetChannelUsers(channelID string) ([]*model.User, error) {
 		}
 		retryCount = 0
 
-		allUsers = append(allUsers, mmusersPaged...)
+		var list []UserSummary
+		if jsonErr := json.NewDecoder(resp.Body).Decode(&list); jsonErr != nil {
+			resp.Body.Close()
+			return nil, jsonErr
+		}
+		resp.Body.Close()
 
-		if len(mmusersPaged) < batchSize {
+		fetchedUsers = append(fetchedUsers, list...)
+
+		if len(list) < batchSize {
 			break
 		}
 		idx++
 	}
 
-	m.Users.mu.Lock()
-	defer m.Users.mu.Unlock()
+	allUsers := make([]*model.User, 0, len(fetchedUsers))
 
+	m.Users.mu.Lock()
 	if m.Users.channels[channelID] == nil {
-		m.Users.channels[channelID] = make(map[string]struct{})
+		m.Users.channels[channelID] = make(map[string]struct{}, len(fetchedUsers))
 	}
 
-	for _, u := range allUsers {
-		m.Users.users[u.Id] = u
+	for _, u := range fetchedUsers {
+		cachedUser, exists := m.Users.users[u.Id]
+		if !exists {
+			cachedUser = &model.User{
+				Id:        strings.Clone(u.Id),
+				Username:  strings.Clone(u.Username),
+				FirstName: strings.Clone(u.FirstName),
+				LastName:  strings.Clone(u.LastName),
+				Nickname:  strings.Clone(u.Nickname),
+				Roles:     strings.Clone(u.Roles),
+			}
+			m.Users.users[u.Id] = cachedUser
+		} else {
+			// Ensure updated string fields are also cloned
+			cachedUser.Username = strings.Clone(u.Username)
+			cachedUser.FirstName = strings.Clone(u.FirstName)
+			cachedUser.LastName = strings.Clone(u.LastName)
+			cachedUser.Nickname = strings.Clone(u.Nickname)
+			cachedUser.Roles = strings.Clone(u.Roles)
+		}
+
+		allUsers = append(allUsers, cachedUser)
 		m.Users.channels[channelID][u.Id] = struct{}{}
 	}
+	m.Users.mu.Unlock()
 
 	return allUsers, nil
 }
@@ -202,7 +253,7 @@ func (m *Client) GetMoreChannels() []*model.Channel {
 	m.Users.mu.RLock()
 	defer m.Users.mu.RUnlock()
 
-	var channels []*model.Channel
+	channels := make([]*model.Channel, 0, 200)
 	for id, ch := range m.Users.channelData {
 		if _, joined := m.Users.joinedChannels[id]; !joined {
 			channels = append(channels, ch)
@@ -263,11 +314,12 @@ func (m *Client) UpdateChannelsTeam(teamID string) error {
 
 	const batchSize = 200
 	var mmchannels []*model.Channel
-	retryCount := 0
 
+	retryCount := 0
 	for {
 		var resp *model.Response
 		var err error
+
 		mmchannels, resp, err = m.Client.GetChannelsForTeamForUser(teamID, m.User.Id, false, "")
 		if err == nil {
 			break
@@ -278,13 +330,14 @@ func (m *Client) UpdateChannelsTeam(teamID string) error {
 			retryCount++
 			continue
 		}
+
 		return err
 	}
 
-	idx := 0
 	moreChannels := make([]*model.Channel, 0, batchSize)
-	retryCount = 0
 
+	idx := 0
+	retryCount = 0
 	for {
 		channels, resp, err := m.Client.GetPublicChannelsForTeam(teamID, idx, batchSize, "")
 		if err != nil {
@@ -310,11 +363,29 @@ func (m *Client) UpdateChannelsTeam(teamID string) error {
 		m.Users.joinedChannels = make(map[string]struct{})
 	}
 
+	// Helper function to sever JSON backing arrays from a channel's strings
+	cloneChannelStrings := func(ch *model.Channel) {
+		ch.Id = strings.Clone(ch.Id)
+		ch.TeamId = strings.Clone(ch.TeamId)
+		ch.Type = model.ChannelType(strings.Clone(string(ch.Type)))
+		ch.DisplayName = strings.Clone(ch.DisplayName)
+		ch.Name = strings.Clone(ch.Name)
+		ch.Header = strings.Clone(ch.Header)
+		ch.Purpose = strings.Clone(ch.Purpose)
+		ch.CreatorId = strings.Clone(ch.CreatorId)
+	}
+
 	for _, ch := range mmchannels {
+		cloneChannelStrings(ch)
 		m.Users.channelData[ch.Id] = ch
 		m.Users.joinedChannels[ch.Id] = struct{}{}
 	}
+
 	for _, ch := range moreChannels {
+		if _, exists := m.Users.channelData[ch.Id]; exists {
+			continue
+		}
+		cloneChannelStrings(ch)
 		m.Users.channelData[ch.Id] = ch
 	}
 	m.Users.mu.Unlock()
