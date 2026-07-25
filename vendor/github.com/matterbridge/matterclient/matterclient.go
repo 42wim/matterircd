@@ -38,7 +38,7 @@ type Credentials struct {
 }
 
 type UsersCache struct {
-	mu sync.RWMutex
+	mu       sync.RWMutex
 	users    map[string]*model.User
 	channels map[string]map[string]struct{}
 	teams    map[string]map[string]struct{}
@@ -48,6 +48,15 @@ type UsersCache struct {
 	joinedChannels map[string]struct{}
 
 	lastUpdated atomic.Int64
+}
+
+type UserSummary struct {
+        Id        string `json:"id"`
+        Username  string `json:"username"`
+        FirstName string `json:"first_name"`
+        LastName  string `json:"last_name"`
+        Nickname  string `json:"nickname"`
+        Roles     string `json:"roles"`
 }
 
 type Team struct {
@@ -123,13 +132,13 @@ func New(login string, pass string, team string, server string, mfatoken string)
 		Credentials:  cred,
 		MessageChan:  make(chan *Message, 100),
 		Users:        &UsersCache{
-			users:    make(map[string]*model.User),
-			channels: make(map[string]map[string]struct{}),
-			teams:    make(map[string]map[string]struct{}),
-			statuses: make(map[string]string),
+			users:    make(map[string]*model.User, 1000),
+			channels: make(map[string]map[string]struct{}, 1000),
+			teams:    make(map[string]map[string]struct{}, 10),
+			statuses: make(map[string]string, 1000),
 
-			channelData:    make(map[string]*model.Channel),
-			joinedChannels: make(map[string]struct{}),
+			channelData:    make(map[string]*model.Channel, 1000),
+			joinedChannels: make(map[string]struct{}, 200),
 		},
 		rootLogger:   rootLogger,
 		lruCache:     cache,
@@ -154,7 +163,7 @@ func (m *Client) Login() error {
 			m.logger.Info("reconnect: flushing channel user cache to ensure state consistency")
 
 			m.Users.mu.Lock()
-			m.Users.channels = make(map[string]map[string]struct{})
+			m.Users.channels = make(map[string]map[string]struct{}, 1000)
 			m.Users.mu.Unlock()
 
 			m.Users.lastUpdated.Store(time.Now().Unix())
@@ -410,13 +419,18 @@ func (m *Client) initUser() error {
 		m.logger.Debugf("fetching users for team %s (cache expired or missing)", team.Name)
 
 		idx := 0
-		var teamUsers []*model.User
+		teamUsers := make([]*model.User, 0, batchSize)
 		pageRetryCount := 0
 
 		for {
-			mmusers, resp, err := m.Client.GetUsersInTeam(team.Id, idx, batchSize, "")
+			query := fmt.Sprintf("/users?in_team=%v&page=%v&per_page=%v", team.Id, idx, batchSize)
+			resp, err := m.Client.DoAPIGet(query, "")
 			if err != nil {
-				shouldRetry, hErr := m.HandleRetry("GetUsersInTeam", pageRetryCount, 10, resp)
+				var mResp *model.Response
+				if resp != nil {
+					mResp = model.BuildResponse(resp)
+				}
+				shouldRetry, hErr := m.HandleRetry("GetUsersInTeam", pageRetryCount, 10, mResp)
 				if hErr == nil && shouldRetry {
 					pageRetryCount++
 					continue
@@ -426,9 +440,27 @@ func (m *Client) initUser() error {
 			}
 			pageRetryCount = 0
 
-			teamUsers = append(teamUsers, mmusers...)
+			// Decode into our lightweight struct, completely ignoring heavy maps!
+			var list []UserSummary
+			if jsonErr := json.NewDecoder(resp.Body).Decode(&list); jsonErr != nil {
+				resp.Body.Close()
+				return jsonErr
+			}
+			resp.Body.Close()
 
-			if len(mmusers) < batchSize {
+			// Map back to standard model.User
+			for _, u := range list {
+				teamUsers = append(teamUsers, &model.User{
+					Id:        u.Id,
+					Username:  u.Username,
+					FirstName: u.FirstName,
+					LastName:  u.LastName,
+					Nickname:  u.Nickname,
+					Roles:     u.Roles,
+				})
+			}
+
+			if len(list) < batchSize {
 				break
 			}
 
@@ -441,7 +473,7 @@ func (m *Client) initUser() error {
 		if m.Users.teams == nil {
 			m.Users.teams = make(map[string]map[string]struct{})
 		}
-		m.Users.teams[team.Id] = make(map[string]struct{})
+		m.Users.teams[team.Id] = make(map[string]struct{}, len(teamUsers))
 		for _, u := range teamUsers {
 			m.Users.users[u.Id] = u
 			m.Users.teams[team.Id][u.Id] = struct{}{}
