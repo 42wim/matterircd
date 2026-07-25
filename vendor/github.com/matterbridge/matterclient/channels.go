@@ -19,20 +19,33 @@ func (m *Client) GetChannel(channelID string) *model.Channel {
 		return ch
 	}
 
-	mmchannel, _, err := m.Client.GetChannel(channelID, "")
+	query := fmt.Sprintf("/channels/%v", channelID)
+	resp, err := m.Client.DoAPIGet(query, "")
 	if err != nil {
 		return nil
 	}
+	defer resp.Body.Close()
 
-	mmchannel.Id = strings.Clone(mmchannel.Id)
-	mmchannel.TeamId = strings.Clone(mmchannel.TeamId)
-	mmchannel.Type = model.ChannelType(strings.Clone(string(mmchannel.Type)))
-	mmchannel.DisplayName = strings.Clone(mmchannel.DisplayName)
-	mmchannel.Name = strings.Clone(mmchannel.Name)
-	mmchannel.Header = strings.Clone(mmchannel.Header)
-	mmchannel.Purpose = strings.Clone(mmchannel.Purpose)
+	var summary ChannelSummary
+	if err := json.NewDecoder(resp.Body).Decode(&summary); err != nil {
+		return nil
+	}
+
+	mmchannel := &model.Channel{
+		Id:          summary.Id,
+		TeamId:      summary.TeamId,
+		Type:        model.ChannelType(summary.Type),
+		DisplayName: summary.DisplayName,
+		Name:        summary.Name,
+		Header:      summary.Header,
+		Purpose:     summary.Purpose,
+		CreatorId:   summary.CreatorId,
+	}
 
 	m.Users.mu.Lock()
+	if m.Users.channelData == nil {
+		m.Users.channelData = make(map[string]*model.Channel)
+	}
 	m.Users.channelData[channelID] = mmchannel
 	m.Users.mu.Unlock()
 
@@ -100,19 +113,29 @@ func (m *Client) getChannelIDTeam(name string, teamID string) string {
 	m.Users.mu.RUnlock()
 
 	// Fallback if it's not found in the t.Channels or t.MoreChannels cache.
-	// This also let's us join private channels.
-	channel, _, err := m.Client.GetChannelByName(name, teamID, "")
+	// This also lets us join private channels.
+	query := fmt.Sprintf("/teams/%v/channels/name/%v", teamID, name)
+	resp, err := m.Client.DoAPIGet(query, "")
 	if err != nil {
 		return ""
 	}
+	defer resp.Body.Close()
 
-	channel.Id = strings.Clone(channel.Id)
-	channel.TeamId = strings.Clone(channel.TeamId)
-	channel.Type = model.ChannelType(strings.Clone(string(channel.Type)))
-	channel.DisplayName = strings.Clone(channel.DisplayName)
-	channel.Name = strings.Clone(channel.Name)
-	channel.Header = strings.Clone(channel.Header)
-	channel.Purpose = strings.Clone(channel.Purpose)
+	var summary ChannelSummary
+	if err := json.NewDecoder(resp.Body).Decode(&summary); err != nil {
+		return ""
+	}
+
+	channel := &model.Channel{
+		Id:          summary.Id,
+		TeamId:      summary.TeamId,
+		Type:        model.ChannelType(summary.Type),
+		DisplayName: summary.DisplayName,
+		Name:        summary.Name,
+		Header:      summary.Header,
+		Purpose:     summary.Purpose,
+		CreatorId:   summary.CreatorId,
+	}
 
 	m.Users.mu.Lock()
 	if m.Users.channelData == nil {
@@ -313,35 +336,59 @@ func (m *Client) UpdateChannelsTeam(teamID string) error {
 	m.RUnlock()
 
 	const batchSize = 200
-	var mmchannels []*model.Channel
 
+	var mmchannels []*model.Channel
 	retryCount := 0
 	for {
-		var resp *model.Response
-		var err error
-
-		mmchannels, resp, err = m.Client.GetChannelsForTeamForUser(teamID, m.User.Id, false, "")
-		if err == nil {
-			break
+		query := fmt.Sprintf("/users/%v/teams/%v/channels", m.User.Id, teamID)
+		resp, err := m.Client.DoAPIGet(query, "")
+		if err != nil {
+			var mResp *model.Response
+			if resp != nil {
+				mResp = model.BuildResponse(resp)
+			}
+			shouldRetry, hErr := m.HandleRetry("GetChannelsForTeamForUser", retryCount, 10, mResp)
+			if hErr == nil && shouldRetry {
+				retryCount++
+				continue
+			}
+			return err
 		}
 
-		shouldRetry, hErr := m.HandleRetry("GetChannelsForTeamForUser", retryCount, 10, resp)
-		if hErr == nil && shouldRetry {
-			retryCount++
-			continue
+		var list []ChannelSummary
+		if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
+			resp.Body.Close()
+			return err
 		}
+		resp.Body.Close()
 
-		return err
+		for _, ch := range list {
+			mmchannels = append(mmchannels, &model.Channel{
+				Id:          ch.Id,
+				TeamId:      ch.TeamId,
+				Type:        model.ChannelType(ch.Type),
+				DisplayName: ch.DisplayName,
+				Name:        ch.Name,
+				Header:      ch.Header,
+				Purpose:     ch.Purpose,
+				CreatorId:   ch.CreatorId,
+			})
+		}
+		break
 	}
 
 	moreChannels := make([]*model.Channel, 0, batchSize)
-
 	idx := 0
 	retryCount = 0
 	for {
-		channels, resp, err := m.Client.GetPublicChannelsForTeam(teamID, idx, batchSize, "")
+		query := fmt.Sprintf("/teams/%v/channels?page=%v&per_page=%v", teamID, idx, batchSize)
+		resp, err := m.Client.DoAPIGet(query, "")
 		if err != nil {
-			shouldRetry, hErr := m.HandleRetry("GetPublicChannelsForTeam", retryCount, 10, resp)
+			var mResp *model.Response
+			if resp != nil {
+				mResp = model.BuildResponse(resp)
+			}
+			shouldRetry, hErr := m.HandleRetry("GetPublicChannelsForTeam", retryCount, 10, mResp)
 			if hErr == nil && shouldRetry {
 				retryCount++
 				continue
@@ -350,8 +397,27 @@ func (m *Client) UpdateChannelsTeam(teamID string) error {
 		}
 		retryCount = 0
 
-		moreChannels = append(moreChannels, channels...)
-		if len(channels) < batchSize {
+		var list []ChannelSummary
+		if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
+			resp.Body.Close()
+			return err
+		}
+		resp.Body.Close()
+
+		for _, ch := range list {
+			moreChannels = append(moreChannels, &model.Channel{
+				Id:          ch.Id,
+				TeamId:      ch.TeamId,
+				Type:        model.ChannelType(ch.Type),
+				DisplayName: ch.DisplayName,
+				Name:        ch.Name,
+				Header:      ch.Header,
+				Purpose:     ch.Purpose,
+				CreatorId:   ch.CreatorId,
+			})
+		}
+
+		if len(list) < batchSize {
 			break
 		}
 		idx++
@@ -363,21 +429,8 @@ func (m *Client) UpdateChannelsTeam(teamID string) error {
 		m.Users.joinedChannels = make(map[string]struct{})
 	}
 
-	// Helper function to sever JSON backing arrays from a channel's strings
-	cloneChannelStrings := func(ch *model.Channel) {
-		ch.Id = strings.Clone(ch.Id)
-		ch.TeamId = strings.Clone(ch.TeamId)
-		ch.Type = model.ChannelType(strings.Clone(string(ch.Type)))
-		ch.DisplayName = strings.Clone(ch.DisplayName)
-		ch.Name = strings.Clone(ch.Name)
-		ch.Header = strings.Clone(ch.Header)
-		ch.Purpose = strings.Clone(ch.Purpose)
-		ch.CreatorId = strings.Clone(ch.CreatorId)
-	}
-
 	for _, ch := range mmchannels {
 		if _, exists := m.Users.channelData[ch.Id]; !exists {
-			cloneChannelStrings(ch)
 			m.Users.channelData[ch.Id] = ch
 		}
 		m.Users.joinedChannels[ch.Id] = struct{}{}
@@ -387,7 +440,6 @@ func (m *Client) UpdateChannelsTeam(teamID string) error {
 		if _, exists := m.Users.channelData[ch.Id]; exists {
 			continue
 		}
-		cloneChannelStrings(ch)
 		m.Users.channelData[ch.Id] = ch
 	}
 	m.Users.mu.Unlock()

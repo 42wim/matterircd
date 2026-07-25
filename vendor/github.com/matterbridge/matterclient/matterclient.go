@@ -37,6 +37,18 @@ type Credentials struct {
 	MFAToken         string
 }
 
+//nolint:stylecheck
+type ChannelSummary struct {
+        Id          string `json:"id"`
+        TeamId      string `json:"team_id"`
+        Type        string `json:"type"`
+        DisplayName string `json:"display_name"`
+        Name        string `json:"name"`
+        Header      string `json:"header"`
+        Purpose     string `json:"purpose"`
+        CreatorId   string `json:"creator_id"`
+}
+
 type UsersCache struct {
 	mu       sync.RWMutex
 	users    map[string]*model.User
