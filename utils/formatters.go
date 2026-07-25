@@ -5,8 +5,10 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/alecthomas/chroma/v2/quick"
+	"github.com/kenshaw/emoji"
 )
 
 //nolint:funlen,gocyclo
@@ -169,4 +171,179 @@ func Markdown2irc(msg string, blockQuoteChar string, inlineCode string) string {
 	}
 
 	return msg
+}
+
+var (
+	emojiInitOnce sync.Once
+	emojiData     []emoji.Emoji
+	emojiReplacer *strings.Replacer
+	emojiAliasMap map[string]int
+)
+
+type emojiSkinToneInfo struct {
+	suffix string
+	match  string
+	tone   emoji.SkinTone
+}
+
+var emojiSkinTones = []emojiSkinToneInfo{
+	{"light", "_light", emoji.Light},
+	{"medium_light", "_medium_light", emoji.MediumLight},
+	{"medium", "_medium", emoji.Medium},
+	{"medium_dark", "_medium_dark", emoji.MediumDark},
+	{"dark", "_dark", emoji.Dark},
+}
+
+func initEmoji() {
+	data := emoji.Gemoji()
+
+	var aliasPairs []string
+	emojiAliasMap = make(map[string]int, len(data))
+
+	for i, e := range data {
+		if e.Emoji == "" {
+			continue
+		}
+		for _, alias := range e.Aliases {
+			if alias == "" {
+				continue
+			}
+			emojiAliasMap[alias], aliasPairs = i, append(aliasPairs, ":"+alias+":", e.Emoji)
+			if !e.SkinTones {
+				continue
+			}
+			// Include skin tones
+			for _, st := range emojiSkinTones {
+				aliasTone := alias + "_" + st.suffix + "_skin_tone"
+				aliasPairs = append(aliasPairs, ":"+aliasTone+":", e.Tone(st.tone))
+			}
+		}
+		// In addition to emoji aliases, include emoji tags
+		for _, tag := range e.Tags {
+			if tag == "" {
+				continue
+			}
+			// But only if it doesn't already exist, e.g. "angry"
+			if _, ok := emojiAliasMap[tag]; !ok {
+				emojiAliasMap[tag], aliasPairs = i, append(aliasPairs, ":"+tag+":", e.Emoji)
+				if !e.SkinTones {
+					continue
+				}
+				// Include skin tones
+				for _, st := range emojiSkinTones {
+					aliasTone := tag + "_" + st.suffix + "_skin_tone"
+					aliasPairs = append(aliasPairs, ":"+aliasTone+":", e.Tone(st.tone))
+				}
+			}
+		}
+	}
+
+	emojiData = data
+	emojiReplacer = strings.NewReplacer(aliasPairs...)
+}
+
+func EmojiReplaceAliases(s string) string {
+	if strings.IndexByte(s, ':') < 0 {
+		return s
+	}
+	emojiInitOnce.Do(initEmoji)
+	return emojiReplacer.Replace(s)
+}
+
+func EmojiFromAlias(alias string) (string, bool) {
+	if alias == "" {
+		return "", false
+	}
+
+	emojiInitOnce.Do(initEmoji)
+
+	if a, ok := strings.CutPrefix(alias, ":"); ok {
+		if a, ok := strings.CutSuffix(a, ":"); ok {
+			alias = a
+		}
+	}
+
+	if idx, ok := emojiAliasMap[alias]; ok {
+		return emojiData[idx].Emoji, true
+	}
+
+	base, ok := strings.CutSuffix(alias, "_skin_tone")
+	if !ok {
+		return "", false
+	}
+
+	// Support skin tones
+	for _, st := range emojiSkinTones {
+		if !strings.HasSuffix(base, st.match) {
+			continue
+		}
+
+		baseAlias := strings.TrimSuffix(base, st.match)
+
+		idx, ok := emojiAliasMap[baseAlias]
+		if !ok {
+			return "", false
+		}
+
+		return emojiData[idx].Tone(st.tone), true
+	}
+
+	return "", false
+}
+
+// WrapMessage soft-wraps msg into lines of at most maxLen bytes, breaking
+// only at spaces/newlines. Words longer than maxLen are left unbroken and
+// overflow their line rather than being split - fine here since IRC's real
+// line limit (512) leaves headroom above maxLen (440), and splitting mid-
+// word would corrupt URLs/tokens. Pure byte scanning throughout
+//
+//nolint:gocyclo
+func WrapMessage(msg string, maxLen int) string {
+	if maxLen <= 0 || len(msg) <= maxLen {
+		return msg
+	}
+
+	var b strings.Builder
+	b.Grow(len(msg) + (len(msg)/maxLen)*2)
+
+	lineLen := 0
+	spaceStart, spaceLen := 0, 0
+
+	i := 0
+	for i < len(msg) {
+		switch {
+		case msg[i] == ' ' || msg[i] == '\t':
+			spaceStart = i
+			for i < len(msg) && (msg[i] == ' ' || msg[i] == '\t') {
+				i++
+			}
+			spaceLen = i - spaceStart
+
+		case msg[i] == '\n':
+			b.WriteByte('\n')
+			lineLen, spaceLen = 0, 0
+			i++
+
+		default:
+			start := i
+			for i < len(msg) && msg[i] != ' ' && msg[i] != '\t' && msg[i] != '\n' {
+				i++
+			}
+			word := msg[start:i]
+
+			if lineLen > 0 && lineLen+spaceLen+len(word) > maxLen {
+				b.WriteByte('\n')
+				lineLen, spaceLen = 0, 0 // drop pending spaces, don't carry to new line
+			} else if spaceLen > 0 {
+				b.WriteString(msg[spaceStart : spaceStart+spaceLen])
+				lineLen += spaceLen
+				spaceLen = 0
+			}
+
+			b.WriteString(word)
+			lineLen += len(word)
+		}
+	}
+
+	return b.String()
 }

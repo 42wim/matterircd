@@ -130,9 +130,9 @@ func New(login string, pass string, team string, server string, mfatoken string)
 	cache, _ := lru.New(500)
 
 	return &Client{
-		Credentials: cred,
-		MessageChan: make(chan *Message, 100),
-		Users: &UsersCache{
+		Credentials:  cred,
+		MessageChan:  make(chan *Message, 100),
+		Users:        &UsersCache{
 			users:    make(map[string]*model.User, 1000),
 			channels: make(map[string]map[string]struct{}, 1000),
 			teams:    make(map[string]map[string]struct{}, 10),

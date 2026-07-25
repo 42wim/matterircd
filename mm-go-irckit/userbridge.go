@@ -16,13 +16,11 @@ import (
 	"github.com/42wim/matterircd/bridge/mastodon"
 	"github.com/42wim/matterircd/bridge/mattermost"
 	"github.com/42wim/matterircd/bridge/slack"
+	"github.com/42wim/matterircd/config"
 	"github.com/42wim/matterircd/utils"
 	"github.com/davecgh/go-spew/spew"
-	"github.com/kenshaw/emoji"
 	"github.com/mattermost/mattermost-server/v6/model"
-	"github.com/muesli/reflow/wordwrap"
 	"github.com/sorcix/irc"
-	"github.com/spf13/viper"
 )
 
 const systemUser = "system"
@@ -52,7 +50,7 @@ type UserBridge struct {
 	updateCounter      map[string]time.Time
 }
 
-func NewUserBridge(c net.Conn, srv Server, cfg *viper.Viper, db *bolt.DB) *User {
+func NewUserBridge(c net.Conn, srv Server, cfg *config.Config, db *bolt.DB) *User {
 	u := NewUser(&conn{
 		Conn:    c,
 		Encoder: irc.NewEncoder(c),
@@ -60,7 +58,7 @@ func NewUserBridge(c net.Conn, srv Server, cfg *viper.Viper, db *bolt.DB) *User 
 	})
 
 	u.Srv = srv
-	u.v = cfg
+	u.cfg = cfg
 	u.lastViewedAtDB = db
 	u.msgLast = make(map[string][2]string)
 	u.msgMap = make(map[string]map[string]int)
@@ -79,7 +77,9 @@ func NewUserBridge(c net.Conn, srv Server, cfg *viper.Viper, db *bolt.DB) *User 
 
 func (u *User) handleEventChan() {
 	for event := range u.eventChan {
-		logger.Tracef("eventchan %s", spew.Sdump(event))
+		if logger.Level.String() == "trace" {
+			logger.Tracef("eventchan %s", spew.Sdump(event))
+		}
 		switch e := event.Data.(type) {
 		case *bridge.ChannelMessageEvent:
 			u.handleChannelMessageEvent(e)
@@ -137,14 +137,14 @@ const (
 )
 
 func (u *User) getMarkdownBlockCodePrefix() (string, string) {
-	disableMarkdown := u.v.GetBool(u.br.Protocol() + ".disablemarkdown")
-	enableUnicode := u.v.GetBool(u.br.Protocol() + ".unicode")
+	disableMarkdown := u.br.FormatterConfig().DisableMarkdown
+	enableUnicode := u.br.FormatterConfig().Unicode
 
 	// Block quotes
 	var blockQuoteChar string
-	if u.v.GetBool(u.br.Protocol()+".disablemarkdownblockquote") || disableMarkdown {
+	if u.br.FormatterConfig().DisableMarkdownBlockQuote || disableMarkdown {
 		blockQuoteChar = blockQuoteCharDefault
-	} else if custom := u.v.GetString(u.br.Protocol() + ".markdownblockquotechar"); custom != "" {
+	} else if custom := u.br.FormatterConfig().MarkdownBlockQuoteChar; custom != "" {
 		blockQuoteChar = custom
 	} else if enableUnicode {
 		blockQuoteChar = blockQuoteCharUnicode
@@ -154,9 +154,9 @@ func (u *User) getMarkdownBlockCodePrefix() (string, string) {
 
 	// Code blocks
 	var codeBlockPrefix string
-	if u.v.GetBool(u.br.Protocol()+".disablecodeblockprefix") || disableMarkdown {
+	if u.br.FormatterConfig().DisableCodeBlockPrefix || disableMarkdown {
 		codeBlockPrefix = codeBlockCharDefault
-	} else if custom := u.v.GetString(u.br.Protocol() + ".codeblockprefix"); custom != "" {
+	} else if custom := u.br.FormatterConfig().CodeBlockPrefix; custom != "" {
 		codeBlockPrefix = custom
 	} else if enableUnicode {
 		codeBlockPrefix = codeBlockPrefixUnicode
@@ -168,7 +168,7 @@ func (u *User) getMarkdownBlockCodePrefix() (string, string) {
 }
 
 func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
-	if u.v.GetBool(u.br.Protocol() + ".showmentions") {
+	if u.br.Protocol() == "mattermost" && u.cfg.Mattermost().ShowMentions {
 		for _, m := range u.MentionKeys {
 			if m == u.Nick {
 				continue
@@ -187,9 +187,9 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 	var showContext bool
 	var maxlen int
 
-	disableMarkdown := u.v.GetBool(u.br.Protocol() + ".disablemarkdown")
+	disableMarkdown := u.br.FormatterConfig().DisableMarkdown
 	blockQuoteChar, codeBlockPrefix := u.getMarkdownBlockCodePrefix()
-	inlineCode := u.v.GetString(u.br.Protocol() + ".markdowninlinecode")
+	inlineCode := u.br.FormatterConfig().MarkdownInlineCode
 
 	text := event.Text
 	prefix := ""
@@ -212,15 +212,15 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 	trimmedPrefix := strings.TrimSpace(prefix)
 	trimmedSuffix := strings.TrimSpace(suffix)
 
-	disableEmoji := u.v.GetBool(u.br.Protocol() + ".disableemoji")
-	prefixContext := u.v.GetBool(u.br.Protocol() + ".prefixcontext")
-	showContextMulti := u.v.GetBool(u.br.Protocol() + ".showcontextmulti")
-	syntaxHighlighting := u.v.GetString(u.br.Protocol() + ".syntaxhighlighting")
+	disableEmoji := u.br.FormatterConfig().DisableEmoji
+	prefixContext := u.br.BridgeConfig().PrefixContext
+	showContextMulti := u.br.BridgeConfig().ShowContextMulti
+	syntaxHighlighting := u.br.FormatterConfig().SyntaxHighlighting
 
 	lexer := ""
 	codeBlockBackTick := false
 	codeBlockTilde := false
-	text = wordwrap.String(text, maxlen)
+	text = utils.WrapMessage(text, maxlen)
 	addPrefix := false
 	for {
 		line, rest, found := strings.Cut(text, "\n")
@@ -247,7 +247,7 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 		}
 
 		if !disableEmoji && !codeBlockBackTick && !codeBlockTilde {
-			line = emoji.ReplaceAliases(line)
+			line = utils.EmojiReplaceAliases(line)
 		}
 
 		if showContext || addPrefix {
@@ -276,7 +276,7 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 		text = rest
 	}
 
-	if !u.v.GetBool(u.br.Protocol() + ".disableautoview") {
+	if u.br.Protocol() == "mattermost" && !u.cfg.Mattermost().DisableAutoView {
 		u.updateLastViewed(event.ChannelID)
 	}
 	u.saveLastViewedAt(event.ChannelID)
@@ -300,7 +300,7 @@ func (u *User) handleChannelAddEvent(event *bridge.ChannelAddEvent) {
 		}
 	}
 
-	if !u.v.GetBool(u.br.Protocol() + ".disableautoview") {
+	if u.br.Protocol() == "mattermost" && !u.cfg.Mattermost().DisableAutoView {
 		u.updateLastViewed(event.ChannelID)
 	}
 	u.saveLastViewedAt(event.ChannelID)
@@ -369,13 +369,13 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 	}
 
 	if event.ChannelType != "D" && ch.ID() == "&messages" {
-		if u.v.GetBool(u.br.Protocol() + ".showonlyjoined") {
+		if u.br.BridgeConfig().ShowOnlyJoined {
 			return
 		}
 		nick += "/" + u.Srv.Channel(event.ChannelID).String()
 	}
 
-	if u.v.GetBool(u.br.Protocol() + ".showmentions") {
+	if u.br.Protocol() == "mattermost" && u.cfg.Mattermost().ShowMentions {
 		for _, m := range u.MentionKeys {
 			if m == u.Nick {
 				continue
@@ -391,9 +391,9 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		}
 	}
 
-	disableMarkdown := u.v.GetBool(u.br.Protocol() + ".disablemarkdown")
+	disableMarkdown := u.br.FormatterConfig().DisableMarkdown
 	blockQuoteChar, codeBlockPrefix := u.getMarkdownBlockCodePrefix()
-	inlineCode := u.v.GetString(u.br.Protocol() + ".markdowninlinecode")
+	inlineCode := u.br.FormatterConfig().MarkdownInlineCode
 
 	text := event.Text
 	prefix := ""
@@ -413,15 +413,15 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 	trimmedPrefix := strings.TrimSpace(prefix)
 	trimmedSuffix := strings.TrimSpace(suffix)
 
-	disableEmoji := u.v.GetBool(u.br.Protocol() + ".disableemoji")
-	prefixContext := u.v.GetBool(u.br.Protocol() + ".prefixcontext")
-	showContextMulti := u.v.GetBool(u.br.Protocol() + ".showcontextmulti")
-	syntaxHighlighting := u.v.GetString(u.br.Protocol() + ".syntaxhighlighting")
+	disableEmoji := u.br.FormatterConfig().DisableEmoji
+	prefixContext := u.br.BridgeConfig().PrefixContext
+	showContextMulti := u.br.BridgeConfig().ShowContextMulti
+	syntaxHighlighting := u.br.FormatterConfig().SyntaxHighlighting
 
 	lexer := ""
 	codeBlockBackTick := false
 	codeBlockTilde := false
-	text = wordwrap.String(text, maxlen)
+	text = utils.WrapMessage(text, maxlen)
 	addPrefix := false
 	for {
 		line, rest, found := strings.Cut(text, "\n")
@@ -448,7 +448,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		}
 
 		if !disableEmoji && !codeBlockBackTick && !codeBlockTilde {
-			line = emoji.ReplaceAliases(line)
+			line = utils.EmojiReplaceAliases(line)
 		}
 
 		if showContext || addPrefix {
@@ -474,14 +474,14 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		text = rest
 	}
 
-	if !u.v.GetBool(u.br.Protocol() + ".disableautoview") {
+	if u.br.Protocol() == "mattermost" && !u.cfg.Mattermost().DisableAutoView {
 		u.updateLastViewed(event.ChannelID)
 	}
 	u.saveLastViewedAt(event.ChannelID)
 }
 
 func (u *User) handleFileEvent(event *bridge.FileEvent) {
-	if u.v.GetBool(u.br.Protocol()+".showonlyjoined") && event.ChannelType != "D" {
+	if u.br.BridgeConfig().ShowOnlyJoined && event.ChannelType != "D" {
 		ch := u.getMessageChannel(event.ChannelID, event.Sender)
 		if ch.ID() == "&messages" {
 			return
@@ -490,7 +490,7 @@ func (u *User) handleFileEvent(event *bridge.FileEvent) {
 
 	for _, fname := range event.Files {
 		fileMsg := "\x1ddownload file - " + fname.Name + "\x1d"
-		if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
+		if u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext {
 			threadMsgID := u.prefixContext(event.ChannelID, event.MessageID, event.ParentID, "posted_file")
 			fileMsg = u.formatContextMessage("", threadMsgID, fileMsg)
 		}
@@ -597,15 +597,14 @@ func (u *User) handleReactionEvent(event interface{}) {
 
 	defer u.saveLastViewedAt(channelID)
 
-	if u.v.GetBool(u.br.Protocol() + ".hidereactions") {
+	if u.br.Protocol() == "mattermost" && u.cfg.Mattermost().HideReactions {
 		logger.Debug("Not showing reaction: " + text + reaction)
 		return
 	}
 
-	if !u.v.GetBool(u.br.Protocol() + ".disableemoji") {
-		reactionEmoji := emoji.FromAlias(reaction)
-		if reactionEmoji != nil {
-			reaction = reactionEmoji.Emoji
+	if !u.br.FormatterConfig().DisableEmoji {
+		if reactionEmoji, ok := utils.EmojiFromAlias(reaction); ok {
+			reaction = reactionEmoji
 		}
 	}
 
@@ -753,7 +752,7 @@ func (u *User) addUsersToChannels() {
 		logger.Debugf("Adding channel %#v", brchannel)
 
 		// only joindm when specified
-		if brchannel.DM && !u.v.GetBool(u.br.Protocol()+".joindm") {
+		if brchannel.DM && !u.br.BridgeConfig().JoinDM {
 			logger.Debugf("Skipping IM channel %s", brchannel.Name)
 
 			continue
@@ -787,7 +786,7 @@ func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(string, string, .
 
 	channelName := mmchannel.Name
 
-	if mmchannel.TeamID != u.br.GetMe().TeamID || u.v.GetBool(u.br.Protocol()+".prefixmainteam") {
+	if mmchannel.TeamID != u.br.GetMe().TeamID || (u.br.Protocol() == "mattermost" && u.cfg.Mattermost().PrefixMainTeam) {
 		channelName = u.br.GetTeamName(mmchannel.TeamID) + "/" + mmchannel.Name
 	}
 
@@ -926,7 +925,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 				}
 
 				replayMsg := fmt.Sprintf("[%s] %s", ts.Format("15:04"), post)
-				if (u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext")) && nick != systemUser {
+				if (u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext) && nick != systemUser {
 					threadMsgID := u.prefixContext(brchannel.ID, p.Id, p.RootId, "replay")
 					replayMsg = u.formatContextMessage(ts.Format("15:04"), threadMsgID, post)
 				}
@@ -939,7 +938,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 
 			for _, fname := range u.br.GetFileLinks(p.FileIds) {
 				fileMsg := "\x1ddownload file - " + fname + "\x1d"
-				if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
+				if u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext {
 					threadMsgID := u.prefixContext(brchannel.ID, p.Id, p.RootId, "replay_file")
 					fileMsg = u.formatContextMessage(ts.Format("15:04"), threadMsgID, fileMsg)
 				}
@@ -948,7 +947,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 		}
 
 		if len(mmPostList.Order) > 0 {
-			if !u.v.GetBool(u.br.Protocol() + ".disableautoview") {
+			if u.br.Protocol() == "mattermost" && !u.cfg.Mattermost().DisableAutoView {
 				u.updateLastViewed(brchannel.ID)
 			}
 			u.saveLastViewedAt(brchannel.ID)
@@ -968,9 +967,9 @@ func (u *User) MsgUser(toUser *User, msg string) {
 
 func (u *User) MsgSpoofUser(sender *User, rcvuser string, text string, maxlen ...int) {
 	if len(maxlen) == 0 {
-		text = wordwrap.String(text, 440)
+		text = utils.WrapMessage(text, 440)
 	} else {
-		text = wordwrap.String(text, maxlen[0])
+		text = utils.WrapMessage(text, maxlen[0])
 	}
 
 	prefix := irc.Prefix{
@@ -1026,9 +1025,9 @@ func (u *User) syncChannel(id string, name string) {
 func (u *User) mayJoin(channelID string) bool {
 	ch := u.Srv.Channel(channelID)
 
-	jo := u.v.GetStringSlice(u.br.Protocol() + ".joinonly")
-	ji := u.v.GetStringSlice(u.br.Protocol() + ".joininclude")
-	je := u.v.GetStringSlice(u.br.Protocol() + ".joinexclude")
+	jo := u.br.BridgeConfig().JoinOnly
+	ji := u.br.BridgeConfig().JoinInclude
+	je := u.br.BridgeConfig().JoinExclude
 
 	switch {
 	// if we have joinonly channels specified we are only allowed to join those
@@ -1063,13 +1062,29 @@ func (u *User) mayJoin(channelID string) bool {
 }
 
 func (u *User) isValidServer(server, protocol string) bool {
-	if len(u.v.GetStringSlice(protocol+".restrict")) == 0 {
+	var restrict []string
+
+	switch protocol {
+	case "mattermost":
+		restrict = u.cfg.Mattermost().Bridge.Restrict
+
+	case "slack":
+		restrict = u.cfg.Slack().Bridge.Restrict
+
+	case "mastodon":
+		restrict = u.cfg.Mastodon().Bridge.Restrict
+
+	default:
 		return true
 	}
 
-	logger.Debugf("restrict: %s", u.v.GetStringSlice(protocol+".restrict"))
+	if len(restrict) == 0 {
+		return true
+	}
 
-	for _, srv := range u.v.GetStringSlice(protocol + ".restrict") {
+	logger.Debugf("restrict: %v", restrict)
+
+	for _, srv := range restrict {
 		if srv == server {
 			return true
 		}
@@ -1084,14 +1099,14 @@ func (u *User) loginTo(protocol string) error {
 	switch protocol {
 	case "mastodon":
 		u.eventChan = make(chan *bridge.Event)
-		u.br, err = mastodon.New(u.v, u.Credentials, u.eventChan, u.addUsersToChannels)
+		u.br, err = mastodon.New(u.cfg, u.Credentials, u.eventChan, u.addUsersToChannels)
 	case "slack":
 		u.eventChan = make(chan *bridge.Event)
-		u.br, err = slack.New(u.v, u.Credentials, u.eventChan, u.addUsersToChannels)
+		u.br, err = slack.New(u.cfg, u.Credentials, u.eventChan, u.addUsersToChannels)
 	case "mattermost":
 		u.eventChan = make(chan *bridge.Event)
-		if u.v.GetBool("mattermost.ignoreserverversion") || strings.HasPrefix(u.getMattermostVersion(), "7.") || strings.HasPrefix(u.getMattermostVersion(), "8.") || strings.HasPrefix(u.getMattermostVersion(), "9.") || strings.HasPrefix(u.getMattermostVersion(), "10.") || strings.HasPrefix(u.getMattermostVersion(), "11.") {
-			u.br, _, err = mattermost.New(u.v, u.Credentials, u.eventChan, u.addUsersToChannels)
+		if u.cfg.Mattermost().IgnoreServerVersion || strings.HasPrefix(u.getMattermostVersion(), "7.") || strings.HasPrefix(u.getMattermostVersion(), "8.") || strings.HasPrefix(u.getMattermostVersion(), "9.") || strings.HasPrefix(u.getMattermostVersion(), "10.") || strings.HasPrefix(u.getMattermostVersion(), "11.") {
+			u.br, _, err = mattermost.New(u.cfg, u.Credentials, u.eventChan, u.addUsersToChannels)
 		} else {
 			return fmt.Errorf("mattermost version %s not supported", u.getMattermostVersion())
 		}
@@ -1186,9 +1201,9 @@ func (u *User) updateMsgMapIndex(channelID string, counter int, messageID string
 func (u *User) formatContextMessage(ts, threadMsgID, msg string) string {
 	var formattedMsg string
 	switch {
-	case u.v.GetBool(u.br.Protocol() + ".prefixcontext"):
+	case u.br.BridgeConfig().PrefixContext:
 		formattedMsg = threadMsgID + " " + msg
-	case u.v.GetBool(u.br.Protocol() + ".suffixcontext"):
+	case u.br.BridgeConfig().SuffixContext:
 		formattedMsg = msg + " " + threadMsgID
 	}
 	if ts != "" {
@@ -1201,15 +1216,15 @@ func (u *User) prefixContext(channelID, messageID, parentID, event string) strin
 	logger.Tracef("prefixContext ch %s msg %s parent %s event %s", channelID, messageID, parentID, event)
 
 	prefixChar := "->"
-	if u.v.GetBool(u.br.Protocol() + ".unicode") {
+	if u.br.FormatterConfig().Unicode {
 		prefixChar = "↪"
 	}
 
-	if u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" || u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost+post" {
+	if u.br.BridgeConfig().ThreadContext == "mattermost" || u.br.BridgeConfig().ThreadContext == "mattermost+post" {
 		if parentID == "" {
 			return "[@@" + messageID + "]"
 		}
-		if u.v.GetString(u.br.Protocol()+".threadcontext") == "mattermost" || parentID == messageID {
+		if u.br.BridgeConfig().ThreadContext == "mattermost" || parentID == messageID {
 			return "[" + prefixChar + "@@" + parentID + "]"
 		}
 		return "[" + prefixChar + "@@" + parentID + ",@@" + messageID + "]"
@@ -1288,8 +1303,7 @@ func (u *User) saveLastViewedAt(channelID string) {
 
 func (u *User) getMattermostVersion() string {
 	proto := "https"
-
-	if u.v.GetBool("mattermost.insecure") {
+	if u.cfg.Mattermost().Insecure {
 		proto = "http"
 	}
 
@@ -1312,26 +1326,26 @@ func (u *User) handleMessageThreadContext(channelID, messageID, parentID, event,
 
 	newText := text
 	switch {
-	case u.v.GetBool(u.br.Protocol()+".prefixcontext") && strings.HasPrefix(text, "\x01"):
+	case u.br.BridgeConfig().PrefixContext && strings.HasPrefix(text, "\x01"):
 		prefix = u.prefixContext(channelID, messageID, parentID, event) + " "
 		newText = strings.Replace(text, "\x01ACTION ", "\x01ACTION "+prefix, 1)
 		maxlen = len(newText)
-	case u.v.GetBool(u.br.Protocol()+".prefixcontext") && u.v.GetBool(u.br.Protocol()+".showcontextmulti"):
+	case u.br.BridgeConfig().PrefixContext && u.br.BridgeConfig().ShowContextMulti:
 		prefix = u.prefixContext(channelID, messageID, parentID, event) + " "
 		showContext = true
 		maxlen -= len(prefix)
-	case u.v.GetBool(u.br.Protocol() + ".prefixcontext"):
+	case u.br.BridgeConfig().PrefixContext:
 		prefix = u.prefixContext(channelID, messageID, parentID, event) + " "
 		newText = prefix + text
-	case u.v.GetBool(u.br.Protocol()+".suffixcontext") && strings.HasSuffix(text, "\x01"):
+	case u.br.BridgeConfig().SuffixContext && strings.HasSuffix(text, "\x01"):
 		suffix = " " + u.prefixContext(channelID, messageID, parentID, event)
 		newText = strings.Replace(text, " \x01", suffix+" \x01", 1)
 		maxlen = len(newText)
-	case u.v.GetBool(u.br.Protocol()+".suffixcontext") && u.v.GetBool(u.br.Protocol()+".showcontextmulti"):
+	case u.br.BridgeConfig().SuffixContext && u.br.BridgeConfig().ShowContextMulti:
 		suffix = " " + u.prefixContext(channelID, messageID, parentID, event)
 		showContext = true
 		maxlen -= len(suffix)
-	case u.v.GetBool(u.br.Protocol() + ".suffixcontext"):
+	case u.br.BridgeConfig().SuffixContext:
 		suffix = " " + u.prefixContext(channelID, messageID, parentID, event)
 		newText = strings.TrimRight(text, "\n") + suffix
 	}
