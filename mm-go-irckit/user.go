@@ -18,7 +18,7 @@ import (
 // NewUser creates a *User, wrapping a connection with metadata we need for our server.
 func NewUser(c Conn) *User {
 	u := &User{
-		Conn:     c,
+		Conn: c,
 	}
 
 	if c != nil {
