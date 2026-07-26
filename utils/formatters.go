@@ -176,7 +176,6 @@ func Markdown2irc(msg string, blockQuoteChar string, inlineCode string) string {
 var (
 	emojiInitOnce sync.Once
 	emojiData     []emoji.Emoji
-	emojiReplacer *strings.Replacer
 	emojiAliasMap map[string]int
 )
 
@@ -197,7 +196,6 @@ var emojiSkinTones = []emojiSkinToneInfo{
 func initEmoji() {
 	data := emoji.Gemoji()
 
-	var aliasPairs []string
 	emojiAliasMap = make(map[string]int, len(data))
 
 	for i, e := range data {
@@ -208,15 +206,7 @@ func initEmoji() {
 			if alias == "" {
 				continue
 			}
-			emojiAliasMap[alias], aliasPairs = i, append(aliasPairs, ":"+alias+":", e.Emoji)
-			if !e.SkinTones {
-				continue
-			}
-			// Include skin tones
-			for _, st := range emojiSkinTones {
-				aliasTone := alias + "_" + st.suffix + "_skin_tone"
-				aliasPairs = append(aliasPairs, ":"+aliasTone+":", e.Tone(st.tone))
-			}
+			emojiAliasMap[alias] = i
 		}
 		// In addition to emoji aliases, include emoji tags
 		for _, tag := range e.Tags {
@@ -225,29 +215,59 @@ func initEmoji() {
 			}
 			// But only if it doesn't already exist, e.g. "angry"
 			if _, ok := emojiAliasMap[tag]; !ok {
-				emojiAliasMap[tag], aliasPairs = i, append(aliasPairs, ":"+tag+":", e.Emoji)
-				if !e.SkinTones {
-					continue
-				}
-				// Include skin tones
-				for _, st := range emojiSkinTones {
-					aliasTone := tag + "_" + st.suffix + "_skin_tone"
-					aliasPairs = append(aliasPairs, ":"+aliasTone+":", e.Tone(st.tone))
-				}
+				emojiAliasMap[tag] = i
 			}
 		}
 	}
 
 	emojiData = data
-	emojiReplacer = strings.NewReplacer(aliasPairs...)
 }
 
 func EmojiReplaceAliases(s string) string {
 	if strings.IndexByte(s, ':') < 0 {
 		return s
 	}
+
 	emojiInitOnce.Do(initEmoji)
-	return emojiReplacer.Replace(s)
+
+	var builder strings.Builder
+	builder.Grow(len(s))
+
+	start := -1
+	for i := range len(s) {
+		// Handle normal characters outside of colons
+		if s[i] != ':' {
+			if start == -1 {
+				builder.WriteByte(s[i])
+			}
+			continue
+		}
+
+		// We found a colon, mark it as the start of a potential emoji
+		if start == -1 {
+			start = i
+			continue
+		}
+
+		// We found a second colon, test the substring
+		code := s[start : i+1]
+		if emojiStr, ok := EmojiFromAlias(code); ok {
+			builder.WriteString(emojiStr)
+			start = -1 // Reset for the next emoji
+		} else {
+			// Not a valid emoji. Write everything up to this colon,
+			// and treat this current colon as the new start.
+			builder.WriteString(s[start:i])
+			start = i
+		}
+	}
+
+	// Write any unclosed trailing colons/text
+	if start != -1 {
+		builder.WriteString(s[start:])
+	}
+
+	return builder.String()
 }
 
 func EmojiFromAlias(alias string) (string, bool) {
