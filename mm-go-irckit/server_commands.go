@@ -263,7 +263,7 @@ func CmdNames(s Server, u *User, msg *irc.Message) error {
 		}
 
 		if ch, exists := s.HasChannel(channel); exists {
-			ch.SendNamesResponse(u)
+			_ = ch.SendNamesResponse(u)
 		}
 	}
 	return nil
