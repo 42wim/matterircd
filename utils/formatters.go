@@ -12,7 +12,7 @@ import (
 
 //nolint:funlen,gocyclo
 func FormatCodeBlockText(text string, codeBlockBackTick bool, codeBlockTilde bool, lexer string, syntaxHighlighting string, linePrefix string) (string, bool, bool, string) {
-	if linePrefix != "" {
+	if linePrefix != "" && strings.ContainsRune(linePrefix, '\\') {
 		if unq, err := strconv.Unquote(`"` + linePrefix + `"`); err == nil {
 			linePrefix = unq
 		}
@@ -20,27 +20,34 @@ func FormatCodeBlockText(text string, codeBlockBackTick bool, codeBlockTilde boo
 
 	trimmedText := strings.TrimLeft(text, " \t")
 
-	handleToggle := func(prefix string, isActive bool) string {
-		if isActive {
-			newLexer := strings.TrimSpace(strings.TrimPrefix(trimmedText, prefix))
-			if newLexer != "" {
-				lexer = newLexer
-				return linePrefix + "\x16" + lexer + "\x16"
-			}
-			return ""
-		}
-		lexer = ""
-		return ""
-	}
-
+	// Inline backtick toggle logic to avoid closure allocations
 	if strings.HasPrefix(trimmedText, "```") && !codeBlockTilde {
 		codeBlockBackTick = !codeBlockBackTick
-		return handleToggle("```", codeBlockBackTick), codeBlockBackTick, codeBlockTilde, lexer
+		if codeBlockBackTick {
+			newLexer := strings.TrimSpace(strings.TrimPrefix(trimmedText, "```"))
+			if newLexer != "" {
+				lexer = newLexer
+				return linePrefix + "\x16" + lexer + "\x16", codeBlockBackTick, codeBlockTilde, lexer
+			}
+		} else {
+			lexer = ""
+		}
+		return "", codeBlockBackTick, codeBlockTilde, lexer
 	}
 
+	// Inline tilde toggle logic
 	if strings.HasPrefix(trimmedText, "~~~") && !codeBlockBackTick {
 		codeBlockTilde = !codeBlockTilde
-		return handleToggle("~~~", codeBlockTilde), codeBlockBackTick, codeBlockTilde, lexer
+		if codeBlockTilde {
+			newLexer := strings.TrimSpace(strings.TrimPrefix(trimmedText, "~~~"))
+			if newLexer != "" {
+				lexer = newLexer
+				return linePrefix + "\x16" + lexer + "\x16", codeBlockBackTick, codeBlockTilde, lexer
+			}
+		} else {
+			lexer = ""
+		}
+		return "", codeBlockBackTick, codeBlockTilde, lexer
 	}
 
 	codeBlock := codeBlockBackTick || codeBlockTilde
@@ -48,17 +55,13 @@ func FormatCodeBlockText(text string, codeBlockBackTick bool, codeBlockTilde boo
 		return text, codeBlockBackTick, codeBlockTilde, lexer
 	}
 
-	var sb strings.Builder
-	sb.WriteString(linePrefix)
-
 	if text == "" {
-		sb.WriteByte(' ')
-		return sb.String(), codeBlockBackTick, codeBlockTilde, lexer
+		return linePrefix + " ", codeBlockBackTick, codeBlockTilde, lexer
 	}
 
 	if syntaxHighlighting == "" || lexer == "" {
-		sb.WriteString(text)
-		return sb.String(), codeBlockBackTick, codeBlockTilde, lexer
+		// Use native string concatenation instead of a Builder for simple 2-string joins
+		return linePrefix + text, codeBlockBackTick, codeBlockTilde, lexer
 	}
 
 	formatter := "terminal256"
@@ -68,28 +71,40 @@ func FormatCodeBlockText(text string, codeBlockBackTick bool, codeBlockTilde boo
 		style = syntaxHighlighting[idx+1:]
 	}
 
+	// Single buffer approach: pre-allocate enough capacity to prevent reallocation
 	var b bytes.Buffer
+	b.Grow(len(linePrefix) + len(text) + 64)
+	b.WriteString(linePrefix)
+
 	if err := quick.Highlight(&b, text, lexer, formatter, style); err == nil {
 		bs := b.Bytes()
-		// Work around https://github.com/alecthomas/chroma/issues/716
 		const resetSeq = "\x1b[0m"
 		hasReset := bytes.HasSuffix(bs, []byte(resetSeq))
+
+		end := len(bs)
 		if hasReset {
-			bs = bs[:len(bs)-len(resetSeq)]
-		}
-		if len(bs) > 0 && bs[len(bs)-1] == '\n' {
-			bs = bs[:len(bs)-1]
-		}
-		if hasReset {
-			bs = append(bs, resetSeq...)
+			end -= len(resetSeq)
 		}
 
-		sb.Write(bs)
-	} else {
-		sb.WriteString(text)
+		// Work around https://github.com/alecthomas/chroma/issues/716
+		// Safely strip the trailing newline without touching the linePrefix
+		if end > len(linePrefix) && bs[end-1] == '\n' {
+			end--
+		}
+
+		// If we need to modify the tail, do it in-place using the buffer
+		if end != len(bs) {
+			b.Truncate(end)
+			if hasReset {
+				b.WriteString(resetSeq)
+			}
+		}
+
+		return b.String(), codeBlockBackTick, codeBlockTilde, lexer
 	}
 
-	return sb.String(), codeBlockBackTick, codeBlockTilde, lexer
+	// Fallback if highlight fails
+	return linePrefix + text, codeBlockBackTick, codeBlockTilde, lexer
 }
 
 // isWordChar mimics ASCII \w (letters, digits, and underscores)
@@ -116,7 +131,7 @@ func checkWordBoundaryEnd(s string, idx int) bool {
 
 // replacePattern simulates greedy regex matching like \*\*([^\*]+)\*\*
 //
-//nolint:gocyclo,funlen
+//nolint:funlen,gocyclo
 func replacePattern(s string, delim string, ircStart, ircEnd string, checkWordBoundary bool) string {
 	delimLen := len(delim)
 	delimByte := delim[0] // '*' or '_'
