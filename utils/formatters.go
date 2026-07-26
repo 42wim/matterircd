@@ -234,27 +234,31 @@ func EmojiReplaceAliases(s string) string {
 	builder.Grow(len(s))
 
 	start := -1
-	for i := 0; i < len(s); i++ {
-		if s[i] == ':' {
+	for i := range len(s) {
+		// Handle normal characters outside of colons
+		if s[i] != ':' {
 			if start == -1 {
-				// Mark potential start of an emoji shortcode
-				start = i
-			} else {
-				// We found a second colon, test the substring
-				code := s[start : i+1]
-				if emojiStr, ok := EmojiFromAlias(code); ok {
-					builder.WriteString(emojiStr)
-					start = -1 // Reset for the next emoji
-				} else {
-					// Not a valid emoji. Write everything up to this colon,
-					// and treat this current colon as the new start.
-					builder.WriteString(s[start:i])
-					start = i
-				}
+				builder.WriteByte(s[i])
 			}
-		} else if start == -1 {
-			// Normal characters outside of colons
-			builder.WriteByte(s[i])
+			continue
+		}
+
+		// We found a colon, mark it as the start of a potential emoji
+		if start == -1 {
+			start = i
+			continue
+		}
+
+		// We found a second colon, test the substring
+		code := s[start : i+1]
+		if emojiStr, ok := EmojiFromAlias(code); ok {
+			builder.WriteString(emojiStr)
+			start = -1 // Reset for the next emoji
+		} else {
+			// Not a valid emoji. Write everything up to this colon,
+			// and treat this current colon as the new start.
+			builder.WriteString(s[start:i])
+			start = i
 		}
 	}
 
