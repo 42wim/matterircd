@@ -250,12 +250,21 @@ func CmdNames(s Server, u *User, msg *irc.Message) error {
 		return nil
 	}
 
-	for _, channel := range strings.Split(msg.Params[0], ",") {
-		ch, exists := s.HasChannel(channel)
-		if !exists {
-			continue
+	channels := msg.Params[0]
+	for len(channels) > 0 {
+		var channel string
+		idx := strings.IndexByte(channels, ',')
+		if idx < 0 {
+			channel = channels
+			channels = ""
+		} else {
+			channel = channels[:idx]
+			channels = channels[idx+1:]
 		}
-		ch.SendNamesResponse(u)
+
+		if ch, exists := s.HasChannel(channel); exists {
+			ch.SendNamesResponse(u)
+		}
 	}
 	return nil
 }
