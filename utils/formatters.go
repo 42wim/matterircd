@@ -2,7 +2,6 @@ package utils
 
 import (
 	"bytes"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -93,28 +92,156 @@ func FormatCodeBlockText(text string, codeBlockBackTick bool, codeBlockTilde boo
 	return sb.String(), codeBlockBackTick, codeBlockTilde, lexer
 }
 
-// Use static initialisation to optimize.
-// Bold & Italic - https://www.markdownguide.org/basic-syntax#bold-and-italic
-var boldItalicRegExp = []*regexp.Regexp{
-	regexp.MustCompile(`\*\*\*([^\*]+)\*\*\*`),
-	regexp.MustCompile(`\b\_\_\_([^\_]+)\_\_\_\b`),
+// isWordChar mimics ASCII \w (letters, digits, and underscores)
+func isWordChar(c byte) bool {
+	return (c >= 'a' && c <= 'z') ||
+		(c >= 'A' && c <= 'Z') ||
+		(c >= '0' && c <= '9') ||
+		c == '_'
 }
 
-// Bold - https://www.markdownguide.org/basic-syntax#bold
-var boldRegExp = []*regexp.Regexp{
-	regexp.MustCompile(`\*\*([^\*]+)\*\*`),
-	regexp.MustCompile(`\b\_\_([^\_]+)\_\_\b`),
+func checkWordBoundaryStart(s string, idx int) bool {
+	if idx == 0 {
+		return true
+	}
+	return !isWordChar(s[idx-1]) // Must transition from a non-word char
 }
 
-// Italic - https://www.markdownguide.org/basic-syntax#italic
-var italicRegExp = []*regexp.Regexp{
-	regexp.MustCompile(`\*([^\*]+)\*`),
-	regexp.MustCompile(`\b\_([^\_]+)\_\b`),
+func checkWordBoundaryEnd(s string, idx int) bool {
+	if idx == len(s) {
+		return true
+	}
+	return !isWordChar(s[idx]) // Must transition to a non-word char
 }
 
-// Code / Monospace - https://markdownguide.offshoot.io/basic-syntax/#code
-var codeRegExp = []*regexp.Regexp{
-	regexp.MustCompile("`+([^`]+)`+"),
+// replacePattern simulates greedy regex matching like \*\*([^\*]+)\*\*
+//
+//nolint:gocyclo,funlen
+func replacePattern(s string, delim string, ircStart, ircEnd string, checkWordBoundary bool) string {
+	delimLen := len(delim)
+	delimByte := delim[0] // '*' or '_'
+
+	var b strings.Builder
+	start := 0
+	i := 0
+
+	for i < len(s) {
+		idx := strings.Index(s[i:], delim)
+		if idx == -1 {
+			break
+		}
+		absoluteIdx := i + idx
+
+		// Ensure it's exactly the length we want (e.g., "**" shouldn't match "***")
+		if absoluteIdx > 0 && s[absoluteIdx-1] == delimByte {
+			i = absoluteIdx + 1
+			continue
+		}
+		if absoluteIdx+delimLen < len(s) && s[absoluteIdx+delimLen] == delimByte {
+			i = absoluteIdx + 1
+			continue
+		}
+
+		if checkWordBoundary && !checkWordBoundaryStart(s, absoluteIdx) {
+			i = absoluteIdx + 1
+			continue
+		}
+
+		// Find the closing delimiter
+		searchStart := absoluteIdx + delimLen
+		closeIdx := strings.Index(s[searchStart:], delim)
+		if closeIdx == -1 {
+			i = absoluteIdx + 1
+			continue
+		}
+		absoluteCloseIdx := searchStart + closeIdx
+
+		// Ensure closing delimiter is exact length
+		if absoluteCloseIdx+delimLen < len(s) && s[absoluteCloseIdx+delimLen] == delimByte {
+			i = absoluteCloseIdx + 1
+			continue
+		}
+
+		// Ensure inner string doesn't contain the delimiter character
+		inner := s[searchStart:absoluteCloseIdx]
+		if strings.IndexByte(inner, delimByte) != -1 {
+			i = absoluteIdx + 1
+			continue
+		}
+
+		if checkWordBoundary && !checkWordBoundaryEnd(s, absoluteCloseIdx+delimLen) {
+			i = absoluteIdx + 1
+			continue
+		}
+
+		// Lazy allocation only if we successfully found a valid pair
+		if start == 0 {
+			b.Grow(len(s) + 32)
+		}
+
+		b.WriteString(s[start:absoluteIdx])
+		b.WriteString(ircStart)
+		b.WriteString(inner)
+		b.WriteString(ircEnd)
+
+		start = absoluteCloseIdx + delimLen
+		i = start
+	}
+
+	if start == 0 {
+		return s // Zero allocations if no matches were made
+	}
+	b.WriteString(s[start:])
+	return b.String()
+}
+
+// replaceCode simulates the `+([^`]+)`+ regex for backticks
+func replaceCode(msg, startCode, endCode string) string {
+	var b strings.Builder
+	start := 0
+	i := 0
+
+	for i < len(msg) {
+		idx := strings.IndexByte(msg[i:], '`')
+		if idx == -1 {
+			break
+		}
+		absoluteIdx := i + idx
+
+		runLen := 1
+		for absoluteIdx+runLen < len(msg) && msg[absoluteIdx+runLen] == '`' {
+			runLen++
+		}
+
+		searchStart := absoluteIdx + runLen
+		closeIdx := strings.IndexByte(msg[searchStart:], '`')
+		if closeIdx == -1 {
+			break
+		}
+		absoluteCloseIdx := searchStart + closeIdx
+
+		closeRunLen := 1
+		for absoluteCloseIdx+closeRunLen < len(msg) && msg[absoluteCloseIdx+closeRunLen] == '`' {
+			closeRunLen++
+		}
+
+		if start == 0 {
+			b.Grow(len(msg) + 32)
+		}
+		b.WriteString(msg[start:absoluteIdx])
+		b.WriteString(startCode)
+		b.WriteString(msg[absoluteIdx+runLen : absoluteCloseIdx])
+		b.WriteString(endCode)
+
+		start = absoluteCloseIdx + closeRunLen
+		i = start
+	}
+
+	if start == 0 {
+		return msg
+	}
+	b.WriteString(msg[start:])
+	return b.String()
 }
 
 const blockQuoteCharDefault = ">"
@@ -124,27 +251,34 @@ func Markdown2irc(msg string, blockQuoteChar string, inlineCode string) string {
 		return msg
 	}
 
-	// Bold & Italic 0x02+0x1d
-	if strings.ContainsAny(msg, "*_") {
-		for _, re := range boldItalicRegExp {
-			msg = re.ReplaceAllString(msg, "\x02\x1d${1}\x1d\x02")
+	// Block quotes
+	trimmedText := strings.TrimLeft(msg, " \t")
+	if strings.HasPrefix(trimmedText, blockQuoteCharDefault) && blockQuoteChar != blockQuoteCharDefault {
+		if unq, err := strconv.Unquote(`"` + blockQuoteChar + `"`); err == nil {
+			blockQuoteChar = unq
 		}
+		msg = strings.Replace(msg, blockQuoteCharDefault, blockQuoteChar, 1)
+	}
 
-		// Bold 0x02
-		for _, re := range boldRegExp {
-			msg = re.ReplaceAllString(msg, "\x02${1}\x02")
-		}
+	// Bold & Italic 0x02+0x1d - Asterisk processing
+	if strings.Contains(msg, "*") {
+		msg = replacePattern(msg, "***", "\x02\x1d", "\x1d\x02", false)
+		msg = replacePattern(msg, "**", "\x02", "\x02", false)
+		msg = replacePattern(msg, "*", "\x1d", "\x1d", false)
+	}
 
-		// Italic 0x1d
-		for _, re := range italicRegExp {
-			msg = re.ReplaceAllString(msg, "\x1d${1}\x1d")
-		}
+	// Bold & Italic 0x02+0x1d - Underscore processing
+	if strings.Contains(msg, "_") {
+		msg = replacePattern(msg, "___", "\x02\x1d", "\x1d\x02", true)
+		msg = replacePattern(msg, "__", "\x02", "\x02", true)
+		msg = replacePattern(msg, "_", "\x1d", "\x1d", true)
 	}
 
 	// Code / Monospace 0x11
 	if strings.Contains(msg, "`") {
 		inlineCodeStart := "\x0f`\x11\x02\x030,14"
 		inlineCodeEnd := "\x11\x0f`"
+
 		if inlineCode != "" {
 			if unq, err := strconv.Unquote(`"` + inlineCode + `"`); err == nil {
 				inlineCode = unq
@@ -155,19 +289,8 @@ func Markdown2irc(msg string, blockQuoteChar string, inlineCode string) string {
 				inlineCodeEnd = "\x11\x0f"
 			}
 		}
-		for _, re := range codeRegExp {
-			// Not all IRC clients support monospace (0x11) so keep the fence
-			msg = re.ReplaceAllString(msg, inlineCodeStart+"${1}"+inlineCodeEnd)
-		}
-	}
-
-	// Block quotes
-	trimmedText := strings.TrimLeft(msg, " \t")
-	if strings.HasPrefix(trimmedText, blockQuoteCharDefault) && blockQuoteChar != blockQuoteCharDefault {
-		if unq, err := strconv.Unquote(`"` + blockQuoteChar + `"`); err == nil {
-			blockQuoteChar = unq
-		}
-		msg = strings.Replace(msg, blockQuoteCharDefault, blockQuoteChar, 1)
+		// Not all IRC clients support monospace (0x11) so keep the fence
+		msg = replaceCode(msg, inlineCodeStart, inlineCodeEnd)
 	}
 
 	return msg
