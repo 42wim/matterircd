@@ -266,15 +266,6 @@ func Markdown2irc(msg string, blockQuoteChar string, inlineCode string) string {
 		return msg
 	}
 
-	// Block quotes
-	trimmedText := strings.TrimLeft(msg, " \t")
-	if strings.HasPrefix(trimmedText, blockQuoteCharDefault) && blockQuoteChar != blockQuoteCharDefault {
-		if unq, err := strconv.Unquote(`"` + blockQuoteChar + `"`); err == nil {
-			blockQuoteChar = unq
-		}
-		msg = strings.Replace(msg, blockQuoteCharDefault, blockQuoteChar, 1)
-	}
-
 	// Bold & Italic 0x02+0x1d - Asterisk processing
 	if strings.Contains(msg, "*") {
 		msg = replacePattern(msg, "***", "\x02\x1d", "\x1d\x02", false)
@@ -306,6 +297,15 @@ func Markdown2irc(msg string, blockQuoteChar string, inlineCode string) string {
 		}
 		// Not all IRC clients support monospace (0x11) so keep the fence
 		msg = replaceCode(msg, inlineCodeStart, inlineCodeEnd)
+	}
+
+	// Block quotes
+	trimmedText := strings.TrimLeft(msg, " \t")
+	if strings.HasPrefix(trimmedText, blockQuoteCharDefault) && blockQuoteChar != blockQuoteCharDefault {
+		if unq, err := strconv.Unquote(`"` + blockQuoteChar + `"`); err == nil {
+			blockQuoteChar = unq
+		}
+		msg = strings.Replace(msg, blockQuoteCharDefault, blockQuoteChar, 1)
 	}
 
 	return msg
