@@ -725,30 +725,51 @@ func CmdWho(s Server, u *User, msg *irc.Message) error {
 		return nil
 	}
 
-	r := make([]*irc.Message, 0, ch.Len()+1)
+	users := ch.Users()
+	numUsers := len(users)
+
+	r := make([]*irc.Message, numUsers+1)
+	messages := make([]irc.Message, numUsers+1)
+	paramsBacking := make([]string, numUsers*7)
 
 	statuses, _ := u.br.StatusUsers()
 
-	for _, other := range ch.Users() {
+	prefix := s.Prefix()
+	myNick := u.Nick
+	for i, other := range users {
 		status := "H"
 		if statuses[other.User] != "online" {
 			status = "G"
 		}
+
+		pIdx := i * 7
+		params := paramsBacking[pIdx : pIdx+7 : pIdx+7]
+		params[0] = myNick
+		params[1] = mask
+		params[2] = other.User
+		params[3] = other.Host
+		params[4] = "*"
+		params[5] = other.Nick
+		params[6] = status
+
 		// <me> <channel> <user> <host> <server> <nick> [H/G]: 0 <real>
-		r = append(r, &irc.Message{
-			Prefix:   s.Prefix(),
-			Params:   []string{u.Nick, mask, other.User, other.Host, "*", other.Nick, status},
+		messages[i] = irc.Message{
+			Prefix:   prefix,
+			Params:   params,
 			Command:  irc.RPL_WHOREPLY,
 			Trailing: "0 " + other.Real,
-		})
+		}
+
+		r[i] = &messages[i]
 	}
 
-	r = append(r, &irc.Message{
-		Prefix:   s.Prefix(),
-		Params:   []string{u.Nick, mask},
+	messages[numUsers] = irc.Message{
+		Prefix:   prefix,
+		Params:   []string{myNick, mask},
 		Command:  irc.RPL_ENDOFWHO,
 		Trailing: "End of /WHO list.",
-	})
+	}
+	r[numUsers] = &messages[numUsers]
 
 	return u.Encode(r...)
 }
