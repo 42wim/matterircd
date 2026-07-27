@@ -67,7 +67,7 @@ func (m *Mastodon) Invite(channelID, username string) error {
 
 func (m *Mastodon) IsChannelMember(channelID string) bool {
 	// Mastodon only has the single unified timeline "channel"
-	return channelID == "mastodon"
+	return channelID == "mastodon" //nolint:goconst
 }
 
 func (m *Mastodon) Join(channelName string) (string, string, error) {
