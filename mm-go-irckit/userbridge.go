@@ -1027,10 +1027,10 @@ func (u *User) syncChannel(id string, name string) {
 	u.addUsersToChannel(batchUsers, "&users", "&users")
 	u.addUsersToChannel(batchUsers, name, id)
 
-	// check if our IRC Nick is in the list of translated channel members
+	// Check if this channel is in our bridge's list of joined channels
 	isMember := false
-	for _, bu := range batchUsers {
-		if bu.Nick == u.Nick {
+	for _, ch := range u.br.GetChannels() {
+		if ch.ID == id {
 			isMember = true
 			break
 		}
