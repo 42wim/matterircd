@@ -305,7 +305,26 @@ func Markdown2irc(msg string, blockQuoteChar string, inlineCode string) string {
 		if unq, err := strconv.Unquote(`"` + blockQuoteChar + `"`); err == nil {
 			blockQuoteChar = unq
 		}
-		msg = strings.Replace(msg, blockQuoteCharDefault, blockQuoteChar, 1)
+
+		var newPrefix strings.Builder
+		idx := 0
+		for idx < len(trimmedText) {
+			if trimmedText[idx] == '>' {
+				newPrefix.WriteString(blockQuoteChar)
+				idx++
+				// Markdown allows one optional space immediately after a '>'
+				if idx < len(trimmedText) && trimmedText[idx] == ' ' {
+					idx++
+				}
+			} else if trimmedText[idx] == ' ' || trimmedText[idx] == '\t' {
+				// Skip any extra spaces between nested quote markers
+				idx++
+			} else {
+				break
+			}
+		}
+
+		msg = newPrefix.String() + trimmedText[idx:]
 	}
 
 	return msg
