@@ -1148,8 +1148,14 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		m.msgParentCache.Remove(data.Id)
 	}
 
-	msg := strings.TrimRight(data.Message, "\n")
+	msg := data.Message
+	// Manually slice off trailing newlines
+	for len(msg) > 0 && msg[len(msg)-1] == '\n' {
+		msg = msg[:len(msg)-1]
+	}
+
 	var sbMsg strings.Builder
+	sbMsg.Grow(len(data.Message) + 64)
 	attachments := data.Attachments()
 
 	switch {
@@ -1159,37 +1165,35 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		sbMsg.WriteString(sbSuffix.String())
 		sbMsg.WriteString("\x01")
 	case data.Type == "slack_attachment":
-		useFallback := msg == ""
-		// https://docs.slack.dev/tools/node-slack-sdk/reference/web-api/interfaces/MessageAttachment/
-		attachmentMsg := m.parseMessageAttachments(attachments, useFallback)
-		if msg == "" {
-			sbMsg.WriteString(attachmentMsg)
-		} else if attachmentMsg != "" {
+		if len(msg) > 0 {
 			sbMsg.WriteString(msg)
-			sbMsg.WriteString("\n")
-			sbMsg.WriteString(attachmentMsg)
 		}
+		useFallback := len(msg) == 0
+		// https://docs.slack.dev/tools/node-slack-sdk/reference/web-api/interfaces/MessageAttachment/
+		m.parseMessageAttachments(&sbMsg, attachments, useFallback)
 	case data.Type == "custom_matterpoll":
 		pollMsg := parseMatterpollToMsg(attachments, useUnicode)
 		sbMsg.WriteString(msg)
 		sbMsg.WriteString(pollMsg)
 	case len(attachments) > 0:
-		useFallback := msg == ""
-		// https://developers.mattermost.com/integrate/reference/message-attachments/
-		attachmentMsg := m.parseMessageAttachments(attachments, useFallback)
-		if msg == "" {
-			sbMsg.WriteString(attachmentMsg)
-		} else if attachmentMsg != "" {
+		if len(msg) > 0 {
 			sbMsg.WriteString(msg)
-			sbMsg.WriteString("\n")
-			sbMsg.WriteString(attachmentMsg)
 		}
+		useFallback := len(msg) == 0
+		// https://developers.mattermost.com/integrate/reference/message-attachments/
+		m.parseMessageAttachments(&sbMsg, attachments, useFallback)
 	default:
 		sbMsg.WriteString(msg)
 	}
 
 	if sbSuffix.Len() > 0 && data.Type != "me" {
 		sbMsg.WriteString(sbSuffix.String())
+	}
+
+	// We can't use data.GetPreviewPost() due to a bug so use our own
+	previewText, previewUserID, previewChannelID := extractPreviewData(data.Metadata)
+	if previewText != "" {
+		m.parsePreviewPost(&sbMsg, m.GetUser(previewUserID).Nick, m.GetChannelName(previewChannelID), previewText)
 	}
 
 	switch {
@@ -1758,7 +1762,12 @@ func parseMatterpollToMsg(attachments []*model.SlackAttachment, unicode bool) st
 const blockQuoteCharDefault = ">"
 
 //nolint:funlen,gocognit,gocyclo
-func (m *Mattermost) parseMessageAttachments(attachments []*model.SlackAttachment, useFallback bool) string {
+func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*model.SlackAttachment, useFallback bool) {
+	// If the main message builder already has content, add a newline before our preview
+	if b.Len() > 0 {
+		b.WriteByte('\n')
+	}
+
 	rc := m.cfg.Current()
 
 	useUnicode := rc.Mattermost.Formatter.Unicode
@@ -1782,8 +1791,6 @@ func (m *Mattermost) parseMessageAttachments(attachments []*model.SlackAttachmen
 			codeBlockPrefix = strings.Replace(codeBlockPrefix, "▎", "▏", 1)
 		}
 	}
-
-	var b strings.Builder
 
 	for _, attachment := range attachments {
 		prefix := "\033[1m" + prefixChar + "\033[0m" + spaceChar
@@ -2009,9 +2016,108 @@ func (m *Mattermost) parseMessageAttachments(attachments []*model.SlackAttachmen
 			}
 		}
 	}
+}
 
-	msg := strings.TrimRight(b.String(), "\n")
-	return msg
+// XXX: Bug in Mattermost itself and PostEmbed Data interface{}
+// extractPreviewData returns (message, userID, channelID)
+func extractPreviewData(metadata *model.PostMetadata) (string, string, string) {
+	if metadata == nil || len(metadata.Embeds) == 0 {
+		return "", "", ""
+	}
+
+	for _, embed := range metadata.Embeds {
+		if embed.Type == "permalink" && embed.Data != nil { //nolint:nestif
+			if dataMap, ok := embed.Data.(map[string]interface{}); ok {
+				if postMap, ok := dataMap["post"].(map[string]interface{}); ok {
+					var msg, userID, channelID string
+
+					if val, ok := postMap["message"].(string); ok {
+						msg = val
+					}
+					if val, ok := postMap["user_id"].(string); ok {
+						userID = val
+					}
+					if val, ok := postMap["channel_id"].(string); ok {
+						channelID = val
+					}
+
+					return msg, userID, channelID
+				}
+			}
+		}
+	}
+
+	return "", "", ""
+}
+
+//nolint:funlen,gocyclo
+func (m *Mattermost) parsePreviewPost(b *strings.Builder, user string, channel string, text string) {
+	// If the main message builder already has content, add a newline before our preview
+	if b.Len() > 0 {
+		b.WriteByte('\n')
+	}
+
+	rc := m.cfg.Current()
+
+	useUnicode := rc.Mattermost.Formatter.Unicode
+	syntaxHighlighting := rc.Mattermost.Formatter.SyntaxHighlighting
+	codeBlockPrefix := rc.Mattermost.Formatter.CodeBlockPrefix
+	disableMarkdown := rc.Mattermost.Formatter.DisableMarkdown
+	disableEmoji := rc.Mattermost.Formatter.DisableEmoji
+
+	prefixChar := messageAttachmentCharNonUnicode
+	spaceChar := messageAttachmentSpaceNonUnicode
+	blockquoteChar := blockquoteCharNonUnicode
+	inlineCode := rc.Mattermost.Formatter.MarkdownInlineCode
+
+	if useUnicode {
+		prefixChar = messageAttachmentCharUnicode
+		spaceChar = messageAttachmentSpaceUnicode
+		blockquoteChar = blockquoteCharUnicode
+		// Downgrade heavy vertical to light as we're using heavy already
+		if strings.ContainsAny(codeBlockPrefix, "┃🮇▎") {
+			codeBlockPrefix = strings.Replace(codeBlockPrefix, "┃", "│", 1)
+			codeBlockPrefix = strings.Replace(codeBlockPrefix, "🮇", "▕", 1)
+			codeBlockPrefix = strings.Replace(codeBlockPrefix, "▎", "▏", 1)
+		}
+	}
+
+	b.Grow(len(text) + 64)
+	prefix := prefixChar + spaceChar
+
+	b.WriteString(prefix)
+	b.WriteByte('\x02')
+	b.WriteString(user)
+	b.WriteString("\x02 wrote in \x1d")
+	b.WriteString(channel)
+	b.WriteString("\x1d:\n")
+
+	lexer := ""
+	codeBlockBackTick := false
+	codeBlockTilde := false
+
+	for {
+		line, rest, found := strings.Cut(text, "\n")
+
+		line, codeBlockBackTick, codeBlockTilde, lexer = utils.FormatCodeBlockText(line, codeBlockBackTick, codeBlockTilde, lexer, syntaxHighlighting, codeBlockPrefix)
+
+		if !disableMarkdown && !codeBlockBackTick && !codeBlockTilde {
+			line = utils.Markdown2irc(line, blockquoteChar, inlineCode)
+		}
+
+		if !disableEmoji && !codeBlockBackTick && !codeBlockTilde {
+			line = utils.EmojiReplaceAliases(line)
+		}
+
+		b.WriteString(prefix)
+		b.WriteString(line)
+
+		if !found {
+			break
+		}
+		b.WriteByte('\n')
+		text = rest
+	}
 }
 
 func (m *Mattermost) GetLastSentMsgs() []string {
