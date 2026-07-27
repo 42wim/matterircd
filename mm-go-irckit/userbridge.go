@@ -1027,18 +1027,9 @@ func (u *User) syncChannel(id string, name string) {
 	u.addUsersToChannel(batchUsers, "&users", "&users")
 	u.addUsersToChannel(batchUsers, name, id)
 
-	// Check if this channel is in our bridge's list of joined channels
-	isMember := false
-	for _, ch := range u.br.GetChannels() {
-		if ch.ID == id {
-			isMember = true
-			break
-		}
-	}
-
 	// add myself ONLY if I am actually a member
 	ch := srv.Channel(id)
-	if isMember && !ch.HasUser(u) && u.mayJoin(id) {
+	if u.br.IsChannelMember(id) && !ch.HasUser(u) && u.mayJoin(id) {
 		logger.Debugf("syncChannel adding myself to %s (id: %s)", name, id)
 		ch.Join(u)
 		svc, _ := srv.HasUser(u.br.Protocol())
