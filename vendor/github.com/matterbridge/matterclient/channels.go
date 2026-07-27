@@ -450,7 +450,16 @@ func (m *Client) UpdateChannelsTeam(teamID string) error {
 	if m.Users.channelData == nil {
 		totalChannels := len(joinedSummaries) + len(publicSummaries)
 		m.Users.channelData = make(map[string]*model.Channel, totalChannels)
+
+		// Allocate the map buckets exactly once on startup
 		m.Users.joinedChannels = make(map[string]struct{}, len(joinedSummaries))
+	} else {
+		// This instantly empties the map while preserving the underlying memory buckets,
+		// completely eliminating allocation churn for subsequent syncs!
+		// clear(m.Users.joinedChannels) // rquires Go 1.21+
+		for k := range m.Users.joinedChannels {
+			delete(m.Users.joinedChannels, k)
+		}
 	}
 
 	for _, ch := range joinedSummaries {
