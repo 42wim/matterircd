@@ -434,7 +434,7 @@ func (m *Client) initUser() error {
 
 		m.logger.Debugf("fetching users for team %s (cache expired or missing)", team.Name)
 
-		teamUsers := make([]*model.User, 0, batchSize)
+		fetchedUsers := make([]UserSummary, 0, batchSize)
 
 		idx := 0
 		pageRetryCount := 0
@@ -463,17 +463,7 @@ func (m *Client) initUser() error {
 			}
 			resp.Body.Close()
 
-			for _, u := range list {
-				teamUsers = append(teamUsers, &model.User{
-					Id:        u.Id,
-					Username:  u.Username,
-					FirstName: u.FirstName,
-					LastName:  u.LastName,
-					Nickname:  u.Nickname,
-					Roles:     u.Roles,
-				})
-			}
-
+			fetchedUsers = append(fetchedUsers, list...)
 			if len(list) < batchSize {
 				break
 			}
@@ -481,16 +471,54 @@ func (m *Client) initUser() error {
 			idx++
 			time.Sleep(time.Millisecond * 200)
 		}
-		m.logger.Debugf("found %d users in team %s", len(teamUsers), team.Name)
+		m.logger.Debugf("found %d users in team %s", len(fetchedUsers), team.Name)
 
 		m.Users.mu.Lock()
 		if m.Users.teams == nil {
 			m.Users.teams = make(map[string]map[string]struct{})
 		}
-		m.Users.teams[team.Id] = make(map[string]struct{}, len(teamUsers))
-		for _, u := range teamUsers {
-			m.Users.users[u.Id] = u
-			m.Users.teams[team.Id][u.Id] = struct{}{}
+		m.Users.teams[team.Id] = make(map[string]struct{}, len(fetchedUsers))
+
+		for _, u := range fetchedUsers {
+			cachedUser, exists := m.Users.users[u.Id]
+			if !exists { //nolint:nestif
+				// Intern common roles
+				roles := u.Roles
+				if roles == "system_user" {
+					roles = "system_user"
+				} else if roles == "system_admin system_user" {
+					roles = "system_admin system_user"
+				}
+
+				cachedUser = &model.User{
+					Id:        u.Id,
+					Username:  u.Username,
+					FirstName: u.FirstName,
+					LastName:  u.LastName,
+					Nickname:  u.Nickname,
+					Roles:     roles,
+				}
+				m.Users.users[u.Id] = cachedUser
+			} else {
+				// Only overwrite if changed, saving the tenured strings
+				if cachedUser.Username != u.Username {
+					cachedUser.Username = u.Username
+				}
+				if cachedUser.FirstName != u.FirstName {
+					cachedUser.FirstName = u.FirstName
+				}
+				if cachedUser.LastName != u.LastName {
+					cachedUser.LastName = u.LastName
+				}
+				if cachedUser.Nickname != u.Nickname {
+					cachedUser.Nickname = u.Nickname
+				}
+				if cachedUser.Roles != u.Roles {
+					cachedUser.Roles = u.Roles
+				}
+			}
+
+			m.Users.teams[team.Id][cachedUser.Id] = struct{}{}
 		}
 		m.Users.lastUpdated.Store(time.Now().Unix())
 		m.Users.mu.Unlock()
