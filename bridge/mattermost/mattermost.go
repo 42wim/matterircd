@@ -1192,12 +1192,15 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 
 	// We can't use data.GetPreviewPost() due to a bug so use our own
 	previewText, previewUserID, previewChannelID := extractPreviewData(data.Metadata)
-	if previewText != "" {
+	if !(previewText == "" && previewUserID == "" && previewChannelID == "") {
 		nick := previewUserID
 		if user := m.GetUser(previewUserID); user != nil {
 			nick = user.Nick
 		}
 		channel := m.GetChannelName(previewChannelID)
+		if strings.Contains(channel, "__") {
+			channel = ""
+		}
 		m.parsePreviewPost(&sbMsg, nick, channel, previewText)
 	}
 
@@ -2093,9 +2096,13 @@ func (m *Mattermost) parsePreviewPost(b *strings.Builder, user string, channel s
 	b.WriteString(prefix)
 	b.WriteByte('\x02')
 	b.WriteString(user)
-	b.WriteString("\x02 wrote in \x1d")
-	b.WriteString(channel)
-	b.WriteString("\x1d:\n")
+	b.WriteString("\x02 wrote")
+	if channel != "" {
+		b.WriteString(" in \x1d")
+		b.WriteString(channel)
+		b.WriteByte('\x1d')
+	}
+	b.WriteByte('\n')
 
 	lexer := ""
 	codeBlockBackTick := false
