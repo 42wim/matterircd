@@ -450,8 +450,8 @@ func (m *Client) UpdateChannelsTeam(teamID string) error {
 	if m.Users.channelData == nil {
 		totalChannels := len(joinedSummaries) + len(publicSummaries)
 		m.Users.channelData = make(map[string]*model.Channel, totalChannels)
-		m.Users.joinedChannels = make(map[string]struct{}, len(joinedSummaries))
 	}
+	m.Users.joinedChannels = make(map[string]struct{}, len(joinedSummaries))
 
 	for _, ch := range joinedSummaries {
 		cached, exists := m.Users.channelData[ch.Id]
