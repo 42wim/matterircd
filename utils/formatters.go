@@ -308,19 +308,21 @@ func Markdown2irc(msg string, blockQuoteChar string, inlineCode string) string {
 
 		var newPrefix strings.Builder
 		idx := 0
+	ParseLoop:
 		for idx < len(trimmedText) {
-			if trimmedText[idx] == '>' {
+			switch trimmedText[idx] {
+			case '>':
 				newPrefix.WriteString(blockQuoteChar)
 				idx++
 				// Markdown allows one optional space immediately after a '>'
 				if idx < len(trimmedText) && trimmedText[idx] == ' ' {
 					idx++
 				}
-			} else if trimmedText[idx] == ' ' || trimmedText[idx] == '\t' {
+			case ' ', '\t':
 				// Skip any extra spaces between nested quote markers
 				idx++
-			} else {
-				break
+			default:
+				break ParseLoop
 			}
 		}
 
