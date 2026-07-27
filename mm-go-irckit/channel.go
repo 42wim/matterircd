@@ -288,45 +288,55 @@ func (ch *channel) SendNamesResponse(u *User) error {
 		return u.Encode(end)
 	}
 
-	msgs := make([]*irc.Message, 0, len(names)+1)
+	estimatedMsgs := (len(names) / 20) + 2
+	messages := make([]irc.Message, 0, estimatedMsgs)
+	sharedNamReplyParams := []string{u.Nick, "=", ch.name}
 
 	var line strings.Builder
 	line.Grow(512)
 	i := 0
 	for _, name := range names {
-		if i+len(name) < 400 {
+		nameLen := len(name) + 1
+		if i+nameLen < 400 {
 			line.WriteString(name)
 			line.WriteByte(' ')
-			i += len(name)
+			i += nameLen
 		} else {
-			msgs = append(msgs, &irc.Message{
+			messages = append(messages, irc.Message{
 				Prefix:   prefix,
 				Command:  irc.RPL_NAMREPLY,
-				Params:   []string{u.Nick, "=", ch.name},
+				Params:   sharedNamReplyParams,
 				Trailing: line.String(),
 			})
 			line.Reset()
 			line.WriteString(name)
 			line.WriteByte(' ')
-			i = len(name)
+			i = nameLen
 		}
 	}
 
-	msgs = append(msgs, &irc.Message{
-		Prefix:   prefix,
-		Command:  irc.RPL_NAMREPLY,
-		Params:   []string{u.Nick, "=", ch.name},
-		Trailing: line.String(),
-	})
+	if line.Len() > 0 {
+		messages = append(messages, irc.Message{
+			Prefix:   prefix,
+			Command:  irc.RPL_NAMREPLY,
+			Params:   sharedNamReplyParams,
+			Trailing: line.String(),
+		})
+	}
 
-	msgs = append(msgs, &irc.Message{
+	messages = append(messages, irc.Message{
 		Prefix:   prefix,
 		Params:   []string{u.Nick, ch.name},
 		Command:  irc.RPL_ENDOFNAMES,
 		Trailing: "End of /NAMES list.",
 	})
 
-	return u.Encode(msgs...)
+	r := make([]*irc.Message, len(messages))
+	for j := range messages {
+		r[j] = &messages[j]
+	}
+
+	return u.Encode(r...)
 }
 
 func (ch *channel) BatchJoin(inputusers []*User) error {
