@@ -5,7 +5,9 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/sirupsen/logrus"
@@ -417,15 +419,31 @@ func validate(runtimeCfg *RuntimeConfig) error {
 }
 
 func (c *Config) watch() {
-	// reload config on file changes
 	if runtime.GOOS == "illumos" {
 		return
 	}
 
+	var (
+		mu    sync.Mutex
+		timer *time.Timer
+	)
+
+	// reload config on file changes
 	c.v.OnConfigChange(func(_ fsnotify.Event) {
-		if err := c.reload(); err != nil && logger != nil {
-			logger.WithError(err).Error("config reload failed")
+		mu.Lock()
+		defer mu.Unlock()
+
+		// If a timer is already running, stop it (debounce)
+		if timer != nil {
+			timer.Stop()
 		}
+
+		// Wait 500ms after the last filesystem event before reloading
+		timer = time.AfterFunc(500*time.Millisecond, func() {
+			if err := c.reload(); err != nil && logger != nil {
+				logger.WithError(err).Error("config reload failed")
+			}
+		})
 	})
 
 	c.v.WatchConfig()
