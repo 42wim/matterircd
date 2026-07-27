@@ -518,7 +518,7 @@ func (u *User) handleFileEvent(event *bridge.FileEvent) {
 }
 
 func (u *User) handleChannelCreateEvent(event *bridge.ChannelCreateEvent) {
-	logger.Debugf("ACTION_CHANNEL_CREATED adding myself to %s (%s)", u.br.GetChannelName(event.ChannelID), event.ChannelID)
+	logger.Debugf("ACTION_CHANNEL_CREATED syncing channel %s (%s)", u.br.GetChannelName(event.ChannelID), event.ChannelID)
 
 	u.syncChannel(event.ChannelID, u.br.GetChannelName(event.ChannelID))
 }
@@ -526,16 +526,12 @@ func (u *User) handleChannelCreateEvent(event *bridge.ChannelCreateEvent) {
 func (u *User) handleChannelDeleteEvent(event *bridge.ChannelDeleteEvent) {
 	ch := u.Srv.Channel(event.ChannelID)
 
-	for _, brchannel := range u.br.GetChannels() {
-		if brchannel.ID == event.ChannelID {
-			logger.Debugf("ACTION_CHANNEL_DELETED removing myself from %s (%s)", u.br.GetChannelName(event.ChannelID), event.ChannelID)
-
-			ch.Part(u, "")
-			return
-		}
+	if ch.HasUser(u) {
+		logger.Debugf("ACTION_CHANNEL_DELETED removing myself from %s (%s)", u.br.GetChannelName(event.ChannelID), event.ChannelID)
+		ch.Part(u, "")
+	} else {
+		logger.Debugf("ACTION_CHANNEL_DELETED not in channel %s (%s)", u.br.GetChannelName(event.ChannelID), event.ChannelID)
 	}
-
-	logger.Debugf("ACTION_CHANNEL_DELETED not in channel %s (%s)", u.br.GetChannelName(event.ChannelID), event.ChannelID)
 }
 
 func (u *User) handleUserUpdateEvent(event *bridge.UserUpdateEvent) {
@@ -1031,9 +1027,18 @@ func (u *User) syncChannel(id string, name string) {
 	u.addUsersToChannel(batchUsers, "&users", "&users")
 	u.addUsersToChannel(batchUsers, name, id)
 
-	// add myself
+	// check if our IRC Nick is in the list of translated channel members
+	isMember := false
+	for _, bu := range batchUsers {
+		if bu.Nick == u.Nick {
+			isMember = true
+			break
+		}
+	}
+
+	// add myself ONLY if I am actually a member
 	ch := srv.Channel(id)
-	if !ch.HasUser(u) && u.mayJoin(id) {
+	if isMember && !ch.HasUser(u) && u.mayJoin(id) {
 		logger.Debugf("syncChannel adding myself to %s (id: %s)", name, id)
 		ch.Join(u)
 		svc, _ := srv.HasUser(u.br.Protocol())
