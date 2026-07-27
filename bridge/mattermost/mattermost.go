@@ -1193,7 +1193,12 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	// We can't use data.GetPreviewPost() due to a bug so use our own
 	previewText, previewUserID, previewChannelID := extractPreviewData(data.Metadata)
 	if previewText != "" {
-		m.parsePreviewPost(&sbMsg, m.GetUser(previewUserID).Nick, m.GetChannelName(previewChannelID), previewText)
+		nick := previewUserID
+		if user := m.GetUser(previewUserID); user != nil {
+			nick = user.Nick
+		}
+		channel := m.GetChannelName(previewChannelID)
+		m.parsePreviewPost(&sbMsg, nick, channel, previewText)
 	}
 
 	switch {
@@ -2050,7 +2055,7 @@ func extractPreviewData(metadata *model.PostMetadata) (string, string, string) {
 	return "", "", ""
 }
 
-//nolint:funlen,gocyclo
+//nolint:funlen
 func (m *Mattermost) parsePreviewPost(b *strings.Builder, user string, channel string, text string) {
 	// If the main message builder already has content, add a newline before our preview
 	if b.Len() > 0 {
