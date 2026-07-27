@@ -317,6 +317,19 @@ func (m *Client) GetTeamFromChannel(channelID string) string {
 	return ""
 }
 
+// IsChannelMember returns true if the user is a member of the given channel ID.
+func (m *Client) IsChannelMember(channelID string) bool {
+	m.Users.mu.RLock()
+	defer m.Users.mu.RUnlock()
+
+	if m.Users.joinedChannels == nil {
+		return false
+	}
+
+	_, exists := m.Users.joinedChannels[channelID]
+	return exists
+}
+
 func (m *Client) JoinChannel(channelID string) error {
 	m.Users.mu.RLock()
 	_, joined := m.Users.joinedChannels[channelID]

@@ -481,7 +481,7 @@ func (m *Client) initUser() error {
 
 		for _, u := range fetchedUsers {
 			cachedUser, exists := m.Users.users[u.Id]
-			if !exists { //nolint:nestif
+			if !exists { //nolint:nestif,dupl
 				// Intern common roles
 				roles := u.Roles
 				if roles == "system_user" {

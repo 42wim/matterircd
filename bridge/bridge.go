@@ -63,6 +63,8 @@ type Bridger interface {
 	Config() any
 	BridgeConfig() *config.BridgeConfig
 	FormatterConfig() *config.FormatterConfig
+
+	IsChannelMember(channelID string) bool
 }
 
 type ChannelInfo struct {

@@ -87,6 +87,17 @@ func (s *Slack) Invite(channelID, username string) error {
 	return err
 }
 
+func (s *Slack) IsChannelMember(channelID string) bool {
+	info, err := s.sc.GetConversationInfo(&slack.GetConversationInfoInput{
+		ChannelID: channelID,
+	})
+	if err != nil || info == nil {
+		return false
+	}
+
+	return info.IsMember
+}
+
 func (s *Slack) Join(channelName string) (string, string, error) {
 	mychan, _, _, err := s.sc.JoinConversation(channelName)
 	if err != nil {

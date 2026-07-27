@@ -216,6 +216,10 @@ func (m *Mattermost) Invite(channelID, username string) error {
 	return nil
 }
 
+func (m *Mattermost) IsChannelMember(channelID string) bool {
+    return m.mc.IsChannelMember(channelID)
+}
+
 func (m *Mattermost) Join(channelName string) (string, string, error) {
 	teamID := ""
 
