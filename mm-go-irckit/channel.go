@@ -384,12 +384,14 @@ func (ch *channel) BatchJoin(inputusers []*User) error {
 // Join introduces a User to the channel (sends relevant messages, stores).
 func (ch *channel) Join(u *User) error {
 	// TODO: Check if user is already here?
-	ch.mu.Lock()
 
 	if u.ID() == "" {
-		ch.mu.Unlock()
-
 		return nil
+	}
+
+	ch.mu.Lock()
+	if ch.usersIdx == nil {
+		ch.usersIdx = make(map[string]*User)
 	}
 
 	if _, exists := ch.usersIdx[u.ID()]; exists {
@@ -401,6 +403,10 @@ func (ch *channel) Join(u *User) error {
 
 	ch.mu.Unlock()
 	u.Lock()
+
+	if u.channels == nil {
+		u.channels = make(map[Channel]struct{})
+	}
 
 	u.channels[ch] = struct{}{}
 
@@ -426,7 +432,6 @@ func (ch *channel) Join(u *User) error {
 			to.Encode(msg)
 		}
 	}
-
 
 	ch.SendNamesResponse(u)
 
