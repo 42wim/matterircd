@@ -867,6 +867,9 @@ func (m *Client) WsReceiver(ctx context.Context) {
 
 			m.lastWsActivity.Store(time.Now().Unix())
 
+			// Synchronously update local cache to avoid race conditions downstream
+			m.syncJoinedChannelsCache(event)
+
 			go m.maintainUsersCache(event)
 
 			msg := &Message{
@@ -1179,8 +1182,15 @@ func (m *Client) maintainUsersCache(event *model.WebSocketEvent) {
 			channel := &model.Channel{}
 			if err := json.Unmarshal([]byte(channelStr), channel); err == nil {
 				m.Users.mu.Lock()
+				if m.Users.channelData == nil {
+					m.Users.channelData = make(map[string]*model.Channel)
+				}
 				m.Users.channelData[channel.Id] = channel
+
 				if channel.Type == model.ChannelTypeDirect || channel.Type == model.ChannelTypeGroup {
+					if m.Users.joinedChannels == nil {
+						m.Users.joinedChannels = make(map[string]struct{})
+					}
 					m.Users.joinedChannels[channel.Id] = struct{}{}
 				}
 				m.Users.mu.Unlock()
@@ -1195,6 +1205,9 @@ func (m *Client) maintainUsersCache(event *model.WebSocketEvent) {
 			channel := &model.Channel{}
 			if err := json.Unmarshal([]byte(channelStr), channel); err == nil {
 				m.Users.mu.Lock()
+				if m.Users.channelData == nil {
+					m.Users.channelData = make(map[string]*model.Channel)
+				}
 				m.Users.channelData[channel.Id] = channel
 				m.Users.mu.Unlock()
 				m.Users.lastUpdated.Store(time.Now().Unix())
@@ -1206,6 +1219,51 @@ func (m *Client) maintainUsersCache(event *model.WebSocketEvent) {
 			// Mattermost soft-deletes channels. We keep the channel and users in our
 			// local cache to gracefully handle history, references, or restorations.
 			m.Users.lastUpdated.Store(time.Now().Unix())
+		}
+	}
+}
+
+// syncJoinedChannelsCache synchronously updates the joined channels cache
+// to prevent race conditions before handing off to background processes.
+//
+//nolint:gocyclo
+func (m *Client) syncJoinedChannelsCache(event *model.WebSocketEvent) {
+	switch event.EventType() {
+	case model.WebsocketEventUserAdded:
+		if userID, ok := event.GetData()["user_id"].(string); ok && m.User != nil && userID == m.User.Id {
+			m.Users.mu.Lock()
+			if m.Users.joinedChannels == nil {
+				m.Users.joinedChannels = make(map[string]struct{})
+			}
+			m.Users.joinedChannels[event.GetBroadcast().ChannelId] = struct{}{}
+			m.Users.mu.Unlock()
+		}
+	case model.WebsocketEventUserRemoved:
+		if userID, ok := event.GetData()["user_id"].(string); ok && m.User != nil && userID == m.User.Id {
+			m.Users.mu.Lock()
+			if m.Users.joinedChannels != nil {
+				delete(m.Users.joinedChannels, event.GetBroadcast().ChannelId)
+			}
+			m.Users.mu.Unlock()
+		}
+	case model.WebsocketEventDirectAdded, model.WebsocketEventChannelCreated:
+		// New DMs/Group messages don't fire user_added, they fire direct_added or channel_created.
+		// We do a fast, partial unmarshal synchronously to catch the channel ID and Type.
+		if channelStr, ok := event.GetData()["channel"].(string); ok { //nolint:nestif
+			var ch struct {
+				ID   string            `json:"id"`
+				Type model.ChannelType `json:"type"`
+			}
+			if err := json.Unmarshal([]byte(channelStr), &ch); err == nil {
+				if ch.Type == model.ChannelTypeDirect || ch.Type == model.ChannelTypeGroup {
+					m.Users.mu.Lock()
+					if m.Users.joinedChannels == nil {
+						m.Users.joinedChannels = make(map[string]struct{})
+					}
+					m.Users.joinedChannels[ch.ID] = struct{}{}
+					m.Users.mu.Unlock()
+				}
+			}
 		}
 	}
 }
