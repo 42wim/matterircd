@@ -378,7 +378,7 @@ func (m *Client) parseActionPost(rmsg *Message) {
 		m.logger.Error("payload 'post' was missing or not a string")
 		return
 	}
-	if err := json.Unmarshal([]byte(postStr), &data); err != nil {
+	if err := json.NewDecoder(strings.NewReader(postStr)).Decode(&data); err != nil {
 		m.logger.Errorf("failed to unmarshal post: %v", err)
 		return
 	}
