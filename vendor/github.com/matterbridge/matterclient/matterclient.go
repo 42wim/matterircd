@@ -1225,10 +1225,11 @@ func (m *Client) maintainUsersCache(event *model.WebSocketEvent) {
 
 // syncJoinedChannelsCache synchronously updates the joined channels cache
 // to prevent race conditions before handing off to background processes.
+//
+//nolint:gocognit
 func (m *Client) syncJoinedChannelsCache(event *model.WebSocketEvent) {
-	eventType := event.EventType()
-
-	if eventType == model.WebsocketEventUserAdded {
+	switch event.EventType() {
+	case model.WebsocketEventUserAdded:
 		if userID, ok := event.GetData()["user_id"].(string); ok && m.User != nil && userID == m.User.Id {
 			m.Users.mu.Lock()
 			if m.Users.joinedChannels == nil {
@@ -1237,7 +1238,7 @@ func (m *Client) syncJoinedChannelsCache(event *model.WebSocketEvent) {
 			m.Users.joinedChannels[event.GetBroadcast().ChannelId] = struct{}{}
 			m.Users.mu.Unlock()
 		}
-	} else if eventType == model.WebsocketEventUserRemoved {
+	case model.WebsocketEventUserRemoved:
 		if userID, ok := event.GetData()["user_id"].(string); ok && m.User != nil && userID == m.User.Id {
 			m.Users.mu.Lock()
 			if m.Users.joinedChannels != nil {
@@ -1245,12 +1246,12 @@ func (m *Client) syncJoinedChannelsCache(event *model.WebSocketEvent) {
 			}
 			m.Users.mu.Unlock()
 		}
-	} else if eventType == model.WebsocketEventDirectAdded || eventType == model.WebsocketEventChannelCreated {
+	case model.WebsocketEventDirectAdded, model.WebsocketEventChannelCreated:
 		// New DMs/Group messages don't fire user_added, they fire direct_added or channel_created.
 		// We do a fast, partial unmarshal synchronously to catch the channel ID and Type.
 		if channelStr, ok := event.GetData()["channel"].(string); ok {
-			var ch struct { //nolint:stylecheck
-				Id   string            `json:"id"`
+			var ch struct {
+				ID   string            `json:"id"`
 				Type model.ChannelType `json:"type"`
 			}
 			if err := json.Unmarshal([]byte(channelStr), &ch); err == nil {
@@ -1259,7 +1260,7 @@ func (m *Client) syncJoinedChannelsCache(event *model.WebSocketEvent) {
 					if m.Users.joinedChannels == nil {
 						m.Users.joinedChannels = make(map[string]struct{})
 					}
-					m.Users.joinedChannels[ch.Id] = struct{}{}
+					m.Users.joinedChannels[ch.ID] = struct{}{}
 					m.Users.mu.Unlock()
 				}
 			}
