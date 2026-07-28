@@ -454,11 +454,9 @@ func (m *Client) UpdateChannelsTeam(teamID string) error {
 		// Allocate the map buckets exactly once on startup
 		m.Users.joinedChannels = make(map[string]struct{}, len(joinedSummaries))
 	} else {
-		// Iterate through the global map and delete ONLY the channels belonging
-		// to the team we are currently syncing.
-		for chanID, ch := range m.Users.channelData {
-			if ch.TeamId == teamID {
-				delete(m.Users.channelData, chanID)
+		// Selectively delete only the joined channels belonging to THIS team.
+		for chanID := range m.Users.joinedChannels {
+			if ch, ok := m.Users.channelData[chanID]; ok && ch.TeamId == teamID {
 				delete(m.Users.joinedChannels, chanID)
 			}
 		}
