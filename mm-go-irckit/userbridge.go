@@ -772,7 +772,7 @@ func (u *User) addUsersToChannels() {
 	var wg sync.WaitGroup
 
 	// Use 4 workers instead of the previous 10 to preserve alphabetical pacing
-	for i := 0; i < 4; i++ {
+	for range 4 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
