@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"net"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -727,7 +728,7 @@ func (u *User) addUsersToChannels() {
 	}
 
 	srv := u.Srv
-	throttle := time.NewTicker(time.Millisecond * 200)
+	throttle := time.NewTicker(time.Millisecond * 8)
 
 	logger.Debug("in addUsersToChannels()")
 	// add all users, also who are not on channels
@@ -752,10 +753,26 @@ func (u *User) addUsersToChannels() {
 	ch = srv.Channel("&messages")
 	ch.Join(u)
 
-	channels := make(chan *bridge.ChannelInfo, 5)
+	// Fetch, filter, and sort the channels alphabetically
+	var joinChannels []*bridge.ChannelInfo
+	for _, brchannel := range u.br.GetChannels() {
+		// only joindm when specified
+		if brchannel.DM && !u.br.BridgeConfig().JoinDM {
+			logger.Debugf("Skipping IM channel %s", brchannel.Name)
+			continue
+		}
+		joinChannels = append(joinChannels, brchannel)
+	}
+
+	sort.Slice(joinChannels, func(i, j int) bool {
+		return strings.ToLower(joinChannels[i].Name) < strings.ToLower(joinChannels[j].Name)
+	})
+
+	channels := make(chan *bridge.ChannelInfo, len(joinChannels))
 	var wg sync.WaitGroup
 
-	for i := 0; i < 10; i++ {
+	// Use 4 workers instead of the previous 10 to preserve alphabetical pacing
+	for range 4 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -763,16 +780,9 @@ func (u *User) addUsersToChannels() {
 		}()
 	}
 
-	for _, brchannel := range u.br.GetChannels() {
+	// Feed the sorted channels into the queue
+	for _, brchannel := range joinChannels {
 		logger.Debugf("Adding channel %#v", brchannel)
-
-		// only joindm when specified
-		if brchannel.DM && !u.br.BridgeConfig().JoinDM {
-			logger.Debugf("Skipping IM channel %s", brchannel.Name)
-
-			continue
-		}
-
 		channels <- brchannel
 	}
 
