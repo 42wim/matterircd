@@ -751,7 +751,7 @@ func (m *Mattermost) wsActionPostSkip(rmsg *model.WebSocketEvent) bool {
 	shortenMsgLen := rc.Mattermost.ShortenRepliesTo
 
 	var data model.Post
-	if err := json.Unmarshal([]byte(postData), &data); err != nil {
+	if err := json.NewDecoder(strings.NewReader(postData)).Decode(&data); err != nil {
 		logger.Errorf("failed to unmarshal post: %v", err)
 		return true
 	}
@@ -784,6 +784,7 @@ func (m *Mattermost) wsActionPostSkip(rmsg *model.WebSocketEvent) bool {
 
 	msgID := data.Id
 	var sbSuffix strings.Builder
+	sbSuffix.Grow(shortenMsgLen + 32)
 	if data.RootId != "" {
 		msgID = data.RootId
 		if !rc.Mattermost.HideReplies {
@@ -806,6 +807,7 @@ func (m *Mattermost) wsActionPostSkip(rmsg *model.WebSocketEvent) bool {
 
 	lastSentMsg = maybeShorten(lastSentMsg, 90, "@", useUnicode)
 	var sb strings.Builder
+	sb.Grow(len(lastSentMsg) + shortenMsgLen + 32)
 	sb.WriteString(channel)
 	sb.WriteString(": ")
 	sb.WriteString(lastSentMsg)
@@ -970,7 +972,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	}
 
 	var data model.Post
-	if err := json.Unmarshal([]byte(postData), &data); err != nil {
+	if err := json.NewDecoder(strings.NewReader(postData)).Decode(&data); err != nil {
 		logger.Errorf("failed to unmarshal postData: %v", err)
 		return
 	}
@@ -986,6 +988,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	useUnicode := rc.Mattermost.Formatter.Unicode
 
 	var sbSuffix strings.Builder
+	sbSuffix.Grow(rc.Mattermost.ShortenRepliesTo + 32)
 	if !rc.Mattermost.HideReplies && data.RootId != "" {
 		parentReplyMsg, err := m.getParentReplyMsg(data.RootId, nil, rc.Mattermost.ShortenRepliesTo, "@", useUnicode)
 		if err != nil {
@@ -1500,7 +1503,7 @@ func (m *Mattermost) handleReactionEvent(rmsg *model.WebSocketEvent) {
 	}
 
 	var reaction model.Reaction
-	if err := json.Unmarshal([]byte(reactionData), &reaction); err != nil {
+	if err := json.NewDecoder(strings.NewReader(reactionData)).Decode(&reaction); err != nil {
 		logger.Errorf("failed to unmarshal reactionData: %v", err)
 		return
 	}
@@ -1538,6 +1541,7 @@ func (m *Mattermost) handleReactionEvent(rmsg *model.WebSocketEvent) {
 
 	var parentUser *bridge.UserInfo
 	var sbSuffix strings.Builder
+	sbSuffix.Grow(rc.Mattermost.ShortenRepliesTo + 32)
 
 	parentID := reaction.PostId
 	parentPost, _, err := m.mc.Client.GetPost(reaction.PostId, "")
