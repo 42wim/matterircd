@@ -2098,7 +2098,7 @@ func (m *Mattermost) parsePreviewPost(b *strings.Builder, user string, channel s
 	prefix := prefixChar + spaceChar
 
 	b.WriteString(prefix)
-	b.WriteByte('\x02@')
+	b.WriteString("\x02@")
 	b.WriteString(user)
 	b.WriteString("\x02 wrote")
 	if channel != "" {
