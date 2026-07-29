@@ -227,9 +227,14 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 		line, rest, found := strings.Cut(text, "\n")
 
 		// Remove message thread context prefix for formatting and remember to add it back
-		if !addPrefix && prefixContext && !showContextMulti && strings.HasPrefix(line, prefix) {
-			line = strings.TrimPrefix(line, prefix)
-			addPrefix = true
+		if !addPrefix && prefixContext && !showContextMulti {
+			if prefix != "" && strings.HasPrefix(line, prefix) {
+				line = strings.TrimPrefix(line, prefix)
+				addPrefix = true
+			} else if trimmedPrefix != "" && line == trimmedPrefix {
+				line = ""
+				addPrefix = true
+			}
 		}
 
 		// TODO: Ideally, we want to read the whole code block and syntax highlight on that, but let's go with per-line for now.
@@ -428,9 +433,14 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		line, rest, found := strings.Cut(text, "\n")
 
 		// Remove message thread context prefix for formatting and remember to add it back
-		if !addPrefix && prefixContext && !showContextMulti && strings.HasPrefix(line, prefix) {
-			line = strings.TrimPrefix(line, prefix)
-			addPrefix = true
+		if !addPrefix && prefixContext && !showContextMulti {
+			if prefix != "" && strings.HasPrefix(line, prefix) {
+				line = strings.TrimPrefix(line, prefix)
+				addPrefix = true
+			} else if trimmedPrefix != "" && line == trimmedPrefix {
+				line = ""
+				addPrefix = true
+			}
 		}
 
 		// TODO: Ideally, we want to read the whole code block and syntax highlight on that, but let's go with per-line for now.
