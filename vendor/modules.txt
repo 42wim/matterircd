@@ -139,9 +139,6 @@ github.com/mattn/go-isatty
 # github.com/mattn/go-mastodon v0.0.6
 ## explicit; go 1.16
 github.com/mattn/go-mastodon
-# github.com/mattn/go-runewidth v0.0.13
-## explicit; go 1.9
-github.com/mattn/go-runewidth
 # github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d
 ## explicit
 github.com/mgutz/ansi
@@ -176,10 +173,6 @@ github.com/modern-go/concurrent
 # github.com/modern-go/reflect2 v1.0.2
 ## explicit; go 1.12
 github.com/modern-go/reflect2
-# github.com/muesli/reflow v0.3.0
-## explicit; go 1.13
-github.com/muesli/reflow/ansi
-github.com/muesli/reflow/wordwrap
 # github.com/opentracing/opentracing-go v1.2.0
 ## explicit; go 1.14
 github.com/opentracing/opentracing-go
@@ -207,9 +200,6 @@ github.com/pkg/errors
 # github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2
 ## explicit
 github.com/pmezard/go-difflib/difflib
-# github.com/rivo/uniseg v0.2.0
-## explicit; go 1.12
-github.com/rivo/uniseg
 # github.com/rs/xid v1.4.0
 ## explicit; go 1.12
 github.com/rs/xid
