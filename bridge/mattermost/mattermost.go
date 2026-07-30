@@ -72,13 +72,14 @@ func New(cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Eve
 
 	// Helper closure to set bridge levels
 	setBridgeLogLevels := func(rc *config.RuntimeConfig) {
-		if rc.Trace {
+		switch {
+		case rc.Trace:
 			ourlog.SetLevel(logrus.TraceLevel)
 			mc.SetLogLevel("trace")
-		} else if rc.Debug {
+		case rc.Debug:
 			ourlog.SetLevel(logrus.DebugLevel)
 			mc.SetLogLevel("debug")
-		} else {
+		default:
 			ourlog.SetLevel(logrus.InfoLevel)
 			mc.SetLogLevel("info")
 		}

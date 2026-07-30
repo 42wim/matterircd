@@ -58,17 +58,18 @@ func New(cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Eve
 		ourlog.SetLevel(logrus.TraceLevel)
 	}
 
-	sc, err :=  s.loginToSlack()
+	sc, err := s.loginToSlack()
 	if err != nil {
 		return nil, err
 	}
 	// Helper closure to set bridge levels
 	setBridgeLogLevels := func(rc *config.RuntimeConfig) {
-		if rc.Trace {
+		switch {
+		case rc.Trace:
 			ourlog.SetLevel(logrus.TraceLevel)
-		} else if rc.Debug {
+		case rc.Debug:
 			ourlog.SetLevel(logrus.DebugLevel)
-		} else {
+		default:
 			ourlog.SetLevel(logrus.InfoLevel)
 		}
 	}
