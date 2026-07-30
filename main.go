@@ -68,17 +68,29 @@ func main() {
 	}
 	rc := cfg.Current()
 
-	if rc.Debug {
-		logger.Info("enabling debug")
-		config.SetLogLevel(logrus.DebugLevel)
-		irckit.SetLogLevel("debug")
+	// Helper function to set log levels on startup and reloads
+	setLogLevels := func(rc *config.RuntimeConfig) {
+		switch {
+		case rc.Trace:
+			logger.Info("enabling trace")
+			config.SetLogLevel(logrus.TraceLevel)
+			irckit.SetLogLevel("trace")
+		case rc.Debug:
+			logger.Info("enabling debug")
+			config.SetLogLevel(logrus.DebugLevel)
+			irckit.SetLogLevel("debug")
+		default:
+			// Fallback to Info when Debug/Trace are toggled off live
+			config.SetLogLevel(logrus.InfoLevel)
+			irckit.SetLogLevel("info")
+		}
 	}
 
-	if rc.Trace {
-		logger.Info("enabling trace")
-		config.SetLogLevel(logrus.TraceLevel)
-		irckit.SetLogLevel("trace")
-	}
+	// Set initial log level at startup
+	setLogLevels(rc)
+
+	// Register hook to update log levels dynamically on config reload
+	cfg.RegisterReloadHook(setLogLevels)
 
 	if rc.Gops {
 		if err := agent.Listen(agent.Options{}); err != nil {

@@ -70,13 +70,27 @@ func New(cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Eve
 		return nil, nil, err
 	}
 
-	if rc.Debug {
-		mc.SetLogLevel("debug")
+	// Helper closure to set bridge levels
+	setBridgeLogLevels := func(rc *config.RuntimeConfig) {
+		if rc.Trace {
+			ourlog.SetLevel(logrus.TraceLevel)
+			mc.SetLogLevel("trace")
+		} else if rc.Debug {
+			ourlog.SetLevel(logrus.DebugLevel)
+			mc.SetLogLevel("debug")
+		} else {
+			ourlog.SetLevel(logrus.InfoLevel)
+			mc.SetLogLevel("info")
+		}
 	}
 
-	if rc.Trace {
-		mc.SetLogLevel("trace")
-	}
+	// Set initial log level
+	setBridgeLogLevels(rc)
+
+	// Register hook to update live on reloads
+	cfg.RegisterReloadHook(func(newRC *config.RuntimeConfig) {
+		setBridgeLogLevels(newRC)
+	})
 
 	m.mc = mc
 	m.connected = true
