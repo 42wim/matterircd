@@ -8,8 +8,10 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
 
 	bolt "go.etcd.io/bbolt"
@@ -91,6 +93,19 @@ func main() {
 
 	// Register hook to update log levels dynamically on config reload
 	cfg.RegisterReloadHook(setLogLevels)
+
+	// Setup SIGHUP listener for manual live reloads via `kill -s HUP <PID>`
+	sighupChan := make(chan os.Signal, 1)
+	signal.Notify(sighupChan, syscall.SIGHUP)
+
+	go func() {
+		for range sighupChan {
+			logger.Info("received SIGHUP signal, triggering config reload...")
+			if err := cfg.Reload(); err != nil {
+				logger.WithError(err).Error("SIGHUP config reload failed")
+			}
+		}
+	}()
 
 	if rc.Gops {
 		if err := agent.Listen(agent.Options{}); err != nil {
