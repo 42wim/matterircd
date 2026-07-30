@@ -2,7 +2,6 @@ package utils
 
 import (
 	"bytes"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -12,12 +11,6 @@ import (
 
 //nolint:funlen,gocyclo
 func FormatCodeBlockText(text string, codeBlockBackTick bool, codeBlockTilde bool, lexer string, syntaxHighlighting string, linePrefix string) (string, bool, bool, string) {
-	if linePrefix != "" && strings.ContainsRune(linePrefix, '\\') {
-		if unq, err := strconv.Unquote(`"` + linePrefix + `"`); err == nil {
-			linePrefix = unq
-		}
-	}
-
 	trimmedText := strings.TrimLeft(text, " \t")
 
 	// Inline backtick toggle logic to avoid closure allocations
@@ -286,9 +279,6 @@ func Markdown2irc(msg string, blockQuoteChar string, inlineCode string) string {
 		inlineCodeEnd := "\x11\x0f`"
 
 		if inlineCode != "" {
-			if unq, err := strconv.Unquote(`"` + inlineCode + `"`); err == nil {
-				inlineCode = unq
-			}
 			inlineCodeStart = inlineCode
 			// Remove fence if not present
 			if !strings.Contains(inlineCode, "`") {
@@ -302,10 +292,6 @@ func Markdown2irc(msg string, blockQuoteChar string, inlineCode string) string {
 	// Block quotes
 	trimmedText := strings.TrimLeft(msg, " \t")
 	if strings.HasPrefix(trimmedText, blockQuoteCharDefault) && blockQuoteChar != blockQuoteCharDefault {
-		if unq, err := strconv.Unquote(`"` + blockQuoteChar + `"`); err == nil {
-			blockQuoteChar = unq
-		}
-
 		var newPrefix strings.Builder
 		idx := 0
 	ParseLoop:
