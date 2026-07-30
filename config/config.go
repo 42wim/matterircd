@@ -416,13 +416,13 @@ func SetLogLevel(level logrus.Level) {
 }
 
 func unquoteString(s string) string {
-        if s == "" || !strings.ContainsRune(s, '\\') {
-                return s
-        }
-        if unq, err := strconv.Unquote(`"` + s + `"`); err == nil {
-                return unq
-        }
-        return s
+	if s == "" || !strings.ContainsRune(s, '\\') {
+		return s
+	}
+	if unq, err := strconv.Unquote(`"` + s + `"`); err == nil {
+		return unq
+	}
+	return s
 }
 
 func validate(runtimeCfg *RuntimeConfig) error {
