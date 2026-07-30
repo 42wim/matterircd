@@ -225,9 +225,12 @@ func (m *Mattermost) Join(channelName string) (string, string, error) {
 
 	sp := strings.Split(channelName, "/")
 	if len(sp) > 1 {
-		team, _, _ := m.mc.Client.GetTeamByName(sp[0], "")
+		team, _, err := m.mc.Client.GetTeamByName(sp[0], "")
 		if team == nil {
-			return "", "", fmt.Errorf("cannot join channel (+i)")
+			if err != nil {
+				return "", "", fmt.Errorf("team not found: %v", err)
+			}
+			return "", "", fmt.Errorf("team not found")
 		}
 
 		teamID = team.Id
@@ -239,11 +242,14 @@ func (m *Mattermost) Join(channelName string) (string, string, error) {
 	}
 
 	channelID := m.mc.GetChannelID(channelName, teamID)
+	if channelID == "" {
+		return "", "", fmt.Errorf("channel not found: check if the channel exists, if you are using the URL slug, or if it is private")
+	}
 
 	err := m.mc.JoinChannel(channelID)
 	logger.Debugf("join channel %s, id %s, err: %v", channelName, channelID, err)
 	if err != nil {
-		return "", "", fmt.Errorf("cannot join channel (+i)")
+		return "", "", fmt.Errorf("cannot join channel: %v", err)
 	}
 
 	topic := m.mc.GetChannelHeader(channelID)
