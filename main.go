@@ -35,12 +35,6 @@ var (
 	cfg     *config.Config
 
 	LastViewedSaveDB *bolt.DB
-
-	gopsRunning bool
-	gopsMu      sync.Mutex
-
-	profServer *http.Server
-	profMu     sync.Mutex
 )
 
 func main() {
@@ -175,7 +169,7 @@ func setupProfilingReloadHook(cfg *config.Config) {
 		profMu.Lock()
 		defer profMu.Unlock()
 
-		if rc.Profiling {
+		if rc.Profiling { //nolint:nestif
 			if profServer == nil {
 				logger.Info("enabling profiling: starting HTTP server: *:6060")
 				runtime.SetBlockProfileRate(1)
@@ -188,8 +182,9 @@ func setupProfilingReloadHook(cfg *config.Config) {
 				})
 
 				profServer = &http.Server{
-					Addr:    ":6060",
-					Handler: handler,
+					Addr:              ":6060",
+					Handler:           handler,
+					ReadHeaderTimeout: 3 * time.Second,
 				}
 
 				go func() {
@@ -229,7 +224,7 @@ func setupGopsReloadHook(cfg *config.Config) {
 		gopsMu.Lock()
 		defer gopsMu.Unlock()
 
-		if rc.Gops {
+		if rc.Gops { //nolint:nestif
 			if !gopsRunning {
 				logger.Info("enabling gops agent")
 				if err := agent.Listen(agent.Options{}); err != nil {
