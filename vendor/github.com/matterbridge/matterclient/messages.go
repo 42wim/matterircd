@@ -183,6 +183,20 @@ func (m *Client) GetPostThread(postID string) *model.PostList {
 }
 
 func (m *Client) GetPostsSince(channelID string, time int64) *model.PostList {
+	m.Users.mu.RLock()
+	ch, ok := m.Users.channelData[channelID]
+	m.Users.mu.RUnlock()
+
+	if ok && ch != nil {
+		// If channel is archived, or hasn't had new posts, bail early!
+		if ch.DeleteAt > 0 || (ch.LastPostAt > 0 && ch.LastPostAt <= time) {
+			return &model.PostList{
+				Order: []string{},
+				Posts: make(map[string]*model.Post),
+			}
+		}
+	}
+
 	retryCount := 0
 	for {
 		res, resp, err := m.Client.GetPostsSince(channelID, time, false)

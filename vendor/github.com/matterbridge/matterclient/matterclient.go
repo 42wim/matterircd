@@ -40,12 +40,15 @@ type Credentials struct {
 //nolint:stylecheck
 type ChannelSummary struct {
 	Id          string `json:"id"`
+	UpdateAt    int64  `json:"update_at"`
+	DeleteAt    int64  `json:"delete_at"`
 	TeamId      string `json:"team_id"`
 	Type        string `json:"type"`
 	DisplayName string `json:"display_name"`
 	Name        string `json:"name"`
 	Header      string `json:"header"`
 	Purpose     string `json:"purpose"`
+	LastPostAt  int64  `json:"last_post_at"`
 	CreatorId   string `json:"creator_id"`
 }
 
@@ -1160,6 +1163,21 @@ func (m *Client) maintainUsersCache(event *model.WebSocketEvent) {
 		if postStr, ok := event.GetData()["post"].(string); ok && channelID != "" {
 			post := &model.Post{}
 			if err := json.NewDecoder(strings.NewReader(postStr)).Decode(post); err == nil {
+				// Update the LastPostAt in our channelData cache
+				m.Users.mu.Lock()
+				if ch, ok := m.Users.channelData[channelID]; ok {
+					// Only update if the new post is newer (handles out-of-order websocket events)
+					if post.CreateAt > ch.LastPostAt {
+						ch.LastPostAt = post.CreateAt
+					}
+				}
+				m.Users.mu.Unlock()
+
+				// Mattermost assigns the leaving user's ID to the 'system_leave_channel' post.
+				if strings.HasPrefix(post.Type, "system_") {
+					break
+				}
+
 				m.Users.mu.RLock()
 				_, channelIsCached := m.Users.channels[channelID]
 				_, userIsCached := m.Users.channels[channelID][post.UserId]
@@ -1202,6 +1220,18 @@ func (m *Client) maintainUsersCache(event *model.WebSocketEvent) {
 		if channelID, ok := event.GetData()["channel_id"].(string); ok && channelID != "" {
 			// Mattermost soft-deletes channels. We keep the channel and users in our
 			// local cache to gracefully handle history, references, or restorations.
+			m.Users.mu.Lock()
+			if ch, ok := m.Users.channelData[channelID]; ok {
+				// Mattermost event data parses numbers as float64
+				if deleteAt, ok := event.GetData()["delete_at"].(float64); ok && deleteAt > 0 {
+					ch.DeleteAt = int64(deleteAt)
+				} else {
+					// Fallback if payload is missing the timestamp (Mattermost uses epoch milliseconds)
+					ch.DeleteAt = time.Now().UnixNano() / int64(time.Millisecond)
+				}
+			}
+			m.Users.mu.Unlock()
+
 			m.Users.lastUpdated.Store(time.Now().Unix())
 		}
 	case model.WebsocketEventMultipleChannelsViewed:
