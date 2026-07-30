@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/http"
 	"os"
+	"runtime"
 	"strings"
 	"time"
 
@@ -18,6 +20,8 @@ import (
 	prefixed "github.com/matterbridge/logrus-prefixed-formatter"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
+
+	_ "net/http/pprof" //nolint:gosec
 )
 
 var (
@@ -33,6 +37,7 @@ func main() {
 	ourlog := logrus.New()
 	ourlog.Formatter = &prefixed.TextFormatter{
 		PrefixPadding: 11,
+		DisableColors: false,
 		FullTimestamp: true,
 	}
 	logger = ourlog.WithFields(logrus.Fields{"prefix": "matterircd"})
@@ -79,6 +84,25 @@ func main() {
 		if err := agent.Listen(agent.Options{}); err != nil {
 			log.Fatal(err)
 		}
+	}
+
+	if rc.Profiling {
+		runtime.SetBlockProfileRate(1)
+		runtime.SetMutexProfileFraction(10)
+		go func() {
+			logger.Infof("enabling profiling: start HTTP server: *:6060")
+
+			h := http.DefaultServeMux
+			handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// Remove any gzip (or other content-encoding) header.
+				w.Header().Del("Content-Encoding")
+				h.ServeHTTP(w, r)
+			})
+
+			if err := http.ListenAndServe(":6060", handler); err != nil { //nolint:gosec
+				logger.Fatal("profiling: Failed to start HTTP server", err)
+			}
+		}()
 	}
 
 	if flag.Lookup("version").Value.String() == "true" {

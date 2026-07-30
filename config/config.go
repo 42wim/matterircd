@@ -42,9 +42,10 @@ type RuntimeConfig struct {
 type GlobalConfig struct {
 	Bind string
 
-	Debug bool
-	Trace bool
-	Gops  bool
+	Debug     bool
+	Trace     bool
+	Gops      bool
+	Profiling bool
 
 	TLSBind string
 	TLSDir  string
@@ -249,9 +250,10 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 		GlobalConfig: GlobalConfig{
 			Bind: c.v.GetString("bind"),
 
-			Debug: c.v.GetBool("debug"),
-			Trace: c.v.GetBool("trace"),
-			Gops:  c.v.GetBool("gops"),
+			Debug:     c.v.GetBool("debug"),
+			Trace:     c.v.GetBool("trace"),
+			Gops:      c.v.GetBool("gops"),
+			Profiling: c.v.GetBool("profiling"),
 
 			TLSBind: c.v.GetString("tlsbind"),
 			TLSDir:  c.v.GetString("tlsdir"),
