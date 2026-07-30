@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -206,11 +207,11 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 
 		DisableMarkdown:           c.v.GetBool("mattermost.DisableMarkdown"),
 		DisableMarkdownBlockQuote: c.v.GetBool("mattermost.DisableMarkdownBlockQuote"),
-		MarkdownBlockQuoteChar:    c.v.GetString("mattermost.MarkdownBlockQuoteChar"),
-		MarkdownInlineCode:        c.v.GetString("mattermost.MarkdownInlineCode"),
+		MarkdownBlockQuoteChar:    unquoteString(c.v.GetString("mattermost.MarkdownBlockQuoteChar")),
+		MarkdownInlineCode:        unquoteString(c.v.GetString("mattermost.MarkdownInlineCode")),
 
 		DisableCodeBlockPrefix: c.v.GetBool("mattermost.DisableCodeBlockPrefix"),
-		CodeBlockPrefix:        c.v.GetString("mattermost.CodeBlockPrefix"),
+		CodeBlockPrefix:        unquoteString(c.v.GetString("mattermost.CodeBlockPrefix")),
 		SyntaxHighlighting:     c.v.GetString("mattermost.SyntaxHighlighting"),
 
 		Unicode: c.v.GetBool("mattermost.Unicode"),
@@ -220,11 +221,11 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 
 		DisableMarkdown:           c.v.GetBool("slack.DisableMarkdown"),
 		DisableMarkdownBlockQuote: c.v.GetBool("slack.DisableMarkdownBlockQuote"),
-		MarkdownBlockQuoteChar:    c.v.GetString("slack.MarkdownBlockQuoteChar"),
-		MarkdownInlineCode:        c.v.GetString("slack.MarkdownInlineCode"),
+		MarkdownBlockQuoteChar:    unquoteString(c.v.GetString("slack.MarkdownBlockQuoteChar")),
+		MarkdownInlineCode:        unquoteString(c.v.GetString("slack.MarkdownInlineCode")),
 
 		DisableCodeBlockPrefix: c.v.GetBool("slack.DisableCodeBlockPrefix"),
-		CodeBlockPrefix:        c.v.GetString("slack.CodeBlockPrefix"),
+		CodeBlockPrefix:        unquoteString(c.v.GetString("slack.CodeBlockPrefix")),
 		SyntaxHighlighting:     c.v.GetString("slack.SyntaxHighlighting"),
 
 		Unicode: c.v.GetBool("slack.Unicode"),
@@ -234,11 +235,11 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 
 		DisableMarkdown:           c.v.GetBool("mastodon.DisableMarkdown"),
 		DisableMarkdownBlockQuote: c.v.GetBool("mastodon.DisableMarkdownBlockQuote"),
-		MarkdownBlockQuoteChar:    c.v.GetString("mastodon.MarkdownBlockQuoteChar"),
-		MarkdownInlineCode:        c.v.GetString("mastodon.MarkdownInlineCode"),
+		MarkdownBlockQuoteChar:    unquoteString(c.v.GetString("mastodon.MarkdownBlockQuoteChar")),
+		MarkdownInlineCode:        unquoteString(c.v.GetString("mastodon.MarkdownInlineCode")),
 
 		DisableCodeBlockPrefix: c.v.GetBool("mastodon.DisableCodeBlockPrefix"),
-		CodeBlockPrefix:        c.v.GetString("mastodon.CodeBlockPrefix"),
+		CodeBlockPrefix:        unquoteString(c.v.GetString("mastodon.CodeBlockPrefix")),
 		SyntaxHighlighting:     c.v.GetString("mastodon.SyntaxHighlighting"),
 
 		Unicode: c.v.GetBool("mastodon.Unicode"),
@@ -412,6 +413,16 @@ func SetLogLevel(level logrus.Level) {
 	if logger != nil {
 		logger.Logger.SetLevel(level)
 	}
+}
+
+func unquoteString(s string) string {
+	if s == "" || !strings.ContainsRune(s, '\\') {
+		return s
+	}
+	if unq, err := strconv.Unquote(`"` + s + `"`); err == nil {
+		return unq
+	}
+	return s
 }
 
 func validate(runtimeCfg *RuntimeConfig) error {
