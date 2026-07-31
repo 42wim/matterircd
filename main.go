@@ -61,6 +61,9 @@ func main() {
 	flag.String("tlsbind", "", "interface:port to bind to. (e.g 127.0.0.1:6697)")
 	flag.String("tlsdir", ".", "directory to look for key.pem and cert.pem.")
 
+	// profiling related cfg
+	flag.String("profilingbind", "127.0.0.1:6060", "interface:port to bind the profiling server to.")
+
 	pflag.CommandLine.AddGoFlagSet(flag.CommandLine)
 	pflag.Parse()
 
@@ -169,9 +172,25 @@ func setupProfilingReloadHook(cfg *config.Config) {
 		profMu.Lock()
 		defer profMu.Unlock()
 
+		// Get the bind address, fallback to localhost if empty
+		bindAddr := rc.ProfilingBind
+		if bindAddr == "" {
+			bindAddr = "127.0.0.1:6060"
+		}
+
 		if rc.Profiling { //nolint:nestif
+			if profServer != nil && profServer.Addr != bindAddr {
+				logger.Infof("profiling bind address changed, restarting server...")
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if err := profServer.Shutdown(ctx); err != nil {
+					logger.WithError(err).Error("profiling: Failed to gracefully shutdown old server")
+				}
+				profServer = nil
+			}
+
 			if profServer == nil {
-				logger.Info("enabling profiling: starting HTTP server: *:6060")
+				logger.Infof("enabling profiling: starting HTTP server: %s", bindAddr)
 				runtime.SetBlockProfileRate(1)
 				runtime.SetMutexProfileFraction(10)
 
@@ -182,7 +201,7 @@ func setupProfilingReloadHook(cfg *config.Config) {
 				})
 
 				profServer = &http.Server{
-					Addr:              ":6060",
+					Addr:              bindAddr,
 					Handler:           handler,
 					ReadHeaderTimeout: 3 * time.Second,
 				}
@@ -195,7 +214,7 @@ func setupProfilingReloadHook(cfg *config.Config) {
 			}
 		} else {
 			if profServer != nil {
-				logger.Info("disabling profiling: shutting down HTTP server: *:6060")
+				logger.Infof("disabling profiling: shutting down HTTP server: %s", profServer.Addr)
 				runtime.SetBlockProfileRate(0)
 				runtime.SetMutexProfileFraction(0)
 
