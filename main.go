@@ -162,6 +162,7 @@ func setupLogReloadHook(cfg *config.Config) {
 	cfg.RegisterReloadHook(setLogLevels)
 }
 
+//nolint:funlen
 func setupProfilingReloadHook(cfg *config.Config) {
 	var (
 		profServer *http.Server
@@ -212,20 +213,18 @@ func setupProfilingReloadHook(cfg *config.Config) {
 					}
 				}()
 			}
-		} else {
-			if profServer != nil {
-				logger.Infof("disabling profiling: shutting down HTTP server: %s", profServer.Addr)
-				runtime.SetBlockProfileRate(0)
-				runtime.SetMutexProfileFraction(0)
+		} else if profServer != nil {
+			logger.Infof("disabling profiling: shutting down HTTP server: %s", profServer.Addr)
+			runtime.SetBlockProfileRate(0)
+			runtime.SetMutexProfileFraction(0)
 
-				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancel()
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
 
-				if err := profServer.Shutdown(ctx); err != nil {
-					logger.WithError(err).Error("profiling: Failed to gracefully shutdown")
-				}
-				profServer = nil
+			if err := profServer.Shutdown(ctx); err != nil {
+				logger.WithError(err).Error("profiling: Failed to gracefully shutdown")
 			}
+			profServer = nil
 		}
 	}
 
