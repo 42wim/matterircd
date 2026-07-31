@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"flag"
 	"fmt"
@@ -8,8 +9,11 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"runtime"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 
 	bolt "go.etcd.io/bbolt"
@@ -57,6 +61,9 @@ func main() {
 	flag.String("tlsbind", "", "interface:port to bind to. (e.g 127.0.0.1:6697)")
 	flag.String("tlsdir", ".", "directory to look for key.pem and cert.pem.")
 
+	// profiling related cfg
+	flag.String("profilingbind", "127.0.0.1:6060", "interface:port to bind the profiling server to.")
+
 	pflag.CommandLine.AddGoFlagSet(flag.CommandLine)
 	pflag.Parse()
 
@@ -68,42 +75,11 @@ func main() {
 	}
 	rc := cfg.Current()
 
-	if rc.Debug {
-		logger.Info("enabling debug")
-		config.SetLogLevel(logrus.DebugLevel)
-		irckit.SetLogLevel("debug")
-	}
-
-	if rc.Trace {
-		logger.Info("enabling trace")
-		config.SetLogLevel(logrus.TraceLevel)
-		irckit.SetLogLevel("trace")
-	}
-
-	if rc.Gops {
-		if err := agent.Listen(agent.Options{}); err != nil {
-			log.Fatal(err)
-		}
-	}
-
-	if rc.Profiling {
-		runtime.SetBlockProfileRate(1)
-		runtime.SetMutexProfileFraction(10)
-		go func() {
-			logger.Infof("enabling profiling: start HTTP server: *:6060")
-
-			h := http.DefaultServeMux
-			handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				// Remove any gzip (or other content-encoding) header.
-				w.Header().Del("Content-Encoding")
-				h.ServeHTTP(w, r)
-			})
-
-			if err := http.ListenAndServe(":6060", handler); err != nil { //nolint:gosec
-				logger.Fatal("profiling: Failed to start HTTP server", err)
-			}
-		}()
-	}
+	// Setup live-reloading subsystems
+	setupLogReloadHook(cfg)
+	setupProfilingReloadHook(cfg)
+	setupGopsReloadHook(cfg)
+	setupSignalHandling(cfg)
 
 	if flag.Lookup("version").Value.String() == "true" {
 		fmt.Printf("version: %s %s\n", version, githash)
@@ -162,6 +138,144 @@ func main() {
 	}
 
 	select {}
+}
+
+func setupLogReloadHook(cfg *config.Config) {
+	setLogLevels := func(rc *config.RuntimeConfig) {
+		switch {
+		case rc.Trace:
+			logger.Info("enabling trace")
+			config.SetLogLevel(logrus.TraceLevel)
+			irckit.SetLogLevel("trace")
+		case rc.Debug:
+			logger.Info("enabling debug")
+			config.SetLogLevel(logrus.DebugLevel)
+			irckit.SetLogLevel("debug")
+		default:
+			// Fallback to Info when Debug/Trace are toggled off live
+			config.SetLogLevel(logrus.InfoLevel)
+			irckit.SetLogLevel("info")
+		}
+	}
+
+	setLogLevels(cfg.Current())
+	cfg.RegisterReloadHook(setLogLevels)
+}
+
+//nolint:funlen
+func setupProfilingReloadHook(cfg *config.Config) {
+	var (
+		profServer *http.Server
+		profMu     sync.Mutex
+	)
+
+	setProfiling := func(rc *config.RuntimeConfig) {
+		profMu.Lock()
+		defer profMu.Unlock()
+
+		// Get the bind address, fallback to localhost if empty
+		bindAddr := rc.ProfilingBind
+		if bindAddr == "" {
+			bindAddr = "127.0.0.1:6060"
+		}
+
+		if rc.Profiling { //nolint:nestif
+			if profServer != nil && profServer.Addr != bindAddr {
+				logger.Infof("profiling bind address changed, restarting server...")
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if err := profServer.Shutdown(ctx); err != nil {
+					logger.WithError(err).Error("profiling: Failed to gracefully shutdown old server")
+				}
+				profServer = nil
+			}
+
+			if profServer == nil {
+				logger.Infof("enabling profiling: starting HTTP server: %s", bindAddr)
+				runtime.SetBlockProfileRate(1)
+				runtime.SetMutexProfileFraction(10)
+
+				h := http.DefaultServeMux
+				handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Del("Content-Encoding")
+					h.ServeHTTP(w, r)
+				})
+
+				profServer = &http.Server{
+					Addr:              bindAddr,
+					Handler:           handler,
+					ReadHeaderTimeout: 3 * time.Second,
+				}
+
+				go func() {
+					if err := profServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+						logger.WithError(err).Error("profiling: Failed to start HTTP server")
+					}
+				}()
+			}
+		} else if profServer != nil {
+			logger.Infof("disabling profiling: shutting down HTTP server: %s", profServer.Addr)
+			runtime.SetBlockProfileRate(0)
+			runtime.SetMutexProfileFraction(0)
+
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			if err := profServer.Shutdown(ctx); err != nil {
+				logger.WithError(err).Error("profiling: Failed to gracefully shutdown")
+			}
+			profServer = nil
+		}
+	}
+
+	setProfiling(cfg.Current())
+	cfg.RegisterReloadHook(setProfiling)
+}
+
+func setupGopsReloadHook(cfg *config.Config) {
+	var (
+		gopsRunning bool
+		gopsMu      sync.Mutex
+	)
+
+	setGops := func(rc *config.RuntimeConfig) {
+		gopsMu.Lock()
+		defer gopsMu.Unlock()
+
+		if rc.Gops { //nolint:nestif
+			if !gopsRunning {
+				logger.Info("enabling gops agent")
+				if err := agent.Listen(agent.Options{}); err != nil {
+					logger.WithError(err).Error("failed to start gops agent")
+				} else {
+					gopsRunning = true
+				}
+			}
+		} else {
+			if gopsRunning {
+				logger.Info("disabling gops agent")
+				agent.Close()
+				gopsRunning = false
+			}
+		}
+	}
+
+	setGops(cfg.Current())
+	cfg.RegisterReloadHook(setGops)
+}
+
+func setupSignalHandling(cfg *config.Config) {
+	sighupChan := make(chan os.Signal, 1)
+	signal.Notify(sighupChan, syscall.SIGHUP)
+
+	go func() {
+		for range sighupChan {
+			logger.Info("received SIGHUP signal, triggering config reload...")
+			if err := cfg.Reload(); err != nil {
+				logger.WithError(err).Error("SIGHUP config reload failed")
+			}
+		}
+	}()
 }
 
 func tlsbind() net.Listener {

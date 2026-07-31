@@ -25,6 +25,9 @@ type Config struct {
 	current atomic.Pointer[RuntimeConfig]
 
 	v *viper.Viper
+
+	reloadHooks []func(rc *RuntimeConfig)
+	hooksMu     sync.RWMutex
 }
 
 // RuntimeConfig is immutable.
@@ -42,10 +45,11 @@ type RuntimeConfig struct {
 type GlobalConfig struct {
 	Bind string
 
-	Debug     bool
-	Trace     bool
-	Gops      bool
-	Profiling bool
+	Debug         bool
+	Trace         bool
+	Gops          bool
+	Profiling     bool
+	ProfilingBind string
 
 	TLSBind string
 	TLSDir  string
@@ -250,10 +254,11 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 		GlobalConfig: GlobalConfig{
 			Bind: c.v.GetString("bind"),
 
-			Debug:     c.v.GetBool("debug"),
-			Trace:     c.v.GetBool("trace"),
-			Gops:      c.v.GetBool("gops"),
-			Profiling: c.v.GetBool("profiling"),
+			Debug:         c.v.GetBool("debug"),
+			Trace:         c.v.GetBool("trace"),
+			Gops:          c.v.GetBool("gops"),
+			Profiling:     c.v.GetBool("profiling"),
+			ProfilingBind: c.v.GetString("profilingbind"),
 
 			TLSBind: c.v.GetString("tlsbind"),
 			TLSDir:  c.v.GetString("tlsdir"),
@@ -370,7 +375,7 @@ func Load(cfgfile string, flags *pflag.FlagSet) (*Config, error) {
 		return c, nil
 	}
 
-	if err := c.reload(); err != nil {
+	if err := c.Reload(); err != nil {
 		return nil, fmt.Errorf("error reading config file: %w", err)
 	}
 
@@ -391,7 +396,15 @@ func (c *Config) publishRuntimeConfig() error {
 	return nil
 }
 
-func (c *Config) reload() error {
+// RegisterReloadHook allows other packages to execute logic when the config file changes.
+func (c *Config) RegisterReloadHook(hook func(rc *RuntimeConfig)) {
+	c.hooksMu.Lock()
+	defer c.hooksMu.Unlock()
+	c.reloadHooks = append(c.reloadHooks, hook)
+}
+
+// Reload re-reads the config file, updates the atomic pointer, and triggers hooks.
+func (c *Config) Reload() error {
 	if err := c.v.ReadInConfig(); err != nil {
 		return err
 	}
@@ -403,6 +416,14 @@ func (c *Config) reload() error {
 	if logger != nil {
 		logger.Info("configuration reloaded")
 	}
+
+	// Successfully reloaded, trigger all registered hooks safely
+	c.hooksMu.RLock()
+	rc := c.Current()
+	for _, hook := range c.reloadHooks {
+		hook(rc)
+	}
+	c.hooksMu.RUnlock()
 
 	return nil
 }
@@ -453,7 +474,7 @@ func (c *Config) watch() {
 
 		// Wait 500ms after the last filesystem event before reloading
 		timer = time.AfterFunc(500*time.Millisecond, func() {
-			if err := c.reload(); err != nil && logger != nil {
+			if err := c.Reload(); err != nil && logger != nil {
 				logger.WithError(err).Error("config reload failed")
 			}
 		})

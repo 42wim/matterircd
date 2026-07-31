@@ -41,8 +41,6 @@ func New(cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Eve
 		cfg:         cfg,
 	}
 
-	var err error
-
 	rc := cfg.Current()
 
 	ourlog := logrus.New()
@@ -60,11 +58,31 @@ func New(cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Eve
 		ourlog.SetLevel(logrus.TraceLevel)
 	}
 
-	s.sc, err = s.loginToSlack()
+	sc, err := s.loginToSlack()
 	if err != nil {
 		return nil, err
 	}
+	// Helper closure to set bridge levels
+	setBridgeLogLevels := func(rc *config.RuntimeConfig) {
+		switch {
+		case rc.Trace:
+			ourlog.SetLevel(logrus.TraceLevel)
+		case rc.Debug:
+			ourlog.SetLevel(logrus.DebugLevel)
+		default:
+			ourlog.SetLevel(logrus.InfoLevel)
+		}
+	}
 
+	// Set initial log level
+	setBridgeLogLevels(rc)
+
+	// Register hook to update live on reloads
+	cfg.RegisterReloadHook(func(newRC *config.RuntimeConfig) {
+		setBridgeLogLevels(newRC)
+	})
+
+	s.sc = sc
 	s.msgLast = make(map[string]string)
 
 	users, _ := s.sc.GetUsers()
