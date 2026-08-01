@@ -254,7 +254,7 @@ func CmdMotd(s Server, u *User, _ *irc.Message) error {
 
 // CmdNames is a handler for the /NAMES command.
 func CmdNames(s Server, u *User, msg *irc.Message) error {
-	if len(msg.Params) < 1 || msg.Params[0] == "**" {
+	if len(msg.Params) < 1 || msg.Params[0] == "**" { //nolint:nestif
 		if srv, ok := s.(*server); ok {
 			srv.RLock()
 			joined := make([]Channel, 0, len(srv.channels))
