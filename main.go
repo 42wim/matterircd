@@ -29,6 +29,7 @@ import (
 )
 
 var (
+	project = "matterircd"
 	version = "0.31.0-dev"
 	githash string
 	logger  *logrus.Entry
@@ -44,7 +45,7 @@ func main() {
 		DisableColors: false,
 		FullTimestamp: true,
 	}
-	logger = ourlog.WithFields(logrus.Fields{"prefix": "matterircd"})
+	logger = ourlog.WithFields(logrus.Fields{"prefix": project})
 	config.SetLogger(logger)
 
 	// config related. instantiate a new config.Config to store flags
@@ -67,6 +68,16 @@ func main() {
 	pflag.CommandLine.AddGoFlagSet(flag.CommandLine)
 	pflag.Parse()
 
+	if flag.Lookup("version").Value.String() == "true" {
+		fmt.Printf("%s %s %s\n", project, version, githash)
+		return
+	}
+
+	logger.Infof("Running version %s %s", version, githash)
+	if strings.Contains(version, "-dev") {
+		logger.Infof("WARNING: THIS IS A DEVELOPMENT VERSION. Things may break.")
+	}
+
 	// Attempt to load values from the config file
 	var err error
 	cfg, err = config.Load(*flagConfig, pflag.CommandLine)
@@ -81,59 +92,58 @@ func main() {
 	setupGopsReloadHook(cfg)
 	setupSignalHandling(cfg)
 
-	if flag.Lookup("version").Value.String() == "true" {
-		fmt.Printf("version: %s %s\n", version, githash)
-		return
-	}
-
 	irckit.SetLogger(logger)
 
-	logger.Infof("Running version %s %s", version, githash)
-	if strings.Contains(version, "-dev") {
-		logger.Infof("WARNING: THIS IS A DEVELOPMENT VERSION. Things may break.")
-	}
-
+	// We bind before starting goroutines so port conflicts are caught instantly.
+	var tlsSocket net.Listener
 	if rc.TLSBind != "" {
-		go func() {
-			logger.Infof("Listening on %s (TLS)", rc.TLSBind)
-			socket := tlsbind()
-			defer socket.Close()
-			start(socket)
-		}()
+		tlsSocket = tlsbind()
 	}
 
-	mmLastViewedFile := "matterircd-lastsaved.db"
+	// Backwards compatible: Bind standard socket synchronously (if configured)
+	var stdSocket net.Listener
+	if rc.Bind != "" {
+		var network string
+		if strings.ContainsRune(rc.Bind, os.PathSeparator) {
+			network = "unix"
+		} else {
+			network = "tcp"
+		}
+
+		var err error
+		stdSocket, err = net.Listen(network, rc.Bind)
+		if err != nil {
+			logger.Fatal(err)
+		}
+	}
+
+	// Now that ports are secured, open the database
+	mmLastViewedFile := project + "-lastsaved.db"
 	if statePath := rc.Mattermost.LastViewedSaveFile; statePath != "" {
 		mmLastViewedFile = statePath
 	}
 	db, err := bolt.Open(mmLastViewedFile, 0o600, &bolt.Options{Timeout: 1 * time.Second})
 	if err != nil {
-		logger.Fatal(err)
+		logger.Fatalf("Database lock failed (is another instance running?): %v", err)
 	}
 	defer db.Close()
 	LastViewedSaveDB = db
 
-	// backwards compatible
-
-	if rc.Bind != "" {
+	// Start serving connections asynchronously
+	if tlsSocket != nil {
+		logger.Infof("Listening on %s (TLS)", rc.TLSBind)
 		go func() {
-			var network string
-			if strings.ContainsRune(rc.Bind, os.PathSeparator) {
-				network = "unix"
-			} else {
-				network = "tcp"
-			}
+			defer tlsSocket.Close()
+			start(tlsSocket)
+		}()
+	}
 
-			socket, err := net.Listen(network, rc.Bind)
-			if err != nil {
-				logger.Errorf("Can not listen on %s: %v", rc.Bind, err)
-				os.Exit(1)
-			}
-
-			logger.Infof("Listening on %s", rc.Bind)
-
-			defer socket.Close()
-			start(socket)
+	// Backwards compatible
+	if stdSocket != nil {
+		logger.Infof("Listening on %s", rc.Bind)
+		go func() {
+			defer stdSocket.Close()
+			start(stdSocket)
 		}()
 	}
 
@@ -293,8 +303,7 @@ func tlsbind() net.Listener {
 
 	kpr, err := NewKeypairReloader(certPath, keyPath)
 	if err != nil {
-		logger.Errorf("could not load TLS, incorrect directory? Error: %s", err)
-		os.Exit(1)
+		logger.Fatalf("could not load TLS, incorrect directory? Error: %s", err)
 	}
 
 	tlsConfig := tls.Config{
@@ -303,11 +312,8 @@ func tlsbind() net.Listener {
 
 	listenerTLS, err := tls.Listen("tcp", rc.TLSBind, &tlsConfig)
 	if err != nil {
-		logger.Errorf("Can not listen on %s: %v\n", rc.TLSBind, err)
-		os.Exit(1)
+		logger.Fatal(err)
 	}
-
-	logger.Info("TLS listening on ", rc.TLSBind)
 
 	return listenerTLS
 }
@@ -321,7 +327,7 @@ func start(socket net.Listener) {
 		}
 
 		go func() {
-			newsrv := irckit.ServerConfig{Name: "matterircd", Version: version}.Server()
+			newsrv := irckit.ServerConfig{Name: project, Version: version}.Server()
 
 			logger.Infof("New connection: %s", conn.RemoteAddr())
 
