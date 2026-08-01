@@ -67,6 +67,16 @@ func main() {
 	pflag.CommandLine.AddGoFlagSet(flag.CommandLine)
 	pflag.Parse()
 
+	if flag.Lookup("version").Value.String() == "true" {
+		fmt.Printf("version: %s %s\n", version, githash)
+		return
+	}
+
+	logger.Infof("Running version %s %s", version, githash)
+	if strings.Contains(version, "-dev") {
+		logger.Infof("WARNING: THIS IS A DEVELOPMENT VERSION. Things may break.")
+	}
+
 	// Attempt to load values from the config file
 	var err error
 	cfg, err = config.Load(*flagConfig, pflag.CommandLine)
@@ -81,17 +91,7 @@ func main() {
 	setupGopsReloadHook(cfg)
 	setupSignalHandling(cfg)
 
-	if flag.Lookup("version").Value.String() == "true" {
-		fmt.Printf("version: %s %s\n", version, githash)
-		return
-	}
-
 	irckit.SetLogger(logger)
-
-	logger.Infof("Running version %s %s", version, githash)
-	if strings.Contains(version, "-dev") {
-		logger.Infof("WARNING: THIS IS A DEVELOPMENT VERSION. Things may break.")
-	}
 
 	if rc.TLSBind != "" {
 		go func() {
