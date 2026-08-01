@@ -22,7 +22,7 @@ func DefaultCommands() Commands {
 	cmds.Add(Handler{Command: irc.LUSERS, Call: CmdLusers})
 	cmds.Add(Handler{Command: irc.MODE, Call: CmdMode, MinParams: 1, LoggedIn: true})
 	cmds.Add(Handler{Command: irc.MOTD, Call: CmdMotd})
-	cmds.Add(Handler{Command: irc.NAMES, Call: CmdNames, MinParams: 1, LoggedIn: true})
+	cmds.Add(Handler{Command: irc.NAMES, Call: CmdNames, MinParams: 0, LoggedIn: true})
 	cmds.Add(Handler{Command: irc.NICK, Call: CmdNick, MinParams: 1})
 	cmds.Add(Handler{Command: irc.PART, Call: CmdPart, MinParams: 1, LoggedIn: true})
 	cmds.Add(Handler{Command: irc.PING, Call: CmdPing})
@@ -254,7 +254,26 @@ func CmdMotd(s Server, u *User, _ *irc.Message) error {
 
 // CmdNames is a handler for the /NAMES command.
 func CmdNames(s Server, u *User, msg *irc.Message) error {
-	if len(msg.Params) < 1 {
+	if len(msg.Params) < 1 || msg.Params[0] == "**" {
+		if srv, ok := s.(*server); ok {
+			srv.RLock()
+			// Deduplicate using the Channel interface itself as the key!
+			joinedMap := make(map[Channel]struct{})
+			for _, ch := range srv.channels {
+				for _, member := range ch.Users() {
+					if member.Nick == u.Nick {
+						joinedMap[ch] = struct{}{}
+						break
+					}
+				}
+			}
+			srv.RUnlock()
+
+			// Send the deduplicated responses
+			for ch := range joinedMap {
+				_ = ch.SendNamesResponse(u)
+			}
+		}
 		return nil
 	}
 
