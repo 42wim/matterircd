@@ -158,7 +158,7 @@ func CmdList(s Server, u *User, msg *irc.Message) error {
 	for name := range info {
 		channelNames = append(channelNames, name)
 	}
-	sort.Strings(channelNames) // Alphabetical sort for strings
+	sort.Strings(channelNames)
 
 	for _, channelName := range channelNames {
 		topic := info[channelName]
@@ -254,35 +254,52 @@ func CmdMotd(s Server, u *User, _ *irc.Message) error {
 
 // CmdNames is a handler for the /NAMES command.
 func CmdNames(s Server, u *User, msg *irc.Message) error {
-	if len(msg.Params) < 1 || msg.Params[0] == "**" { //nolint:nestif
-		if srv, ok := s.(*server); ok {
-			srv.RLock()
-			joined := make([]Channel, 0, len(srv.channels))
-			for _, ch := range srv.channels {
-				for _, member := range ch.Users() {
-					if member.Nick == u.Nick {
-						// Simple linear scan to prevent duplicates
-						isDup := false
-						for _, existing := range joined {
-							if existing == ch {
-								isDup = true
-								break
-							}
-						}
-						if !isDup {
-							joined = append(joined, ch)
-						}
-						break
-					}
+	if len(msg.Params) < 1 || msg.Params[0] == "**" {
+		srv, ok := s.(*server)
+		if !ok {
+			return nil
+		}
+
+		srv.RLock()
+		joined := make([]*channel, 0, len(srv.channels))
+
+	ChannelLoop:
+		for _, intfCh := range srv.channels {
+			ch, ok := intfCh.(*channel)
+			if !ok {
+				continue
+			}
+
+			inChannel := false
+			for _, member := range ch.Users() {
+				if member.Nick == u.Nick {
+					inChannel = true
+					break
 				}
 			}
-			srv.RUnlock()
-
-			// Send the deduplicated responses
-			for _, ch := range joined {
-				_ = ch.SendNamesResponse(u)
+			if !inChannel {
+				continue
 			}
+
+			for _, existing := range joined {
+				if existing.name == ch.name {
+					continue ChannelLoop
+				}
+			}
+
+			joined = append(joined, ch)
 		}
+		srv.RUnlock()
+
+		sort.Slice(joined, func(i, j int) bool {
+			return joined[i].name < joined[j].name
+		})
+
+		// Send the deduplicated, sorted responses
+		for _, ch := range joined {
+			_ = ch.SendNamesResponse(u)
+		}
+
 		return nil
 	}
 
@@ -773,7 +790,6 @@ func CmdWho(s Server, u *User, msg *irc.Message) error {
 	users := ch.Users()
 
 	sort.Slice(users, func(i, j int) bool {
-		// Sorting by Nick to keep the IRC output perfectly alphabetical
 		return users[i].Nick < users[j].Nick
 	})
 
