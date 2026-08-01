@@ -153,7 +153,11 @@ func (u *User) Encode(msgs ...*irc.Message) (err error) {
 			continue
 		}
 
-		logger.Debugf("-> \"%s\"", msg)
+		if msg.Command == "PONG" {
+			logger.Tracef("-> \"%s\"", msg)
+		} else {
+			logger.Debugf("-> \"%s\"", msg)
+		}
 
 		err := u.Conn.Encode(msg)
 		if err != nil {
@@ -283,6 +287,9 @@ func (u *User) Decode() {
 		if msg.Command == "PRIVMSG" {
 			logger.Debugf("B: %#v", dmsg)
 			buffer <- msg
+		} else if msg.Command == "PING" {
+			logger.Trace(dmsg)
+			u.DecodeCh <- msg
 		} else {
 			logger.Debug(dmsg)
 			u.DecodeCh <- msg
