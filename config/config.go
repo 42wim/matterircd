@@ -405,6 +405,9 @@ func (c *Config) RegisterReloadHook(hook func(rc *RuntimeConfig)) {
 
 // Reload re-reads the config file, updates the atomic pointer, and triggers hooks.
 func (c *Config) Reload() error {
+	// If the atomic pointer is currently nil, this is the initial startup load
+	isFirstLoad := c.Current() == nil
+
 	if err := c.v.ReadInConfig(); err != nil {
 		return err
 	}
@@ -413,7 +416,8 @@ func (c *Config) Reload() error {
 		return err
 	}
 
-	if logger != nil {
+	// Only print the reload message if this isn't the initial boot
+	if !isFirstLoad && logger != nil {
 		logger.Info("configuration reloaded")
 	}
 
