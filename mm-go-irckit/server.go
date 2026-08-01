@@ -366,7 +366,11 @@ func (s *server) handle(u *User) {
 		}
 		go func(msg *irc.Message) {
 			err := s.commands.Run(s, u, msg)
-			logger.Debugf("Executed %#v %#v", msg, err)
+			if msg.Command == "PING" {
+				logger.Tracef("Executed %#v %#v", msg, err)
+			} else {
+				logger.Debugf("Executed %#v %#v", msg, err)
+			}
 			if err == ErrUnknownCommand {
 				// TODO: Emit event?
 			} else if err != nil {
