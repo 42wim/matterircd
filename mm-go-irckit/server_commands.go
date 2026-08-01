@@ -270,14 +270,7 @@ func CmdNames(s Server, u *User, msg *irc.Message) error {
 				continue
 			}
 
-			inChannel := false
-			for _, member := range ch.Users() {
-				if member.Nick == u.Nick {
-					inChannel = true
-					break
-				}
-			}
-			if !inChannel {
+			if !ch.HasUser(u) {
 				continue
 			}
 
