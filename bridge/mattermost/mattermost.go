@@ -584,11 +584,12 @@ func (m *Mattermost) GetUsers() []*bridge.UserInfo {
 }
 
 func (m *Mattermost) GetChannels() []*bridge.ChannelInfo {
-	var channels []*bridge.ChannelInfo
+	mmchannels := m.mc.GetChannels()
+	channels := make([]*bridge.ChannelInfo, 0, len(mmchannels))
 
-	chanMap := make(map[string]bool)
+	chanMap := make(map[string]bool, len(mmchannels))
 
-	for _, mmchannel := range m.mc.GetChannels() {
+	for _, mmchannel := range mmchannels {
 		// don't add the same channel twice
 		// the same direct messages channels get listed for each team
 		if chanMap[mmchannel.Id] {

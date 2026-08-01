@@ -3,6 +3,7 @@ package irckit
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -21,7 +22,7 @@ func DefaultCommands() Commands {
 	cmds.Add(Handler{Command: irc.LUSERS, Call: CmdLusers})
 	cmds.Add(Handler{Command: irc.MODE, Call: CmdMode, MinParams: 1, LoggedIn: true})
 	cmds.Add(Handler{Command: irc.MOTD, Call: CmdMotd})
-	cmds.Add(Handler{Command: irc.NAMES, Call: CmdNames, MinParams: 1, LoggedIn: true})
+	cmds.Add(Handler{Command: irc.NAMES, Call: CmdNames, MinParams: 0, LoggedIn: true})
 	cmds.Add(Handler{Command: irc.NICK, Call: CmdNick, MinParams: 1})
 	cmds.Add(Handler{Command: irc.PART, Call: CmdPart, MinParams: 1, LoggedIn: true})
 	cmds.Add(Handler{Command: irc.PING, Call: CmdPing})
@@ -153,7 +154,14 @@ func CmdList(s Server, u *User, msg *irc.Message) error {
 		return err
 	}
 
-	for channelName, topic := range info {
+	channelNames := make([]string, 0, len(info))
+	for name := range info {
+		channelNames = append(channelNames, name)
+	}
+	sort.Strings(channelNames)
+
+	for _, channelName := range channelNames {
+		topic := info[channelName]
 		r = append(r, &irc.Message{
 			Prefix:   s.Prefix(),
 			Command:  irc.RPL_LIST,
@@ -246,7 +254,45 @@ func CmdMotd(s Server, u *User, _ *irc.Message) error {
 
 // CmdNames is a handler for the /NAMES command.
 func CmdNames(s Server, u *User, msg *irc.Message) error {
-	if len(msg.Params) < 1 {
+	if len(msg.Params) < 1 || msg.Params[0] == "**" {
+		srv, ok := s.(*server)
+		if !ok {
+			return nil
+		}
+
+		srv.RLock()
+		joined := make([]*channel, 0, len(srv.channels))
+
+	ChannelLoop:
+		for _, intfCh := range srv.channels {
+			ch, ok := intfCh.(*channel)
+			if !ok {
+				continue
+			}
+
+			if !ch.HasUser(u) {
+				continue
+			}
+
+			for _, existing := range joined {
+				if existing.name == ch.name {
+					continue ChannelLoop
+				}
+			}
+
+			joined = append(joined, ch)
+		}
+		srv.RUnlock()
+
+		sort.Slice(joined, func(i, j int) bool {
+			return joined[i].name < joined[j].name
+		})
+
+		// Send the deduplicated, sorted responses
+		for _, ch := range joined {
+			_ = ch.SendNamesResponse(u)
+		}
+
 		return nil
 	}
 
@@ -735,6 +781,11 @@ func CmdWho(s Server, u *User, msg *irc.Message) error {
 	}
 
 	users := ch.Users()
+
+	sort.Slice(users, func(i, j int) bool {
+		return users[i].Nick < users[j].Nick
+	})
+
 	numUsers := len(users)
 
 	r := make([]*irc.Message, numUsers+1)
