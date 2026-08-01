@@ -3,6 +3,7 @@ package irckit
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -153,7 +154,14 @@ func CmdList(s Server, u *User, msg *irc.Message) error {
 		return err
 	}
 
-	for channelName, topic := range info {
+	channelNames := make([]string, 0, len(info))
+	for name := range info {
+		channelNames = append(channelNames, name)
+	}
+	sort.Strings(channelNames) // Alphabetical sort for strings
+
+	for _, channelName := range channelNames {
+		topic := info[channelName]
 		r = append(r, &irc.Message{
 			Prefix:   s.Prefix(),
 			Command:  irc.RPL_LIST,
@@ -735,6 +743,12 @@ func CmdWho(s Server, u *User, msg *irc.Message) error {
 	}
 
 	users := ch.Users()
+
+	sort.Slice(users, func(i, j int) bool {
+		// Sorting by Nick to keep the IRC output perfectly alphabetical
+		return users[i].Nick < users[j].Nick
+	})
+
 	numUsers := len(users)
 
 	r := make([]*irc.Message, numUsers+1)
