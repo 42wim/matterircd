@@ -52,6 +52,13 @@ type ChannelSummary struct {
 	CreatorId   string `json:"creator_id"`
 }
 
+type CustomStatus struct {
+	Emoji     string `json:"emoji"`
+	Text      string `json:"text"`
+	Duration  string `json:"duration"`
+	ExpiresAt string `json:"expires_at"`
+}
+
 type UsersCache struct {
 	mu       sync.RWMutex
 	users    map[string]*model.User
@@ -64,17 +71,20 @@ type UsersCache struct {
 
 	channelLastViewedAt map[string]int64
 
+	customStatuses map[string]string
+
 	lastUpdated atomic.Int64
 }
 
 //nolint:stylecheck
 type UserSummary struct {
-	Id        string `json:"id"`
-	Username  string `json:"username"`
-	FirstName string `json:"first_name"`
-	LastName  string `json:"last_name"`
-	Nickname  string `json:"nickname"`
-	Roles     string `json:"roles"`
+	Id        string            `json:"id"`
+	Username  string            `json:"username"`
+	FirstName string            `json:"first_name"`
+	LastName  string            `json:"last_name"`
+	Nickname  string            `json:"nickname"`
+	Roles     string            `json:"roles"`
+	Props     map[string]string `json:"props"`
 }
 
 type Team struct {
@@ -504,6 +514,7 @@ func (m *Client) initUser() error {
 					LastName:  u.LastName,
 					Nickname:  u.Nickname,
 					Roles:     roles,
+					Props:     u.Props,
 				}
 				m.Users.users[u.Id] = cachedUser
 			} else {
@@ -1252,6 +1263,66 @@ func (m *Client) maintainUsersCache(event *model.WebSocketEvent) {
 			// If it doesn't, we can just use the current time to update it locally!
 			m.Users.channelLastViewedAt[channelID] = time.Now().UnixNano() / int64(time.Millisecond)
 			m.Users.mu.Unlock()
+		}
+
+	case model.WebsocketEventStatusChange:
+		if statusRaw, ok := event.GetData()["status"].(string); ok {
+			userID, _ := event.GetData()["user_id"].(string)
+			if userID == "" && event.GetBroadcast() != nil {
+				userID = event.GetBroadcast().UserId
+			}
+
+			if userID != "" {
+				m.SetUserStatus(userID, statusRaw)
+			}
+		}
+
+	case model.WebsocketEventPreferencesChanged:
+		prefsJSON, ok := event.GetData()["preferences"].(string)
+		if !ok || prefsJSON == "" {
+			break
+		}
+
+		var preferences []model.Preference
+		if err := json.NewDecoder(strings.NewReader(prefsJSON)).Decode(&preferences); err == nil {
+			for _, pref := range preferences {
+				if pref.Category != "custom_status" || pref.Name != "custom_status" {
+					continue
+				}
+
+				m.Users.mu.RLock()
+				_, tracked := m.Users.customStatuses[pref.UserId]
+				m.Users.mu.RUnlock()
+
+				if tracked {
+					m.Users.SetUserCustomStatus(pref.UserId, pref.Value)
+				}
+				break
+			}
+		}
+
+	case model.WebsocketEventPreferencesDeleted:
+		prefsJSON, ok := event.GetData()["preferences"].(string)
+		if !ok || prefsJSON == "" {
+			break
+		}
+
+		var preferences []model.Preference
+		if err := json.NewDecoder(strings.NewReader(prefsJSON)).Decode(&preferences); err == nil {
+			for _, pref := range preferences {
+				if pref.Category != "custom_status" || pref.Name != "custom_status" {
+					continue
+				}
+
+				m.Users.mu.RLock()
+				_, tracked := m.Users.customStatuses[pref.UserId]
+				m.Users.mu.RUnlock()
+
+				if tracked {
+					m.Users.SetUserCustomStatus(pref.UserId, "")
+				}
+				break
+			}
 		}
 	}
 }

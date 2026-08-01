@@ -21,16 +21,45 @@ func (m *Client) GetStatus(userID string) string {
 	m.Users.mu.RLock()
 	status, ok := m.Users.statuses[userID]
 	m.Users.mu.RUnlock()
-	if ok {
-		return status
+
+	if !ok {
+		res, _, err := m.Client.GetUserStatus(userID, "")
+		if err != nil {
+			status = "offline"
+		} else {
+			status = m.SetUserStatus(userID, res.Status)
+		}
 	}
 
-	res, _, err := m.Client.GetUserStatus(userID, "")
-	if err != nil {
-		return "offline"
+	m.Users.mu.RLock()
+	customStatus, tracked := m.Users.customStatuses[userID]
+	m.Users.mu.RUnlock()
+
+	if !tracked {
+		user := m.GetUser(userID)
+		var rawJSON string
+		if user != nil && user.Props != nil {
+			if val, propOk := user.Props["customStatus"]; propOk {
+				rawJSON = val
+			}
+		}
+
+		// Parse & store in cache (permanently marks user as tracked)
+		m.Users.SetUserCustomStatus(userID, rawJSON)
+
+		m.Users.mu.RLock()
+		customStatus = m.Users.customStatuses[userID]
+		m.Users.mu.RUnlock()
 	}
 
-	return m.SetUserStatus(userID, res.Status)
+	if customStatus != "" {
+		if status != "online" && status != "" {
+			return status + ": " + customStatus
+		}
+		return customStatus
+	}
+
+	return status
 }
 
 func (m *Client) GetStatuses() map[string]string {
@@ -125,6 +154,13 @@ func (m *Client) GetUser(userID string) *model.User {
 	return res
 }
 
+func (c *UsersCache) GetUserCustomStatus(userID string) string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	return c.customStatuses[userID]
+}
+
 func (m *Client) GetUserName(userID string) string {
 	if user := m.GetUser(userID); user != nil {
 		return user.Username
@@ -144,6 +180,41 @@ func (m *Client) GetUsers() map[string]*model.User {
 	}
 
 	return users
+}
+
+func (c *UsersCache) SetUserCustomStatus(userID string, rawJSON string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.customStatuses == nil {
+		c.customStatuses = make(map[string]string)
+	}
+
+	if rawJSON == "" || rawJSON == "{}" || rawJSON == "null" {
+		c.customStatuses[userID] = ""
+		return
+	}
+
+	var status CustomStatus
+
+	if err := json.NewDecoder(strings.NewReader(rawJSON)).Decode(&status); err != nil {
+		c.customStatuses[userID] = ""
+		return
+	}
+
+	if status.Text == "" {
+		c.customStatuses[userID] = ""
+		return
+	}
+
+	var formattedStatus string
+	if status.Emoji != "" {
+		formattedStatus = ":" + status.Emoji + ": " + status.Text
+	} else {
+		formattedStatus = status.Text
+	}
+
+	c.customStatuses[userID] = formattedStatus
 }
 
 func (m *Client) SetUserStatus(userID string, rawStatus string) string {
