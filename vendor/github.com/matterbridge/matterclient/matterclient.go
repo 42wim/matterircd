@@ -1144,17 +1144,42 @@ func (m *Client) maintainUsersCache(event *model.WebSocketEvent) {
 				}
 			}
 		}
+
 	case model.WebsocketEventUserUpdated:
+		var user *model.User
 		if userStr, ok := event.GetData()["user"].(string); ok {
-			user := &model.User{}
-			if err := json.NewDecoder(strings.NewReader(userStr)).Decode(user); err == nil {
-				if teamID, hasTeam := event.GetData()["team_id"].(string); hasTeam && teamID != "" {
-					m.UpdateTeamUsersCache(teamID, user)
-				} else {
-					m.UpdateUser(user)
-				}
+			user = &model.User{}
+			_ = json.NewDecoder(strings.NewReader(userStr)).Decode(user)
+		} else if u, ok := event.GetData()["user"].(*model.User); ok {
+			user = u
+		}
+
+		if user == nil {
+			break
+		}
+
+		if teamID, hasTeam := event.GetData()["team_id"].(string); hasTeam && teamID != "" {
+			m.UpdateTeamUsersCache(teamID, user)
+		} else {
+			m.UpdateUser(user)
+		}
+
+		m.Users.mu.RLock()
+		_, tracked := m.Users.customStatuses[user.Id]
+		m.Users.mu.RUnlock()
+
+		if !tracked {
+			break
+		}
+
+		var rawJSON string
+		if user.Props != nil {
+			if val, ok := user.Props["customStatus"]; ok {
+				rawJSON = val
 			}
 		}
+		m.Users.SetUserCustomStatus(user.Id, rawJSON)
+
 	case model.WebsocketEventUserAdded:
 		channelID := event.GetBroadcast().ChannelId
 		if userID, ok := event.GetData()["user_id"].(string); ok && channelID != "" {
@@ -1163,48 +1188,63 @@ func (m *Client) maintainUsersCache(event *model.WebSocketEvent) {
 				m.Users.lastUpdated.Store(time.Now().Unix())
 			}
 		}
+
 	case model.WebsocketEventUserRemoved:
 		channelID := event.GetBroadcast().ChannelId
 		if userID, ok := event.GetData()["user_id"].(string); ok && channelID != "" {
 			m.UpdateChannelUsersCacheRemove(channelID, userID)
 			m.Users.lastUpdated.Store(time.Now().Unix())
 		}
+
 	case model.WebsocketEventPosted:
 		channelID := event.GetBroadcast().ChannelId
-		if postStr, ok := event.GetData()["post"].(string); ok && channelID != "" {
-			post := &model.Post{}
-			if err := json.NewDecoder(strings.NewReader(postStr)).Decode(post); err == nil {
-				// Update the LastPostAt in our channelData cache
-				m.Users.mu.Lock()
-				if ch, ok := m.Users.channelData[channelID]; ok {
-					// Only update if the new post is newer (handles out-of-order websocket events)
-					if post.CreateAt > ch.LastPostAt {
-						ch.LastPostAt = post.CreateAt
-					}
-				}
-				m.Users.mu.Unlock()
+		if channelID == "" {
+			break
+		}
 
-				// Mattermost assigns the leaving user's ID to the 'system_leave_channel' post.
-				if strings.HasPrefix(post.Type, "system_") {
-					break
-				}
+		postStr, ok := event.GetData()["post"].(string)
+		if !ok || postStr == "" {
+			break
+		}
 
-				m.Users.mu.RLock()
-				_, channelIsCached := m.Users.channels[channelID]
-				_, userIsCached := m.Users.channels[channelID][post.UserId]
-				m.Users.mu.RUnlock()
+		post := &model.Post{}
+		if err := json.NewDecoder(strings.NewReader(postStr)).Decode(post); err != nil {
+			break
+		}
 
-				// If we are actively caching this channel, but the user isn't in our list, our cache is stale!
-				if channelIsCached && !userIsCached {
-					m.logger.Warnf("Unrecognized user %s spoke in %s. Invalidating channel cache.", post.UserId, channelID)
-
-					m.Users.mu.Lock()
-					delete(m.Users.channels, channelID)
-					m.Users.mu.Unlock()
-					m.Users.lastUpdated.Store(time.Now().Unix())
-				}
+		// Update the LastPostAt in our channelData cache
+		m.Users.mu.Lock()
+		if ch, ok := m.Users.channelData[channelID]; ok {
+			// Only update if the new post is newer (handles out-of-order websocket events)
+			if post.CreateAt > ch.LastPostAt {
+				ch.LastPostAt = post.CreateAt
 			}
 		}
+		m.Users.mu.Unlock()
+
+		// Mattermost assigns the leaving user's ID to the 'system_leave_channel' post.
+		if strings.HasPrefix(post.Type, "system_") {
+			break
+		}
+
+		m.Users.mu.RLock()
+		channelMap, channelIsCached := m.Users.channels[channelID]
+		var userIsCached bool
+		if channelIsCached {
+			_, userIsCached = channelMap[post.UserId]
+		}
+		m.Users.mu.RUnlock()
+
+		// If we are actively caching this channel, but the user isn't in our list, our cache is stale!
+		if channelIsCached && !userIsCached {
+			m.logger.Warnf("Unrecognized user %s spoke in %s. Invalidating channel cache.", post.UserId, channelID)
+
+			m.Users.mu.Lock()
+			delete(m.Users.channels, channelID)
+			m.Users.mu.Unlock()
+			m.Users.lastUpdated.Store(time.Now().Unix())
+		}
+
 	case model.WebsocketEventChannelCreated, model.WebsocketEventDirectAdded:
 		if channelStr, ok := event.GetData()["channel"].(string); ok {
 			channel := &model.Channel{}
@@ -1274,54 +1314,6 @@ func (m *Client) maintainUsersCache(event *model.WebSocketEvent) {
 
 			if userID != "" {
 				m.SetUserStatus(userID, statusRaw)
-			}
-		}
-
-	case model.WebsocketEventPreferencesChanged:
-		prefsJSON, ok := event.GetData()["preferences"].(string)
-		if !ok || prefsJSON == "" {
-			break
-		}
-
-		var preferences []model.Preference
-		if err := json.NewDecoder(strings.NewReader(prefsJSON)).Decode(&preferences); err == nil {
-			for _, pref := range preferences {
-				if pref.Category != "custom_status" || pref.Name != "custom_status" {
-					continue
-				}
-
-				m.Users.mu.RLock()
-				_, tracked := m.Users.customStatuses[pref.UserId]
-				m.Users.mu.RUnlock()
-
-				if tracked {
-					m.Users.SetUserCustomStatus(pref.UserId, pref.Value)
-				}
-				break
-			}
-		}
-
-	case model.WebsocketEventPreferencesDeleted:
-		prefsJSON, ok := event.GetData()["preferences"].(string)
-		if !ok || prefsJSON == "" {
-			break
-		}
-
-		var preferences []model.Preference
-		if err := json.NewDecoder(strings.NewReader(prefsJSON)).Decode(&preferences); err == nil {
-			for _, pref := range preferences {
-				if pref.Category != "custom_status" || pref.Name != "custom_status" {
-					continue
-				}
-
-				m.Users.mu.RLock()
-				_, tracked := m.Users.customStatuses[pref.UserId]
-				m.Users.mu.RUnlock()
-
-				if tracked {
-					m.Users.SetUserCustomStatus(pref.UserId, "")
-				}
-				break
 			}
 		}
 	}
