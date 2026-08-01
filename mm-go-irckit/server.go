@@ -244,8 +244,10 @@ func (s *server) Channel(channelID string) Channel {
 		info = &bridge.ChannelInfo{}
 	}
 
-	modes := make(map[string]bool)
-	modes["p"] = info.Private
+	modes := make(map[string]bool, 1)
+	if info.Private {
+		modes["p"] = true
+	}
 
 	newCh := s.config.NewChannel(s, channelID, name, service, modes)
 

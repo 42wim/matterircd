@@ -587,7 +587,7 @@ func (m *Mattermost) GetChannels() []*bridge.ChannelInfo {
 	mmchannels := m.mc.GetChannels()
 	channels := make([]*bridge.ChannelInfo, 0, len(mmchannels))
 
-	chanMap := make(map[string]bool)
+	chanMap := make(map[string]bool, len(mmchannels))
 
 	for _, mmchannel := range mmchannels {
 		// don't add the same channel twice

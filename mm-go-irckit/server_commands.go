@@ -257,12 +257,21 @@ func CmdNames(s Server, u *User, msg *irc.Message) error {
 	if len(msg.Params) < 1 || msg.Params[0] == "**" {
 		if srv, ok := s.(*server); ok {
 			srv.RLock()
-			// Deduplicate using the Channel interface itself as the key!
-			joinedMap := make(map[Channel]struct{})
+			joined := make([]Channel, 0, len(srv.channels))
 			for _, ch := range srv.channels {
 				for _, member := range ch.Users() {
 					if member.Nick == u.Nick {
-						joinedMap[ch] = struct{}{}
+						// Simple linear scan to prevent duplicates
+						isDup := false
+						for _, existing := range joined {
+							if existing == ch {
+								isDup = true
+								break
+							}
+						}
+						if !isDup {
+							joined = append(joined, ch)
+						}
 						break
 					}
 				}
@@ -270,7 +279,7 @@ func CmdNames(s Server, u *User, msg *irc.Message) error {
 			srv.RUnlock()
 
 			// Send the deduplicated responses
-			for ch := range joinedMap {
+			for _, ch := range joined {
 				_ = ch.SendNamesResponse(u)
 			}
 		}
