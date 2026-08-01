@@ -29,6 +29,7 @@ import (
 )
 
 var (
+	project = "matterircd"
 	version = "0.31.0-dev"
 	githash string
 	logger  *logrus.Entry
@@ -44,7 +45,7 @@ func main() {
 		DisableColors: false,
 		FullTimestamp: true,
 	}
-	logger = ourlog.WithFields(logrus.Fields{"prefix": "matterircd"})
+	logger = ourlog.WithFields(logrus.Fields{"prefix": project})
 	config.SetLogger(logger)
 
 	// config related. instantiate a new config.Config to store flags
@@ -68,7 +69,7 @@ func main() {
 	pflag.Parse()
 
 	if flag.Lookup("version").Value.String() == "true" {
-		fmt.Printf("version: %s %s\n", version, githash)
+		fmt.Printf("%s %s %s\n", project, version, githash)
 		return
 	}
 
@@ -117,7 +118,7 @@ func main() {
 	}
 
 	// Now that ports are secured, open the database
-	mmLastViewedFile := "matterircd-lastsaved.db"
+	mmLastViewedFile := project + "-lastsaved.db"
 	if statePath := rc.Mattermost.LastViewedSaveFile; statePath != "" {
 		mmLastViewedFile = statePath
 	}
@@ -326,7 +327,7 @@ func start(socket net.Listener) {
 		}
 
 		go func() {
-			newsrv := irckit.ServerConfig{Name: "matterircd", Version: version}.Server()
+			newsrv := irckit.ServerConfig{Name: project, Version: version}.Server()
 
 			logger.Infof("New connection: %s", conn.RemoteAddr())
 
