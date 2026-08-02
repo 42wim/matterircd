@@ -172,9 +172,37 @@ func (m *Mattermost) handleWsMessage(quitChan chan struct{}) {
 			logger.Debug("exiting handleWsMessage")
 			return
 		case message := <-m.mc.MessageChan:
-			logger.Debugf("MMUser WsReceiver: %#v", message.Raw)
-			if logger.Level.String() == "trace" {
-				logger.Tracef("handleWsMessage %s", spew.Sdump(message))
+			if logger.Logger.IsLevelEnabled(logrus.DebugLevel) {
+				userInfo := ""
+				data := message.Raw.GetData()
+				if data != nil {
+					// Check for a full user object first
+					if userVal, ok := data["user"]; ok {
+						var u *model.User
+						if userStr, isStr := userVal.(string); isStr {
+							u = &model.User{}
+							_ = json.NewDecoder(strings.NewReader(userStr)).Decode(u)
+						} else if userPtr, isPtr := userVal.(*model.User); isPtr {
+							u = userPtr
+						}
+						if u != nil && u.Username != "" {
+							userInfo = fmt.Sprintf(" [User: %s (ID: %s)]", u.Username, u.Id)
+						}
+					}
+
+					// Fallback to user_id string if no full user object was found
+					if userInfo == "" {
+						if userID, ok := data["user_id"].(string); ok && userID != "" {
+							userInfo = fmt.Sprintf(" [UserID: %s]", userID)
+						}
+					}
+				}
+
+				logger.Debugf("MMUser WsReceiver%s: %#v", userInfo, message.Raw)
+
+				if logger.Logger.IsLevelEnabled(logrus.TraceLevel) {
+					logger.Tracef("handleWsMessage%s %s", userInfo, spew.Sdump(message))
+				}
 			}
 
 			switch message.Raw.EventType() {
