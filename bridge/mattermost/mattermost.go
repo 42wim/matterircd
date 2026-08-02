@@ -154,26 +154,26 @@ func (m *Mattermost) loginToMattermost(onWsConnect func()) (*matterclient.Client
 	m.quitChan = append(m.quitChan, quitChan)
 
 	// Start a pool of 10 concurrent workers
-	for range 10 {
-		go m.handleWsMessage(quitChan)
+	for i := range 10 {
+		go m.handleWsMessage(quitChan, i)
 	}
 
 	return mc, nil
 }
 
 //nolint:cyclop
-func (m *Mattermost) handleWsMessage(quitChan chan struct{}) {
+func (m *Mattermost) handleWsMessage(quitChan chan struct{}, workerIdx int) {
 	for {
 		if m.mc.WsQuit {
 			logger.Trace("exiting handleWsMessage")
 			return
 		}
 
-		logger.Trace("in handleWsMessage", len(m.mc.MessageChan))
+		logger.Trace("in handleWsMessage", workerIdx)
 
 		select {
 		case <-quitChan:
-			logger.Trace("exiting handleWsMessage")
+			logger.Trace("exiting handleWsMessage", workerIdx)
 			return
 		case message := <-m.mc.MessageChan:
 			eventType := message.Raw.EventType()
@@ -198,17 +198,17 @@ func (m *Mattermost) handleWsMessage(quitChan chan struct{}) {
 
 				switch eventType {
 				case model.WebsocketEventTyping, model.WebsocketEventUserUpdated:
-					logger.Tracef("MMUser WsReceiver%s: %#v", userInfo, message.Raw)
+					logger.Tracef("handleWsMessage%d MMUser WsReceiver%s: %#v", workerIdx, userInfo, message.Raw)
 				case model.WebsocketEventMultipleChannelsViewed:
-					logger.Tracef("MMUser WsReceiver%s: %#v", userInfo, message.Raw)
+					logger.Tracef("handleWsMessage%d MMUser WsReceiver%s: %#v", workerIdx, userInfo, message.Raw)
 				case model.WebsocketEventPreferencesChanged, model.WebsocketEventSidebarCategoryUpdated:
-					logger.Tracef("MMUser WsReceiver%s: %#v", userInfo, message.Raw)
+					logger.Tracef("handleWsMessage%d MMUser WsReceiver%s: %#v", workerIdx, userInfo, message.Raw)
 				default:
-					logger.Debugf("MMUser WsReceiver%s: %#v", userInfo, message.Raw)
+					logger.Debugf("handleWsMessage%d MMUser WsReceiver%s: %#v", workerIdx, userInfo, message.Raw)
 				}
 
 				if logger.Logger.IsLevelEnabled(logrus.TraceLevel) {
-					logger.Tracef("handleWsMessage%s %s", userInfo, spew.Sdump(message))
+					logger.Tracef("handleWsMessage%d %s %s", workerIdx, userInfo, spew.Sdump(message))
 				}
 			}
 
