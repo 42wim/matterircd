@@ -75,12 +75,16 @@ func New(cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Eve
 		switch {
 		case rc.Trace:
 			ourlog.SetLevel(logrus.TraceLevel)
-			mc.SetLogLevel("trace")
 		case rc.Debug:
 			ourlog.SetLevel(logrus.DebugLevel)
-			mc.SetLogLevel("debug")
 		default:
 			ourlog.SetLevel(logrus.InfoLevel)
+		}
+
+		if rc.Mattermost.MatterclientLogLevel != "" {
+			logger.Infof("enabling matterclient logging: level: %s", rc.Mattermost.MatterclientLogLevel)
+			mc.SetLogLevel(strings.ToLower(rc.Mattermost.MatterclientLogLevel))
+		} else {
 			mc.SetLogLevel("info")
 		}
 	}
@@ -293,7 +297,7 @@ func (m *Mattermost) Join(channelName string) (string, string, error) {
 	}
 
 	err := m.mc.JoinChannel(channelID)
-	logger.Debugf("join channel %s, id %s, err: %v", channelName, channelID, err)
+	logger.Debugf("Join channel %s (id: %s), err: %v", channelName, channelID, err)
 	if err != nil {
 		return "", "", fmt.Errorf("cannot join channel: %v", err)
 	}
@@ -494,7 +498,7 @@ func (m *Mattermost) Topic(channelID string) string {
 }
 
 func (m *Mattermost) SetTopic(channelID, text string) error {
-	logger.Debugf("updating channelheader %#v, %#v", channelID, text)
+	logger.Debugf("Updating channel header/topic %#v, %#v", channelID, text)
 	patch := &model.ChannelPatch{
 		Header: &text,
 	}
@@ -558,7 +562,7 @@ func (m *Mattermost) GetChannelName(channelID string) string {
 	if channelName == "" {
 		channel := m.mc.GetChannel(channelID)
 		if channel == nil {
-			logger.Debugf("Could not resolve missing channel name for %s", channelID)
+			logger.Warnf("Could not resolve missing channel name for %s", channelID)
 		}
 	}
 
@@ -819,7 +823,7 @@ func (m *Mattermost) wsActionPostSkip(rmsg *model.WebSocketEvent) bool {
 	}
 
 	if data.Type == model.PostTypeLeaveChannel || data.Type == model.PostTypeJoinChannel {
-		logger.Debugf("our own join/leave message. not relaying %#v", data.Message)
+		logger.Tracef("our own join/leave message. not relaying %#v", data.Message)
 		return true
 	}
 
@@ -957,7 +961,7 @@ func (m *Mattermost) getParentReplyMsg(parentID string, preFetchedPost *model.Po
 	// None found, so we'll need to create one and save it for future uses.
 	if v, ok := m.msgParentCache.Get(parentID); ok {
 		if replyMessage, ok = v.(string); ok {
-			logger.Debugf("Found saved reply for parent post %s, using:%s", parentID, replyMessage)
+			logger.Tracef("Found saved reply for parent post %s, using:%s", parentID, replyMessage)
 			return replyMessage, nil
 		}
 	}
@@ -1004,7 +1008,7 @@ func (m *Mattermost) getParentReplyMsg(parentID string, preFetchedPost *model.Po
 	parentUser := m.GetUser(parentPost.UserId)
 	parentMessage := maybeShorten(msg, newLen, uncounted, unicode)
 	replyMessage = " (re @" + parentUser.Nick + ": " + parentMessage + ")"
-	logger.Debugf("Created reply for parent post %s:%s", parentID, replyMessage)
+	logger.Tracef("Created reply for parent post %s:%s", parentID, replyMessage)
 
 	m.msgParentCache.Add(parentID, replyMessage)
 
@@ -1566,7 +1570,7 @@ func (m *Mattermost) handleReactionEvent(rmsg *model.WebSocketEvent) {
 
 	// Don't show our own reaction messages unless mattermost.showownreactions is enabled.
 	if userID.Me && !rc.Mattermost.ShowOwnReactions {
-		logger.Debugf("Not showing own reaction: %s: %s", rmsg.EventType(), reaction.EmojiName)
+		logger.Tracef("Not showing own reaction: %s: %s", rmsg.EventType(), reaction.EmojiName)
 		return
 	}
 

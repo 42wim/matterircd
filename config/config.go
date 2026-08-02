@@ -100,6 +100,8 @@ type MattermostConfig struct {
 	Bridge    BridgeConfig
 	Formatter FormatterConfig
 
+	MatterclientLogLevel string
+
 	DefaultServer string
 	DefaultTeam   string
 
@@ -274,6 +276,8 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 		Mattermost: MattermostConfig{
 			Bridge:    mmBridge,
 			Formatter: mmFormatter,
+
+			MatterclientLogLevel: c.v.GetString("mattermost.MatterclientLogLevel"),
 
 			DefaultServer: c.v.GetString("mattermost.DefaultServer"),
 			DefaultTeam:   c.v.GetString("mattermost.DefaultTeam"),
