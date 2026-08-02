@@ -877,10 +877,29 @@ func (m *Client) WsReceiver(ctx context.Context) {
 			}
 
 			eventType := event.EventType()
-			if eventType == model.WebsocketEventTyping {
-				m.logger.Tracef("WsReceiver event: %#v", event)
-			} else {
-				m.logger.Debugf("WsReceiver event: %#v", event)
+			if m.rootLogger.IsLevelEnabled(logrus.DebugLevel) { //nolint:nestif
+				userInfo := ""
+				data := event.GetData()
+
+				if userPtr, ok := data["user"].(*model.User); ok {
+					if userPtr.Username != "" {
+						userInfo = " [User: " + userPtr.Username + " (ID: " + userPtr.Id + ")]"
+					}
+				} else if userStr, ok := data["user"].(string); ok && userStr != "" {
+					var summary UserSummary
+					_ = json.NewDecoder(strings.NewReader(userStr)).Decode(&summary)
+					if summary.Username != "" {
+						userInfo = " [User: " + summary.Username + " (ID: " + summary.Id + ")]"
+					}
+				} else if userID, ok := data["user_id"].(string); ok && userID != "" {
+					userInfo = " [UserID: " + userID + "]"
+				}
+
+				if eventType == model.WebsocketEventTyping {
+					m.logger.Tracef("WsReceiver event%s: %#v", userInfo, event)
+				} else {
+					m.logger.Debugf("WsReceiver event%s: %#v", userInfo, event)
+				}
 			}
 
 			m.lastWsActivity.Store(time.Now().Unix())

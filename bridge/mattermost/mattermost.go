@@ -172,9 +172,34 @@ func (m *Mattermost) handleWsMessage(quitChan chan struct{}) {
 			logger.Debug("exiting handleWsMessage")
 			return
 		case message := <-m.mc.MessageChan:
-			logger.Debugf("MMUser WsReceiver: %#v", message.Raw)
-			if logger.Level.String() == "trace" {
-				logger.Tracef("handleWsMessage %s", spew.Sdump(message))
+			eventType := message.Raw.EventType()
+			if logger.Logger.IsLevelEnabled(logrus.DebugLevel) { //nolint:nestif
+				userInfo := ""
+				data := message.Raw.GetData()
+
+				if userPtr, ok := data["user"].(*model.User); ok {
+					if userPtr.Username != "" {
+						userInfo = " [User: " + userPtr.Username + " (ID: " + userPtr.Id + ")]"
+					}
+				} else if userStr, ok := data["user"].(string); ok && userStr != "" {
+					var summary *model.User
+					_ = json.NewDecoder(strings.NewReader(userStr)).Decode(&summary)
+					if summary.Username != "" {
+						userInfo = " [User: " + summary.Username + " (ID: " + summary.Id + ")]"
+					}
+				} else if userID, ok := data["user_id"].(string); ok && userID != "" {
+					userInfo = " [UserID: " + userID + "]"
+				}
+
+				if eventType == model.WebsocketEventTyping {
+					logger.Tracef("MMUser WsReceiver%s: %#v", userInfo, message.Raw)
+				} else {
+					logger.Debugf("MMUser WsReceiver%s: %#v", userInfo, message.Raw)
+				}
+
+				if logger.Logger.IsLevelEnabled(logrus.TraceLevel) {
+					logger.Tracef("handleWsMessage%s %s", userInfo, spew.Sdump(message))
+				}
 			}
 
 			switch message.Raw.EventType() {
