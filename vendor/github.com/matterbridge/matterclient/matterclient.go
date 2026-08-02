@@ -456,7 +456,7 @@ func (m *Client) initUser() error {
 		idx := 0
 		pageRetryCount := 0
 		for {
-			query := fmt.Sprintf("/users?in_team=%v&page=%v&per_page=%v", team.Id, idx, batchSize)
+			query := "/users?in_team=" + team.Id + "&page=" + strconv.Itoa(idx) + "&per_page=" + strconv.Itoa(batchSize)
 			resp, err := m.Client.DoAPIGet(query, "")
 			if err != nil {
 				var mResp *model.Response
@@ -497,16 +497,15 @@ func (m *Client) initUser() error {
 		m.Users.teams[team.Id] = make(map[string]struct{}, len(fetchedUsers))
 
 		for _, u := range fetchedUsers {
+			roles := u.Roles
+			if roles == "system_user" {
+				roles = "system_user"
+			} else if roles == "system_admin system_user" {
+				roles = "system_admin system_user"
+			}
+
 			cachedUser, exists := m.Users.users[u.Id]
 			if !exists { //nolint:nestif,dupl
-				// Intern common roles
-				roles := u.Roles
-				if roles == "system_user" {
-					roles = "system_user"
-				} else if roles == "system_admin system_user" {
-					roles = "system_admin system_user"
-				}
-
 				cachedUser = &model.User{
 					Id:        u.Id,
 					Username:  u.Username,
@@ -518,7 +517,6 @@ func (m *Client) initUser() error {
 				}
 				m.Users.users[u.Id] = cachedUser
 			} else {
-				// Only overwrite if changed, saving the tenured strings
 				if cachedUser.Username != u.Username {
 					cachedUser.Username = u.Username
 				}
@@ -531,8 +529,11 @@ func (m *Client) initUser() error {
 				if cachedUser.Nickname != u.Nickname {
 					cachedUser.Nickname = u.Nickname
 				}
-				if cachedUser.Roles != u.Roles {
-					cachedUser.Roles = u.Roles
+				if cachedUser.Roles != roles {
+					cachedUser.Roles = roles
+				}
+				if u.Props != nil {
+					cachedUser.Props = u.Props
 				}
 			}
 
