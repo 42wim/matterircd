@@ -161,7 +161,7 @@ func (m *Mattermost) loginToMattermost(onWsConnect func()) (*matterclient.Client
 	return mc, nil
 }
 
-//nolint:cyclop
+//nolint:cyclop,gocognit,gocyclo
 func (m *Mattermost) handleWsMessage(quitChan chan struct{}, workerIdx int) {
 	for {
 		if m.mc.WsQuit {
