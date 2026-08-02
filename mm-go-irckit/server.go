@@ -258,7 +258,7 @@ func (s *server) Channel(channelID string) Channel {
 		return ch
 	}
 
-	logger.Debugf("new channel id: %s, name: %s", channelID, name)
+	logger.Tracef("new channel %s (id: %s)", name, channelID)
 
 	s.channels[channelID] = newCh
 	s.channels[name] = newCh

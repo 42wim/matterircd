@@ -339,7 +339,7 @@ func (u *User) getMessageChannel(channelID string, sender *bridge.UserInfo) Chan
 	// if it's another user, let them join
 	if !ghost.Me && !ch.HasUser(ghost) {
 		if u.br.Protocol() != "mastodon" {
-			logger.Debugf("User %s is not in channel %s. Joining now", ghost.Nick, ch.String())
+			logger.Tracef("User %s is not in channel %s. Joining now", ghost.Nick, ch.String())
 			ch.Join(ghost) //nolint:errcheck
 		}
 	}
@@ -731,6 +731,7 @@ func (u *User) addUsersToChannel(users []*User, channel string, channelID string
 }
 
 func (u *User) addUsersToChannels() {
+	time.Sleep(time.Millisecond * 500)
 	// wait until the bridge is ready
 	for u.br == nil {
 		logger.Debug("bridge not ready yet, sleeping")

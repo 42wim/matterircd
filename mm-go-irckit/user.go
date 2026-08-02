@@ -177,7 +177,7 @@ var (
 // nolint:funlen,gocognit,gocyclo
 func (u *User) Decode() {
 	if u.Ghost {
-		logger.Debug("ghost user, skipping Decode()")
+		logger.Trace("ghost user, skipping Decode()")
 		return
 	}
 	buffer := make(chan *irc.Message, 512)
@@ -186,7 +186,7 @@ func (u *User) Decode() {
 	if bufferTimeout < 100 {
 		bufferTimeout = 100
 	}
-	logger.Debugf("using paste buffer timeout: %#v", bufferTimeout)
+	logger.Tracef("using paste buffer timeout: %#v", bufferTimeout)
 	timeout := time.Duration(bufferTimeout) * time.Millisecond
 	t := timer.NewTimer(timeout)
 	t.Stop()
@@ -205,7 +205,7 @@ func (u *User) Decode() {
 
 			// trim last newline
 			bufferedMsg.Trailing = strings.TrimSpace(bufferedMsg.Trailing)
-			logger.Debugf("flushing buffer: %#v", bufferedMsg)
+			logger.Tracef("flushing buffer: %#v", bufferedMsg)
 			u.DecodeCh <- bufferedMsg
 			// clear buffer
 			bufferedMsg = nil
@@ -226,7 +226,7 @@ func (u *User) Decode() {
 						}
 						bufferedMsg = nil
 					}
-					logger.Debugf("decode buffer goroutine exiting for %s", u.Nick)
+					logger.Tracef("decode buffer goroutine exiting for %s", u.Nick)
 					return
 				}
 				// are we starting a new buffer ?
@@ -237,7 +237,7 @@ func (u *User) Decode() {
 				} else {
 					if strings.HasPrefix(msg.Trailing, "\x01ACTION") || replyRegExp.MatchString(msg.Trailing) || modifyRegExp.MatchString(msg.Trailing) {
 						// flush buffer
-						logger.Debug("flushing buffer because of /me, replies to threads, and message modifications")
+						logger.Trace("flushing buffer because of /me, replies to threads, and message modifications")
 						flush()
 						// send CTCP message
 						u.DecodeCh <- msg

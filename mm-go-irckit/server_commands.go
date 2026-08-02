@@ -55,7 +55,7 @@ func CmdInvite(s Server, u *User, msg *irc.Message) error {
 	}
 
 	if ch, exists := s.HasChannel(channel); exists {
-		logger.Debugf("inviting %s to %s", other.User, ch.ID())
+		logger.Tracef("inviting %s to %s", other.User, ch.ID())
 		err := u.br.Invite(ch.ID(), other.User)
 		if err != nil {
 			return err
@@ -128,7 +128,7 @@ func CmdJoin(s Server, u *User, msg *irc.Message) error {
 			continue
 		}
 
-		logger.Debugf("Join channel %s, id %s, err: %v", channelName, channelID, err)
+		logger.Tracef("Join channel %s, id %s, err: %v", channelName, channelID, err)
 
 		sync = u.syncChannel
 
