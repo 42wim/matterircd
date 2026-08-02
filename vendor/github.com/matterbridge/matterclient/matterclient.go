@@ -869,27 +869,19 @@ func (m *Client) WsReceiver(ctx context.Context) {
 			if m.rootLogger.IsLevelEnabled(logrus.DebugLevel) { //nolint:nestif
 				userInfo := ""
 				data := event.GetData()
-				if data != nil {
-					// Check for a full user object first
-					if userVal, ok := data["user"]; ok {
-						var u *model.User
-						if userStr, isStr := userVal.(string); isStr {
-							u = &model.User{}
-							_ = json.NewDecoder(strings.NewReader(userStr)).Decode(u)
-						} else if userPtr, isPtr := userVal.(*model.User); isPtr {
-							u = userPtr
-						}
-						if u != nil && u.Username != "" {
-							userInfo = fmt.Sprintf(" [User: %s (ID: %s)]", u.Username, u.Id)
-						}
-					}
 
-					// Fallback to user_id string if no full user object was found
-					if userInfo == "" {
-						if userID, ok := data["user_id"].(string); ok && userID != "" {
-							userInfo = fmt.Sprintf(" [UserID: %s]", userID)
-						}
+				if userPtr, ok := data["user"].(*model.User); ok {
+					if userPtr.Username != "" {
+						userInfo = " [User: " + userPtr.Username + " (ID: " + userPtr.Id + ")]"
 					}
+				} else if userStr, ok := data["user"].(string); ok && userStr != "" {
+					var summary UserSummary
+					_ = json.NewDecoder(strings.NewReader(userStr)).Decode(&summary)
+					if summary.Username != "" {
+						userInfo = " [User: " + summary.Username + " (ID: " + summary.Id + ")]"
+					}
+				} else if userID, ok := data["user_id"].(string); ok && userID != "" {
+					userInfo = " [UserID: " + userID + "]"
 				}
 
 				if eventType == model.WebsocketEventTyping {
