@@ -368,7 +368,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		CHANNEL_GROUP                  = "G"
 	*/
 	nick := sanitizeNick(event.Sender.Nick)
-	logger.Debugf("in handleChannelMessageEvent from %s", nick)
+	logger.Tracef("in handleChannelMessageEvent from %s", nick)
 	ch := u.getMessageChannel(event.ChannelID, event.Sender)
 	if event.Sender.Me {
 		nick = u.Nick
@@ -740,7 +740,7 @@ func (u *User) addUsersToChannels() {
 	srv := u.Srv
 	throttle := time.NewTicker(time.Millisecond * 8)
 
-	logger.Debug("in addUsersToChannels()")
+	logger.Trace("in addUsersToChannels()")
 	// add all users, also who are not on channels
 	ch := srv.Channel("&users")
 

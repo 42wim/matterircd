@@ -161,18 +161,19 @@ func (m *Mattermost) loginToMattermost(onWsConnect func()) (*matterclient.Client
 func (m *Mattermost) handleWsMessage(quitChan chan struct{}) {
 	for {
 		if m.mc.WsQuit {
-			logger.Debug("exiting handleWsMessage")
+			logger.Trace("exiting handleWsMessage")
 			return
 		}
 
-		logger.Debug("in handleWsMessage", len(m.mc.MessageChan))
+		logger.Trace("in handleWsMessage", len(m.mc.MessageChan))
 
 		select {
 		case <-quitChan:
-			logger.Debug("exiting handleWsMessage")
+			logger.Trace("exiting handleWsMessage")
 			return
 		case message := <-m.mc.MessageChan:
 			eventType := message.Raw.EventType()
+
 			if logger.Logger.IsLevelEnabled(logrus.DebugLevel) { //nolint:nestif
 				userInfo := ""
 				data := message.Raw.GetData()
@@ -191,9 +192,14 @@ func (m *Mattermost) handleWsMessage(quitChan chan struct{}) {
 					userInfo = " [UserID: " + userID + "]"
 				}
 
-				if eventType == model.WebsocketEventTyping {
+				switch eventType {
+				case model.WebsocketEventTyping, model.WebsocketEventUserUpdated:
 					logger.Tracef("MMUser WsReceiver%s: %#v", userInfo, message.Raw)
-				} else {
+				case model.WebsocketEventMultipleChannelsViewed:
+					logger.Tracef("MMUser WsReceiver%s: %#v", userInfo, message.Raw)
+				case model.WebsocketEventPreferencesChanged, model.WebsocketEventSidebarCategoryUpdated:
+					logger.Tracef("MMUser WsReceiver%s: %#v", userInfo, message.Raw)
+				default:
 					logger.Debugf("MMUser WsReceiver%s: %#v", userInfo, message.Raw)
 				}
 
@@ -202,7 +208,7 @@ func (m *Mattermost) handleWsMessage(quitChan chan struct{}) {
 				}
 			}
 
-			switch message.Raw.EventType() {
+			switch eventType {
 			case model.WebsocketEventPosted:
 				m.handleWsActionPost(message.Raw)
 			case model.WebsocketEventPostEdited:
@@ -861,7 +867,7 @@ func (m *Mattermost) wsActionPostSkip(rmsg *model.WebSocketEvent) bool {
 	sb.WriteString(sbSuffix.String())
 	m.msgLastSentCache.Add(msgID, sb.String())
 
-	logger.Debugf("message is sent from this matterircd instance, not relaying %#v", data.Message)
+	logger.Tracef("message is sent from this matterircd instance, not relaying %#v", data.Message)
 	return true
 }
 
@@ -1025,7 +1031,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	}
 	extraProps := data.GetProps()
 
-	logger.Debugf("handleWsActionPost() receiving userid %s", data.UserId)
+	logger.Tracef("handleWsActionPost() receiving userid %s", data.UserId)
 	if m.wsActionPostSkip(rmsg) {
 		return
 	}
