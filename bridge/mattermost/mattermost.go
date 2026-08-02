@@ -172,7 +172,7 @@ func (m *Mattermost) handleWsMessage(quitChan chan struct{}) {
 			logger.Debug("exiting handleWsMessage")
 			return
 		case message := <-m.mc.MessageChan:
-			if logger.Logger.IsLevelEnabled(logrus.DebugLevel) {
+			if logger.Logger.IsLevelEnabled(logrus.DebugLevel) { //nolint:nestif
 				userInfo := ""
 				data := message.Raw.GetData()
 				if data != nil {
