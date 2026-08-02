@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/42wim/matterircd/utils"
 	"github.com/sorcix/irc"
 )
 
@@ -866,7 +867,7 @@ func CmdWhois(s Server, u *User, msg *irc.Message) error {
 				Prefix:   s.Prefix(),
 				Params:   []string{u.Nick, other.Nick},
 				Command:  irc.RPL_AWAY,
-				Trailing: status,
+				Trailing: utils.EmojiReplaceAliases(status),
 			})
 		}
 
