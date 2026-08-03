@@ -36,6 +36,11 @@ type Mattermost struct {
 	cfg *config.Config
 }
 
+type CachedPost struct {
+	RootID   string
+	ReplyMsg string
+}
+
 var logger *logrus.Entry
 
 func New(cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Event, onWsConnect func()) (bridge.Bridger, *matterclient.Client, error) {
@@ -842,12 +847,13 @@ func (m *Mattermost) wsActionPostSkip(rmsg *model.WebSocketEvent) bool {
 	msgID := data.Id
 	var sbSuffix strings.Builder
 	sbSuffix.Grow(shortenMsgLen + 32)
+
 	if data.RootId != "" {
 		msgID = data.RootId
 		if !rc.Mattermost.HideReplies {
-			parentReplyMsg, err := m.getParentReplyMsg(data.RootId, nil, shortenMsgLen, "@", useUnicode)
+			cachedRoot, err := m.getCachedPostInfo(data.RootId, nil, shortenMsgLen, "@", useUnicode)
 			if err == nil {
-				sbSuffix.WriteString(parentReplyMsg)
+				sbSuffix.WriteString(cachedRoot.ReplyMsg)
 			}
 		}
 	}
@@ -943,49 +949,34 @@ var markdownReplacer = strings.NewReplacer(
 )
 
 //nolint:funlen
-func (m *Mattermost) getParentReplyMsg(parentID string, preFetchedPost *model.Post, newLen int, uncounted string, unicode bool) (string, error) {
-	var replyMessage string
-
+func (m *Mattermost) getCachedPostInfo(postID string, preFetchedPost *model.Post, newLen int, uncounted string, unicode bool) (CachedPost, error) {
 	rc := m.cfg.Current()
-
-	disableMarkdown := rc.Mattermost.Formatter.DisableMarkdown
-	disableEmoji := rc.Mattermost.Formatter.DisableEmoji
-	useUnicode := rc.Mattermost.Formatter.Unicode
-	blockquoteChar := blockquoteCharNonUnicode
-	inlineCode := rc.Mattermost.Formatter.MarkdownInlineCode
-	if useUnicode {
-		blockquoteChar = blockquoteCharUnicode
-	}
 
 	// Search and use cached reply if it exists.
 	// None found, so we'll need to create one and save it for future uses.
-	if v, ok := m.msgParentCache.Get(parentID); ok {
-		if replyMessage, ok = v.(string); ok {
-			logger.Tracef("Found saved reply for parent post %s, using:%s", parentID, replyMessage)
-			return replyMessage, nil
+	if v, ok := m.msgParentCache.Get(postID); ok {
+		if cp, ok := v.(CachedPost); ok {
+			logger.Tracef("Found saved reply for parent post %s, using:%s", postID, cp.ReplyMsg)
+			return cp, nil
 		}
 	}
 
-	var parentPost *model.Post
+	var post *model.Post
 	var err error
 
 	if preFetchedPost != nil {
-		parentPost = preFetchedPost
+		post = preFetchedPost
 	} else {
-		parentPost, _, err = m.mc.Client.GetPost(parentID, "")
-		// Retry once on failure.
+		post, _, err = m.mc.Client.GetPost(postID, "")
 		if err != nil {
-			parentPost, _, err = m.mc.Client.GetPost(parentID, "")
-		}
-		if err != nil {
-			return "", err
+			return CachedPost{}, err
 		}
 	}
 
-	msg := parentPost.Message
+	msg := post.Message
 	if msg == "" {
 		// If we have message attachments and there is a fallback message, use it.
-		if attachments := parentPost.Attachments(); len(attachments) > 0 {
+		if attachments := post.Attachments(); len(attachments) > 0 {
 			if attachments[0].Fallback != "" {
 				msg = attachments[0].Fallback
 			} else if attachments[0].Text != "" {
@@ -994,25 +985,41 @@ func (m *Mattermost) getParentReplyMsg(parentID string, preFetchedPost *model.Po
 		}
 	}
 
-	if !disableMarkdown {
+	if !rc.Mattermost.Formatter.DisableMarkdown {
 		msg = markdownReplacer.Replace(msg)
-		msg = utils.Markdown2irc(msg, blockquoteChar, inlineCode)
+		blockquoteChar := blockquoteCharNonUnicode
+		if unicode {
+			blockquoteChar = blockquoteCharUnicode
+		}
+		msg = utils.Markdown2irc(msg, blockquoteChar, rc.Mattermost.Formatter.MarkdownInlineCode)
 	} else {
 		msg = strings.ReplaceAll(msg, "\n", " ")
 	}
 
-	if !disableEmoji {
+	if !rc.Mattermost.Formatter.DisableEmoji {
 		msg = utils.EmojiReplaceAliases(msg)
 	}
 
-	parentUser := m.GetUser(parentPost.UserId)
+	parentUser := m.GetUser(post.UserId)
 	parentMessage := maybeShorten(msg, newLen, uncounted, unicode)
-	replyMessage = " (re @" + parentUser.Nick + ": " + parentMessage + ")"
-	logger.Tracef("Created reply for parent post %s:%s", parentID, replyMessage)
 
-	m.msgParentCache.Add(parentID, replyMessage)
+	var b strings.Builder
+	b.Grow(9 + len(parentUser.Nick) + len(parentMessage))
+	b.WriteString(" (re @")
+	b.WriteString(parentUser.Nick)
+	b.WriteString(": ")
+	b.WriteString(parentMessage)
+	b.WriteString(")")
 
-	return replyMessage, nil
+	cp := CachedPost{
+		RootID:   post.RootId,
+		ReplyMsg: b.String(),
+	}
+
+	logger.Tracef("Created cached post info for %s: %s", postID, cp.ReplyMsg)
+	m.msgParentCache.Add(postID, cp)
+
+	return cp, nil
 }
 
 var (
@@ -1046,12 +1053,13 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 
 	var sbSuffix strings.Builder
 	sbSuffix.Grow(rc.Mattermost.ShortenRepliesTo + 32)
+
 	if !rc.Mattermost.HideReplies && data.RootId != "" {
-		parentReplyMsg, err := m.getParentReplyMsg(data.RootId, nil, rc.Mattermost.ShortenRepliesTo, "@", useUnicode)
+		cachedRoot, err := m.getCachedPostInfo(data.RootId, nil, rc.Mattermost.ShortenRepliesTo, "@", useUnicode)
 		if err != nil {
 			logger.Errorf("Unable to get parent post for %#v", data) //nolint:govet
 		} else {
-			sbSuffix.WriteString(parentReplyMsg)
+			sbSuffix.WriteString(cachedRoot.ReplyMsg)
 		}
 	}
 
@@ -1599,23 +1607,18 @@ func (m *Mattermost) handleReactionEvent(rmsg *model.WebSocketEvent) {
 	sbSuffix.Grow(rc.Mattermost.ShortenRepliesTo + 32)
 
 	parentID := reaction.PostId
-	parentPost, _, err := m.mc.Client.GetPost(reaction.PostId, "")
-	if err != nil {
-		parentPost, _, err = m.mc.Client.GetPost(reaction.PostId, "")
-	}
-
+	// Fetch the post being reacted to (hits cache if already seen)
+	cachedPost, err := m.getCachedPostInfo(reaction.PostId, nil, rc.Mattermost.ShortenRepliesTo, "@", rc.Mattermost.Formatter.Unicode)
 	if err == nil {
-		if parentPost.RootId != "" {
-			parentID = parentPost.RootId
+		if cachedPost.RootID != "" {
+			parentID = cachedPost.RootID
 		}
+
 		if !rc.Mattermost.HideReplies {
-			replyMsg, err := m.getParentReplyMsg(reaction.PostId, parentPost, rc.Mattermost.ShortenRepliesTo, "@", rc.Mattermost.Formatter.Unicode)
-			if err == nil {
-				sbSuffix.WriteString(replyMsg)
-			}
+			sbSuffix.WriteString(cachedPost.ReplyMsg)
 		}
 	} else {
-		logger.Errorf("Unable to get parent post for reaction %#v: %v", reaction, err)
+		logger.Errorf("Unable to get post info for reaction %#v: %v", reaction, err)
 	}
 
 	switch rmsg.EventType() {
