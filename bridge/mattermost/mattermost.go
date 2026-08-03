@@ -161,7 +161,7 @@ func (m *Mattermost) loginToMattermost(onWsConnect func()) (*matterclient.Client
 	return mc, nil
 }
 
-//nolint:cyclop,gocognit,gocyclo
+//nolint:cyclop,funlen,gocognit,gocyclo
 func (m *Mattermost) handleWsMessage(quitChan chan struct{}, workerIdx int) {
 	for {
 		if m.mc.WsQuit {
@@ -1322,7 +1322,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	}
 
 	logger.Debugf("handleWsActionPost() user %s sent %#v", ghost.Nick, sbMsg.String())
-	logger.Debugf("%#v", data) //nolint:govet
+	logger.Tracef("%#v", data) //nolint:govet
 }
 
 func (m *Mattermost) getFilesFromData(data *model.Post) []*bridge.File {
