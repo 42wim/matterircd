@@ -339,7 +339,7 @@ func (u *User) getMessageChannel(channelID string, sender *bridge.UserInfo) Chan
 	// if it's another user, let them join
 	if !ghost.Me && !ch.HasUser(ghost) {
 		if u.br.Protocol() != "mastodon" {
-			logger.Debugf("User %s is not in channel %s. Joining now", ghost.Nick, ch.String())
+			logger.Tracef("User %s is not in channel %s. Joining now", ghost.Nick, ch.String())
 			ch.Join(ghost) //nolint:errcheck
 		}
 	}
@@ -368,7 +368,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		CHANNEL_GROUP                  = "G"
 	*/
 	nick := sanitizeNick(event.Sender.Nick)
-	logger.Debugf("in handleChannelMessageEvent from %s", nick)
+	logger.Tracef("in handleChannelMessageEvent from %s", nick)
 	ch := u.getMessageChannel(event.ChannelID, event.Sender)
 	if event.Sender.Me {
 		nick = u.Nick
@@ -731,6 +731,7 @@ func (u *User) addUsersToChannel(users []*User, channel string, channelID string
 }
 
 func (u *User) addUsersToChannels() {
+	time.Sleep(time.Millisecond * 500)
 	// wait until the bridge is ready
 	for u.br == nil {
 		logger.Debug("bridge not ready yet, sleeping")
@@ -740,7 +741,7 @@ func (u *User) addUsersToChannels() {
 	srv := u.Srv
 	throttle := time.NewTicker(time.Millisecond * 8)
 
-	logger.Debug("in addUsersToChannels()")
+	logger.Trace("in addUsersToChannels()")
 	// add all users, also who are not on channels
 	ch := srv.Channel("&users")
 

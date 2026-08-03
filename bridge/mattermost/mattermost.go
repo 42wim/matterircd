@@ -75,12 +75,16 @@ func New(cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Eve
 		switch {
 		case rc.Trace:
 			ourlog.SetLevel(logrus.TraceLevel)
-			mc.SetLogLevel("trace")
 		case rc.Debug:
 			ourlog.SetLevel(logrus.DebugLevel)
-			mc.SetLogLevel("debug")
 		default:
 			ourlog.SetLevel(logrus.InfoLevel)
+		}
+
+		if rc.Mattermost.MatterclientLogLevel != "" {
+			logger.Infof("enabling matterclient logging: level: %s", rc.Mattermost.MatterclientLogLevel)
+			mc.SetLogLevel(strings.ToLower(rc.Mattermost.MatterclientLogLevel))
+		} else {
 			mc.SetLogLevel("info")
 		}
 	}
@@ -150,29 +154,30 @@ func (m *Mattermost) loginToMattermost(onWsConnect func()) (*matterclient.Client
 	m.quitChan = append(m.quitChan, quitChan)
 
 	// Start a pool of 10 concurrent workers
-	for range 10 {
-		go m.handleWsMessage(quitChan)
+	for i := range 10 {
+		go m.handleWsMessage(quitChan, i)
 	}
 
 	return mc, nil
 }
 
-//nolint:cyclop
-func (m *Mattermost) handleWsMessage(quitChan chan struct{}) {
+//nolint:cyclop,funlen,gocognit,gocyclo
+func (m *Mattermost) handleWsMessage(quitChan chan struct{}, workerIdx int) {
 	for {
 		if m.mc.WsQuit {
-			logger.Debug("exiting handleWsMessage")
+			logger.Trace("exiting handleWsMessage")
 			return
 		}
 
-		logger.Debug("in handleWsMessage", len(m.mc.MessageChan))
+		logger.Trace("in handleWsMessage", workerIdx)
 
 		select {
 		case <-quitChan:
-			logger.Debug("exiting handleWsMessage")
+			logger.Trace("exiting handleWsMessage", workerIdx)
 			return
 		case message := <-m.mc.MessageChan:
 			eventType := message.Raw.EventType()
+
 			if logger.Logger.IsLevelEnabled(logrus.DebugLevel) { //nolint:nestif
 				userInfo := ""
 				data := message.Raw.GetData()
@@ -191,18 +196,23 @@ func (m *Mattermost) handleWsMessage(quitChan chan struct{}) {
 					userInfo = " [UserID: " + userID + "]"
 				}
 
-				if eventType == model.WebsocketEventTyping {
-					logger.Tracef("MMUser WsReceiver%s: %#v", userInfo, message.Raw)
-				} else {
-					logger.Debugf("MMUser WsReceiver%s: %#v", userInfo, message.Raw)
+				switch eventType {
+				case model.WebsocketEventTyping, model.WebsocketEventUserUpdated:
+					logger.Tracef("handleWsMessage%d MMUser WsReceiver%s: %#v", workerIdx, userInfo, message.Raw)
+				case model.WebsocketEventMultipleChannelsViewed:
+					logger.Tracef("handleWsMessage%d MMUser WsReceiver%s: %#v", workerIdx, userInfo, message.Raw)
+				case model.WebsocketEventPreferencesChanged, model.WebsocketEventSidebarCategoryUpdated:
+					logger.Tracef("handleWsMessage%d MMUser WsReceiver%s: %#v", workerIdx, userInfo, message.Raw)
+				default:
+					logger.Debugf("handleWsMessage%d MMUser WsReceiver%s: %#v", workerIdx, userInfo, message.Raw)
 				}
 
 				if logger.Logger.IsLevelEnabled(logrus.TraceLevel) {
-					logger.Tracef("handleWsMessage%s %s", userInfo, spew.Sdump(message))
+					logger.Tracef("handleWsMessage%d %s %s", workerIdx, userInfo, spew.Sdump(message))
 				}
 			}
 
-			switch message.Raw.EventType() {
+			switch eventType {
 			case model.WebsocketEventPosted:
 				m.handleWsActionPost(message.Raw)
 			case model.WebsocketEventPostEdited:
@@ -287,7 +297,7 @@ func (m *Mattermost) Join(channelName string) (string, string, error) {
 	}
 
 	err := m.mc.JoinChannel(channelID)
-	logger.Debugf("join channel %s, id %s, err: %v", channelName, channelID, err)
+	logger.Debugf("Join channel %s (id: %s), err: %v", channelName, channelID, err)
 	if err != nil {
 		return "", "", fmt.Errorf("cannot join channel: %v", err)
 	}
@@ -488,7 +498,7 @@ func (m *Mattermost) Topic(channelID string) string {
 }
 
 func (m *Mattermost) SetTopic(channelID, text string) error {
-	logger.Debugf("updating channelheader %#v, %#v", channelID, text)
+	logger.Debugf("Updating channel header/topic %#v, %#v", channelID, text)
 	patch := &model.ChannelPatch{
 		Header: &text,
 	}
@@ -552,7 +562,7 @@ func (m *Mattermost) GetChannelName(channelID string) string {
 	if channelName == "" {
 		channel := m.mc.GetChannel(channelID)
 		if channel == nil {
-			logger.Debugf("Could not resolve missing channel name for %s", channelID)
+			logger.Warnf("Could not resolve missing channel name for %s", channelID)
 		}
 	}
 
@@ -813,7 +823,7 @@ func (m *Mattermost) wsActionPostSkip(rmsg *model.WebSocketEvent) bool {
 	}
 
 	if data.Type == model.PostTypeLeaveChannel || data.Type == model.PostTypeJoinChannel {
-		logger.Debugf("our own join/leave message. not relaying %#v", data.Message)
+		logger.Tracef("our own join/leave message. not relaying %#v", data.Message)
 		return true
 	}
 
@@ -861,7 +871,7 @@ func (m *Mattermost) wsActionPostSkip(rmsg *model.WebSocketEvent) bool {
 	sb.WriteString(sbSuffix.String())
 	m.msgLastSentCache.Add(msgID, sb.String())
 
-	logger.Debugf("message is sent from this matterircd instance, not relaying %#v", data.Message)
+	logger.Tracef("message is sent from this matterircd instance, not relaying %#v", data.Message)
 	return true
 }
 
@@ -951,7 +961,7 @@ func (m *Mattermost) getParentReplyMsg(parentID string, preFetchedPost *model.Po
 	// None found, so we'll need to create one and save it for future uses.
 	if v, ok := m.msgParentCache.Get(parentID); ok {
 		if replyMessage, ok = v.(string); ok {
-			logger.Debugf("Found saved reply for parent post %s, using:%s", parentID, replyMessage)
+			logger.Tracef("Found saved reply for parent post %s, using:%s", parentID, replyMessage)
 			return replyMessage, nil
 		}
 	}
@@ -998,7 +1008,7 @@ func (m *Mattermost) getParentReplyMsg(parentID string, preFetchedPost *model.Po
 	parentUser := m.GetUser(parentPost.UserId)
 	parentMessage := maybeShorten(msg, newLen, uncounted, unicode)
 	replyMessage = " (re @" + parentUser.Nick + ": " + parentMessage + ")"
-	logger.Debugf("Created reply for parent post %s:%s", parentID, replyMessage)
+	logger.Tracef("Created reply for parent post %s:%s", parentID, replyMessage)
 
 	m.msgParentCache.Add(parentID, replyMessage)
 
@@ -1025,7 +1035,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	}
 	extraProps := data.GetProps()
 
-	logger.Debugf("handleWsActionPost() receiving userid %s", data.UserId)
+	logger.Tracef("handleWsActionPost() receiving userid %s", data.UserId)
 	if m.wsActionPostSkip(rmsg) {
 		return
 	}
@@ -1312,7 +1322,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	}
 
 	logger.Debugf("handleWsActionPost() user %s sent %#v", ghost.Nick, sbMsg.String())
-	logger.Debugf("%#v", data) //nolint:govet
+	logger.Tracef("%#v", data) //nolint:govet
 }
 
 func (m *Mattermost) getFilesFromData(data *model.Post) []*bridge.File {
@@ -1560,7 +1570,7 @@ func (m *Mattermost) handleReactionEvent(rmsg *model.WebSocketEvent) {
 
 	// Don't show our own reaction messages unless mattermost.showownreactions is enabled.
 	if userID.Me && !rc.Mattermost.ShowOwnReactions {
-		logger.Debugf("Not showing own reaction: %s: %s", rmsg.EventType(), reaction.EmojiName)
+		logger.Tracef("Not showing own reaction: %s: %s", rmsg.EventType(), reaction.EmojiName)
 		return
 	}
 
