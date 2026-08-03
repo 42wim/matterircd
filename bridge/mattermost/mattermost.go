@@ -160,25 +160,34 @@ func (m *Mattermost) loginToMattermost(onWsConnect func()) (*matterclient.Client
 
 	// Start a pool of 10 concurrent workers
 	for i := range 10 {
-		go m.handleWsMessage(quitChan, i)
+		// Extract the current prefix
+		currentPrefix := ""
+		if p, ok := logger.Data["prefix"].(string); ok {
+			currentPrefix = p + ": "
+		}
+
+		// Create a new logger instance for this specific worker
+		workerLogger := logger.WithField("prefix", fmt.Sprintf("%shandleWsMessage%d", currentPrefix, i))
+
+		go m.handleWsMessage(quitChan, workerLogger)
 	}
 
 	return mc, nil
 }
 
 //nolint:cyclop,funlen,gocognit,gocyclo
-func (m *Mattermost) handleWsMessage(quitChan chan struct{}, workerIdx int) {
+func (m *Mattermost) handleWsMessage(quitChan chan struct{}, logger *logrus.Entry) {
 	for {
 		if m.mc.WsQuit {
 			logger.Trace("exiting handleWsMessage")
 			return
 		}
 
-		logger.Trace("in handleWsMessage", workerIdx)
+		logger.Trace("in handleWsMessage")
 
 		select {
 		case <-quitChan:
-			logger.Trace("exiting handleWsMessage", workerIdx)
+			logger.Trace("exiting handleWsMessage")
 			return
 		case message := <-m.mc.MessageChan:
 			eventType := message.Raw.EventType()
@@ -203,47 +212,47 @@ func (m *Mattermost) handleWsMessage(quitChan chan struct{}, workerIdx int) {
 
 				switch eventType {
 				case model.WebsocketEventTyping, model.WebsocketEventUserUpdated:
-					logger.Tracef("handleWsMessage%d MMUser WsReceiver%s: %#v", workerIdx, userInfo, message.Raw)
+					logger.Tracef("WsReceiver%s: %#v", userInfo, message.Raw)
 				case model.WebsocketEventMultipleChannelsViewed:
-					logger.Tracef("handleWsMessage%d MMUser WsReceiver%s: %#v", workerIdx, userInfo, message.Raw)
+					logger.Tracef("WsReceiver%s: %#v", userInfo, message.Raw)
 				case model.WebsocketEventPreferencesChanged, model.WebsocketEventSidebarCategoryUpdated:
-					logger.Tracef("handleWsMessage%d MMUser WsReceiver%s: %#v", workerIdx, userInfo, message.Raw)
+					logger.Tracef("WsReceiver%s: %#v", userInfo, message.Raw)
 				default:
-					logger.Debugf("handleWsMessage%d MMUser WsReceiver%s: %#v", workerIdx, userInfo, message.Raw)
+					logger.Debugf("WsReceiver%s: %#v", userInfo, message.Raw)
 				}
 
 				if logger.Logger.IsLevelEnabled(logrus.TraceLevel) {
-					logger.Tracef("handleWsMessage%d %s %s", workerIdx, userInfo, spew.Sdump(message))
+					logger.Tracef("%s %s", userInfo, spew.Sdump(message))
 				}
 			}
 
 			switch eventType {
 			case model.WebsocketEventPosted:
-				m.handleWsActionPost(message.Raw)
+				m.handleWsActionPost(message.Raw, logger)
 			case model.WebsocketEventPostEdited:
-				m.handleWsActionPost(message.Raw)
+				m.handleWsActionPost(message.Raw, logger)
 			case model.WebsocketEventPostDeleted:
-				m.handleWsActionPost(message.Raw)
+				m.handleWsActionPost(message.Raw, logger)
 			case model.WebsocketEventEphemeralMessage:
-				m.handleWsActionPost(message.Raw)
+				m.handleWsActionPost(message.Raw, logger)
 			case model.WebsocketEventUserRemoved:
-				m.handleWsActionUserRemoved(message.Raw)
+				m.handleWsActionUserRemoved(message.Raw, logger)
 			case model.WebsocketEventUserAdded:
-				m.handleWsActionUserAdded(message.Raw)
+				m.handleWsActionUserAdded(message.Raw, logger)
 			case model.WebsocketEventChannelCreated:
-				m.handleWsActionChannelCreated(message.Raw)
+				m.handleWsActionChannelCreated(message.Raw, logger)
 			case model.WebsocketEventChannelDeleted:
-				m.handleWsActionChannelDeleted(message.Raw)
+				m.handleWsActionChannelDeleted(message.Raw, logger)
 			case model.WebsocketEventChannelRestored:
-				m.handleWsActionChannelCreated(message.Raw)
+				m.handleWsActionChannelCreated(message.Raw, logger)
 			case model.WebsocketEventChannelUpdated:
-				m.handleWsActionPost(message.Raw)
+				m.handleWsActionPost(message.Raw, logger)
 			case model.WebsocketEventUserUpdated:
-				m.handleWsActionUserUpdated(message.Raw)
+				m.handleWsActionUserUpdated(message.Raw, logger)
 			case model.WebsocketEventStatusChange:
-				m.handleStatusChangeEvent(message.Raw)
+				m.handleStatusChangeEvent(message.Raw, logger)
 			case model.WebsocketEventReactionAdded, model.WebsocketEventReactionRemoved:
-				m.handleReactionEvent(message.Raw)
+				m.handleReactionEvent(message.Raw, logger)
 			}
 		}
 	}
@@ -794,7 +803,7 @@ const (
 )
 
 //nolint:forcetypeassert
-func (m *Mattermost) wsActionPostSkip(rmsg *model.WebSocketEvent) bool {
+func (m *Mattermost) wsActionPostSkip(rmsg *model.WebSocketEvent, logger *logrus.Entry) bool {
 	postData, ok := rmsg.GetData()["post"].(string)
 	if !ok {
 		return true
@@ -851,7 +860,7 @@ func (m *Mattermost) wsActionPostSkip(rmsg *model.WebSocketEvent) bool {
 	if data.RootId != "" {
 		msgID = data.RootId
 		if !rc.Mattermost.HideReplies {
-			cachedRoot, err := m.getCachedPostInfo(data.RootId, nil, shortenMsgLen, "@", useUnicode)
+			cachedRoot, err := m.getCachedPostInfo(data.RootId, nil, shortenMsgLen, "@", useUnicode, logger)
 			if err == nil {
 				sbSuffix.WriteString(cachedRoot.ReplyMsg)
 			}
@@ -949,7 +958,7 @@ var markdownReplacer = strings.NewReplacer(
 )
 
 //nolint:funlen
-func (m *Mattermost) getCachedPostInfo(postID string, preFetchedPost *model.Post, newLen int, uncounted string, unicode bool) (CachedPost, error) {
+func (m *Mattermost) getCachedPostInfo(postID string, preFetchedPost *model.Post, newLen int, uncounted string, unicode bool, logger *logrus.Entry) (CachedPost, error) {
 	rc := m.cfg.Current()
 
 	// Search and use cached reply if it exists.
@@ -1028,7 +1037,7 @@ var (
 )
 
 //nolint:funlen,gocognit,gocyclo,cyclop,forcetypeassert
-func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
+func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent, logger *logrus.Entry) {
 	wsData := rmsg.GetData()
 	postData, ok := wsData["post"].(string)
 	if !ok {
@@ -1043,7 +1052,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	extraProps := data.GetProps()
 
 	logger.Tracef("handleWsActionPost() receiving userid %s", data.UserId)
-	if m.wsActionPostSkip(rmsg) {
+	if m.wsActionPostSkip(rmsg, logger) {
 		return
 	}
 
@@ -1055,7 +1064,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	sbSuffix.Grow(rc.Mattermost.ShortenRepliesTo + 32)
 
 	if !rc.Mattermost.HideReplies && data.RootId != "" {
-		cachedRoot, err := m.getCachedPostInfo(data.RootId, nil, rc.Mattermost.ShortenRepliesTo, "@", useUnicode)
+		cachedRoot, err := m.getCachedPostInfo(data.RootId, nil, rc.Mattermost.ShortenRepliesTo, "@", useUnicode, logger)
 		if err != nil {
 			logger.Errorf("Unable to get parent post for %#v", data) //nolint:govet
 		} else {
@@ -1140,7 +1149,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 			logger.Debugf("Successfully synced single channel %s", data.ChannelId)
 		}
 
-		m.wsActionPostJoinLeave(&data, extraProps)
+		m.wsActionPostJoinLeave(&data, extraProps, logger)
 		return
 
 	case model.PostTypeHeaderChange:
@@ -1238,9 +1247,9 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		}
 		useFallback := len(msg) == 0
 		// https://docs.slack.dev/tools/node-slack-sdk/reference/web-api/interfaces/MessageAttachment/
-		m.parseMessageAttachments(&sbMsg, attachments, useFallback)
+		m.parseMessageAttachments(&sbMsg, attachments, useFallback, logger)
 	case data.Type == "custom_matterpoll":
-		pollMsg := parseMatterpollToMsg(attachments, useUnicode)
+		pollMsg := parseMatterpollToMsg(attachments, useUnicode, logger)
 		sbMsg.WriteString(msg)
 		sbMsg.WriteString(pollMsg)
 	case len(attachments) > 0:
@@ -1249,7 +1258,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		}
 		useFallback := len(msg) == 0
 		// https://developers.mattermost.com/integrate/reference/message-attachments/
-		m.parseMessageAttachments(&sbMsg, attachments, useFallback)
+		m.parseMessageAttachments(&sbMsg, attachments, useFallback, logger)
 	default:
 		sbMsg.WriteString(msg)
 	}
@@ -1269,7 +1278,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 		if strings.Contains(channel, "__") {
 			channel = ""
 		}
-		m.parsePreviewPost(&sbMsg, nick, channel, previewText)
+		m.parsePreviewPost(&sbMsg, nick, channel, previewText, logger)
 	}
 
 	switch {
@@ -1326,7 +1335,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent) {
 	}
 
 	if len(data.FileIds) > 0 {
-		m.handleFileEvent(channelType, ghost, &data, rmsg)
+		m.handleFileEvent(channelType, ghost, &data, rmsg, logger)
 	}
 
 	logger.Debugf("handleWsActionPost() user %s sent %#v", ghost.Nick, sbMsg.String())
@@ -1345,7 +1354,7 @@ func (m *Mattermost) getFilesFromData(data *model.Post) []*bridge.File {
 	return files
 }
 
-func (m *Mattermost) handleFileEvent(channelType string, ghost *bridge.UserInfo, data *model.Post, rmsg *model.WebSocketEvent) {
+func (m *Mattermost) handleFileEvent(channelType string, ghost *bridge.UserInfo, data *model.Post, rmsg *model.WebSocketEvent, logger *logrus.Entry) {
 	event := &bridge.Event{
 		Type: "file_event",
 	}
@@ -1395,7 +1404,7 @@ func (m *Mattermost) handleFileEvent(channelType string, ghost *bridge.UserInfo,
 	logger.Debugf("handleFileEvent() user %s sent %d files %#v", ghost.Nick, len(fileEvent.Files), data.FileIds)
 }
 
-func (m *Mattermost) wsActionPostJoinLeave(data *model.Post, extraProps map[string]interface{}) {
+func (m *Mattermost) wsActionPostJoinLeave(data *model.Post, extraProps map[string]interface{}, logger *logrus.Entry) {
 	logger.Debugf("wsActionPostJoinLeave: extraProps: %#v", extraProps)
 	switch data.Type {
 	case "system_add_to_channel":
@@ -1432,7 +1441,7 @@ func (m *Mattermost) wsActionPostJoinLeave(data *model.Post, extraProps map[stri
 	}
 }
 
-func (m *Mattermost) handleWsActionUserAdded(rmsg *model.WebSocketEvent) {
+func (m *Mattermost) handleWsActionUserAdded(rmsg *model.WebSocketEvent, logger *logrus.Entry) {
 	userID, ok := rmsg.GetData()["user_id"].(string)
 	if !ok {
 		return
@@ -1454,7 +1463,7 @@ func (m *Mattermost) handleWsActionUserAdded(rmsg *model.WebSocketEvent) {
 	m.eventChan <- event
 }
 
-func (m *Mattermost) handleWsActionUserRemoved(rmsg *model.WebSocketEvent) {
+func (m *Mattermost) handleWsActionUserRemoved(rmsg *model.WebSocketEvent, logger *logrus.Entry) {
 	wsData := rmsg.GetData()
 	userID, ok := wsData["user_id"].(string)
 	if !ok {
@@ -1463,7 +1472,7 @@ func (m *Mattermost) handleWsActionUserRemoved(rmsg *model.WebSocketEvent) {
 
 	removerID, ok := wsData["remover_id"].(string)
 	if !ok {
-		fmt.Println("not ok removerID", removerID)
+		logger.Error("not ok removerID", removerID)
 		return
 	}
 
@@ -1486,12 +1495,12 @@ func (m *Mattermost) handleWsActionUserRemoved(rmsg *model.WebSocketEvent) {
 	m.eventChan <- event
 }
 
-func (m *Mattermost) handleWsActionUserUpdated(rmsg *model.WebSocketEvent) {
+func (m *Mattermost) handleWsActionUserUpdated(rmsg *model.WebSocketEvent, logger *logrus.Entry) {
 	var info model.User
 
 	err := Decode(rmsg.GetData()["user"], &info)
 	if err != nil {
-		fmt.Println("decode", err)
+		logger.Errorf("decode", err)
 		return
 	}
 
@@ -1505,7 +1514,7 @@ func (m *Mattermost) handleWsActionUserUpdated(rmsg *model.WebSocketEvent) {
 	m.eventChan <- event
 }
 
-func (m *Mattermost) handleWsActionChannelCreated(rmsg *model.WebSocketEvent) {
+func (m *Mattermost) handleWsActionChannelCreated(rmsg *model.WebSocketEvent, logger *logrus.Entry) {
 	channelID, ok := rmsg.GetData()["channel_id"].(string)
 	if !ok {
 		return
@@ -1521,7 +1530,7 @@ func (m *Mattermost) handleWsActionChannelCreated(rmsg *model.WebSocketEvent) {
 	m.eventChan <- event
 }
 
-func (m *Mattermost) handleWsActionChannelDeleted(rmsg *model.WebSocketEvent) {
+func (m *Mattermost) handleWsActionChannelDeleted(rmsg *model.WebSocketEvent, logger *logrus.Entry) {
 	channelID, ok := rmsg.GetData()["channel_id"].(string)
 	if !ok {
 		return
@@ -1537,12 +1546,12 @@ func (m *Mattermost) handleWsActionChannelDeleted(rmsg *model.WebSocketEvent) {
 	m.eventChan <- event
 }
 
-func (m *Mattermost) handleStatusChangeEvent(rmsg *model.WebSocketEvent) {
+func (m *Mattermost) handleStatusChangeEvent(rmsg *model.WebSocketEvent, logger *logrus.Entry) {
 	var info model.Status
 
 	err := Decode(rmsg.GetData(), &info)
 	if err != nil {
-		fmt.Println("decode", err)
+		logger.Errorf("decode", err)
 
 		return
 	}
@@ -1559,7 +1568,7 @@ func (m *Mattermost) handleStatusChangeEvent(rmsg *model.WebSocketEvent) {
 }
 
 //nolint:forcetypeassert
-func (m *Mattermost) handleReactionEvent(rmsg *model.WebSocketEvent) {
+func (m *Mattermost) handleReactionEvent(rmsg *model.WebSocketEvent, logger *logrus.Entry) {
 	reactionData, ok := rmsg.GetData()["reaction"].(string)
 	if !ok {
 		return
@@ -1608,7 +1617,7 @@ func (m *Mattermost) handleReactionEvent(rmsg *model.WebSocketEvent) {
 
 	parentID := reaction.PostId
 	// Fetch the post being reacted to (hits cache if already seen)
-	cachedPost, err := m.getCachedPostInfo(reaction.PostId, nil, rc.Mattermost.ShortenRepliesTo, "@", rc.Mattermost.Formatter.Unicode)
+	cachedPost, err := m.getCachedPostInfo(reaction.PostId, nil, rc.Mattermost.ShortenRepliesTo, "@", rc.Mattermost.Formatter.Unicode, logger)
 	if err == nil {
 		if cachedPost.RootID != "" {
 			parentID = cachedPost.RootID
@@ -1780,7 +1789,7 @@ const (
 	messageAttachmentSpaceUnicode = " "
 )
 
-func parseMatterpollToMsg(attachments []*model.SlackAttachment, unicode bool) string {
+func parseMatterpollToMsg(attachments []*model.SlackAttachment, unicode bool, logger *logrus.Entry) string {
 	msg := ""
 	prefixChar := messageAttachmentCharNonUnicode
 	spaceChar := messageAttachmentSpaceNonUnicode
@@ -1832,7 +1841,7 @@ func parseMatterpollToMsg(attachments []*model.SlackAttachment, unicode bool) st
 const blockQuoteCharDefault = ">"
 
 //nolint:funlen,gocognit,gocyclo
-func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*model.SlackAttachment, useFallback bool) {
+func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*model.SlackAttachment, useFallback bool, logger *logrus.Entry) {
 	// If the main message builder already has content, add a newline before our preview
 	if b.Len() > 0 {
 		b.WriteByte('\n')
@@ -2121,7 +2130,7 @@ func extractPreviewData(metadata *model.PostMetadata) (string, string, string) {
 }
 
 //nolint:funlen
-func (m *Mattermost) parsePreviewPost(b *strings.Builder, user string, channel string, text string) {
+func (m *Mattermost) parsePreviewPost(b *strings.Builder, user string, channel string, text string, logger *logrus.Entry) {
 	// If the main message builder already has content, add a newline before our preview
 	if b.Len() > 0 {
 		b.WriteByte('\n')

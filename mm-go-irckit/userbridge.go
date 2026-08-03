@@ -21,6 +21,7 @@ import (
 	"github.com/42wim/matterircd/utils"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/mattermost/mattermost-server/v6/model"
+	"github.com/sirupsen/logrus"
 	"github.com/sorcix/irc"
 )
 
@@ -783,11 +784,20 @@ func (u *User) addUsersToChannels() {
 	var wg sync.WaitGroup
 
 	// Use 4 workers instead of the previous 10 to preserve alphabetical pacing
-	for range 4 {
+	for i := range 4 {
+		// Extract the current prefix (e.g., "matterircd"
+		currentPrefix := ""
+		if p, ok := logger.Data["prefix"].(string); ok {
+			currentPrefix = p + ": "
+		}
+
+		// Create a new logger instance for this specific worker
+		workerLogger := logger.WithField("prefix", fmt.Sprintf("%saddUsersToChannels%d", currentPrefix, i))
+
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			u.addUserToChannelWorker(channels, throttle)
+			u.addUserToChannelWorker(channels, throttle, workerLogger)
 		}()
 	}
 
@@ -833,9 +843,9 @@ func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(string, string, .
 }
 
 //nolint:funlen,gocognit,gocyclo,cyclop
-func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throttle *time.Ticker) {
+func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throttle *time.Ticker, logger *logrus.Entry) {
 	for brchannel := range channels {
-		logger.Debug("addUserToChannelWorker", brchannel)
+		logger.Debug("addUserToChannelWorker ", brchannel)
 
 		<-throttle.C
 		// exclude direct messages
@@ -1036,7 +1046,7 @@ func (u *User) MsgSpoofUser(sender *User, rcvuser string, text string, maxlen ..
 func (u *User) syncChannel(id string, name string) {
 	users, err := u.br.GetChannelUsers(id)
 	if err != nil {
-		fmt.Println(err)
+		logger.Error(err)
 		return
 	}
 
