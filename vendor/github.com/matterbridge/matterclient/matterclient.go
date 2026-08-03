@@ -1156,56 +1156,60 @@ func (m *Client) syncSingleUser(event *model.WebSocketEvent) {
 //nolint:gocognit,gocyclo,funlen
 func (m *Client) maintainUsersCache(event *model.WebSocketEvent) {
 	switch event.EventType() {
-	case model.WebsocketEventNewUser:
-		if userID, ok := event.GetData()["user_id"].(string); ok {
-			if user := m.GetUser(userID); user != nil {
-				if teamID, hasTeam := event.GetData()["team_id"].(string); hasTeam && teamID != "" {
-					m.UpdateTeamUsersCache(teamID, user)
+	case model.WebsocketEventNewUser, model.WebsocketEventUserUpdated, model.WebsocketEventUserAdded:
+		var u *model.User
+
+		if userVal, ok := event.GetData()["user"]; ok {
+			if userPtr, isPtr := userVal.(*model.User); isPtr {
+				u = userPtr
+			} else if userStr, isStr := userVal.(string); isStr && userStr != "" {
+				var summary UserSummary
+				_ = json.NewDecoder(strings.NewReader(userStr)).Decode(&summary)
+				// Map it back to the required model.User for the cache functions
+				u = &model.User{
+					Id:        summary.Id,
+					Username:  summary.Username,
+					FirstName: summary.FirstName,
+					LastName:  summary.LastName,
+					Nickname:  summary.Nickname,
+					Roles:     summary.Roles,
+					Props:     summary.Props,
 				}
 			}
+		} else if userID, ok := event.GetData()["user_id"].(string); ok && userID != "" {
+			u = m.GetUser(userID)
 		}
 
-	case model.WebsocketEventUserUpdated:
-		var user *model.User
-		if userStr, ok := event.GetData()["user"].(string); ok {
-			user = &model.User{}
-			_ = json.NewDecoder(strings.NewReader(userStr)).Decode(user)
-		} else if u, ok := event.GetData()["user"].(*model.User); ok {
-			user = u
-		}
-
-		if user == nil {
+		// If we couldn't resolve a valid user, bail out early
+		if u == nil || u.Id == "" {
 			break
 		}
 
-		if teamID, hasTeam := event.GetData()["team_id"].(string); hasTeam && teamID != "" {
-			m.UpdateTeamUsersCache(teamID, user)
+		eventType := event.EventType()
+
+		if eventType == model.WebsocketEventUserAdded {
+			broadcast := event.GetBroadcast()
+			if broadcast != nil && broadcast.ChannelId != "" {
+				m.UpdateChannelUsersCache(broadcast.ChannelId, u)
+				m.Users.lastUpdated.Store(time.Now().Unix())
+			}
 		} else {
-			m.UpdateUser(user)
-		}
-
-		m.Users.mu.RLock()
-		_, tracked := m.Users.customStatuses[user.Id]
-		m.Users.mu.RUnlock()
-
-		if !tracked {
-			break
-		}
-
-		var rawJSON string
-		if user.Props != nil {
-			if val, ok := user.Props["customStatus"]; ok {
-				rawJSON = val
+			// Handles NewUser and UserUpdated
+			if teamID, hasTeam := event.GetData()["team_id"].(string); hasTeam && teamID != "" {
+				m.UpdateTeamUsersCache(teamID, u)
+			} else if eventType == model.WebsocketEventUserUpdated {
+				m.UpdateUser(u)
 			}
 		}
-		m.Users.SetUserCustomStatus(user.Id, rawJSON)
 
-	case model.WebsocketEventUserAdded:
-		channelID := event.GetBroadcast().ChannelId
-		if userID, ok := event.GetData()["user_id"].(string); ok && channelID != "" {
-			if user := m.GetUser(userID); user != nil {
-				m.UpdateChannelUsersCache(channelID, user)
-				m.Users.lastUpdated.Store(time.Now().Unix())
+		// Custom Status processing (UserUpdated only)
+		if eventType == model.WebsocketEventUserUpdated {
+			m.Users.mu.RLock()
+			_, tracked := m.Users.customStatuses[u.Id]
+			m.Users.mu.RUnlock()
+
+			if tracked {
+				m.Users.SetUserCustomStatus(u.Id, u.Props["customStatus"])
 			}
 		}
 
@@ -1222,13 +1226,17 @@ func (m *Client) maintainUsersCache(event *model.WebSocketEvent) {
 			break
 		}
 
-		postStr, ok := event.GetData()["post"].(string)
-		if !ok || postStr == "" {
-			break
+		var post *model.Post
+
+		if postPtr, ok := event.GetData()["post"].(*model.Post); ok {
+			post = postPtr
+		} else if postStr, ok := event.GetData()["post"].(string); ok && postStr != "" {
+			// Fallback path: Driver left it as a JSON string
+			post = &model.Post{}
+			_ = json.NewDecoder(strings.NewReader(postStr)).Decode(post)
 		}
 
-		post := &model.Post{}
-		if err := json.NewDecoder(strings.NewReader(postStr)).Decode(post); err != nil {
+		if post == nil || post.Id == "" {
 			break
 		}
 
@@ -1243,6 +1251,7 @@ func (m *Client) maintainUsersCache(event *model.WebSocketEvent) {
 		m.Users.mu.Unlock()
 
 		// Mattermost assigns the leaving user's ID to the 'system_leave_channel' post.
+		// We don't need to invalidate channel caches based on system message authorship.
 		if strings.HasPrefix(post.Type, "system_") {
 			break
 		}
@@ -1265,39 +1274,52 @@ func (m *Client) maintainUsersCache(event *model.WebSocketEvent) {
 			m.Users.lastUpdated.Store(time.Now().Unix())
 		}
 
-	case model.WebsocketEventChannelCreated, model.WebsocketEventDirectAdded:
-		if channelStr, ok := event.GetData()["channel"].(string); ok {
-			channel := &model.Channel{}
-			if err := json.NewDecoder(strings.NewReader(channelStr)).Decode(channel); err == nil {
-				m.Users.mu.Lock()
-				m.Users.channelData[channel.Id] = channel
-				m.Users.mu.Unlock()
-				m.Users.lastUpdated.Store(time.Now().Unix())
-			}
-		} else if channelID, ok := event.GetData()["channel_id"].(string); ok && channelID != "" {
-			m.GetChannel(channelID)
-		}
-	case model.WebsocketEventChannelUpdated:
-		if channelStr, ok := event.GetData()["channel"].(string); ok {
-			channel := &model.Channel{}
-			if err := json.NewDecoder(strings.NewReader(channelStr)).Decode(channel); err == nil {
-				m.Users.mu.Lock()
-				m.Users.channelData[channel.Id] = channel
-				m.Users.mu.Unlock()
-				m.Users.lastUpdated.Store(time.Now().Unix())
+	case model.WebsocketEventChannelCreated, model.WebsocketEventDirectAdded, model.WebsocketEventChannelUpdated:
+		var channel *model.Channel
+
+		if chPtr, ok := event.GetData()["channel"].(*model.Channel); ok {
+			channel = chPtr
+		} else if chStr, ok := event.GetData()["channel"].(string); ok && chStr != "" {
+			var summary ChannelSummary
+			_ = json.NewDecoder(strings.NewReader(chStr)).Decode(&summary)
+			channel = &model.Channel{
+				Id:          summary.Id,
+				TeamId:      summary.TeamId,
+				Type:        model.ChannelType(summary.Type),
+				DisplayName: summary.DisplayName,
+				Name:        summary.Name,
+				Header:      summary.Header,
+				Purpose:     summary.Purpose,
+				CreatorId:   summary.CreatorId,
 			}
 		}
+
+		// If we failed to extract a channel, attempt the last resort fallback fetch
+		if channel == nil || channel.Id == "" {
+			if event.EventType() != model.WebsocketEventChannelUpdated {
+				if channelID, ok := event.GetData()["channel_id"].(string); ok && channelID != "" {
+					m.GetChannel(channelID)
+				}
+			}
+			break
+		}
+
+		// We have a valid channel object, cache it
+		m.Users.mu.Lock()
+		m.Users.channelData[channel.Id] = channel
+		m.Users.mu.Unlock()
+		m.Users.lastUpdated.Store(time.Now().Unix())
+
 	case model.WebsocketEventChannelDeleted:
 		if channelID, ok := event.GetData()["channel_id"].(string); ok && channelID != "" {
 			// Mattermost soft-deletes channels. We keep the channel and users in our
 			// local cache to gracefully handle history, references, or restorations.
 			m.Users.mu.Lock()
 			if ch, ok := m.Users.channelData[channelID]; ok {
-				// Mattermost event data parses numbers as float64
 				if deleteAt, ok := event.GetData()["delete_at"].(float64); ok && deleteAt > 0 {
 					ch.DeleteAt = int64(deleteAt)
 				} else {
-					// Fallback if payload is missing the timestamp (Mattermost uses epoch milliseconds)
+					// Fallback if payload is missing the timestamp
 					ch.DeleteAt = time.Now().UnixNano() / int64(time.Millisecond)
 				}
 			}
@@ -1305,6 +1327,7 @@ func (m *Client) maintainUsersCache(event *model.WebSocketEvent) {
 
 			m.Users.lastUpdated.Store(time.Now().Unix())
 		}
+
 	case model.WebsocketEventMultipleChannelsViewed:
 		if channelTimes, ok := event.GetData()["channel_times"].(map[string]interface{}); ok {
 			m.Users.mu.Lock()
@@ -1326,16 +1349,22 @@ func (m *Client) maintainUsersCache(event *model.WebSocketEvent) {
 		}
 
 	case model.WebsocketEventStatusChange:
-		if statusRaw, ok := event.GetData()["status"].(string); ok {
-			userID, _ := event.GetData()["user_id"].(string)
-			if userID == "" && event.GetBroadcast() != nil {
-				userID = event.GetBroadcast().UserId
-			}
-
-			if userID != "" {
-				m.SetUserStatus(userID, statusRaw)
-			}
+		statusRaw, ok := event.GetData()["status"].(string)
+		if !ok || statusRaw == "" {
+			break
 		}
+
+		userID, _ := event.GetData()["user_id"].(string)
+		if userID == "" && event.GetBroadcast() != nil {
+			userID = event.GetBroadcast().UserId
+		}
+
+		if userID == "" {
+			break
+		}
+
+		m.SetUserStatus(userID, statusRaw)
+
 	}
 }
 
@@ -1343,33 +1372,56 @@ func (m *Client) maintainUsersCache(event *model.WebSocketEvent) {
 // to prevent race conditions before handing off to background processes.
 func (m *Client) syncJoinedChannelsCache(event *model.WebSocketEvent) {
 	switch event.EventType() {
-	case model.WebsocketEventUserAdded:
-		if userID, ok := event.GetData()["user_id"].(string); ok && m.User != nil && userID == m.User.Id {
-			m.Users.mu.Lock()
-			m.Users.joinedChannels[event.GetBroadcast().ChannelId] = struct{}{}
-			m.Users.mu.Unlock()
+	case model.WebsocketEventUserAdded, model.WebsocketEventUserRemoved:
+		if m.User == nil {
+			break
 		}
-	case model.WebsocketEventUserRemoved:
-		if userID, ok := event.GetData()["user_id"].(string); ok && m.User != nil && userID == m.User.Id {
-			m.Users.mu.Lock()
-			delete(m.Users.joinedChannels, event.GetBroadcast().ChannelId)
-			m.Users.mu.Unlock()
+
+		userID, ok := event.GetData()["user_id"].(string)
+		if !ok || userID != m.User.Id {
+			break
 		}
+
+		broadcast := event.GetBroadcast()
+		if broadcast == nil || broadcast.ChannelId == "" {
+			break
+		}
+
+		m.Users.mu.Lock()
+		if event.EventType() == model.WebsocketEventUserAdded {
+			m.Users.joinedChannels[broadcast.ChannelId] = struct{}{}
+		} else {
+			delete(m.Users.joinedChannels, broadcast.ChannelId)
+		}
+		m.Users.mu.Unlock()
+
 	case model.WebsocketEventDirectAdded, model.WebsocketEventChannelCreated:
-		// New DMs/Group messages don't fire user_added, they fire direct_added or channel_created.
-		// We do a fast, partial unmarshal synchronously to catch the channel ID and Type.
-		if channelStr, ok := event.GetData()["channel"].(string); ok {
+		var chID string
+		var chType model.ChannelType
+
+		if chPtr, ok := event.GetData()["channel"].(*model.Channel); ok {
+			chID = chPtr.Id
+			chType = chPtr.Type
+		} else if chStr, ok := event.GetData()["channel"].(string); ok && chStr != "" {
+			// Fallback path: Fast partial unmarshal
 			var ch struct {
 				ID   string            `json:"id"`
 				Type model.ChannelType `json:"type"`
 			}
-			if err := json.NewDecoder(strings.NewReader(channelStr)).Decode(&ch); err == nil {
-				if ch.Type == model.ChannelTypeDirect || ch.Type == model.ChannelTypeGroup {
-					m.Users.mu.Lock()
-					m.Users.joinedChannels[ch.ID] = struct{}{}
-					m.Users.mu.Unlock()
-				}
+			if err := json.NewDecoder(strings.NewReader(chStr)).Decode(&ch); err == nil {
+				chID = ch.ID
+				chType = ch.Type
 			}
+		}
+
+		if chID == "" {
+			break
+		}
+
+		if chType == model.ChannelTypeDirect || chType == model.ChannelTypeGroup {
+			m.Users.mu.Lock()
+			m.Users.joinedChannels[chID] = struct{}{}
+			m.Users.mu.Unlock()
 		}
 	}
 }
