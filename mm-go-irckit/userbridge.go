@@ -792,7 +792,7 @@ func (u *User) addUsersToChannels() {
 		}
 
 		// Create a new logger instance for this specific worker
-		workerLogger := logger.WithField("prefix", fmt.Sprintf("%saddUsersToChannels%d", currentPrefix, i))
+		workerLogger := logger.WithField("prefix", fmt.Sprintf("%saddUserToChannelWorker%d", currentPrefix, i))
 
 		wg.Add(1)
 		go func() {
@@ -845,7 +845,7 @@ func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(string, string, .
 //nolint:funlen,gocognit,gocyclo,cyclop
 func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throttle *time.Ticker, logger *logrus.Entry) {
 	for brchannel := range channels {
-		logger.Debug("addUserToChannelWorker ", brchannel)
+		logger.Debug("addUserToChannelWorker", brchannel)
 
 		<-throttle.C
 		// exclude direct messages

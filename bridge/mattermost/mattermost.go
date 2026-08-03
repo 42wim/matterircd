@@ -802,7 +802,7 @@ const (
 	blockquoteCharUnicode    = "▕"
 )
 
-//nolint:forcetypeassert
+//nolint:funlen,gocyclo
 func (m *Mattermost) wsActionPostSkip(rmsg *model.WebSocketEvent, logger *logrus.Entry) bool {
 	postData, ok := rmsg.GetData()["post"].(string)
 	if !ok {
@@ -1247,9 +1247,9 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent, logger *logr
 		}
 		useFallback := len(msg) == 0
 		// https://docs.slack.dev/tools/node-slack-sdk/reference/web-api/interfaces/MessageAttachment/
-		m.parseMessageAttachments(&sbMsg, attachments, useFallback, logger)
+		m.parseMessageAttachments(&sbMsg, attachments, useFallback)
 	case data.Type == "custom_matterpoll":
-		pollMsg := parseMatterpollToMsg(attachments, useUnicode, logger)
+		pollMsg := parseMatterpollToMsg(attachments, useUnicode)
 		sbMsg.WriteString(msg)
 		sbMsg.WriteString(pollMsg)
 	case len(attachments) > 0:
@@ -1258,7 +1258,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent, logger *logr
 		}
 		useFallback := len(msg) == 0
 		// https://developers.mattermost.com/integrate/reference/message-attachments/
-		m.parseMessageAttachments(&sbMsg, attachments, useFallback, logger)
+		m.parseMessageAttachments(&sbMsg, attachments, useFallback)
 	default:
 		sbMsg.WriteString(msg)
 	}
@@ -1278,7 +1278,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent, logger *logr
 		if strings.Contains(channel, "__") {
 			channel = ""
 		}
-		m.parsePreviewPost(&sbMsg, nick, channel, previewText, logger)
+		m.parsePreviewPost(&sbMsg, nick, channel, previewText)
 	}
 
 	switch {
@@ -1442,6 +1442,7 @@ func (m *Mattermost) wsActionPostJoinLeave(data *model.Post, extraProps map[stri
 }
 
 func (m *Mattermost) handleWsActionUserAdded(rmsg *model.WebSocketEvent, logger *logrus.Entry) {
+	logger.Trace("in handleWsActionUserAdded")
 	userID, ok := rmsg.GetData()["user_id"].(string)
 	if !ok {
 		return
@@ -1496,11 +1497,12 @@ func (m *Mattermost) handleWsActionUserRemoved(rmsg *model.WebSocketEvent, logge
 }
 
 func (m *Mattermost) handleWsActionUserUpdated(rmsg *model.WebSocketEvent, logger *logrus.Entry) {
+	logger.Trace("in handleWsActionUserUpdated")
 	var info model.User
 
 	err := Decode(rmsg.GetData()["user"], &info)
 	if err != nil {
-		logger.Errorf("decode", err)
+		logger.Error("decode", err)
 		return
 	}
 
@@ -1515,6 +1517,7 @@ func (m *Mattermost) handleWsActionUserUpdated(rmsg *model.WebSocketEvent, logge
 }
 
 func (m *Mattermost) handleWsActionChannelCreated(rmsg *model.WebSocketEvent, logger *logrus.Entry) {
+	logger.Trace("in handleWsActionChannelCreated")
 	channelID, ok := rmsg.GetData()["channel_id"].(string)
 	if !ok {
 		return
@@ -1531,6 +1534,7 @@ func (m *Mattermost) handleWsActionChannelCreated(rmsg *model.WebSocketEvent, lo
 }
 
 func (m *Mattermost) handleWsActionChannelDeleted(rmsg *model.WebSocketEvent, logger *logrus.Entry) {
+	logger.Trace("in handleWsActionChannelDeleted")
 	channelID, ok := rmsg.GetData()["channel_id"].(string)
 	if !ok {
 		return
@@ -1551,7 +1555,7 @@ func (m *Mattermost) handleStatusChangeEvent(rmsg *model.WebSocketEvent, logger 
 
 	err := Decode(rmsg.GetData(), &info)
 	if err != nil {
-		logger.Errorf("decode", err)
+		logger.Error("decode", err)
 
 		return
 	}
@@ -1567,7 +1571,7 @@ func (m *Mattermost) handleStatusChangeEvent(rmsg *model.WebSocketEvent, logger 
 	m.eventChan <- event
 }
 
-//nolint:forcetypeassert
+//nolint:funlen
 func (m *Mattermost) handleReactionEvent(rmsg *model.WebSocketEvent, logger *logrus.Entry) {
 	reactionData, ok := rmsg.GetData()["reaction"].(string)
 	if !ok {
@@ -1789,7 +1793,7 @@ const (
 	messageAttachmentSpaceUnicode = " "
 )
 
-func parseMatterpollToMsg(attachments []*model.SlackAttachment, unicode bool, logger *logrus.Entry) string {
+func parseMatterpollToMsg(attachments []*model.SlackAttachment, unicode bool) string {
 	msg := ""
 	prefixChar := messageAttachmentCharNonUnicode
 	spaceChar := messageAttachmentSpaceNonUnicode
@@ -1841,7 +1845,7 @@ func parseMatterpollToMsg(attachments []*model.SlackAttachment, unicode bool, lo
 const blockQuoteCharDefault = ">"
 
 //nolint:funlen,gocognit,gocyclo
-func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*model.SlackAttachment, useFallback bool, logger *logrus.Entry) {
+func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*model.SlackAttachment, useFallback bool) {
 	// If the main message builder already has content, add a newline before our preview
 	if b.Len() > 0 {
 		b.WriteByte('\n')
@@ -2130,7 +2134,7 @@ func extractPreviewData(metadata *model.PostMetadata) (string, string, string) {
 }
 
 //nolint:funlen
-func (m *Mattermost) parsePreviewPost(b *strings.Builder, user string, channel string, text string, logger *logrus.Entry) {
+func (m *Mattermost) parsePreviewPost(b *strings.Builder, user string, channel string, text string) {
 	// If the main message builder already has content, add a newline before our preview
 	if b.Len() > 0 {
 		b.WriteByte('\n')
