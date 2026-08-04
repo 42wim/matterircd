@@ -291,33 +291,7 @@ func (s *server) Connect(u *User) error {
 
 // Quit will remove the user from all channels and disconnect.
 func (s *server) Quit(u *User, message string) {
-	s.Lock()
-	if _, exists := s.users[u.ID()]; !exists {
-		s.Unlock()
-		return
-	}
-	s.Unlock()
-
-	var ownedGhosts []*User
-	if u.br != nil {
-		s.Lock()
-		for _, user := range s.users {
-			if user.Ghost && user.br == u.br {
-				ownedGhosts = append(ownedGhosts, user)
-			}
-		}
-		s.Unlock()
-	}
-
-	for _, ghost := range ownedGhosts {
-		for _, ch := range ghost.Channels() {
-			ch.Part(ghost, "")
-		}
-		s.Lock()
-		delete(s.users, ghost.ID())
-		s.Unlock()
-	}
-
+	// 1. Safely tear down the Mattermost/Slack bridge exactly ONCE
 	u.eventLoopMutex.Lock()
 	if u.br != nil {
 		u.br.Logout()
@@ -325,10 +299,25 @@ func (s *server) Quit(u *User, message string) {
 	}
 	u.eventLoopMutex.Unlock()
 
+	// 2. Part the primary user from channels (broadcasts PART)
+	channels := u.Channels()
+	for _, ch := range channels {
+		ch.Part(u, message)
+		ch.Unlink()
+	}
+
+	// 3. Remove the primary user from the global server registry.
+	// Because u.User changes during login, we iterate to find and 
+	// delete the exact pointer, bypassing the ID mismatch bug.
 	s.Lock()
-	delete(s.users, u.ID())
+	for id, userPtr := range s.users {
+		if userPtr == u {
+			delete(s.users, id)
+		}
+	}
 	s.Unlock()
 
+	// 4. Safely close the TCP socket
 	go u.Close()
 }
 
@@ -560,30 +549,10 @@ outerloop:
 	return ErrHandshakeFailed
 }
 
-func (s *server) Logout(u *User) {
-	var ownedGhosts []*User
-	if u.br != nil {
-		s.Lock()
-		for _, user := range s.users {
-			if user.Ghost && user.br == u.br {
-				ownedGhosts = append(ownedGhosts, user)
-			}
-		}
-		s.Unlock()
-	}
-
-	for _, ghost := range ownedGhosts {
-		for _, ch := range ghost.Channels() {
-			ch.Part(ghost, "")
-		}
-		s.Lock()
-		delete(s.users, ghost.ID())
-		s.Unlock()
-	}
-
-	channels := u.Channels()
+func (s *server) Logout(user *User) {
+	channels := user.Channels()
 	for _, ch := range channels {
-		ch.Part(u, "")
+		ch.Part(user, "")
 		ch.Unlink()
 	}
 }
