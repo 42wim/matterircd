@@ -3,6 +3,8 @@ package irckit
 import (
 	"errors"
 	"fmt"
+	"runtime"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -232,13 +234,28 @@ func (s *server) Channel(channelID string) Channel {
 		return ch
 	}
 
-	service := s.u.br.Protocol()
-	name := s.u.br.GetChannelName(channelID)
+	var service, name string
+	var info *bridge.ChannelInfo
+	var err error
 
-	info, err := s.u.br.GetChannel(channelID)
+	// Safely retrieve the global user pointer to prevent concurrent dereference panics
+	s.RLock()
+	u := s.u
+	s.RUnlock()
+
+	if u != nil && u.br != nil {
+		service = u.br.Protocol()
+		name = u.br.GetChannelName(channelID)
+		info, err = u.br.GetChannel(channelID)
+	} else {
+		service = "service"
+		name = channelID
+		err = errors.New("no active user bridge")
+	}
+
 	if err != nil {
 		// don't error on our special channels
-		if channelID != "" && !strings.HasPrefix(channelID, "&") && channelID != s.u.Nick && channelID != s.u.Username {
+		if channelID != "" && !strings.HasPrefix(channelID, "&") && u != nil && channelID != u.Nick && channelID != u.Username {
 			logger.Errorf("didn't find channel %s (%s): %s", channelID, name, err)
 		}
 		info = &bridge.ChannelInfo{}
@@ -290,22 +307,32 @@ func (s *server) Connect(u *User) error {
 	return nil
 }
 
-var ServiceUser = "service"
-
 // Quit will remove the user from all channels and disconnect.
 func (s *server) Quit(u *User, message string) {
 	u.eventLoopMutex.Lock()
 	if u.br != nil {
-		_ = u.br.Logout()
+		u.br.Logout()
 		u.br = nil
 	}
 	u.eventLoopMutex.Unlock()
 
-	for _, ch := range u.Channels() {
-		ch.Part(u, message)
+	// 1. THE NUCLEAR PART: Bypass u.Channels() entirely!
+	// Force-part the user from EVERY channel on the server to guarantee
+	// removal, even if the user's internal channel map is buggy/out-of-sync.
+	s.RLock()
+	allChannels := make([]Channel, 0, len(s.channels))
+	for _, ch := range s.channels {
+		allChannels = append(allChannels, ch)
+	}
+	s.RUnlock()
+
+	for _, ch := range allChannels {
+		if ch.HasUser(u) {
+			ch.Part(u, message)
+		}
 	}
 
-	// Global Channel Sweep
+	// 2. Global Channel Sweep
 	s.RLock()
 	uniqueChannels := make(map[Channel]struct{})
 	for _, ch := range s.channels {
@@ -325,11 +352,11 @@ func (s *server) Quit(u *User, message string) {
 			for _, other := range ch.Users() {
 				ch.Part(other, "")
 			}
-			ch.Unlink()
+			s.UnlinkChannel(ch)
 		}
 	}
 
-	// Global Server Registry & Pointer Sweep
+	// 3. Global Server Registry & Pointer Sweep
 	s.Lock()
 	for id, userPtr := range s.users {
 		if userPtr == u {
@@ -348,6 +375,7 @@ func (s *server) Quit(u *User, message string) {
 	}
 	s.Unlock()
 
+	// 4. The Ultimate Ghost Sweeper
 	s.RLock()
 	activeGhosts := make(map[*User]struct{})
 	for _, ch := range s.channels {
@@ -360,7 +388,7 @@ func (s *server) Quit(u *User, message string) {
 
 	var orphaned []string
 	for id, ghost := range s.users {
-		if ghost.Ghost && ghost.Host != ServiceUser {
+		if ghost.Ghost && ghost.Host != "service" {
 			if _, isActive := activeGhosts[ghost]; !isActive {
 				orphaned = append(orphaned, id)
 			}
@@ -375,6 +403,10 @@ func (s *server) Quit(u *User, message string) {
 		}
 		s.Unlock()
 	}
+
+	// Force an aggressive GC sweep and return memory to the OS.
+	runtime.GC()
+	debug.FreeOSMemory()
 
 	go u.Close()
 }
@@ -591,7 +623,7 @@ outerloop:
 						Nick: service,
 						User: service,
 						Real: service,
-						Host: ServiceUser,
+						Host: "service", //nolint:goconst
 					},
 					channels: map[Channel]struct{}{},
 				},
@@ -609,8 +641,18 @@ outerloop:
 
 //nolint:gocognit
 func (s *server) Logout(u *User) {
-	for _, ch := range u.Channels() {
-		ch.Part(u, "")
+	// The Nuclear Part for soft-logouts
+	s.RLock()
+	allChannels := make([]Channel, 0, len(s.channels))
+	for _, ch := range s.channels {
+		allChannels = append(allChannels, ch)
+	}
+	s.RUnlock()
+
+	for _, ch := range allChannels {
+		if ch.HasUser(u) {
+			ch.Part(u, "")
+		}
 	}
 
 	s.RLock()
@@ -632,7 +674,7 @@ func (s *server) Logout(u *User) {
 			for _, other := range ch.Users() {
 				ch.Part(other, "")
 			}
-			ch.Unlink()
+			s.UnlinkChannel(ch)
 		}
 	}
 
@@ -648,7 +690,6 @@ func (s *server) Logout(u *User) {
 	}
 	s.Unlock()
 
-	// The Ultimate Ghost Sweeper for soft logouts
 	s.RLock()
 	activeGhosts := make(map[*User]struct{})
 	for _, ch := range s.channels {
@@ -661,7 +702,7 @@ func (s *server) Logout(u *User) {
 
 	var orphaned []string
 	for id, ghost := range s.users {
-		if ghost.Ghost && ghost.Host != ServiceUser {
+		if ghost.Ghost && ghost.Host != "service" {
 			if _, isActive := activeGhosts[ghost]; !isActive {
 				orphaned = append(orphaned, id)
 			}
