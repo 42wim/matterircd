@@ -35,6 +35,9 @@ type UserBridge struct {
 	eventChan   chan *bridge.Event
 	away        bool
 
+	eventLoopMutex   sync.Mutex
+	eventLoopStarted bool
+
 	lastViewedAtDB *bolt.DB
 
 	msgCounterMutex sync.RWMutex
@@ -815,8 +818,15 @@ func (u *User) addUsersToChannels() {
 		throttle.Stop()
 	}()
 
-	// we did all the initialization, now listen for events
-	go u.handleEventChan()
+	// Prevent leaking goroutines on internal bridge reconnects
+	// by ensuring we only launch one event loop per session.
+	u.eventLoopMutex.Lock()
+	if !u.eventLoopStarted {
+		u.eventLoopStarted = true
+		// we did all the initialization, now listen for events
+		go u.handleEventChan()
+	}
+	u.eventLoopMutex.Unlock()
 }
 
 func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(string, string, ...int) {
@@ -1141,6 +1151,11 @@ func (u *User) isValidServer(server, protocol string) bool {
 
 func (u *User) loginTo(protocol string) error {
 	var err error
+
+	// Reset the event loop tracker in case this User struct is recycled
+	u.eventLoopMutex.Lock()
+	u.eventLoopStarted = false
+	u.eventLoopMutex.Unlock()
 
 	switch protocol {
 	case "mastodon":
