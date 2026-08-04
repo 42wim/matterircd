@@ -321,9 +321,11 @@ func (s *server) Quit(u *User, message string) {
 	go u.Close()
 
 	// Safely tear down the Mattermost/Slack bridge
-	if u.br != nil {
-		_ = u.br.Logout()
+	if u.br == nil {
+		return
 	}
+
+	u.br.Logout()
 }
 
 // Len returns the number of users connected to the server.
