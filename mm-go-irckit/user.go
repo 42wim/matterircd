@@ -295,6 +295,14 @@ func (u *User) Decode() {
 			u.DecodeCh <- msg
 		}
 	}
+
+	if u.Srv != nil {
+		u.Srv.Quit(u, "connection closed")
+	}
+
+	if u.DecodeCh != nil {
+		close(u.DecodeCh)
+	}
 }
 
 func (u *User) createService(nick string, what string) {
