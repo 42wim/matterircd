@@ -300,8 +300,6 @@ func (u *User) Decode() {
 		u.Srv.Quit(u, "connection closed")
 	}
 
-	// The TCP read loop is completely dead, so it is finally safe to close 
-	// the channel. This releases the server.handle goroutine so it doesn't leak.
 	if u.DecodeCh != nil {
 		close(u.DecodeCh)
 	}

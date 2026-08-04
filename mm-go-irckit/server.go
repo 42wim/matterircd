@@ -291,7 +291,6 @@ func (s *server) Connect(u *User) error {
 
 // Quit will remove the user from all channels and disconnect.
 func (s *server) Quit(u *User, message string) {
-	// 1. Safely tear down the Mattermost/Slack bridge exactly ONCE
 	u.eventLoopMutex.Lock()
 	if u.br != nil {
 		u.br.Logout()
@@ -299,16 +298,28 @@ func (s *server) Quit(u *User, message string) {
 	}
 	u.eventLoopMutex.Unlock()
 
-	// 2. Part the primary user from channels (broadcasts PART)
 	channels := u.Channels()
 	for _, ch := range channels {
 		ch.Part(u, message)
-		ch.Unlink()
+
+		// Check if there are any real concurrent IRC clients left in this channel
+		realUsers := 0
+		for _, other := range ch.Users() {
+			if !other.Ghost {
+				realUsers++
+			}
+		}
+
+		// Only if the channel is completely empty of real users do we
+		// clear out the ghosts and unlink the channel from the server.
+		if realUsers == 0 {
+			for _, other := range ch.Users() {
+				ch.Part(other, "")
+			}
+			ch.Unlink()
+		}
 	}
 
-	// 3. Remove the primary user from the global server registry.
-	// Because u.User changes during login, we iterate to find and 
-	// delete the exact pointer, bypassing the ID mismatch bug.
 	s.Lock()
 	for id, userPtr := range s.users {
 		if userPtr == u {
@@ -317,7 +328,6 @@ func (s *server) Quit(u *User, message string) {
 	}
 	s.Unlock()
 
-	// 4. Safely close the TCP socket
 	go u.Close()
 }
 
@@ -549,11 +559,24 @@ outerloop:
 	return ErrHandshakeFailed
 }
 
-func (s *server) Logout(user *User) {
-	channels := user.Channels()
+func (s *server) Logout(u *User) {
+	channels := u.Channels()
 	for _, ch := range channels {
-		ch.Part(user, "")
-		ch.Unlink()
+		ch.Part(u, "")
+
+		realUsers := 0
+		for _, other := range ch.Users() {
+			if !other.Ghost {
+				realUsers++
+			}
+		}
+
+		if realUsers == 0 {
+			for _, other := range ch.Users() {
+				ch.Part(other, "")
+			}
+			ch.Unlink()
+		}
 	}
 }
 

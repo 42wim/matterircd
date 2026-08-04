@@ -660,14 +660,6 @@ func (u *User) CreateUsersFromInfo(info []*bridge.UserInfo) []*User {
 		}
 
 		if ghost, ok := u.Srv.HasUserID(userinfo.User); ok {
-			ghost.Lock()
-			ghost.UserInfo = userinfo
-			nick := ghost.UserInfo.Nick
-			if nick == "" {
-				nick = ghost.UserInfo.Username
-			}
-			ghost.Nick = sanitizeNick(nick)
-			ghost.Unlock()
 			users = append(users, ghost)
 			continue
 		}
