@@ -647,6 +647,27 @@ func (u *User) handleReactionEvent(event interface{}) {
 	u.handleChannelMessageEvent(e)
 }
 
+func cloneString(s string) string {
+	if s == "" {
+		return ""
+	}
+	return string(append([]byte(nil), s...))
+}
+
+func cloneUserInfo(info *bridge.UserInfo) *bridge.UserInfo {
+	if info == nil {
+		return nil
+	}
+	clone := *info
+	clone.Nick = cloneString(info.Nick)
+	clone.User = cloneString(info.User)
+	clone.Real = cloneString(info.Real)
+	clone.Host = cloneString(info.Host)
+	clone.Username = cloneString(info.Username)
+	clone.Ghost = true
+	return &clone
+}
+
 func (u *User) CreateUserFromInfo(info *bridge.UserInfo) *User {
 	return u.createUserFromInfo(info)
 }
@@ -660,12 +681,20 @@ func (u *User) CreateUsersFromInfo(info []*bridge.UserInfo) []*User {
 		}
 
 		if ghost, ok := u.Srv.HasUserID(userinfo.User); ok {
+			ghost.Lock()
+			ghost.UserInfo = cloneUserInfo(userinfo)
+			nick := ghost.UserInfo.Nick
+			if nick == "" {
+				nick = ghost.UserInfo.Username
+			}
+			ghost.Nick = sanitizeNick(nick)
+			ghost.Unlock()
 			users = append(users, ghost)
 			continue
 		}
 
 		ghost := NewUser(nil)
-		ghost.UserInfo = userinfo
+		ghost.UserInfo = cloneUserInfo(userinfo)
 		nick := ghost.UserInfo.Nick
 		if nick == "" {
 			nick = ghost.UserInfo.Username
@@ -691,13 +720,13 @@ func (u *User) updateUserFromInfo(info *bridge.UserInfo) *User {
 			u.Encode(changeMsg)
 		}
 
-		ghost.UserInfo = info
+		ghost.UserInfo = cloneUserInfo(info)
 
 		return ghost
 	}
 
 	ghost := NewUser(nil)
-	ghost.UserInfo = info
+	ghost.UserInfo = cloneUserInfo(info)
 
 	u.Srv.Add(ghost)
 
@@ -710,7 +739,7 @@ func (u *User) createUserFromInfo(info *bridge.UserInfo) *User {
 	}
 
 	ghost := NewUser(u.Conn)
-	ghost.UserInfo = info
+	ghost.UserInfo = cloneUserInfo(info)
 	ghost.Nick = sanitizeNick(ghost.Nick)
 
 	u.Srv.Add(ghost)
