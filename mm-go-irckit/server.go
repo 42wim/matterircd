@@ -291,12 +291,20 @@ func (s *server) Connect(u *User) error {
 
 // Quit will remove the user from all channels and disconnect.
 func (s *server) Quit(u *User, message string) {
-	go u.Close()
 	s.Lock()
+	if _, exists := s.users[u.ID()]; !exists {
+		s.Unlock()
+		return
+	}
 	delete(s.users, u.ID())
 	s.Unlock()
 
-	u.br.Logout()
+	go u.Close()
+
+	// Safely tear down the Mattermost/Slack bridge
+	if u.br != nil {
+		u.br.Logout()
+	}
 }
 
 // Len returns the number of users connected to the server.
