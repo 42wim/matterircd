@@ -146,7 +146,7 @@ func (m *Mattermost) loginToMattermost(onWsConnect func()) (*matterclient.Client
 	logger.Infof("login as %s (team: %s) on %s", m.credentials.Login, m.credentials.Team, m.credentials.Server)
 
 	if err := mc.Login(); err != nil {
-		logger.Error("login failed", err)
+		logger.Error("login failed: ", err)
 		return nil, err
 	}
 

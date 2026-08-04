@@ -292,54 +292,50 @@ func (s *server) Connect(u *User) error {
 // Quit will remove the user from all channels and disconnect.
 func (s *server) Quit(u *User, message string) {
 	s.Lock()
-	// Prevent double-quits and nil-pointer panics
 	if _, exists := s.users[u.ID()]; !exists {
 		s.Unlock()
 		return
 	}
 	s.Unlock()
 
+	var ownedGhosts []*User
+	if u.br != nil {
+		s.Lock()
+		for _, user := range s.users {
+			if user.Ghost && user.br == u.br {
+				ownedGhosts = append(ownedGhosts, user)
+			}
+		}
+		s.Unlock()
+	}
+
+	for _, ghost := range ownedGhosts {
+		for _, ch := range ghost.Channels() {
+			ch.Part(ghost, "")
+		}
+		s.Lock()
+		delete(s.users, ghost.ID())
+		s.Unlock()
+	}
+
+	u.eventLoopMutex.Lock()
+	if u.br != nil {
+		_ = u.br.Logout()
+		u.br = nil
+	}
+	u.eventLoopMutex.Unlock()
+
 	channels := u.Channels()
 	for _, ch := range channels {
-		// Count if any other real concurrent clients are still in this channel
-		realUsers := 0
-		for _, other := range ch.Users() {
-			if !other.Ghost && other.ID() != u.ID() {
-				realUsers++
-			}
-		}
-
-		// Only purge the Ghost caches if we are the LAST real user leaving the channel.
-		// This guarantees we never break shared channels for concurrent clients.
-		if realUsers == 0 {
-			s.Lock()
-			for _, other := range ch.Users() {
-				if other.Ghost {
-					delete(s.users, other.ID())
-				}
-			}
-			s.Unlock()
-		}
-
-		// Because u is still in s.users, this will successfully broadcast
-		// the PART message to u's client before they disconnect.
 		ch.Part(u, message)
 		ch.Unlink()
 	}
 
-	// Now safely remove the user from the global server registry
 	s.Lock()
 	delete(s.users, u.ID())
 	s.Unlock()
 
 	go u.Close()
-
-	// Safely tear down the Mattermost/Slack bridge
-	if u.br == nil {
-		return
-	}
-
-	u.br.Logout()
 }
 
 // Len returns the number of users connected to the server.
@@ -570,18 +566,30 @@ outerloop:
 	return ErrHandshakeFailed
 }
 
-func (s *server) Logout(user *User) {
-	channels := user.Channels()
-	for _, ch := range channels {
+func (s *server) Logout(u *User) {
+	var ownedGhosts []*User
+	if u.br != nil {
 		s.Lock()
-		for _, other := range ch.Users() {
-			// Only delete Ghost users to avoid disconnecting concurrent clients
-			if other.Ghost {
-				delete(s.users, other.ID())
+		for _, user := range s.users {
+			if user.Ghost && user.br == u.br {
+				ownedGhosts = append(ownedGhosts, user)
 			}
 		}
 		s.Unlock()
-		ch.Part(user, "")
+	}
+
+	for _, ghost := range ownedGhosts {
+		for _, ch := range ghost.Channels() {
+			ch.Part(ghost, "")
+		}
+		s.Lock()
+		delete(s.users, ghost.ID())
+		s.Unlock()
+	}
+
+	channels := u.Channels()
+	for _, ch := range channels {
+		ch.Part(u, "")
 		ch.Unlink()
 	}
 }

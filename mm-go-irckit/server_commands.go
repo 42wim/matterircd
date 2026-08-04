@@ -716,9 +716,7 @@ func CmdQuit(s Server, u *User, msg *irc.Message) error {
 	s.EncodeMessage(u, irc.QUIT, []string{}, partMsg)
 	s.EncodeMessage(u, irc.ERROR, []string{}, "You will be missed.")
 
-	// Let the centralized, idempotent Quit handler safely tear down
-	// the connection, the ghosts, and the bridge.
-	u.Srv.Quit(u, partMsg)
+	s.Quit(u, partMsg)
 
 	return nil
 }
