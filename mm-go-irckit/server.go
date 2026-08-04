@@ -328,6 +328,28 @@ func (s *server) Quit(u *User, message string) {
 	}
 	s.Unlock()
 
+	// Now that channels are unlinked and ghosts are parted, any ghost
+	// with 0 channels is completely orphaned and must be deleted.
+	var orphaned []string
+	s.RLock()
+	for id, ghost := range s.users {
+		if ghost.Ghost && ghost.Host != "service" && ghost.NumChannels() == 0 {
+			orphaned = append(orphaned, id)
+		}
+	}
+	s.RUnlock()
+
+	if len(orphaned) > 0 {
+		s.Lock()
+		for _, id := range orphaned {
+			// Double check inside the lock for thread safety
+			if ghost, ok := s.users[id]; ok && ghost.NumChannels() == 0 {
+				delete(s.users, id)
+			}
+		}
+		s.Unlock()
+	}
+
 	go u.Close()
 }
 
@@ -564,6 +586,7 @@ func (s *server) Logout(u *User) {
 	for _, ch := range channels {
 		ch.Part(u, "")
 
+		// Perform the exact same empty-channel check for soft logouts
 		realUsers := 0
 		for _, other := range ch.Users() {
 			if !other.Ghost {
@@ -577,6 +600,26 @@ func (s *server) Logout(u *User) {
 			}
 			ch.Unlink()
 		}
+	}
+
+	// Sweep orphaned ghosts for soft-logouts too!
+	var orphaned []string
+	s.RLock()
+	for id, ghost := range s.users {
+		if ghost.Ghost && ghost.Host != "service" && ghost.NumChannels() == 0 {
+			orphaned = append(orphaned, id)
+		}
+	}
+	s.RUnlock()
+
+	if len(orphaned) > 0 {
+		s.Lock()
+		for _, id := range orphaned {
+			if ghost, ok := s.users[id]; ok && ghost.NumChannels() == 0 {
+				delete(s.users, id)
+			}
+		}
+		s.Unlock()
 	}
 }
 
