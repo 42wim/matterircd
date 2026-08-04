@@ -320,16 +320,10 @@ func (s *server) Quit(u *User, message string) {
 
 	u.eventLoopMutex.Lock()
 	if u.br != nil {
-		_ = u.br.Logout()
+		u.br.Logout()
 		u.br = nil
 	}
 	u.eventLoopMutex.Unlock()
-
-	channels := u.Channels()
-	for _, ch := range channels {
-		ch.Part(u, message)
-		ch.Unlink()
-	}
 
 	s.Lock()
 	delete(s.users, u.ID())
