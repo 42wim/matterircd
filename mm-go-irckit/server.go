@@ -303,7 +303,7 @@ func (s *server) Quit(u *User, message string) {
 
 	// Safely tear down the Mattermost/Slack bridge
 	if u.br != nil {
-		u.br.Logout()
+		_ = u.br.Logout()
 	}
 }
 
