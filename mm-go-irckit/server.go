@@ -3,8 +3,6 @@ package irckit
 import (
 	"errors"
 	"fmt"
-	"runtime"
-	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -311,28 +309,15 @@ func (s *server) Connect(u *User) error {
 func (s *server) Quit(u *User, message string) {
 	u.eventLoopMutex.Lock()
 	if u.br != nil {
-		u.br.Logout()
-		u.br = nil
+		_ = u.br.Logout()
 	}
 	u.eventLoopMutex.Unlock()
 
-	// 1. THE NUCLEAR PART: Bypass u.Channels() entirely!
-	// Force-part the user from EVERY channel on the server to guarantee
-	// removal, even if the user's internal channel map is buggy/out-of-sync.
-	s.RLock()
-	allChannels := make([]Channel, 0, len(s.channels))
-	for _, ch := range s.channels {
-		allChannels = append(allChannels, ch)
-	}
-	s.RUnlock()
-
-	for _, ch := range allChannels {
-		if ch.HasUser(u) {
-			ch.Part(u, message)
-		}
+	for _, ch := range u.Channels() {
+		ch.Part(u, message)
 	}
 
-	// 2. Global Channel Sweep
+	// Global Channel Sweep
 	s.RLock()
 	uniqueChannels := make(map[Channel]struct{})
 	for _, ch := range s.channels {
@@ -356,7 +341,7 @@ func (s *server) Quit(u *User, message string) {
 		}
 	}
 
-	// 3. Global Server Registry & Pointer Sweep
+	// Global Server Registry & Pointer Sweep
 	s.Lock()
 	for id, userPtr := range s.users {
 		if userPtr == u {
@@ -375,7 +360,7 @@ func (s *server) Quit(u *User, message string) {
 	}
 	s.Unlock()
 
-	// 4. The Ultimate Ghost Sweeper
+	// Ghost Sweeper
 	s.RLock()
 	activeGhosts := make(map[*User]struct{})
 	for _, ch := range s.channels {
@@ -403,10 +388,6 @@ func (s *server) Quit(u *User, message string) {
 		}
 		s.Unlock()
 	}
-
-	// Force an aggressive GC sweep and return memory to the OS.
-	runtime.GC()
-	debug.FreeOSMemory()
 
 	go u.Close()
 }
@@ -641,18 +622,8 @@ outerloop:
 
 //nolint:gocognit
 func (s *server) Logout(u *User) {
-	// The Nuclear Part for soft-logouts
-	s.RLock()
-	allChannels := make([]Channel, 0, len(s.channels))
-	for _, ch := range s.channels {
-		allChannels = append(allChannels, ch)
-	}
-	s.RUnlock()
-
-	for _, ch := range allChannels {
-		if ch.HasUser(u) {
-			ch.Part(u, "")
-		}
+	for _, ch := range u.Channels() {
+		ch.Part(u, "")
 	}
 
 	s.RLock()
