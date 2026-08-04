@@ -292,6 +292,7 @@ func (s *server) Connect(u *User) error {
 // Quit will remove the user from all channels and disconnect.
 func (s *server) Quit(u *User, message string) {
 	s.Lock()
+	// Prevent double-quits and nil-pointer panics
 	if _, exists := s.users[u.ID()]; !exists {
 		s.Unlock()
 		return
@@ -299,8 +300,20 @@ func (s *server) Quit(u *User, message string) {
 	delete(s.users, u.ID())
 	s.Unlock()
 
+	// Ensure the user and all their associated Ghost users are removed
+	// so the garbage collector can reclaim their memory and caches.
 	channels := u.Channels()
 	for _, ch := range channels {
+		s.Lock()
+		for _, other := range ch.Users() {
+			// Safely drop all spoofed users to free the bridge caches.
+			// Checking .Ghost ensures we never disconnect real concurrent clients.
+			if other.Ghost {
+				delete(s.users, other.ID())
+			}
+		}
+		s.Unlock()
+
 		ch.Part(u, message)
 		ch.Unlink()
 	}
