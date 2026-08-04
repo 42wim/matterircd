@@ -94,6 +94,8 @@ type ServerConfig struct {
 	Commands Commands
 }
 
+var serviceName = "service"
+
 func (c ServerConfig) Server() Server {
 	if c.NewChannel == nil {
 		c.NewChannel = NewChannel
@@ -246,7 +248,7 @@ func (s *server) Channel(channelID string) Channel {
 		name = u.br.GetChannelName(channelID)
 		info, err = u.br.GetChannel(channelID)
 	} else {
-		service = "service"
+		service = serviceName
 		name = channelID
 		err = errors.New("no active user bridge")
 	}
@@ -373,7 +375,7 @@ func (s *server) Quit(u *User, message string) {
 
 	var orphaned []string
 	for id, ghost := range s.users {
-		if ghost.Ghost && ghost.Host != "service" {
+		if ghost.Ghost && ghost.Host != serviceName {
 			if _, isActive := activeGhosts[ghost]; !isActive {
 				orphaned = append(orphaned, id)
 			}
@@ -604,7 +606,7 @@ outerloop:
 						Nick: service,
 						User: service,
 						Real: service,
-						Host: "service", //nolint:goconst
+						Host: serviceName,
 					},
 					channels: map[Channel]struct{}{},
 				},
@@ -620,7 +622,7 @@ outerloop:
 	return ErrHandshakeFailed
 }
 
-//nolint:gocognit
+//nolint:gocognit,gocyclo
 func (s *server) Logout(u *User) {
 	for _, ch := range u.Channels() {
 		ch.Part(u, "")
@@ -673,7 +675,7 @@ func (s *server) Logout(u *User) {
 
 	var orphaned []string
 	for id, ghost := range s.users {
-		if ghost.Ghost && ghost.Host != "service" {
+		if ghost.Ghost && ghost.Host != serviceName {
 			if _, isActive := activeGhosts[ghost]; !isActive {
 				orphaned = append(orphaned, id)
 			}
