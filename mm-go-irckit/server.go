@@ -297,26 +297,40 @@ func (s *server) Quit(u *User, message string) {
 		s.Unlock()
 		return
 	}
-	delete(s.users, u.ID())
 	s.Unlock()
 
-	// Ensure the user and all their associated Ghost users are removed
-	// so the garbage collector can reclaim their memory and caches.
 	channels := u.Channels()
 	for _, ch := range channels {
-		s.Lock()
+		// Count if any other real concurrent clients are still in this channel
+		realUsers := 0
 		for _, other := range ch.Users() {
-			// Safely drop all spoofed users to free the bridge caches.
-			// Checking .Ghost ensures we never disconnect real concurrent clients.
-			if other.Ghost {
-				delete(s.users, other.ID())
+			if !other.Ghost && other.ID() != u.ID() {
+				realUsers++
 			}
 		}
-		s.Unlock()
 
+		// Only purge the Ghost caches if we are the LAST real user leaving the channel.
+		// This guarantees we never break shared channels for concurrent clients.
+		if realUsers == 0 {
+			s.Lock()
+			for _, other := range ch.Users() {
+				if other.Ghost {
+					delete(s.users, other.ID())
+				}
+			}
+			s.Unlock()
+		}
+
+		// Because u is still in s.users, this will successfully broadcast
+		// the PART message to u's client before they disconnect.
 		ch.Part(u, message)
 		ch.Unlink()
 	}
+
+	// Now safely remove the user from the global server registry
+	s.Lock()
+	delete(s.users, u.ID())
+	s.Unlock()
 
 	go u.Close()
 
