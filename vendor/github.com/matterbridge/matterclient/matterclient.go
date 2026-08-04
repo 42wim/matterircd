@@ -984,6 +984,16 @@ func (m *Client) Logout() error {
 	m.logger.Debug("closing websocket")
 	m.WsClient.Close()
 
+	// Explicitly nil the heavy maps so the garbage collector instantly
+	// reclaims the memory allocated by initUser and UpdateChannelsTeam.
+	m.Users.mu.Lock()
+	m.Users.users = nil
+	m.Users.channels = nil
+	m.Users.channelData = nil
+	m.Users.joinedChannels = nil
+	m.Users.teams = nil
+	m.Users.mu.Unlock()
+
 	if strings.Contains(m.Credentials.Pass, model.SessionCookieToken) {
 		m.logger.Debug("Not invalidating session in logout, credential is a token")
 
