@@ -298,11 +298,19 @@ func (s *server) Quit(u *User, message string) {
 	}
 	u.eventLoopMutex.Unlock()
 
-	channels := u.Channels()
-	for _, ch := range channels {
+	for _, ch := range u.Channels() {
 		ch.Part(u, message)
+	}
 
-		// Check if there are any real concurrent IRC clients left in this channel
+	// Global Channel Sweep
+	s.RLock()
+	uniqueChannels := make(map[Channel]struct{})
+	for _, ch := range s.channels {
+		uniqueChannels[ch] = struct{}{}
+	}
+	s.RUnlock()
+
+	for ch := range uniqueChannels {
 		realUsers := 0
 		for _, other := range ch.Users() {
 			if !other.Ghost {
@@ -310,8 +318,6 @@ func (s *server) Quit(u *User, message string) {
 			}
 		}
 
-		// Only if the channel is completely empty of real users do we
-		// clear out the ghosts and unlink the channel from the server.
 		if realUsers == 0 {
 			for _, other := range ch.Users() {
 				ch.Part(other, "")
@@ -320,21 +326,41 @@ func (s *server) Quit(u *User, message string) {
 		}
 	}
 
+	// Global Server Registry & Pointer Sweep
 	s.Lock()
 	for id, userPtr := range s.users {
 		if userPtr == u {
 			delete(s.users, id)
 		}
 	}
+
+	if s.u == u {
+		s.u = nil
+		for _, other := range s.users {
+			if !other.Ghost && other.br != nil {
+				s.u = other
+				break
+			}
+		}
+	}
 	s.Unlock()
 
-	// Now that channels are unlinked and ghosts are parted, any ghost
-	// with 0 channels is completely orphaned and must be deleted.
-	var orphaned []string
 	s.RLock()
+	activeGhosts := make(map[*User]struct{})
+	for _, ch := range s.channels {
+		for _, usr := range ch.Users() {
+			if usr.Ghost {
+				activeGhosts[usr] = struct{}{}
+			}
+		}
+	}
+
+	var orphaned []string
 	for id, ghost := range s.users {
-		if ghost.Ghost && ghost.Host != "service" && ghost.NumChannels() == 0 {
-			orphaned = append(orphaned, id)
+		if ghost.Ghost && ghost.Host != "service" {
+			if _, isActive := activeGhosts[ghost]; !isActive {
+				orphaned = append(orphaned, id)
+			}
 		}
 	}
 	s.RUnlock()
@@ -342,10 +368,7 @@ func (s *server) Quit(u *User, message string) {
 	if len(orphaned) > 0 {
 		s.Lock()
 		for _, id := range orphaned {
-			// Double check inside the lock for thread safety
-			if ghost, ok := s.users[id]; ok && ghost.NumChannels() == 0 {
-				delete(s.users, id)
-			}
+			delete(s.users, id)
 		}
 		s.Unlock()
 	}
@@ -582,11 +605,18 @@ outerloop:
 }
 
 func (s *server) Logout(u *User) {
-	channels := u.Channels()
-	for _, ch := range channels {
+	for _, ch := range u.Channels() {
 		ch.Part(u, "")
+	}
 
-		// Perform the exact same empty-channel check for soft logouts
+	s.RLock()
+	uniqueChannels := make(map[Channel]struct{})
+	for _, ch := range s.channels {
+		uniqueChannels[ch] = struct{}{}
+	}
+	s.RUnlock()
+
+	for ch := range uniqueChannels {
 		realUsers := 0
 		for _, other := range ch.Users() {
 			if !other.Ghost {
@@ -602,12 +632,35 @@ func (s *server) Logout(u *User) {
 		}
 	}
 
-	// Sweep orphaned ghosts for soft-logouts too!
-	var orphaned []string
+	s.Lock()
+	if s.u == u {
+		s.u = nil
+		for _, other := range s.users {
+			if !other.Ghost && other.br != nil {
+				s.u = other
+				break
+			}
+		}
+	}
+	s.Unlock()
+
+	// The Ultimate Ghost Sweeper for soft logouts
 	s.RLock()
+	activeGhosts := make(map[*User]struct{})
+	for _, ch := range s.channels {
+		for _, usr := range ch.Users() {
+			if usr.Ghost {
+				activeGhosts[usr] = struct{}{}
+			}
+		}
+	}
+
+	var orphaned []string
 	for id, ghost := range s.users {
-		if ghost.Ghost && ghost.Host != "service" && ghost.NumChannels() == 0 {
-			orphaned = append(orphaned, id)
+		if ghost.Ghost && ghost.Host != "service" {
+			if _, isActive := activeGhosts[ghost]; !isActive {
+				orphaned = append(orphaned, id)
+			}
 		}
 	}
 	s.RUnlock()
@@ -615,9 +668,7 @@ func (s *server) Logout(u *User) {
 	if len(orphaned) > 0 {
 		s.Lock()
 		for _, id := range orphaned {
-			if ghost, ok := s.users[id]; ok && ghost.NumChannels() == 0 {
-				delete(s.users, id)
-			}
+			delete(s.users, id)
 		}
 		s.Unlock()
 	}
