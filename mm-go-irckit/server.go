@@ -299,6 +299,12 @@ func (s *server) Quit(u *User, message string) {
 	delete(s.users, u.ID())
 	s.Unlock()
 
+	channels := u.Channels()
+	for _, ch := range channels {
+		ch.Part(u, message)
+		ch.Unlink()
+	}
+
 	go u.Close()
 
 	// Safely tear down the Mattermost/Slack bridge
