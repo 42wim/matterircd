@@ -593,14 +593,6 @@ func (c *Client4) DoAPIRequestBytes(method, url string, data []byte, etag string
 }
 
 func (c *Client4) DoAPIRequestReader(method, url string, data io.Reader, headers map[string]string) (*http.Response, error) {
-	// XXX: HAW:
-	//if !strings.HasSuffix(url, "system/ping") && !strings.HasSuffix(url, "/users/status/ids") && !strings.HasSuffix(url, "channels/members/m45ssk4t4bfwufbghxnmj89d4a/view") {
-	if !strings.HasSuffix(url, "/users/status/ids") && !strings.HasSuffix(url, "channels/members/m45ssk4t4bfwufbghxnmj89d4a/view") {
-		fmt.Printf("\033[33mHAW: DoAPIRequestReader(): method: '%s' url: '%s' data: '???'\033[0m\n", method, url)
-	} else if strings.HasSuffix(url, "/users/status/ids"){
-		fmt.Printf("\033[33mHAW: DoAPIRequestReader(): method: '%s' url: '%s' data: '...'\033[0m\n", method, url)
-	}
-
 	rq, err := http.NewRequest(method, url, data)
 	if err != nil {
 		return nil, err
@@ -617,10 +609,6 @@ func (c *Client4) DoAPIRequestReader(method, url string, data io.Reader, headers
 	if c.HTTPHeader != nil && len(c.HTTPHeader) > 0 {
 		for k, v := range c.HTTPHeader {
 			rq.Header.Set(k, v)
-			// XXX: HAW:
-			if !strings.HasSuffix(url, "system/ping") {
-				fmt.Printf("\033[33mHAW: DoAPIRequestReader(): method: '%s' url: '%s' request headers: '%s' value: '%s'\033[0m\n", method, url, k, v)
-			}
 		}
 	}
 
