@@ -290,11 +290,13 @@ func (s *server) Connect(u *User) error {
 	return nil
 }
 
+var ServiceUser = "service"
+
 // Quit will remove the user from all channels and disconnect.
 func (s *server) Quit(u *User, message string) {
 	u.eventLoopMutex.Lock()
 	if u.br != nil {
-		u.br.Logout()
+		_ = u.br.Logout()
 		u.br = nil
 	}
 	u.eventLoopMutex.Unlock()
@@ -358,7 +360,7 @@ func (s *server) Quit(u *User, message string) {
 
 	var orphaned []string
 	for id, ghost := range s.users {
-		if ghost.Ghost && ghost.Host != "service" {
+		if ghost.Ghost && ghost.Host != ServiceUser {
 			if _, isActive := activeGhosts[ghost]; !isActive {
 				orphaned = append(orphaned, id)
 			}
@@ -589,7 +591,7 @@ outerloop:
 						Nick: service,
 						User: service,
 						Real: service,
-						Host: "service",
+						Host: ServiceUser,
 					},
 					channels: map[Channel]struct{}{},
 				},
@@ -605,6 +607,7 @@ outerloop:
 	return ErrHandshakeFailed
 }
 
+//nolint:gocognit
 func (s *server) Logout(u *User) {
 	for _, ch := range u.Channels() {
 		ch.Part(u, "")
@@ -658,7 +661,7 @@ func (s *server) Logout(u *User) {
 
 	var orphaned []string
 	for id, ghost := range s.users {
-		if ghost.Ghost && ghost.Host != "service" {
+		if ghost.Ghost && ghost.Host != ServiceUser {
 			if _, isActive := activeGhosts[ghost]; !isActive {
 				orphaned = append(orphaned, id)
 			}
