@@ -561,7 +561,10 @@ func (s *server) Logout(user *User) {
 	for _, ch := range channels {
 		s.Lock()
 		for _, other := range ch.Users() {
-			delete(s.users, other.ID())
+			// Only delete Ghost users to avoid disconnecting concurrent clients
+			if other.Ghost {
+				delete(s.users, other.ID())
+			}
 		}
 		s.Unlock()
 		ch.Part(user, "")
