@@ -647,27 +647,6 @@ func (u *User) handleReactionEvent(event interface{}) {
 	u.handleChannelMessageEvent(e)
 }
 
-func cloneString(s string) string {
-	if s == "" {
-		return ""
-	}
-	return string(append([]byte(nil), s...))
-}
-
-func cloneUserInfo(info *bridge.UserInfo) *bridge.UserInfo {
-	if info == nil {
-		return nil
-	}
-	clone := *info
-	clone.Nick = cloneString(info.Nick)
-	clone.User = cloneString(info.User)
-	clone.Real = cloneString(info.Real)
-	clone.Host = cloneString(info.Host)
-	clone.Username = cloneString(info.Username)
-	clone.Ghost = true
-	return &clone
-}
-
 func (u *User) CreateUserFromInfo(info *bridge.UserInfo) *User {
 	return u.createUserFromInfo(info)
 }
@@ -680,21 +659,20 @@ func (u *User) CreateUsersFromInfo(info []*bridge.UserInfo) []*User {
 			continue
 		}
 
+		// Force Ghost flag so the server knows this is not a real user,
+		// allowing channels to safely close when real users leave.
+		userinfo.Ghost = true
+
 		if ghost, ok := u.Srv.HasUserID(userinfo.User); ok {
-			ghost.Lock()
-			ghost.UserInfo = cloneUserInfo(userinfo)
-			nick := ghost.UserInfo.Nick
-			if nick == "" {
-				nick = ghost.UserInfo.Username
-			}
-			ghost.Nick = sanitizeNick(nick)
-			ghost.Unlock()
+			// Do not overwrite existing ghost.UserInfo!
+			// Existing ghosts are already functional. Overwriting them
+			// risks injecting pointers from temporary connections.
 			users = append(users, ghost)
 			continue
 		}
 
-		ghost := NewUser(nil)
-		ghost.UserInfo = cloneUserInfo(userinfo)
+		ghost := NewUser(nil) // Use nil to avoid anchoring the TCP connection
+		ghost.UserInfo = userinfo
 		nick := ghost.UserInfo.Nick
 		if nick == "" {
 			nick = ghost.UserInfo.Username
@@ -710,6 +688,8 @@ func (u *User) CreateUsersFromInfo(info []*bridge.UserInfo) []*User {
 }
 
 func (u *User) updateUserFromInfo(info *bridge.UserInfo) *User {
+	info.Ghost = true // Force Ghost flag
+
 	if ghost, ok := u.Srv.HasUserID(info.User); ok {
 		if ghost.Nick != info.Nick {
 			changeMsg := &irc.Message{
@@ -719,14 +699,12 @@ func (u *User) updateUserFromInfo(info *bridge.UserInfo) *User {
 			}
 			u.Encode(changeMsg)
 		}
-
-		ghost.UserInfo = cloneUserInfo(info)
-
+		// Do not overwrite existing ghost.UserInfo
 		return ghost
 	}
 
-	ghost := NewUser(nil)
-	ghost.UserInfo = cloneUserInfo(info)
+	ghost := NewUser(nil) // Use nil to avoid anchoring the TCP connection
+	ghost.UserInfo = info
 
 	u.Srv.Add(ghost)
 
@@ -734,12 +712,14 @@ func (u *User) updateUserFromInfo(info *bridge.UserInfo) *User {
 }
 
 func (u *User) createUserFromInfo(info *bridge.UserInfo) *User {
+	info.Ghost = true // Force Ghost flag
+
 	if ghost, ok := u.Srv.HasUserID(info.User); ok {
 		return ghost
 	}
 
-	ghost := NewUser(u.Conn)
-	ghost.UserInfo = cloneUserInfo(info)
+	ghost := NewUser(nil) // Use nil to avoid anchoring the TCP connection
+	ghost.UserInfo = info
 	ghost.Nick = sanitizeNick(ghost.Nick)
 
 	u.Srv.Add(ghost)

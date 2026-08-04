@@ -266,14 +266,15 @@ func (s *server) Channel(channelID string) Channel {
 	return newCh
 }
 
-// UnlinkChannel unlinks the channel from the server's storage, returns whether it existed.
+// UnlinkChannel unlinks the channel from the server's storage.
+// By iterating the entire map, we guarantee all aliases are eradicated,
+// preventing ghost channels from lingering in memory and blocking the GC.
 func (s *server) UnlinkChannel(ch Channel) {
 	s.Lock()
-	chStored := s.channels[ch.String()]
-	r := chStored == ch
-	if r {
-		delete(s.channels, ch.String())
-		delete(s.channels, ch.ID())
+	for k, v := range s.channels {
+		if v == ch {
+			delete(s.channels, k)
+		}
 	}
 	s.Unlock()
 }
