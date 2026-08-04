@@ -671,7 +671,7 @@ func (u *User) CreateUsersFromInfo(info []*bridge.UserInfo) []*User {
 			continue
 		}
 
-		ghost := NewUser(nil) // Use nil to avoid anchoring the TCP connection
+		ghost := NewUser(nil)
 		ghost.UserInfo = userinfo
 		nick := ghost.UserInfo.Nick
 		if nick == "" {
@@ -703,7 +703,7 @@ func (u *User) updateUserFromInfo(info *bridge.UserInfo) *User {
 		return ghost
 	}
 
-	ghost := NewUser(nil) // Use nil to avoid anchoring the TCP connection
+	ghost := NewUser(nil)
 	ghost.UserInfo = info
 
 	u.Srv.Add(ghost)
@@ -712,13 +712,13 @@ func (u *User) updateUserFromInfo(info *bridge.UserInfo) *User {
 }
 
 func (u *User) createUserFromInfo(info *bridge.UserInfo) *User {
-	info.Ghost = true // Force Ghost flag
+	info.Ghost = true
 
 	if ghost, ok := u.Srv.HasUserID(info.User); ok {
 		return ghost
 	}
 
-	ghost := NewUser(nil) // Use nil to avoid anchoring the TCP connection
+	ghost := NewUser(nil)
 	ghost.UserInfo = info
 	ghost.Nick = sanitizeNick(ghost.Nick)
 

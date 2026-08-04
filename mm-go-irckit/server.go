@@ -622,10 +622,10 @@ outerloop:
 	return ErrHandshakeFailed
 }
 
-//nolint:gocognit,gocyclo
-func (s *server) Logout(u *User) {
-	for _, ch := range u.Channels() {
-		ch.Part(u, "")
+//nolint:funlen,gocognit,gocyclo
+func (s *server) Logout(user *User) {
+	for _, ch := range user.Channels() {
+		ch.Part(user, "")
 	}
 
 	s.RLock()
@@ -652,7 +652,7 @@ func (s *server) Logout(u *User) {
 	}
 
 	s.Lock()
-	if s.u == u {
+	if s.u == user {
 		s.u = nil
 		for _, other := range s.users {
 			if !other.Ghost && other.br != nil {
