@@ -716,13 +716,7 @@ func CmdQuit(s Server, u *User, msg *irc.Message) error {
 	s.EncodeMessage(u, irc.QUIT, []string{}, partMsg)
 	s.EncodeMessage(u, irc.ERROR, []string{}, "You will be missed.")
 
-	if u.br != nil {
-		// u.br may be nil when the user is not yet logged in by the time we quit.
-		u.br.Logout()
-	}
-	u.Srv.Logout(u)
-
-	u.Conn.Close()
+	s.Quit(u, partMsg)
 
 	return nil
 }

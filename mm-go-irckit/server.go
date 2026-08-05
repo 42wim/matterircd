@@ -94,6 +94,8 @@ type ServerConfig struct {
 	Commands Commands
 }
 
+var serviceName = "service"
+
 func (c ServerConfig) Server() Server {
 	if c.NewChannel == nil {
 		c.NewChannel = NewChannel
@@ -232,13 +234,28 @@ func (s *server) Channel(channelID string) Channel {
 		return ch
 	}
 
-	service := s.u.br.Protocol()
-	name := s.u.br.GetChannelName(channelID)
+	var service, name string
+	var info *bridge.ChannelInfo
+	var err error
 
-	info, err := s.u.br.GetChannel(channelID)
+	// Safely retrieve the global user pointer to prevent concurrent dereference panics
+	s.RLock()
+	u := s.u
+	s.RUnlock()
+
+	if u != nil && u.br != nil {
+		service = u.br.Protocol()
+		name = u.br.GetChannelName(channelID)
+		info, err = u.br.GetChannel(channelID)
+	} else {
+		service = serviceName
+		name = channelID
+		err = errors.New("no active user bridge")
+	}
+
 	if err != nil {
 		// don't error on our special channels
-		if channelID != "" && !strings.HasPrefix(channelID, "&") && channelID != s.u.Nick && channelID != s.u.Username {
+		if channelID != "" && !strings.HasPrefix(channelID, "&") && u != nil && channelID != u.Nick && channelID != u.Username {
 			logger.Errorf("didn't find channel %s (%s): %s", channelID, name, err)
 		}
 		info = &bridge.ChannelInfo{}
@@ -266,14 +283,15 @@ func (s *server) Channel(channelID string) Channel {
 	return newCh
 }
 
-// UnlinkChannel unlinks the channel from the server's storage, returns whether it existed.
+// UnlinkChannel unlinks the channel from the server's storage.
+// By iterating the entire map, we guarantee all aliases are eradicated,
+// preventing ghost channels from lingering in memory and blocking the GC.
 func (s *server) UnlinkChannel(ch Channel) {
 	s.Lock()
-	chStored := s.channels[ch.String()]
-	r := chStored == ch
-	if r {
-		delete(s.channels, ch.String())
-		delete(s.channels, ch.ID())
+	for k, v := range s.channels {
+		if v == ch {
+			delete(s.channels, k)
+		}
 	}
 	s.Unlock()
 }
@@ -291,12 +309,93 @@ func (s *server) Connect(u *User) error {
 
 // Quit will remove the user from all channels and disconnect.
 func (s *server) Quit(u *User, message string) {
-	go u.Close()
+	if u.cancel != nil {
+		u.cancel()
+	}
+
+	u.eventLoopMutex.Lock()
+	if u.br != nil {
+		_ = u.br.Logout()
+	}
+	u.eventLoopMutex.Unlock()
+
+	for _, ch := range u.Channels() {
+		ch.Part(u, message)
+	}
+
+	// Global Channel Sweep
+	s.RLock()
+	uniqueChannels := make(map[Channel]struct{})
+	for _, ch := range s.channels {
+		uniqueChannels[ch] = struct{}{}
+	}
+	s.RUnlock()
+
+	for ch := range uniqueChannels {
+		realUsers := 0
+		for _, other := range ch.Users() {
+			if !other.Ghost {
+				realUsers++
+			}
+		}
+
+		if realUsers == 0 {
+			for _, other := range ch.Users() {
+				ch.Part(other, "")
+			}
+			s.UnlinkChannel(ch)
+		}
+	}
+
+	// Global Server Registry & Pointer Sweep
 	s.Lock()
-	delete(s.users, u.ID())
+	for id, userPtr := range s.users {
+		if userPtr == u {
+			delete(s.users, id)
+		}
+	}
+
+	if s.u == u {
+		s.u = nil
+		for _, other := range s.users {
+			if !other.Ghost && other.br != nil {
+				s.u = other
+				break
+			}
+		}
+	}
 	s.Unlock()
 
-	u.br.Logout()
+	// Ghost Sweeper
+	s.RLock()
+	activeGhosts := make(map[*User]struct{})
+	for _, ch := range s.channels {
+		for _, usr := range ch.Users() {
+			if usr.Ghost {
+				activeGhosts[usr] = struct{}{}
+			}
+		}
+	}
+
+	var orphaned []string
+	for id, ghost := range s.users {
+		if ghost.Ghost && ghost.Host != serviceName {
+			if _, isActive := activeGhosts[ghost]; !isActive {
+				orphaned = append(orphaned, id)
+			}
+		}
+	}
+	s.RUnlock()
+
+	if len(orphaned) > 0 {
+		s.Lock()
+		for _, id := range orphaned {
+			delete(s.users, id)
+		}
+		s.Unlock()
+	}
+
+	go u.Close()
 }
 
 // Len returns the number of users connected to the server.
@@ -511,7 +610,7 @@ outerloop:
 						Nick: service,
 						User: service,
 						Real: service,
-						Host: "service",
+						Host: serviceName,
 					},
 					channels: map[Channel]struct{}{},
 				},
@@ -527,16 +626,73 @@ outerloop:
 	return ErrHandshakeFailed
 }
 
+//nolint:funlen,gocognit,gocyclo
 func (s *server) Logout(user *User) {
-	channels := user.Channels()
-	for _, ch := range channels {
-		s.Lock()
+	for _, ch := range user.Channels() {
+		ch.Part(user, "")
+	}
+
+	s.RLock()
+	uniqueChannels := make(map[Channel]struct{})
+	for _, ch := range s.channels {
+		uniqueChannels[ch] = struct{}{}
+	}
+	s.RUnlock()
+
+	for ch := range uniqueChannels {
+		realUsers := 0
 		for _, other := range ch.Users() {
-			delete(s.users, other.ID())
+			if !other.Ghost {
+				realUsers++
+			}
+		}
+
+		if realUsers == 0 {
+			for _, other := range ch.Users() {
+				ch.Part(other, "")
+			}
+			s.UnlinkChannel(ch)
+		}
+	}
+
+	s.Lock()
+	if s.u == user {
+		s.u = nil
+		for _, other := range s.users {
+			if !other.Ghost && other.br != nil {
+				s.u = other
+				break
+			}
+		}
+	}
+	s.Unlock()
+
+	s.RLock()
+	activeGhosts := make(map[*User]struct{})
+	for _, ch := range s.channels {
+		for _, usr := range ch.Users() {
+			if usr.Ghost {
+				activeGhosts[usr] = struct{}{}
+			}
+		}
+	}
+
+	var orphaned []string
+	for id, ghost := range s.users {
+		if ghost.Ghost && ghost.Host != serviceName {
+			if _, isActive := activeGhosts[ghost]; !isActive {
+				orphaned = append(orphaned, id)
+			}
+		}
+	}
+	s.RUnlock()
+
+	if len(orphaned) > 0 {
+		s.Lock()
+		for _, id := range orphaned {
+			delete(s.users, id)
 		}
 		s.Unlock()
-		ch.Part(user, "")
-		ch.Unlink()
 	}
 }
 

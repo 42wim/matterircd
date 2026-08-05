@@ -35,6 +35,9 @@ type UserBridge struct {
 	eventChan   chan *bridge.Event
 	away        bool
 
+	eventLoopMutex   sync.Mutex
+	eventLoopStarted bool
+
 	lastViewedAtDB *bolt.DB
 
 	msgCounterMutex sync.RWMutex
@@ -656,15 +659,14 @@ func (u *User) CreateUsersFromInfo(info []*bridge.UserInfo) []*User {
 			continue
 		}
 
+		// Force Ghost flag so the server knows this is not a real user,
+		// allowing channels to safely close when real users leave.
+		userinfo.Ghost = true
+
 		if ghost, ok := u.Srv.HasUserID(userinfo.User); ok {
-			ghost.Lock()
-			ghost.UserInfo = userinfo
-			nick := ghost.UserInfo.Nick
-			if nick == "" {
-				nick = ghost.UserInfo.Username
-			}
-			ghost.Nick = sanitizeNick(nick)
-			ghost.Unlock()
+			// Do not overwrite existing ghost.UserInfo!
+			// Existing ghosts are already functional. Overwriting them
+			// risks injecting pointers from temporary connections.
 			users = append(users, ghost)
 			continue
 		}
@@ -686,6 +688,8 @@ func (u *User) CreateUsersFromInfo(info []*bridge.UserInfo) []*User {
 }
 
 func (u *User) updateUserFromInfo(info *bridge.UserInfo) *User {
+	info.Ghost = true
+
 	if ghost, ok := u.Srv.HasUserID(info.User); ok {
 		if ghost.Nick != info.Nick {
 			changeMsg := &irc.Message{
@@ -695,9 +699,7 @@ func (u *User) updateUserFromInfo(info *bridge.UserInfo) *User {
 			}
 			u.Encode(changeMsg)
 		}
-
-		ghost.UserInfo = info
-
+		// Do not overwrite existing ghost.UserInfo
 		return ghost
 	}
 
@@ -710,11 +712,14 @@ func (u *User) updateUserFromInfo(info *bridge.UserInfo) *User {
 }
 
 func (u *User) createUserFromInfo(info *bridge.UserInfo) *User {
+	info.Ghost = true
+
 	if ghost, ok := u.Srv.HasUserID(info.User); ok {
 		return ghost
 	}
 
-	ghost := NewUser(u.Conn)
+	// Use nil to avoid anchoring the TCP connection
+	ghost := NewUser(nil)
 	ghost.UserInfo = info
 	ghost.Nick = sanitizeNick(ghost.Nick)
 
@@ -815,8 +820,15 @@ func (u *User) addUsersToChannels() {
 		throttle.Stop()
 	}()
 
-	// we did all the initialization, now listen for events
-	go u.handleEventChan()
+	// Prevent leaking goroutines on internal bridge reconnects
+	// by ensuring we only launch one event loop per session.
+	u.eventLoopMutex.Lock()
+	if !u.eventLoopStarted {
+		u.eventLoopStarted = true
+		// we did all the initialization, now listen for events
+		go u.handleEventChan()
+	}
+	u.eventLoopMutex.Unlock()
 }
 
 func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(string, string, ...int) {
@@ -1142,6 +1154,11 @@ func (u *User) isValidServer(server, protocol string) bool {
 func (u *User) loginTo(protocol string) error {
 	var err error
 
+	// Reset the event loop tracker in case this User struct is recycled
+	u.eventLoopMutex.Lock()
+	u.eventLoopStarted = false
+	u.eventLoopMutex.Unlock()
+
 	switch protocol {
 	case "mastodon":
 		u.eventChan = make(chan *bridge.Event)
@@ -1152,7 +1169,7 @@ func (u *User) loginTo(protocol string) error {
 	case "mattermost":
 		u.eventChan = make(chan *bridge.Event)
 		if u.cfg.Mattermost().IgnoreServerVersion || strings.HasPrefix(u.getMattermostVersion(), "7.") || strings.HasPrefix(u.getMattermostVersion(), "8.") || strings.HasPrefix(u.getMattermostVersion(), "9.") || strings.HasPrefix(u.getMattermostVersion(), "10.") || strings.HasPrefix(u.getMattermostVersion(), "11.") {
-			u.br, _, err = mattermost.New(u.cfg, u.Credentials, u.eventChan, u.addUsersToChannels)
+			u.br, _, err = mattermost.New(u.ctx, u.cfg, u.Credentials, u.eventChan, u.addUsersToChannels)
 		} else {
 			return fmt.Errorf("mattermost version %s not supported", u.getMattermostVersion())
 		}
