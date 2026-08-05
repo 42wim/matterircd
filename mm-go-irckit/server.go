@@ -309,6 +309,10 @@ func (s *server) Connect(u *User) error {
 
 // Quit will remove the user from all channels and disconnect.
 func (s *server) Quit(u *User, message string) {
+	if u.ctx != nil && u.ctx.Err() != nil {
+		return
+	}
+
 	if u.cancel != nil {
 		u.cancel()
 	}
