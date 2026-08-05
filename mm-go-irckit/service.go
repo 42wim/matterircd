@@ -227,7 +227,7 @@ func replay(u *User, toUser *User, args []string, service string) {
 		return
 	}
 
-	u.replayHistory(toUser, brchannel)
+	u.replayHistory(brchannel)
 }
 
 //nolint:forcetypeassert,goconst

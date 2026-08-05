@@ -172,6 +172,7 @@ func (m *Mattermost) loginToMattermost(ctx context.Context, onWsConnect func()) 
 		// Create a new logger instance for this specific worker
 		workerLogger := logger.WithField("prefix", fmt.Sprintf("%shandleWsMessage%d", currentPrefix, i))
 
+		//nolint:contextcheck
 		go m.handleWsMessage(quitChan, workerLogger)
 	}
 
@@ -960,7 +961,7 @@ var markdownReplacer = strings.NewReplacer(
 	"~~~", "`",
 )
 
-//nolint:funlen
+//nolint:funlen,unparam
 func (m *Mattermost) getCachedPostInfo(postID string, preFetchedPost *model.Post, newLen int, uncounted string, unicode bool, logger *logrus.Entry) (CachedPost, error) {
 	rc := m.cfg.Current()
 
@@ -1729,6 +1730,7 @@ func (m *Mattermost) getDMUser(name interface{}) *bridge.UserInfo {
 	return nil
 }
 
+//nolint:funlen,gocyclo
 func (m *Mattermost) formatMessage(data *model.Post, eventType string, logger *logrus.Entry) string {
 	rc := m.cfg.Current()
 	useUnicode := rc.Mattermost.Formatter.Unicode
@@ -1739,7 +1741,7 @@ func (m *Mattermost) formatMessage(data *model.Post, eventType string, logger *l
 	if !rc.Mattermost.HideReplies && data.RootId != "" {
 		cachedRoot, err := m.getCachedPostInfo(data.RootId, nil, rc.Mattermost.ShortenRepliesTo, "@", useUnicode, logger)
 		if err != nil {
-			logger.Errorf("Unable to get parent post for %#v", data) //nolint:govet
+			logger.Errorf("Unable to get parent post for %#v", data)
 		} else {
 			sbSuffix.WriteString(cachedRoot.ReplyMsg)
 		}
@@ -1772,6 +1774,7 @@ func (m *Mattermost) formatMessage(data *model.Post, eventType string, logger *l
 			sbMsg.WriteString(msg)
 		}
 		useFallback := len(msg) == 0
+		// https://docs.slack.dev/tools/node-slack-sdk/reference/web-api/interfaces/MessageAttachment/
 		m.parseMessageAttachments(&sbMsg, attachments, useFallback)
 	case data.Type == "custom_matterpoll":
 		pollMsg := parseMatterpollToMsg(attachments, useUnicode)
@@ -1782,6 +1785,7 @@ func (m *Mattermost) formatMessage(data *model.Post, eventType string, logger *l
 			sbMsg.WriteString(msg)
 		}
 		useFallback := len(msg) == 0
+		// https://developers.mattermost.com/integrate/reference/message-attachments/
 		m.parseMessageAttachments(&sbMsg, attachments, useFallback)
 	default:
 		sbMsg.WriteString(msg)
@@ -1791,6 +1795,7 @@ func (m *Mattermost) formatMessage(data *model.Post, eventType string, logger *l
 		sbMsg.WriteString(sbSuffix.String())
 	}
 
+	// We can't use data.GetPreviewPost() due to a bug so use our own
 	previewText, previewUserID, previewChannelID := extractPreviewData(data.Metadata)
 	if !(previewText == "" && previewUserID == "" && previewChannelID == "") {
 		nick := previewUserID
@@ -2243,7 +2248,12 @@ func (m *Mattermost) GetLastSentMsgs() []string {
 	return data
 }
 
+//nolint:funlen
 func (m *Mattermost) GetReplayEvents(channelID string, since int64) []*bridge.Event {
+	// TODO: Switch from using GetPostsSince() to GetPostsAfter()
+	// TODO: which also does pagination rather than the 200 post limit.
+	// TODO: Or maybe a combination with GetPostsSince() getting the
+	// TODO: first post ID to use for GetPostsAfter().
 	mmPostList := m.mc.GetPostsSince(channelID, since)
 	if mmPostList == nil {
 		return nil
@@ -2260,6 +2270,13 @@ func (m *Mattermost) GetReplayEvents(channelID string, since int64) []*bridge.Ev
 	for i := len(mmPostList.Order) - 1; i >= 0; i-- {
 		p := mmPostList.Posts[mmPostList.Order[i]]
 
+		// GetPostsSince will return older messages with reaction
+		// changes since LastViewedAt. This will be confusing as
+		// the user will think it's a duplicate, or a post out of
+		// order. Plus, we don't show reaction changes when
+		// relaying messages/logs so let's skip these.
+		//
+		// See https://github.com/mattermost/mattermost/issues/13846 and https://github.com/anneschuth/claude-threads/pull/66
 		if p.DeleteAt > p.CreateAt || p.CreateAt < since {
 			continue
 		}
@@ -2311,7 +2328,6 @@ func (m *Mattermost) GetReplayEvents(channelID string, since int64) []*bridge.Ev
 				}
 			}
 
-			// Format text with exactly the same rules as the live socket
 			formattedMsg := m.formatMessage(p, "replay", logger)
 
 			if isDM {

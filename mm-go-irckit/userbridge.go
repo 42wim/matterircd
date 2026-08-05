@@ -848,7 +848,6 @@ func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(string, string, .
 	return ch.SpoofMessage
 }
 
-
 func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throttle *time.Ticker, logger *logrus.Entry) {
 	for brchannel := range channels {
 		logger.Debug("addUserToChannelWorker", brchannel)
@@ -861,6 +860,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			continue
 		}
 
+		// exclude direct messages
 		if !strings.Contains(brchannel.Name, "__") {
 			channelName := brchannel.Name
 
@@ -871,8 +871,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			u.syncChannel(brchannel.ID, "#"+channelName)
 		}
 
-		// Directly invoke the new shared method
-		u.replayHistory(u, brchannel)
+		u.replayHistory(brchannel)
 
 		if u.br.Protocol() == "mattermost" && !u.cfg.Mattermost().DisableAutoView {
 			u.updateLastViewed(brchannel.ID)
@@ -882,7 +881,9 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 }
 
 // replayHistory handles the actual fetching and spoofing of historical channel messages.
-func (u *User) replayHistory(toUser *User, brchannel *bridge.ChannelInfo) {
+//
+//nolint:funlen,gocognit,gocyclo
+func (u *User) replayHistory(brchannel *bridge.ChannelInfo) {
 	since := u.br.GetLastViewedAt(brchannel.ID)
 	if since == 0 {
 		return
@@ -895,6 +896,7 @@ func (u *User) replayHistory(toUser *User, brchannel *bridge.ChannelInfo) {
 		channame = "#" + brchannel.Name
 	}
 
+	// We used the stored "last viewed at" if present.
 	var lastViewedAt int64
 	key := brchannel.ID
 	err := u.lastViewedAtDB.View(func(tx *bolt.Tx) error {
@@ -914,13 +916,16 @@ func (u *User) replayHistory(toUser *User, brchannel *bridge.ChannelInfo) {
 		lastViewedAt = since
 	}
 
+	// But only use the stored last viewed if it's later than what the server knows.
 	if lastViewedAt > since {
 		since = lastViewedAt + 1
 		logSince = "stored"
 	}
 
+	// Post everything to the channel we haven't seen yet
 	events := u.br.GetReplayEvents(brchannel.ID, since)
 	if events == nil {
+		// If the channel is not from the primary team id, we can't get posts
 		if brchannel.TeamID == u.br.GetMe().TeamID {
 			logger.Errorf("something wrong with GetReplayEvents for %s for channel %s (%s)", u.Nick, channame, brchannel.ID)
 		}
