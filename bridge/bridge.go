@@ -65,6 +65,8 @@ type Bridger interface {
 	FormatterConfig() *config.FormatterConfig
 
 	IsChannelMember(channelID string) bool
+
+	GetReplayEvents(channelID string, since int64) []*Event
 }
 
 type ChannelInfo struct {
@@ -110,12 +112,16 @@ type ChannelAddEvent struct {
 	Adder     *UserInfo
 	Added     []*UserInfo
 	ChannelID string
+	Text      string
+	CreateAt  int64
 }
 
 type ChannelRemoveEvent struct {
 	Remover   *UserInfo
 	Removed   []*UserInfo
 	ChannelID string
+	Text      string
+	CreateAt  int64
 }
 
 type ChannelCreateEvent struct {
@@ -136,6 +142,7 @@ type ChannelMessageEvent struct {
 	MessageID   string
 	Event       string
 	ParentID    string
+	CreateAt    int64
 }
 
 type ChannelTopicEvent struct {
@@ -153,6 +160,7 @@ type DirectMessageEvent struct {
 	MessageID string
 	Event     string
 	ParentID  string
+	CreateAt  int64
 }
 
 type FileEvent struct {

@@ -3,6 +3,7 @@ package irckit
 import (
 	"encoding/binary"
 	"fmt"
+	"math"
 	"math/rand"
 	"net"
 	"net/http"
@@ -847,7 +848,7 @@ func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(string, string, .
 	return ch.SpoofMessage
 }
 
-//nolint:funlen,gocognit,gocyclo,cyclop
+
 func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throttle *time.Ticker, logger *logrus.Entry) {
 	for brchannel := range channels {
 		logger.Debug("addUserToChannelWorker", brchannel)
@@ -870,14 +871,147 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			u.syncChannel(brchannel.ID, "#"+channelName)
 		}
 
-		args := []string{brchannel.Name, brchannel.TeamID}
-
-		replay(u, u, args, "")
+		// Directly invoke the new shared method
+		u.replayHistory(u, brchannel)
 
 		if u.br.Protocol() == "mattermost" && !u.cfg.Mattermost().DisableAutoView {
 			u.updateLastViewed(brchannel.ID)
 		}
 		u.saveLastViewedAt(brchannel.ID)
+	}
+}
+
+// replayHistory handles the actual fetching and spoofing of historical channel messages.
+func (u *User) replayHistory(toUser *User, brchannel *bridge.ChannelInfo) {
+	since := u.br.GetLastViewedAt(brchannel.ID)
+	if since == 0 {
+		return
+	}
+
+	spoof := u.createSpoof(brchannel)
+	logSince := "server"
+	channame := brchannel.Name
+	if !brchannel.DM {
+		channame = "#" + brchannel.Name
+	}
+
+	var lastViewedAt int64
+	key := brchannel.ID
+	err := u.lastViewedAtDB.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(u.User))
+		if v := b.Get([]byte(key)); v != nil {
+			val := binary.LittleEndian.Uint64(v)
+			if val > math.MaxInt64 {
+				logger.Errorf("timestamp value %d exceeds int64 range", val)
+			} else {
+				lastViewedAt = int64(val)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		logger.Errorf("something wrong with u.lastViewedAtDB.View for %s for channel %s (%s)", u.Nick, channame, brchannel.ID)
+		lastViewedAt = since
+	}
+
+	if lastViewedAt > since {
+		since = lastViewedAt + 1
+		logSince = "stored"
+	}
+
+	events := u.br.GetReplayEvents(brchannel.ID, since)
+	if events == nil {
+		if brchannel.TeamID == u.br.GetMe().TeamID {
+			logger.Errorf("something wrong with GetReplayEvents for %s for channel %s (%s)", u.Nick, channame, brchannel.ID)
+		}
+		return
+	}
+
+	showReplayHdr := true
+
+	for _, event := range events {
+		var createAt int64
+		var text, nick, msgID, parentID string
+		var files []*bridge.File
+
+		// Extract attributes dynamically based on the event payload type
+		switch e := event.Data.(type) {
+		case *bridge.ChannelMessageEvent:
+			createAt = e.CreateAt
+			text = e.Text
+			nick = e.Sender.Nick
+			msgID = e.MessageID
+			parentID = e.ParentID
+			files = e.Files
+		case *bridge.DirectMessageEvent:
+			createAt = e.CreateAt
+			text = e.Text
+			nick = e.Sender.Nick
+			msgID = e.MessageID
+			parentID = e.ParentID
+			files = e.Files
+		case *bridge.ChannelAddEvent:
+			createAt = e.CreateAt
+			text = e.Text
+			nick = systemUser
+			if len(e.Added) > 0 {
+				ghost := u.createUserFromInfo(e.Added[0])
+				u.Srv.Channel(brchannel.ID).Join(ghost) //nolint:errcheck
+			}
+		case *bridge.ChannelRemoveEvent:
+			createAt = e.CreateAt
+			text = e.Text
+			nick = systemUser
+			if len(e.Removed) > 0 {
+				ghost := u.createUserFromInfo(e.Removed[0])
+				u.Srv.Channel(brchannel.ID).Part(ghost, "")
+			}
+		default:
+			continue
+		}
+
+		ts := time.Unix(0, createAt*int64(time.Millisecond))
+
+		for _, post := range strings.Split(text, "\n") {
+			if post == "" {
+				continue
+			}
+
+			if showReplayHdr {
+				date := ts.Format("2006-01-02 15:04:05")
+				if brchannel.DM {
+					spoof(nick, fmt.Sprintf("\x02Replaying msgs since %s\x02 \x1d(%s)\x1d", date, logSince))
+				} else {
+					spoof("matterircd", fmt.Sprintf("\x02Replaying msgs since %s\x02 \x1d(%s)\x1d", date, logSince))
+				}
+				logger.Infof("Replaying msgs for %s for %s (%s) since %s (%s)", u.Nick, channame, brchannel.ID, date, logSince)
+				showReplayHdr = false
+			}
+
+			if nick == systemUser {
+				post = "\x1d" + post + "\x1d"
+			}
+
+			replayMsg := fmt.Sprintf("[%s] %s", ts.Format("15:04"), post)
+			if (u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext) && nick != systemUser {
+				threadMsgID := u.prefixContext(brchannel.ID, msgID, parentID, "replay")
+				replayMsg = u.formatContextMessage(ts.Format("15:04"), threadMsgID, post)
+			}
+			spoof(nick, replayMsg)
+		}
+
+		if len(files) == 0 {
+			continue
+		}
+
+		for _, fname := range files {
+			fileMsg := "\x1ddownload file - " + fname.Name + "\x1d"
+			if u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext {
+				threadMsgID := u.prefixContext(brchannel.ID, msgID, parentID, "replay_file")
+				fileMsg = u.formatContextMessage(ts.Format("15:04"), threadMsgID, fileMsg)
+			}
+			spoof(nick, fileMsg)
+		}
 	}
 }
 

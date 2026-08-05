@@ -413,3 +413,7 @@ func (m *Mastodon) BridgeConfig() *config.BridgeConfig {
 func (m *Mastodon) FormatterConfig() *config.FormatterConfig {
 	return &m.cfg.Current().Mastodon.Formatter
 }
+
+func (m *Mastodon) GetReplayEvents(channelID string, since int64) []*bridge.Event {
+	return []*bridge.Event{}
+}

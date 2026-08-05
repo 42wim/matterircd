@@ -1209,14 +1209,8 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent, logger *logr
 	}
 
 	eventType := rmsg.EventType()
-	// add an edited/deleted string when messages are edited/deleted
+	// Check for edits/deletes to manage cache
 	if eventType == model.WebsocketEventPostEdited || eventType == model.WebsocketEventPostDeleted {
-		if eventType == model.WebsocketEventPostDeleted {
-			sbSuffix.WriteString(" \x1d(deleted)\x1d")
-		} else {
-			sbSuffix.WriteString(" \x1d(edited)\x1d")
-		}
-
 		// check if we have an edited direct message (channels have __)
 		name := m.GetChannelName(data.ChannelId)
 		if strings.Contains(name, "__") {
@@ -1228,61 +1222,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent, logger *logr
 		m.msgParentCache.Remove(data.Id)
 	}
 
-	msg := data.Message
-	// Manually slice off trailing newlines
-	for len(msg) > 0 && msg[len(msg)-1] == '\n' {
-		msg = msg[:len(msg)-1]
-	}
-
-	var sbMsg strings.Builder
-	sbMsg.Grow(len(data.Message) + 64)
-	attachments := data.Attachments()
-
-	switch {
-	case data.Type == "me":
-		sbMsg.WriteString("\x01ACTION ")
-		sbMsg.WriteString(msg)
-		sbMsg.WriteString(sbSuffix.String())
-		sbMsg.WriteString("\x01")
-	case data.Type == "slack_attachment":
-		if len(msg) > 0 {
-			sbMsg.WriteString(msg)
-		}
-		useFallback := len(msg) == 0
-		// https://docs.slack.dev/tools/node-slack-sdk/reference/web-api/interfaces/MessageAttachment/
-		m.parseMessageAttachments(&sbMsg, attachments, useFallback)
-	case data.Type == "custom_matterpoll":
-		pollMsg := parseMatterpollToMsg(attachments, useUnicode)
-		sbMsg.WriteString(msg)
-		sbMsg.WriteString(pollMsg)
-	case len(attachments) > 0:
-		if len(msg) > 0 {
-			sbMsg.WriteString(msg)
-		}
-		useFallback := len(msg) == 0
-		// https://developers.mattermost.com/integrate/reference/message-attachments/
-		m.parseMessageAttachments(&sbMsg, attachments, useFallback)
-	default:
-		sbMsg.WriteString(msg)
-	}
-
-	if sbSuffix.Len() > 0 && data.Type != "me" {
-		sbMsg.WriteString(sbSuffix.String())
-	}
-
-	// We can't use data.GetPreviewPost() due to a bug so use our own
-	previewText, previewUserID, previewChannelID := extractPreviewData(data.Metadata)
-	if !(previewText == "" && previewUserID == "" && previewChannelID == "") {
-		nick := previewUserID
-		if user := m.GetUser(previewUserID); user != nil {
-			nick = user.Nick
-		}
-		channel := m.GetChannelName(previewChannelID)
-		if strings.Contains(channel, "__") {
-			channel = ""
-		}
-		m.parsePreviewPost(&sbMsg, nick, channel, previewText)
-	}
+	formattedMsg := m.formatMessage(&data, string(eventType), logger)
 
 	switch {
 	case channelType == "D":
@@ -1291,11 +1231,12 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent, logger *logr
 		}
 
 		d := &bridge.DirectMessageEvent{
-			Text:      sbMsg.String(),
+			Text:      formattedMsg,
 			ChannelID: data.ChannelId,
 			MessageID: data.Id,
 			Event:     string(eventType),
 			ParentID:  data.RootId,
+			CreateAt:  data.CreateAt,
 		}
 
 		if ghost.Me {
@@ -1312,18 +1253,18 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent, logger *logr
 		}
 
 		event.Data = d
-
 		m.eventChan <- event
+
 	default:
 		messageType := ""
-		if !rc.Mattermost.DisableDefaultMentions && channelMentionsRegExp.MatchString(sbMsg.String()) {
+		if !rc.Mattermost.DisableDefaultMentions && channelMentionsRegExp.MatchString(formattedMsg) {
 			messageType = "notice"
 		}
 
 		event := &bridge.Event{
 			Type: "channel_message",
 			Data: &bridge.ChannelMessageEvent{
-				Text:        sbMsg.String(),
+				Text:        formattedMsg,
 				ChannelID:   data.ChannelId,
 				Sender:      ghost,
 				MessageType: messageType,
@@ -1331,6 +1272,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent, logger *logr
 				MessageID:   data.Id,
 				Event:       string(eventType),
 				ParentID:    data.RootId,
+				CreateAt:    data.CreateAt,
 			},
 		}
 
@@ -1341,7 +1283,7 @@ func (m *Mattermost) handleWsActionPost(rmsg *model.WebSocketEvent, logger *logr
 		m.handleFileEvent(channelType, ghost, &data, rmsg, logger)
 	}
 
-	logger.Debugf("handleWsActionPost() user %s sent %#v", ghost.Nick, sbMsg.String())
+	logger.Debugf("handleWsActionPost() user %s sent %#v", ghost.Nick, formattedMsg)
 	logger.Tracef("%#v", data) //nolint:govet
 }
 
@@ -1787,6 +1729,84 @@ func (m *Mattermost) getDMUser(name interface{}) *bridge.UserInfo {
 	return nil
 }
 
+func (m *Mattermost) formatMessage(data *model.Post, eventType string, logger *logrus.Entry) string {
+	rc := m.cfg.Current()
+	useUnicode := rc.Mattermost.Formatter.Unicode
+
+	var sbSuffix strings.Builder
+	sbSuffix.Grow(rc.Mattermost.ShortenRepliesTo + 32)
+
+	if !rc.Mattermost.HideReplies && data.RootId != "" {
+		cachedRoot, err := m.getCachedPostInfo(data.RootId, nil, rc.Mattermost.ShortenRepliesTo, "@", useUnicode, logger)
+		if err != nil {
+			logger.Errorf("Unable to get parent post for %#v", data) //nolint:govet
+		} else {
+			sbSuffix.WriteString(cachedRoot.ReplyMsg)
+		}
+	}
+
+	if eventType == string(model.WebsocketEventPostEdited) {
+		sbSuffix.WriteString(" \x1d(edited)\x1d")
+	} else if eventType == string(model.WebsocketEventPostDeleted) {
+		sbSuffix.WriteString(" \x1d(deleted)\x1d")
+	}
+
+	msg := data.Message
+	// Manually slice off trailing newlines
+	for len(msg) > 0 && msg[len(msg)-1] == '\n' {
+		msg = msg[:len(msg)-1]
+	}
+
+	var sbMsg strings.Builder
+	sbMsg.Grow(len(msg) + sbSuffix.Len() + 64)
+	attachments := data.Attachments()
+
+	switch {
+	case data.Type == "me":
+		sbMsg.WriteString("\x01ACTION ")
+		sbMsg.WriteString(msg)
+		sbMsg.WriteString(sbSuffix.String())
+		sbMsg.WriteString("\x01")
+	case data.Type == "slack_attachment":
+		if len(msg) > 0 {
+			sbMsg.WriteString(msg)
+		}
+		useFallback := len(msg) == 0
+		m.parseMessageAttachments(&sbMsg, attachments, useFallback)
+	case data.Type == "custom_matterpoll":
+		pollMsg := parseMatterpollToMsg(attachments, useUnicode)
+		sbMsg.WriteString(msg)
+		sbMsg.WriteString(pollMsg)
+	case len(attachments) > 0:
+		if len(msg) > 0 {
+			sbMsg.WriteString(msg)
+		}
+		useFallback := len(msg) == 0
+		m.parseMessageAttachments(&sbMsg, attachments, useFallback)
+	default:
+		sbMsg.WriteString(msg)
+	}
+
+	if sbSuffix.Len() > 0 && data.Type != "me" {
+		sbMsg.WriteString(sbSuffix.String())
+	}
+
+	previewText, previewUserID, previewChannelID := extractPreviewData(data.Metadata)
+	if !(previewText == "" && previewUserID == "" && previewChannelID == "") {
+		nick := previewUserID
+		if user := m.GetUser(previewUserID); user != nil {
+			nick = user.Nick
+		}
+		channel := m.GetChannelName(previewChannelID)
+		if strings.Contains(channel, "__") {
+			channel = ""
+		}
+		m.parsePreviewPost(&sbMsg, nick, channel, previewText)
+	}
+
+	return sbMsg.String()
+}
+
 const (
 	messageAttachmentCharNonUnicode = "|"
 	// right one quarter block (U+1FB87)
@@ -2221,6 +2241,112 @@ func (m *Mattermost) GetLastSentMsgs() []string {
 	}
 
 	return data
+}
+
+func (m *Mattermost) GetReplayEvents(channelID string, since int64) []*bridge.Event {
+	mmPostList := m.mc.GetPostsSince(channelID, since)
+	if mmPostList == nil {
+		return nil
+	}
+	if len(mmPostList.Order) == 0 {
+		return []*bridge.Event{}
+	}
+
+	events := make([]*bridge.Event, 0, len(mmPostList.Order))
+	channelName := m.GetChannelName(channelID)
+	isDM := strings.Contains(channelName, "__")
+
+	// traverse the order in reverse
+	for i := len(mmPostList.Order) - 1; i >= 0; i-- {
+		p := mmPostList.Posts[mmPostList.Order[i]]
+
+		if p.DeleteAt > p.CreateAt || p.CreateAt < since {
+			continue
+		}
+
+		props := p.GetProps()
+		botname, override := props["override_username"].(string)
+		user := m.GetUser(p.UserId)
+		if override {
+			user.Nick = botname
+		}
+
+		switch p.Type {
+		case model.PostTypeAddToTeam, model.PostTypeJoinChannel, model.PostTypeAddToChannel:
+			targetUser := user
+			if addedUserID, ok := props["addedUserId"].(string); ok {
+				targetUser = m.GetUser(addedUserID)
+			}
+			events = append(events, &bridge.Event{
+				Type: "channel_add",
+				Data: &bridge.ChannelAddEvent{
+					Added:     []*bridge.UserInfo{targetUser},
+					ChannelID: p.ChannelId,
+					Text:      p.Message,
+					CreateAt:  p.CreateAt,
+				},
+			})
+		case model.PostTypeRemoveFromTeam, model.PostTypeLeaveChannel, model.PostTypeRemoveFromChannel:
+			targetUser := user
+			if removedUserID, ok := props["removedUserId"].(string); ok {
+				targetUser = m.GetUser(removedUserID)
+			}
+			events = append(events, &bridge.Event{
+				Type: "channel_remove",
+				Data: &bridge.ChannelRemoveEvent{
+					Removed:   []*bridge.UserInfo{targetUser},
+					ChannelID: p.ChannelId,
+					Text:      p.Message,
+					CreateAt:  p.CreateAt,
+				},
+			})
+		default:
+			// Pre-allocate file slice
+			var files []*bridge.File
+			if len(p.FileIds) > 0 {
+				fileLinks := m.GetFileLinks(p.FileIds)
+				files = make([]*bridge.File, 0, len(fileLinks))
+				for _, fname := range fileLinks {
+					files = append(files, &bridge.File{Name: fname})
+				}
+			}
+
+			// Format text with exactly the same rules as the live socket
+			formattedMsg := m.formatMessage(p, "replay", logger)
+
+			if isDM {
+				events = append(events, &bridge.Event{
+					Type: "direct_message",
+					Data: &bridge.DirectMessageEvent{
+						Text:      formattedMsg,
+						ChannelID: p.ChannelId,
+						Sender:    user,
+						Receiver:  m.getDMUser(channelName),
+						Files:     files,
+						MessageID: p.Id,
+						ParentID:  p.RootId,
+						Event:     "replay",
+						CreateAt:  p.CreateAt,
+					},
+				})
+			} else {
+				events = append(events, &bridge.Event{
+					Type: "channel_message",
+					Data: &bridge.ChannelMessageEvent{
+						Text:      formattedMsg,
+						ChannelID: p.ChannelId,
+						Sender:    user,
+						Files:     files,
+						MessageID: p.Id,
+						ParentID:  p.RootId,
+						Event:     "replay",
+						CreateAt:  p.CreateAt,
+					},
+				})
+			}
+		}
+	}
+	return events
 }
 
 func (m *Mattermost) Config() any {

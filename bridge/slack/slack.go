@@ -1044,3 +1044,7 @@ func (s *Slack) BridgeConfig() *config.BridgeConfig {
 func (s *Slack) FormatterConfig() *config.FormatterConfig {
 	return &s.cfg.Current().Slack.Formatter
 }
+
+func (s *Slack) GetReplayEvents(channelID string, since int64) []*bridge.Event {
+	return []*bridge.Event{}
+}
