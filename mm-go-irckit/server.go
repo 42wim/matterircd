@@ -323,85 +323,7 @@ func (s *server) Quit(u *User, message string) {
 		ch.Part(u, message)
 	}
 
-	// Global Channel Sweep
-	s.RLock()
-	uniqueChannels := make(map[Channel]struct{})
-	for _, ch := range s.channels {
-		uniqueChannels[ch] = struct{}{}
-	}
-	s.RUnlock()
-
-	for ch := range uniqueChannels {
-		realUsers := 0
-		for _, other := range ch.Users() {
-			if !other.Ghost {
-				realUsers++
-			}
-		}
-
-		if realUsers == 0 {
-			for _, other := range ch.Users() {
-				ch.Part(other, "")
-			}
-			s.UnlinkChannel(ch)
-		}
-	}
-
-	// Global Server Registry & Pointer Sweep
-	s.Lock()
-	for id, userPtr := range s.users {
-		if userPtr == u {
-			delete(s.users, id)
-		}
-	}
-
-	if s.u == u {
-		s.u = nil
-		for _, other := range s.users {
-			if !other.Ghost && other.br != nil {
-				s.u = other
-				break
-			}
-		}
-	}
-	s.Unlock()
-
-	// Ghost Sweeper
-	s.RLock()
-	activeGhosts := make(map[*User]struct{})
-	for _, ch := range s.channels {
-		for _, usr := range ch.Users() {
-			// Deterministic check: No TCP connection + not the service bot = Ghost
-			if usr.Conn == nil && usr.Host != serviceName {
-				activeGhosts[usr] = struct{}{}
-			}
-		}
-	}
-
-	var orphaned []string
-	for id, ghost := range s.users {
-		if ghost.Conn == nil && ghost.Host != serviceName {
-			if _, isActive := activeGhosts[ghost]; !isActive {
-				orphaned = append(orphaned, id)
-			}
-		}
-	}
-	s.RUnlock()
-
-	if len(orphaned) > 0 {
-		s.Lock()
-		for _, id := range orphaned {
-			if ghost, ok := s.users[id]; ok {
-				// EXPLICITLY release the context to prevent the Go runtime
-				// from leaking the struct in the heap!
-				if ghost.cancel != nil {
-					ghost.cancel()
-				}
-			}
-			delete(s.users, id)
-		}
-		s.Unlock()
-	}
+	s.sweep(u)
 
 	go u.Close()
 }
@@ -634,12 +556,19 @@ outerloop:
 	return ErrHandshakeFailed
 }
 
-//nolint:funlen,gocognit,gocyclo
 func (s *server) Logout(user *User) {
 	for _, ch := range user.Channels() {
 		ch.Part(user, "")
 	}
 
+	s.sweep(user)
+}
+
+// sweep cleans up empty channels, orphaned ghosts, and the global server registry.
+//
+//nolint:funlen,gocognit,gocyclo
+func (s *server) sweep(u *User) {
+	// Global Channel Sweep
 	s.RLock()
 	uniqueChannels := make(map[Channel]struct{})
 	for _, ch := range s.channels {
@@ -663,8 +592,15 @@ func (s *server) Logout(user *User) {
 		}
 	}
 
+	// Global Server Registry & Pointer Sweep
 	s.Lock()
-	if s.u == user {
+	for id, userPtr := range s.users {
+		if userPtr == u {
+			delete(s.users, id)
+		}
+	}
+
+	if s.u == u {
 		s.u = nil
 		for _, other := range s.users {
 			if !other.Ghost && other.br != nil {
@@ -675,11 +611,13 @@ func (s *server) Logout(user *User) {
 	}
 	s.Unlock()
 
+	// Ghost Sweeper
 	s.RLock()
 	activeGhosts := make(map[*User]struct{})
 	for _, ch := range s.channels {
 		for _, usr := range ch.Users() {
-			if usr.Ghost {
+			// Deterministic check: No TCP connection + not the service bot = Ghost
+			if usr.Conn == nil && usr.Host != serviceName {
 				activeGhosts[usr] = struct{}{}
 			}
 		}
@@ -687,7 +625,7 @@ func (s *server) Logout(user *User) {
 
 	var orphaned []string
 	for id, ghost := range s.users {
-		if ghost.Ghost && ghost.Host != serviceName {
+		if ghost.Conn == nil && ghost.Host != serviceName {
 			if _, isActive := activeGhosts[ghost]; !isActive {
 				orphaned = append(orphaned, id)
 			}
@@ -698,6 +636,13 @@ func (s *server) Logout(user *User) {
 	if len(orphaned) > 0 {
 		s.Lock()
 		for _, id := range orphaned {
+			if ghost, ok := s.users[id]; ok {
+				// EXPLICITLY release the context to prevent the Go runtime
+				// from leaking the struct in the heap!
+				if ghost.cancel != nil {
+					ghost.cancel()
+				}
+			}
 			delete(s.users, id)
 		}
 		s.Unlock()
