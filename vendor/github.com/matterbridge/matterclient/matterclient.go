@@ -17,10 +17,10 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	lru "github.com/hashicorp/golang-lru"
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/jpillora/backoff"
 	prefixed "github.com/matterbridge/logrus-prefixed-formatter"
-	"github.com/mattermost/mattermost-server/v6/model"
+	"github.com/mattermost/mattermost/server/public/model"
 	"github.com/sirupsen/logrus"
 )
 
@@ -128,7 +128,11 @@ type Client struct {
 
 	logger      *logrus.Entry
 	rootLogger  *logrus.Logger
-	lruCache    *lru.Cache
+
+	apiLogger      *logrus.Entry
+	rootAPILogger  *logrus.Logger
+
+	lruCache    *lru.Cache[string, bool]
 	aliveChan   chan bool
 	loginCancel context.CancelFunc
 
@@ -142,12 +146,22 @@ type Client struct {
 var Matterircd bool
 
 func New(login string, pass string, team string, server string, mfatoken string) *Client {
+	// Logger for the rest of matterclient
 	rootLogger := logrus.New()
 	rootLogger.SetFormatter(&prefixed.TextFormatter{
 		PrefixPadding: 13,
 		DisableColors: false,
 		FullTimestamp: true,
 	})
+	// Logger for Mattermost API calls
+	rootAPILogger := logrus.New()
+	rootAPILogger.SetFormatter(&prefixed.TextFormatter{
+		PrefixPadding: 21,
+		DisableColors: false,
+		FullTimestamp: true,
+	})
+	// Default to higher than "warn" to not log anything
+	rootAPILogger.SetLevel(logrus.ErrorLevel)
 
 	cred := &Credentials{
 		Login:    login,
@@ -157,12 +171,12 @@ func New(login string, pass string, team string, server string, mfatoken string)
 		MFAToken: mfatoken,
 	}
 
-	cache, _ := lru.New(500)
+	cache, _ := lru.New[string, bool](500)
 
 	return &Client{
-		Credentials:  cred,
-		MessageChan:  make(chan *Message, 100),
-		Users:        &UsersCache{
+		Credentials: cred,
+		MessageChan: make(chan *Message, 100),
+		Users: &UsersCache{
 			users:    make(map[string]*model.User, 1000),
 			channels: make(map[string]map[string]struct{}, 1000),
 			teams:    make(map[string]map[string]struct{}, 10),
@@ -173,9 +187,14 @@ func New(login string, pass string, team string, server string, mfatoken string)
 
 			channelLastViewedAt: make(map[string]int64, 1000),
 		},
-		rootLogger: rootLogger,
 		lruCache:   cache,
+
+		rootLogger: rootLogger,
 		logger:     rootLogger.WithFields(logrus.Fields{"prefix": "matterclient"}),
+
+		rootAPILogger: rootAPILogger,
+		apiLogger:     rootAPILogger.WithFields(logrus.Fields{"prefix": "matterclient: MM API"}),
+
 		aliveChan:  make(chan bool),
 	}
 }
@@ -334,7 +353,7 @@ func (m *Client) initClient(b *backoff.Backoff) error {
 		},
 		Proxy: http.ProxyFromEnvironment,
 
-		// https://github.com/matterbridge/matterclient/pull/9
+		// https://github.com/golang/go/issues/39299
 		DialContext: (&net.Dialer{
 			Timeout:   time.Second * time.Duration(m.Timeout),
 			KeepAlive: 30 * time.Second,
@@ -345,7 +364,6 @@ func (m *Client) initClient(b *backoff.Backoff) error {
 		TLSHandshakeTimeout:   time.Second * time.Duration(m.Timeout),
 		ExpectContinueTimeout: 1 * time.Second,
 
-		// https://github.com/matterbridge/matterclient/pull/9
 		// Additional tuning
 		MaxIdleConnsPerHost: 10,
 	}
@@ -397,7 +415,8 @@ func (m *Client) serverAlive(b *backoff.Backoff) error {
 
 		d := b.Duration()
 		// bogus call to get the serverversion
-		resp, err := m.Client.Logout()
+		m.apiLogger.Info("serverAlive: Logout")
+		resp, err := m.Client.Logout(context.TODO())
 		if err != nil {
 			return err
 		}
@@ -416,6 +435,8 @@ func (m *Client) serverAlive(b *backoff.Backoff) error {
 // initialize user and teams
 // nolint:funlen
 func (m *Client) initUser() error {
+	ctx := context.TODO()
+
 	m.Lock()
 	if m.OtherTeams == nil {
 		m.OtherTeams = make(map[string]*Team)
@@ -429,7 +450,8 @@ func (m *Client) initUser() error {
 	for {
 		var resp *model.Response
 		var err error
-		teams, resp, err = m.Client.GetTeamsForUser(userID, "")
+		m.apiLogger.Warnf("initUser: GetTeamsForUser: UserID %s #%d", userID, retryCount)
+		teams, resp, err = m.Client.GetTeamsForUser(ctx, userID, "")
 		if err == nil {
 			break
 		}
@@ -476,7 +498,8 @@ func (m *Client) initUser() error {
 			}
 
 			query := "/users?in_team=" + team.Id + "&page=" + strconv.Itoa(idx) + "&per_page=" + strconv.Itoa(batchSize)
-			resp, err := m.Client.DoAPIGet(query, "")
+			m.apiLogger.Warnf("initUser: DoAPIGet: query %s #%d", query, retryCount)
+			resp, err := m.Client.DoAPIGet(context.TODO(), query, "")
 			if err != nil {
 				var mResp *model.Response
 				if resp != nil {
@@ -624,6 +647,7 @@ func (m *Client) initUserChannels() error {
 }
 
 func (m *Client) doLogin(firstConnection bool, b *backoff.Backoff) error {
+	ctx := context.TODO()
 	var (
 		logmsg = "trying login"
 		err    error
@@ -644,9 +668,11 @@ func (m *Client) doLogin(firstConnection bool, b *backoff.Backoff) error {
 				return err
 			}
 		case m.Credentials.MFAToken != "":
-			user, _, err = m.Client.LoginWithMFA(m.Credentials.Login, m.Credentials.Pass, m.Credentials.MFAToken)
+			m.apiLogger.Info("doLogin: LoginWithMFA")
+			user, _, err = m.Client.LoginWithMFA(ctx, m.Credentials.Login, m.Credentials.Pass, m.Credentials.MFAToken)
 		default:
-			user, _, err = m.Client.Login(m.Credentials.Login, m.Credentials.Pass)
+			m.apiLogger.Info("doLogin: Login")
+			user, _, err = m.Client.Login(ctx, m.Credentials.Login, m.Credentials.Pass)
 		}
 
 		if err != nil {
@@ -695,7 +721,8 @@ func (m *Client) doLoginToken() (*model.User, *model.Response, error) {
 		m.logger.Debugf(logmsg + " with personal token")
 	}
 
-	user, resp, err = m.Client.GetMe("")
+	m.apiLogger.Info("doLoginToken: GetMe")
+	user, resp, err = m.Client.GetMe(context.TODO(), "")
 	if err != nil {
 		return user, resp, err
 	}
@@ -788,7 +815,7 @@ func (m *Client) wsConnect() {
 	m.WsConnected = true
 }
 
-func (m *Client) doCheckAlive() error {
+func (m *Client) doCheckAlive(ctx context.Context) error {
 	if m.WsClient != nil && m.WsClient.ListenError != nil {
 		return fmt.Errorf("websocket listen error: %w", m.WsClient.ListenError)
 	}
@@ -814,7 +841,8 @@ func (m *Client) doCheckAlive() error {
 	}
 
 	m.logger.Tracef("websocket has been quiet (last event %v ago; up %s), falling back to HTTP GetPing", timeSinceActivity.Round(time.Second), uptime)
-	if _, _, err := m.Client.GetPing(); err != nil {
+	m.apiLogger.Info("doCheckAlive: GetPing")
+	if _, _, err := m.Client.GetPing(ctx); err != nil {
 		m.logger.Warnf("fallback HTTP ping failed (up %s): %s", uptime, err)
 		return fmt.Errorf("fallback HTTP ping failed (up %s): %w", uptime, err)
 	}
@@ -837,8 +865,8 @@ func (m *Client) checkAlive(ctx context.Context) {
 			var err error
 
 			// check if session still is valid
-			for i := 0; i < 3; i++ {
-				err = m.doCheckAlive()
+			for i := 0; i < 3; i++ { //nolint:intrange
+				err = m.doCheckAlive(ctx)
 				if err == nil {
 					break
 				}
@@ -869,7 +897,7 @@ func (m *Client) checkConnection(ctx context.Context) {
 			if !alive {
 				time.Sleep(time.Second * 10)
 
-				if m.doCheckAlive() != nil {
+				if m.doCheckAlive(ctx) != nil {
 					m.Reconnect()
 				}
 			}
@@ -931,7 +959,7 @@ func (m *Client) WsReceiver(ctx context.Context) {
 			// Synchronously update local cache to avoid race conditions downstream
 			m.syncJoinedChannelsCache(event)
 
-			go m.maintainUsersCache(event)
+			go m.maintainUsersCache(ctx, event)
 
 			msg := &Message{
 				Raw:  event,
@@ -1029,13 +1057,26 @@ func (m *Client) Logout() error {
 	// actually log out
 	m.logger.Debug("running m.Client.Logout")
 
-	if _, err := m.Client.Logout(); err != nil {
+	m.apiLogger.Info("Logout")
+	if _, err := m.Client.Logout(context.TODO()); err != nil {
 		return err
 	}
 
 	m.logger.Debug("exiting Logout()")
 
 	return nil
+}
+
+// SetLogAPICalls sets the log level of the Mattermost API-call logger.
+// Set to "warn" to log most API request operations (some lifecycle calls are logged at "info").
+// Accepted levels are: 'debug', 'info', 'warn', 'error', 'fatal' and 'panic'.
+func (m *Client) SetLogAPICalls(level string) {
+	l, err := logrus.ParseLevel(level)
+	if err != nil {
+		m.logger.Warnf("Failed to parse specified log-level '%s': %#v", level, err)
+	} else {
+		m.rootAPILogger.SetLevel(l)
+	}
 }
 
 // SetLogLevel tries to parse the specified level and if successful sets
@@ -1170,13 +1211,14 @@ func (m *Client) UpdateTeamUsersCache(teamID string, user *model.User) {
 }
 
 //nolint:unused
-func (m *Client) syncSingleUser(event *model.WebSocketEvent) {
+func (m *Client) syncSingleUser(ctx context.Context, event *model.WebSocketEvent) {
 	userID, ok := event.GetData()["user_id"].(string)
 	if !ok {
 		return
 	}
 
-	user, _, err := m.Client.GetUser(userID, "")
+	m.apiLogger.Warnf("syncSingleUser: GetUser: UserID: %s", userID)
+	user, _, err := m.Client.GetUser(ctx, userID, "")
 	if err != nil {
 		m.logger.Errorf("syncSingleUser failed to get user %s: %v", userID, err)
 		return
@@ -1190,7 +1232,7 @@ func (m *Client) syncSingleUser(event *model.WebSocketEvent) {
 }
 
 //nolint:gocognit,gocyclo,funlen
-func (m *Client) maintainUsersCache(event *model.WebSocketEvent) {
+func (m *Client) maintainUsersCache(ctx context.Context, event *model.WebSocketEvent) {
 	switch event.EventType() {
 	case model.WebsocketEventNewUser, model.WebsocketEventUserUpdated, model.WebsocketEventUserAdded:
 		var u *model.User
@@ -1213,7 +1255,7 @@ func (m *Client) maintainUsersCache(event *model.WebSocketEvent) {
 				}
 			}
 		} else if userID, ok := event.GetData()["user_id"].(string); ok && userID != "" {
-			u = m.GetUser(userID)
+			u = m.GetUser(ctx, userID)
 		}
 
 		// If we couldn't resolve a valid user, bail out early
@@ -1334,7 +1376,7 @@ func (m *Client) maintainUsersCache(event *model.WebSocketEvent) {
 		if channel == nil || channel.Id == "" {
 			if event.EventType() != model.WebsocketEventChannelUpdated {
 				if channelID, ok := event.GetData()["channel_id"].(string); ok && channelID != "" {
-					m.GetChannel(channelID)
+					m.GetChannel(ctx, channelID)
 				}
 			}
 			break

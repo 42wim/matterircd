@@ -7,7 +7,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 )
 
 //go:generate go run gen.go
@@ -74,41 +73,6 @@ const (
 	Dark        SkinTone = 0x1f3ff
 )
 
-// ParseSkinTone parses the skin tone from the passed string.
-func ParseSkinTone(str string) (SkinTone, error) {
-	s := strings.TrimSpace(strings.ToLower(str))
-	if s == "" {
-		return Neutral, nil
-	}
-	switch cleanRE.ReplaceAllString(s, "") {
-	case "neutral", "none":
-		return Neutral, nil
-	case "light", "lite":
-		return Light, nil
-	case "mediumlight", "mediumlite":
-		return MediumLight, nil
-	case "medium":
-		return Medium, nil
-	case "mediumdark":
-		return MediumDark, nil
-	case "dark":
-		return Dark, nil
-	}
-	return Neutral, ErrInvalidSkinTone
-}
-
-// UnmarshalText satisfies the [encoding.TextUnmarshaler] interface.
-func (s *SkinTone) UnmarshalText(text []byte) error {
-	var err error
-	*s, err = ParseSkinTone(string(text))
-	return err
-}
-
-// MarshalText satisfies the [encoding.TextMarshaler] interface.
-func (s *SkinTone) MarshalText() ([]byte, error) {
-	return []byte(s.String()), nil
-}
-
 // String satisfies the [fmt.Stringer] interface.
 func (s SkinTone) String() string {
 	switch s {
@@ -129,32 +93,10 @@ func (s SkinTone) String() string {
 }
 
 var (
-	skinTonesRE   = regexp.MustCompile(`^(.+?)_((?:neutral|light|medium_light|medium|medium_dark|dark))_skin_tone$`)
-	skinTonesList = []string{"light", "medium_light", "medium", "medium_dark", "dark"}
-)
-
-// Error is a emoji package error.
-type Error string
-
-// Error satisfies the error interface.
-func (err Error) Error() string {
-	return string(err)
-}
-
-const (
-	// ErrInvalidSkinTone is the invalid skin tone error.
-	ErrInvalidSkinTone Error = "invalid skin tone"
-)
-
-var (
-	emojiInitOnce sync.Once
-	emojiData     []Emoji
-
 	// codeMap provides a map of the emoji unicode code to its emoji data.
 	codeMap map[string]int
 	// aliasMap provides a map of the alias to its emoji data.
 	aliasMap map[string]int
-	aliasPairs []string
 	// codeReplacer is the string replacer for emoji codes.
 	codeReplacer *strings.Replacer
 	// aliasReplacer is the string replacer for emoji aliases.
@@ -170,7 +112,7 @@ var (
 	emoticonAliasMap map[string]string
 )
 
-func initEmoji() {
+func init() {
 	data := Gemoji()
 	// initialize
 	codeMap = make(map[string]int, len(data))
@@ -178,7 +120,7 @@ func initEmoji() {
 	emoticonCodeMap = make(map[string]string)
 	emoticonAliasMap = make(map[string]string)
 	// process emoji codes and aliases
-	var codePairs []string
+	var codePairs, aliasPairs []string
 	for i, e := range data {
 		if e.Emoji == "" || len(e.Aliases) == 0 {
 			continue
@@ -190,14 +132,6 @@ func initEmoji() {
 				continue
 			}
 			aliasMap[a], aliasPairs = i, append(aliasPairs, ":"+a+":", e.Emoji)
-			// include skin tones
-			if e.SkinTones {
-				for _, t := range skinTonesList {
-					aWithTone := a + "_" + t + "_skin_tone"
-					tone, _ := ParseSkinTone(t)
-					aliasMap[aWithTone], aliasPairs = i, append(aliasPairs, ":"+aWithTone+":", e.Tone(tone))
-				}
-			}
 		}
 	}
 	// process emoticons
@@ -218,18 +152,16 @@ func initEmoji() {
 	codeReplacer = strings.NewReplacer(codePairs...)
 	aliasReplacer = strings.NewReplacer(aliasPairs...)
 	aliasEmoticonReplacer = strings.NewReplacer(aliasEmoticonPairs...)
-	emojiData = data
 }
 
 // FromCode retrieves the emoji data based on the provided unicode code (ie,
 // "\u2618" will return the Gemoji data for "shamrock").
 func FromCode(code string) *Emoji {
-	emojiInitOnce.Do(initEmoji)
 	i, ok := codeMap[code]
 	if !ok {
 		return nil
 	}
-	data := emojiData
+	data := Gemoji()
 	return &data[i]
 }
 
@@ -237,35 +169,20 @@ func FromCode(code string) *Emoji {
 // "alias" or ":alias:" (ie, "shamrock" or ":shamrock:" will return the Gemoji
 // data for "shamrock").
 func FromAlias(alias string) *Emoji {
-	emojiInitOnce.Do(initEmoji)
 	if strings.HasPrefix(alias, ":") && strings.HasSuffix(alias, ":") {
 		alias = alias[1 : len(alias)-1]
-	}
-	tone := Neutral
-	// support skin tones
-	matches := skinTonesRE.FindStringSubmatch(alias)
-	if len(matches) == 3 {
-		alias = matches[1]
-		tone, _ = ParseSkinTone(matches[2])
 	}
 	i, ok := aliasMap[alias]
 	if !ok {
 		return nil
 	}
-	data := emojiData
-	if tone != Neutral {
-		modifiedEmoji := data[i]
-		tonedString := modifiedEmoji.Tone(tone)
-		modifiedEmoji.Emoji = tonedString
-		return &modifiedEmoji
-	}
+	data := Gemoji()
 	return &data[i]
 }
 
 // FromEmoticon retrieves the emoji data based on the provided emoticon (ie,
 // ":o)" will return the Gemoji data for "monkey face").
 func FromEmoticon(emoticon string) *Emoji {
-	emojiInitOnce.Do(initEmoji)
 	alias, ok := emoticonAliasMap[emoticon]
 	if !ok {
 		return nil
@@ -277,21 +194,18 @@ func FromEmoticon(emoticon string) *Emoji {
 // alias (in the form of ":alias:") (ie, "\u2618" will be converted to
 // ":shamrock:").
 func ReplaceCodes(s string) string {
-	emojiInitOnce.Do(initEmoji)
 	return codeReplacer.Replace(s)
 }
 
 // ReplaceAliases replaces all aliases of the form ":alias:" with its
 // corresponding unicode value.
 func ReplaceAliases(s string) string {
-	emojiInitOnce.Do(initEmoji)
 	return aliasReplacer.Replace(s)
 }
 
 // emoticonReplacer replaces all matched emoticon strings in s with the its
 // corresponding map'd value in repl.
 func emoticonReplacer(s string, repl map[string]string) string {
-	emojiInitOnce.Do(initEmoji)
 	matches := emoticonRE.FindAllStringSubmatchIndex(s, -1)
 	// bail if no matches
 	if len(matches) == 0 {
@@ -317,7 +231,6 @@ func emoticonReplacer(s string, repl map[string]string) string {
 // corresponding emoji code (ie, the monkey face emoticon ":o)" will be
 // replaced with "\U0001f435").
 func ReplaceEmoticonsWithCodes(s string) string {
-	emojiInitOnce.Do(initEmoji)
 	return emoticonReplacer(s, emoticonCodeMap)
 }
 
@@ -325,7 +238,6 @@ func ReplaceEmoticonsWithCodes(s string) string {
 // the first corresponding emoji alias (in the form of :alias:) (ie, the monkey
 // face emoticon ":o)" will be replaced with ":monkey_face:").
 func ReplaceEmoticonsWithAliases(s string) string {
-	emojiInitOnce.Do(initEmoji)
 	return emoticonReplacer(s, emoticonAliasMap)
 }
 
@@ -333,7 +245,6 @@ func ReplaceEmoticonsWithAliases(s string) string {
 // :alias:) with its corresponding emoticon (ie, :D, :p, etc) (ie, the alias
 // ":monkey_face:" will be replaced with ":o)").
 func ReplaceAliasesWithEmoticons(s string) string {
-	emojiInitOnce.Do(initEmoji)
 	return aliasEmoticonReplacer.Replace(s)
 }
 
@@ -357,29 +268,4 @@ var emoticonMap = map[string][]string{
 	"stuck_out_tongue_winking_eye": {";p", ";P", ";-p", ";-P", ";b", ";-b"},
 	"sunglasses":                   {"8)"},
 	"wink":                         {";)", ";-)"},
-}
-
-// cleanRE is matches non alpha characters.
-var cleanRE = regexp.MustCompile(`(?i)[^a-z]`)
-
-// AddAlias adds the specified emoji alias
-func AddAlias(alias string, dest string) error {
-	if strings.HasPrefix(alias, ":") && strings.HasSuffix(alias, ":") {
-		alias = alias[1 : len(alias)-1]
-	}
-	if strings.HasPrefix(dest, ":") && strings.HasSuffix(dest, ":") {
-		dest = dest[1 : len(dest)-1]
-	}
-
-	if _, ok := aliasMap[dest]; !ok {
-		return fmt.Errorf("destination emoji alias does not exist")
-	}
-
-	data := Gemoji()
-	idx := aliasMap[dest]
-	aliasMap[alias], aliasPairs = idx, append(aliasPairs, ":"+alias+":", data[idx].Emoji)
-
-	// update replacer with latest
-	aliasReplacer = strings.NewReplacer(aliasPairs...)
-	return nil
 }

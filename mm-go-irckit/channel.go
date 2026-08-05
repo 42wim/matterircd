@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/42wim/matterircd/utils"
-	"github.com/mattermost/mattermost-server/v6/model"
+	"github.com/mattermost/mattermost/server/public/model"
 	"github.com/sorcix/irc"
 )
 

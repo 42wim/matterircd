@@ -1,6 +1,7 @@
 package matterclient
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mattermost/mattermost-server/v6/model"
+	"github.com/mattermost/mattermost/server/public/model"
 )
 
 func (m *Client) GetNickName(userID string) string {
-	if user := m.GetUser(userID); user != nil {
+	if user := m.GetUser(context.TODO(), userID); user != nil {
 		return user.Nickname
 	}
 
@@ -25,7 +26,8 @@ func (m *Client) GetStatus(userID string) string {
 	m.Users.mu.RUnlock()
 
 	if !ok {
-		res, _, err := m.Client.GetUserStatus(userID, "")
+		m.apiLogger.Warnf("GetStatus: GetUserStatus: UserID: %s", userID)
+		res, _, err := m.Client.GetUserStatus(context.TODO(), userID, "")
 		if err != nil {
 			status = "offline"
 		} else {
@@ -38,7 +40,7 @@ func (m *Client) GetStatus(userID string) string {
 	m.Users.mu.RUnlock()
 
 	if !tracked {
-		user := m.GetUser(userID)
+		user := m.GetUser(context.TODO(), userID)
 		var rawJSON string
 		if user != nil && user.Props != nil {
 			if val, propOk := user.Props["customStatus"]; propOk {
@@ -91,7 +93,8 @@ func (m *Client) GetStatuses() map[string]string {
 		}
 
 		batch := missingIDs[i:end]
-		res, _, err := m.Client.GetUsersStatusesByIds(batch)
+		m.apiLogger.Warnf("GetStatuses: GetUsersStatusesByIds: Batch: %d #%d", len(batch), i)
+		res, _, err := m.Client.GetUsersStatusesByIds(context.TODO(), batch)
 		if err != nil {
 			continue
 		}
@@ -129,7 +132,7 @@ func (m *Client) GetTeamName(teamID string) string {
 	return ""
 }
 
-func (m *Client) GetUser(userID string) *model.User {
+func (m *Client) GetUser(ctx context.Context, userID string) *model.User {
 	m.Users.mu.RLock()
 	user, exists := m.Users.users[userID]
 	m.Users.mu.RUnlock()
@@ -138,7 +141,8 @@ func (m *Client) GetUser(userID string) *model.User {
 		return user
 	}
 
-	res, _, err := m.Client.GetUser(userID, "")
+	m.apiLogger.Warnf("GetUser: UserID: %s", userID)
+	res, _, err := m.Client.GetUser(ctx, userID, "")
 	if err != nil {
 		m.logger.Debugf("GetUser failed to fetch missing user %s: %s", userID, err)
 		return nil
@@ -164,7 +168,7 @@ func (c *UsersCache) GetUserCustomStatus(userID string) string {
 }
 
 func (m *Client) GetUserName(userID string) string {
-	if user := m.GetUser(userID); user != nil {
+	if user := m.GetUser(context.TODO(), userID); user != nil {
 		return user.Username
 	}
 
@@ -245,7 +249,8 @@ func (m *Client) UpdateUsers() error {
 		}
 
 		query := "/users?page=" + strconv.Itoa(idx) + "&per_page=" + strconv.Itoa(batchSize)
-		resp, err := m.Client.DoAPIGet(query, "")
+		m.apiLogger.Warnf("UpdateUsers: DoAPIGet: query %s #%d", query, retryCount)
+		resp, err := m.Client.DoAPIGet(context.TODO(), query, "")
 		if err != nil {
 			var mResp *model.Response
 			if resp != nil {
@@ -332,7 +337,8 @@ func (m *Client) UpdateUserNick(nick string) error {
 	m.RUnlock()
 	userClone.Nickname = nick
 
-	updatedUser, _, err := m.Client.UpdateUser(&userClone)
+	m.apiLogger.Warnf("UpdateUserNick: nick: %s", nick)
+	updatedUser, _, err := m.Client.UpdateUser(context.TODO(), &userClone)
 	if err != nil {
 		return err
 	}
@@ -354,7 +360,8 @@ func (m *Client) UsernamesInChannel(channelID string) []string {
 	idx := 0
 	retryCount := 0
 	for {
-		res, resp, err := m.Client.GetChannelMembers(channelID, idx, batchSize, "")
+		m.apiLogger.Warnf("UsernamesInChannel: GetChannelMembers: ChannelID: %s, Page: %d, PerPage: %d #%d", channelID, idx, batchSize, retryCount)
+		res, resp, err := m.Client.GetChannelMembers(context.TODO(), channelID, idx, batchSize, "")
 		if err != nil {
 			shouldRetry, hErr := m.HandleRetry("UsernamesInChannel", retryCount, 10, resp)
 			if hErr == nil && shouldRetry {
@@ -384,7 +391,8 @@ func (m *Client) UsernamesInChannel(channelID string) []string {
 }
 
 func (m *Client) UpdateStatus(userID string, status string) error {
-	_, _, err := m.Client.UpdateUserStatus(userID, &model.Status{Status: status})
+	m.apiLogger.Warnf("UpdateStatus: UserID: %s, Status: %s", userID, status)
+	_, _, err := m.Client.UpdateUserStatus(context.TODO(), userID, &model.Status{Status: status})
 	if err != nil {
 		return err
 	}
