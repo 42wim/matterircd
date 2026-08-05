@@ -72,7 +72,7 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 		ourlog.SetLevel(logrus.TraceLevel)
 	}
 
-	mc, err := m.loginToMattermost(onWsConnect, ctx)
+	mc, err := m.loginToMattermost(ctx, onWsConnect)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -119,7 +119,7 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 	return m, mc, nil
 }
 
-func (m *Mattermost) loginToMattermost(onWsConnect func(), ctx context.Context) (*matterclient.Client, error) {
+func (m *Mattermost) loginToMattermost(ctx context.Context, onWsConnect func()) (*matterclient.Client, error) {
 	rc := m.cfg.Current()
 
 	matterclient.Matterircd = true
@@ -129,11 +129,10 @@ func (m *Mattermost) loginToMattermost(onWsConnect func(), ctx context.Context) 
 		mc.Credentials.NoTLS = true
 	}
 
-	mc.Ctx = ctx
-
 	mc.AntiIdle = !rc.Mattermost.DisableAutoView || rc.Mattermost.ForceAntiIdle
 	mc.AntiIdleChan = rc.Mattermost.AntiIdleChannel
 	mc.AntiIdleIntvl = rc.Mattermost.AntiIdleInterval
+	mc.Ctx = ctx
 	mc.OnWsConnect = onWsConnect
 
 	mc.Timeout = rc.ClientTimeout
