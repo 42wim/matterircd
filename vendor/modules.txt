@@ -81,6 +81,11 @@ github.com/hashicorp/go-plugin/runner
 ## explicit; go 1.12
 github.com/hashicorp/golang-lru
 github.com/hashicorp/golang-lru/simplelru
+# github.com/hashicorp/golang-lru/v2 v2.0.7
+## explicit; go 1.18
+github.com/hashicorp/golang-lru/v2
+github.com/hashicorp/golang-lru/v2/internal
+github.com/hashicorp/golang-lru/v2/simplelru
 # github.com/hashicorp/hcl v1.0.0
 ## explicit
 github.com/hashicorp/hcl
@@ -108,7 +113,7 @@ github.com/magiconair/properties
 # github.com/matterbridge/logrus-prefixed-formatter v0.5.3-0.20200523233437-d971309a77ba
 ## explicit
 github.com/matterbridge/logrus-prefixed-formatter
-# github.com/matterbridge/matterclient v0.0.0-20260720233254-fb46ac0a7a63
+# github.com/matterbridge/matterclient v0.0.0-20260805040455-d9143e3d40ac
 ## explicit; go 1.21
 github.com/matterbridge/matterclient
 # github.com/mattermost/go-i18n v1.11.1-0.20211013152124-5c415071e404
@@ -143,9 +148,6 @@ github.com/mattn/go-isatty
 # github.com/mattn/go-mastodon v0.0.6
 ## explicit; go 1.16
 github.com/mattn/go-mastodon
-# github.com/mattn/go-runewidth v0.0.13
-## explicit; go 1.9
-github.com/mattn/go-runewidth
 # github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d
 ## explicit
 github.com/mgutz/ansi
@@ -155,10 +157,6 @@ github.com/mitchellh/go-testing-interface
 # github.com/mitchellh/mapstructure v1.5.0
 ## explicit; go 1.14
 github.com/mitchellh/mapstructure
-# github.com/muesli/reflow v0.3.0
-## explicit; go 1.13
-github.com/muesli/reflow/ansi
-github.com/muesli/reflow/wordwrap
 # github.com/nxadm/tail v1.4.11
 ## explicit; go 1.13
 # github.com/oklog/run v1.1.0
@@ -186,9 +184,6 @@ github.com/pkg/errors
 # github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2
 ## explicit
 github.com/pmezard/go-difflib/difflib
-# github.com/rivo/uniseg v0.2.0
-## explicit; go 1.12
-github.com/rivo/uniseg
 # github.com/sagikazarmark/locafero v0.3.0
 ## explicit; go 1.20
 github.com/sagikazarmark/locafero

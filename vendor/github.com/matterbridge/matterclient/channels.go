@@ -2,7 +2,9 @@ package matterclient
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,12 +20,33 @@ func (m *Client) GetChannel(ctx context.Context, channelID string) *model.Channe
 		return ch
 	}
 
-	mmchannel, _, err := m.Client.GetChannel(ctx, channelID, "")
+	query := "/channels/" + channelID
+	resp, err := m.Client.DoAPIGet(ctx, query, "")
 	if err != nil {
 		return nil
 	}
+	defer resp.Body.Close()
+
+	var summary ChannelSummary
+	if err := json.NewDecoder(resp.Body).Decode(&summary); err != nil {
+		return nil
+	}
+
+	mmchannel := &model.Channel{
+		Id:          summary.Id,
+		TeamId:      summary.TeamId,
+		Type:        model.ChannelType(summary.Type),
+		DisplayName: summary.DisplayName,
+		Name:        summary.Name,
+		Header:      summary.Header,
+		Purpose:     summary.Purpose,
+		CreatorId:   summary.CreatorId,
+	}
 
 	m.Users.mu.Lock()
+	if m.Users.channelData == nil {
+		m.Users.channelData = make(map[string]*model.Channel)
+	}
 	m.Users.channelData[channelID] = mmchannel
 	m.Users.mu.Unlock()
 
@@ -35,7 +58,7 @@ func (m *Client) GetChannels() []*model.Channel {
 	m.Users.mu.RLock()
 	defer m.Users.mu.RUnlock()
 
-	var channels []*model.Channel
+	channels := make([]*model.Channel, 0, 200)
 	for id := range m.Users.joinedChannels {
 		if ch, exists := m.Users.channelData[id]; exists {
 			channels = append(channels, ch)
@@ -90,11 +113,27 @@ func (m *Client) getChannelIDTeam(name string, teamID string) string {
 	}
 	m.Users.mu.RUnlock()
 
-	// Fallback if it's not found in the t.Channels or t.MoreChannels cache.
-	// This also let's us join private channels.
-	channel, _, err := m.Client.GetChannelByName(context.TODO(), name, teamID, "")
+	query := "/teams/" + teamID + "/channels/name/" + name
+	resp, err := m.Client.DoAPIGet(context.TODO(), query, "")
 	if err != nil {
 		return ""
+	}
+	defer resp.Body.Close()
+
+	var summary ChannelSummary
+	if err := json.NewDecoder(resp.Body).Decode(&summary); err != nil {
+		return ""
+	}
+
+	channel := &model.Channel{
+		Id:          summary.Id,
+		TeamId:      summary.TeamId,
+		Type:        model.ChannelType(summary.Type),
+		DisplayName: summary.DisplayName,
+		Name:        summary.Name,
+		Header:      summary.Header,
+		Purpose:     summary.Purpose,
+		CreatorId:   summary.CreatorId,
 	}
 
 	m.Users.mu.Lock()
@@ -136,14 +175,23 @@ func (m *Client) GetChannelUsers(channelID string) ([]*model.User, error) {
 	m.Users.mu.RUnlock()
 
 	const batchSize = 200
-	var allUsers []*model.User
+	fetchedUsers := make([]UserSummary, 0, batchSize)
 
 	idx := 0
 	retryCount := 0
 	for {
-		mmusersPaged, resp, err := m.Client.GetUsersInChannel(context.TODO(), channelID, idx, batchSize, "")
+		if m.IsAborted() {
+			return nil, errors.New("login aborted")
+		}
+
+		query := "/users?in_channel=" + channelID + "&page=" + strconv.Itoa(idx) + "&per_page=" + strconv.Itoa(batchSize)
+		resp, err := m.Client.DoAPIGet(context.TODO(), query, "")
 		if err != nil {
-			shouldRetry, hErr := m.HandleRetry("GetUsersInChannel", retryCount, 10, resp)
+			var mResp *model.Response
+			if resp != nil {
+				mResp = model.BuildResponse(resp)
+			}
+			shouldRetry, hErr := m.HandleRetry("GetUsersInChannel", retryCount, 10, mResp)
 			if hErr == nil && shouldRetry {
 				retryCount++
 				continue
@@ -152,30 +200,100 @@ func (m *Client) GetChannelUsers(channelID string) ([]*model.User, error) {
 		}
 		retryCount = 0
 
-		allUsers = append(allUsers, mmusersPaged...)
+		var list []UserSummary
+		if jsonErr := json.NewDecoder(resp.Body).Decode(&list); jsonErr != nil {
+			resp.Body.Close()
+			return nil, jsonErr
+		}
+		resp.Body.Close()
 
-		if len(mmusersPaged) < batchSize {
+		fetchedUsers = append(fetchedUsers, list...)
+
+		if len(list) < batchSize {
 			break
 		}
 		idx++
 	}
 
+	allUsers := make([]*model.User, 0, len(fetchedUsers))
+
 	m.Users.mu.Lock()
-	defer m.Users.mu.Unlock()
-
 	if m.Users.channels[channelID] == nil {
-		m.Users.channels[channelID] = make(map[string]struct{})
+		m.Users.channels[channelID] = make(map[string]struct{}, len(fetchedUsers))
 	}
 
-	for _, u := range allUsers {
-		m.Users.users[u.Id] = u
-		m.Users.channels[channelID][u.Id] = struct{}{}
+	for _, u := range fetchedUsers {
+		cachedUser, exists := m.Users.users[u.Id]
+
+		roles := u.Roles
+		if roles == "system_user" { //nolint:goconst
+			roles = "system_user"
+		} else if roles == "system_admin system_user" { //nolint:goconst
+			roles = "system_admin system_user"
+		}
+
+		if !exists { //nolint:nestif
+			cachedUser = &model.User{
+				Id:        u.Id,
+				Username:  u.Username,
+				FirstName: u.FirstName,
+				LastName:  u.LastName,
+				Nickname:  u.Nickname,
+				Roles:     roles,
+				Props:     u.Props,
+			}
+			m.Users.users[u.Id] = cachedUser
+		} else {
+			if cachedUser.Username != u.Username {
+				cachedUser.Username = u.Username
+			}
+			if cachedUser.FirstName != u.FirstName {
+				cachedUser.FirstName = u.FirstName
+			}
+			if cachedUser.LastName != u.LastName {
+				cachedUser.LastName = u.LastName
+			}
+			if cachedUser.Nickname != u.Nickname {
+				cachedUser.Nickname = u.Nickname
+			}
+			if cachedUser.Roles != roles {
+				cachedUser.Roles = roles
+			}
+			if u.Props != nil {
+				cachedUser.Props = u.Props
+			}
+		}
+
+		allUsers = append(allUsers, cachedUser)
+		m.Users.channels[channelID][cachedUser.Id] = struct{}{}
 	}
+	m.Users.mu.Unlock()
 
 	return allUsers, nil
 }
 
 func (m *Client) GetLastViewedAt(channelID string) int64 {
+	m.Users.mu.RLock()
+	// Check if the channel is deleted
+	ch, channelExists := m.Users.channelData[channelID]
+	if channelExists && ch.DeleteAt > 0 {
+		m.Users.mu.RUnlock()
+		return 0
+	}
+
+	// Check our view cache
+	if viewedAt, ok := m.Users.channelLastViewedAt[channelID]; ok {
+		m.Users.mu.RUnlock()
+		return viewedAt
+	}
+
+	// Get CreateAt while we still have the read lock, just in case we need it
+	var createAt int64
+	if channelExists {
+		createAt = ch.CreateAt
+	}
+	m.Users.mu.RUnlock()
+
 	m.RLock()
 	userID := m.User.Id
 	m.RUnlock()
@@ -184,7 +302,16 @@ func (m *Client) GetLastViewedAt(channelID string) int64 {
 	for {
 		res, resp, err := m.Client.GetChannelMember(context.TODO(), channelID, userID, "")
 		if err == nil {
-			return res.LastViewedAt
+			viewedAt := res.LastViewedAt
+			if viewedAt == 0 && createAt > 0 {
+				viewedAt = createAt
+			}
+
+			m.Users.mu.Lock()
+			m.Users.channelLastViewedAt[channelID] = viewedAt
+			m.Users.mu.Unlock()
+
+			return viewedAt
 		}
 
 		shouldRetry, hErr := m.HandleRetry("GetChannelMember", retryCount, 10, resp)
@@ -194,6 +321,11 @@ func (m *Client) GetLastViewedAt(channelID string) int64 {
 		}
 
 		m.logger.Errorf("GetChannelMember failed for %s: %v", channelID, err)
+
+		// Fallback on error: Return CreateAt if we know it, otherwise current time
+		if createAt > 0 {
+			return createAt
+		}
 		return model.GetMillis()
 	}
 }
@@ -203,7 +335,7 @@ func (m *Client) GetMoreChannels() []*model.Channel {
 	m.Users.mu.RLock()
 	defer m.Users.mu.RUnlock()
 
-	var channels []*model.Channel
+	channels := make([]*model.Channel, 0, 200)
 	for id, ch := range m.Users.channelData {
 		if _, joined := m.Users.joinedChannels[id]; !joined {
 			channels = append(channels, ch)
@@ -222,6 +354,19 @@ func (m *Client) GetTeamFromChannel(channelID string) string {
 		return ch.TeamId
 	}
 	return ""
+}
+
+// IsChannelMember returns true if the user is a member of the given channel ID.
+func (m *Client) IsChannelMember(channelID string) bool {
+	m.Users.mu.RLock()
+	defer m.Users.mu.RUnlock()
+
+	if m.Users.joinedChannels == nil {
+		return false
+	}
+
+	_, exists := m.Users.joinedChannels[channelID]
+	return exists
 }
 
 func (m *Client) JoinChannel(channelID string) error {
@@ -263,37 +408,55 @@ func (m *Client) UpdateChannelsTeam(teamID string) error {
 	m.RUnlock()
 
 	ctx := context.TODO()
-
 	const batchSize = 200
-	var mmchannels []*model.Channel
 
+	var joinedSummaries []ChannelSummary
 	retryCount := 0
 	for {
-		var resp *model.Response
-		var err error
-
-		mmchannels, resp, err = m.Client.GetChannelsForTeamForUser(ctx, teamID, m.User.Id, false, "")
-		if err == nil {
-			break
+		if m.IsAborted() {
+			return errors.New("login aborted")
 		}
 
-		shouldRetry, hErr := m.HandleRetry("GetChannelsForTeamForUser", retryCount, 10, resp)
-		if hErr == nil && shouldRetry {
-			retryCount++
-			continue
+		query := "/users/" + m.User.Id + "/teams/" + teamID + "/channels"
+		resp, err := m.Client.DoAPIGet(ctx, query, "")
+		if err != nil {
+			var mResp *model.Response
+			if resp != nil {
+				mResp = model.BuildResponse(resp)
+			}
+			shouldRetry, hErr := m.HandleRetry("GetChannelsForTeamForUser", retryCount, 10, mResp)
+			if hErr == nil && shouldRetry {
+				retryCount++
+				continue
+			}
+			return err
 		}
 
-		return err
+		if err := json.NewDecoder(resp.Body).Decode(&joinedSummaries); err != nil {
+			resp.Body.Close()
+			return err
+		}
+		resp.Body.Close()
+		break
 	}
 
-	moreChannels := make([]*model.Channel, 0, batchSize)
+	publicSummaries := make([]ChannelSummary, 0, batchSize)
+	var list []ChannelSummary
 
 	idx := 0
 	retryCount = 0
 	for {
-		channels, resp, err := m.Client.GetPublicChannelsForTeam(ctx, teamID, idx, batchSize, "")
+		if m.IsAborted() {
+			return errors.New("login aborted")
+		}
+		query := "/teams/" + teamID + "/channels?page=" + strconv.Itoa(idx) + "&per_page=" + strconv.Itoa(batchSize)
+		resp, err := m.Client.DoAPIGet(ctx, query, "")
 		if err != nil {
-			shouldRetry, hErr := m.HandleRetry("GetPublicChannelsForTeam", retryCount, 10, resp)
+			var mResp *model.Response
+			if resp != nil {
+				mResp = model.BuildResponse(resp)
+			}
+			shouldRetry, hErr := m.HandleRetry("GetPublicChannelsForTeam", retryCount, 10, mResp)
 			if hErr == nil && shouldRetry {
 				retryCount++
 				continue
@@ -302,26 +465,112 @@ func (m *Client) UpdateChannelsTeam(teamID string) error {
 		}
 		retryCount = 0
 
-		moreChannels = append(moreChannels, channels...)
-		if len(channels) < batchSize {
+		list = list[:0]
+		if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
+			resp.Body.Close()
+			return err
+		}
+		resp.Body.Close()
+
+		publicSummaries = append(publicSummaries, list...)
+
+		if len(list) < batchSize {
 			break
 		}
 		idx++
 	}
 
+	// Helper to intern highly repetitive channel types
+	internType := func(t string) model.ChannelType {
+		switch t {
+		case "O":
+			return model.ChannelTypeOpen
+		case "P":
+			return model.ChannelTypePrivate
+		case "D":
+			return model.ChannelTypeDirect
+		}
+		return model.ChannelType(t)
+	}
+
 	m.Users.mu.Lock()
 	if m.Users.channelData == nil {
-		m.Users.channelData = make(map[string]*model.Channel)
-		m.Users.joinedChannels = make(map[string]struct{})
+		totalChannels := len(joinedSummaries) + len(publicSummaries)
+		m.Users.channelData = make(map[string]*model.Channel, totalChannels)
+		m.Users.joinedChannels = make(map[string]struct{}, len(joinedSummaries))
+	} else {
+		for chanID := range m.Users.joinedChannels {
+			if ch, ok := m.Users.channelData[chanID]; ok && ch.TeamId == teamID {
+				delete(m.Users.joinedChannels, chanID)
+			}
+		}
 	}
 
-	for _, ch := range mmchannels {
-		m.Users.channelData[ch.Id] = ch
-		m.Users.joinedChannels[ch.Id] = struct{}{}
+	for _, ch := range joinedSummaries {
+		cached, exists := m.Users.channelData[ch.Id]
+		if !exists { //nolint:nestif
+			cached = &model.Channel{
+				Id:          ch.Id,
+				TeamId:      teamID,
+				Type:        internType(ch.Type),
+				DisplayName: ch.DisplayName,
+				Name:        ch.Name,
+				Header:      ch.Header,
+				Purpose:     ch.Purpose,
+				CreatorId:   ch.CreatorId,
+			}
+			m.Users.channelData[cached.Id] = cached
+		} else {
+			if cached.DisplayName != ch.DisplayName {
+				cached.DisplayName = ch.DisplayName
+			}
+			if cached.Name != ch.Name {
+				cached.Name = ch.Name
+			}
+			if cached.Header != ch.Header {
+				cached.Header = ch.Header
+			}
+			if cached.Purpose != ch.Purpose {
+				cached.Purpose = ch.Purpose
+			}
+			if newType := internType(ch.Type); cached.Type != newType {
+				cached.Type = newType
+			}
+		}
+		m.Users.joinedChannels[cached.Id] = struct{}{}
 	}
 
-	for _, ch := range moreChannels {
-		m.Users.channelData[ch.Id] = ch
+	for _, ch := range publicSummaries {
+		cached, exists := m.Users.channelData[ch.Id]
+		if !exists { //nolint:nestif
+			cached = &model.Channel{
+				Id:          ch.Id,
+				TeamId:      teamID,
+				Type:        internType(ch.Type),
+				DisplayName: ch.DisplayName,
+				Name:        ch.Name,
+				Header:      ch.Header,
+				Purpose:     ch.Purpose,
+				CreatorId:   ch.CreatorId,
+			}
+			m.Users.channelData[cached.Id] = cached
+		} else {
+			if cached.DisplayName != ch.DisplayName {
+				cached.DisplayName = ch.DisplayName
+			}
+			if cached.Name != ch.Name {
+				cached.Name = ch.Name
+			}
+			if cached.Header != ch.Header {
+				cached.Header = ch.Header
+			}
+			if cached.Purpose != ch.Purpose {
+				cached.Purpose = ch.Purpose
+			}
+			if newType := internType(ch.Type); cached.Type != newType {
+				cached.Type = newType
+			}
+		}
 	}
 	m.Users.mu.Unlock()
 

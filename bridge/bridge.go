@@ -2,6 +2,8 @@ package bridge
 
 import (
 	"time"
+
+	"github.com/42wim/matterircd/config"
 )
 
 type Bridger interface {
@@ -57,6 +59,12 @@ type Bridger interface {
 	GetFileLinks(fileIDs []string) []string
 
 	GetLastSentMsgs() []string
+
+	Config() any
+	BridgeConfig() *config.BridgeConfig
+	FormatterConfig() *config.FormatterConfig
+
+	IsChannelMember(channelID string) bool
 }
 
 type ChannelInfo struct {

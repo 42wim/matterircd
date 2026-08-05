@@ -2,7 +2,11 @@ package matterclient
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/mattermost/mattermost/server/public/model"
@@ -20,16 +24,45 @@ func (m *Client) GetStatus(userID string) string {
 	m.Users.mu.RLock()
 	status, ok := m.Users.statuses[userID]
 	m.Users.mu.RUnlock()
-	if ok {
-		return status
+
+	if !ok {
+		res, _, err := m.Client.GetUserStatus(context.TODO(), userID, "")
+		if err != nil {
+			status = "offline"
+		} else {
+			status = m.SetUserStatus(userID, res.Status)
+		}
 	}
 
-	res, _, err := m.Client.GetUserStatus(context.TODO(), userID, "")
-	if err != nil {
-		return "offline"
+	m.Users.mu.RLock()
+	customStatus, tracked := m.Users.customStatuses[userID]
+	m.Users.mu.RUnlock()
+
+	if !tracked {
+		user := m.GetUser(context.TODO(), userID)
+		var rawJSON string
+		if user != nil && user.Props != nil {
+			if val, propOk := user.Props["customStatus"]; propOk {
+				rawJSON = val
+			}
+		}
+
+		// Parse & store in cache (permanently marks user as tracked)
+		m.Users.SetUserCustomStatus(userID, rawJSON)
+
+		m.Users.mu.RLock()
+		customStatus = m.Users.customStatuses[userID]
+		m.Users.mu.RUnlock()
 	}
 
-	return m.SetUserStatus(userID, res.Status)
+	if customStatus != "" {
+		if status != "online" && status != "" {
+			return status + ": " + customStatus
+		}
+		return customStatus
+	}
+
+	return status
 }
 
 func (m *Client) GetStatuses() map[string]string {
@@ -65,7 +98,8 @@ func (m *Client) GetStatuses() map[string]string {
 		}
 
 		for _, st := range res {
-			statuses[st.UserId] = m.SetUserStatus(st.UserId, st.Status)
+			cleanID := strings.Clone(st.UserId)
+			statuses[cleanID] = m.SetUserStatus(cleanID, st.Status)
 		}
 	}
 
@@ -111,9 +145,23 @@ func (m *Client) GetUser(ctx context.Context, userID string) *model.User {
 		return nil
 	}
 
+	res.Id = strings.Clone(res.Id)
+	res.Username = strings.Clone(res.Username)
+	res.FirstName = strings.Clone(res.FirstName)
+	res.LastName = strings.Clone(res.LastName)
+	res.Nickname = strings.Clone(res.Nickname)
+	res.Roles = strings.Clone(res.Roles)
+
 	m.UpdateUser(res)
 
 	return res
+}
+
+func (c *UsersCache) GetUserCustomStatus(userID string) string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	return c.customStatuses[userID]
 }
 
 func (m *Client) GetUserName(userID string) string {
@@ -135,6 +183,38 @@ func (m *Client) GetUsers() map[string]*model.User {
 	}
 
 	return users
+}
+
+func (c *UsersCache) SetUserCustomStatus(userID string, rawJSON string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.customStatuses == nil {
+		c.customStatuses = make(map[string]string)
+	}
+
+	if rawJSON == "" || rawJSON == "{}" || rawJSON == "null" {
+		c.customStatuses[userID] = ""
+		return
+	}
+
+	var status CustomStatus
+
+	if err := json.NewDecoder(strings.NewReader(rawJSON)).Decode(&status); err != nil {
+		c.customStatuses[userID] = ""
+		return
+	}
+
+	if status.Text == "" {
+		c.customStatuses[userID] = ""
+		return
+	}
+
+	if status.Emoji != "" {
+		c.customStatuses[userID] = ":" + status.Emoji + ": " + status.Text
+	} else {
+		c.customStatuses[userID] = status.Text
+	}
 }
 
 func (m *Client) SetUserStatus(userID string, rawStatus string) string {
@@ -161,27 +241,79 @@ func (m *Client) UpdateUsers() error {
 	idx := 0
 	retryCount := 0
 	for {
-		mmusers, resp, err := m.Client.GetUsers(context.TODO(), idx, batchSize, "")
+		if m.IsAborted() {
+			return errors.New("login aborted")
+		}
+
+		query := "/users?page=" + strconv.Itoa(idx) + "&per_page=" + strconv.Itoa(batchSize)
+		resp, err := m.Client.DoAPIGet(context.TODO(), query, "")
 		if err != nil {
-			shouldRetry, hErr := m.HandleRetry("GetUsers", retryCount, 10, resp)
+			var mResp *model.Response
+			if resp != nil {
+				mResp = model.BuildResponse(resp)
+			}
+			shouldRetry, hErr := m.HandleRetry("GetUsers", retryCount, 10, mResp)
 			if hErr == nil && shouldRetry {
 				retryCount++
 				continue
 			}
-
 			m.logger.Errorf("UpdateUsers failed at batch %d: %v", idx, err)
 			return err
 		}
 		retryCount = 0
 
+		var list []UserSummary
+		if jsonErr := json.NewDecoder(resp.Body).Decode(&list); jsonErr != nil {
+			resp.Body.Close()
+			return jsonErr
+		}
+		resp.Body.Close()
+
 		m.Users.mu.Lock()
-		for _, user := range mmusers {
-			m.Users.users[user.Id] = user
+		for _, u := range list {
+			roles := u.Roles
+			if roles == "system_user" {
+				roles = "system_user"
+			} else if roles == "system_admin system_user" {
+				roles = "system_admin system_user"
+			}
+
+			cachedUser, exists := m.Users.users[u.Id]
+			if !exists { //nolint:nestif
+				m.Users.users[u.Id] = &model.User{
+					Id:        u.Id,
+					Username:  u.Username,
+					FirstName: u.FirstName,
+					LastName:  u.LastName,
+					Nickname:  u.Nickname,
+					Roles:     roles,
+					Props:     u.Props,
+				}
+			} else {
+				if cachedUser.Username != u.Username {
+					cachedUser.Username = u.Username
+				}
+				if cachedUser.FirstName != u.FirstName {
+					cachedUser.FirstName = u.FirstName
+				}
+				if cachedUser.LastName != u.LastName {
+					cachedUser.LastName = u.LastName
+				}
+				if cachedUser.Nickname != u.Nickname {
+					cachedUser.Nickname = u.Nickname
+				}
+				if cachedUser.Roles != roles {
+					cachedUser.Roles = roles
+				}
+				if u.Props != nil {
+					cachedUser.Props = u.Props
+				}
+			}
 		}
 		m.Users.lastUpdated.Store(time.Now().Unix())
 		m.Users.mu.Unlock()
 
-		if len(mmusers) < batchSize {
+		if len(list) < batchSize {
 			break
 		}
 
@@ -215,18 +347,38 @@ func (m *Client) UpdateUserNick(nick string) error {
 }
 
 func (m *Client) UsernamesInChannel(channelID string) []string {
-	res, _, err := m.Client.GetChannelMembers(context.TODO(), channelID, 0, 50000, "")
-	if err != nil {
-		m.logger.Errorf("UsernamesInChannel(%s) failed: %s", channelID, err)
-
-		return []string{}
-	}
+	const batchSize = 200
 
 	allusers := m.GetUsers()
-	result := []string{}
+	result := make([]string, 0, batchSize)
 
-	for _, member := range res {
-		result = append(result, allusers[member.UserId].Nickname)
+	idx := 0
+	retryCount := 0
+	for {
+		res, resp, err := m.Client.GetChannelMembers(context.TODO(), channelID, idx, batchSize, "")
+		if err != nil {
+			shouldRetry, hErr := m.HandleRetry("UsernamesInChannel", retryCount, 10, resp)
+			if hErr == nil && shouldRetry {
+				retryCount++
+				continue
+			}
+
+			m.logger.Errorf("UsernamesInChannel(%s) failed: %s", channelID, err)
+			return result
+		}
+		retryCount = 0
+
+		for _, member := range res {
+			if user, ok := allusers[member.UserId]; ok {
+				result = append(result, user.Nickname)
+			}
+		}
+
+		if len(res) < batchSize {
+			break
+		}
+
+		idx++
 	}
 
 	return result

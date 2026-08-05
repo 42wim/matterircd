@@ -3,15 +3,21 @@ package matterclient
 import (
 	"context"
 	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
-	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/mattermost/mattermost/server/public/model"
 )
 
 func (m *Client) parseResponse(rmsg *model.WebSocketResponse) {
-	m.logger.Debugf("getting response: %#v", rmsg)
+	text, ok := rmsg.Data["text"].(string)
+	if ok && text == "pong" {
+		m.logger.Tracef("getting response: %#v", rmsg)
+	} else {
+		m.logger.Debugf("getting response: %#v", rmsg)
+	}
 }
 
 func (m *Client) CreatePost(post *model.Post) (*model.Post, error) {
@@ -95,22 +101,63 @@ func (m *Client) GetPost(postID string) (*model.Post, error) {
 }
 
 func (m *Client) GetPosts(channelID string, limit int) *model.PostList {
-	retryCount := 0
-	for {
-		res, resp, err := m.Client.GetPostsForChannel(context.TODO(), channelID, 0, limit, "", false, false)
-		if err == nil {
-			return res
-		}
+	const batchSize = 200
 
-		shouldRetry, hErr := m.HandleRetry("GetPostsForChannel", retryCount, 10, resp)
-		if hErr == nil && shouldRetry {
-			retryCount++
-			continue
-		}
-
-		m.logger.Errorf("GetPostsForChannel failed for %s: %v", channelID, err)
-		return nil
+	if limit <= 0 {
+		limit = 60
 	}
+
+	finalPostList := &model.PostList{
+		Order: []string{},
+		Posts: make(map[string]*model.Post),
+	}
+
+	idx := 0
+	retryCount := 0
+	fetched := 0
+	for fetched < limit {
+		// Figure out how many posts to fetch in this batch.
+		// It will be 200, unless we are close to the limit.
+		currentBatchSize := batchSize
+		if limit-fetched < batchSize {
+			currentBatchSize = limit - fetched
+		}
+
+		res, resp, err := m.Client.GetPostsForChannel(context.TODO(), channelID, idx, currentBatchSize, "", false, false)
+		if err != nil {
+			shouldRetry, hErr := m.HandleRetry("GetPostsForChannel", retryCount, 10, resp)
+			if hErr == nil && shouldRetry {
+				retryCount++
+				continue
+			}
+
+			m.logger.Errorf("GetPostsForChannel failed for %s at page %d: %v", channelID, idx, err)
+			if len(finalPostList.Order) == 0 {
+				return nil
+			}
+			return finalPostList
+		}
+		retryCount = 0
+
+		if res != nil {
+			finalPostList.Order = append(finalPostList.Order, res.Order...)
+			for postID, post := range res.Posts {
+				finalPostList.Posts[postID] = post
+			}
+
+			fetched += len(res.Order)
+
+			if len(res.Order) < currentBatchSize {
+				break
+			}
+		} else {
+			break
+		}
+
+		idx++
+	}
+
+	return finalPostList
 }
 
 func (m *Client) GetPostThread(postID string) *model.PostList {
@@ -138,6 +185,20 @@ func (m *Client) GetPostThread(postID string) *model.PostList {
 }
 
 func (m *Client) GetPostsSince(channelID string, time int64) *model.PostList {
+	m.Users.mu.RLock()
+	ch, ok := m.Users.channelData[channelID]
+	m.Users.mu.RUnlock()
+
+	if ok && ch != nil {
+		// If channel is archived, or hasn't had new posts, bail early!
+		if ch.DeleteAt > 0 || (ch.LastPostAt > 0 && ch.LastPostAt <= time) {
+			return &model.PostList{
+				Order: []string{},
+				Posts: make(map[string]*model.Post),
+			}
+		}
+	}
+
 	retryCount := 0
 	for {
 		res, resp, err := m.Client.GetPostsSince(context.TODO(), channelID, time, false)
@@ -318,29 +379,42 @@ func (m *Client) UploadFile(data []byte, channelID string, filename string) (str
 }
 
 func (m *Client) parseActionPost(rmsg *Message) {
-	// add post to cache, if it already exists don't relay this again.
-	// this should fix reposts
-	if ok, _ := m.lruCache.ContainsOrAdd(digestString(rmsg.Raw.GetData()["post"].(string)), true); ok && rmsg.Raw.EventType() != model.WebsocketEventPostDeleted {
-		m.logger.Debugf("message %#v in cache, not processing again", rmsg.Raw.GetData()["post"].(string))
+	var data *model.Post
+	var postStr string
+
+	if pPtr, ok := rmsg.Raw.GetData()["post"].(*model.Post); ok {
+		data = pPtr
+	} else if pStr, ok := rmsg.Raw.GetData()["post"].(string); ok && pStr != "" {
+		postStr = pStr
+		data = &model.Post{}
+		if err := json.NewDecoder(strings.NewReader(postStr)).Decode(data); err != nil {
+			m.logger.Errorf("failed to unmarshal post: %v", err)
+			return
+		}
+	} else {
+		m.logger.Error("payload 'post' was missing or invalid")
+		return
+	}
+
+	// We combine EventType, ID, and UpdateAt.
+	// This uniquely separates creations, edits, and deletions without any slow hashing!
+	var dedupKey string
+	if data != nil && data.Id != "" {
+		dedupKey = string(rmsg.Raw.EventType()) + ":" + data.Id + ":" + strconv.FormatInt(data.UpdateAt, 10)
+	} else if postStr != "" {
+		// Absolute last resort fallback
+		dedupKey = digestString(postStr)
+	}
+
+	if ok, _ := m.lruCache.ContainsOrAdd(dedupKey, true); ok {
+		m.logger.Debugf("message %s in cache, not processing again", dedupKey)
 		rmsg.Text = ""
-
 		return
 	}
 
-	var data model.Post
-	postStr, ok := rmsg.Raw.GetData()["post"].(string)
-	if !ok {
-		m.logger.Error("payload 'post' was missing or not a string")
-		return
-	}
-	if err := json.Unmarshal([]byte(postStr), &data); err != nil {
-		m.logger.Errorf("failed to unmarshal post: %v", err)
-		return
-	}
 	// we don't have the user, refresh the userlist
 	if m.GetUser(context.TODO(), data.UserId) == nil {
-		m.logger.Infof("User '%v' is not known, ignoring message '%#v'",
-			data.UserId, data)
+		m.logger.Infof("User '%v' is not known, ignoring message '%#v'", data.UserId, data)
 		return
 	}
 
@@ -348,6 +422,7 @@ func (m *Client) parseActionPost(rmsg *Message) {
 	rmsg.Channel = m.GetChannelName(data.ChannelId)
 	rmsg.UserID = data.UserId
 	rmsg.Type = data.Type
+
 	teamid, _ := rmsg.Raw.GetData()["team_id"].(string)
 	// edit messsages have no team_id for some reason
 	if teamid == "" {
@@ -359,13 +434,14 @@ func (m *Client) parseActionPost(rmsg *Message) {
 	if teamid != "" {
 		rmsg.Team = m.GetTeamName(teamid)
 	}
+
 	// direct message
 	if rmsg.Raw.GetData()["channel_type"] == "D" {
 		rmsg.Channel = m.GetUser(context.TODO(), data.UserId).Username
 	}
 
 	rmsg.Text = data.Message
-	rmsg.Post = &data
+	rmsg.Post = data
 }
 
 func (m *Client) parseMessage(rmsg *Message) {
@@ -384,5 +460,10 @@ func (m *Client) parseMessage(rmsg *Message) {
 }
 
 func digestString(s string) string {
-	return fmt.Sprintf("%x", md5.Sum([]byte(s))) //nolint:gosec
+	if len(s) == 0 {
+		return ""
+	}
+
+	sum := md5.Sum([]byte(s)) //nolint:gosec
+	return hex.EncodeToString(sum[:])
 }

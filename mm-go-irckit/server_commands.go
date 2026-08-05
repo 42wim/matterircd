@@ -3,9 +3,11 @@ package irckit
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
+	"github.com/42wim/matterircd/utils"
 	"github.com/sorcix/irc"
 )
 
@@ -21,7 +23,7 @@ func DefaultCommands() Commands {
 	cmds.Add(Handler{Command: irc.LUSERS, Call: CmdLusers})
 	cmds.Add(Handler{Command: irc.MODE, Call: CmdMode, MinParams: 1, LoggedIn: true})
 	cmds.Add(Handler{Command: irc.MOTD, Call: CmdMotd})
-	cmds.Add(Handler{Command: irc.NAMES, Call: CmdNames, MinParams: 1, LoggedIn: true})
+	cmds.Add(Handler{Command: irc.NAMES, Call: CmdNames, MinParams: 0, LoggedIn: true})
 	cmds.Add(Handler{Command: irc.NICK, Call: CmdNick, MinParams: 1})
 	cmds.Add(Handler{Command: irc.PART, Call: CmdPart, MinParams: 1, LoggedIn: true})
 	cmds.Add(Handler{Command: irc.PING, Call: CmdPing})
@@ -53,7 +55,7 @@ func CmdInvite(s Server, u *User, msg *irc.Message) error {
 	}
 
 	if ch, exists := s.HasChannel(channel); exists {
-		logger.Debugf("inviting %s to %s", other.User, ch.ID())
+		logger.Tracef("inviting %s to %s", other.User, ch.ID())
 		err := u.br.Invite(ch.ID(), other.User)
 		if err != nil {
 			return err
@@ -126,21 +128,9 @@ func CmdJoin(s Server, u *User, msg *irc.Message) error {
 			continue
 		}
 
-		logger.Debugf("Join channel %s, id %s, err: %v", channelName, channelID, err)
+		logger.Tracef("Join channel %s, id %s, err: %v", channelName, channelID, err)
 
 		sync = u.syncChannel
-
-		/*u.v.GetStringSlice(u.br.Protocol()+".joinexclude")
-		u.v.Set(key string, value interface{})
-		*/
-		// if we joined, remove channel from exclude and add to include
-		u.v.Set(u.br.Protocol()+".joinexclude", removeStringInSlice(channel, u.v.GetStringSlice(u.br.Protocol()+".joinexclude")))
-
-		if len(u.v.GetStringSlice(u.br.Protocol()+".joininclude")) > 0 {
-			channels := u.v.GetStringSlice(u.br.Protocol() + ".joininclude")
-			channels = append(channels, channel)
-			u.v.Set(u.br.Protocol()+".joininclude", channels)
-		}
 
 		ch := s.Channel(channelID)
 		sync(channelID, channelName)
@@ -165,7 +155,14 @@ func CmdList(s Server, u *User, msg *irc.Message) error {
 		return err
 	}
 
-	for channelName, topic := range info {
+	channelNames := make([]string, 0, len(info))
+	for name := range info {
+		channelNames = append(channelNames, name)
+	}
+	sort.Strings(channelNames)
+
+	for _, channelName := range channelNames {
+		topic := info[channelName]
 		r = append(r, &irc.Message{
 			Prefix:   s.Prefix(),
 			Command:  irc.RPL_LIST,
@@ -258,16 +255,63 @@ func CmdMotd(s Server, u *User, _ *irc.Message) error {
 
 // CmdNames is a handler for the /NAMES command.
 func CmdNames(s Server, u *User, msg *irc.Message) error {
-	if len(msg.Params) < 1 {
+	if len(msg.Params) < 1 || msg.Params[0] == "**" {
+		srv, ok := s.(*server)
+		if !ok {
+			return nil
+		}
+
+		srv.RLock()
+		joined := make([]*channel, 0, len(srv.channels))
+
+	ChannelLoop:
+		for _, intfCh := range srv.channels {
+			ch, ok := intfCh.(*channel)
+			if !ok {
+				continue
+			}
+
+			if !ch.HasUser(u) {
+				continue
+			}
+
+			for _, existing := range joined {
+				if existing.name == ch.name {
+					continue ChannelLoop
+				}
+			}
+
+			joined = append(joined, ch)
+		}
+		srv.RUnlock()
+
+		sort.Slice(joined, func(i, j int) bool {
+			return joined[i].name < joined[j].name
+		})
+
+		// Send the deduplicated, sorted responses
+		for _, ch := range joined {
+			_ = ch.SendNamesResponse(u)
+		}
+
 		return nil
 	}
 
-	for _, channel := range strings.Split(msg.Params[0], ",") {
-		ch, exists := s.HasChannel(channel)
-		if !exists {
-			continue
+	channels := msg.Params[0]
+	for len(channels) > 0 {
+		var channel string
+		idx := strings.IndexByte(channels, ',')
+		if idx < 0 {
+			channel = channels
+			channels = ""
+		} else {
+			channel = channels[:idx]
+			channels = channels[idx+1:]
 		}
-		ch.SendNamesResponse(u)
+
+		if ch, exists := s.HasChannel(channel); exists {
+			_ = ch.SendNamesResponse(u)
+		}
 	}
 	return nil
 }
@@ -308,7 +352,7 @@ func CmdPart(s Server, u *User, msg *irc.Message) error {
 		// first part on irc
 		ch.Part(u, msg.Trailing)
 		// now part on mattermost/slack
-		if !u.v.GetBool(u.br.Protocol() + ".PartFake") {
+		if !u.br.BridgeConfig().PartFake {
 			err = u.br.Part(ch.ID())
 			if err != nil {
 				return err
@@ -317,9 +361,6 @@ func CmdPart(s Server, u *User, msg *irc.Message) error {
 		// part all other (ghost)users on the channel
 		for _, k := range ch.Users() {
 			ch.Part(k, "")
-			// if we parted, remove channel from include
-			u.v.Set(u.br.Protocol()+".joininclude",
-				removeStringInSlice(chName, u.v.GetStringSlice(u.br.Protocol()+".joininclude")))
 		}
 	}
 
@@ -403,7 +444,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 		u.msgLast[ch.ID()] = [2]string{msgID, ""}
 		u.saveLastViewedAt(ch.ID())
 
-		if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
+		if u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext {
 			u.prefixContext(ch.ID(), msgID, "", "posted_self")
 		}
 
@@ -449,7 +490,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 			u.msgLast[toUser.User] = [2]string{msgID, ""}
 			u.saveLastViewedAt(toUser.User)
 
-			if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
+			if u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext {
 				u.prefixContext(toUser.User, msgID, "", "posted_self")
 			}
 
@@ -652,7 +693,7 @@ func threadMsgChannelUser(u *User, msg *irc.Message, channelID string, toUser bo
 	u.msgLast[channelID] = [2]string{msgID, threadID}
 	u.saveLastViewedAt(channelID)
 
-	if u.v.GetBool(u.br.Protocol()+".prefixcontext") || u.v.GetBool(u.br.Protocol()+".suffixcontext") {
+	if u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext {
 		u.prefixContext(channelID, msgID, threadID, "posted_self")
 	}
 
@@ -675,13 +716,7 @@ func CmdQuit(s Server, u *User, msg *irc.Message) error {
 	s.EncodeMessage(u, irc.QUIT, []string{}, partMsg)
 	s.EncodeMessage(u, irc.ERROR, []string{}, "You will be missed.")
 
-	if u.br != nil {
-		// u.br may be nil when the user is not yet logged in by the time we quit.
-		u.br.Logout()
-	}
-	u.Srv.Logout(u)
-
-	u.Conn.Close()
+	s.Quit(u, partMsg)
 
 	return nil
 }
@@ -740,30 +775,56 @@ func CmdWho(s Server, u *User, msg *irc.Message) error {
 		return nil
 	}
 
-	r := make([]*irc.Message, 0, ch.Len()+1)
+	users := ch.Users()
+
+	sort.Slice(users, func(i, j int) bool {
+		return users[i].Nick < users[j].Nick
+	})
+
+	numUsers := len(users)
+
+	r := make([]*irc.Message, numUsers+1)
+	messages := make([]irc.Message, numUsers+1)
+	paramsBacking := make([]string, numUsers*7)
 
 	statuses, _ := u.br.StatusUsers()
 
-	for _, other := range ch.Users() {
+	prefix := s.Prefix()
+	myNick := u.Nick
+	for i, other := range users {
 		status := "H"
 		if statuses[other.User] != "online" {
 			status = "G"
 		}
+
+		pIdx := i * 7
+		params := paramsBacking[pIdx : pIdx+7 : pIdx+7]
+		params[0] = myNick
+		params[1] = mask
+		params[2] = other.User
+		params[3] = other.Host
+		params[4] = "*"
+		params[5] = other.Nick
+		params[6] = status
+
 		// <me> <channel> <user> <host> <server> <nick> [H/G]: 0 <real>
-		r = append(r, &irc.Message{
-			Prefix:   s.Prefix(),
-			Params:   []string{u.Nick, mask, other.User, other.Host, "*", other.Nick, status},
+		messages[i] = irc.Message{
+			Prefix:   prefix,
+			Params:   params,
 			Command:  irc.RPL_WHOREPLY,
 			Trailing: "0 " + other.Real,
-		})
+		}
+
+		r[i] = &messages[i]
 	}
 
-	r = append(r, &irc.Message{
-		Prefix:   s.Prefix(),
-		Params:   []string{u.Nick, mask},
+	messages[numUsers] = irc.Message{
+		Prefix:   prefix,
+		Params:   []string{myNick, mask},
 		Command:  irc.RPL_ENDOFWHO,
 		Trailing: "End of /WHO list.",
-	})
+	}
+	r[numUsers] = &messages[numUsers]
 
 	return u.Encode(r...)
 }
@@ -800,7 +861,7 @@ func CmdWhois(s Server, u *User, msg *irc.Message) error {
 				Prefix:   s.Prefix(),
 				Params:   []string{u.Nick, other.Nick},
 				Command:  irc.RPL_AWAY,
-				Trailing: status,
+				Trailing: utils.EmojiReplaceAliases(status),
 			})
 		}
 

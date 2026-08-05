@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	lru "github.com/hashicorp/golang-lru"
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/jpillora/backoff"
 	prefixed "github.com/matterbridge/logrus-prefixed-formatter"
 	"github.com/mattermost/mattermost/server/public/model"
@@ -37,6 +37,28 @@ type Credentials struct {
 	MFAToken         string
 }
 
+//nolint:stylecheck
+type ChannelSummary struct {
+	Id          string `json:"id"`
+	UpdateAt    int64  `json:"update_at"`
+	DeleteAt    int64  `json:"delete_at"`
+	TeamId      string `json:"team_id"`
+	Type        string `json:"type"`
+	DisplayName string `json:"display_name"`
+	Name        string `json:"name"`
+	Header      string `json:"header"`
+	Purpose     string `json:"purpose"`
+	LastPostAt  int64  `json:"last_post_at"`
+	CreatorId   string `json:"creator_id"`
+}
+
+type CustomStatus struct {
+	Emoji     string `json:"emoji"`
+	Text      string `json:"text"`
+	Duration  string `json:"duration"`
+	ExpiresAt string `json:"expires_at"`
+}
+
 type UsersCache struct {
 	mu       sync.RWMutex
 	users    map[string]*model.User
@@ -47,12 +69,27 @@ type UsersCache struct {
 	channelData    map[string]*model.Channel
 	joinedChannels map[string]struct{}
 
+	channelLastViewedAt map[string]int64
+
+	customStatuses map[string]string
+
 	lastUpdated atomic.Int64
 }
 
+//nolint:stylecheck
+type UserSummary struct {
+	Id        string            `json:"id"`
+	Username  string            `json:"username"`
+	FirstName string            `json:"first_name"`
+	LastName  string            `json:"last_name"`
+	Nickname  string            `json:"nickname"`
+	Roles     string            `json:"roles"`
+	Props     map[string]string `json:"props"`
+}
+
 type Team struct {
-	Team         *model.Team
-	ID           string
+	Team *model.Team
+	ID   string
 
 	LastUserSync    time.Time
 	LastChannelSync time.Time
@@ -91,12 +128,15 @@ type Client struct {
 
 	logger      *logrus.Entry
 	rootLogger  *logrus.Logger
-	lruCache    *lru.Cache
+	lruCache    *lru.Cache[string, bool]
 	aliveChan   chan bool
 	loginCancel context.CancelFunc
 
 	lastWsActivity atomic.Int64
 	connectedAt    atomic.Int64
+
+	//nolint:containedctx // Tied to the lifecycle of the persistent client session
+	Ctx context.Context
 }
 
 var Matterircd bool
@@ -105,7 +145,7 @@ func New(login string, pass string, team string, server string, mfatoken string)
 	rootLogger := logrus.New()
 	rootLogger.SetFormatter(&prefixed.TextFormatter{
 		PrefixPadding: 13,
-		DisableColors: true,
+		DisableColors: false,
 		FullTimestamp: true,
 	})
 
@@ -117,19 +157,21 @@ func New(login string, pass string, team string, server string, mfatoken string)
 		MFAToken: mfatoken,
 	}
 
-	cache, _ := lru.New(500)
+	cache, _ := lru.New[string, bool](500)
 
 	return &Client{
 		Credentials: cred,
 		MessageChan: make(chan *Message, 100),
 		Users: &UsersCache{
-			users:    make(map[string]*model.User),
-			channels: make(map[string]map[string]struct{}),
-			teams:    make(map[string]map[string]struct{}),
-			statuses: make(map[string]string),
+			users:    make(map[string]*model.User, 1000),
+			channels: make(map[string]map[string]struct{}, 1000),
+			teams:    make(map[string]map[string]struct{}, 10),
+			statuses: make(map[string]string, 1000),
 
-			channelData:    make(map[string]*model.Channel),
-			joinedChannels: make(map[string]struct{}),
+			channelData:    make(map[string]*model.Channel, 1000),
+			joinedChannels: make(map[string]struct{}, 200),
+
+			channelLastViewedAt: make(map[string]int64, 1000),
 		},
 		rootLogger: rootLogger,
 		lruCache:   cache,
@@ -154,7 +196,7 @@ func (m *Client) Login() error {
 			m.logger.Info("reconnect: flushing channel user cache to ensure state consistency")
 
 			m.Users.mu.Lock()
-			m.Users.channels = make(map[string]map[string]struct{})
+			m.Users.channels = make(map[string]map[string]struct{}, 1000)
 			m.Users.mu.Unlock()
 
 			m.Users.lastUpdated.Store(time.Now().Unix())
@@ -188,7 +230,7 @@ func (m *Client) Login() error {
 	}
 
 	if m.Team == nil {
-		validTeamNames := make([]string, len(m.OtherTeams))
+		validTeamNames := make([]string, 0, len(m.OtherTeams))
 		for _, t := range m.OtherTeams {
 			validTeamNames = append(validTeamNames, t.Team.Name)
 		}
@@ -203,7 +245,11 @@ func (m *Client) Login() error {
 	// connect websocket
 	m.wsConnect()
 
-	ctx, loginCancel := context.WithCancel(context.TODO())
+	parentCtx := m.Ctx
+	if parentCtx == nil {
+		parentCtx = context.Background()
+	}
+	ctx, loginCancel := context.WithCancel(parentCtx)
 	m.loginCancel = loginCancel
 
 	m.logger.Debug("starting wsreceiver")
@@ -344,6 +390,10 @@ func (m *Client) serverAlive(b *backoff.Backoff) error {
 	defer b.Reset()
 
 	for {
+		if m.IsAborted() {
+			return errors.New("login aborted")
+		}
+
 		d := b.Duration()
 		// bogus call to get the serverversion
 		resp, err := m.Client.Logout(context.TODO())
@@ -397,6 +447,10 @@ func (m *Client) initUser() error {
 	const batchSize = 200
 
 	for _, team := range teams {
+		if m.IsAborted() {
+			return errors.New("login aborted")
+		}
+
 		m.Lock()
 		existingTeam, exists := m.OtherTeams[team.Id]
 		m.Unlock()
@@ -413,14 +467,23 @@ func (m *Client) initUser() error {
 
 		m.logger.Debugf("fetching users for team %s (cache expired or missing)", team.Name)
 
-		var teamUsers []*model.User
+		fetchedUsers := make([]UserSummary, 0, batchSize)
 
 		idx := 0
 		pageRetryCount := 0
 		for {
-			mmusers, resp, err := m.Client.GetUsersInTeam(ctx, team.Id, idx, batchSize, "")
+			if m.IsAborted() {
+				return errors.New("login aborted")
+			}
+
+			query := "/users?in_team=" + team.Id + "&page=" + strconv.Itoa(idx) + "&per_page=" + strconv.Itoa(batchSize)
+			resp, err := m.Client.DoAPIGet(context.TODO(), query, "")
 			if err != nil {
-				shouldRetry, hErr := m.HandleRetry("GetUsersInTeam", pageRetryCount, 10, resp)
+				var mResp *model.Response
+				if resp != nil {
+					mResp = model.BuildResponse(resp)
+				}
+				shouldRetry, hErr := m.HandleRetry("GetUsersInTeam", pageRetryCount, 10, mResp)
 				if hErr == nil && shouldRetry {
 					pageRetryCount++
 					continue
@@ -430,24 +493,71 @@ func (m *Client) initUser() error {
 			}
 			pageRetryCount = 0
 
-			teamUsers = append(teamUsers, mmusers...)
+			var list []UserSummary
+			if jsonErr := json.NewDecoder(resp.Body).Decode(&list); jsonErr != nil {
+				resp.Body.Close()
+				return jsonErr
+			}
+			resp.Body.Close()
 
-			if len(mmusers) < batchSize {
+			fetchedUsers = append(fetchedUsers, list...)
+			if len(list) < batchSize {
 				break
 			}
+
 			idx++
 			time.Sleep(time.Millisecond * 200)
 		}
-		m.logger.Debugf("found %d users in team %s", len(teamUsers), team.Name)
+		m.logger.Debugf("found %d users in team %s", len(fetchedUsers), team.Name)
 
 		m.Users.mu.Lock()
 		if m.Users.teams == nil {
 			m.Users.teams = make(map[string]map[string]struct{})
 		}
-		m.Users.teams[team.Id] = make(map[string]struct{})
-		for _, u := range teamUsers {
-			m.Users.users[u.Id] = u
-			m.Users.teams[team.Id][u.Id] = struct{}{}
+		m.Users.teams[team.Id] = make(map[string]struct{}, len(fetchedUsers))
+
+		for _, u := range fetchedUsers {
+			roles := u.Roles
+			if roles == "system_user" {
+				roles = "system_user"
+			} else if roles == "system_admin system_user" {
+				roles = "system_admin system_user"
+			}
+
+			cachedUser, exists := m.Users.users[u.Id]
+			if !exists { //nolint:nestif,dupl
+				cachedUser = &model.User{
+					Id:        u.Id,
+					Username:  u.Username,
+					FirstName: u.FirstName,
+					LastName:  u.LastName,
+					Nickname:  u.Nickname,
+					Roles:     roles,
+					Props:     u.Props,
+				}
+				m.Users.users[u.Id] = cachedUser
+			} else {
+				if cachedUser.Username != u.Username {
+					cachedUser.Username = u.Username
+				}
+				if cachedUser.FirstName != u.FirstName {
+					cachedUser.FirstName = u.FirstName
+				}
+				if cachedUser.LastName != u.LastName {
+					cachedUser.LastName = u.LastName
+				}
+				if cachedUser.Nickname != u.Nickname {
+					cachedUser.Nickname = u.Nickname
+				}
+				if cachedUser.Roles != roles {
+					cachedUser.Roles = roles
+				}
+				if u.Props != nil {
+					cachedUser.Props = u.Props
+				}
+			}
+
+			m.Users.teams[team.Id][cachedUser.Id] = struct{}{}
 		}
 		m.Users.lastUpdated.Store(time.Now().Unix())
 		m.Users.mu.Unlock()
@@ -523,6 +633,10 @@ func (m *Client) doLogin(firstConnection bool, b *backoff.Backoff) error {
 	)
 
 	for {
+		if m.IsAborted() {
+			return errors.New("login aborted")
+		}
+
 		m.logger.Debugf("%s %s %s %s", logmsg, m.Credentials.Team, m.Credentials.Login, m.Credentials.Server)
 
 		switch {
@@ -645,7 +759,8 @@ func (m *Client) wsConnect() {
 			TLSClientConfig: &tls.Config{
 				InsecureSkipVerify: m.SkipTLSVerify, //nolint:gosec
 			},
-			Proxy: http.ProxyFromEnvironment,
+			Proxy:             http.ProxyFromEnvironment,
+			EnableCompression: false,
 		}
 
 		var err error
@@ -787,9 +902,36 @@ func (m *Client) WsReceiver(ctx context.Context) {
 				continue
 			}
 
-			m.logger.Debugf("WsReceiver event: %#v", event)
+			eventType := event.EventType()
+			if m.rootLogger.IsLevelEnabled(logrus.DebugLevel) { //nolint:nestif
+				userInfo := ""
+				data := event.GetData()
+
+				if userPtr, ok := data["user"].(*model.User); ok {
+					if userPtr.Username != "" {
+						userInfo = " [User: " + userPtr.Username + " (ID: " + userPtr.Id + ")]"
+					}
+				} else if userStr, ok := data["user"].(string); ok && userStr != "" {
+					var summary UserSummary
+					_ = json.NewDecoder(strings.NewReader(userStr)).Decode(&summary)
+					if summary.Username != "" {
+						userInfo = " [User: " + summary.Username + " (ID: " + summary.Id + ")]"
+					}
+				} else if userID, ok := data["user_id"].(string); ok && userID != "" {
+					userInfo = " [UserID: " + userID + "]"
+				}
+
+				if eventType == model.WebsocketEventTyping {
+					m.logger.Tracef("WsReceiver event%s: %#v", userInfo, event)
+				} else {
+					m.logger.Debugf("WsReceiver event%s: %#v", userInfo, event)
+				}
+			}
 
 			m.lastWsActivity.Store(time.Now().Unix())
+
+			// Synchronously update local cache to avoid race conditions downstream
+			m.syncJoinedChannelsCache(event)
 
 			go m.maintainUsersCache(ctx, event)
 
@@ -814,7 +956,12 @@ func (m *Client) WsReceiver(ctx context.Context) {
 				continue
 			}
 
-			m.logger.Debugf("WsReceiver response: %#v", response)
+			text, ok := response.Data["text"].(string)
+			if ok && text == "pong" {
+				m.logger.Tracef("WsReceiver response: %#v", response)
+			} else {
+				m.logger.Debugf("WsReceiver response: %#v", response)
+			}
 
 			m.lastWsActivity.Store(time.Now().Unix())
 
@@ -854,13 +1001,26 @@ func (m *Client) reconnectLogout() error {
 // Logout disconnects the client from the chat server.
 func (m *Client) Logout() error {
 	m.logger.Debug("logout running loginCancel to exit goroutines")
-	m.loginCancel()
+	if m.loginCancel != nil {
+		m.loginCancel()
+	}
 
 	m.logger.Debugf("logout as %s (team: %s) on %s", m.Credentials.Login, m.Credentials.Team, m.Credentials.Server)
 	m.WsQuit = true
 	// close the websocket
 	m.logger.Debug("closing websocket")
 	m.WsClient.Close()
+
+	// Replace the heavy maps with fresh, empty ones. The old, massive maps
+	// are orphaned for the Garbage Collector, and lingering goroutines
+	// can safely write to these new maps without panicking.
+	m.Users.mu.Lock()
+	m.Users.users = make(map[string]*model.User)
+	m.Users.channels = make(map[string]map[string]struct{})
+	m.Users.channelData = make(map[string]*model.Channel)
+	m.Users.joinedChannels = make(map[string]struct{})
+	m.Users.teams = make(map[string]map[string]struct{})
+	m.Users.mu.Unlock()
 
 	if strings.Contains(m.Credentials.Pass, model.SessionCookieToken) {
 		m.logger.Debug("Not invalidating session in logout, credential is a token")
@@ -1034,33 +1194,60 @@ func (m *Client) syncSingleUser(ctx context.Context, event *model.WebSocketEvent
 //nolint:gocognit,gocyclo,funlen
 func (m *Client) maintainUsersCache(ctx context.Context, event *model.WebSocketEvent) {
 	switch event.EventType() {
-	case model.WebsocketEventNewUser:
-		if userID, ok := event.GetData()["user_id"].(string); ok {
-			if user := m.GetUser(ctx, userID); user != nil {
-				if teamID, hasTeam := event.GetData()["team_id"].(string); hasTeam && teamID != "" {
-					m.UpdateTeamUsersCache(teamID, user)
+	case model.WebsocketEventNewUser, model.WebsocketEventUserUpdated, model.WebsocketEventUserAdded:
+		var u *model.User
+
+		if userVal, ok := event.GetData()["user"]; ok {
+			if userPtr, isPtr := userVal.(*model.User); isPtr {
+				u = userPtr
+			} else if userStr, isStr := userVal.(string); isStr && userStr != "" {
+				var summary UserSummary
+				_ = json.NewDecoder(strings.NewReader(userStr)).Decode(&summary)
+				// Map it back to the required model.User for the cache functions
+				u = &model.User{
+					Id:        summary.Id,
+					Username:  summary.Username,
+					FirstName: summary.FirstName,
+					LastName:  summary.LastName,
+					Nickname:  summary.Nickname,
+					Roles:     summary.Roles,
+					Props:     summary.Props,
 				}
 			}
+		} else if userID, ok := event.GetData()["user_id"].(string); ok && userID != "" {
+			u = m.GetUser(ctx, userID)
 		}
 
-	case model.WebsocketEventUserUpdated:
-		if userStr, ok := event.GetData()["user"].(string); ok {
-			user := &model.User{}
-			if err := json.Unmarshal([]byte(userStr), user); err == nil {
-				if teamID, hasTeam := event.GetData()["team_id"].(string); hasTeam && teamID != "" {
-					m.UpdateTeamUsersCache(teamID, user)
-				} else {
-					m.UpdateUser(user)
-				}
-			}
+		// If we couldn't resolve a valid user, bail out early
+		if u == nil || u.Id == "" {
+			break
 		}
 
-	case model.WebsocketEventUserAdded:
-		channelID := event.GetBroadcast().ChannelId
-		if userID, ok := event.GetData()["user_id"].(string); ok && channelID != "" {
-			if user := m.GetUser(ctx, userID); user != nil {
-				m.UpdateChannelUsersCache(channelID, user)
+		eventType := event.EventType()
+
+		if eventType == model.WebsocketEventUserAdded {
+			broadcast := event.GetBroadcast()
+			if broadcast != nil && broadcast.ChannelId != "" {
+				m.UpdateChannelUsersCache(broadcast.ChannelId, u)
 				m.Users.lastUpdated.Store(time.Now().Unix())
+			}
+		} else {
+			// Handles NewUser and UserUpdated
+			if teamID, hasTeam := event.GetData()["team_id"].(string); hasTeam && teamID != "" {
+				m.UpdateTeamUsersCache(teamID, u)
+			} else if eventType == model.WebsocketEventUserUpdated {
+				m.UpdateUser(u)
+			}
+		}
+
+		// Custom Status processing (UserUpdated only)
+		if eventType == model.WebsocketEventUserUpdated {
+			m.Users.mu.RLock()
+			_, tracked := m.Users.customStatuses[u.Id]
+			m.Users.mu.RUnlock()
+
+			if tracked {
+				m.Users.SetUserCustomStatus(u.Id, u.Props["customStatus"])
 			}
 		}
 
@@ -1073,58 +1260,217 @@ func (m *Client) maintainUsersCache(ctx context.Context, event *model.WebSocketE
 
 	case model.WebsocketEventPosted:
 		channelID := event.GetBroadcast().ChannelId
-		if postStr, ok := event.GetData()["post"].(string); ok && channelID != "" {
-			post := &model.Post{}
-			if err := json.Unmarshal([]byte(postStr), post); err == nil {
-				m.Users.mu.RLock()
-				_, channelIsCached := m.Users.channels[channelID]
-				_, userIsCached := m.Users.channels[channelID][post.UserId]
-				m.Users.mu.RUnlock()
+		if channelID == "" {
+			break
+		}
 
-				// If we are actively caching this channel, but the user isn't in our list, our cache is stale!
-				if channelIsCached && !userIsCached {
-					m.logger.Warnf("Unrecognized user %s spoke in %s. Invalidating channel cache.", post.UserId, channelID)
+		var post *model.Post
 
-					m.Users.mu.Lock()
-					delete(m.Users.channels, channelID)
-					m.Users.mu.Unlock()
-					m.Users.lastUpdated.Store(time.Now().Unix())
+		if postPtr, ok := event.GetData()["post"].(*model.Post); ok {
+			post = postPtr
+		} else if postStr, ok := event.GetData()["post"].(string); ok && postStr != "" {
+			// Fallback path: Driver left it as a JSON string
+			post = &model.Post{}
+			_ = json.NewDecoder(strings.NewReader(postStr)).Decode(post)
+		}
+
+		if post == nil || post.Id == "" {
+			break
+		}
+
+		// Update the LastPostAt in our channelData cache
+		m.Users.mu.Lock()
+		if ch, ok := m.Users.channelData[channelID]; ok {
+			// Only update if the new post is newer (handles out-of-order websocket events)
+			if post.CreateAt > ch.LastPostAt {
+				ch.LastPostAt = post.CreateAt
+			}
+		}
+		m.Users.mu.Unlock()
+
+		// Mattermost assigns the leaving user's ID to the 'system_leave_channel' post.
+		// We don't need to invalidate channel caches based on system message authorship.
+		if strings.HasPrefix(post.Type, "system_") {
+			break
+		}
+
+		m.Users.mu.RLock()
+		channelMap, channelIsCached := m.Users.channels[channelID]
+		var userIsCached bool
+		if channelIsCached {
+			_, userIsCached = channelMap[post.UserId]
+		}
+		m.Users.mu.RUnlock()
+
+		// If we are actively caching this channel, but the user isn't in our list, our cache is stale!
+		if channelIsCached && !userIsCached {
+			m.logger.Warnf("Unrecognized user %s spoke in %s. Invalidating channel cache.", post.UserId, channelID)
+
+			m.Users.mu.Lock()
+			delete(m.Users.channels, channelID)
+			m.Users.mu.Unlock()
+			m.Users.lastUpdated.Store(time.Now().Unix())
+		}
+
+	case model.WebsocketEventChannelCreated, model.WebsocketEventDirectAdded, model.WebsocketEventChannelUpdated:
+		var channel *model.Channel
+
+		if chPtr, ok := event.GetData()["channel"].(*model.Channel); ok {
+			channel = chPtr
+		} else if chStr, ok := event.GetData()["channel"].(string); ok && chStr != "" {
+			var summary ChannelSummary
+			_ = json.NewDecoder(strings.NewReader(chStr)).Decode(&summary)
+			channel = &model.Channel{
+				Id:          summary.Id,
+				TeamId:      summary.TeamId,
+				Type:        model.ChannelType(summary.Type),
+				DisplayName: summary.DisplayName,
+				Name:        summary.Name,
+				Header:      summary.Header,
+				Purpose:     summary.Purpose,
+				CreatorId:   summary.CreatorId,
+			}
+		}
+
+		// If we failed to extract a channel, attempt the last resort fallback fetch
+		if channel == nil || channel.Id == "" {
+			if event.EventType() != model.WebsocketEventChannelUpdated {
+				if channelID, ok := event.GetData()["channel_id"].(string); ok && channelID != "" {
+					m.GetChannel(ctx, channelID)
 				}
 			}
+			break
 		}
 
-	case model.WebsocketEventChannelCreated, model.WebsocketEventDirectAdded:
-		if channelStr, ok := event.GetData()["channel"].(string); ok {
-			channel := &model.Channel{}
-			if err := json.Unmarshal([]byte(channelStr), channel); err == nil {
-				m.Users.mu.Lock()
-				m.Users.channelData[channel.Id] = channel
-				if channel.Type == model.ChannelTypeDirect || channel.Type == model.ChannelTypeGroup {
-					m.Users.joinedChannels[channel.Id] = struct{}{}
-				}
-				m.Users.mu.Unlock()
-				m.Users.lastUpdated.Store(time.Now().Unix())
-			}
-		} else if channelID, ok := event.GetData()["channel_id"].(string); ok && channelID != "" {
-			m.GetChannel(ctx, channelID)
-		}
-
-	case model.WebsocketEventChannelUpdated:
-		if channelStr, ok := event.GetData()["channel"].(string); ok {
-			channel := &model.Channel{}
-			if err := json.Unmarshal([]byte(channelStr), channel); err == nil {
-				m.Users.mu.Lock()
-				m.Users.channelData[channel.Id] = channel
-				m.Users.mu.Unlock()
-				m.Users.lastUpdated.Store(time.Now().Unix())
-			}
-		}
+		// We have a valid channel object, cache it
+		m.Users.mu.Lock()
+		m.Users.channelData[channel.Id] = channel
+		m.Users.mu.Unlock()
+		m.Users.lastUpdated.Store(time.Now().Unix())
 
 	case model.WebsocketEventChannelDeleted:
 		if channelID, ok := event.GetData()["channel_id"].(string); ok && channelID != "" {
 			// Mattermost soft-deletes channels. We keep the channel and users in our
 			// local cache to gracefully handle history, references, or restorations.
+			m.Users.mu.Lock()
+			if ch, ok := m.Users.channelData[channelID]; ok {
+				if deleteAt, ok := event.GetData()["delete_at"].(float64); ok && deleteAt > 0 {
+					ch.DeleteAt = int64(deleteAt)
+				} else {
+					// Fallback if payload is missing the timestamp
+					ch.DeleteAt = time.Now().UnixNano() / int64(time.Millisecond)
+				}
+			}
+			m.Users.mu.Unlock()
+
 			m.Users.lastUpdated.Store(time.Now().Unix())
 		}
+
+	case model.WebsocketEventMultipleChannelsViewed:
+		if channelTimes, ok := event.GetData()["channel_times"].(map[string]interface{}); ok {
+			m.Users.mu.Lock()
+			for chanID, timeVal := range channelTimes {
+				if ts, ok := timeVal.(float64); ok {
+					m.Users.channelLastViewedAt[chanID] = int64(ts)
+				}
+			}
+			m.Users.mu.Unlock()
+		}
+
+	case model.WebsocketEventChannelViewed:
+		if channelID, ok := event.GetData()["channel_id"].(string); ok && channelID != "" {
+			m.Users.mu.Lock()
+			// channel_viewed doesn't always contain a timestamp in the payload.
+			// If it doesn't, we can just use the current time to update it locally!
+			m.Users.channelLastViewedAt[channelID] = time.Now().UnixNano() / int64(time.Millisecond)
+			m.Users.mu.Unlock()
+		}
+
+	case model.WebsocketEventStatusChange:
+		statusRaw, ok := event.GetData()["status"].(string)
+		if !ok || statusRaw == "" {
+			break
+		}
+
+		userID, _ := event.GetData()["user_id"].(string)
+		if userID == "" && event.GetBroadcast() != nil {
+			userID = event.GetBroadcast().UserId
+		}
+
+		if userID == "" {
+			break
+		}
+
+		m.SetUserStatus(userID, statusRaw)
+
 	}
+}
+
+// syncJoinedChannelsCache synchronously updates the joined channels cache
+// to prevent race conditions before handing off to background processes.
+func (m *Client) syncJoinedChannelsCache(event *model.WebSocketEvent) {
+	switch event.EventType() {
+	case model.WebsocketEventUserAdded, model.WebsocketEventUserRemoved:
+		if m.User == nil {
+			break
+		}
+
+		userID, ok := event.GetData()["user_id"].(string)
+		if !ok || userID != m.User.Id {
+			break
+		}
+
+		broadcast := event.GetBroadcast()
+		if broadcast == nil || broadcast.ChannelId == "" {
+			break
+		}
+
+		m.Users.mu.Lock()
+		if event.EventType() == model.WebsocketEventUserAdded {
+			m.Users.joinedChannels[broadcast.ChannelId] = struct{}{}
+		} else {
+			delete(m.Users.joinedChannels, broadcast.ChannelId)
+		}
+		m.Users.mu.Unlock()
+
+	case model.WebsocketEventDirectAdded, model.WebsocketEventChannelCreated:
+		var chID string
+		var chType model.ChannelType
+
+		if chPtr, ok := event.GetData()["channel"].(*model.Channel); ok {
+			chID = chPtr.Id
+			chType = chPtr.Type
+		} else if chStr, ok := event.GetData()["channel"].(string); ok && chStr != "" {
+			// Fallback path: Fast partial unmarshal
+			var ch struct {
+				ID   string            `json:"id"`
+				Type model.ChannelType `json:"type"`
+			}
+			if err := json.NewDecoder(strings.NewReader(chStr)).Decode(&ch); err == nil {
+				chID = ch.ID
+				chType = ch.Type
+			}
+		}
+
+		if chID == "" {
+			break
+		}
+
+		if chType == model.ChannelTypeDirect || chType == model.ChannelTypeGroup {
+			m.Users.mu.Lock()
+			m.Users.joinedChannels[chID] = struct{}{}
+			m.Users.mu.Unlock()
+		}
+	}
+}
+
+// IsAborted checks if the user disconnected or logout was called
+func (m *Client) IsAborted() bool {
+	if m.WsQuit {
+		return true
+	}
+	if m.Ctx != nil && m.Ctx.Err() != nil {
+		return true
+	}
+	return false
 }

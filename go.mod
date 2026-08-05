@@ -4,16 +4,16 @@ require (
 	github.com/alecthomas/chroma/v2 v2.9.1
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc
 	github.com/desertbit/timer v0.0.0-20180107155436-c41aec40b27f
+	github.com/fsnotify/fsnotify v1.6.0
 	github.com/google/gops v0.3.27
 	github.com/grokify/html-strip-tags-go v0.0.1
 	github.com/hashicorp/golang-lru v0.6.0
 	github.com/kenshaw/emoji v0.3.3
 	github.com/matterbridge/logrus-prefixed-formatter v0.5.3-0.20200523233437-d971309a77ba
-	github.com/matterbridge/matterclient v0.0.0-20260720233254-fb46ac0a7a63
+	github.com/matterbridge/matterclient v0.0.0-20260805040455-d9143e3d40ac
 	github.com/mattermost/mattermost/server/public v0.1.3
 	github.com/mattn/go-mastodon v0.0.6
 	github.com/mitchellh/mapstructure v1.5.0
-	github.com/muesli/reflow v0.3.0
 	github.com/sirupsen/logrus v1.9.3
 	github.com/slack-go/slack v0.12.3
 	github.com/sorcix/irc v1.1.4
@@ -29,7 +29,6 @@ require (
 	github.com/dyatlov/go-opengraph/opengraph v0.0.0-20220524092352-606d7b1e5f8a // indirect
 	github.com/fatih/color v1.16.0 // indirect
 	github.com/francoispqt/gojay v1.2.13 // indirect
-	github.com/fsnotify/fsnotify v1.6.0 // indirect
 	github.com/go-asn1-ber/asn1-ber v1.5.5 // indirect
 	github.com/golang/protobuf v1.5.3 // indirect
 	github.com/google/uuid v1.6.0 // indirect
@@ -38,6 +37,7 @@ require (
 	github.com/hashicorp/go-hclog v1.6.2 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/hashicorp/go-plugin v1.6.0 // indirect
+	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/hashicorp/hcl v1.0.0 // indirect
 	github.com/hashicorp/yamux v0.1.1 // indirect
 	github.com/jpillora/backoff v1.0.0 // indirect
@@ -47,7 +47,6 @@ require (
 	github.com/mattermost/logr/v2 v2.0.21 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
-	github.com/mattn/go-runewidth v0.0.13 // indirect
 	github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d // indirect
 	github.com/mitchellh/go-testing-interface v1.14.1 // indirect
 	github.com/nxadm/tail v1.4.11 // indirect
@@ -58,7 +57,6 @@ require (
 	github.com/philhofer/fwd v1.1.2 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
-	github.com/rivo/uniseg v0.2.0 // indirect
 	github.com/sagikazarmark/locafero v0.3.0 // indirect
 	github.com/sagikazarmark/slog-shim v0.1.0 // indirect
 	github.com/sourcegraph/conc v0.3.0 // indirect
@@ -88,4 +86,4 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-go 1.22
+go 1.26

@@ -1,6 +1,7 @@
 package irckit
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net"
@@ -10,21 +11,28 @@ import (
 	"time"
 
 	"github.com/42wim/matterircd/bridge"
+	"github.com/42wim/matterircd/config"
 	"github.com/desertbit/timer"
 	"github.com/sorcix/irc"
-	"github.com/spf13/viper"
 )
 
 // NewUser creates a *User, wrapping a connection with metadata we need for our server.
 func NewUser(c Conn) *User {
-	return &User{
-		Conn: c,
-		UserInfo: &bridge.UserInfo{
-			Host: "*",
-		},
-		channels: map[Channel]struct{}{},
-		DecodeCh: make(chan *irc.Message),
+	ctx, cancel := context.WithCancel(context.Background())
+	u := &User{
+		Conn:   c,
+		cancel: cancel,
+		ctx:    ctx,
 	}
+
+	if c != nil {
+		u.UserInfo = &bridge.UserInfo{
+			Host: "*",
+		}
+		u.DecodeCh = make(chan *irc.Message)
+	}
+
+	return u
 }
 
 // NewUserNet creates a *User from a net.Conn connection.
@@ -49,9 +57,13 @@ type User struct {
 
 	channels map[Channel]struct{}
 
-	v *viper.Viper
+	cfg *config.Config
 
 	UserBridge
+
+	//nolint:containedctx // Tied to the lifecycle of the persistent client session
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 func (u *User) ID() string {
@@ -149,7 +161,11 @@ func (u *User) Encode(msgs ...*irc.Message) (err error) {
 			continue
 		}
 
-		logger.Debugf("-> \"%s\"", msg)
+		if msg.Command == "PONG" {
+			logger.Tracef("-> \"%s\"", msg)
+		} else {
+			logger.Debugf("-> \"%s\"", msg)
+		}
 
 		err := u.Conn.Encode(msg)
 		if err != nil {
@@ -169,16 +185,16 @@ var (
 // nolint:funlen,gocognit,gocyclo
 func (u *User) Decode() {
 	if u.Ghost {
-		logger.Debug("ghost user, skipping Decode()")
+		logger.Trace("ghost user, skipping Decode()")
 		return
 	}
 	buffer := make(chan *irc.Message, 512)
-	bufferTimeout := u.v.GetInt("PasteBufferTimeout")
+	bufferTimeout := u.cfg.Current().PasteBufferTimeout
 	// we need at least 100
 	if bufferTimeout < 100 {
 		bufferTimeout = 100
 	}
-	logger.Debugf("using paste buffer timeout: %#v", bufferTimeout)
+	logger.Tracef("using paste buffer timeout: %#v", bufferTimeout)
 	timeout := time.Duration(bufferTimeout) * time.Millisecond
 	t := timer.NewTimer(timeout)
 	t.Stop()
@@ -197,7 +213,7 @@ func (u *User) Decode() {
 
 			// trim last newline
 			bufferedMsg.Trailing = strings.TrimSpace(bufferedMsg.Trailing)
-			logger.Debugf("flushing buffer: %#v", bufferedMsg)
+			logger.Tracef("flushing buffer: %#v", bufferedMsg)
 			u.DecodeCh <- bufferedMsg
 			// clear buffer
 			bufferedMsg = nil
@@ -218,7 +234,7 @@ func (u *User) Decode() {
 						}
 						bufferedMsg = nil
 					}
-					logger.Debugf("decode buffer goroutine exiting for %s", u.Nick)
+					logger.Tracef("decode buffer goroutine exiting for %s", u.Nick)
 					return
 				}
 				// are we starting a new buffer ?
@@ -229,7 +245,7 @@ func (u *User) Decode() {
 				} else {
 					if strings.HasPrefix(msg.Trailing, "\x01ACTION") || replyRegExp.MatchString(msg.Trailing) || modifyRegExp.MatchString(msg.Trailing) {
 						// flush buffer
-						logger.Debug("flushing buffer because of /me, replies to threads, and message modifications")
+						logger.Trace("flushing buffer because of /me, replies to threads, and message modifications")
 						flush()
 						// send CTCP message
 						u.DecodeCh <- msg
@@ -279,10 +295,21 @@ func (u *User) Decode() {
 		if msg.Command == "PRIVMSG" {
 			logger.Debugf("B: %#v", dmsg)
 			buffer <- msg
+		} else if msg.Command == "PING" {
+			logger.Trace(dmsg)
+			u.DecodeCh <- msg
 		} else {
 			logger.Debug(dmsg)
 			u.DecodeCh <- msg
 		}
+	}
+
+	if u.Srv != nil {
+		u.Srv.Quit(u, "connection closed")
+	}
+
+	if u.DecodeCh != nil {
+		close(u.DecodeCh)
 	}
 }
 
