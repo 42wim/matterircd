@@ -207,6 +207,29 @@ func login(u *User, toUser *User, args []string, service string) {
 	u.MsgUser(toUser, "login OK")
 }
 
+func replay(u *User, toUser *User, args []string, service string) {
+	if len(args) == 0 || len(args) > 2 {
+		u.MsgUser(toUser, "need REPLAY (#<channel>)")
+		u.MsgUser(toUser, "e.g. REPLAY #bugs")
+		return
+	}
+
+	channelName := strings.TrimPrefix(args[0], "#")
+	channelTeamID := u.br.GetMe().TeamID
+	if len(args) == 2 {
+		channelTeamID = args[1]
+	}
+
+	channelID := u.br.GetChannelID(channelName, channelTeamID)
+	brchannel, err := u.br.GetChannel(channelID)
+	if err != nil {
+		u.MsgUser(toUser, channelName+" not found")
+		return
+	}
+
+	u.replayHistory(brchannel)
+}
+
 //nolint:forcetypeassert,goconst
 func details(u *User, toUser *User, args []string, service string) {
 	if service == "slack" {
@@ -644,9 +667,10 @@ var cmds = map[string]Command{
 	"login":            {handler: login, minParams: 2, maxParams: 5},
 	"logout":           {handler: logout, login: true, minParams: 0, maxParams: 0},
 	"part":             {handler: part, login: true, minParams: 1, maxParams: 1},
+	"replay":           {handler: replay, login: true, minParams: 1, maxParams: 2},
+	"scrollback":       {handler: scrollback, login: true, minParams: 2, maxParams: 2},
 	"search":           {handler: search, login: true, minParams: 1, maxParams: -1},
 	"searchusers":      {handler: searchUsers, login: true, minParams: 1, maxParams: -1},
-	"scrollback":       {handler: scrollback, login: true, minParams: 2, maxParams: 2},
 	"updatelastviewed": {handler: updatelastviewed, login: true, minParams: 1, maxParams: 1},
 }
 
