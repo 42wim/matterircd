@@ -1,6 +1,7 @@
 package irckit
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net"
@@ -17,8 +18,11 @@ import (
 
 // NewUser creates a *User, wrapping a connection with metadata we need for our server.
 func NewUser(c Conn) *User {
+	ctx, cancel := context.WithCancel(context.Background())
 	u := &User{
-		Conn: c,
+		Conn:   c,
+		cancel: cancel,
+		ctx:    ctx,
 	}
 
 	if c != nil {
@@ -56,6 +60,9 @@ type User struct {
 	cfg *config.Config
 
 	UserBridge
+
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 func (u *User) ID() string {

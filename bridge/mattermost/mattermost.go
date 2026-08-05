@@ -1,6 +1,7 @@
 package mattermost
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -43,7 +44,7 @@ type CachedPost struct {
 
 var logger *logrus.Entry
 
-func New(cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Event, onWsConnect func()) (bridge.Bridger, *matterclient.Client, error) {
+func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Event, onWsConnect func()) (bridge.Bridger, *matterclient.Client, error) {
 	m := &Mattermost{
 		credentials: cred,
 		eventChan:   eventChan,
@@ -70,7 +71,7 @@ func New(cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Eve
 		ourlog.SetLevel(logrus.TraceLevel)
 	}
 
-	mc, err := m.loginToMattermost(onWsConnect)
+	mc, err := m.loginToMattermost(onWsConnect, ctx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -117,7 +118,7 @@ func New(cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Eve
 	return m, mc, nil
 }
 
-func (m *Mattermost) loginToMattermost(onWsConnect func()) (*matterclient.Client, error) {
+func (m *Mattermost) loginToMattermost(onWsConnect func(), ctx context.Context) (*matterclient.Client, error) {
 	rc := m.cfg.Current()
 
 	matterclient.Matterircd = true
@@ -126,6 +127,8 @@ func (m *Mattermost) loginToMattermost(onWsConnect func()) (*matterclient.Client
 	if rc.Mattermost.Insecure {
 		mc.Credentials.NoTLS = true
 	}
+
+	mc.Ctx = ctx
 
 	mc.AntiIdle = !rc.Mattermost.DisableAutoView || rc.Mattermost.ForceAntiIdle
 	mc.AntiIdleChan = rc.Mattermost.AntiIdleChannel

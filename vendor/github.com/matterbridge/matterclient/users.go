@@ -240,7 +240,7 @@ func (m *Client) UpdateUsers() error {
 	idx := 0
 	retryCount := 0
 	for {
-		if m.WsQuit {
+		if m.IsAborted() {
 			return errors.New("login aborted")
 		}
 

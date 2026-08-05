@@ -1169,7 +1169,7 @@ func (u *User) loginTo(protocol string) error {
 	case "mattermost":
 		u.eventChan = make(chan *bridge.Event)
 		if u.cfg.Mattermost().IgnoreServerVersion || strings.HasPrefix(u.getMattermostVersion(), "7.") || strings.HasPrefix(u.getMattermostVersion(), "8.") || strings.HasPrefix(u.getMattermostVersion(), "9.") || strings.HasPrefix(u.getMattermostVersion(), "10.") || strings.HasPrefix(u.getMattermostVersion(), "11.") {
-			u.br, _, err = mattermost.New(u.cfg, u.Credentials, u.eventChan, u.addUsersToChannels)
+			u.br, _, err = mattermost.New(u.ctx, u.cfg, u.Credentials, u.eventChan, u.addUsersToChannels)
 		} else {
 			return fmt.Errorf("mattermost version %s not supported", u.getMattermostVersion())
 		}

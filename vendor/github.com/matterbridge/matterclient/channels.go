@@ -179,7 +179,7 @@ func (m *Client) GetChannelUsers(channelID string) ([]*model.User, error) {
 	idx := 0
 	retryCount := 0
 	for {
-		if m.WsQuit {
+		if m.IsAborted() {
 			return nil, errors.New("login aborted")
 		}
 
@@ -411,7 +411,7 @@ func (m *Client) UpdateChannelsTeam(teamID string) error {
 	var joinedSummaries []ChannelSummary
 	retryCount := 0
 	for {
-		if m.WsQuit {
+		if m.IsAborted() {
 			return errors.New("login aborted")
 		}
 
@@ -444,7 +444,7 @@ func (m *Client) UpdateChannelsTeam(teamID string) error {
 	idx := 0
 	retryCount = 0
 	for {
-		if m.WsQuit {
+		if m.IsAborted() {
 			return errors.New("login aborted")
 		}
 		query := "/teams/" + teamID + "/channels?page=" + strconv.Itoa(idx) + "&per_page=" + strconv.Itoa(batchSize)
