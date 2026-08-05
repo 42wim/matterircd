@@ -371,7 +371,8 @@ func (s *server) Quit(u *User, message string) {
 	activeGhosts := make(map[*User]struct{})
 	for _, ch := range s.channels {
 		for _, usr := range ch.Users() {
-			if usr.Ghost {
+			// Deterministic check: No TCP connection + not the service bot = Ghost
+			if usr.Conn == nil && usr.Host != serviceName {
 				activeGhosts[usr] = struct{}{}
 			}
 		}
@@ -379,7 +380,7 @@ func (s *server) Quit(u *User, message string) {
 
 	var orphaned []string
 	for id, ghost := range s.users {
-		if ghost.Ghost && ghost.Host != serviceName {
+		if ghost.Conn == nil && ghost.Host != serviceName {
 			if _, isActive := activeGhosts[ghost]; !isActive {
 				orphaned = append(orphaned, id)
 			}
@@ -390,6 +391,13 @@ func (s *server) Quit(u *User, message string) {
 	if len(orphaned) > 0 {
 		s.Lock()
 		for _, id := range orphaned {
+			if ghost, ok := s.users[id]; ok {
+				// EXPLICITLY release the context to prevent the Go runtime
+				// from leaking the struct in the heap!
+				if ghost.cancel != nil {
+					ghost.cancel()
+				}
+			}
 			delete(s.users, id)
 		}
 		s.Unlock()
