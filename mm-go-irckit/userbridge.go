@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"net"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -19,9 +20,8 @@ import (
 	"github.com/42wim/matterircd/config"
 	"github.com/42wim/matterircd/utils"
 	"github.com/davecgh/go-spew/spew"
-	"github.com/kenshaw/emoji"
 	"github.com/mattermost/mattermost-server/v6/model"
-	"github.com/muesli/reflow/wordwrap"
+	"github.com/sirupsen/logrus"
 	"github.com/sorcix/irc"
 )
 
@@ -34,6 +34,9 @@ type UserBridge struct {
 	inprogress  bool
 	eventChan   chan *bridge.Event
 	away        bool
+
+	eventLoopMutex   sync.Mutex
+	eventLoopStarted bool
 
 	lastViewedAtDB *bolt.DB
 
@@ -79,7 +82,9 @@ func NewUserBridge(c net.Conn, srv Server, cfg *config.Config, db *bolt.DB) *Use
 
 func (u *User) handleEventChan() {
 	for event := range u.eventChan {
-		logger.Tracef("eventchan %s", spew.Sdump(event))
+		if logger.Level.String() == "trace" {
+			logger.Tracef("eventchan %s", spew.Sdump(event))
+		}
 		switch e := event.Data.(type) {
 		case *bridge.ChannelMessageEvent:
 			u.handleChannelMessageEvent(e)
@@ -220,15 +225,20 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 	lexer := ""
 	codeBlockBackTick := false
 	codeBlockTilde := false
-	text = wordwrap.String(text, maxlen)
+	text = utils.WrapMessage(text, maxlen)
 	addPrefix := false
 	for {
 		line, rest, found := strings.Cut(text, "\n")
 
 		// Remove message thread context prefix for formatting and remember to add it back
-		if !addPrefix && prefixContext && !showContextMulti && strings.HasPrefix(line, prefix) {
-			line = strings.TrimPrefix(line, prefix)
-			addPrefix = true
+		if !addPrefix && prefixContext && !showContextMulti {
+			if prefix != "" && strings.HasPrefix(line, prefix) {
+				line = strings.TrimPrefix(line, prefix)
+				addPrefix = true
+			} else if trimmedPrefix != "" && line == trimmedPrefix {
+				line = ""
+				addPrefix = true
+			}
 		}
 
 		// TODO: Ideally, we want to read the whole code block and syntax highlight on that, but let's go with per-line for now.
@@ -247,7 +257,7 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 		}
 
 		if !disableEmoji && !codeBlockBackTick && !codeBlockTilde {
-			line = emoji.ReplaceAliases(line)
+			line = utils.EmojiReplaceAliases(line)
 		}
 
 		if showContext || addPrefix {
@@ -333,7 +343,7 @@ func (u *User) getMessageChannel(channelID string, sender *bridge.UserInfo) Chan
 	// if it's another user, let them join
 	if !ghost.Me && !ch.HasUser(ghost) {
 		if u.br.Protocol() != "mastodon" {
-			logger.Debugf("User %s is not in channel %s. Joining now", ghost.Nick, ch.String())
+			logger.Tracef("User %s is not in channel %s. Joining now", ghost.Nick, ch.String())
 			ch.Join(ghost) //nolint:errcheck
 		}
 	}
@@ -362,7 +372,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		CHANNEL_GROUP                  = "G"
 	*/
 	nick := sanitizeNick(event.Sender.Nick)
-	logger.Debugf("in handleChannelMessageEvent from %s", nick)
+	logger.Tracef("in handleChannelMessageEvent from %s", nick)
 	ch := u.getMessageChannel(event.ChannelID, event.Sender)
 	if event.Sender.Me {
 		nick = u.Nick
@@ -421,15 +431,20 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 	lexer := ""
 	codeBlockBackTick := false
 	codeBlockTilde := false
-	text = wordwrap.String(text, maxlen)
+	text = utils.WrapMessage(text, maxlen)
 	addPrefix := false
 	for {
 		line, rest, found := strings.Cut(text, "\n")
 
 		// Remove message thread context prefix for formatting and remember to add it back
-		if !addPrefix && prefixContext && !showContextMulti && strings.HasPrefix(line, prefix) {
-			line = strings.TrimPrefix(line, prefix)
-			addPrefix = true
+		if !addPrefix && prefixContext && !showContextMulti {
+			if prefix != "" && strings.HasPrefix(line, prefix) {
+				line = strings.TrimPrefix(line, prefix)
+				addPrefix = true
+			} else if trimmedPrefix != "" && line == trimmedPrefix {
+				line = ""
+				addPrefix = true
+			}
 		}
 
 		// TODO: Ideally, we want to read the whole code block and syntax highlight on that, but let's go with per-line for now.
@@ -448,7 +463,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		}
 
 		if !disableEmoji && !codeBlockBackTick && !codeBlockTilde {
-			line = emoji.ReplaceAliases(line)
+			line = utils.EmojiReplaceAliases(line)
 		}
 
 		if showContext || addPrefix {
@@ -518,7 +533,7 @@ func (u *User) handleFileEvent(event *bridge.FileEvent) {
 }
 
 func (u *User) handleChannelCreateEvent(event *bridge.ChannelCreateEvent) {
-	logger.Debugf("ACTION_CHANNEL_CREATED adding myself to %s (%s)", u.br.GetChannelName(event.ChannelID), event.ChannelID)
+	logger.Debugf("ACTION_CHANNEL_CREATED syncing channel %s (%s)", u.br.GetChannelName(event.ChannelID), event.ChannelID)
 
 	u.syncChannel(event.ChannelID, u.br.GetChannelName(event.ChannelID))
 }
@@ -526,16 +541,12 @@ func (u *User) handleChannelCreateEvent(event *bridge.ChannelCreateEvent) {
 func (u *User) handleChannelDeleteEvent(event *bridge.ChannelDeleteEvent) {
 	ch := u.Srv.Channel(event.ChannelID)
 
-	for _, brchannel := range u.br.GetChannels() {
-		if brchannel.ID == event.ChannelID {
-			logger.Debugf("ACTION_CHANNEL_DELETED removing myself from %s (%s)", u.br.GetChannelName(event.ChannelID), event.ChannelID)
-
-			ch.Part(u, "")
-			return
-		}
+	if ch.HasUser(u) {
+		logger.Debugf("ACTION_CHANNEL_DELETED removing myself from %s (%s)", u.br.GetChannelName(event.ChannelID), event.ChannelID)
+		ch.Part(u, "")
+	} else {
+		logger.Debugf("ACTION_CHANNEL_DELETED not in channel %s (%s)", u.br.GetChannelName(event.ChannelID), event.ChannelID)
 	}
-
-	logger.Debugf("ACTION_CHANNEL_DELETED not in channel %s (%s)", u.br.GetChannelName(event.ChannelID), event.ChannelID)
 }
 
 func (u *User) handleUserUpdateEvent(event *bridge.UserUpdateEvent) {
@@ -603,9 +614,8 @@ func (u *User) handleReactionEvent(event interface{}) {
 	}
 
 	if !u.br.FormatterConfig().DisableEmoji {
-		reactionEmoji := emoji.FromAlias(reaction)
-		if reactionEmoji != nil {
-			reaction = reactionEmoji.Emoji
+		if reactionEmoji, ok := utils.EmojiFromAlias(reaction); ok {
+			reaction = reactionEmoji
 		}
 	}
 
@@ -649,10 +659,28 @@ func (u *User) CreateUsersFromInfo(info []*bridge.UserInfo) []*User {
 			continue
 		}
 
-		userinfo := userinfo
-		ghost := NewUser(u.Conn)
+		// Force Ghost flag so the server knows this is not a real user,
+		// allowing channels to safely close when real users leave.
+		userinfo.Ghost = true
+
+		if ghost, ok := u.Srv.HasUserID(userinfo.User); ok {
+			// Do not overwrite existing ghost.UserInfo!
+			// Existing ghosts are already functional. Overwriting them
+			// risks injecting pointers from temporary connections.
+			users = append(users, ghost)
+			continue
+		}
+
+		ghost := NewUser(nil)
 		ghost.UserInfo = userinfo
-		ghost.Nick = sanitizeNick(ghost.Nick)
+		nick := ghost.UserInfo.Nick
+		if nick == "" {
+			nick = ghost.UserInfo.Username
+		}
+		ghost.Nick = sanitizeNick(nick)
+
+		u.Srv.Add(ghost)
+
 		users = append(users, ghost)
 	}
 
@@ -660,6 +688,8 @@ func (u *User) CreateUsersFromInfo(info []*bridge.UserInfo) []*User {
 }
 
 func (u *User) updateUserFromInfo(info *bridge.UserInfo) *User {
+	info.Ghost = true
+
 	if ghost, ok := u.Srv.HasUserID(info.User); ok {
 		if ghost.Nick != info.Nick {
 			changeMsg := &irc.Message{
@@ -669,13 +699,11 @@ func (u *User) updateUserFromInfo(info *bridge.UserInfo) *User {
 			}
 			u.Encode(changeMsg)
 		}
-
-		ghost.UserInfo = info
-
+		// Do not overwrite existing ghost.UserInfo
 		return ghost
 	}
 
-	ghost := NewUser(u.Conn)
+	ghost := NewUser(nil)
 	ghost.UserInfo = info
 
 	u.Srv.Add(ghost)
@@ -684,11 +712,14 @@ func (u *User) updateUserFromInfo(info *bridge.UserInfo) *User {
 }
 
 func (u *User) createUserFromInfo(info *bridge.UserInfo) *User {
+	info.Ghost = true
+
 	if ghost, ok := u.Srv.HasUserID(info.User); ok {
 		return ghost
 	}
 
-	ghost := NewUser(u.Conn)
+	// Use nil to avoid anchoring the TCP connection
+	ghost := NewUser(nil)
 	ghost.UserInfo = info
 	ghost.Nick = sanitizeNick(ghost.Nick)
 
@@ -706,6 +737,7 @@ func (u *User) addUsersToChannel(users []*User, channel string, channelID string
 }
 
 func (u *User) addUsersToChannels() {
+	time.Sleep(time.Millisecond * 500)
 	// wait until the bridge is ready
 	for u.br == nil {
 		logger.Debug("bridge not ready yet, sleeping")
@@ -713,9 +745,9 @@ func (u *User) addUsersToChannels() {
 	}
 
 	srv := u.Srv
-	throttle := time.NewTicker(time.Millisecond * 200)
+	throttle := time.NewTicker(time.Millisecond * 8)
 
-	logger.Debug("in addUsersToChannels()")
+	logger.Trace("in addUsersToChannels()")
 	// add all users, also who are not on channels
 	ch := srv.Channel("&users")
 
@@ -738,27 +770,45 @@ func (u *User) addUsersToChannels() {
 	ch = srv.Channel("&messages")
 	ch.Join(u)
 
-	channels := make(chan *bridge.ChannelInfo, 5)
-	var wg sync.WaitGroup
-
-	for i := 0; i < 10; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			u.addUserToChannelWorker(channels, throttle)
-		}()
-	}
-
+	// Fetch, filter, and sort the channels alphabetically
+	var joinChannels []*bridge.ChannelInfo
 	for _, brchannel := range u.br.GetChannels() {
-		logger.Debugf("Adding channel %#v", brchannel)
-
 		// only joindm when specified
 		if brchannel.DM && !u.br.BridgeConfig().JoinDM {
 			logger.Debugf("Skipping IM channel %s", brchannel.Name)
-
 			continue
 		}
+		joinChannels = append(joinChannels, brchannel)
+	}
 
+	sort.Slice(joinChannels, func(i, j int) bool {
+		return strings.ToLower(joinChannels[i].Name) < strings.ToLower(joinChannels[j].Name)
+	})
+
+	channels := make(chan *bridge.ChannelInfo, len(joinChannels))
+	var wg sync.WaitGroup
+
+	// Use 4 workers instead of the previous 10 to preserve alphabetical pacing
+	for i := range 4 {
+		// Extract the current prefix (e.g., "matterircd"
+		currentPrefix := ""
+		if p, ok := logger.Data["prefix"].(string); ok {
+			currentPrefix = p + ": "
+		}
+
+		// Create a new logger instance for this specific worker
+		workerLogger := logger.WithField("prefix", fmt.Sprintf("%saddUserToChannelWorker%d", currentPrefix, i))
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			u.addUserToChannelWorker(channels, throttle, workerLogger)
+		}()
+	}
+
+	// Feed the sorted channels into the queue
+	for _, brchannel := range joinChannels {
+		logger.Debugf("Adding channel %#v", brchannel)
 		channels <- brchannel
 	}
 
@@ -770,8 +820,15 @@ func (u *User) addUsersToChannels() {
 		throttle.Stop()
 	}()
 
-	// we did all the initialization, now listen for events
-	go u.handleEventChan()
+	// Prevent leaking goroutines on internal bridge reconnects
+	// by ensuring we only launch one event loop per session.
+	u.eventLoopMutex.Lock()
+	if !u.eventLoopStarted {
+		u.eventLoopStarted = true
+		// we did all the initialization, now listen for events
+		go u.handleEventChan()
+	}
+	u.eventLoopMutex.Unlock()
 }
 
 func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(string, string, ...int) {
@@ -790,7 +847,8 @@ func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(string, string, .
 	return ch.SpoofMessage
 }
 
-func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throttle *time.Ticker) {
+//nolint:funlen,gocognit,gocyclo,cyclop
+func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throttle *time.Ticker, logger *logrus.Entry) {
 	for brchannel := range channels {
 		logger.Debug("addUserToChannelWorker", brchannel)
 
@@ -835,9 +893,9 @@ func (u *User) MsgUser(toUser *User, msg string) {
 
 func (u *User) MsgSpoofUser(sender *User, rcvuser string, text string, maxlen ...int) {
 	if len(maxlen) == 0 {
-		text = wordwrap.String(text, 440)
+		text = utils.WrapMessage(text, 440)
 	} else {
-		text = wordwrap.String(text, maxlen[0])
+		text = utils.WrapMessage(text, maxlen[0])
 	}
 
 	prefix := irc.Prefix{
@@ -868,7 +926,7 @@ func (u *User) MsgSpoofUser(sender *User, rcvuser string, text string, maxlen ..
 func (u *User) syncChannel(id string, name string) {
 	users, err := u.br.GetChannelUsers(id)
 	if err != nil {
-		fmt.Println(err)
+		logger.Error(err)
 		return
 	}
 
@@ -880,9 +938,9 @@ func (u *User) syncChannel(id string, name string) {
 	u.addUsersToChannel(batchUsers, "&users", "&users")
 	u.addUsersToChannel(batchUsers, name, id)
 
-	// add myself
+	// add myself ONLY if I am actually a member
 	ch := srv.Channel(id)
-	if !ch.HasUser(u) && u.mayJoin(id) {
+	if u.br.IsChannelMember(id) && !ch.HasUser(u) && u.mayJoin(id) {
 		logger.Debugf("syncChannel adding myself to %s (id: %s)", name, id)
 		ch.Join(u)
 		svc, _ := srv.HasUser(u.br.Protocol())
@@ -964,6 +1022,11 @@ func (u *User) isValidServer(server, protocol string) bool {
 func (u *User) loginTo(protocol string) error {
 	var err error
 
+	// Reset the event loop tracker in case this User struct is recycled
+	u.eventLoopMutex.Lock()
+	u.eventLoopStarted = false
+	u.eventLoopMutex.Unlock()
+
 	switch protocol {
 	case "mastodon":
 		u.eventChan = make(chan *bridge.Event)
@@ -974,7 +1037,7 @@ func (u *User) loginTo(protocol string) error {
 	case "mattermost":
 		u.eventChan = make(chan *bridge.Event)
 		if u.cfg.Mattermost().IgnoreServerVersion || strings.HasPrefix(u.getMattermostVersion(), "7.") || strings.HasPrefix(u.getMattermostVersion(), "8.") || strings.HasPrefix(u.getMattermostVersion(), "9.") || strings.HasPrefix(u.getMattermostVersion(), "10.") || strings.HasPrefix(u.getMattermostVersion(), "11.") {
-			u.br, _, err = mattermost.New(u.cfg, u.Credentials, u.eventChan, u.addUsersToChannels)
+			u.br, _, err = mattermost.New(u.ctx, u.cfg, u.Credentials, u.eventChan, u.addUsersToChannels)
 		} else {
 			return fmt.Errorf("mattermost version %s not supported", u.getMattermostVersion())
 		}

@@ -35,8 +35,6 @@ func New(cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Eve
 		cfg:         cfg,
 	}
 
-	var err error
-
 	rc := cfg.Current()
 
 	logger.SetFormatter(&logger.TextFormatter{FullTimestamp: true})
@@ -48,10 +46,32 @@ func New(cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Eve
 		logger.SetLevel(logger.TraceLevel)
 	}
 
-	m.mc, err = m.loginToMastodon()
+	mc, err := m.loginToMastodon()
 	if err != nil {
 		return nil, err
 	}
+
+	// Helper closure to set bridge levels
+	setBridgeLogLevels := func(rc *config.RuntimeConfig) {
+		switch {
+		case rc.Trace:
+			logger.SetLevel(logger.TraceLevel)
+		case rc.Debug:
+			logger.SetLevel(logger.DebugLevel)
+		default:
+			logger.SetLevel(logger.InfoLevel)
+		}
+	}
+
+	// Set initial log level
+	setBridgeLogLevels(rc)
+
+	// Register hook to update live on reloads
+	cfg.RegisterReloadHook(func(newRC *config.RuntimeConfig) {
+		setBridgeLogLevels(newRC)
+	})
+
+	m.mc = mc
 
 	go m.handleMastodon()
 	go m.onConnect()
@@ -63,6 +83,11 @@ func New(cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Eve
 
 func (m *Mastodon) Invite(channelID, username string) error {
 	return nil
+}
+
+func (m *Mastodon) IsChannelMember(channelID string) bool {
+	// Mastodon only has the single unified timeline "channel"
+	return channelID == "mastodon" //nolint:goconst
 }
 
 func (m *Mastodon) Join(channelName string) (string, string, error) {

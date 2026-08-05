@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/42wim/matterircd/utils"
 	"github.com/mattermost/mattermost-server/v6/model"
-	"github.com/muesli/reflow/wordwrap"
 	"github.com/sorcix/irc"
 )
 
@@ -131,7 +131,7 @@ func (ch *channel) ID() string {
 }
 
 func (ch *channel) Message(from *User, text string) {
-	text = wordwrap.String(text, 440)
+	text = utils.WrapMessage(text, 440)
 
 	msg := irc.Message{
 		Prefix:        from.Prefix(),
@@ -277,6 +277,8 @@ func (ch *channel) Topic(from Prefixer, text string) {
 // SendNamesResponse sends a User messages indicating the current members of the Channel.
 func (ch *channel) SendNamesResponse(u *User) error {
 	names := ch.Names()
+	sort.Strings(names)
+
 	prefix := ch.Prefix()
 	if len(names) == 0 {
 		end := &irc.Message{
@@ -288,62 +290,92 @@ func (ch *channel) SendNamesResponse(u *User) error {
 		return u.Encode(end)
 	}
 
-	msgs := make([]*irc.Message, 0, len(names)+1)
+	estimatedMsgs := (len(names) / 20) + 2
+	messages := make([]irc.Message, 0, estimatedMsgs)
+	sharedNamReplyParams := []string{u.Nick, "=", ch.name}
 
 	var line strings.Builder
 	line.Grow(512)
 	i := 0
 	for _, name := range names {
-		if i+len(name) < 400 {
+		nameLen := len(name) + 1
+		if i+nameLen < 400 {
 			line.WriteString(name)
 			line.WriteByte(' ')
-			i += len(name)
+			i += nameLen
 		} else {
-			msgs = append(msgs, &irc.Message{
+			messages = append(messages, irc.Message{
 				Prefix:   prefix,
 				Command:  irc.RPL_NAMREPLY,
-				Params:   []string{u.Nick, "=", ch.name},
+				Params:   sharedNamReplyParams,
 				Trailing: line.String(),
 			})
 			line.Reset()
 			line.WriteString(name)
 			line.WriteByte(' ')
-			i = len(name)
+			i = nameLen
 		}
 	}
 
-	msgs = append(msgs, &irc.Message{
-		Prefix:   prefix,
-		Command:  irc.RPL_NAMREPLY,
-		Params:   []string{u.Nick, "=", ch.name},
-		Trailing: line.String(),
-	})
+	if line.Len() > 0 {
+		messages = append(messages, irc.Message{
+			Prefix:   prefix,
+			Command:  irc.RPL_NAMREPLY,
+			Params:   sharedNamReplyParams,
+			Trailing: line.String(),
+		})
+	}
 
-	msgs = append(msgs, &irc.Message{
+	messages = append(messages, irc.Message{
 		Prefix:   prefix,
 		Params:   []string{u.Nick, ch.name},
 		Command:  irc.RPL_ENDOFNAMES,
 		Trailing: "End of /NAMES list.",
 	})
 
-	return u.Encode(msgs...)
+	r := make([]*irc.Message, len(messages))
+	for j := range messages {
+		r[j] = &messages[j]
+	}
+
+	return u.Encode(r...)
 }
 
 func (ch *channel) BatchJoin(inputusers []*User) error {
-	// TODO: Check if user is already here?
-	users := make([]*User, 0, len(inputusers))
+	if len(inputusers) == 0 {
+		return nil
+	}
 
 	ch.mu.Lock()
+	if ch.usersIdx == nil {
+		ch.usersIdx = make(map[string]*User, len(inputusers))
+	}
+
+	// We only need to post-process the "Me" user to update their internal map.
+	// A tiny stack buffer is more than enough since there is typically only 1 "Me" user.
+	var inlineBuf [2]*User
+	meUsers := inlineBuf[:0]
+
 	for _, u := range inputusers {
-		if _, exists := ch.usersIdx[u.ID()]; !exists {
-			ch.usersIdx[u.ID()] = u
-			users = append(users, u)
+		uid := u.ID()
+		if _, exists := ch.usersIdx[uid]; !exists {
+			ch.usersIdx[uid] = u
+
+			// Only gather the "Me" user(s) for the secondary loop.
+			// This prevents allocating a massive slice for ghost users.
+			if u.UserInfo != nil && u.UserInfo.Me {
+				meUsers = append(meUsers, u)
+			}
 		}
 	}
 	ch.mu.Unlock()
 
-	for _, u := range users {
+	// Process only the "Me" user(s)
+	for _, u := range meUsers {
 		u.Lock()
+		if u.channels == nil {
+			u.channels = make(map[Channel]struct{}, 2)
+		}
 		u.channels[ch] = struct{}{}
 		u.Unlock()
 	}
@@ -354,12 +386,14 @@ func (ch *channel) BatchJoin(inputusers []*User) error {
 // Join introduces a User to the channel (sends relevant messages, stores).
 func (ch *channel) Join(u *User) error {
 	// TODO: Check if user is already here?
-	ch.mu.Lock()
 
 	if u.ID() == "" {
-		ch.mu.Unlock()
-
 		return nil
+	}
+
+	ch.mu.Lock()
+	if ch.usersIdx == nil {
+		ch.usersIdx = make(map[string]*User)
 	}
 
 	if _, exists := ch.usersIdx[u.ID()]; exists {
@@ -371,6 +405,10 @@ func (ch *channel) Join(u *User) error {
 
 	ch.mu.Unlock()
 	u.Lock()
+
+	if u.channels == nil {
+		u.channels = make(map[Channel]struct{})
+	}
 
 	u.channels[ch] = struct{}{}
 
@@ -396,7 +434,6 @@ func (ch *channel) Join(u *User) error {
 			to.Encode(msg)
 		}
 	}
-
 
 	ch.SendNamesResponse(u)
 
@@ -453,9 +490,9 @@ func (ch *channel) Len() int {
 
 func (ch *channel) Spoof(from string, text string, cmd string, maxlen ...int) {
 	if len(maxlen) == 0 {
-		text = wordwrap.String(text, 440)
+		text = utils.WrapMessage(text, 440)
 	} else {
-		text = wordwrap.String(text, maxlen[0])
+		text = utils.WrapMessage(text, maxlen[0])
 	}
 
 	prefix := irc.Prefix{

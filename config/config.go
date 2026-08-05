@@ -4,8 +4,11 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/sirupsen/logrus"
@@ -22,6 +25,9 @@ type Config struct {
 	current atomic.Pointer[RuntimeConfig]
 
 	v *viper.Viper
+
+	reloadHooks []func(rc *RuntimeConfig)
+	hooksMu     sync.RWMutex
 }
 
 // RuntimeConfig is immutable.
@@ -39,9 +45,11 @@ type RuntimeConfig struct {
 type GlobalConfig struct {
 	Bind string
 
-	Debug bool
-	Trace bool
-	Gops  bool
+	Debug         bool
+	Trace         bool
+	Gops          bool
+	Profiling     bool
+	ProfilingBind string
 
 	TLSBind string
 	TLSDir  string
@@ -91,6 +99,8 @@ type FormatterConfig struct {
 type MattermostConfig struct {
 	Bridge    BridgeConfig
 	Formatter FormatterConfig
+
+	MatterclientLogLevel string
 
 	DefaultServer string
 	DefaultTeam   string
@@ -204,11 +214,11 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 
 		DisableMarkdown:           c.v.GetBool("mattermost.DisableMarkdown"),
 		DisableMarkdownBlockQuote: c.v.GetBool("mattermost.DisableMarkdownBlockQuote"),
-		MarkdownBlockQuoteChar:    c.v.GetString("mattermost.MarkdownBlockQuoteChar"),
-		MarkdownInlineCode:        c.v.GetString("mattermost.MarkdownInlineCode"),
+		MarkdownBlockQuoteChar:    unquoteString(c.v.GetString("mattermost.MarkdownBlockQuoteChar")),
+		MarkdownInlineCode:        unquoteString(c.v.GetString("mattermost.MarkdownInlineCode")),
 
 		DisableCodeBlockPrefix: c.v.GetBool("mattermost.DisableCodeBlockPrefix"),
-		CodeBlockPrefix:        c.v.GetString("mattermost.CodeBlockPrefix"),
+		CodeBlockPrefix:        unquoteString(c.v.GetString("mattermost.CodeBlockPrefix")),
 		SyntaxHighlighting:     c.v.GetString("mattermost.SyntaxHighlighting"),
 
 		Unicode: c.v.GetBool("mattermost.Unicode"),
@@ -218,11 +228,11 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 
 		DisableMarkdown:           c.v.GetBool("slack.DisableMarkdown"),
 		DisableMarkdownBlockQuote: c.v.GetBool("slack.DisableMarkdownBlockQuote"),
-		MarkdownBlockQuoteChar:    c.v.GetString("slack.MarkdownBlockQuoteChar"),
-		MarkdownInlineCode:        c.v.GetString("slack.MarkdownInlineCode"),
+		MarkdownBlockQuoteChar:    unquoteString(c.v.GetString("slack.MarkdownBlockQuoteChar")),
+		MarkdownInlineCode:        unquoteString(c.v.GetString("slack.MarkdownInlineCode")),
 
 		DisableCodeBlockPrefix: c.v.GetBool("slack.DisableCodeBlockPrefix"),
-		CodeBlockPrefix:        c.v.GetString("slack.CodeBlockPrefix"),
+		CodeBlockPrefix:        unquoteString(c.v.GetString("slack.CodeBlockPrefix")),
 		SyntaxHighlighting:     c.v.GetString("slack.SyntaxHighlighting"),
 
 		Unicode: c.v.GetBool("slack.Unicode"),
@@ -232,11 +242,11 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 
 		DisableMarkdown:           c.v.GetBool("mastodon.DisableMarkdown"),
 		DisableMarkdownBlockQuote: c.v.GetBool("mastodon.DisableMarkdownBlockQuote"),
-		MarkdownBlockQuoteChar:    c.v.GetString("mastodon.MarkdownBlockQuoteChar"),
-		MarkdownInlineCode:        c.v.GetString("mastodon.MarkdownInlineCode"),
+		MarkdownBlockQuoteChar:    unquoteString(c.v.GetString("mastodon.MarkdownBlockQuoteChar")),
+		MarkdownInlineCode:        unquoteString(c.v.GetString("mastodon.MarkdownInlineCode")),
 
 		DisableCodeBlockPrefix: c.v.GetBool("mastodon.DisableCodeBlockPrefix"),
-		CodeBlockPrefix:        c.v.GetString("mastodon.CodeBlockPrefix"),
+		CodeBlockPrefix:        unquoteString(c.v.GetString("mastodon.CodeBlockPrefix")),
 		SyntaxHighlighting:     c.v.GetString("mastodon.SyntaxHighlighting"),
 
 		Unicode: c.v.GetBool("mastodon.Unicode"),
@@ -246,9 +256,11 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 		GlobalConfig: GlobalConfig{
 			Bind: c.v.GetString("bind"),
 
-			Debug: c.v.GetBool("debug"),
-			Trace: c.v.GetBool("trace"),
-			Gops:  c.v.GetBool("gops"),
+			Debug:         c.v.GetBool("debug"),
+			Trace:         c.v.GetBool("trace"),
+			Gops:          c.v.GetBool("gops"),
+			Profiling:     c.v.GetBool("profiling"),
+			ProfilingBind: c.v.GetString("profilingbind"),
 
 			TLSBind: c.v.GetString("tlsbind"),
 			TLSDir:  c.v.GetString("tlsdir"),
@@ -264,6 +276,8 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 		Mattermost: MattermostConfig{
 			Bridge:    mmBridge,
 			Formatter: mmFormatter,
+
+			MatterclientLogLevel: c.v.GetString("mattermost.MatterclientLogLevel"),
 
 			DefaultServer: c.v.GetString("mattermost.DefaultServer"),
 			DefaultTeam:   c.v.GetString("mattermost.DefaultTeam"),
@@ -365,7 +379,7 @@ func Load(cfgfile string, flags *pflag.FlagSet) (*Config, error) {
 		return c, nil
 	}
 
-	if err := c.reload(); err != nil {
+	if err := c.Reload(); err != nil {
 		return nil, fmt.Errorf("error reading config file: %w", err)
 	}
 
@@ -386,7 +400,18 @@ func (c *Config) publishRuntimeConfig() error {
 	return nil
 }
 
-func (c *Config) reload() error {
+// RegisterReloadHook allows other packages to execute logic when the config file changes.
+func (c *Config) RegisterReloadHook(hook func(rc *RuntimeConfig)) {
+	c.hooksMu.Lock()
+	defer c.hooksMu.Unlock()
+	c.reloadHooks = append(c.reloadHooks, hook)
+}
+
+// Reload re-reads the config file, updates the atomic pointer, and triggers hooks.
+func (c *Config) Reload() error {
+	// If the atomic pointer is currently nil, this is the initial startup load
+	isFirstLoad := c.Current() == nil
+
 	if err := c.v.ReadInConfig(); err != nil {
 		return err
 	}
@@ -395,9 +420,18 @@ func (c *Config) reload() error {
 		return err
 	}
 
-	if logger != nil {
+	// Only print the reload message if this isn't the initial boot
+	if !isFirstLoad && logger != nil {
 		logger.Info("configuration reloaded")
 	}
+
+	// Successfully reloaded, trigger all registered hooks safely
+	c.hooksMu.RLock()
+	rc := c.Current()
+	for _, hook := range c.reloadHooks {
+		hook(rc)
+	}
+	c.hooksMu.RUnlock()
 
 	return nil
 }
@@ -412,20 +446,46 @@ func SetLogLevel(level logrus.Level) {
 	}
 }
 
+func unquoteString(s string) string {
+	if s == "" || !strings.ContainsRune(s, '\\') {
+		return s
+	}
+	if unq, err := strconv.Unquote(`"` + s + `"`); err == nil {
+		return unq
+	}
+	return s
+}
+
 func validate(runtimeCfg *RuntimeConfig) error {
 	return nil
 }
 
 func (c *Config) watch() {
-	// reload config on file changes
 	if runtime.GOOS == "illumos" {
 		return
 	}
 
+	var (
+		mu    sync.Mutex
+		timer *time.Timer
+	)
+
+	// reload config on file changes
 	c.v.OnConfigChange(func(_ fsnotify.Event) {
-		if err := c.reload(); err != nil && logger != nil {
-			logger.WithError(err).Error("config reload failed")
+		mu.Lock()
+		defer mu.Unlock()
+
+		// If a timer is already running, stop it (debounce)
+		if timer != nil {
+			timer.Stop()
 		}
+
+		// Wait 500ms after the last filesystem event before reloading
+		timer = time.AfterFunc(500*time.Millisecond, func() {
+			if err := c.Reload(); err != nil && logger != nil {
+				logger.WithError(err).Error("config reload failed")
+			}
+		})
 	})
 
 	c.v.WatchConfig()
