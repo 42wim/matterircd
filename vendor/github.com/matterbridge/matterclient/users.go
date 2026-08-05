@@ -2,6 +2,7 @@ package matterclient
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -239,6 +240,10 @@ func (m *Client) UpdateUsers() error {
 	idx := 0
 	retryCount := 0
 	for {
+		if m.WsQuit {
+			return errors.New("login aborted")
+		}
+
 		query := "/users?page=" + strconv.Itoa(idx) + "&per_page=" + strconv.Itoa(batchSize)
 		resp, err := m.Client.DoAPIGet(query, "")
 		if err != nil {

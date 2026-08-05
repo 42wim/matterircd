@@ -384,6 +384,10 @@ func (m *Client) serverAlive(b *backoff.Backoff) error {
 	defer b.Reset()
 
 	for {
+		if m.WsQuit {
+			return errors.New("login aborted")
+		}
+
 		d := b.Duration()
 		// bogus call to get the serverversion
 		resp, err := m.Client.Logout()
@@ -435,6 +439,10 @@ func (m *Client) initUser() error {
 	const batchSize = 200
 
 	for _, team := range teams {
+		if m.WsQuit {
+			return errors.New("login aborted")
+		}
+
 		m.Lock()
 		existingTeam, exists := m.OtherTeams[team.Id]
 		m.Unlock()
@@ -612,6 +620,10 @@ func (m *Client) doLogin(firstConnection bool, b *backoff.Backoff) error {
 	)
 
 	for {
+		if m.WsQuit {
+			return errors.New("login aborted")
+		}
+
 		m.logger.Debugf("%s %s %s %s", logmsg, m.Credentials.Team, m.Credentials.Login, m.Credentials.Server)
 
 		switch {
@@ -976,7 +988,9 @@ func (m *Client) reconnectLogout() error {
 // Logout disconnects the client from the chat server.
 func (m *Client) Logout() error {
 	m.logger.Debug("logout running loginCancel to exit goroutines")
-	m.loginCancel()
+	if m.loginCancel != nil {
+		m.loginCancel()
+	}
 
 	m.logger.Debugf("logout as %s (team: %s) on %s", m.Credentials.Login, m.Credentials.Team, m.Credentials.Server)
 	m.WsQuit = true
