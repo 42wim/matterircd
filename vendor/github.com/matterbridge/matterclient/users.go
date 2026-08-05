@@ -26,6 +26,7 @@ func (m *Client) GetStatus(userID string) string {
 	m.Users.mu.RUnlock()
 
 	if !ok {
+		m.apiLogger.Warnf("GetStatus: GetUserStatus: UserID: %s", userID)
 		res, _, err := m.Client.GetUserStatus(context.TODO(), userID, "")
 		if err != nil {
 			status = "offline"
@@ -92,6 +93,7 @@ func (m *Client) GetStatuses() map[string]string {
 		}
 
 		batch := missingIDs[i:end]
+		m.apiLogger.Warnf("GetStatuses: GetUsersStatusesByIds: Batch: %d #%d", len(batch), i)
 		res, _, err := m.Client.GetUsersStatusesByIds(context.TODO(), batch)
 		if err != nil {
 			continue
@@ -139,6 +141,7 @@ func (m *Client) GetUser(ctx context.Context, userID string) *model.User {
 		return user
 	}
 
+	m.apiLogger.Warnf("GetUser: UserID: %s", userID)
 	res, _, err := m.Client.GetUser(ctx, userID, "")
 	if err != nil {
 		m.logger.Debugf("GetUser failed to fetch missing user %s: %s", userID, err)
@@ -246,6 +249,7 @@ func (m *Client) UpdateUsers() error {
 		}
 
 		query := "/users?page=" + strconv.Itoa(idx) + "&per_page=" + strconv.Itoa(batchSize)
+		m.apiLogger.Warnf("UpdateUsers: DoAPIGet: query %s #%d", query, retryCount)
 		resp, err := m.Client.DoAPIGet(context.TODO(), query, "")
 		if err != nil {
 			var mResp *model.Response
@@ -333,6 +337,7 @@ func (m *Client) UpdateUserNick(nick string) error {
 	m.RUnlock()
 	userClone.Nickname = nick
 
+	m.apiLogger.Warnf("UpdateUserNick: nick: %s", nick)
 	updatedUser, _, err := m.Client.UpdateUser(context.TODO(), &userClone)
 	if err != nil {
 		return err
@@ -355,6 +360,7 @@ func (m *Client) UsernamesInChannel(channelID string) []string {
 	idx := 0
 	retryCount := 0
 	for {
+		m.apiLogger.Warnf("UsernamesInChannel: GetChannelMembers: ChannelID: %s, Page: %d, PerPage: %d #%d", channelID, idx, batchSize, retryCount)
 		res, resp, err := m.Client.GetChannelMembers(context.TODO(), channelID, idx, batchSize, "")
 		if err != nil {
 			shouldRetry, hErr := m.HandleRetry("UsernamesInChannel", retryCount, 10, resp)
@@ -385,6 +391,7 @@ func (m *Client) UsernamesInChannel(channelID string) []string {
 }
 
 func (m *Client) UpdateStatus(userID string, status string) error {
+	m.apiLogger.Warnf("UpdateStatus: UserID: %s, Status: %s", userID, status)
 	_, _, err := m.Client.UpdateUserStatus(context.TODO(), userID, &model.Status{Status: status})
 	if err != nil {
 		return err

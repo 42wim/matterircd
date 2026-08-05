@@ -23,6 +23,7 @@ func (m *Client) parseResponse(rmsg *model.WebSocketResponse) {
 func (m *Client) CreatePost(post *model.Post) (*model.Post, error) {
 	retryCount := 0
 	for {
+		m.apiLogger.Warnf("CreatePost: UserID: %s, ChannelID: %s #%d", post.UserId, post.ChannelId, retryCount)
 		res, resp, err := m.Client.CreatePost(context.TODO(), post)
 		if err == nil {
 			return res, nil
@@ -39,6 +40,7 @@ func (m *Client) CreatePost(post *model.Post) (*model.Post, error) {
 }
 
 func (m *Client) DeleteMessage(postID string) error {
+	m.apiLogger.Warnf("DeleteMessage: PostID: %s", postID)
 	_, err := m.Client.DeletePost(context.TODO(), postID)
 	if err != nil {
 		return err
@@ -50,6 +52,7 @@ func (m *Client) DeleteMessage(postID string) error {
 func (m *Client) EditMessage(postID string, text string) (string, error) {
 	post := &model.Post{Message: text, Id: postID}
 
+	m.apiLogger.Warnf("EditMessage: PostID: %s", postID)
 	res, _, err := m.Client.UpdatePost(context.TODO(), postID, post)
 	if err != nil {
 		return "", err
@@ -67,6 +70,7 @@ func (m *Client) GetFileLinks(filenames []string) []string {
 	var output []string
 
 	for _, f := range filenames {
+		m.apiLogger.Infof("GetFileLinks: file: %s", f)
 		res, _, err := m.Client.GetFileLink(context.TODO(), f)
 		if err != nil {
 			// public links is probably disabled, create the link ourselves
@@ -84,6 +88,7 @@ func (m *Client) GetFileLinks(filenames []string) []string {
 func (m *Client) GetPost(postID string) (*model.Post, error) {
 	retryCount := 0
 	for {
+		m.apiLogger.Warnf("GetPost: PostID: %s #%d", postID, retryCount)
 		res, resp, err := m.Client.GetPost(context.TODO(), postID, "")
 		if err == nil {
 			return res, nil
@@ -123,6 +128,7 @@ func (m *Client) GetPosts(channelID string, limit int) *model.PostList {
 			currentBatchSize = limit - fetched
 		}
 
+		m.apiLogger.Warnf("GetPosts: ChannelID: %s, Page: %d, PerPage: %d #%d", channelID, idx, currentBatchSize, retryCount)
 		res, resp, err := m.Client.GetPostsForChannel(context.TODO(), channelID, idx, currentBatchSize, "", false, false)
 		if err != nil {
 			shouldRetry, hErr := m.HandleRetry("GetPostsForChannel", retryCount, 10, resp)
@@ -168,6 +174,7 @@ func (m *Client) GetPostThread(postID string) *model.PostList {
 
 	retryCount := 0
 	for {
+		m.apiLogger.Warnf("GetPostThread: PostID: %s #%d", postID, retryCount)
 		res, resp, err := m.Client.GetPostThreadWithOpts(context.TODO(), postID, "", opts)
 		if err == nil {
 			return res
@@ -201,6 +208,7 @@ func (m *Client) GetPostsSince(channelID string, time int64) *model.PostList {
 
 	retryCount := 0
 	for {
+		m.apiLogger.Warnf("GetPostsSince: ChannelID: %s, Since: %d #%d", channelID, time, retryCount)
 		res, resp, err := m.Client.GetPostsSince(context.TODO(), channelID, time, false)
 		if err == nil {
 			return res
@@ -218,6 +226,7 @@ func (m *Client) GetPostsSince(channelID string, time int64) *model.PostList {
 }
 
 func (m *Client) GetPublicLink(filename string) string {
+	m.apiLogger.Infof("GetPublicLink: file: %s", filename)
 	res, _, err := m.Client.GetFileLink(context.TODO(), filename)
 	if err != nil {
 		return ""
@@ -230,6 +239,7 @@ func (m *Client) GetPublicLinks(filenames []string) []string {
 	var output []string
 
 	for _, f := range filenames {
+		m.apiLogger.Infof("GetPublicLinks: file: %s", f)
 		res, _, err := m.Client.GetFileLink(context.TODO(), f)
 		if err != nil {
 			continue
@@ -250,6 +260,7 @@ func (m *Client) PostMessage(channelID string, text string, rootID string) (stri
 
 	retryCount := 0
 	for {
+		m.apiLogger.Warnf("PostMessage: ChannelID: %s, RootID: %s #%d", channelID, rootID, retryCount)
 		res, resp, err := m.Client.CreatePost(context.TODO(), post)
 		if err == nil {
 			return res.Id, nil
@@ -275,6 +286,7 @@ func (m *Client) PostMessageWithFiles(channelID string, text string, rootID stri
 
 	retryCount := 0
 	for {
+		m.apiLogger.Warnf("PostMessageWithFiles: ChannelID: %s, RootID %s #%d", channelID, rootID, retryCount)
 		res, resp, err := m.Client.CreatePost(context.TODO(), post)
 		if err == nil {
 			return res.Id, nil
@@ -293,6 +305,7 @@ func (m *Client) PostMessageWithFiles(channelID string, text string, rootID stri
 func (m *Client) SearchPosts(query string) *model.PostList {
 	retryCount := 0
 	for {
+		m.apiLogger.Warnf("SearchPosts: query: %s #%d", query, retryCount)
 		res, resp, err := m.Client.SearchPosts(context.TODO(), m.Team.ID, query, false)
 		if err == nil {
 			return res
@@ -319,6 +332,7 @@ func (m *Client) SendDirectMessageProps(toUserID string, msg string, rootID stri
 	retryCount := 0
 	for {
 		// create DM channel (only happens on first message)
+		m.apiLogger.Warnf("SendDirectMessageProps: CreateDirectChannel: UserID: %s, toUserID: %s #%d", m.User.Id, toUserID, retryCount)
 		_, resp, err := m.Client.CreateDirectChannel(context.TODO(), m.User.Id, toUserID)
 		if err == nil {
 			break
@@ -353,6 +367,7 @@ func (m *Client) SendDirectMessageProps(toUserID string, msg string, rootID stri
 
 	retryCount = 0
 	for {
+		m.apiLogger.Warnf("SendDirectMessageProps: CreatePost: UserID: %s, ChannelID: %s #%d", post.UserId, post.ChannelId, retryCount)
 		_, resp, err := m.Client.CreatePost(context.TODO(), post)
 		if err == nil {
 			return nil
@@ -370,6 +385,7 @@ func (m *Client) SendDirectMessageProps(toUserID string, msg string, rootID stri
 }
 
 func (m *Client) UploadFile(data []byte, channelID string, filename string) (string, error) {
+	m.apiLogger.Warnf("UploadFile: ChannelID: %s, filename: %s", channelID, filename)
 	f, _, err := m.Client.UploadFile(context.TODO(), data, channelID, filename)
 	if err != nil {
 		return "", err
