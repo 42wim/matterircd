@@ -44,6 +44,7 @@ type CachedPost struct {
 
 var logger *logrus.Entry
 
+//nolint:funlen
 func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Event, onWsConnect func()) (bridge.Bridger, *matterclient.Client, error) {
 	m := &Mattermost{
 		credentials: cred,

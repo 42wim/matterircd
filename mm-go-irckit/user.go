@@ -61,6 +61,7 @@ type User struct {
 
 	UserBridge
 
+	//nolint:containedctx // Tied to the lifecycle of the persistent client session
 	ctx    context.Context
 	cancel context.CancelFunc
 }
