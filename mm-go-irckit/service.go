@@ -208,6 +208,11 @@ func login(u *User, toUser *User, args []string, service string) {
 }
 
 func replay(u *User, toUser *User, args []string, service string) {
+	if service != "mattermost" {
+		u.MsgUser(toUser, "not implemented")
+		return
+	}
+
 	if len(args) == 0 || len(args) > 2 {
 		u.MsgUser(toUser, "need REPLAY (#<channel>)")
 		u.MsgUser(toUser, "e.g. REPLAY #bugs")
@@ -232,7 +237,7 @@ func replay(u *User, toUser *User, args []string, service string) {
 
 //nolint:forcetypeassert,goconst
 func details(u *User, toUser *User, args []string, service string) {
-	if service == "slack" {
+	if service != "mattermost" {
 		u.MsgUser(toUser, "not implemented")
 		return
 	}
@@ -308,7 +313,7 @@ func details(u *User, toUser *User, args []string, service string) {
 
 //nolint:cyclop
 func search(u *User, toUser *User, args []string, service string) {
-	if service == "slack" {
+	if service != "mattermost" {
 		u.MsgUser(toUser, "not implemented")
 		return
 	}
@@ -384,7 +389,7 @@ func formatSearchMsg(u *User, channelID string, channel string, user *User, nick
 }
 
 func searchUsers(u *User, toUser *User, args []string, service string) {
-	if service == "slack" {
+	if service != "mattermost" {
 		u.MsgUser(toUser, "not implemented")
 		return
 	}
@@ -436,7 +441,7 @@ func part(u *User, toUser *User, args []string, service string) {
 
 //nolint:funlen,gocognit,gocyclo,cyclop
 func scrollback(u *User, toUser *User, args []string, service string) {
-	if service == "slack" {
+	if service != "mattermost" {
 		u.MsgUser(toUser, "not implemented")
 		return
 	}
@@ -607,7 +612,7 @@ func formatScrollbackMsg(u *User, channelID string, channel string, user *User, 
 }
 
 func updatelastviewed(u *User, toUser *User, args []string, service string) {
-	if service == "slack" {
+	if service != "mattermost" {
 		u.MsgUser(toUser, "not implemented")
 		return
 	}
@@ -769,7 +774,7 @@ func lastsent(u *User, toUser *User, args []string, service string) {
 
 //nolint:funlen
 func channelHeader(u *User, toUser *User, args []string, service string) {
-	if service == "slack" {
+	if service != "mattermost" {
 		u.MsgUser(toUser, "not implemented")
 		return
 	}
