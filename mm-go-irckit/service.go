@@ -213,15 +213,27 @@ func replay(u *User, toUser *User, args []string, service string) {
 	}
 
 	if len(args) == 0 || len(args) > 2 {
-		u.MsgUser(toUser, "need REPLAY (#<channel>)")
-		u.MsgUser(toUser, "e.g. REPLAY #bugs")
+		u.MsgUser(toUser, "need REPLAY (#<channel>) [duration]")
+		u.MsgUser(toUser, "e.g. REPLAY #bugs 24h")
 		return
 	}
 
 	channelName := strings.TrimPrefix(args[0], "#")
 	channelTeamID := u.br.GetMe().TeamID
+
+	var since int64
+	var logSince string
+
+	// Parse optional duration argument
 	if len(args) == 2 {
-		channelTeamID = args[1]
+		if d, err := time.ParseDuration(args[1]); err == nil {
+			// Mattermost uses Unix milliseconds
+			since = time.Now().Add(-d).UnixMilli()
+			logSince = fmt.Sprintf("user requested: %s", args[1])
+		} else {
+			u.MsgUser(toUser, "invalid duration format. e.g. 24h, 30m")
+			return
+		}
 	}
 
 	channelID := u.br.GetChannelID(u.ctx, channelName, channelTeamID)
@@ -231,7 +243,12 @@ func replay(u *User, toUser *User, args []string, service string) {
 		return
 	}
 
-	u.replayHistory(brchannel)
+	// If no custom duration was provided, fall back to our configured strategy
+	if since == 0 {
+		since, logSince = u.getChannelSince(u.ctx, brchannel.ID)
+	}
+
+	u.replayHistory(brchannel, since, logSince)
 }
 
 //nolint:forcetypeassert,goconst

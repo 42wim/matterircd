@@ -904,6 +904,7 @@ func (u *User) getChannelSince(ctx context.Context, channelID string) (int64, st
 func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throttle *time.Ticker, logger *logrus.Entry) {
 	strategy := u.cfg.Mattermost().ReplayStrategy
 	disableLazyJoin := u.cfg.Mattermost().DisableLazyJoin
+
 	for {
 		select {
 		case <-u.ctx.Done():
@@ -915,7 +916,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 				return
 			}
 
-			logger.Debug("addUserToChannelWorker ", brchannel.Name)
+			logger.Debugf("addUserToChannelWorker %s (using %s)", brchannel.Name, strategy)
 
 			// Interruptible throttle wait
 			select {
@@ -955,7 +956,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 				u.syncChannel(brchannel.ID, "#"+channelName)
 			}
 
-			u.replayHistory(brchannel)
+			u.replayHistory(brchannel, since, sinceStr)
 
 			if u.br.Protocol() == "mattermost" && !u.cfg.Mattermost().DisableAutoView {
 				u.updateLastViewed(brchannel.ID)
@@ -968,43 +969,15 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 // replayHistory handles the actual fetching and spoofing of historical channel messages.
 //
 //nolint:funlen,gocognit,gocyclo
-func (u *User) replayHistory(brchannel *bridge.ChannelInfo) {
-	since := u.br.GetLastViewedAt(u.ctx, brchannel.ID)
+func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSince string) {
 	if since == 0 {
 		return
 	}
 
 	spoof := u.createSpoof(brchannel)
-	logSince := "server"
 	channame := brchannel.Name
 	if !brchannel.DM {
 		channame = "#" + brchannel.Name
-	}
-
-	// We use the stored "last viewed at" if present.
-	var lastViewedAt int64
-	key := brchannel.ID
-	err := u.lastViewedAtDB.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(u.User))
-		if v := b.Get([]byte(key)); v != nil {
-			val := binary.LittleEndian.Uint64(v)
-			if val > math.MaxInt64 {
-				logger.Errorf("timestamp value %d exceeds int64 range", val)
-			} else {
-				lastViewedAt = int64(val)
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		logger.Errorf("something wrong with u.lastViewedAtDB.View for %s for channel %s (%s)", u.Nick, channame, brchannel.ID)
-		lastViewedAt = since
-	}
-
-	// But only use the stored last viewed if it's later than what the server knows.
-	if lastViewedAt > since {
-		since = lastViewedAt + 1
-		logSince = "stored"
 	}
 
 	// Post everything to the channel we haven't seen yet
@@ -1047,7 +1020,6 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo) {
 		}
 
 		ts := time.Unix(0, createAt*int64(time.Millisecond))
-
 		tsStr := ts.Format("15:04")
 
 		// Print the replay header on the very first valid event we process
