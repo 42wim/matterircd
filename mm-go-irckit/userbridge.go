@@ -848,7 +848,7 @@ func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(string, string, .
 	return ch.SpoofMessage
 }
 
-//nolint:funlen,gocognit,gocyclo,cyclop
+//nolint:cyclop
 func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throttle *time.Ticker, logger *logrus.Entry) {
 	for {
 		select {
@@ -863,7 +863,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 
 			logger.Debug("addUserToChannelWorker", brchannel)
 
-			// 2. Interruptible throttle wait
+			// Interruptible throttle wait
 			select {
 			case <-u.ctx.Done():
 				logger.Debug("addUserToChannelWorker aborted via context during throttle")
