@@ -11,7 +11,6 @@ import (
 	"unicode"
 
 	"github.com/42wim/matterircd/bridge"
-	"github.com/mattermost/mattermost/server/public/model"
 )
 
 type CommandHandler interface {
@@ -353,38 +352,6 @@ func search(u *User, toUser *User, args []string, service string) {
 
 	for _, event := range events {
 		dispatchHistoricalEvent(u, toUser, event, searchStr, searchRegexes)
-	}
-}
-
-func formatSearchMsg(u *User, channelID string, channel string, user *User, nick string, p *model.Post, msgText string) {
-	ts := time.Unix(0, p.CreateAt*int64(time.Millisecond))
-
-	switch {
-	case (u.cfg.Mattermost().CollapseScrollback && strings.HasPrefix(channel, "#")):
-		threadMsgID := u.prefixContext(channelID, p.Id, p.RootId, "scrollback")
-		msg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, msgText)
-		nick += "/" + channel
-		u.Srv.Channel("&messages").SpoofMessage(nick, msg)
-	case u.cfg.Mattermost().CollapseScrollback:
-		threadMsgID := u.prefixContext(channelID, p.Id, p.RootId, "scrollback")
-		msg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, msgText)
-		u.Srv.Channel("&messages").SpoofMessage(nick, msg)
-	case (u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext) && strings.HasPrefix(channel, "#"):
-		threadMsgID := u.prefixContext(channelID, p.Id, p.RootId, "scrollback")
-		nick += "/" + channel
-		msg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, "<"+nick+"> "+msgText)
-		u.MsgUser(user, msg)
-	case strings.HasPrefix(channel, "#"):
-		nick += "/" + channel
-		msg := "[" + ts.Format("2006-01-02 15:04") + "] <" + nick + "> " + msgText
-		u.MsgUser(user, msg)
-	case u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext:
-		threadMsgID := u.prefixContext(channelID, p.Id, p.RootId, "scrollback")
-		msg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, "<"+nick+"> "+msgText)
-		u.MsgUser(user, msg)
-	default:
-		msg := "[" + ts.Format("2006-01-02 15:04") + "] <" + nick + "> " + msgText
-		u.MsgUser(user, msg)
 	}
 }
 
