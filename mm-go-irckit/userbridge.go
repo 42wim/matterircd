@@ -849,58 +849,75 @@ func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(string, string, .
 }
 
 // getChannelSince calculates the 'since' timestamp for a channel based on the configured strategy.
-func (u *User) getChannelSince(ctx context.Context, channelID string) (int64, string) {
+func (u *User) getChannelSince(ctx context.Context, channelID string) (int64, string, bool) {
 	// Fetch server-side last viewed if strategy allows
-	var serverSince int64
 	strategy := u.cfg.Mattermost().ReplayStrategy
 	if strategy == "" {
-		strategy = "hybrid"
+		strategy = "hybrid" //nolint:goconst
 	}
 
 	// Support alias normalizations
 	switch strategy {
-	case "saved+server", "server+saved":
+	case "saved+server", "server+saved", "stored+server", "server+stored":
 		strategy = "hybrid"
+	case "stored": //nolint:goconst
+		strategy = "saved" //nolint:goconst
 	}
 
+	var serverSince int64
 	if strategy != "saved" {
 		serverSince = u.br.GetLastViewedAt(ctx, channelID)
+		// If the server explicitly returns 0, the channel is deleted or invalid.
+		// We must honor this and immediately return 0 so it gets skipped, ignoring local data.
+		if serverSince == 0 {
+			return 0, "server", false //nolint:goconst
+		}
 	}
 
 	// If strategy is server-only, return immediately
 	if strategy == "server-only" {
-		return serverSince, "server"
+		return serverSince, "server", false
 	}
 
-	// Fetch locally saved BoltDB last viewed if strategy allows
 	var savedSince int64
+	var inDB bool
+
+	// Fetch locally saved BoltDB last viewed if strategy allows
 	if strategy == "saved" || strategy == "hybrid" {
 		_ = u.lastViewedAtDB.View(func(tx *bolt.Tx) error {
 			b := tx.Bucket([]byte(u.User))
-			if b != nil {
-				if v := b.Get([]byte(channelID)); v != nil {
-					val := binary.LittleEndian.Uint64(v)
-					if val <= math.MaxInt64 {
-						savedSince = int64(val)
-					}
-				}
+			if b == nil {
+				return nil
 			}
+
+			v := b.Get([]byte(channelID))
+			if v == nil {
+				return nil
+			}
+
+			val := binary.LittleEndian.Uint64(v)
+			if val <= math.MaxInt64 {
+				savedSince = int64(val)
+				inDB = true
+			}
+
 			return nil
 		})
 	}
 
 	if strategy == "saved" {
-		return savedSince, "stored"
+		return savedSince, "stored", inDB
 	}
 
-	// "hybrid" behaviour: use whichever value is later
+	// "hybrid" behavior: use whichever value is later
 	if savedSince > serverSince {
-		return savedSince, "stored"
+		return savedSince, "stored", inDB
 	}
-	return serverSince, "server"
+
+	return serverSince, "server", inDB
 }
 
-//nolint:cyclop
+//nolint:funlen,cyclop,gocognit,gocyclo
 func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throttle *time.Ticker, logger *logrus.Entry) {
 	strategy := u.cfg.Mattermost().ReplayStrategy
 	disableLazyJoin := u.cfg.Mattermost().DisableLazyJoin
@@ -926,7 +943,20 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			case <-throttle.C:
 			}
 
-			since, sinceStr := u.getChannelSince(u.ctx, brchannel.ID)
+			since, sinceStr, inDB := u.getChannelSince(u.ctx, brchannel.ID)
+
+			// Catch the edge case where an offline DM (never seen before in BoltDB)
+			// returns 0 or a very old timestamp from the server.
+			isDM := strings.Contains(brchannel.Name, "__")
+			if isDM && !inDB {
+				sevenDaysMs := time.Now().Add(-7 * 24 * time.Hour).UnixMilli()
+				// This catches both since == 0 AND very old createAt timestamps
+				if since < sevenDaysMs {
+					logger.Debugf("Untracked DM detected for %s, applying fallback timestamp", brchannel.Name)
+					since = sevenDaysMs
+					sinceStr = "dm-offline-fallback"
+				}
+			}
 
 			// ignore invalid/deleted/old channels
 			if since == 0 {

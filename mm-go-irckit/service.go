@@ -245,7 +245,7 @@ func replay(u *User, toUser *User, args []string, service string) {
 
 	// If no custom duration was provided, fall back to our configured strategy
 	if since == 0 {
-		since, logSince = u.getChannelSince(u.ctx, brchannel.ID)
+		since, logSince, _ = u.getChannelSince(u.ctx, brchannel.ID)
 	}
 
 	u.replayHistory(brchannel, since, logSince)
