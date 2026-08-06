@@ -230,6 +230,7 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 	addPrefix := false
 	for {
 		line, rest, found := strings.Cut(text, "\n")
+		line = strings.TrimSuffix(line, "\r")
 
 		// Remove message thread context prefix for formatting and remember to add it back
 		if !addPrefix && prefixContext && !showContextMulti {
@@ -436,6 +437,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 	addPrefix := false
 	for {
 		line, rest, found := strings.Cut(text, "\n")
+		line = strings.TrimSuffix(line, "\r")
 
 		// Remove message thread context prefix for formatting and remember to add it back
 		if !addPrefix && prefixContext && !showContextMulti {
@@ -1089,6 +1091,8 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 		textToProcess := text
 		for {
 			line, rest, found := strings.Cut(textToProcess, "\n")
+			line = strings.TrimSuffix(line, "\r")
+
 			if line != "" {
 				if nick == systemUser {
 					line = "\x1d" + line + "\x1d"
@@ -1162,6 +1166,7 @@ func (u *User) MsgSpoofUser(sender *User, rcvuser string, text string, maxlen ..
 
 	for {
 		line, rest, found := strings.Cut(text, "\n")
+		line = strings.TrimSuffix(line, "\r")
 		msg.Trailing = line
 
 		u.Encode(&msg) //nolint:errcheck

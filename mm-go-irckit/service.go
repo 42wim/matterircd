@@ -313,6 +313,7 @@ func details(u *User, toUser *User, args []string, service string) {
 		textToProcess := text
 		for {
 			line, rest, found := strings.Cut(textToProcess, "\n")
+			line = strings.TrimSuffix(line, "\r")
 
 			// Visually translate actions for the details view
 			if strings.HasPrefix(line, "\x01ACTION ") && strings.HasSuffix(line, "\x01") {
@@ -527,6 +528,7 @@ func dispatchHistoricalEvent(u *User, toUser *User, event *bridge.Event, searchC
 	textToProcess := text
 	for {
 		line, rest, found := strings.Cut(textToProcess, "\n")
+		line = strings.TrimSuffix(line, "\r")
 		if line != "" {
 			if nick == systemUser {
 				line = "\x1d" + line + "\x1d"
