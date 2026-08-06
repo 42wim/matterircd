@@ -927,9 +927,12 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 	// Currently only supported and tested with Mattermost
 	lazyJoin := u.br.Protocol() == "mattermost" && !u.cfg.Mattermost().DisableLazyJoin
 
-	// TODO: Make this a configuration option?
+	// TODO: Make these configuration options?
 	lazyJoinDuration := 21 * 24 * time.Hour
+	replayDuration := 31 * 24 * time.Hour
+
 	lazyJoinCutoff := time.Now().Add(-lazyJoinDuration).UnixMilli()
+	replayCutoff := time.Now().Add(-replayDuration).UnixMilli()
 	dmFallbackCutoff := time.Now().Add(-(lazyJoinDuration / 2)).UnixMilli()
 
 	for {
@@ -972,15 +975,24 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 				continue
 			}
 
-			// The Lazy Join Cutoff
+			// If the channel has a valid timestamp, but it's from years ago,
+			// cap it to 31 days so we don't flood the IRC client with massive history.
+			if since < replayCutoff {
+				logger.Infof("Capping replay history for %s to %s (original since: %s)",
+					brchannel.Name,
+					replayDuration,
+					time.UnixMilli(since).Format("2006-01-02"),
+				)
+				since = replayCutoff
+				sinceStr = "replay-cutoff-fallback"
+			}
+
+			// If enabled, use Lazy Join to speed up initial matterircd start up and also
+			// not have a flood of channels in the IRC client.
 			if lazyJoin {
 				// If last viewed more than lazyJoinCutoff -> SKIP!
 				if since < lazyJoinCutoff {
-					logger.Debugf("Lazy-joining %s: last viewed over %v (since: %s)",
-						brchannel.Name,
-						lazyJoinDuration,
-						time.UnixMilli(since).Format("2006-01-02 15:04:05"),
-					)
+					logger.Debugf("Lazy-joining %s: last viewed over %s ago", brchannel.Name, lazyJoinDuration)
 					continue
 				}
 			}
