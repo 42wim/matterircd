@@ -10,7 +10,7 @@ import (
 type Bridger interface {
 	Invite(ctx context.Context, channelID, username string) error
 	Join(ctx context.Context, channelName string) (string, string, error)
-	List(ctx context.Context, ) (map[string]string, error)
+	List(ctx context.Context) (map[string]string, error)
 	Part(ctx context.Context, channel string) error
 	SetTopic(ctx context.Context, channelID, text string) error
 	Topic(ctx context.Context, channelID string) string

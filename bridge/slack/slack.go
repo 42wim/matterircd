@@ -575,6 +575,7 @@ func (s *Slack) loginToSlack() (*slack.Client, error) {
 	return s.sc, nil
 }
 
+//nolint:funlen,gocyclo
 func (s *Slack) handleSlack(ctx context.Context) {
 	for msg := range s.rtm.IncomingEvents {
 		logger.Tracef("handleSlack %s", spew.Sdump(msg))

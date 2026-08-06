@@ -30,7 +30,7 @@ func logout(u *User, toUser *User, args []string, service string) {
 		u.MsgUser(toUser, "login or logout in progress. Please wait")
 		return
 	}
-	u.br.Logout(u.ctx)
+	_ = u.br.Logout(u.ctx)
 	u.logoutFrom(u.br.Protocol())
 }
 

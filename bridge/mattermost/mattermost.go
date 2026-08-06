@@ -36,6 +36,7 @@ type Mattermost struct {
 
 	cfg *config.Config
 
+	//nolint:containedctx
 	wsCtx    context.Context
 	wsCancel context.CancelFunc
 }
@@ -177,6 +178,7 @@ func (m *Mattermost) loginToMattermost(ctx context.Context, onWsConnect func()) 
 		// Create a new logger instance for this specific worker
 		workerLogger := logger.WithField("prefix", fmt.Sprintf("%shandleWsMessage%d", currentPrefix, i))
 
+		//nolint:contextcheck
 		go m.handleWsMessage(m.wsCtx, quitChan, workerLogger)
 	}
 
@@ -240,42 +242,29 @@ func (m *Mattermost) handleWsMessage(ctx context.Context, quitChan chan struct{}
 			case model.WebsocketEventPostEdited:
 				m.handleWsActionPost(ctx, message.Raw, logger)
 			case model.WebsocketEventPostDeleted:
-				m.handleWsActionPost(ctx,message.Raw, logger)
+				m.handleWsActionPost(ctx, message.Raw, logger)
 			case model.WebsocketEventEphemeralMessage:
-				m.handleWsActionPost(ctx,message.Raw, logger)
+				m.handleWsActionPost(ctx, message.Raw, logger)
 			case model.WebsocketEventUserRemoved:
 				m.handleWsActionUserRemoved(ctx, message.Raw, logger)
 			case model.WebsocketEventUserAdded:
 				m.handleWsActionUserAdded(ctx, message.Raw, logger)
 			case model.WebsocketEventChannelCreated:
-				m.handleWsActionChannelCreated(ctx, message.Raw, logger)
+				m.handleWsActionChannelCreated(message.Raw, logger)
 			case model.WebsocketEventChannelDeleted:
-				m.handleWsActionChannelDeleted(ctx, message.Raw, logger)
+				m.handleWsActionChannelDeleted(message.Raw, logger)
 			case model.WebsocketEventChannelRestored:
-				m.handleWsActionChannelCreated(ctx, message.Raw, logger)
+				m.handleWsActionChannelCreated(message.Raw, logger)
 			case model.WebsocketEventChannelUpdated:
 				m.handleWsActionPost(ctx, message.Raw, logger)
 			case model.WebsocketEventUserUpdated:
-				m.handleWsActionUserUpdated(ctx, message.Raw, logger)
+				m.handleWsActionUserUpdated(message.Raw, logger)
 			case model.WebsocketEventStatusChange:
-				m.handleStatusChangeEvent(ctx, message.Raw, logger)
+				m.handleStatusChangeEvent(message.Raw, logger)
 			case model.WebsocketEventReactionAdded, model.WebsocketEventReactionRemoved:
 				m.handleReactionEvent(ctx, message.Raw, logger)
 			}
 		}
-	}
-}
-
-func (m *Mattermost) checkWsActionMessage(ctx context.Context, rmsg *model.WebSocketEvent, throttle *time.Ticker) {
-	if m.GetChannelName(ctx, rmsg.GetBroadcast().ChannelId) != "" {
-		return
-	}
-
-	select {
-	case <-throttle.C:
-		logger.Debugf("Updating channels for %#v", rmsg.GetBroadcast())
-		go m.UpdateChannels(ctx)
-	default:
 	}
 }
 
@@ -1085,7 +1074,7 @@ func (m *Mattermost) handleWsActionPost(ctx context.Context, rmsg *model.WebSock
 	}
 
 	// create new "ghost" user
-	ghost := m.GetUser(ctx,data.UserId)
+	ghost := m.GetUser(ctx, data.UserId)
 	// our own message, set our IRC self as user, not our mattermost self
 	if data.UserId == m.GetMe().User {
 		ghost = m.GetMe()
@@ -1450,7 +1439,7 @@ func (m *Mattermost) handleWsActionUserRemoved(ctx context.Context, rmsg *model.
 	m.eventChan <- event
 }
 
-func (m *Mattermost) handleWsActionUserUpdated(ctx context.Context, rmsg *model.WebSocketEvent, logger *logrus.Entry) {
+func (m *Mattermost) handleWsActionUserUpdated(rmsg *model.WebSocketEvent, logger *logrus.Entry) {
 	logger.Trace("in handleWsActionUserUpdated")
 	var info model.User
 
@@ -1470,7 +1459,7 @@ func (m *Mattermost) handleWsActionUserUpdated(ctx context.Context, rmsg *model.
 	m.eventChan <- event
 }
 
-func (m *Mattermost) handleWsActionChannelCreated(ctx context.Context, rmsg *model.WebSocketEvent, logger *logrus.Entry) {
+func (m *Mattermost) handleWsActionChannelCreated(rmsg *model.WebSocketEvent, logger *logrus.Entry) {
 	logger.Trace("in handleWsActionChannelCreated")
 	channelID, ok := rmsg.GetData()["channel_id"].(string)
 	if !ok {
@@ -1487,7 +1476,7 @@ func (m *Mattermost) handleWsActionChannelCreated(ctx context.Context, rmsg *mod
 	m.eventChan <- event
 }
 
-func (m *Mattermost) handleWsActionChannelDeleted(ctx context.Context, rmsg *model.WebSocketEvent, logger *logrus.Entry) {
+func (m *Mattermost) handleWsActionChannelDeleted(rmsg *model.WebSocketEvent, logger *logrus.Entry) {
 	logger.Trace("in handleWsActionChannelDeleted")
 	channelID, ok := rmsg.GetData()["channel_id"].(string)
 	if !ok {
@@ -1504,7 +1493,7 @@ func (m *Mattermost) handleWsActionChannelDeleted(ctx context.Context, rmsg *mod
 	m.eventChan <- event
 }
 
-func (m *Mattermost) handleStatusChangeEvent(ctx context.Context, rmsg *model.WebSocketEvent, logger *logrus.Entry) {
+func (m *Mattermost) handleStatusChangeEvent(rmsg *model.WebSocketEvent, logger *logrus.Entry) {
 	var info model.Status
 
 	err := Decode(rmsg.GetData(), &info)
