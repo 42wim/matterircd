@@ -1,6 +1,7 @@
 package irckit
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 	"math"
@@ -847,8 +848,62 @@ func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(string, string, .
 	return ch.SpoofMessage
 }
 
+// getChannelSince calculates the 'since' timestamp for a channel based on the configured strategy.
+func (u *User) getChannelSince(ctx context.Context, channelID string) (int64, string) {
+	// Fetch server-side last viewed if strategy allows
+	var serverSince int64
+	strategy := u.cfg.Mattermost().ReplayStrategy
+	if strategy == "" {
+		strategy = "hybrid"
+	}
+
+	// Support alias normalizations
+	switch strategy {
+	case "saved+server", "server+saved":
+		strategy = "hybrid"
+	}
+
+	if strategy != "saved" {
+		serverSince = u.br.GetLastViewedAt(ctx, channelID)
+	}
+
+	// If strategy is server-only, return immediately
+	if strategy == "server-only" {
+		return serverSince, "server"
+	}
+
+	// Fetch locally saved BoltDB last viewed if strategy allows
+	var savedSince int64
+	if strategy == "saved" || strategy == "hybrid" {
+		_ = u.lastViewedAtDB.View(func(tx *bolt.Tx) error {
+			b := tx.Bucket([]byte(u.User))
+			if b != nil {
+				if v := b.Get([]byte(channelID)); v != nil {
+					val := binary.LittleEndian.Uint64(v)
+					if val <= math.MaxInt64 {
+						savedSince = int64(val)
+					}
+				}
+			}
+			return nil
+		})
+	}
+
+	if strategy == "saved" {
+		return savedSince, "stored"
+	}
+
+	// "hybrid" behaviour: use whichever value is later
+	if savedSince > serverSince {
+		return savedSince, "stored"
+	}
+	return serverSince, "server"
+}
+
 //nolint:cyclop
 func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throttle *time.Ticker, logger *logrus.Entry) {
+	strategy := u.cfg.Mattermost().ReplayStrategy
+	disableLazyJoin := u.cfg.Mattermost().DisableLazyJoin
 	for {
 		select {
 		case <-u.ctx.Done():
@@ -860,7 +915,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 				return
 			}
 
-			logger.Debug("addUserToChannelWorker", brchannel)
+			logger.Debug("addUserToChannelWorker ", brchannel.Name)
 
 			// Interruptible throttle wait
 			select {
@@ -870,10 +925,23 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			case <-throttle.C:
 			}
 
-			since := u.br.GetLastViewedAt(u.ctx, brchannel.ID)
+			since, sinceStr := u.getChannelSince(u.ctx, brchannel.ID)
+
 			// ignore invalid/deleted/old channels
 			if since == 0 {
 				continue
+			}
+
+			// The 21-Day Lazy Join Cutoff
+			if !disableLazyJoin {
+				one21DaysMs := int64(21 * 24 * time.Hour / time.Millisecond)
+				nowMs := time.Now().UnixMilli()
+
+				// If last viewed more than 21 days ago -> SKIP!
+				if (nowMs - since) > one21DaysMs {
+					logger.Debugf("Lazy-joining %s: last viewed over 21 days ago", brchannel.Name)
+					continue
+				}
 			}
 
 			// exclude direct messages
