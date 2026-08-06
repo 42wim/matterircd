@@ -989,7 +989,7 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo) {
 				} else {
 					spoof("matterircd", fmt.Sprintf("\x02Replaying msgs since %s\x02 \x1d(%s)\x1d", date, logSince))
 				}
-				logger.Infof("Replaying msgs for %s for %s (%s) since %s (%s)", u.Nick, channame, brchannel.ID, date, logSince)
+				logger.Infof("Replaying msgs for %s (%s) since %s (%s)", channame, brchannel.ID, date, logSince)
 				showReplayHdr = false
 			}
 
