@@ -1057,13 +1057,17 @@ func (m *Client) WsReceiver(ctx context.Context) {
 	}
 }
 
-// Logout disconnects the client from the chat server.
+// reconnectLogout disconnects the client from the chat server for an internal reconnect.
 func (m *Client) reconnectLogout(ctx context.Context) error {
 	err := m.Logout(ctx)
+
+	// Always reset WsQuit so the subsequent Login() doesn't instantly abort
 	m.WsQuit = false
 
 	if err != nil {
-		return err
+		m.logger.Debugf("reconnectLogout encountered error during teardown: %v", err)
+		// We deliberately don't return the error here.
+		// A failure to cleanly logout should NOT stop us from trying to reconnect!
 	}
 
 	return nil
@@ -1104,7 +1108,8 @@ func (m *Client) Logout(ctx context.Context) error {
 
 	m.apiLogger.Info("Logout")
 	if _, err := m.Client.Logout(ctx); err != nil {
-		return err
+		// Ignore context/network errors on teardown so reconnects can proceed
+		m.logger.Debugf("HTTP logout failed (ignored): %v", err)
 	}
 
 	m.logger.Debug("exiting Logout()")

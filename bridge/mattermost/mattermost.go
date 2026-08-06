@@ -188,11 +188,6 @@ func (m *Mattermost) loginToMattermost(ctx context.Context, onWsConnect func()) 
 //nolint:cyclop,funlen,gocognit,gocyclo
 func (m *Mattermost) handleWsMessage(ctx context.Context, quitChan chan struct{}, logger *logrus.Entry) {
 	for {
-		if m.mc.WsQuit {
-			logger.Trace("exiting handleWsMessage")
-			return
-		}
-
 		logger.Trace("in handleWsMessage")
 
 		select {
@@ -351,10 +346,7 @@ func (m *Mattermost) UpdateChannels(ctx context.Context) error {
 
 func (m *Mattermost) Logout(ctx context.Context) error {
 	if m.mc.WsClient != nil {
-		err := m.mc.Logout(ctx)
-		if err != nil {
-			logger.Error("logout failed")
-		}
+		_ = m.mc.Logout(ctx)
 		logger.Info("logout succeeded")
 	}
 
