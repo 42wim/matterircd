@@ -1046,6 +1046,12 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 
 	showReplayHdr := true
 
+	disableEmoji := u.br.FormatterConfig().DisableEmoji
+	disableMarkdown := u.br.FormatterConfig().DisableMarkdown
+	inlineCode := u.br.FormatterConfig().MarkdownInlineCode
+	blockQuoteChar, codeBlockPrefix := u.getMarkdownBlockCodePrefix()
+	syntaxHighlighting := u.br.FormatterConfig().SyntaxHighlighting
+
 	for _, event := range events {
 		var createAt int64
 		var text, nick, msgID, parentID string
@@ -1074,7 +1080,7 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 		}
 
 		ts := time.Unix(0, createAt*int64(time.Millisecond))
-		tsStr := ts.Format("15:04")
+		tsStr := ts.Format("2006-01-02 15:04")
 
 		// Print the replay header on the very first valid event we process
 		if showReplayHdr && (text != "" || len(files) > 0) {
@@ -1088,10 +1094,23 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 			showReplayHdr = false
 		}
 
-		textToProcess := text
+		lexer := ""
+		codeBlockBackTick := false
+		codeBlockTilde := false
+		textToProcess := utils.WrapMessage(text, 440)
 		for {
 			line, rest, found := strings.Cut(textToProcess, "\n")
 			line = strings.TrimSuffix(line, "\r")
+
+			line, codeBlockBackTick, codeBlockTilde, lexer = utils.FormatCodeBlockText(line, codeBlockBackTick, codeBlockTilde, lexer, syntaxHighlighting, codeBlockPrefix)
+
+			if !disableMarkdown && !codeBlockBackTick && !codeBlockTilde {
+				line = utils.Markdown2irc(line, blockQuoteChar, inlineCode)
+			}
+
+			if !disableEmoji && !codeBlockBackTick && !codeBlockTilde {
+				line = utils.EmojiReplaceAliases(line)
+			}
 
 			if line != "" {
 				if nick == systemUser {
