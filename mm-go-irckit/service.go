@@ -244,6 +244,7 @@ func details(u *User, toUser *User, args []string, service string) {
 	}
 
 	postID := args[0]
+
 	proto := "https"
 	if u.cfg.Mattermost().Insecure {
 		proto = "http"
@@ -440,8 +441,8 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 		return
 	}
 
-	limit := 0
 	var err error
+	limit := 0
 	if len(args) == 2 {
 		limit, err = strconv.Atoi(args[1])
 	}
@@ -451,9 +452,10 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 		return
 	}
 
-	searchStr := args[0]
+	search := args[0]
+
 	var channelID, searchPostID string
-	scrollbackUser, exists := u.Srv.HasUser(searchStr)
+	scrollbackUser, exists := u.Srv.HasUser(search)
 
 	proto := "https"
 	if u.cfg.Mattermost().Insecure {
@@ -462,19 +464,21 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 	postlistURL := proto + "://" + u.Credentials.Server + "/" + u.Credentials.Team + "/pl/"
 
 	switch {
-	case strings.HasPrefix(searchStr, "#"):
-		channelName := strings.ReplaceAll(searchStr, "#", "")
+	case strings.HasPrefix(search, "#"):
+		channelName := strings.ReplaceAll(search, "#", "")
 		channelID = u.br.GetChannelID(u.ctx, channelName, u.br.GetMe().TeamID)
 	case exists && scrollbackUser.Ghost:
+		// We need to sort the two user IDs to construct the DM
+		// channel name.
 		userIDs := []string{u.User, scrollbackUser.User}
 		sort.Strings(userIDs)
 		channelID = u.br.GetChannelID(u.ctx, userIDs[0]+"__"+userIDs[1], u.br.GetMe().TeamID)
-	case len(searchStr) == 26:
-		searchPostID = searchStr
-	case strings.HasPrefix(searchStr, "@@"):
-		searchPostID = strings.TrimPrefix(searchStr, "@@")
-	case strings.HasPrefix(strings.ToLower(searchStr), postlistURL):
-		searchPostID = strings.TrimPrefix(searchStr, postlistURL)
+	case len(search) == 26:
+		searchPostID = search
+	case strings.HasPrefix(search, "@@"):
+		searchPostID = strings.TrimPrefix(search, "@@")
+	case strings.HasPrefix(strings.ToLower(search), postlistURL):
+		searchPostID = strings.TrimPrefix(search, postlistURL)
 	default:
 		u.MsgUser(toUser, "need SCROLLBACK (#<channel>|<user>|<post/thread ID>) <lines>")
 		u.MsgUser(toUser, "e.g. SCROLLBACK #bugs 10 (show last 10 lines from #bugs)")
@@ -498,11 +502,11 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 	}
 
 	for _, event := range events {
-		dispatchHistoricalEvent(u, toUser, event, searchStr, nil)
+		dispatchHistoricalEvent(u, toUser, event, search, nil)
 	}
 
 	if !u.cfg.Mattermost().CollapseScrollback {
-		u.MsgUser(toUser, fmt.Sprintf("scrollback results shown in \x1d%s\x1d", searchStr))
+		u.MsgUser(toUser, fmt.Sprintf("scrollback results shown in \x1d%s\x1d", search))
 	}
 }
 
@@ -545,6 +549,7 @@ func dispatchHistoricalEvent(u *User, toUser *User, event *bridge.Event, searchC
 			}
 			formatScrollbackMsg(u, channelID, channelName, scrollbackUser, nick, tsStr, msgID, parentID, line)
 		}
+
 		if !found {
 			break
 		}
