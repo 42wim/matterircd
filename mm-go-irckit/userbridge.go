@@ -848,35 +848,53 @@ func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(string, string, .
 	return ch.SpoofMessage
 }
 
+//nolint:funlen,gocognit,gocyclo,cyclop
 func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throttle *time.Ticker, logger *logrus.Entry) {
-	for brchannel := range channels {
-		logger.Debug("addUserToChannelWorker", brchannel)
-
-		<-throttle.C
-
-		since := u.br.GetLastViewedAt(u.ctx, brchannel.ID)
-		// ignore invalid/deleted/old channels
-		if since == 0 {
-			continue
-		}
-
-		// exclude direct messages
-		if !strings.Contains(brchannel.Name, "__") {
-			channelName := brchannel.Name
-
-			if brchannel.TeamID != u.br.GetMe().TeamID || (u.br.Protocol() == "mattermost" && u.cfg.Mattermost().PrefixMainTeam) {
-				channelName = u.br.GetTeamName(u.ctx, brchannel.TeamID) + "/" + brchannel.Name
+	for {
+		select {
+		case <-u.ctx.Done():
+			logger.Debug("addUserToChannelWorker aborted via context before fetching channel")
+			return
+		case brchannel, ok := <-channels:
+			if !ok {
+				// The channel was closed, worker is done draining the queue
+				return
 			}
 
-			u.syncChannel(brchannel.ID, "#"+channelName)
-		}
+			logger.Debug("addUserToChannelWorker", brchannel)
 
-		u.replayHistory(brchannel)
+			// 2. Interruptible throttle wait
+			select {
+			case <-u.ctx.Done():
+				logger.Debug("addUserToChannelWorker aborted via context during throttle")
+				return
+			case <-throttle.C:
+			}
 
-		if u.br.Protocol() == "mattermost" && !u.cfg.Mattermost().DisableAutoView {
-			u.updateLastViewed(brchannel.ID)
+			since := u.br.GetLastViewedAt(u.ctx, brchannel.ID)
+			// ignore invalid/deleted/old channels
+			if since == 0 {
+				continue
+			}
+
+			// exclude direct messages
+			if !strings.Contains(brchannel.Name, "__") {
+				channelName := brchannel.Name
+
+				if brchannel.TeamID != u.br.GetMe().TeamID || (u.br.Protocol() == "mattermost" && u.cfg.Mattermost().PrefixMainTeam) {
+					channelName = u.br.GetTeamName(u.ctx, brchannel.TeamID) + "/" + brchannel.Name
+				}
+
+				u.syncChannel(brchannel.ID, "#"+channelName)
+			}
+
+			u.replayHistory(brchannel)
+
+			if u.br.Protocol() == "mattermost" && !u.cfg.Mattermost().DisableAutoView {
+				u.updateLastViewed(brchannel.ID)
+			}
+			u.saveLastViewedAt(brchannel.ID)
 		}
-		u.saveLastViewedAt(brchannel.ID)
 	}
 }
 
