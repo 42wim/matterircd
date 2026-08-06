@@ -914,7 +914,7 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo) {
 		channame = "#" + brchannel.Name
 	}
 
-	// We used the stored "last viewed at" if present.
+	// We use the stored "last viewed at" if present.
 	var lastViewedAt int64
 	key := brchannel.ID
 	err := u.lastViewedAtDB.View(func(tx *bolt.Tx) error {
@@ -1003,11 +1003,23 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo) {
 					line = "\x1d" + line + "\x1d"
 				}
 
+				// Safely unwrap CTCP actions
+				isAction := strings.HasPrefix(line, "\x01ACTION ") && strings.HasSuffix(line, "\x01")
+				if isAction {
+					line = line[8 : len(line)-1]
+				}
+
 				replayMsg := fmt.Sprintf("[%s] %s", tsStr, line)
 				if (u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext) && nick != systemUser {
 					threadMsgID := u.prefixContext(brchannel.ID, msgID, parentID, "replay")
 					replayMsg = u.formatContextMessage(tsStr, threadMsgID, line)
 				}
+
+				// Re-wrap the entire payload
+				if isAction {
+					replayMsg = "\x01ACTION " + replayMsg + "\x01"
+				}
+
 				spoof(nick, replayMsg)
 			}
 
@@ -1283,6 +1295,8 @@ func (u *User) formatContextMessage(ts, threadMsgID, msg string) string {
 		formattedMsg = threadMsgID + " " + msg
 	case u.br.BridgeConfig().SuffixContext:
 		formattedMsg = msg + " " + threadMsgID
+	default:
+		formattedMsg = msg
 	}
 	if ts != "" {
 		formattedMsg = "[" + ts + "] " + formattedMsg

@@ -291,6 +291,11 @@ func details(u *User, toUser *User, args []string, service string) {
 		textToProcess := text
 		for {
 			line, rest, found := strings.Cut(textToProcess, "\n")
+
+			// Visually translate actions for the details view
+			if strings.HasPrefix(line, "\x01ACTION ") && strings.HasSuffix(line, "\x01") {
+				line = "* " + nick + " " + line[8:len(line)-1]
+			}
 			u.MsgUser(toUser, prefix+"  "+line+"\n")
 			if !found {
 				break
@@ -553,31 +558,47 @@ func dispatchHistoricalEvent(u *User, toUser *User, event *bridge.Event, searchC
 }
 
 func formatScrollbackMsg(u *User, channelID string, channel string, user *User, nick string, tsStr string, msgID, parentID, msgText string) {
+	// Safely unwrap CTCP actions
+	isAction := strings.HasPrefix(msgText, "\x01ACTION ") && strings.HasSuffix(msgText, "\x01")
+	if isAction {
+		msgText = msgText[8 : len(msgText)-1]
+	}
+
+	var msg string
+	var send func(string)
+
 	switch {
 	case u.cfg.Mattermost().CollapseScrollback && strings.HasPrefix(channel, "#"):
 		threadMsgID := u.prefixContext(channelID, msgID, parentID, "scrollback")
-		msg := u.formatContextMessage(tsStr, threadMsgID, msgText)
+		msg = u.formatContextMessage(tsStr, threadMsgID, msgText)
 		nick += "/" + channel
-		u.Srv.Channel("&messages").SpoofMessage(nick, msg)
+		send = func(m string) { u.Srv.Channel("&messages").SpoofMessage(nick, m) }
 	case u.cfg.Mattermost().CollapseScrollback:
 		threadMsgID := u.prefixContext(channelID, msgID, parentID, "scrollback")
-		msg := u.formatContextMessage(tsStr, threadMsgID, msgText)
-		u.Srv.Channel("&messages").SpoofMessage(nick, msg)
+		msg = u.formatContextMessage(tsStr, threadMsgID, msgText)
+		send = func(m string) { u.Srv.Channel("&messages").SpoofMessage(nick, m) }
 	case (u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext) && strings.HasPrefix(channel, "#") && nick != systemUser:
 		threadMsgID := u.prefixContext(channelID, msgID, parentID, "scrollback")
-		msg := u.formatContextMessage(tsStr, threadMsgID, msgText)
-		u.Srv.Channel(channelID).SpoofMessage(nick, msg)
+		msg = u.formatContextMessage(tsStr, threadMsgID, msgText)
+		send = func(m string) { u.Srv.Channel(channelID).SpoofMessage(nick, m) }
 	case strings.HasPrefix(channel, "#"):
-		msg := "[" + tsStr + "] " + msgText
-		u.Srv.Channel(channelID).SpoofMessage(nick, msg)
+		msg = "[" + tsStr + "] " + msgText
+		send = func(m string) { u.Srv.Channel(channelID).SpoofMessage(nick, m) }
 	case u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext:
 		threadMsgID := u.prefixContext(channelID, msgID, parentID, "scrollback")
-		msg := u.formatContextMessage(tsStr, threadMsgID, msgText)
-		u.MsgSpoofUser(user, nick, msg)
+		msg = u.formatContextMessage(tsStr, threadMsgID, msgText)
+		send = func(m string) { u.MsgSpoofUser(user, nick, m) }
 	default:
-		msg := "[" + tsStr + "] <" + nick + "> " + msgText
-		u.MsgSpoofUser(user, nick, msg)
+		msg = "[" + tsStr + "] <" + nick + "> " + msgText
+		send = func(m string) { u.MsgSpoofUser(user, nick, m) }
 	}
+
+	// Re-wrap the entire payload so the IRC client parses it
+	if isAction {
+		msg = "\x01ACTION " + msg + "\x01"
+	}
+
+	send(msg)
 }
 
 func updatelastviewed(u *User, toUser *User, args []string, service string) {
