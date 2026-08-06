@@ -270,7 +270,7 @@ func details(u *User, toUser *User, args []string, service string) {
 	}
 
 	prefix := "\033[1;38;2;0;82;204m|\033[0m "
-	u.MsgUser(toUser, prefix+postlistURL+postID+"\n")
+	u.MsgUser(toUser, prefix+postlistURL+postID)
 
 	for _, event := range events {
 		var createAt int64
@@ -286,7 +286,7 @@ func details(u *User, toUser *User, args []string, service string) {
 		}
 
 		ts := time.Unix(0, createAt*int64(time.Millisecond)).Format("2006-01-02 15:04:05")
-		u.MsgUser(toUser, prefix+"["+ts+"] <"+nick+"> in "+channel+"\n")
+		u.MsgUser(toUser, prefix+"["+ts+"] <"+nick+"> in "+channel)
 
 		textToProcess := text
 		for {
@@ -296,7 +296,7 @@ func details(u *User, toUser *User, args []string, service string) {
 			if strings.HasPrefix(line, "\x01ACTION ") && strings.HasSuffix(line, "\x01") {
 				line = "* " + nick + " " + line[8:len(line)-1]
 			}
-			u.MsgUser(toUser, prefix+"  "+line+"\n")
+			u.MsgUser(toUser, prefix+"  "+line)
 			if !found {
 				break
 			}
