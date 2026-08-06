@@ -446,12 +446,12 @@ func (s *Slack) GetLastViewedAt(ctx context.Context, channelID string) int64 {
 	return 0
 }
 
-func (s *Slack) GetPostsSince(ctx context.Context, channelID string, since int64) interface{} {
-	return nil
+func (s *Slack) GetPostsSince(ctx context.Context, channelID string, since int64) []*bridge.Event {
+	return []*bridge.Event{}
 }
 
-func (s *Slack) SearchPosts(ctx context.Context, search string) interface{} {
-	return nil
+func (s *Slack) SearchPosts(ctx context.Context, search string) []*bridge.Event {
+	return []*bridge.Event{}
 }
 
 func (s *Slack) UpdateLastViewed(ctx context.Context, channelID string) {
@@ -469,12 +469,12 @@ func (s *Slack) SearchUsers(ctx context.Context, query string) ([]*bridge.UserIn
 	return nil, nil
 }
 
-func (s *Slack) GetPosts(ctx context.Context, channelID string, limit int) interface{} {
-	return nil
+func (s *Slack) GetPosts(ctx context.Context, channelID string, limit int) []*bridge.Event {
+	return []*bridge.Event{}
 }
 
-func (s *Slack) GetPostThread(ctx context.Context, channelID string) interface{} {
-	return nil
+func (s *Slack) GetPostThread(ctx context.Context, channelID string) []*bridge.Event {
+	return []*bridge.Event{}
 }
 
 func (s *Slack) GetChannelID(ctx context.Context, name, teamID string) string {

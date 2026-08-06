@@ -1624,8 +1624,12 @@ func (m *Mattermost) GetLastViewedAt(ctx context.Context, channelID string) int6
 	return x
 }
 
-func (m *Mattermost) GetPostsSince(ctx context.Context, channelID string, since int64) interface{} {
-	return m.mc.GetPostsSince(ctx, channelID, since)
+func (m *Mattermost) GetPostsSince(ctx context.Context, channelID string, since int64) []*bridge.Event {
+	// TODO: Switch from using GetPostsSince() to GetPostsAfter()
+	// TODO: which also does pagination rather than the 200 post limit.
+	// TODO: Or maybe a combination with GetPostsSince() getting the
+	// TODO: first post ID to use for GetPostsAfter().
+	return m.postListToEvents(ctx, m.mc.GetPostsSince(ctx, channelID, since), "scrollback", since)
 }
 
 func (m *Mattermost) UpdateLastViewed(ctx context.Context, channelID string) {
@@ -1649,8 +1653,8 @@ func (m *Mattermost) UpdateLastViewedUser(ctx context.Context, userID string) er
 	}
 }
 
-func (m *Mattermost) SearchPosts(ctx context.Context, search string) interface{} {
-	return m.mc.SearchPosts(ctx, search)
+func (m *Mattermost) SearchPosts(ctx context.Context, search string) []*bridge.Event {
+	return m.postListToEvents(ctx, m.mc.SearchPosts(ctx, search), "search", 0)
 }
 
 func (m *Mattermost) GetFileLinks(ctx context.Context, fileIDs []string) []string {
@@ -1672,12 +1676,12 @@ func (m *Mattermost) SearchUsers(ctx context.Context, query string) ([]*bridge.U
 	return brusers, nil
 }
 
-func (m *Mattermost) GetPosts(ctx context.Context, channelID string, limit int) interface{} {
-	return m.mc.GetPosts(ctx, channelID, limit)
+func (m *Mattermost) GetPosts(ctx context.Context, channelID string, limit int) []*bridge.Event {
+	return m.postListToEvents(ctx, m.mc.GetPosts(ctx, channelID, limit), "scrollback", 0)
 }
 
-func (m *Mattermost) GetPostThread(ctx context.Context, postID string) interface{} {
-	return m.mc.GetPostThread(ctx, postID)
+func (m *Mattermost) GetPostThread(ctx context.Context, postID string) []*bridge.Event {
+	return m.postListToEvents(ctx, m.mc.GetPostThread(ctx, postID), "details", 0)
 }
 
 func (m *Mattermost) GetChannelID(ctx context.Context, name, teamID string) string {
@@ -2245,23 +2249,25 @@ func (m *Mattermost) GetLastSentMsgs() []string {
 	return data
 }
 
-//nolint:funlen
 func (m *Mattermost) GetReplayEvents(ctx context.Context, channelID string, since int64) []*bridge.Event {
 	// TODO: Switch from using GetPostsSince() to GetPostsAfter()
 	// TODO: which also does pagination rather than the 200 post limit.
 	// TODO: Or maybe a combination with GetPostsSince() getting the
 	// TODO: first post ID to use for GetPostsAfter().
-	mmPostList := m.mc.GetPostsSince(ctx, channelID, since)
-	if mmPostList == nil {
+	return m.postListToEvents(ctx, m.mc.GetPostsSince(ctx, channelID, since), "replay", since)
+}
+
+func (m *Mattermost) postListToEvents(ctx context.Context, postlist interface{}, eventType string, since int64) []*bridge.Event {
+	if postlist == nil {
 		return nil
 	}
-	if len(mmPostList.Order) == 0 {
+
+	mmPostList, ok := postlist.(*model.PostList)
+	if !ok || mmPostList == nil || len(mmPostList.Order) == 0 {
 		return []*bridge.Event{}
 	}
 
 	events := make([]*bridge.Event, 0, len(mmPostList.Order))
-	channelName := m.GetChannelName(ctx, channelID)
-	isDM := strings.Contains(channelName, "__")
 
 	// traverse the order in reverse
 	for i := len(mmPostList.Order) - 1; i >= 0; i-- {
@@ -2274,92 +2280,101 @@ func (m *Mattermost) GetReplayEvents(ctx context.Context, channelID string, sinc
 		// relaying messages/logs so let's skip these.
 		//
 		// See https://github.com/mattermost/mattermost/issues/13846 and https://github.com/anneschuth/claude-threads/pull/66
-		if p.DeleteAt > p.CreateAt || p.CreateAt < since {
+		if eventType == "replay" && (p.DeleteAt > p.CreateAt || p.CreateAt < since) {
+			continue
+		} else if eventType != "details" && eventType != "replay" && p.DeleteAt > p.CreateAt {
 			continue
 		}
 
-		props := p.GetProps()
-		botname, override := props["override_username"].(string)
-		user := m.GetUser(ctx, p.UserId)
-		if override {
-			user.Nick = botname
-		}
-
-		switch p.Type {
-		case model.PostTypeAddToTeam, model.PostTypeJoinChannel, model.PostTypeAddToChannel:
-			targetUser := user
-			if addedUserID, ok := props["addedUserId"].(string); ok {
-				targetUser = m.GetUser(ctx, addedUserID)
-			}
-			events = append(events, &bridge.Event{
-				Type: "channel_add",
-				Data: &bridge.ChannelAddEvent{
-					Added:     []*bridge.UserInfo{targetUser},
-					ChannelID: p.ChannelId,
-					Text:      p.Message,
-					CreateAt:  p.CreateAt,
-				},
-			})
-		case model.PostTypeRemoveFromTeam, model.PostTypeLeaveChannel, model.PostTypeRemoveFromChannel:
-			targetUser := user
-			if removedUserID, ok := props["removedUserId"].(string); ok {
-				targetUser = m.GetUser(ctx, removedUserID)
-			}
-			events = append(events, &bridge.Event{
-				Type: "channel_remove",
-				Data: &bridge.ChannelRemoveEvent{
-					Removed:   []*bridge.UserInfo{targetUser},
-					ChannelID: p.ChannelId,
-					Text:      p.Message,
-					CreateAt:  p.CreateAt,
-				},
-			})
-		default:
-			// Pre-allocate file slice
-			var files []*bridge.File
-			if len(p.FileIds) > 0 {
-				fileLinks := m.GetFileLinks(ctx, p.FileIds)
-				files = make([]*bridge.File, 0, len(fileLinks))
-				for _, fname := range fileLinks {
-					files = append(files, &bridge.File{Name: fname})
-				}
-			}
-
-			formattedMsg := m.formatMessage(ctx, p, "replay", logger)
-
-			if isDM {
-				events = append(events, &bridge.Event{
-					Type: "direct_message",
-					Data: &bridge.DirectMessageEvent{
-						Text:      formattedMsg,
-						ChannelID: p.ChannelId,
-						Sender:    user,
-						Receiver:  m.getDMUser(ctx, channelName),
-						Files:     files,
-						MessageID: p.Id,
-						ParentID:  p.RootId,
-						Event:     "replay",
-						CreateAt:  p.CreateAt,
-					},
-				})
-			} else {
-				events = append(events, &bridge.Event{
-					Type: "channel_message",
-					Data: &bridge.ChannelMessageEvent{
-						Text:      formattedMsg,
-						ChannelID: p.ChannelId,
-						Sender:    user,
-						Files:     files,
-						MessageID: p.Id,
-						ParentID:  p.RootId,
-						Event:     "replay",
-						CreateAt:  p.CreateAt,
-					},
-				})
-			}
+		if ev := m.postToEvent(ctx, p, eventType); ev != nil {
+			events = append(events, ev)
 		}
 	}
 	return events
+}
+
+func (m *Mattermost) postToEvent(ctx context.Context, p *model.Post, eventType string) *bridge.Event {
+	channelName := m.GetChannelName(ctx, p.ChannelId)
+	isDM := strings.Contains(channelName, "__")
+
+	props := p.GetProps()
+	botname, override := props["override_username"].(string)
+	user := m.GetUser(ctx, p.UserId)
+	if override {
+		user.Nick = botname
+	}
+
+	switch p.Type {
+	case model.PostTypeAddToTeam, model.PostTypeJoinChannel, model.PostTypeAddToChannel:
+		targetUser := user
+		if addedUserID, ok := props["addedUserId"].(string); ok {
+			targetUser = m.GetUser(ctx, addedUserID)
+		}
+		return &bridge.Event{
+			Type: "channel_add",
+			Data: &bridge.ChannelAddEvent{
+				Added:     []*bridge.UserInfo{targetUser},
+				ChannelID: p.ChannelId,
+				Text:      p.Message,
+				CreateAt:  p.CreateAt,
+			},
+		}
+	case model.PostTypeRemoveFromTeam, model.PostTypeLeaveChannel, model.PostTypeRemoveFromChannel:
+		targetUser := user
+		if removedUserID, ok := props["removedUserId"].(string); ok {
+			targetUser = m.GetUser(ctx, removedUserID)
+		}
+		return &bridge.Event{
+			Type: "channel_remove",
+			Data: &bridge.ChannelRemoveEvent{
+				Removed:   []*bridge.UserInfo{targetUser},
+				ChannelID: p.ChannelId,
+				Text:      p.Message,
+				CreateAt:  p.CreateAt,
+			},
+		}
+	default:
+		var files []*bridge.File
+		if len(p.FileIds) > 0 {
+			fileLinks := m.GetFileLinks(ctx, p.FileIds)
+			files = make([]*bridge.File, 0, len(fileLinks))
+			for _, fname := range fileLinks {
+				files = append(files, &bridge.File{Name: fname})
+			}
+		}
+
+		formattedMsg := m.formatMessage(ctx, p, eventType, logger)
+
+		if isDM {
+			return &bridge.Event{
+				Type: "direct_message",
+				Data: &bridge.DirectMessageEvent{
+					Text:      formattedMsg,
+					ChannelID: p.ChannelId,
+					Sender:    user,
+					Receiver:  m.getDMUser(ctx, channelName),
+					Files:     files,
+					MessageID: p.Id,
+					ParentID:  p.RootId,
+					Event:     eventType,
+					CreateAt:  p.CreateAt,
+				},
+			}
+		}
+		return &bridge.Event{
+			Type: "channel_message",
+			Data: &bridge.ChannelMessageEvent{
+				Text:      formattedMsg,
+				ChannelID: p.ChannelId,
+				Sender:    user,
+				Files:     files,
+				MessageID: p.Id,
+				ParentID:  p.RootId,
+				Event:     eventType,
+				CreateAt:  p.CreateAt,
+			},
+		}
+	}
 }
 
 func (m *Mattermost) Config() any {

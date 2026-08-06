@@ -942,9 +942,9 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo) {
 
 	// Post everything to the channel we haven't seen yet
 	events := u.br.GetReplayEvents(u.ctx, brchannel.ID, since)
-	if events == nil {
+	if len(events) == 0 {
 		// If the channel is not from the primary team id, we can't get posts
-		if brchannel.TeamID == u.br.GetMe().TeamID {
+		if events == nil && brchannel.TeamID == u.br.GetMe().TeamID {
 			logger.Errorf("something wrong with GetReplayEvents for %s for channel %s (%s)", u.Nick, channame, brchannel.ID)
 		}
 		return
@@ -960,31 +960,17 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo) {
 		// Extract attributes dynamically based on the event payload type
 		switch e := event.Data.(type) {
 		case *bridge.ChannelMessageEvent:
-			createAt = e.CreateAt
-			text = e.Text
-			nick = e.Sender.Nick
-			msgID = e.MessageID
-			parentID = e.ParentID
-			files = e.Files
+			createAt, text, nick, msgID, parentID, files = e.CreateAt, e.Text, e.Sender.Nick, e.MessageID, e.ParentID, e.Files
 		case *bridge.DirectMessageEvent:
-			createAt = e.CreateAt
-			text = e.Text
-			nick = e.Sender.Nick
-			msgID = e.MessageID
-			parentID = e.ParentID
-			files = e.Files
+			createAt, text, nick, msgID, parentID, files = e.CreateAt, e.Text, e.Sender.Nick, e.MessageID, e.ParentID, e.Files
 		case *bridge.ChannelAddEvent:
-			createAt = e.CreateAt
-			text = e.Text
-			nick = systemUser
+			createAt, text, nick = e.CreateAt, e.Text, systemUser
 			if len(e.Added) > 0 {
 				ghost := u.createUserFromInfo(e.Added[0])
 				u.Srv.Channel(brchannel.ID).Join(ghost) //nolint:errcheck
 			}
 		case *bridge.ChannelRemoveEvent:
-			createAt = e.CreateAt
-			text = e.Text
-			nick = systemUser
+			createAt, text, nick = e.CreateAt, e.Text, systemUser
 			if len(e.Removed) > 0 {
 				ghost := u.createUserFromInfo(e.Removed[0])
 				u.Srv.Channel(brchannel.ID).Part(ghost, "")
@@ -995,43 +981,47 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo) {
 
 		ts := time.Unix(0, createAt*int64(time.Millisecond))
 
-		for _, post := range strings.Split(text, "\n") {
-			if post == "" {
-				continue
-			}
+		tsStr := ts.Format("15:04")
 
-			if showReplayHdr {
-				date := ts.Format("2006-01-02 15:04:05")
-				if brchannel.DM {
-					spoof(nick, fmt.Sprintf("\x02Replaying msgs since %s\x02 \x1d(%s)\x1d", date, logSince))
-				} else {
-					spoof("matterircd", fmt.Sprintf("\x02Replaying msgs since %s\x02 \x1d(%s)\x1d", date, logSince))
+		// Print the replay header on the very first valid event we process
+		if showReplayHdr && (text != "" || len(files) > 0) {
+			dateStr := ts.Format("2006-01-02 15:04:05")
+			target := "matterircd"
+			if brchannel.DM {
+				target = nick
+			}
+			spoof(target, fmt.Sprintf("\x02Replaying msgs since %s\x02 \x1d(%s)\x1d", dateStr, logSince))
+			logger.Infof("Replaying msgs for %s (%s) since %s (%s)", channame, brchannel.ID, dateStr, logSince)
+			showReplayHdr = false
+		}
+
+		textToProcess := text
+		for {
+			line, rest, found := strings.Cut(textToProcess, "\n")
+			if line != "" {
+				if nick == systemUser {
+					line = "\x1d" + line + "\x1d"
 				}
-				logger.Infof("Replaying msgs for %s (%s) since %s (%s)", channame, brchannel.ID, date, logSince)
-				showReplayHdr = false
+
+				replayMsg := fmt.Sprintf("[%s] %s", tsStr, line)
+				if (u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext) && nick != systemUser {
+					threadMsgID := u.prefixContext(brchannel.ID, msgID, parentID, "replay")
+					replayMsg = u.formatContextMessage(tsStr, threadMsgID, line)
+				}
+				spoof(nick, replayMsg)
 			}
 
-			if nick == systemUser {
-				post = "\x1d" + post + "\x1d"
+			if !found {
+				break
 			}
-
-			replayMsg := fmt.Sprintf("[%s] %s", ts.Format("15:04"), post)
-			if (u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext) && nick != systemUser {
-				threadMsgID := u.prefixContext(brchannel.ID, msgID, parentID, "replay")
-				replayMsg = u.formatContextMessage(ts.Format("15:04"), threadMsgID, post)
-			}
-			spoof(nick, replayMsg)
+			textToProcess = rest
 		}
 
-		if len(files) == 0 {
-			continue
-		}
-
-		for _, fname := range files {
-			fileMsg := "\x1ddownload file - " + fname.Name + "\x1d"
+		for _, f := range files {
+			fileMsg := "\x1ddownload file - " + f.Name + "\x1d"
 			if u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext {
 				threadMsgID := u.prefixContext(brchannel.ID, msgID, parentID, "replay_file")
-				fileMsg = u.formatContextMessage(ts.Format("15:04"), threadMsgID, fileMsg)
+				fileMsg = u.formatContextMessage(tsStr, threadMsgID, fileMsg)
 			}
 			spoof(nick, fileMsg)
 		}

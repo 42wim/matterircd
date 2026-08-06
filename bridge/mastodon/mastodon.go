@@ -203,12 +203,12 @@ func (m *Mastodon) GetLastViewedAt(ctx context.Context, channelID string) int64 
 	return 0
 }
 
-func (m *Mastodon) GetPostsSince(ctx context.Context, channelID string, since int64) interface{} {
-	return nil
+func (m *Mastodon) GetPostsSince(ctx context.Context, channelID string, since int64) []*bridge.Event {
+	return []*bridge.Event{}
 }
 
-func (m *Mastodon) SearchPosts(ctx context.Context, search string) interface{} {
-	return nil
+func (m *Mastodon) SearchPosts(ctx context.Context, search string) []*bridge.Event {
+	return []*bridge.Event{}
 }
 
 func (m *Mastodon) UpdateLastViewed(ctx context.Context, channelID string) {
@@ -226,12 +226,12 @@ func (m *Mastodon) SearchUsers(ctx context.Context, query string) ([]*bridge.Use
 	return nil, nil
 }
 
-func (m *Mastodon) GetPosts(ctx context.Context, channelID string, limit int) interface{} {
-	return nil
+func (m *Mastodon) GetPosts(ctx context.Context, channelID string, limit int) []*bridge.Event {
+	return []*bridge.Event{}
 }
 
-func (m *Mastodon) GetPostThread(ctx context.Context, postID string) interface{} {
-	return nil
+func (m *Mastodon) GetPostThread(ctx context.Context, postID string) []*bridge.Event {
+	return []*bridge.Event{}
 }
 
 func (m *Mastodon) GetChannelID(ctx context.Context, name, teamID string) string {
