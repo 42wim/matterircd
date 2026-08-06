@@ -502,6 +502,8 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 }
 
 // Unified dispatcher for handling formatted search and scrollback payloads
+//
+//nolint:unparam
 func dispatchHistoricalEvent(u *User, toUser *User, event *bridge.Event, searchCtx string, searchRegexes []*regexp.Regexp) {
 	var createAt int64
 	var text, nick, msgID, parentID, channelID string

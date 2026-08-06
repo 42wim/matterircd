@@ -2293,6 +2293,7 @@ func (m *Mattermost) postListToEvents(ctx context.Context, postlist interface{},
 	return events
 }
 
+//nolint:funlen
 func (m *Mattermost) postToEvent(ctx context.Context, p *model.Post, eventType string) *bridge.Event {
 	channelName := m.GetChannelName(ctx, p.ChannelId)
 	isDM := strings.Contains(channelName, "__")
