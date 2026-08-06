@@ -11,7 +11,6 @@ import (
 	"unicode"
 
 	"github.com/42wim/matterircd/bridge"
-	"github.com/mattermost/mattermost/server/public/model"
 )
 
 type CommandHandler interface {
@@ -208,6 +207,11 @@ func login(u *User, toUser *User, args []string, service string) {
 }
 
 func replay(u *User, toUser *User, args []string, service string) {
+	if service != "mattermost" {
+		u.MsgUser(toUser, "not implemented")
+		return
+	}
+
 	if len(args) == 0 || len(args) > 2 {
 		u.MsgUser(toUser, "need REPLAY (#<channel>)")
 		u.MsgUser(toUser, "e.g. REPLAY #bugs")
@@ -232,7 +236,7 @@ func replay(u *User, toUser *User, args []string, service string) {
 
 //nolint:forcetypeassert,goconst
 func details(u *User, toUser *User, args []string, service string) {
-	if service == "slack" {
+	if service != "mattermost" {
 		u.MsgUser(toUser, "not implemented")
 		return
 	}
@@ -264,42 +268,59 @@ func details(u *User, toUser *User, args []string, service string) {
 		return
 	}
 
-	list := u.br.GetPostThread(u.ctx, postID)
-	if list == nil || list.(*model.PostList) == nil || len(list.(*model.PostList).Order) == 0 {
+	events := u.br.GetPostThread(u.ctx, postID)
+	if len(events) == 0 {
 		u.MsgUser(toUser, "post not found")
 		return
 	}
 
-	postlist, _ := list.(*model.PostList)
-	post := postlist.Posts[postlist.Order[0]]
-	channel := getMattermostChannelName(u, post.ChannelId)
-	user := u.br.GetUser(u.ctx, post.UserId)
-	nick := user.Nick
-
 	prefix := "\033[1;38;2;0;82;204m|\033[0m "
-	u.MsgUser(toUser, prefix+postlistURL+postID+"\n")
-	if strings.HasPrefix(channel, "#") {
-		u.MsgUser(toUser, prefix+"Channel: "+channel+"\n")
-	}
-	u.MsgUser(toUser, prefix+"User: "+nick+"\n")
-	u.MsgUser(toUser, prefix+"\n")
-	for _, msg := range strings.Split(post.Message, "\n") {
-		u.MsgUser(toUser, prefix+"  "+msg+"\n")
+	u.MsgUser(toUser, prefix+postlistURL+postID)
+
+	for _, event := range events {
+		var createAt int64
+		var text, nick, channel string
+
+		switch e := event.Data.(type) {
+		case *bridge.ChannelMessageEvent:
+			createAt, text, nick, channel = e.CreateAt, e.Text, e.Sender.Nick, u.br.GetChannelName(u.ctx, e.ChannelID)
+		case *bridge.DirectMessageEvent:
+			createAt, text, nick, channel = e.CreateAt, e.Text, e.Sender.Nick, u.br.GetChannelName(u.ctx, e.ChannelID)
+		default:
+			continue
+		}
+
+		ts := time.Unix(0, createAt*int64(time.Millisecond)).Format("2006-01-02 15:04:05")
+		u.MsgUser(toUser, prefix+"["+ts+"] <"+nick+"> in "+channel)
+
+		textToProcess := text
+		for {
+			line, rest, found := strings.Cut(textToProcess, "\n")
+
+			// Visually translate actions for the details view
+			if strings.HasPrefix(line, "\x01ACTION ") && strings.HasSuffix(line, "\x01") {
+				line = "* " + nick + " " + line[8:len(line)-1]
+			}
+			u.MsgUser(toUser, prefix+"  "+line)
+			if !found {
+				break
+			}
+			textToProcess = rest
+		}
 	}
 }
 
 //nolint:cyclop
 func search(u *User, toUser *User, args []string, service string) {
-	if service == "slack" {
+	if service != "mattermost" {
 		u.MsgUser(toUser, "not implemented")
 		return
 	}
 
 	limit := 0
 	if len(args) > 1 {
-		var err error
-		limit, err = strconv.Atoi(args[0])
-		if err == nil {
+		if val, err := strconv.Atoi(args[0]); err == nil {
+			limit = val
 			args = args[1:]
 		}
 	}
@@ -310,99 +331,32 @@ func search(u *User, toUser *User, args []string, service string) {
 		return
 	}
 
-	list := u.br.SearchPosts(u.ctx, strings.Join(args, " "))
-
-	if list == nil || list.(*model.PostList) == nil || len(list.(*model.PostList).Order) == 0 {
+	searchStr := strings.Join(args, " ")
+	events := u.br.SearchPosts(u.ctx, searchStr)
+	if len(events) == 0 {
 		u.MsgUser(toUser, "no results")
 		return
 	}
 
-	postlist, _ := list.(*model.PostList)
-
-	if limit == 0 || limit > len(postlist.Order) {
-		limit = len(postlist.Order)
+	if limit > 0 && limit < len(events) {
+		events = events[len(events)-limit:]
 	}
 
-	for i := limit - 1; i >= 0; i-- {
-		p := postlist.Posts[postlist.Order[i]]
-		if p.Type == model.PostTypeJoinLeave {
-			continue
-		}
-
-		if p.DeleteAt > p.CreateAt {
-			continue
-		}
-
-		props := p.GetProps()
-		botname, override := props["override_username"].(string)
-		user := u.br.GetUser(u.ctx, p.UserId)
-		nick := user.Nick
-		if override {
-			nick = botname
-		}
-
-		channelname := getMattermostChannelName(u, p.ChannelId)
-
-		if p.Type == model.PostTypeAddToTeam || p.Type == model.PostTypeRemoveFromTeam {
-			nick = systemUser
-		}
-
-		for _, post := range strings.Split(p.Message, "\n") {
-			if nick == systemUser {
-				post = "\x1d" + post + "\x1d"
-			}
-			for _, term := range args {
-				re := regexp.MustCompile(`(?i)(` + regexp.QuoteMeta(term) + `)`)
-				post = re.ReplaceAllString(post, "\x02$1\x02")
-			}
-			formatSearchMsg(u, p.ChannelId, channelname, toUser, nick, p, post)
-		}
-
-		if len(p.FileIds) == 0 {
-			continue
-		}
-
-		for _, fname := range u.br.GetFileLinks(u.ctx, p.FileIds) {
-			fileMsg := "\x1ddownload file - " + fname + "\x1d"
-			formatSearchMsg(u, p.ChannelId, channelname, toUser, nick, p, fileMsg)
+	var searchRegexes []*regexp.Regexp
+	if len(args) > 0 {
+		searchRegexes = make([]*regexp.Regexp, 0, len(args))
+		for _, term := range args {
+			searchRegexes = append(searchRegexes, regexp.MustCompile(`(?i)(`+regexp.QuoteMeta(term)+`)`))
 		}
 	}
-}
 
-func formatSearchMsg(u *User, channelID string, channel string, user *User, nick string, p *model.Post, msgText string) {
-	ts := time.Unix(0, p.CreateAt*int64(time.Millisecond))
-
-	switch {
-	case (u.cfg.Mattermost().CollapseScrollback && strings.HasPrefix(channel, "#")):
-		threadMsgID := u.prefixContext(channelID, p.Id, p.RootId, "scrollback")
-		msg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, msgText)
-		nick += "/" + channel
-		u.Srv.Channel("&messages").SpoofMessage(nick, msg)
-	case u.cfg.Mattermost().CollapseScrollback:
-		threadMsgID := u.prefixContext(channelID, p.Id, p.RootId, "scrollback")
-		msg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, msgText)
-		u.Srv.Channel("&messages").SpoofMessage(nick, msg)
-	case (u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext) && strings.HasPrefix(channel, "#"):
-		threadMsgID := u.prefixContext(channelID, p.Id, p.RootId, "scrollback")
-		nick += "/" + channel
-		msg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, "<"+nick+"> "+msgText)
-		u.MsgUser(user, msg)
-	case strings.HasPrefix(channel, "#"):
-		nick += "/" + channel
-		msg := "[" + ts.Format("2006-01-02 15:04") + "] <" + nick + "> " + msgText
-		u.MsgUser(user, msg)
-	case u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext:
-		threadMsgID := u.prefixContext(channelID, p.Id, p.RootId, "scrollback")
-		msg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, "<"+nick+"> "+msgText)
-		u.MsgUser(user, msg)
-	default:
-		msg := "[" + ts.Format("2006-01-02 15:04") + "] <" + nick + "> " + msgText
-		u.MsgUser(user, msg)
+	for _, event := range events {
+		dispatchHistoricalEvent(u, toUser, event, searchStr, searchRegexes)
 	}
 }
 
 func searchUsers(u *User, toUser *User, args []string, service string) {
-	if service == "slack" {
+	if service != "mattermost" {
 		u.MsgUser(toUser, "not implemented")
 		return
 	}
@@ -454,14 +408,13 @@ func part(u *User, toUser *User, args []string, service string) {
 
 //nolint:funlen,gocognit,gocyclo,cyclop
 func scrollback(u *User, toUser *User, args []string, service string) {
-	if service == "slack" {
+	if service != "mattermost" {
 		u.MsgUser(toUser, "not implemented")
 		return
 	}
 
 	var err error
 	limit := 0
-	err = nil
 	if len(args) == 2 {
 		limit, err = strconv.Atoi(args[1])
 	}
@@ -491,8 +444,7 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 		// channel name.
 		userIDs := []string{u.User, scrollbackUser.User}
 		sort.Strings(userIDs)
-		channelName := userIDs[0] + "__" + userIDs[1]
-		channelID = u.br.GetChannelID(u.ctx, channelName, u.br.GetMe().TeamID)
+		channelID = u.br.GetChannelID(u.ctx, userIDs[0]+"__"+userIDs[1], u.br.GetMe().TeamID)
 	case len(search) == 26:
 		searchPostID = search
 	case strings.HasPrefix(search, "@@"):
@@ -505,85 +457,24 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 		return
 	}
 
-	var list interface{}
+	var events []*bridge.Event
 	if searchPostID != "" {
-		list = u.br.GetPostThread(u.ctx, searchPostID)
+		events = u.br.GetPostThread(u.ctx, searchPostID)
 	} else {
-		list = u.br.GetPosts(u.ctx, channelID, limit)
+		events = u.br.GetPosts(u.ctx, channelID, limit)
 	}
-	if list == nil || list.(*model.PostList) == nil || len(list.(*model.PostList).Order) == 0 {
+
+	if len(events) == 0 {
 		u.MsgUser(toUser, "no results")
 		return
 	}
 
-	postlist, _ := list.(*model.PostList)
-
-	// Workaround https://github.com/mattermost/mattermost-server/issues/23081
-	plOrder := postlist.Order
-	if searchPostID != "" {
-		plOrder = append(plOrder, searchPostID)
+	if limit > 0 && limit < len(events) {
+		events = events[len(events)-limit:]
 	}
-	skipRoot := false
 
-	for i := len(plOrder) - 1; i >= 0; i-- {
-		if limit != 0 && len(plOrder) > limit && i < len(plOrder)-limit {
-			continue
-		}
-
-		p := postlist.Posts[plOrder[i]]
-
-		// Workaround https://github.com/mattermost/mattermost-server/issues/23081
-		if searchPostID != "" && p.Id == searchPostID {
-			if skipRoot {
-				continue
-			}
-			skipRoot = true
-		}
-
-		props := p.GetProps()
-		botname, override := props["override_username"].(string)
-		user := u.br.GetUser(u.ctx, p.UserId)
-		nick := user.Nick
-		if override {
-			nick = botname
-		}
-
-		if p.Type == model.PostTypeAddToTeam || p.Type == model.PostTypeRemoveFromTeam {
-			nick = systemUser
-		}
-
-		if searchPostID != "" && channelID == "" {
-			channelID = p.ChannelId
-			search = getMattermostChannelName(u, p.ChannelId)
-			if !strings.HasPrefix(search, "#") {
-				user := u.br.GetUser(u.ctx, search)
-				search = user.Nick
-				if override {
-					search = botname
-				}
-				scrollbackUser, _ = u.Srv.HasUser(search)
-			}
-			if search == "" {
-				u.MsgUser(toUser, "no results; either channel not found, no access, or not joined in")
-				return
-			}
-		}
-
-		for _, post := range strings.Split(p.Message, "\n") {
-			if nick == systemUser {
-				post = "\x1d" + post + "\x1d"
-			}
-			formatScrollbackMsg(u, channelID, search, scrollbackUser, nick, p, post)
-		}
-
-		if len(p.FileIds) == 0 {
-			continue
-		}
-
-		for _, fname := range u.br.GetFileLinks(u.ctx, p.FileIds) {
-			fileMsg := "\x1ddownload file - " + fname + "\x1d"
-			formatScrollbackMsg(u, channelID, search, scrollbackUser, nick, p, fileMsg)
-		}
+	for _, event := range events {
+		dispatchHistoricalEvent(u, toUser, event, search, nil)
 	}
 
 	if !u.cfg.Mattermost().CollapseScrollback {
@@ -591,39 +482,104 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 	}
 }
 
-func formatScrollbackMsg(u *User, channelID string, channel string, user *User, nick string, p *model.Post, msgText string) {
-	ts := time.Unix(0, p.CreateAt*int64(time.Millisecond))
+// Unified dispatcher for handling formatted search and scrollback payloads
+//
+//nolint:unparam
+func dispatchHistoricalEvent(u *User, toUser *User, event *bridge.Event, searchCtx string, searchRegexes []*regexp.Regexp) {
+	var createAt int64
+	var text, nick, msgID, parentID, channelID string
+	var files []*bridge.File
 
-	switch {
-	case (u.cfg.Mattermost().CollapseScrollback && strings.HasPrefix(channel, "#")):
-		threadMsgID := u.prefixContext(channelID, p.Id, p.RootId, "scrollback")
-		msg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, msgText)
-		nick += "/" + channel
-		u.Srv.Channel("&messages").SpoofMessage(nick, msg)
-	case u.cfg.Mattermost().CollapseScrollback:
-		threadMsgID := u.prefixContext(channelID, p.Id, p.RootId, "scrollback")
-		msg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, msgText)
-		nick += "/" + channel
-		u.Srv.Channel("&messages").SpoofMessage(nick, msg)
-	case (u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext) && strings.HasPrefix(channel, "#") && nick != systemUser:
-		threadMsgID := u.prefixContext(channelID, p.Id, p.RootId, "scrollback")
-		msg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, msgText)
-		u.Srv.Channel(channelID).SpoofMessage(nick, msg)
-	case strings.HasPrefix(channel, "#"):
-		msg := "[" + ts.Format("2006-01-02 15:04") + "] " + msgText
-		u.Srv.Channel(channelID).SpoofMessage(nick, msg)
-	case u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext:
-		threadMsgID := u.prefixContext(channelID, p.Id, p.RootId, "scrollback")
-		msg := u.formatContextMessage(ts.Format("2006-01-02 15:04"), threadMsgID, msgText)
-		u.MsgSpoofUser(user, nick, msg)
+	switch e := event.Data.(type) {
+	case *bridge.ChannelMessageEvent:
+		createAt, text, nick, msgID, parentID, files, channelID = e.CreateAt, e.Text, e.Sender.Nick, e.MessageID, e.ParentID, e.Files, e.ChannelID
+	case *bridge.DirectMessageEvent:
+		createAt, text, nick, msgID, parentID, files, channelID = e.CreateAt, e.Text, e.Sender.Nick, e.MessageID, e.ParentID, e.Files, e.ChannelID
+	case *bridge.ChannelAddEvent:
+		createAt, text, nick, channelID = e.CreateAt, e.Text, systemUser, e.ChannelID
+	case *bridge.ChannelRemoveEvent:
+		createAt, text, nick, channelID = e.CreateAt, e.Text, systemUser, e.ChannelID
 	default:
-		msg := "[" + ts.Format("2006-01-02 15:04") + "]" + " <" + nick + "> " + msgText
-		u.MsgSpoofUser(user, nick, msg)
+		return
+	}
+
+	channelName := getMattermostChannelName(u, channelID)
+	scrollbackUser, _ := u.Srv.HasUser(searchCtx)
+
+	tsStr := time.Unix(0, createAt*int64(time.Millisecond)).Format("2006-01-02 15:04")
+	textToProcess := text
+	for {
+		line, rest, found := strings.Cut(textToProcess, "\n")
+		if line != "" {
+			if nick == systemUser {
+				line = "\x1d" + line + "\x1d"
+			}
+			if len(searchRegexes) > 0 {
+				for _, re := range searchRegexes {
+					line = re.ReplaceAllString(line, "\x02$1\x02")
+				}
+			}
+			formatScrollbackMsg(u, channelID, channelName, scrollbackUser, nick, tsStr, msgID, parentID, line)
+		}
+
+		if !found {
+			break
+		}
+		textToProcess = rest
+	}
+
+	for _, f := range files {
+		fileMsg := "\x1ddownload file - " + f.Name + "\x1d"
+		formatScrollbackMsg(u, channelID, channelName, scrollbackUser, nick, tsStr, msgID, parentID, fileMsg)
 	}
 }
 
+func formatScrollbackMsg(u *User, channelID string, channel string, user *User, nick string, tsStr string, msgID, parentID, msgText string) {
+	// Safely unwrap CTCP actions
+	isAction := strings.HasPrefix(msgText, "\x01ACTION ") && strings.HasSuffix(msgText, "\x01")
+	if isAction {
+		msgText = msgText[8 : len(msgText)-1]
+	}
+
+	var msg string
+	var send func(string)
+
+	switch {
+	case u.cfg.Mattermost().CollapseScrollback && strings.HasPrefix(channel, "#"):
+		threadMsgID := u.prefixContext(channelID, msgID, parentID, "scrollback")
+		msg = u.formatContextMessage(tsStr, threadMsgID, msgText)
+		nick += "/" + channel
+		send = func(m string) { u.Srv.Channel("&messages").SpoofMessage(nick, m) }
+	case u.cfg.Mattermost().CollapseScrollback:
+		threadMsgID := u.prefixContext(channelID, msgID, parentID, "scrollback")
+		msg = u.formatContextMessage(tsStr, threadMsgID, msgText)
+		send = func(m string) { u.Srv.Channel("&messages").SpoofMessage(nick, m) }
+	case (u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext) && strings.HasPrefix(channel, "#") && nick != systemUser:
+		threadMsgID := u.prefixContext(channelID, msgID, parentID, "scrollback")
+		msg = u.formatContextMessage(tsStr, threadMsgID, msgText)
+		send = func(m string) { u.Srv.Channel(channelID).SpoofMessage(nick, m) }
+	case strings.HasPrefix(channel, "#"):
+		msg = "[" + tsStr + "] " + msgText
+		send = func(m string) { u.Srv.Channel(channelID).SpoofMessage(nick, m) }
+	case u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext:
+		threadMsgID := u.prefixContext(channelID, msgID, parentID, "scrollback")
+		msg = u.formatContextMessage(tsStr, threadMsgID, msgText)
+		send = func(m string) { u.MsgSpoofUser(user, nick, m) }
+	default:
+		msg = "[" + tsStr + "] <" + nick + "> " + msgText
+		send = func(m string) { u.MsgSpoofUser(user, nick, m) }
+	}
+
+	// Re-wrap the entire payload so the IRC client parses it
+	if isAction {
+		msg = "\x01ACTION " + msg + "\x01"
+	}
+
+	send(msg)
+}
+
 func updatelastviewed(u *User, toUser *User, args []string, service string) {
-	if service == "slack" {
+	if service != "mattermost" {
 		u.MsgUser(toUser, "not implemented")
 		return
 	}
@@ -785,7 +741,7 @@ func lastsent(u *User, toUser *User, args []string, service string) {
 
 //nolint:funlen
 func channelHeader(u *User, toUser *User, args []string, service string) {
-	if service == "slack" {
+	if service != "mattermost" {
 		u.MsgUser(toUser, "not implemented")
 		return
 	}

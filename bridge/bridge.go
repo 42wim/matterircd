@@ -52,10 +52,12 @@ type Bridger interface {
 
 	GetTeamName(ctx context.Context, teamID string) string
 
-	GetPostsSince(ctx context.Context, channelID string, since int64) interface{}
-	GetPosts(ctx context.Context, channelID string, limit int) interface{}
-	GetPostThread(ctx context.Context, postID string) interface{}
-	SearchPosts(ctx context.Context, search string) interface{}
+	GetPostsSince(ctx context.Context, channelID string, since int64) []*Event
+	GetPosts(ctx context.Context, channelID string, limit int) []*Event
+	GetPostThread(ctx context.Context, postID string) []*Event
+	GetReplayEvents(ctx context.Context, channelID string, since int64) []*Event
+	SearchPosts(ctx context.Context, search string) []*Event
+
 	ModifyPost(ctx context.Context, msgID, text string) error
 	GetFileLinks(ctx context.Context, fileIDs []string) []string
 
@@ -66,8 +68,6 @@ type Bridger interface {
 	FormatterConfig() *config.FormatterConfig
 
 	IsChannelMember(channelID string) bool
-
-	GetReplayEvents(ctx context.Context, channelID string, since int64) []*Event
 }
 
 type ChannelInfo struct {
