@@ -1380,6 +1380,7 @@ func (u *User) saveLastViewedAt(channelID string) {
 	}
 
 	currentTime := make([]byte, 8)
+	//nolint:gosec // time.Now().UnixMilli() is positive (post-1970)
 	binary.LittleEndian.PutUint64(currentTime, uint64(time.Now().UnixMilli()))
 
 	err := u.lastViewedAtDB.Update(func(tx *bolt.Tx) error {
