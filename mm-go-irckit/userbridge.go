@@ -21,7 +21,6 @@ import (
 	"github.com/42wim/matterircd/config"
 	"github.com/42wim/matterircd/utils"
 	"github.com/davecgh/go-spew/spew"
-	"github.com/mattermost/mattermost/server/public/model"
 	"github.com/sirupsen/logrus"
 	"github.com/sorcix/irc"
 )
@@ -1381,7 +1380,7 @@ func (u *User) saveLastViewedAt(channelID string) {
 	}
 
 	currentTime := make([]byte, 8)
-	binary.LittleEndian.PutUint64(currentTime, uint64(model.GetMillis()))
+	binary.LittleEndian.PutUint64(currentTime, uint64(time.Now().UnixMilli()))
 
 	err := u.lastViewedAtDB.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(u.User))

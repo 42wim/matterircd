@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/42wim/matterircd/utils"
-	"github.com/mattermost/mattermost/server/public/model"
 	"github.com/sorcix/irc"
 )
 
@@ -467,7 +466,7 @@ func (ch *channel) Names() []string {
 	names := make([]string, 0, len(users))
 
 	for _, u := range users {
-		if strings.Contains(u.Roles, model.SystemAdminRoleId) {
+		if strings.Contains(u.Roles, "system_admin") {
 			names = append(names, "@"+u.Nick)
 		} else {
 			names = append(names, u.Nick)
