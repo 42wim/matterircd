@@ -30,7 +30,7 @@ func logout(u *User, toUser *User, args []string, service string) {
 		u.MsgUser(toUser, "login or logout in progress. Please wait")
 		return
 	}
-	u.br.Logout()
+	_ = u.br.Logout(u.ctx)
 	u.logoutFrom(u.br.Protocol())
 }
 
@@ -88,7 +88,7 @@ func login(u *User, toUser *User, args []string, service string) {
 		}
 
 		if u.br != nil && u.br.Connected() {
-			err = u.br.Logout()
+			err = u.br.Logout(u.ctx)
 			if err != nil {
 				u.MsgUser(toUser, err.Error())
 				return
@@ -189,7 +189,7 @@ func login(u *User, toUser *User, args []string, service string) {
 	}
 
 	if u.br != nil && u.br.Connected() {
-		err := u.br.Logout()
+		err := u.br.Logout(u.ctx)
 		if err != nil {
 			u.MsgUser(toUser, err.Error())
 			return
@@ -220,8 +220,8 @@ func replay(u *User, toUser *User, args []string, service string) {
 		channelTeamID = args[1]
 	}
 
-	channelID := u.br.GetChannelID(channelName, channelTeamID)
-	brchannel, err := u.br.GetChannel(channelID)
+	channelID := u.br.GetChannelID(u.ctx, channelName, channelTeamID)
+	brchannel, err := u.br.GetChannel(u.ctx, channelID)
 	if err != nil {
 		u.MsgUser(toUser, channelName+" not found")
 		return
@@ -264,7 +264,7 @@ func details(u *User, toUser *User, args []string, service string) {
 		return
 	}
 
-	list := u.br.GetPostThread(postID)
+	list := u.br.GetPostThread(u.ctx, postID)
 	if list == nil || list.(*model.PostList) == nil || len(list.(*model.PostList).Order) == 0 {
 		u.MsgUser(toUser, "post not found")
 		return
@@ -273,7 +273,7 @@ func details(u *User, toUser *User, args []string, service string) {
 	postlist, _ := list.(*model.PostList)
 	post := postlist.Posts[postlist.Order[0]]
 	channel := getMattermostChannelName(u, post.ChannelId)
-	user := u.br.GetUser(post.UserId)
+	user := u.br.GetUser(u.ctx, post.UserId)
 	nick := user.Nick
 
 	prefix := "\033[1;38;2;0;82;204m|\033[0m "
@@ -310,7 +310,7 @@ func search(u *User, toUser *User, args []string, service string) {
 		return
 	}
 
-	list := u.br.SearchPosts(strings.Join(args, " "))
+	list := u.br.SearchPosts(u.ctx, strings.Join(args, " "))
 
 	if list == nil || list.(*model.PostList) == nil || len(list.(*model.PostList).Order) == 0 {
 		u.MsgUser(toUser, "no results")
@@ -335,7 +335,7 @@ func search(u *User, toUser *User, args []string, service string) {
 
 		props := p.GetProps()
 		botname, override := props["override_username"].(string)
-		user := u.br.GetUser(p.UserId)
+		user := u.br.GetUser(u.ctx, p.UserId)
 		nick := user.Nick
 		if override {
 			nick = botname
@@ -362,7 +362,7 @@ func search(u *User, toUser *User, args []string, service string) {
 			continue
 		}
 
-		for _, fname := range u.br.GetFileLinks(p.FileIds) {
+		for _, fname := range u.br.GetFileLinks(u.ctx, p.FileIds) {
 			fileMsg := "\x1ddownload file - " + fname + "\x1d"
 			formatSearchMsg(u, p.ChannelId, channelname, toUser, nick, p, fileMsg)
 		}
@@ -407,7 +407,7 @@ func searchUsers(u *User, toUser *User, args []string, service string) {
 		return
 	}
 
-	users, err := u.br.SearchUsers(strings.Join(args, " "))
+	users, err := u.br.SearchUsers(u.ctx, strings.Join(args, " "))
 	if err != nil {
 		u.MsgUser(toUser, fmt.Sprint("Error", err.Error()))
 		return
@@ -419,7 +419,7 @@ func searchUsers(u *User, toUser *User, args []string, service string) {
 }
 
 func getMattermostChannelName(u *User, channelID string) string {
-	channelName := u.br.GetChannelName(channelID)
+	channelName := u.br.GetChannelName(u.ctx, channelID)
 	channelMembers := strings.Split(channelName, "__")
 
 	if len(channelMembers) != 2 {
@@ -444,9 +444,9 @@ func part(u *User, toUser *User, args []string, service string) {
 	if len(args) == 2 {
 		channelTeamID = args[1]
 	}
-	channelID := u.br.GetChannelID(channelName, channelTeamID)
+	channelID := u.br.GetChannelID(u.ctx, channelName, channelTeamID)
 
-	err := u.br.Part(channelID)
+	err := u.br.Part(u.ctx, channelID)
 	if err != nil {
 		u.MsgUser(toUser, fmt.Sprintf("could not part/leave %s", args[0]))
 	}
@@ -485,14 +485,14 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 	switch {
 	case strings.HasPrefix(search, "#"):
 		channelName := strings.ReplaceAll(search, "#", "")
-		channelID = u.br.GetChannelID(channelName, u.br.GetMe().TeamID)
+		channelID = u.br.GetChannelID(u.ctx, channelName, u.br.GetMe().TeamID)
 	case exists && scrollbackUser.Ghost:
 		// We need to sort the two user IDs to construct the DM
 		// channel name.
 		userIDs := []string{u.User, scrollbackUser.User}
 		sort.Strings(userIDs)
 		channelName := userIDs[0] + "__" + userIDs[1]
-		channelID = u.br.GetChannelID(channelName, u.br.GetMe().TeamID)
+		channelID = u.br.GetChannelID(u.ctx, channelName, u.br.GetMe().TeamID)
 	case len(search) == 26:
 		searchPostID = search
 	case strings.HasPrefix(search, "@@"):
@@ -507,9 +507,9 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 
 	var list interface{}
 	if searchPostID != "" {
-		list = u.br.GetPostThread(searchPostID)
+		list = u.br.GetPostThread(u.ctx, searchPostID)
 	} else {
-		list = u.br.GetPosts(channelID, limit)
+		list = u.br.GetPosts(u.ctx, channelID, limit)
 	}
 	if list == nil || list.(*model.PostList) == nil || len(list.(*model.PostList).Order) == 0 {
 		u.MsgUser(toUser, "no results")
@@ -542,7 +542,7 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 
 		props := p.GetProps()
 		botname, override := props["override_username"].(string)
-		user := u.br.GetUser(p.UserId)
+		user := u.br.GetUser(u.ctx, p.UserId)
 		nick := user.Nick
 		if override {
 			nick = botname
@@ -556,7 +556,7 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 			channelID = p.ChannelId
 			search = getMattermostChannelName(u, p.ChannelId)
 			if !strings.HasPrefix(search, "#") {
-				user := u.br.GetUser(search)
+				user := u.br.GetUser(u.ctx, search)
 				search = user.Nick
 				if override {
 					search = botname
@@ -580,7 +580,7 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 			continue
 		}
 
-		for _, fname := range u.br.GetFileLinks(p.FileIds) {
+		for _, fname := range u.br.GetFileLinks(u.ctx, p.FileIds) {
 			fileMsg := "\x1ddownload file - " + fname + "\x1d"
 			formatScrollbackMsg(u, channelID, search, scrollbackUser, nick, p, fileMsg)
 		}
@@ -639,13 +639,13 @@ func updatelastviewed(u *User, toUser *User, args []string, service string) {
 	if strings.Contains(args[0], "#") {
 		args[0] = strings.ReplaceAll(args[0], "#", "")
 
-		channelID = u.br.GetChannelID(args[0], u.br.GetMe().TeamID)
+		channelID = u.br.GetChannelID(u.ctx, args[0], u.br.GetMe().TeamID)
 		if channelID == "" {
 			u.MsgUser(toUser, "channel does not exist")
 			return
 		}
 	} else if updateUser, exists := u.Srv.HasUser(args[0]); exists && updateUser.Ghost {
-		err := u.br.UpdateLastViewedUser(updateUser.User)
+		err := u.br.UpdateLastViewedUser(u.ctx, updateUser.User)
 		if err != nil {
 			u.MsgUser(toUser, fmt.Sprintf("updatelastviewed for %#v failed: %s", updateUser.User, err))
 			return
@@ -656,7 +656,7 @@ func updatelastviewed(u *User, toUser *User, args []string, service string) {
 		return
 	}
 
-	u.br.UpdateLastViewed(channelID)
+	u.br.UpdateLastViewed(u.ctx, channelID)
 	u.MsgUser(toUser, fmt.Sprintf("set viewed for %s", args[0]))
 }
 
@@ -815,14 +815,14 @@ func channelHeader(u *User, toUser *User, args []string, service string) {
 	switch {
 	case strings.HasPrefix(channel, "#"):
 		channelName = strings.ReplaceAll(channel, "#", "")
-		channelID = u.br.GetChannelID(channelName, u.br.GetMe().TeamID)
+		channelID = u.br.GetChannelID(u.ctx, channelName, u.br.GetMe().TeamID)
 	case exists && DMUser.Ghost:
 		// We need to sort the two user IDs to construct the DM
 		// channel name.
 		userIDs := []string{u.User, DMUser.User}
 		sort.Strings(userIDs)
 		channelName = userIDs[0] + "__" + userIDs[1]
-		channelID = u.br.GetChannelID(channelName, u.br.GetMe().TeamID)
+		channelID = u.br.GetChannelID(u.ctx, channelName, u.br.GetMe().TeamID)
 	default:
 		u.MsgUser(toUser, "need HEADER GET (#<channel>|<user>)")
 		u.MsgUser(toUser, "e.g. HEADER GET #bugs")
@@ -838,10 +838,10 @@ func channelHeader(u *User, toUser *User, args []string, service string) {
 
 	switch {
 	case cmd == "get":
-		currentHeader := u.br.Topic(channelID)
+		currentHeader := u.br.Topic(u.ctx, channelID)
 		u.MsgUser(toUser, channel+"'s channel header is: "+currentHeader)
 	case cmd == "set":
-		err := u.br.SetTopic(channelID, strings.Join(args, " "))
+		err := u.br.SetTopic(u.ctx, channelID, strings.Join(args, " "))
 		if err != nil {
 			u.MsgUser(toUser, "failed to set header: "+err.Error())
 		}
