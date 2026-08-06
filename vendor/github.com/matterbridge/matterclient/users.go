@@ -12,22 +12,22 @@ import (
 	"github.com/mattermost/mattermost/server/public/model"
 )
 
-func (m *Client) GetNickName(userID string) string {
-	if user := m.GetUser(context.TODO(), userID); user != nil {
+func (m *Client) GetNickName(ctx context.Context, userID string) string {
+	if user := m.GetUser(ctx, userID); user != nil {
 		return user.Nickname
 	}
 
 	return ""
 }
 
-func (m *Client) GetStatus(userID string) string {
+func (m *Client) GetStatus(ctx context.Context, userID string) string {
 	m.Users.mu.RLock()
 	status, ok := m.Users.statuses[userID]
 	m.Users.mu.RUnlock()
 
 	if !ok {
 		m.apiLogger.Warnf("GetStatus: GetUserStatus: UserID: %s", userID)
-		res, _, err := m.Client.GetUserStatus(context.TODO(), userID, "")
+		res, _, err := m.Client.GetUserStatus(ctx, userID, "")
 		if err != nil {
 			status = "offline"
 		} else {
@@ -40,7 +40,7 @@ func (m *Client) GetStatus(userID string) string {
 	m.Users.mu.RUnlock()
 
 	if !tracked {
-		user := m.GetUser(context.TODO(), userID)
+		user := m.GetUser(ctx, userID)
 		var rawJSON string
 		if user != nil && user.Props != nil {
 			if val, propOk := user.Props["customStatus"]; propOk {
@@ -66,7 +66,7 @@ func (m *Client) GetStatus(userID string) string {
 	return status
 }
 
-func (m *Client) GetStatuses() map[string]string {
+func (m *Client) GetStatuses(ctx context.Context) map[string]string {
 	statuses := make(map[string]string, len(m.Users.users))
 	var missingIDs []string
 
@@ -94,7 +94,7 @@ func (m *Client) GetStatuses() map[string]string {
 
 		batch := missingIDs[i:end]
 		m.apiLogger.Warnf("GetStatuses: GetUsersStatusesByIds: Batch: %d #%d", len(batch), i)
-		res, _, err := m.Client.GetUsersStatusesByIds(context.TODO(), batch)
+		res, _, err := m.Client.GetUsersStatusesByIds(ctx, batch)
 		if err != nil {
 			continue
 		}
@@ -119,7 +119,7 @@ func (m *Client) GetTeamID() string {
 }
 
 // GetTeamName returns the name of the specified teamId
-func (m *Client) GetTeamName(teamID string) string {
+func (m *Client) GetTeamName(ctx context.Context, teamID string) string {
 	m.RLock()
 	defer m.RUnlock()
 
@@ -167,8 +167,8 @@ func (c *UsersCache) GetUserCustomStatus(userID string) string {
 	return c.customStatuses[userID]
 }
 
-func (m *Client) GetUserName(userID string) string {
-	if user := m.GetUser(context.TODO(), userID); user != nil {
+func (m *Client) GetUserName(ctx context.Context, userID string) string {
+	if user := m.GetUser(ctx, userID); user != nil {
 		return user.Username
 	}
 
@@ -238,25 +238,26 @@ func (m *Client) SetUserStatus(userID string, rawStatus string) string {
 	return statusStr
 }
 
-func (m *Client) UpdateUsers() error {
+//nolint:funlen,gocognit,gocyclo
+func (m *Client) UpdateUsers(ctx context.Context) error {
 	const batchSize = 200
 
 	idx := 0
 	retryCount := 0
 	for {
-		if m.IsAborted() {
+		if m.IsAborted(ctx) {
 			return errors.New("login aborted")
 		}
 
 		query := "/users?page=" + strconv.Itoa(idx) + "&per_page=" + strconv.Itoa(batchSize)
 		m.apiLogger.Warnf("UpdateUsers: DoAPIGet: query %s #%d", query, retryCount)
-		resp, err := m.Client.DoAPIGet(context.TODO(), query, "")
+		resp, err := m.Client.DoAPIGet(ctx, query, "")
 		if err != nil {
 			var mResp *model.Response
 			if resp != nil {
 				mResp = model.BuildResponse(resp)
 			}
-			shouldRetry, hErr := m.HandleRetry("GetUsers", retryCount, 10, mResp)
+			shouldRetry, hErr := m.HandleRetry(ctx, "GetUsers", err, retryCount, 10, mResp)
 			if hErr == nil && shouldRetry {
 				retryCount++
 				continue
@@ -327,7 +328,7 @@ func (m *Client) UpdateUsers() error {
 	return nil
 }
 
-func (m *Client) UpdateUserNick(nick string) error {
+func (m *Client) UpdateUserNick(ctx context.Context, nick string) error {
 	m.RLock()
 	if m.User == nil {
 		m.RUnlock()
@@ -338,7 +339,7 @@ func (m *Client) UpdateUserNick(nick string) error {
 	userClone.Nickname = nick
 
 	m.apiLogger.Warnf("UpdateUserNick: nick: %s", nick)
-	updatedUser, _, err := m.Client.UpdateUser(context.TODO(), &userClone)
+	updatedUser, _, err := m.Client.UpdateUser(ctx, &userClone)
 	if err != nil {
 		return err
 	}
@@ -351,7 +352,7 @@ func (m *Client) UpdateUserNick(nick string) error {
 	return nil
 }
 
-func (m *Client) UsernamesInChannel(channelID string) []string {
+func (m *Client) UsernamesInChannel(ctx context.Context, channelID string) []string {
 	const batchSize = 200
 
 	allusers := m.GetUsers()
@@ -361,9 +362,9 @@ func (m *Client) UsernamesInChannel(channelID string) []string {
 	retryCount := 0
 	for {
 		m.apiLogger.Warnf("UsernamesInChannel: GetChannelMembers: ChannelID: %s, Page: %d, PerPage: %d #%d", channelID, idx, batchSize, retryCount)
-		res, resp, err := m.Client.GetChannelMembers(context.TODO(), channelID, idx, batchSize, "")
+		res, resp, err := m.Client.GetChannelMembers(ctx, channelID, idx, batchSize, "")
 		if err != nil {
-			shouldRetry, hErr := m.HandleRetry("UsernamesInChannel", retryCount, 10, resp)
+			shouldRetry, hErr := m.HandleRetry(ctx, "UsernamesInChannel", err, retryCount, 10, resp)
 			if hErr == nil && shouldRetry {
 				retryCount++
 				continue
@@ -390,9 +391,9 @@ func (m *Client) UsernamesInChannel(channelID string) []string {
 	return result
 }
 
-func (m *Client) UpdateStatus(userID string, status string) error {
+func (m *Client) UpdateStatus(ctx context.Context, userID string, status string) error {
 	m.apiLogger.Warnf("UpdateStatus: UserID: %s, Status: %s", userID, status)
-	_, _, err := m.Client.UpdateUserStatus(context.TODO(), userID, &model.Status{Status: status})
+	_, _, err := m.Client.UpdateUserStatus(ctx, userID, &model.Status{Status: status})
 	if err != nil {
 		return err
 	}

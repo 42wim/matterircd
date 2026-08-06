@@ -245,8 +245,8 @@ func (s *server) Channel(channelID string) Channel {
 
 	if u != nil && u.br != nil {
 		service = u.br.Protocol()
-		name = u.br.GetChannelName(channelID)
-		info, err = u.br.GetChannel(channelID)
+		name = u.br.GetChannelName(u.ctx, channelID)
+		info, err = u.br.GetChannel(u.ctx, channelID)
 	} else {
 		service = serviceName
 		name = channelID
@@ -319,7 +319,7 @@ func (s *server) Quit(u *User, message string) {
 
 	u.eventLoopMutex.Lock()
 	if u.br != nil {
-		_ = u.br.Logout()
+		_ = u.br.Logout(u.ctx)
 	}
 	u.eventLoopMutex.Unlock()
 

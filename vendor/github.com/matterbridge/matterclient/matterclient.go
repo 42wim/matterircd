@@ -200,7 +200,8 @@ func New(login string, pass string, team string, server string, mfatoken string)
 }
 
 // Login tries to connect the client with the loging details with which it was initialized.
-func (m *Client) Login() error {
+//nolint:funlen,gocyclo
+func (m *Client) Login(ctx context.Context) error {
 	// check if this is a first connect or a reconnection
 	firstConnection := true
 	if m.WsConnected {
@@ -236,15 +237,15 @@ func (m *Client) Login() error {
 	}
 
 	// do initialization setup
-	if err := m.initClient(b); err != nil {
+	if err := m.initClient(ctx, b); err != nil {
 		return err
 	}
 
-	if err := m.doLogin(firstConnection, b); err != nil {
+	if err := m.doLogin(ctx, firstConnection, b); err != nil {
 		return err
 	}
 
-	if err := m.initUser(); err != nil {
+	if err := m.initUser(ctx); err != nil {
 		return err
 	}
 
@@ -257,23 +258,28 @@ func (m *Client) Login() error {
 		return fmt.Errorf("Team '%s' not found in %v", m.Credentials.Team, validTeamNames)
 	}
 
-	if err := m.initUserChannels(); err != nil {
+	if err := m.initUserChannels(ctx); err != nil {
 		return err
 	}
 
-	// connect websocket
-	m.wsConnect()
+	// Connect websocket using the short-lived Login operation context.
+	// If the login operation is canceled, this will cleanly abort.
+	m.wsConnect(ctx)
 
+	// Prepare the long-lived background context for goroutines.
 	parentCtx := m.Ctx
 	if parentCtx == nil {
 		parentCtx = context.Background()
 	}
-	ctx, loginCancel := context.WithCancel(parentCtx)
+	bgCtx, loginCancel := context.WithCancel(parentCtx)
 	m.loginCancel = loginCancel
 
 	m.logger.Debug("starting wsreceiver")
 
-	go m.WsReceiver(ctx)
+	// Pass the long-lived background context to the goroutines.
+	// They will run until m.loginCancel() is called during Logout.
+	//nolint:contextcheck
+	go m.WsReceiver(bgCtx)
 
 	if m.WsClient != nil {
 		m.logger.Debug("requesting initial user statuses for cache")
@@ -286,7 +292,8 @@ func (m *Client) Login() error {
 		go m.OnWsConnect()
 	}
 
-	go m.checkConnection(ctx)
+	//nolint:contextcheck // Use the long-lived background context (bgCtx) here instead of ctx
+	go m.checkConnection(bgCtx)
 
 	if m.AntiIdle {
 		if m.AntiIdleChan == "" {
@@ -297,7 +304,8 @@ func (m *Client) Login() error {
 		channels := m.GetChannels()
 		for _, channel := range channels {
 			if channel.Name == m.AntiIdleChan {
-				go m.antiIdle(ctx, channel.Id, m.AntiIdleIntvl)
+				//nolint:contextcheck // Use the long-lived background context (bgCtx) here instead of ctx
+				go m.antiIdle(bgCtx, channel.Id, m.AntiIdleIntvl)
 
 				continue
 			}
@@ -307,36 +315,44 @@ func (m *Client) Login() error {
 	return nil
 }
 
-func (m *Client) Reconnect() {
+func (m *Client) Reconnect(ctx context.Context) {
 	if m.reconnectBusy {
 		return
 	}
 
 	m.reconnectBusy = true
+	defer func() { m.reconnectBusy = false }()
 
 	m.logger.Info("reconnect: logout")
-	m.reconnectLogout()
+	_ = m.reconnectLogout(ctx)
 
 	for {
+		if ctx.Err() != nil {
+			m.logger.Errorf("reconnect aborted: %v", ctx.Err())
+			return
+		}
+
 		m.logger.Info("reconnect: login")
 
-		err := m.Login()
+		err := m.Login(ctx)
 		if err != nil {
 			m.logger.Errorf("reconnect: login failed: %s, retrying in 10 seconds", err)
-			time.Sleep(time.Second * 10)
-
-			continue
+			select {
+			case <-ctx.Done():
+				m.logger.Errorf("reconnect aborted during backoff: %v", ctx.Err())
+				return
+			case <-time.After(time.Second * 10):
+				continue
+			}
 		}
 
 		break
 	}
 
 	m.logger.Info("reconnect successful")
-
-	m.reconnectBusy = false
 }
 
-func (m *Client) initClient(b *backoff.Backoff) error {
+func (m *Client) initClient(ctx context.Context, b *backoff.Backoff) error {
 	uriScheme := "https://"
 	if m.NoTLS {
 		uriScheme = "http://"
@@ -376,7 +392,7 @@ func (m *Client) initClient(b *backoff.Backoff) error {
 	}
 
 	// check if server alive, retry until
-	if err := m.serverAlive(b); err != nil {
+	if err := m.serverAlive(ctx, b); err != nil {
 		return err
 	}
 
@@ -405,25 +421,30 @@ func (m *Client) handleLoginToken() error {
 	return nil
 }
 
-func (m *Client) serverAlive(b *backoff.Backoff) error {
+func (m *Client) serverAlive(ctx context.Context, b *backoff.Backoff) error {
 	defer b.Reset()
 
 	for {
-		if m.IsAborted() {
+		if m.IsAborted(ctx) || ctx.Err() != nil {
 			return errors.New("login aborted")
 		}
 
 		d := b.Duration()
 		// bogus call to get the serverversion
 		m.apiLogger.Info("serverAlive: Logout")
-		resp, err := m.Client.Logout(context.TODO())
+		resp, err := m.Client.Logout(ctx)
 		if err != nil {
 			return err
 		}
 
 		if resp.ServerVersion == "" {
 			m.logger.Debugf("Server not up yet, reconnecting in %s", d)
-			time.Sleep(d)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(d):
+				// continue loop
+			}
 		} else {
 			m.logger.Infof("Found version %s", resp.ServerVersion)
 
@@ -433,10 +454,8 @@ func (m *Client) serverAlive(b *backoff.Backoff) error {
 }
 
 // initialize user and teams
-// nolint:funlen
-func (m *Client) initUser() error {
-	ctx := context.TODO()
-
+//nolint:funlen,gocognit,gocyclo
+func (m *Client) initUser(ctx context.Context) error {
 	m.Lock()
 	if m.OtherTeams == nil {
 		m.OtherTeams = make(map[string]*Team)
@@ -456,7 +475,7 @@ func (m *Client) initUser() error {
 			break
 		}
 
-		shouldRetry, hErr := m.HandleRetry("GetTeamsForUser", retryCount, 10, resp)
+		shouldRetry, hErr := m.HandleRetry(ctx, "GetTeamsForUser", err, retryCount, 10, resp)
 		if hErr == nil && shouldRetry {
 			retryCount++
 			continue
@@ -468,7 +487,7 @@ func (m *Client) initUser() error {
 	const batchSize = 200
 
 	for _, team := range teams {
-		if m.IsAborted() {
+		if m.IsAborted(ctx) {
 			return errors.New("login aborted")
 		}
 
@@ -493,19 +512,19 @@ func (m *Client) initUser() error {
 		idx := 0
 		pageRetryCount := 0
 		for {
-			if m.IsAborted() {
+			if m.IsAborted(ctx) {
 				return errors.New("login aborted")
 			}
 
 			query := "/users?in_team=" + team.Id + "&page=" + strconv.Itoa(idx) + "&per_page=" + strconv.Itoa(batchSize)
 			m.apiLogger.Warnf("initUser: DoAPIGet: query %s #%d", query, retryCount)
-			resp, err := m.Client.DoAPIGet(context.TODO(), query, "")
+			resp, err := m.Client.DoAPIGet(ctx, query, "")
 			if err != nil {
 				var mResp *model.Response
 				if resp != nil {
 					mResp = model.BuildResponse(resp)
 				}
-				shouldRetry, hErr := m.HandleRetry("GetUsersInTeam", pageRetryCount, 10, mResp)
+				shouldRetry, hErr := m.HandleRetry(ctx, "GetUsersInTeam", err, pageRetryCount, 10, mResp)
 				if hErr == nil && shouldRetry {
 					pageRetryCount++
 					continue
@@ -528,7 +547,11 @@ func (m *Client) initUser() error {
 			}
 
 			idx++
-			time.Sleep(time.Millisecond * 200)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(time.Millisecond * 200):
+			}
 		}
 		m.logger.Debugf("found %d users in team %s", len(fetchedUsers), team.Name)
 
@@ -601,8 +624,8 @@ func (m *Client) initUser() error {
 	return nil
 }
 
-func (m *Client) initUserChannels() error {
-	if err := m.UpdateChannels(); err != nil {
+func (m *Client) initUserChannels(ctx context.Context) error {
+	if err := m.UpdateChannels(ctx); err != nil {
 		return err
 	}
 
@@ -646,8 +669,7 @@ func (m *Client) initUserChannels() error {
 	return nil
 }
 
-func (m *Client) doLogin(firstConnection bool, b *backoff.Backoff) error {
-	ctx := context.TODO()
+func (m *Client) doLogin(ctx context.Context, firstConnection bool, b *backoff.Backoff) error {
 	var (
 		logmsg = "trying login"
 		err    error
@@ -655,7 +677,7 @@ func (m *Client) doLogin(firstConnection bool, b *backoff.Backoff) error {
 	)
 
 	for {
-		if m.IsAborted() {
+		if m.IsAborted(ctx) || ctx.Err() != nil {
 			return errors.New("login aborted")
 		}
 
@@ -663,7 +685,7 @@ func (m *Client) doLogin(firstConnection bool, b *backoff.Backoff) error {
 
 		switch {
 		case m.Credentials.Token != "":
-			user, _, err = m.doLoginToken()
+			user, _, err = m.doLoginToken(ctx)
 			if err != nil {
 				return err
 			}
@@ -685,8 +707,11 @@ func (m *Client) doLogin(firstConnection bool, b *backoff.Backoff) error {
 			}
 
 			m.logger.Debugf("LOGIN: %s, reconnecting in %s", err, d)
-
-			time.Sleep(d)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(d):
+			}
 
 			logmsg = "retrying login"
 
@@ -703,7 +728,7 @@ func (m *Client) doLogin(firstConnection bool, b *backoff.Backoff) error {
 	return nil
 }
 
-func (m *Client) doLoginToken() (*model.User, *model.Response, error) {
+func (m *Client) doLoginToken(ctx context.Context) (*model.User, *model.Response, error) {
 	var (
 		resp   *model.Response
 		logmsg = "trying login"
@@ -722,7 +747,7 @@ func (m *Client) doLoginToken() (*model.User, *model.Response, error) {
 	}
 
 	m.apiLogger.Info("doLoginToken: GetMe")
-	user, resp, err = m.Client.GetMe(context.TODO(), "")
+	user, resp, err = m.Client.GetMe(ctx, "")
 	if err != nil {
 		return user, resp, err
 	}
@@ -756,7 +781,7 @@ func (m *Client) createCookieJar(token string) *cookiejar.Jar {
 	return jar
 }
 
-func (m *Client) wsConnect() {
+func (m *Client) wsConnect(ctx context.Context) {
 	b := &backoff.Backoff{
 		Min:    time.Second,
 		Max:    5 * time.Minute,
@@ -780,6 +805,11 @@ func (m *Client) wsConnect() {
 	m.logger.Debugf("WsClient: making connection: %s", wsurl)
 
 	for {
+		if ctx.Err() != nil {
+			m.logger.Errorf("wsConnect aborted: %v", ctx.Err())
+			return
+		}
+
 		wsDialer := &websocket.Dialer{
 			TLSClientConfig: &tls.Config{
 				InsecureSkipVerify: m.SkipTLSVerify, //nolint:gosec
@@ -796,7 +826,11 @@ func (m *Client) wsConnect() {
 
 			m.logger.Debugf("WSS: %s, reconnecting in %s", err, d)
 
-			time.Sleep(d)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(d):
+			}
 
 			continue
 		}
@@ -854,6 +888,7 @@ func (m *Client) doCheckAlive(ctx context.Context) error {
 
 func (m *Client) checkAlive(ctx context.Context) {
 	ticker := time.NewTicker(time.Second * 30)
+	defer ticker.Stop()
 
 	for {
 		select {
@@ -873,7 +908,12 @@ func (m *Client) checkAlive(ctx context.Context) {
 
 				if i < 2 {
 					m.logger.Warnf("alive check failed, retrying %d/3: %s", i+1, err)
-					time.Sleep(time.Second * 2)
+					select {
+					case <-ctx.Done():
+						m.logger.Debugf("checkAlive: ctx.Done() triggered during backoff")
+						return
+					case <-time.After(time.Second * 2):
+					}
 				}
 			}
 
@@ -895,10 +935,15 @@ func (m *Client) checkConnection(ctx context.Context) {
 		select {
 		case alive := <-m.aliveChan:
 			if !alive {
-				time.Sleep(time.Second * 10)
+				select {
+				case <-ctx.Done():
+					m.logger.Debug("checkConnection: ctx.Done() triggered during reconnect wait, exiting")
+					return
+				case <-time.After(time.Second * 10):
+				}
 
 				if m.doCheckAlive(ctx) != nil {
-					m.Reconnect()
+					m.Reconnect(ctx)
 				}
 			}
 		case <-ctx.Done():
@@ -967,7 +1012,7 @@ func (m *Client) WsReceiver(ctx context.Context) {
 			}
 
 			if !Matterircd {
-				m.parseMessage(msg)
+				m.parseMessage(ctx, msg)
 			}
 
 			select {
@@ -994,13 +1039,13 @@ func (m *Client) WsReceiver(ctx context.Context) {
 			m.parseResponse(response)
 		case <-m.WsClient.PingTimeoutChannel:
 			m.logger.Error("got a ping timeout")
-			m.Reconnect()
+			m.Reconnect(ctx)
 
 			return
 		case <-ticker.C:
 			if m.WsClient.ListenError != nil {
 				m.logger.Errorf("%#v", m.WsClient.ListenError)
-				m.Reconnect()
+				m.Reconnect(ctx)
 
 				return
 			}
@@ -1013,8 +1058,8 @@ func (m *Client) WsReceiver(ctx context.Context) {
 }
 
 // Logout disconnects the client from the chat server.
-func (m *Client) reconnectLogout() error {
-	err := m.Logout()
+func (m *Client) reconnectLogout(ctx context.Context) error {
+	err := m.Logout(ctx)
 	m.WsQuit = false
 
 	if err != nil {
@@ -1025,7 +1070,7 @@ func (m *Client) reconnectLogout() error {
 }
 
 // Logout disconnects the client from the chat server.
-func (m *Client) Logout() error {
+func (m *Client) Logout(ctx context.Context) error {
 	m.logger.Debug("logout running loginCancel to exit goroutines")
 	if m.loginCancel != nil {
 		m.loginCancel()
@@ -1058,7 +1103,7 @@ func (m *Client) Logout() error {
 	m.logger.Debug("running m.Client.Logout")
 
 	m.apiLogger.Info("Logout")
-	if _, err := m.Client.Logout(context.TODO()); err != nil {
+	if _, err := m.Client.Logout(ctx); err != nil {
 		return err
 	}
 
@@ -1091,9 +1136,9 @@ func (m *Client) SetLogLevel(level string) {
 	}
 }
 
-func (m *Client) HandleRatelimit(name string, resp *model.Response) error {
+func (m *Client) HandleRatelimit(ctx context.Context, name string, resp *model.Response) error {
 	if resp == nil {
-		return fmt.Errorf("Got a nil model response from %s", name)
+		return fmt.Errorf("got a nil model response from %s", name)
 	}
 
 	if resp.StatusCode != 429 {
@@ -1102,8 +1147,8 @@ func (m *Client) HandleRatelimit(name string, resp *model.Response) error {
 
 	resetHeaderStr := resp.Header.Get("X-RateLimit-Reset") //nolint:canonicalheader
 	if resetHeaderStr == "" {
-		time.Sleep(3 * time.Second)
-		return nil
+		_, err := m.sleepWithContext(ctx, 3*time.Second)
+		return err
 	}
 
 	headerValue, err := strconv.ParseInt(resetHeaderStr, 10, 64)
@@ -1130,40 +1175,53 @@ func (m *Client) HandleRatelimit(name string, resp *model.Response) error {
 		waitTime = 5
 	}
 
-	m.logger.Warnf("Ratelimited on %s for %d", name, waitTime)
-	time.Sleep(time.Duration(waitTime) * time.Second)
-
-	return nil
+	m.logger.Warnf("Ratelimited on %s for %d seconds", name, waitTime)
+	_, err = m.sleepWithContext(ctx, time.Duration(waitTime)*time.Second)
+	return err
 }
 
-func (m *Client) HandleRetry(name string, current int, maxLimit int, resp *model.Response) (bool, error) {
+func (m *Client) HandleRetry(ctx context.Context, name string, err error, current int, maxLimit int, resp *model.Response) (bool, error) {
+	if ctx.Err() != nil {
+		return false, ctx.Err()
+	}
+
 	if current >= maxLimit {
 		return false, nil
 	}
 
+	sleepDuration := time.Duration(current+1) * time.Second
+
 	if resp == nil {
-		m.logger.Warnf("Network error on %s (resp is nil), backing off: %ds (attempt %d/%d)",
-			name, current+1, current+1, maxLimit)
-		time.Sleep(time.Duration(current+1) * time.Second)
-		return true, nil
+		m.logger.Warnf("Network error on %s (resp is nil, err: %v), backing off: %s (attempt %d/%d)",
+			name, err, sleepDuration, current+1, maxLimit)
+		return m.sleepWithContext(ctx, sleepDuration)
 	}
 
 	switch {
 	case resp.StatusCode == http.StatusTooManyRequests:
-		_ = m.HandleRatelimit(name, resp)
+		_ = m.HandleRatelimit(ctx, name, resp)
 		return true, nil
 
 	case resp.StatusCode >= http.StatusInternalServerError:
-		m.logger.Warnf("Transient error %d on %s, backing off: %ds (attempt %d/%d)",
-			resp.StatusCode, name, current+1, current+1, maxLimit)
-		time.Sleep(time.Duration(current+1) * time.Second)
-		return true, nil
+		m.logger.Warnf("Transient error %d on %s, backing off: %s (attempt %d/%d)",
+			resp.StatusCode, name, sleepDuration, current+1, maxLimit)
+		return m.sleepWithContext(ctx, sleepDuration)
 
 	case resp.StatusCode >= 300 && resp.StatusCode < 500:
+		// Client errors (4xx) usually shouldn't be retried unless it's a 429
 		return false, nil
 
 	default:
-		time.Sleep(time.Duration(current+1) * time.Second)
+		return m.sleepWithContext(ctx, sleepDuration)
+	}
+}
+
+// Helper function to handle interruptible sleeps
+func (m *Client) sleepWithContext(ctx context.Context, d time.Duration) (bool, error) {
+	select {
+	case <-ctx.Done():
+		return false, ctx.Err() // Context canceled during backoff
+	case <-time.After(d):
 		return true, nil
 	}
 }
@@ -1185,7 +1243,7 @@ func (m *Client) antiIdle(ctx context.Context, channelID string, interval int) {
 		case <-ticker.C:
 			m.logger.Tracef("antiIdle %s", channelID)
 
-			m.UpdateLastViewed(channelID)
+			_ = m.UpdateLastViewed(ctx, channelID)
 		}
 	}
 }
@@ -1504,12 +1562,12 @@ func (m *Client) syncJoinedChannelsCache(event *model.WebSocketEvent) {
 	}
 }
 
-// IsAborted checks if the user disconnected or logout was called
-func (m *Client) IsAborted() bool {
+// IsAborted checks if the user disconnected, logout was called, or the context died.
+func (m *Client) IsAborted(ctx context.Context) bool {
 	if m.WsQuit {
 		return true
 	}
-	if m.Ctx != nil && m.Ctx.Err() != nil {
+	if ctx != nil && ctx.Err() != nil {
 		return true
 	}
 	return false

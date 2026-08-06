@@ -298,7 +298,7 @@ func (u *User) handleChannelAddEvent(event *bridge.ChannelAddEvent) {
 
 	for _, added := range event.Added {
 		if added.Me {
-			u.syncChannel(event.ChannelID, u.br.GetChannelName(event.ChannelID))
+			u.syncChannel(event.ChannelID, u.br.GetChannelName(u.ctx, event.ChannelID))
 			continue
 		}
 
@@ -357,7 +357,7 @@ func (u *User) getMessageChannel(channelID string, sender *bridge.UserInfo) Chan
 		}
 
 		// otherwise first sync it
-		u.syncChannel(channelID, u.br.GetChannelName(channelID))
+		u.syncChannel(channelID, u.br.GetChannelName(u.ctx, channelID))
 
 		return ch
 	}
@@ -534,19 +534,19 @@ func (u *User) handleFileEvent(event *bridge.FileEvent) {
 }
 
 func (u *User) handleChannelCreateEvent(event *bridge.ChannelCreateEvent) {
-	logger.Debugf("ACTION_CHANNEL_CREATED syncing channel %s (%s)", u.br.GetChannelName(event.ChannelID), event.ChannelID)
+	logger.Debugf("ACTION_CHANNEL_CREATED syncing channel %s (%s)", u.br.GetChannelName(u.ctx, event.ChannelID), event.ChannelID)
 
-	u.syncChannel(event.ChannelID, u.br.GetChannelName(event.ChannelID))
+	u.syncChannel(event.ChannelID, u.br.GetChannelName(u.ctx, event.ChannelID))
 }
 
 func (u *User) handleChannelDeleteEvent(event *bridge.ChannelDeleteEvent) {
 	ch := u.Srv.Channel(event.ChannelID)
 
 	if ch.HasUser(u) {
-		logger.Debugf("ACTION_CHANNEL_DELETED removing myself from %s (%s)", u.br.GetChannelName(event.ChannelID), event.ChannelID)
+		logger.Debugf("ACTION_CHANNEL_DELETED removing myself from %s (%s)", u.br.GetChannelName(u.ctx, event.ChannelID), event.ChannelID)
 		ch.Part(u, "")
 	} else {
-		logger.Debugf("ACTION_CHANNEL_DELETED not in channel %s (%s)", u.br.GetChannelName(event.ChannelID), event.ChannelID)
+		logger.Debugf("ACTION_CHANNEL_DELETED not in channel %s (%s)", u.br.GetChannelName(u.ctx, event.ChannelID), event.ChannelID)
 	}
 }
 
@@ -854,7 +854,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 
 		<-throttle.C
 
-		since := u.br.GetLastViewedAt(brchannel.ID)
+		since := u.br.GetLastViewedAt(u.ctx, brchannel.ID)
 		// ignore invalid/deleted/old channels
 		if since == 0 {
 			continue
@@ -865,7 +865,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			channelName := brchannel.Name
 
 			if brchannel.TeamID != u.br.GetMe().TeamID || (u.br.Protocol() == "mattermost" && u.cfg.Mattermost().PrefixMainTeam) {
-				channelName = u.br.GetTeamName(brchannel.TeamID) + "/" + brchannel.Name
+				channelName = u.br.GetTeamName(u.ctx, brchannel.TeamID) + "/" + brchannel.Name
 			}
 
 			u.syncChannel(brchannel.ID, "#"+channelName)
@@ -884,7 +884,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 //
 //nolint:funlen,gocognit,gocyclo
 func (u *User) replayHistory(brchannel *bridge.ChannelInfo) {
-	since := u.br.GetLastViewedAt(brchannel.ID)
+	since := u.br.GetLastViewedAt(u.ctx, brchannel.ID)
 	if since == 0 {
 		return
 	}
@@ -923,7 +923,7 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo) {
 	}
 
 	// Post everything to the channel we haven't seen yet
-	events := u.br.GetReplayEvents(brchannel.ID, since)
+	events := u.br.GetReplayEvents(u.ctx, brchannel.ID, since)
 	if events == nil {
 		// If the channel is not from the primary team id, we can't get posts
 		if brchannel.TeamID == u.br.GetMe().TeamID {
@@ -1063,7 +1063,7 @@ func (u *User) MsgSpoofUser(sender *User, rcvuser string, text string, maxlen ..
 }
 
 func (u *User) syncChannel(id string, name string) {
-	users, err := u.br.GetChannelUsers(id)
+	users, err := u.br.GetChannelUsers(u.ctx, id)
 	if err != nil {
 		logger.Error(err)
 		return
@@ -1083,7 +1083,7 @@ func (u *User) syncChannel(id string, name string) {
 		logger.Debugf("syncChannel adding myself to %s (id: %s)", name, id)
 		ch.Join(u)
 		svc, _ := srv.HasUser(u.br.Protocol())
-		ch.Topic(svc, u.br.Topic(ch.ID()))
+		ch.Topic(svc, u.br.Topic(u.ctx, ch.ID()))
 	}
 }
 
@@ -1185,7 +1185,7 @@ func (u *User) loginTo(protocol string) error {
 		return err
 	}
 
-	status, _ := u.br.StatusUser(u.br.GetMe().User)
+	status, _ := u.br.StatusUser(u.ctx, u.br.GetMe().User)
 	if status == "away" {
 		u.Srv.EncodeMessage(u, irc.RPL_NOWAWAY, []string{u.Nick}, "You have been marked as being away")
 	}
@@ -1349,7 +1349,7 @@ func (u *User) updateLastViewed(channelID string) {
 	go func() {
 		r := rand.New(rand.NewSource(time.Now().UnixNano())) //nolint:gosec
 		time.Sleep(time.Duration(r.Intn(3000)) * time.Millisecond)
-		u.br.UpdateLastViewed(channelID)
+		u.br.UpdateLastViewed(u.ctx, channelID)
 	}()
 }
 

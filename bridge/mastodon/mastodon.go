@@ -81,7 +81,7 @@ func New(cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Eve
 	return m, nil
 }
 
-func (m *Mastodon) Invite(channelID, username string) error {
+func (m *Mastodon) Invite(ctx context.Context, channelID, username string) error {
 	return nil
 }
 
@@ -90,31 +90,31 @@ func (m *Mastodon) IsChannelMember(channelID string) bool {
 	return channelID == "mastodon" //nolint:goconst
 }
 
-func (m *Mastodon) Join(channelName string) (string, string, error) {
+func (m *Mastodon) Join(ctx context.Context, channelName string) (string, string, error) {
 	return "", "", nil
 }
 
-func (m *Mastodon) List() (map[string]string, error) {
+func (m *Mastodon) List(ctx context.Context) (map[string]string, error) {
 	return make(map[string]string), nil
 }
 
-func (m *Mastodon) Part(channelID string) error {
+func (m *Mastodon) Part(ctx context.Context, channelID string) error {
 	return nil
 }
 
-func (m *Mastodon) UpdateChannels() error {
+func (m *Mastodon) UpdateChannels(ctx context.Context) error {
 	return nil
 }
 
-func (m *Mastodon) Logout() error {
+func (m *Mastodon) Logout(ctx context.Context) error {
 	return nil
 }
 
-func (m *Mastodon) MsgUser(username, text string) (string, error) {
+func (m *Mastodon) MsgUser(ctx context.Context, username, text string) (string, error) {
 	return "", nil
 }
 
-func (m *Mastodon) MsgChannel(channelID, text string) (string, error) {
+func (m *Mastodon) MsgChannel(ctx context.Context, channelID, text string) (string, error) {
 	s, err := m.mc.PostStatus(context.Background(), &mastodon.Toot{
 		Status: text,
 	})
@@ -125,11 +125,11 @@ func (m *Mastodon) MsgChannel(channelID, text string) (string, error) {
 	return string(s.ID), nil
 }
 
-func (m *Mastodon) StatusUser(name string) (string, error) {
+func (m *Mastodon) StatusUser(ctx context.Context, name string) (string, error) {
 	return "", nil
 }
 
-func (m *Mastodon) StatusUsers() (map[string]string, error) {
+func (m *Mastodon) StatusUsers(ctx context.Context) (map[string]string, error) {
 	return make(map[string]string), nil
 }
 
@@ -137,19 +137,19 @@ func (m *Mastodon) Protocol() string {
 	return "mastodon" //nolint:goconst
 }
 
-func (m *Mastodon) Kick(channelID, username string) error {
+func (m *Mastodon) Kick(ctx context.Context, channelID, username string) error {
 	return nil
 }
 
-func (m *Mastodon) SetStatus(status string) error {
+func (m *Mastodon) SetStatus(ctx context.Context, status string) error {
 	return nil
 }
 
-func (m *Mastodon) Nick(name string) error {
+func (m *Mastodon) Nick(ctx context.Context, name string) error {
 	return nil
 }
 
-func (m *Mastodon) GetChannelName(channelID string) string {
+func (m *Mastodon) GetChannelName(ctx context.Context, channelID string) string {
 	if channelID == "mastodon" {
 		return "#mastodon"
 	}
@@ -157,7 +157,7 @@ func (m *Mastodon) GetChannelName(channelID string) string {
 	return channelID
 }
 
-func (m *Mastodon) GetChannelUsers(channelID string) ([]*bridge.UserInfo, error) {
+func (m *Mastodon) GetChannelUsers(ctx context.Context, channelID string) ([]*bridge.UserInfo, error) {
 	return nil, nil
 }
 
@@ -169,7 +169,7 @@ func (m *Mastodon) GetChannels() []*bridge.ChannelInfo {
 	return nil
 }
 
-func (m *Mastodon) GetChannel(channelID string) (*bridge.ChannelInfo, error) {
+func (m *Mastodon) GetChannel(ctx context.Context, channelID string) (*bridge.ChannelInfo, error) {
 	if channelID != "mastodon" {
 		return nil, fmt.Errorf("channel not found")
 	}
@@ -183,7 +183,7 @@ func (m *Mastodon) GetChannel(channelID string) (*bridge.ChannelInfo, error) {
 	}, nil
 }
 
-func (m *Mastodon) GetUser(userID string) *bridge.UserInfo {
+func (m *Mastodon) GetUser(ctx context.Context, userID string) *bridge.UserInfo {
 	return nil
 }
 
@@ -191,50 +191,50 @@ func (m *Mastodon) GetMe() *bridge.UserInfo {
 	return &bridge.UserInfo{Nick: "me", Username: "me", Me: true, User: "me"}
 }
 
-func (m *Mastodon) GetUserByUsername(username string) *bridge.UserInfo {
+func (m *Mastodon) GetUserByUsername(ctx context.Context, username string) *bridge.UserInfo {
 	return nil
 }
 
-func (m *Mastodon) GetTeamName(teamID string) string {
+func (m *Mastodon) GetTeamName(ctx context.Context, teamID string) string {
 	return ""
 }
 
-func (m *Mastodon) GetLastViewedAt(channelID string) int64 {
+func (m *Mastodon) GetLastViewedAt(ctx context.Context, channelID string) int64 {
 	return 0
 }
 
-func (m *Mastodon) GetPostsSince(channelID string, since int64) interface{} {
+func (m *Mastodon) GetPostsSince(ctx context.Context, channelID string, since int64) interface{} {
 	return nil
 }
 
-func (m *Mastodon) SearchPosts(search string) interface{} {
+func (m *Mastodon) SearchPosts(ctx context.Context, search string) interface{} {
 	return nil
 }
 
-func (m *Mastodon) UpdateLastViewed(channelID string) {
+func (m *Mastodon) UpdateLastViewed(ctx context.Context, channelID string) {
 }
 
-func (m *Mastodon) UpdateLastViewedUser(userID string) error {
+func (m *Mastodon) UpdateLastViewedUser(ctx context.Context, userID string) error {
 	return nil
 }
 
-func (m *Mastodon) GetFileLinks(fileIDs []string) []string {
+func (m *Mastodon) GetFileLinks(ctx context.Context, fileIDs []string) []string {
 	return []string{}
 }
 
-func (m *Mastodon) SearchUsers(query string) ([]*bridge.UserInfo, error) {
+func (m *Mastodon) SearchUsers(ctx context.Context, query string) ([]*bridge.UserInfo, error) {
 	return nil, nil
 }
 
-func (m *Mastodon) GetPosts(channelID string, limit int) interface{} {
+func (m *Mastodon) GetPosts(ctx context.Context, channelID string, limit int) interface{} {
 	return nil
 }
 
-func (m *Mastodon) GetPostThread(postID string) interface{} {
+func (m *Mastodon) GetPostThread(ctx context.Context, postID string) interface{} {
 	return nil
 }
 
-func (m *Mastodon) GetChannelID(name, teamID string) string {
+func (m *Mastodon) GetChannelID(ctx context.Context, name, teamID string) string {
 	return ""
 }
 
@@ -370,31 +370,31 @@ func (m *Mastodon) Connected() bool {
 	return m.connected
 }
 
-func (m *Mastodon) MsgUserThread(username, parentID, text string) (string, error) {
+func (m *Mastodon) MsgUserThread(ctx context.Context, username, parentID, text string) (string, error) {
 	return "", nil
 }
 
-func (m *Mastodon) MsgChannelThread(username, parentID, text string) (string, error) {
+func (m *Mastodon) MsgChannelThread(ctx context.Context, username, parentID, text string) (string, error) {
 	return "", nil
 }
 
-func (m *Mastodon) ModifyPost(channelID, text string) error {
+func (m *Mastodon) ModifyPost(ctx context.Context, channelID, text string) error {
 	return nil
 }
 
-func (m *Mastodon) AddReaction(msgID, emoji string) error {
+func (m *Mastodon) AddReaction(ctx context.Context, msgID, emoji string) error {
 	return nil
 }
 
-func (m *Mastodon) RemoveReaction(msgID, emoji string) error {
+func (m *Mastodon) RemoveReaction(ctx context.Context, msgID, emoji string) error {
 	return nil
 }
 
-func (m *Mastodon) SetTopic(channelID, text string) error {
+func (m *Mastodon) SetTopic(ctx context.Context, channelID, text string) error {
 	return nil
 }
 
-func (m *Mastodon) Topic(channelID string) string {
+func (m *Mastodon) Topic(ctx context.Context, channelID string) string {
 	return ""
 }
 
@@ -414,6 +414,6 @@ func (m *Mastodon) FormatterConfig() *config.FormatterConfig {
 	return &m.cfg.Current().Mastodon.Formatter
 }
 
-func (m *Mastodon) GetReplayEvents(channelID string, since int64) []*bridge.Event {
+func (m *Mastodon) GetReplayEvents(ctx context.Context, channelID string, since int64) []*bridge.Event {
 	return []*bridge.Event{}
 }

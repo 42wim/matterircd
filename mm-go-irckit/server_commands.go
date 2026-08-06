@@ -38,11 +38,11 @@ func DefaultCommands() Commands {
 
 func CmdAway(s Server, u *User, msg *irc.Message) error {
 	if msg.Trailing == "" {
-		u.br.SetStatus("online")
+		u.br.SetStatus(u.ctx, "online")
 		return s.EncodeMessage(u, irc.RPL_UNAWAY, []string{u.Nick}, "You are no longer marked as being away")
 	}
 
-	u.br.SetStatus("away")
+	u.br.SetStatus(u.ctx, "away")
 	return s.EncodeMessage(u, irc.RPL_NOWAWAY, []string{u.Nick}, "You have been marked as being away")
 }
 
@@ -56,7 +56,7 @@ func CmdInvite(s Server, u *User, msg *irc.Message) error {
 
 	if ch, exists := s.HasChannel(channel); exists {
 		logger.Tracef("inviting %s to %s", other.User, ch.ID())
-		err := u.br.Invite(ch.ID(), other.User)
+		err := u.br.Invite(u.ctx, ch.ID(), other.User)
 		if err != nil {
 			return err
 		}
@@ -98,7 +98,7 @@ func CmdKick(s Server, u *User, msg *irc.Message) error {
 	}
 
 	if ch, exists := s.HasChannel(channel); exists {
-		err := u.br.Kick(ch.ID(), other.User)
+		err := u.br.Kick(u.ctx, ch.ID(), other.User)
 		if err != nil {
 			return err
 		}
@@ -121,7 +121,7 @@ func CmdJoin(s Server, u *User, msg *irc.Message) error {
 			continue
 		}
 
-		channelID, _, err := u.br.Join(channelName)
+		channelID, _, err := u.br.Join(u.ctx, channelName)
 		if err != nil {
 			logger.Errorf("Cannot join channel %s, id %s, err: %v", channelName, channelID, err)
 			s.EncodeMessage(u, irc.ERR_INVITEONLYCHAN, []string{u.Nick, channel}, "Cannot join channel (+i)")
@@ -150,7 +150,7 @@ func CmdList(s Server, u *User, msg *irc.Message) error {
 		Trailing: "Channel Users Topic",
 	})
 
-	info, err := u.br.List()
+	info, err := u.br.List(u.ctx)
 	if err != nil {
 		return err
 	}
@@ -323,7 +323,7 @@ func CmdNick(s Server, u *User, msg *irc.Message) error {
 		return nil
 	}
 	// only update mattermost nick if we're logged in
-	err := u.br.Nick(msg.Params[0])
+	err := u.br.Nick(u.ctx, msg.Params[0])
 	if err != nil {
 		s.EncodeMessage(u, irc.ERR_ERRONEUSNICKNAME, []string{u.Nick}, "Erroneus nickname")
 		return err
@@ -353,7 +353,7 @@ func CmdPart(s Server, u *User, msg *irc.Message) error {
 		ch.Part(u, msg.Trailing)
 		// now part on mattermost/slack
 		if !u.br.BridgeConfig().PartFake {
-			err = u.br.Part(ch.ID())
+			err = u.br.Part(u.ctx, ch.ID())
 			if err != nil {
 				return err
 			}
@@ -433,7 +433,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 			return nil
 		}
 
-		msgID, err2 := u.br.MsgChannel(ch.ID(), msg.Trailing)
+		msgID, err2 := u.br.MsgChannel(u.ctx, ch.ID(), msg.Trailing)
 		if err2 != nil {
 			u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+msg.Trailing+" could not be sent "+err2.Error())
 			return err2
@@ -480,7 +480,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 				return nil
 			}
 
-			msgID, err2 := u.br.MsgUser(toUser.User, msg.Trailing)
+			msgID, err2 := u.br.MsgUser(u.ctx, toUser.User, msg.Trailing)
 			if err2 != nil {
 				u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+msg.Trailing+" could not be sent "+err2.Error())
 				return err2
@@ -532,7 +532,7 @@ func parseReactionToMsg(u *User, msg *irc.Message, channelID string) bool {
 	}
 
 	if action == "-" {
-		err := u.br.RemoveReaction(msgID, emoji)
+		err := u.br.RemoveReaction(u.ctx, msgID, emoji)
 		if err != nil {
 			u.MsgSpoofUser(u, u.br.Protocol(), "reaction: "+emoji+" could not be removed "+err.Error())
 		}
@@ -540,7 +540,7 @@ func parseReactionToMsg(u *User, msg *irc.Message, channelID string) bool {
 		return true
 	}
 
-	err := u.br.AddReaction(msgID, emoji)
+	err := u.br.AddReaction(u.ctx, msgID, emoji)
 	if err != nil {
 		u.MsgSpoofUser(u, u.br.Protocol(), "reaction: "+emoji+" could not be added "+err.Error())
 	}
@@ -607,7 +607,7 @@ func parseModifyMsg(u *User, msg *irc.Message, channelID string) bool {
 		return false
 	}
 
-	err := u.br.ModifyPost(msgID, text)
+	err := u.br.ModifyPost(u.ctx, msgID, text)
 	if err != nil {
 		// probably a wrong id, just put it through as normally
 		if strings.Contains(err.Error(), "permissions") {
@@ -679,9 +679,9 @@ func threadMsgChannelUser(u *User, msg *irc.Message, channelID string, toUser bo
 	var msgID string
 	var err error
 	if toUser {
-		msgID, err = u.br.MsgUserThread(channelID, threadID, text)
+		msgID, err = u.br.MsgUserThread(u.ctx, channelID, threadID, text)
 	} else {
-		msgID, err = u.br.MsgChannelThread(channelID, threadID, text)
+		msgID, err = u.br.MsgChannelThread(u.ctx, channelID, threadID, text)
 	}
 	if err != nil {
 		u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+text+" could not be sent "+err.Error())
@@ -731,7 +731,7 @@ func CmdTopic(s Server, u *User, msg *irc.Message) error {
 	ch := s.Channel(channelname)
 
 	if msg.Trailing != "" {
-		err := u.br.SetTopic(ch.ID(), msg.Trailing)
+		err := u.br.SetTopic(u.ctx, ch.ID(), msg.Trailing)
 		if err != nil {
 			return s.EncodeMessage(u, irc.ERR_CHANOPRIVSNEEDED, msg.Params, err.Error())
 		}
@@ -787,7 +787,7 @@ func CmdWho(s Server, u *User, msg *irc.Message) error {
 	messages := make([]irc.Message, numUsers+1)
 	paramsBacking := make([]string, numUsers*7)
 
-	statuses, _ := u.br.StatusUsers()
+	statuses, _ := u.br.StatusUsers(u.ctx)
 
 	prefix := s.Prefix()
 	myNick := u.Nick
@@ -854,7 +854,7 @@ func CmdWhois(s Server, u *User, msg *irc.Message) error {
 			Trailing: chlist,
 		})
 
-		status, _ := u.br.StatusUser(other.User)
+		status, _ := u.br.StatusUser(u.ctx, other.User)
 
 		if status != "online" {
 			r = append(r, &irc.Message{
