@@ -920,7 +920,17 @@ func (u *User) getChannelSince(ctx context.Context, channelID string) (int64, st
 //nolint:funlen,cyclop,gocognit,gocyclo
 func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throttle *time.Ticker, logger *logrus.Entry) {
 	strategy := u.cfg.Mattermost().ReplayStrategy
-	disableLazyJoin := u.cfg.Mattermost().DisableLazyJoin
+	if strategy == "" {
+		strategy = "hybrid"
+	}
+
+	// Currently only supported and tested with Mattermost
+	lazyJoin := u.br.Protocol() == "mattermost" && !u.cfg.Mattermost().DisableLazyJoin
+
+	// TODO: Make this a configuration option?
+	lazyJoinDuration := 21 * 24 * time.Hour
+	lazyJoinCutoff := time.Now().Add(-lazyJoinDuration).UnixMilli()
+	dmFallbackCutoff := time.Now().Add(-(lazyJoinDuration / 2)).UnixMilli()
 
 	for {
 		select {
@@ -949,11 +959,10 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			// returns 0 or a very old timestamp from the server.
 			isDM := strings.Contains(brchannel.Name, "__")
 			if isDM && !inDB {
-				sevenDaysMs := time.Now().Add(-7 * 24 * time.Hour).UnixMilli()
 				// This catches both since == 0 AND very old createAt timestamps
-				if since < sevenDaysMs {
+				if since < dmFallbackCutoff {
 					logger.Debugf("Untracked DM detected for %s, applying fallback timestamp", brchannel.Name)
-					since = sevenDaysMs
+					since = dmFallbackCutoff
 					sinceStr = "dm-offline-fallback"
 				}
 			}
@@ -963,14 +972,15 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 				continue
 			}
 
-			// The 21-Day Lazy Join Cutoff
-			if !disableLazyJoin {
-				one21DaysMs := int64(21 * 24 * time.Hour / time.Millisecond)
-				nowMs := time.Now().UnixMilli()
-
-				// If last viewed more than 21 days ago -> SKIP!
-				if (nowMs - since) > one21DaysMs {
-					logger.Debugf("Lazy-joining %s: last viewed over 21 days ago", brchannel.Name)
+			// The Lazy Join Cutoff
+			if lazyJoin {
+				// If last viewed more than lazyJoinCutoff -> SKIP!
+				if since < lazyJoinCutoff {
+					logger.Debugf("Lazy-joining %s: last viewed over %v (since: %s)",
+						brchannel.Name,
+						lazyJoinDuration,
+						time.UnixMilli(since).Format("2006-01-02 15:04:05"),
+					)
 					continue
 				}
 			}
