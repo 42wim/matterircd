@@ -1917,7 +1917,7 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 			hex := strings.TrimPrefix(attachment.Color, "#")
 			// https://modern.ircdocs.horse/formatting.html#hex-color
 			// Make sure the hex is uppercase for best compatibility
-			prefix = "\x02\x03#" + strings.ToUpper(hex) + prefixChar + "\x0f" + spaceChar
+			prefix = "\x02\x04" + strings.ToUpper(hex) + prefixChar + "\x0f" + spaceChar
 		}
 
 		var fallbackText string
