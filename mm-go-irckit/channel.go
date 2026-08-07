@@ -143,6 +143,7 @@ func (ch *channel) Message(from *User, text string) {
 
 	for {
 		line, rest, found := strings.Cut(text, "\n")
+		line = strings.TrimSuffix(line, "\r")
 		msg.Trailing = line
 
 		for _, to := range users {
@@ -510,6 +511,7 @@ func (ch *channel) Spoof(from string, text string, cmd string, maxlen ...int) {
 
 	for {
 		line, rest, found := strings.Cut(text, "\n")
+		line = strings.TrimSuffix(line, "\r")
 		msg.Trailing = line
 
 		for _, to := range users {

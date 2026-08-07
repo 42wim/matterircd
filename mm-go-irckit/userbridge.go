@@ -1,6 +1,7 @@
 package irckit
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 	"math"
@@ -229,6 +230,7 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 	addPrefix := false
 	for {
 		line, rest, found := strings.Cut(text, "\n")
+		line = strings.TrimSuffix(line, "\r")
 
 		// Remove message thread context prefix for formatting and remember to add it back
 		if !addPrefix && prefixContext && !showContextMulti {
@@ -435,6 +437,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 	addPrefix := false
 	for {
 		line, rest, found := strings.Cut(text, "\n")
+		line = strings.TrimSuffix(line, "\r")
 
 		// Remove message thread context prefix for formatting and remember to add it back
 		if !addPrefix && prefixContext && !showContextMulti {
@@ -744,6 +747,25 @@ func (u *User) addUsersToChannels() {
 		time.Sleep(time.Millisecond * 500)
 	}
 
+	u.eventLoopMutex.Lock()
+	isHeavySync := !u.eventLoopStarted || time.Since(u.lastSync) > 15*time.Minute
+	u.lastSync = time.Now()
+	u.eventLoopMutex.Unlock()
+	syncStartTime := time.Now()
+
+	ellipsis := "..."
+	if u.br.FormatterConfig().Unicode {
+		ellipsis = "…"
+	}
+
+	// Announce if this is initial login OR a long-offline reconnect
+	if isHeavySync {
+		if svc, ok := u.Srv.HasUser(u.br.Protocol()); ok {
+			logger.Info("starting channel synchronization and history replays")
+			u.MsgUser(svc, fmt.Sprintf("starting channel synchronization and history replays%s (this could be a while)%s", ellipsis, ellipsis))
+		}
+	}
+
 	srv := u.Srv
 	throttle := time.NewTicker(time.Millisecond * 8)
 
@@ -818,6 +840,15 @@ func (u *User) addUsersToChannels() {
 	go func() {
 		wg.Wait()
 		throttle.Stop()
+
+		// Only announce completion if it was a heavy sync and wasn't aborted
+		if isHeavySync && u.ctx != nil && u.ctx.Err() == nil {
+			if svc, ok := u.Srv.HasUser(u.br.Protocol()); ok {
+				duration := time.Since(syncStartTime).Round(time.Second)
+				logger.Infof("channel synchronization completed and history replayed (took %s)", duration)
+				u.MsgUser(svc, fmt.Sprintf("channel synchronization completed and history replayed (took %s).", duration))
+			}
+		}
 	}()
 
 	// Prevent leaking goroutines on internal bridge reconnects
@@ -847,8 +878,88 @@ func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(string, string, .
 	return ch.SpoofMessage
 }
 
-//nolint:cyclop
+// getChannelSince calculates the 'since' timestamp for a channel based on the configured strategy.
+func (u *User) getChannelSince(ctx context.Context, channelID string) (int64, string, bool) {
+	// Fetch server-side last viewed if strategy allows
+	strategy := u.cfg.Mattermost().ReplayStrategy
+	if strategy == "" {
+		strategy = "hybrid" //nolint:goconst
+	}
+
+	// Support alias normalizations
+	switch strategy {
+	case "saved+server", "server+saved", "stored+server", "server+stored":
+		strategy = "hybrid"
+	case "stored": //nolint:goconst
+		strategy = "saved" //nolint:goconst
+	}
+
+	var serverSince int64
+	if strategy != "saved" {
+		serverSince = u.br.GetLastViewedAt(ctx, channelID)
+	}
+
+	// If strategy is server-only, return immediately
+	if strategy == "server-only" {
+		return serverSince, "server", false
+	}
+
+	var savedSince int64
+	var inDB bool
+
+	// Fetch locally saved BoltDB last viewed if strategy allows
+	if strategy == "saved" || strategy == "hybrid" {
+		_ = u.lastViewedAtDB.View(func(tx *bolt.Tx) error {
+			b := tx.Bucket([]byte(u.User))
+			if b == nil {
+				return nil
+			}
+
+			v := b.Get([]byte(channelID))
+			if v == nil {
+				return nil
+			}
+
+			val := binary.LittleEndian.Uint64(v)
+			if val <= math.MaxInt64 {
+				savedSince = int64(val)
+				inDB = true
+			}
+
+			return nil
+		})
+	}
+
+	if strategy == "saved" {
+		return savedSince, "stored", inDB
+	}
+
+	// "hybrid" behavior: use whichever value is later
+	if savedSince > serverSince {
+		return savedSince, "stored", inDB
+	}
+
+	return serverSince, "server", inDB
+}
+
+//nolint:funlen,cyclop,gocognit,gocyclo
 func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throttle *time.Ticker, logger *logrus.Entry) {
+	strategy := u.cfg.Mattermost().ReplayStrategy
+	if strategy == "" {
+		strategy = "hybrid"
+	}
+
+	// Currently only supported and tested with Mattermost
+	lazyJoin := u.br.Protocol() == "mattermost" && !u.cfg.Mattermost().DisableLazyJoin
+
+	// TODO: Make these configuration options?
+	lazyJoinDuration := 21 * 24 * time.Hour
+	replayDuration := 31 * 24 * time.Hour
+
+	lazyJoinCutoff := time.Now().Add(-lazyJoinDuration).UnixMilli()
+	replayCutoff := time.Now().Add(-replayDuration).UnixMilli()
+	dmFallbackCutoff := time.Now().Add(-(lazyJoinDuration / 2)).UnixMilli()
+
 	for {
 		select {
 		case <-u.ctx.Done():
@@ -860,7 +971,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 				return
 			}
 
-			logger.Debug("addUserToChannelWorker", brchannel)
+			logger.Debugf("addUserToChannelWorker %s (using %s)", brchannel.Name, strategy)
 
 			// Interruptible throttle wait
 			select {
@@ -870,10 +981,40 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			case <-throttle.C:
 			}
 
-			since := u.br.GetLastViewedAt(u.ctx, brchannel.ID)
-			// ignore invalid/deleted/old channels
-			if since == 0 {
-				continue
+			since, sinceStr, inDB := u.getChannelSince(u.ctx, brchannel.ID)
+
+			// Catch the edge case where an offline DM (never seen before in BoltDB)
+			// returns 0 or a very old timestamp from the server.
+			isDM := strings.Contains(brchannel.Name, "__")
+			if isDM && !inDB {
+				// This catches both since == 0 AND very old createAt timestamps
+				if since < dmFallbackCutoff {
+					logger.Debugf("Untracked DM detected for %s, applying fallback timestamp", brchannel.Name)
+					since = dmFallbackCutoff
+					sinceStr = "dm-offline-fallback"
+				}
+			}
+
+			// If the channel has a valid timestamp, but it's from years ago,
+			// cap it to 31 days so we don't flood the IRC client with massive history.
+			if since < replayCutoff {
+				logger.Infof("Capping replay history for %s to %s (original since: %s)",
+					brchannel.Name,
+					replayDuration,
+					time.UnixMilli(since).Format("2006-01-02"),
+				)
+				since = replayCutoff
+				sinceStr = "replay-cutoff-fallback"
+			}
+
+			// If enabled, use Lazy Join to speed up initial matterircd start up and also
+			// not have a flood of channels in the IRC client.
+			if lazyJoin && since > 0 {
+				// If last viewed more than the cutoff duration ago -> SKIP!
+				if since < lazyJoinCutoff {
+					logger.Debugf("Lazy-joining %s: last viewed over %v (since: %s)", brchannel.Name, lazyJoinDuration, time.UnixMilli(since).Format("2006-01-02 15:04:05"))
+					continue
+				}
 			}
 
 			// exclude direct messages
@@ -887,7 +1028,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 				u.syncChannel(brchannel.ID, "#"+channelName)
 			}
 
-			u.replayHistory(brchannel)
+			u.replayHistory(brchannel, since, sinceStr)
 
 			if u.br.Protocol() == "mattermost" && !u.cfg.Mattermost().DisableAutoView {
 				u.updateLastViewed(brchannel.ID)
@@ -900,43 +1041,15 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 // replayHistory handles the actual fetching and spoofing of historical channel messages.
 //
 //nolint:funlen,gocognit,gocyclo
-func (u *User) replayHistory(brchannel *bridge.ChannelInfo) {
-	since := u.br.GetLastViewedAt(u.ctx, brchannel.ID)
+func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSince string) {
 	if since == 0 {
 		return
 	}
 
 	spoof := u.createSpoof(brchannel)
-	logSince := "server"
 	channame := brchannel.Name
 	if !brchannel.DM {
 		channame = "#" + brchannel.Name
-	}
-
-	// We use the stored "last viewed at" if present.
-	var lastViewedAt int64
-	key := brchannel.ID
-	err := u.lastViewedAtDB.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(u.User))
-		if v := b.Get([]byte(key)); v != nil {
-			val := binary.LittleEndian.Uint64(v)
-			if val > math.MaxInt64 {
-				logger.Errorf("timestamp value %d exceeds int64 range", val)
-			} else {
-				lastViewedAt = int64(val)
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		logger.Errorf("something wrong with u.lastViewedAtDB.View for %s for channel %s (%s)", u.Nick, channame, brchannel.ID)
-		lastViewedAt = since
-	}
-
-	// But only use the stored last viewed if it's later than what the server knows.
-	if lastViewedAt > since {
-		since = lastViewedAt + 1
-		logSince = "stored"
 	}
 
 	// Post everything to the channel we haven't seen yet
@@ -950,6 +1063,12 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo) {
 	}
 
 	showReplayHdr := true
+
+	disableEmoji := u.br.FormatterConfig().DisableEmoji
+	disableMarkdown := u.br.FormatterConfig().DisableMarkdown
+	inlineCode := u.br.FormatterConfig().MarkdownInlineCode
+	blockQuoteChar, codeBlockPrefix := u.getMarkdownBlockCodePrefix()
+	syntaxHighlighting := u.br.FormatterConfig().SyntaxHighlighting
 
 	for _, event := range events {
 		var createAt int64
@@ -979,8 +1098,7 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo) {
 		}
 
 		ts := time.Unix(0, createAt*int64(time.Millisecond))
-
-		tsStr := ts.Format("15:04")
+		tsStr := ts.Format("2006-01-02 15:04")
 
 		// Print the replay header on the very first valid event we process
 		if showReplayHdr && (text != "" || len(files) > 0) {
@@ -994,9 +1112,24 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo) {
 			showReplayHdr = false
 		}
 
-		textToProcess := text
+		lexer := ""
+		codeBlockBackTick := false
+		codeBlockTilde := false
+		textToProcess := utils.WrapMessage(text, 440)
 		for {
 			line, rest, found := strings.Cut(textToProcess, "\n")
+			line = strings.TrimSuffix(line, "\r")
+
+			line, codeBlockBackTick, codeBlockTilde, lexer = utils.FormatCodeBlockText(line, codeBlockBackTick, codeBlockTilde, lexer, syntaxHighlighting, codeBlockPrefix)
+
+			if !disableMarkdown && !codeBlockBackTick && !codeBlockTilde {
+				line = utils.Markdown2irc(line, blockQuoteChar, inlineCode)
+			}
+
+			if !disableEmoji && !codeBlockBackTick && !codeBlockTilde {
+				line = utils.EmojiReplaceAliases(line)
+			}
+
 			if line != "" {
 				if nick == systemUser {
 					line = "\x1d" + line + "\x1d"
@@ -1070,6 +1203,7 @@ func (u *User) MsgSpoofUser(sender *User, rcvuser string, text string, maxlen ..
 
 	for {
 		line, rest, found := strings.Cut(text, "\n")
+		line = strings.TrimSuffix(line, "\r")
 		msg.Trailing = line
 
 		u.Encode(&msg) //nolint:errcheck
