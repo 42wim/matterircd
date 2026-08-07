@@ -88,11 +88,17 @@ func FindClosestIRCColor(hexColor string) string {
 	bestCode := "01"
 
 	for _, c := range precalculatedPalette {
+		// Calculate the mean red level to adjust weights dynamically
+		rMean := (r1 + c.R) / 2
+
 		rDiff := r1 - c.R
 		gDiff := g1 - c.G
 		bDiff := b1 - c.B
 
-		dist := (rDiff * rDiff) + (gDiff * gDiff) + (bDiff * bDiff)
+		// "Redmean" perceptual distance approximation.
+		// This heavily weights Green (which controls perceived luminosity) and
+		// dynamically scales Red/Blue weighting based on how bright the red channel is.
+		dist := (((512 + rMean) * rDiff * rDiff) >> 8) + (4 * gDiff * gDiff) + (((767 - rMean) * bDiff * bDiff) >> 8)
 
 		if dist == 0 {
 			return c.Code
