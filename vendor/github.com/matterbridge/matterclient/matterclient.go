@@ -315,6 +315,7 @@ func (m *Client) Login(ctx context.Context) error {
 	return nil
 }
 
+//nolint:contextcheck
 func (m *Client) Reconnect(ctx context.Context) {
 	if m.reconnectBusy {
 		return
@@ -323,23 +324,31 @@ func (m *Client) Reconnect(ctx context.Context) {
 	m.reconnectBusy = true
 	defer func() { m.reconnectBusy = false }()
 
+	// Use the persistent parent session context, not the worker's local context!
+	// The worker's local context gets murdered by m.reconnectLogout.
+	sessionCtx := m.Ctx
+	if sessionCtx == nil {
+		sessionCtx = context.Background()
+	}
+
 	m.logger.Info("reconnect: logout")
-	_ = m.reconnectLogout(ctx)
+	m.reconnectLogout(sessionCtx)
 
 	for {
-		if ctx.Err() != nil {
-			m.logger.Errorf("reconnect aborted: %v", ctx.Err())
+		// Check if the actual IRC user disconnected
+		if sessionCtx.Err() != nil {
+			m.logger.Errorf("reconnect aborted: %v", sessionCtx.Err())
 			return
 		}
 
 		m.logger.Info("reconnect: login")
 
-		err := m.Login(ctx)
+		err := m.Login(sessionCtx)
 		if err != nil {
 			m.logger.Errorf("reconnect: login failed: %s, retrying in 10 seconds", err)
 			select {
-			case <-ctx.Done():
-				m.logger.Errorf("reconnect aborted during backoff: %v", ctx.Err())
+			case <-sessionCtx.Done():
+				m.logger.Errorf("reconnect aborted during backoff: %v", sessionCtx.Err())
 				return
 			case <-time.After(time.Second * 10):
 				continue
@@ -1058,7 +1067,7 @@ func (m *Client) WsReceiver(ctx context.Context) {
 }
 
 // reconnectLogout disconnects the client from the chat server for an internal reconnect.
-func (m *Client) reconnectLogout(ctx context.Context) error {
+func (m *Client) reconnectLogout(ctx context.Context) {
 	err := m.Logout(ctx)
 
 	// Always reset WsQuit so the subsequent Login() doesn't instantly abort
@@ -1069,8 +1078,6 @@ func (m *Client) reconnectLogout(ctx context.Context) error {
 		// We deliberately don't return the error here.
 		// A failure to cleanly logout should NOT stop us from trying to reconnect!
 	}
-
-	return nil
 }
 
 // Logout disconnects the client from the chat server.
