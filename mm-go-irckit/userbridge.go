@@ -748,11 +748,18 @@ func (u *User) addUsersToChannels() {
 	isHeavySync := !u.eventLoopStarted || time.Since(u.lastSync) > 15*time.Minute
 	u.lastSync = time.Now()
 	u.eventLoopMutex.Unlock()
+	syncStartTime := time.Now()
+
+	ellipsis := "..."
+	if u.br.FormatterConfig().Unicode {
+		ellipsis = "…"
+	}
 
 	// Announce if this is initial login OR a long-offline reconnect
 	if isHeavySync {
 		if svc, ok := u.Srv.HasUser(u.br.Protocol()); ok {
-			u.MsgUser(svc, "starting channel synchronization and history replays...")
+			logger.Info("starting channel synchronization and history replays")
+			u.MsgUser(svc, fmt.Sprintf("starting channel synchronization and history replays%s (this could be a while).%s", ellipsis, ellipsis))
 		}
 	}
 
@@ -834,7 +841,9 @@ func (u *User) addUsersToChannels() {
 		// Only announce completion if it was a heavy sync and wasn't aborted
 		if isHeavySync && u.ctx != nil && u.ctx.Err() == nil {
 			if svc, ok := u.Srv.HasUser(u.br.Protocol()); ok {
-				u.MsgUser(svc, "channel synchronization completed and history replayed.")
+				duration := time.Since(syncStartTime).Round(time.Second)
+				logger.Infof("channel synchronization completed and history replayed (took %s)", duration)
+				u.MsgUser(svc, fmt.Sprintf("channel synchronization completed and history replayed (took %s).", duration))
 			}
 		}
 	}()
