@@ -897,11 +897,6 @@ func (u *User) getChannelSince(ctx context.Context, channelID string) (int64, st
 	var serverSince int64
 	if strategy != "saved" {
 		serverSince = u.br.GetLastViewedAt(ctx, channelID)
-		// If the server explicitly returns 0, the channel is deleted or invalid.
-		// We must honor this and immediately return 0 so it gets skipped, ignoring local data.
-		if serverSince == 0 {
-			return 0, "server", false //nolint:goconst
-		}
 	}
 
 	// If strategy is server-only, return immediately
@@ -1000,11 +995,6 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 				}
 			}
 
-			// ignore invalid/deleted/old channels
-			if since == 0 {
-				continue
-			}
-
 			// If the channel has a valid timestamp, but it's from years ago,
 			// cap it to 31 days so we don't flood the IRC client with massive history.
 			if since < replayCutoff {
@@ -1019,10 +1009,10 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 
 			// If enabled, use Lazy Join to speed up initial matterircd start up and also
 			// not have a flood of channels in the IRC client.
-			if lazyJoin {
-				// If last viewed more than lazyJoinCutoff -> SKIP!
+			if lazyJoin && since > 0 {
+				// If last viewed more than the cutoff duration ago -> SKIP!
 				if since < lazyJoinCutoff {
-					logger.Debugf("Lazy-joining %s: last viewed over %s ago", brchannel.Name, lazyJoinDuration)
+					logger.Debugf("Lazy-joining %s: last viewed over %v (since: %s)", brchannel.Name, lazyJoinDuration, time.UnixMilli(since).Format("2006-01-02 15:04:05"))
 					continue
 				}
 			}
