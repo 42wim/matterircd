@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"math/rand"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -1831,7 +1830,7 @@ func parseMatterpollToMsg(attachments []*model.SlackAttachment, unicode bool) st
 		spaceChar = messageAttachmentSpaceUnicode
 	}
 	for _, attachment := range attachments {
-		prefix := "\033[1;38;2;0;82;204m" + prefixChar + "\033[0m" + spaceChar
+		prefix := "\x02\x0302" + prefixChar + "\x0f" + spaceChar
 
 		if attachment.AuthorName != "" {
 			msg += prefix + "@" + attachment.AuthorName + "\n"
@@ -1905,26 +1904,20 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 	}
 
 	for _, attachment := range attachments {
-		prefix := "\033[1m" + prefixChar + "\033[0m" + spaceChar
+		prefix := "\x02" + prefixChar + "\x0f" + spaceChar
 		switch {
 		// https://docs.slack.dev/tools/node-slack-sdk/reference/web-api/interfaces/MessageAttachment/#color
 		case attachment.Color == "danger":
-			prefix = "\033[31m" + prefixChar + "\033[0m" + spaceChar
+			prefix = "\x0304" + prefixChar + "\x0f" + spaceChar
 		case attachment.Color == "good":
-			prefix = "\033[32m" + prefixChar + "\033[0m" + spaceChar
+			prefix = "\x0303" + prefixChar + "\x0f" + spaceChar
 		case attachment.Color == "warning":
-			prefix = "\033[33m" + prefixChar + "\033[0m" + spaceChar
+			prefix = "\x0308" + prefixChar + "\x0f" + spaceChar
 		case strings.HasPrefix(attachment.Color, "#"):
 			hex := strings.TrimPrefix(attachment.Color, "#")
-			rr, _ := strconv.ParseInt(hex[0:2], 16, 0)
-			gg, _ := strconv.ParseInt(hex[2:4], 16, 0)
-			bb, _ := strconv.ParseInt(hex[4:6], 16, 0)
 			// https://modern.ircdocs.horse/formatting.html#hex-color
-			prefix = "\033[1;38;2;" +
-				strconv.Itoa(int(rr)) + ";" +
-				strconv.Itoa(int(gg)) + ";" +
-				strconv.Itoa(int(bb)) + "m" +
-				prefixChar + "\033[0m" + spaceChar
+			// Make sure the hex is uppercase for best compatibility
+			prefix = "\x02\x03#" + strings.ToUpper(hex) + prefixChar + "\x0f" + spaceChar
 		}
 
 		var fallbackText string
