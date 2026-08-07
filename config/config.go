@@ -94,6 +94,8 @@ type FormatterConfig struct {
 	CodeBlockPrefix        string
 
 	Unicode bool
+
+	EnableIRCHexColors bool
 }
 
 type MattermostConfig struct {
@@ -224,6 +226,8 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 		SyntaxHighlighting:     c.v.GetString("mattermost.SyntaxHighlighting"),
 
 		Unicode: c.v.GetBool("mattermost.Unicode"),
+
+		EnableIRCHexColors: c.v.GetBool("mattermost.EnableIRCHexColors"),
 	}
 	slFormatter := FormatterConfig{
 		DisableEmoji: c.v.GetBool("slack.DisableEmoji"),
@@ -238,6 +242,8 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 		SyntaxHighlighting:     c.v.GetString("slack.SyntaxHighlighting"),
 
 		Unicode: c.v.GetBool("slack.Unicode"),
+
+		EnableIRCHexColors: c.v.GetBool("slack.EnableIRCHexColors"),
 	}
 	mdFormatter := FormatterConfig{
 		DisableEmoji: c.v.GetBool("mastodon.DisableEmoji"),
@@ -252,6 +258,8 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 		SyntaxHighlighting:     c.v.GetString("mastodon.SyntaxHighlighting"),
 
 		Unicode: c.v.GetBool("mastodon.Unicode"),
+
+		EnableIRCHexColors: c.v.GetBool("mastodon.EnableIRCHexColors"),
 	}
 
 	return &RuntimeConfig{

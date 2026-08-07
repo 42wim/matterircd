@@ -292,7 +292,7 @@ func details(u *User, toUser *User, args []string, service string) {
 		return
 	}
 
-	prefix := "\033[1;38;2;0;82;204m|\033[0m "
+	prefix := "\x0312|\x0f "
 	u.MsgUser(toUser, prefix+postlistURL+postID)
 
 	disableEmoji := u.br.FormatterConfig().DisableEmoji
