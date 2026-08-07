@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math/rand"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -2277,6 +2278,18 @@ func (m *Mattermost) postListToEvents(ctx context.Context, postlist interface{},
 	}
 
 	events := make([]*bridge.Event, 0, len(mmPostList.Order))
+
+	// Enforce strict newest-first sorting before the backwards loop processes it.
+	// This fixes the Mattermost API quirk where thread root posts are placed at index 0.
+	sort.Slice(mmPostList.Order, func(i, j int) bool {
+		pI, okI := mmPostList.Posts[mmPostList.Order[i]]
+		pJ, okJ := mmPostList.Posts[mmPostList.Order[j]]
+		if !okI || !okJ {
+			return false
+		}
+		// Sort descending (newest first) so the backwards loop below prints oldest first
+		return pI.CreateAt > pJ.CreateAt
+	})
 
 	// traverse the order in reverse
 	for i := len(mmPostList.Order) - 1; i >= 0; i-- {
