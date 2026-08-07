@@ -190,9 +190,9 @@ LastViewedSaveFile = "matterircd-lastsaved.db"
 # in persistent storage. "server" will use the "LastViewedAt" timestamp Mattermost records server-side.
 # "hybrid" uses both and uses whichever is the latest.
 ReplayStrategy = "hybrid"
-# Disable default "lazy-join" which means to only join channels active within the last 21-days.
-# This helps speed up initial start up and reduces channel clutter.
-#DisableLazyJoin = true
+# Enable EXPERIMENTAL "lazy-join" to only join channels active within the last 21-days.
+# This helps speed up initial start up and reduces channel clutter in your IRC client.
+#EnableLazyJoin = true
 
 #############################
 ##### SLACK EXAMPLE #########

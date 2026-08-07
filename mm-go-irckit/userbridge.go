@@ -950,7 +950,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 	}
 
 	// Currently only supported and tested with Mattermost
-	lazyJoin := u.br.Protocol() == "mattermost" && !u.cfg.Mattermost().DisableLazyJoin
+	lazyJoin := u.br.Protocol() == "mattermost" && u.cfg.Mattermost().EnableLazyJoin
 
 	// TODO: Make these configuration options?
 	lazyJoinDuration := 21 * 24 * time.Hour
