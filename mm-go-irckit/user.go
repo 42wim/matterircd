@@ -164,9 +164,9 @@ func (u *User) Encode(msgs ...*irc.Message) (err error) {
 		}
 
 		if msg.Command == "PONG" {
-			logger.Tracef("-> \"%s\"", msg)
+			logger.Tracef("-> %q", msg.String())
 		} else {
-			logger.Debugf("-> \"%s\"", msg)
+			logger.Debugf("-> %q", msg.String())
 		}
 
 		err := u.Conn.Encode(msg)
