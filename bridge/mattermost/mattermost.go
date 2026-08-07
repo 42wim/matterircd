@@ -92,11 +92,23 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 			ourlog.SetLevel(logrus.InfoLevel)
 		}
 
+		// Configure matterclient base logger
+		mc.SetLogLevel("info")
 		if rc.Mattermost.MatterclientLogLevel != "" {
 			logger.Infof("enabling matterclient logging: level: %s", rc.Mattermost.MatterclientLogLevel)
 			mc.SetLogLevel(strings.ToLower(rc.Mattermost.MatterclientLogLevel))
-		} else {
-			mc.SetLogLevel("info")
+		}
+
+		// Configure matterclient API logger
+		mc.SetLogAPICalls("error")
+		if rc.Profiling {
+			if rc.Trace {
+				logger.Infof("enabling matterclient API logging: level: trace")
+				mc.SetLogAPICalls("trace")
+			} else if rc.Debug {
+				logger.Infof("enabling matterclient API logging: level: warn")
+				mc.SetLogAPICalls("warn")
+			}
 		}
 	}
 

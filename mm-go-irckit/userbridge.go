@@ -759,7 +759,7 @@ func (u *User) addUsersToChannels() {
 	if isHeavySync {
 		if svc, ok := u.Srv.HasUser(u.br.Protocol()); ok {
 			logger.Info("starting channel synchronization and history replays")
-			u.MsgUser(svc, fmt.Sprintf("starting channel synchronization and history replays%s (this could be a while).%s", ellipsis, ellipsis))
+			u.MsgUser(svc, fmt.Sprintf("starting channel synchronization and history replays%s (this could be a while)%s", ellipsis, ellipsis))
 		}
 	}
 
