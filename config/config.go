@@ -133,6 +133,8 @@ type MattermostConfig struct {
 
 	DisableAutoView    bool
 	LastViewedSaveFile string
+	ReplayStrategy     string
+	DisableLazyJoin    bool
 }
 
 type SlackConfig struct {
@@ -310,6 +312,8 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 
 			DisableAutoView:    c.v.GetBool("mattermost.DisableAutoView"),
 			LastViewedSaveFile: c.v.GetString("mattermost.LastViewedSaveFile"),
+			ReplayStrategy:     c.v.GetString("mattermost.ReplayStrategy"),
+			DisableLazyJoin:    c.v.GetBool("mattermost.DisableLazyJoin"),
 		},
 
 		Slack: SlackConfig{

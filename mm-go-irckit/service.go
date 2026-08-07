@@ -11,6 +11,7 @@ import (
 	"unicode"
 
 	"github.com/42wim/matterircd/bridge"
+	"github.com/42wim/matterircd/utils"
 )
 
 type CommandHandler interface {
@@ -213,15 +214,27 @@ func replay(u *User, toUser *User, args []string, service string) {
 	}
 
 	if len(args) == 0 || len(args) > 2 {
-		u.MsgUser(toUser, "need REPLAY (#<channel>)")
-		u.MsgUser(toUser, "e.g. REPLAY #bugs")
+		u.MsgUser(toUser, "need REPLAY (#<channel>) [duration]")
+		u.MsgUser(toUser, "e.g. REPLAY #bugs 24h")
 		return
 	}
 
 	channelName := strings.TrimPrefix(args[0], "#")
 	channelTeamID := u.br.GetMe().TeamID
+
+	var since int64
+	var logSince string
+
+	// Parse optional duration argument
 	if len(args) == 2 {
-		channelTeamID = args[1]
+		if d, err := time.ParseDuration(args[1]); err == nil {
+			// Mattermost uses Unix milliseconds
+			since = time.Now().Add(-d).UnixMilli()
+			logSince = fmt.Sprintf("user requested: %s", args[1])
+		} else {
+			u.MsgUser(toUser, "invalid duration format. e.g. 24h, 30m")
+			return
+		}
 	}
 
 	channelID := u.br.GetChannelID(u.ctx, channelName, channelTeamID)
@@ -231,7 +244,12 @@ func replay(u *User, toUser *User, args []string, service string) {
 		return
 	}
 
-	u.replayHistory(brchannel)
+	// If no custom duration was provided, fall back to our configured strategy
+	if since == 0 {
+		since, logSince, _ = u.getChannelSince(u.ctx, brchannel.ID)
+	}
+
+	u.replayHistory(brchannel, since, logSince)
 }
 
 //nolint:forcetypeassert,goconst
@@ -277,6 +295,12 @@ func details(u *User, toUser *User, args []string, service string) {
 	prefix := "\033[1;38;2;0;82;204m|\033[0m "
 	u.MsgUser(toUser, prefix+postlistURL+postID)
 
+	disableEmoji := u.br.FormatterConfig().DisableEmoji
+	disableMarkdown := u.br.FormatterConfig().DisableMarkdown
+	inlineCode := u.br.FormatterConfig().MarkdownInlineCode
+	blockQuoteChar, codeBlockPrefix := u.getMarkdownBlockCodePrefix()
+	syntaxHighlighting := u.br.FormatterConfig().SyntaxHighlighting
+
 	for _, event := range events {
 		var createAt int64
 		var text, nick, channel string
@@ -293,9 +317,23 @@ func details(u *User, toUser *User, args []string, service string) {
 		ts := time.Unix(0, createAt*int64(time.Millisecond)).Format("2006-01-02 15:04:05")
 		u.MsgUser(toUser, prefix+"["+ts+"] <"+nick+"> in "+channel)
 
-		textToProcess := text
+		lexer := ""
+		codeBlockBackTick := false
+		codeBlockTilde := false
+		textToProcess := utils.WrapMessage(text, 440)
 		for {
 			line, rest, found := strings.Cut(textToProcess, "\n")
+			line = strings.TrimSuffix(line, "\r")
+
+			line, codeBlockBackTick, codeBlockTilde, lexer = utils.FormatCodeBlockText(line, codeBlockBackTick, codeBlockTilde, lexer, syntaxHighlighting, codeBlockPrefix)
+
+			if !disableMarkdown && !codeBlockBackTick && !codeBlockTilde {
+				line = utils.Markdown2irc(line, blockQuoteChar, inlineCode)
+			}
+
+			if !disableEmoji && !codeBlockBackTick && !codeBlockTilde {
+				line = utils.EmojiReplaceAliases(line)
+			}
 
 			// Visually translate actions for the details view
 			if strings.HasPrefix(line, "\x01ACTION ") && strings.HasSuffix(line, "\x01") {
@@ -507,9 +545,31 @@ func dispatchHistoricalEvent(u *User, toUser *User, event *bridge.Event, searchC
 	scrollbackUser, _ := u.Srv.HasUser(searchCtx)
 
 	tsStr := time.Unix(0, createAt*int64(time.Millisecond)).Format("2006-01-02 15:04")
-	textToProcess := text
+
+	disableEmoji := u.br.FormatterConfig().DisableEmoji
+	disableMarkdown := u.br.FormatterConfig().DisableMarkdown
+	inlineCode := u.br.FormatterConfig().MarkdownInlineCode
+	blockQuoteChar, codeBlockPrefix := u.getMarkdownBlockCodePrefix()
+	syntaxHighlighting := u.br.FormatterConfig().SyntaxHighlighting
+
+	lexer := ""
+	codeBlockBackTick := false
+	codeBlockTilde := false
+	textToProcess := utils.WrapMessage(text, 440)
 	for {
 		line, rest, found := strings.Cut(textToProcess, "\n")
+		line = strings.TrimSuffix(line, "\r")
+
+		line, codeBlockBackTick, codeBlockTilde, lexer = utils.FormatCodeBlockText(line, codeBlockBackTick, codeBlockTilde, lexer, syntaxHighlighting, codeBlockPrefix)
+
+		if !disableMarkdown && !codeBlockBackTick && !codeBlockTilde {
+			line = utils.Markdown2irc(line, blockQuoteChar, inlineCode)
+		}
+
+		if !disableEmoji && !codeBlockBackTick && !codeBlockTilde {
+			line = utils.EmojiReplaceAliases(line)
+		}
+
 		if line != "" {
 			if nick == systemUser {
 				line = "\x1d" + line + "\x1d"

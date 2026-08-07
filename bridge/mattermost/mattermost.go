@@ -1934,11 +1934,13 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 		var fallbackText string
 		if useFallback {
 			fallbackText, _, _ = strings.Cut(attachment.Fallback, "\n")
+			fallbackText = strings.TrimSuffix(fallbackText, "\r")
 
 			// In some cases, no fallback message present
 			// e.g. https://github.com/fluxcd/notification-controller/pull/1322
 			if fallbackText == "" {
 				fallbackText, _, _ = strings.Cut(attachment.Text, "\n")
+				fallbackText = strings.TrimSuffix(fallbackText, "\r")
 				if attachment.AuthorName != "" {
 					fallbackText = attachment.AuthorName + ":" + spaceChar + fallbackText
 				}
@@ -1995,6 +1997,7 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 			text := attachment.Text
 			for {
 				line, rest, found := strings.Cut(text, "\n")
+				line = strings.TrimSuffix(line, "\r")
 
 				line, codeBlockBackTick, codeBlockTilde, lexer = utils.FormatCodeBlockText(line, codeBlockBackTick, codeBlockTilde, lexer, syntaxHighlighting, codeBlockPrefix)
 
@@ -2102,6 +2105,7 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 				text := val1Str
 				for {
 					line, rest, found := strings.Cut(text, "\n")
+					line = strings.TrimSuffix(line, "\r")
 
 					line, codeBlockBackTick, codeBlockTilde, lexer = utils.FormatCodeBlockText(line, codeBlockBackTick, codeBlockTilde, lexer, syntaxHighlighting, codeBlockPrefix)
 
@@ -2218,6 +2222,7 @@ func (m *Mattermost) parsePreviewPost(b *strings.Builder, user string, channel s
 
 	for {
 		line, rest, found := strings.Cut(text, "\n")
+		line = strings.TrimSuffix(line, "\r")
 
 		line, codeBlockBackTick, codeBlockTilde, lexer = utils.FormatCodeBlockText(line, codeBlockBackTick, codeBlockTilde, lexer, syntaxHighlighting, codeBlockPrefix)
 

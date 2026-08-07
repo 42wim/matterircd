@@ -186,6 +186,13 @@ CodeBlockPrefix = "\\x1b[1;38;2;0;82;204m|\\x1b[0m "
 # Path to file to store last viewed information. This is useful for replying only
 # the messages missed.
 LastViewedSaveFile = "matterircd-lastsaved.db"
+# Strategy to use for replaying messages missed. "saved" will use timestamps on what we saved locally
+# in persistent storage. "server" will use the "LastViewedAt" timestamp Mattermost records server-side.
+# "hybrid" uses both and uses whichever is the latest.
+ReplayStrategy = "hybrid"
+# Disable default "lazy-join" which means to only join channels active within the last 21-days.
+# This helps speed up initial start up and reduces channel clutter.
+#DisableLazyJoin = true
 
 #############################
 ##### SLACK EXAMPLE #########
