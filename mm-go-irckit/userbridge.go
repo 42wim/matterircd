@@ -744,8 +744,16 @@ func (u *User) addUsersToChannels() {
 		time.Sleep(time.Millisecond * 500)
 	}
 
-	if svc, ok := u.Srv.HasUser(u.br.Protocol()); ok {
-		u.MsgUser(svc, "starting channel synchronization and history replays...")
+	u.eventLoopMutex.Lock()
+	isHeavySync := !u.eventLoopStarted || time.Since(u.lastSync) > 15*time.Minute
+	u.lastSync = time.Now()
+	u.eventLoopMutex.Unlock()
+
+	// Announce if this is initial login OR a long-offline reconnect
+	if isHeavySync {
+		if svc, ok := u.Srv.HasUser(u.br.Protocol()); ok {
+			u.MsgUser(svc, "starting channel synchronization and history replays...")
+		}
 	}
 
 	srv := u.Srv
@@ -823,9 +831,8 @@ func (u *User) addUsersToChannels() {
 		wg.Wait()
 		throttle.Stop()
 
-		// All 4 workers have finished draining the queue.
-		// If they exited naturally (meaning the context wasn't canceled by an IRC disconnect), notify the user!
-		if u.ctx != nil && u.ctx.Err() == nil {
+		// Only announce completion if it was a heavy sync and wasn't aborted
+		if isHeavySync && u.ctx != nil && u.ctx.Err() == nil {
 			if svc, ok := u.Srv.HasUser(u.br.Protocol()); ok {
 				u.MsgUser(svc, "channel synchronization completed and history replayed.")
 			}
