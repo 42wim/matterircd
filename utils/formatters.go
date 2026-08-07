@@ -2,12 +2,110 @@ package utils
 
 import (
 	"bytes"
+	"fmt"
+	"math"
+	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/alecthomas/chroma/v2/quick"
 	"github.com/kenshaw/emoji"
 )
+
+// IRCColor represents a pre-parsed IRC color for fast distance calculations.
+type IRCColor struct {
+	Code    string
+	R, G, B int
+}
+
+var (
+	// precalculatedPalette will hold our unique colors
+	precalculatedPalette []IRCColor
+	paletteOnce          sync.Once
+)
+
+func initializePalette() {
+	// 00-98 raw hex codes
+	rawColors := []string{
+		// 00-15
+		"FFFFFF", "000000", "00007F", "009300", "FF0000", "7F0000", "9C009C", "FC7F00",
+		"FFFF00", "00FC00", "009393", "00FFFF", "0000FC", "FF00FF", "7F7F7F", "D2D2D2",
+		// 16-31
+		"470000", "472100", "474700", "324700", "004700", "00472C", "004747", "002747",
+		"000047", "2E0047", "470047", "47002A", "740000", "743A00", "747400", "517400",
+		// 32-47
+		"007400", "007449", "007474", "004074", "000074", "4B0074", "740074", "740045",
+		"B50000", "B56300", "B5B500", "7DB500", "00B500", "00B571", "00B5B5", "0063B5",
+		// 48-63
+		"0000B5", "7500B5", "B500B5", "B5006B", "FF0000", "FF8C00", "FFFF00", "B2FF00",
+		"00FF00", "00FFA0", "00FFFF", "008CFF", "0000FF", "A500FF", "FF00FF", "FF0098",
+		// 64-79
+		"FF5959", "FFB459", "FFFF71", "CFFF60", "6FFF6F", "65FFC9", "6DFFFF", "59B4FF",
+		"5959FF", "C459FF", "FF66FF", "FF59BC", "FF9C9C", "FFD39C", "FFFF9C", "E2FF9C",
+		// 80-95
+		"9CFF9C", "9CFFDB", "9CFFFF", "9CD3FF", "9C9CFF", "DC9CFF", "FF9CFF", "FF94D3",
+		"000000", "131313", "282828", "363636", "4D4D4D", "656565", "818181", "9F9F9F",
+		// 96-98
+		"BCBCBC", "E2E2E2", "FFFFFF",
+	}
+
+	// Use a map to track and exclude duplicates.
+	// Because we iterate from 0 to 98, standard codes (0-15) are saved first.
+	seenHex := make(map[string]bool)
+
+	for i, hex := range rawColors {
+		if seenHex[hex] {
+			continue
+		}
+		seenHex[hex] = true
+
+		r, _ := strconv.ParseInt(hex[0:2], 16, 32)
+		g, _ := strconv.ParseInt(hex[2:4], 16, 32)
+		b, _ := strconv.ParseInt(hex[4:6], 16, 32)
+
+		precalculatedPalette = append(precalculatedPalette, IRCColor{
+			Code: fmt.Sprintf("%02d", i),
+			R:    int(r), G: int(g), B: int(b),
+		})
+	}
+}
+
+// FindClosestIRCColor uses the precalculated palette to quickly find the nearest match.
+func FindClosestIRCColor(hexColor string) string {
+	paletteOnce.Do(initializePalette)
+
+	hexColor = strings.ToUpper(strings.TrimPrefix(hexColor, "#"))
+	if len(hexColor) != 6 {
+		return "01"
+	}
+
+	r64, _ := strconv.ParseInt(hexColor[0:2], 16, 32)
+	g64, _ := strconv.ParseInt(hexColor[2:4], 16, 32)
+	b64, _ := strconv.ParseInt(hexColor[4:6], 16, 32)
+	r1, g1, b1 := int(r64), int(g64), int(b64)
+
+	minDist := math.MaxInt32
+	bestCode := "01"
+
+	for _, c := range precalculatedPalette {
+		rDiff := r1 - c.R
+		gDiff := g1 - c.G
+		bDiff := b1 - c.B
+
+		dist := (rDiff * rDiff) + (gDiff * gDiff) + (bDiff * bDiff)
+
+		if dist == 0 {
+			return c.Code
+		}
+
+		if dist < minDist {
+			minDist = dist
+			bestCode = c.Code
+		}
+	}
+
+	return bestCode
+}
 
 //nolint:funlen,gocyclo
 func FormatCodeBlockText(text string, codeBlockBackTick bool, codeBlockTilde bool, lexer string, syntaxHighlighting string, linePrefix string) (string, bool, bool, string) {

@@ -1886,6 +1886,7 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 	codeBlockPrefix := rc.Mattermost.Formatter.CodeBlockPrefix
 	disableMarkdown := rc.Mattermost.Formatter.DisableMarkdown
 	disableEmoji := rc.Mattermost.Formatter.DisableEmoji
+	enableIRCHexColors := rc.Mattermost.Formatter.EnableIRCHexColors
 
 	prefixChar := messageAttachmentCharNonUnicode
 	spaceChar := messageAttachmentSpaceNonUnicode
@@ -1915,9 +1916,15 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 			prefix = "\x0308" + prefixChar + "\x0f" + spaceChar
 		case strings.HasPrefix(attachment.Color, "#"):
 			hex := strings.TrimPrefix(attachment.Color, "#")
-			// https://modern.ircdocs.horse/formatting.html#hex-color
-			// Make sure the hex is uppercase for best compatibility
-			prefix = "\x02\x04" + strings.ToUpper(hex) + prefixChar + "\x0f" + spaceChar
+			if enableIRCHexColors {
+				// https://modern.ircdocs.horse/formatting.html#hex-color
+				// Make sure the hex is uppercase for best compatibility
+				prefix = "\x02\x04" + strings.ToUpper(hex) + prefixChar + "\x0f" + spaceChar
+			} else {
+				// Use the closest standard/extended \x03 code
+				closestMircCode := utils.FindClosestIRCColor(hex)
+				prefix = "\x02\x03" + closestMircCode + prefixChar + "\x0f" + spaceChar
+			}
 		}
 
 		var fallbackText string
