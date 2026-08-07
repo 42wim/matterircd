@@ -1009,7 +1009,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 
 			// If enabled, use Lazy Join to speed up initial matterircd start up and also
 			// not have a flood of channels in the IRC client.
-			if lazyJoin && since > 0 && !isDM {
+			if lazyJoin && since > 0 {
 				// If last viewed more than the cutoff duration ago -> SKIP!
 				if since < lazyJoinCutoff {
 					logger.Debugf("Lazy-joining %s: last viewed over %v (since: %s)", brchannel.Name, lazyJoinDuration, time.UnixMilli(since).Format("2006-01-02 15:04:05"))
