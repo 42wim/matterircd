@@ -744,6 +744,25 @@ func (u *User) addUsersToChannels() {
 		time.Sleep(time.Millisecond * 500)
 	}
 
+	u.eventLoopMutex.Lock()
+	isHeavySync := !u.eventLoopStarted || time.Since(u.lastSync) > 15*time.Minute
+	u.lastSync = time.Now()
+	u.eventLoopMutex.Unlock()
+	syncStartTime := time.Now()
+
+	ellipsis := "..."
+	if u.br.FormatterConfig().Unicode {
+		ellipsis = "…"
+	}
+
+	// Announce if this is initial login OR a long-offline reconnect
+	if isHeavySync {
+		if svc, ok := u.Srv.HasUser(u.br.Protocol()); ok {
+			logger.Info("starting channel synchronization and history replays")
+			u.MsgUser(svc, fmt.Sprintf("starting channel synchronization and history replays%s (this could be a while)%s", ellipsis, ellipsis))
+		}
+	}
+
 	srv := u.Srv
 	throttle := time.NewTicker(time.Millisecond * 8)
 
@@ -818,6 +837,15 @@ func (u *User) addUsersToChannels() {
 	go func() {
 		wg.Wait()
 		throttle.Stop()
+
+		// Only announce completion if it was a heavy sync and wasn't aborted
+		if isHeavySync && u.ctx != nil && u.ctx.Err() == nil {
+			if svc, ok := u.Srv.HasUser(u.br.Protocol()); ok {
+				duration := time.Since(syncStartTime).Round(time.Second)
+				logger.Infof("channel synchronization completed and history replayed (took %s)", duration)
+				u.MsgUser(svc, fmt.Sprintf("channel synchronization completed and history replayed (took %s).", duration))
+			}
+		}
 	}()
 
 	// Prevent leaking goroutines on internal bridge reconnects

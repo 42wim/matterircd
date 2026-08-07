@@ -64,6 +64,8 @@ type User struct {
 	//nolint:containedctx // Tied to the lifecycle of the persistent client session
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	lastSync time.Time
 }
 
 func (u *User) ID() string {
