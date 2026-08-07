@@ -744,6 +744,10 @@ func (u *User) addUsersToChannels() {
 		time.Sleep(time.Millisecond * 500)
 	}
 
+	if svc, ok := u.Srv.HasUser(u.br.Protocol()); ok {
+		u.MsgUser(svc, "starting channel synchronization and history replays...")
+	}
+
 	srv := u.Srv
 	throttle := time.NewTicker(time.Millisecond * 8)
 
@@ -818,6 +822,14 @@ func (u *User) addUsersToChannels() {
 	go func() {
 		wg.Wait()
 		throttle.Stop()
+
+		// All 4 workers have finished draining the queue.
+		// If they exited naturally (meaning the context wasn't canceled by an IRC disconnect), notify the user!
+		if u.ctx != nil && u.ctx.Err() == nil {
+			if svc, ok := u.Srv.HasUser(u.br.Protocol()); ok {
+				u.MsgUser(svc, "channel synchronization completed and history replayed.")
+			}
+		}
 	}()
 
 	// Prevent leaking goroutines on internal bridge reconnects
