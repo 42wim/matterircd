@@ -406,7 +406,7 @@ func (m *Client) JoinChannel(ctx context.Context, channelID string) error {
 func (m *Client) UpdateChannelsTeam(ctx context.Context, teamID string) error {
 	m.RLock()
 	if team, exists := m.OtherTeams[teamID]; exists {
-		if time.Since(team.LastChannelSync) < 30*time.Minute {
+		if time.Since(team.LastChannelSync) < 15*time.Minute {
 			m.RUnlock()
 			m.logger.Debugf("skipping channel fetch for team %s: cache is only %v old", teamID, time.Since(team.LastChannelSync).Round(time.Second))
 			return nil
@@ -450,42 +450,50 @@ func (m *Client) UpdateChannelsTeam(ctx context.Context, teamID string) error {
 	publicSummaries := make([]ChannelSummary, 0, batchSize)
 	var list []ChannelSummary
 
-	idx := 0
-	retryCount = 0
-	for {
-		if m.IsAborted(ctx) {
-			return errors.New("login aborted")
-		}
-		query := "/teams/" + teamID + "/channels?page=" + strconv.Itoa(idx) + "&per_page=" + strconv.Itoa(batchSize)
-		m.apiLogger.Warnf("UpdateChannelsTeam: DoAPIGet: query %s #%d", query, retryCount)
-		resp, err := m.Client.DoAPIGet(ctx, query, "")
-		if err != nil {
-			var mResp *model.Response
-			if resp != nil {
-				mResp = model.BuildResponse(resp)
-			}
-			shouldRetry, hErr := m.HandleRetry(ctx, "GetPublicChannelsForTeam", err, retryCount, 10, mResp)
-			if hErr == nil && shouldRetry {
-				retryCount++
-				continue
-			}
-			return err
-		}
+	m.Users.mu.RLock()
+	skipPublic := !m.ForceSyncOnReconnect && m.Users.channelData != nil
+	m.Users.mu.RUnlock()
+
+	if !skipPublic {
+		idx := 0
 		retryCount = 0
+		for {
+			if m.IsAborted(ctx) {
+				return errors.New("login aborted")
+			}
+			query := "/teams/" + teamID + "/channels?page=" + strconv.Itoa(idx) + "&per_page=" + strconv.Itoa(batchSize)
+			m.apiLogger.Warnf("UpdateChannelsTeam: DoAPIGet: query %s #%d", query, retryCount)
+			resp, err := m.Client.DoAPIGet(ctx, query, "")
+			if err != nil {
+				var mResp *model.Response
+				if resp != nil {
+					mResp = model.BuildResponse(resp)
+				}
+				shouldRetry, hErr := m.HandleRetry(ctx, "GetPublicChannelsForTeam", err, retryCount, 10, mResp)
+				if hErr == nil && shouldRetry {
+					retryCount++
+					continue
+				}
+				return err
+			}
+			retryCount = 0
 
-		list = list[:0]
-		if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
+			list = list[:0]
+			if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
+				resp.Body.Close()
+				return err
+			}
 			resp.Body.Close()
-			return err
-		}
-		resp.Body.Close()
 
-		publicSummaries = append(publicSummaries, list...)
+			publicSummaries = append(publicSummaries, list...)
 
-		if len(list) < batchSize {
-			break
+			if len(list) < batchSize {
+				break
+			}
+			idx++
 		}
-		idx++
+	} else {
+		m.logger.Debug("UpdateChannelsTeam: skipping public channel fetch (ForceSyncOnReconnect is disabled)")
 	}
 
 	// Helper to intern highly repetitive channel types
