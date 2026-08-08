@@ -158,7 +158,7 @@ func New(login string, pass string, team string, server string, mfatoken string)
 	// Logger for Mattermost API calls
 	rootAPILogger := logrus.New()
 	rootAPILogger.SetFormatter(&prefixed.TextFormatter{
-		PrefixPadding: 21,
+		PrefixPadding: 18,
 		DisableColors: false,
 		FullTimestamp: true,
 	})
@@ -195,7 +195,7 @@ func New(login string, pass string, team string, server string, mfatoken string)
 		logger:     rootLogger.WithFields(logrus.Fields{"prefix": "matterclient"}),
 
 		rootAPILogger: rootAPILogger,
-		apiLogger:     rootAPILogger.WithFields(logrus.Fields{"prefix": "matterclient: MM API"}),
+		apiLogger:     rootAPILogger.WithFields(logrus.Fields{"prefix": "matterclient: API"}),
 
 		aliveChan:  make(chan bool),
 	}
