@@ -898,6 +898,7 @@ func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(string, string, .
 }
 
 // getChannelSince calculates the 'since' timestamp for a channel based on the configured strategy.
+//nolint:funlen,gocyclo,unparam
 func (u *User) getChannelSince(ctx context.Context, brchannel *bridge.ChannelInfo, replayCutoff int64) (int64, string, bool) {
 	// Fetch server-side last viewed if strategy allows
 	strategy := u.cfg.Mattermost().ReplayStrategy
@@ -920,12 +921,11 @@ func (u *User) getChannelSince(ctx context.Context, brchannel *bridge.ChannelInf
 
 	// If strategy is server-only, return immediately
 	if strategy == "server-only" {
-		// Fallback for missing server state (common for DMs on reconnect)
-		if serverSince == 0 && brchannel.LastPostAt > 0 {
+		if serverSince == 0 {
 			if brchannel.LastPostAt > replayCutoff {
-				return brchannel.LastPostAt, "lastpost", false
+				return brchannel.LastPostAt, "lastpost-fallback", false
 			}
-			return replayCutoff, "lastpost", false
+			return replayCutoff, "cutoff-fallback", false
 		}
 		return serverSince, "server", false
 	}
@@ -961,11 +961,14 @@ func (u *User) getChannelSince(ctx context.Context, brchannel *bridge.ChannelInf
 
 	// If both server and BoltDB are 0 (or we don't have it in DB for a DM)
 	isDM := strings.Contains(brchannel.Name, "__")
-	if (bestSince == 0 || (isDM && !inDB)) && brchannel.LastPostAt > 0 {
+	if bestSince == 0 || (isDM && !inDB) {
+		// If Mattermost gave us a valid LastPostAt, use it (if it's newer than 31 days)
 		if brchannel.LastPostAt > replayCutoff {
 			return brchannel.LastPostAt, "lastpost-fallback", inDB
 		}
-		return replayCutoff, "lastpost-fallback", inDB
+		// If LastPostAt is 0 (API omitted it) or it's older than replayCutoff,
+		// guarantee we don't return 0 by enforcing the replayCutoff window!
+		return replayCutoff, "cutoff-fallback", inDB
 	}
 
 	return bestSince, source, inDB
