@@ -806,11 +806,11 @@ func (u *User) addUsersToChannels() {
 
 			// If the channel has been dormant since before our threshold, safely skip it
 			if lastPost.Before(threshold) {
-				logger.Debugf("Skipping dormant IM channel %s (LastPost: %v, Threshold: %v)", brchannel.Name, lastPost, threshold)
+				logger.Debugf("Skipping dormant DM channel %s (LastPost: %v, Threshold: %v)", brchannel.Name, lastPost, threshold)
 				continue
 			}
 
-			logger.Debugf("SmartJoin: Joining IM channel %s due to recent offline activity (LastPost: %v, Threshold: %v)", brchannel.Name, lastPost, threshold)
+			logger.Debugf("SmartJoin: Joining DM channel %s due to recent offline activity (LastPost: %v, Threshold: %v)", brchannel.Name, lastPost, threshold)
 		}
 		joinChannels = append(joinChannels, brchannel)
 	}
@@ -898,7 +898,7 @@ func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(string, string, .
 }
 
 // getChannelSince calculates the 'since' timestamp for a channel based on the configured strategy.
-//nolint:funlen,gocyclo,unparam
+//nolint:funlen,gocyclo
 func (u *User) getChannelSince(ctx context.Context, brchannel *bridge.ChannelInfo, replayCutoff int64) (int64, string, bool) {
 	// Fetch server-side last viewed if strategy allows
 	strategy := u.cfg.Mattermost().ReplayStrategy
@@ -984,11 +984,8 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 	// Currently only supported and tested with Mattermost
 	lazyJoin := u.br.Protocol() == "mattermost" && u.cfg.Mattermost().EnableLazyJoin
 
-	// TODO: Make these configuration options?
-	lazyJoinDuration := 21 * 24 * time.Hour
+	// TODO: Make this configuration options?
 	replayDuration := 31 * 24 * time.Hour
-
-	lazyJoinCutoff := time.Now().Add(-lazyJoinDuration).UnixMilli()
 	replayCutoff := time.Now().Add(-replayDuration).UnixMilli()
 
 	for {
@@ -1012,7 +1009,13 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			case <-throttle.C:
 			}
 
-			since, sinceStr, _ := u.getChannelSince(u.ctx, brchannel, replayCutoff)
+			since, sinceStr, inDB := u.getChannelSince(u.ctx, brchannel, replayCutoff)
+
+			// If EnableLazyJoin is true AND strategy is "saved", ONLY join channels already in BoltDB.
+			// If EnableLazyJoin is false, this is bypassed and it joins all 400+ channels!
+			if strategy == "saved" && lazyJoin && !inDB {
+				continue
+			}
 
 			// If the channel has a valid timestamp, but it's from years ago,
 			// cap it to replayDuration so we don't flood the IRC client with massive history.
@@ -1026,13 +1029,32 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 				sinceStr = "replay-cutoff"
 			}
 
-			// If enabled, use Lazy Join...
+			// Temporal Lazy Join (Dormant Channel Filter)
 			isDM := strings.Contains(brchannel.Name, "__")
 			if lazyJoin && since > 0 && !isDM {
-				if since < lazyJoinCutoff {
-					logger.Debugf("Lazy-joining %s: last viewed over %v (since: %s)", brchannel.Name, lazyJoinDuration, time.UnixMilli(since).Format("2006-01-02 15:04:05"))
+				u.eventLoopMutex.Lock()
+				threshold := u.lastSync
+				u.eventLoopMutex.Unlock()
+
+				if threshold.IsZero() {
+					// On a fresh boot, only join public channels active in the last 24 hours
+					threshold = time.Now().Add(-24 * time.Hour)
+				}
+
+				// If no one has spoken in this public channel since we last synced, skip it!
+				if since < threshold.UnixMilli() {
+					logger.Debugf("Smart Lazy-join: Skipping dormant public channel %s", brchannel.Name)
 					continue
 				}
+			}
+
+			// Actually join the IRC channel!
+			if !isDM {
+				channelName := brchannel.Name
+				if brchannel.TeamID != u.br.GetMe().TeamID || (u.br.Protocol() == "mattermost" && u.cfg.Mattermost().PrefixMainTeam) {
+					channelName = u.br.GetTeamName(u.ctx, brchannel.TeamID) + "/" + brchannel.Name
+				}
+				u.syncChannel(brchannel.ID, "#"+channelName)
 			}
 
 			u.replayHistory(brchannel, since, sinceStr)

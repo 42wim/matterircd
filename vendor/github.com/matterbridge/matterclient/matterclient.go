@@ -213,9 +213,10 @@ func (m *Client) Login(ctx context.Context) error {
 	if !firstConnection {
 		lastUpdatedUnix := m.Users.lastUpdated.Load()
 		timeOffline := time.Since(time.Unix(lastUpdatedUnix, 0))
+		cacheClearCutoff := 15*time.Minute
 
 		switch {
-		case timeOffline > 15*time.Minute && m.ForceSyncOnReconnect:
+		case timeOffline > cacheClearCutoff && m.ForceSyncOnReconnect:
 			m.logger.Info("reconnect: flushing channel user cache to ensure state consistency")
 
 			m.Users.mu.Lock()
@@ -223,7 +224,7 @@ func (m *Client) Login(ctx context.Context) error {
 			m.Users.mu.Unlock()
 
 			m.Users.lastUpdated.Store(time.Now().Unix())
-		case timeOffline > 15*time.Minute:
+		case timeOffline > cacheClearCutoff:
 			m.logger.Debug("reconnect: skipping channel user cache flush (ForceSyncOnReconnect is disabled)")
 		default:
 			m.logger.Debugf("reconnect: preserving channel user cache (offline for only %v)", timeOffline.Round(time.Second))
@@ -1088,32 +1089,19 @@ func (m *Client) Logout(ctx context.Context) error {
 
 	m.logger.Debugf("logout as %s (team: %s) on %s", m.Credentials.Login, m.Credentials.Team, m.Credentials.Server)
 	m.WsQuit = true
-	// close the websocket
-	m.logger.Debug("closing websocket")
-	m.WsClient.Close()
 
-	// Replace the heavy maps with fresh, empty ones. The old, massive maps
-	// are orphaned for the Garbage Collector, and lingering goroutines
-	// can safely write to these new maps without panicking.
-	//
-	// We wipe the cache if this is a true logout (!m.reconnectBusy),
-	// OR if the user explicitly requested it via ForceSyncOnReconnect.
-	if !m.reconnectBusy || m.ForceSyncOnReconnect {
-		m.logger.Debug("Logout: wiping channel and user cache")
-		m.Users.mu.Lock()
-		m.Users.users = make(map[string]*model.User)
-		m.Users.channels = make(map[string]map[string]struct{})
-		m.Users.channelData = make(map[string]*model.Channel)
-		m.Users.joinedChannels = make(map[string]struct{})
-		m.Users.teams = make(map[string]map[string]struct{})
-		m.Users.mu.Unlock()
-	} else {
-		m.logger.Debug("Logout: preserving cache for internal reconnect (ForceSyncOnReconnect is disabled)")
+	// close the websocket
+	if m.WsClient != nil {
+		m.logger.Debug("closing websocket")
+		m.WsClient.Close()
 	}
+
+	// NOTE: We no longer wipe the m.Users maps here.
+	// In Bouncer mode, the cache survives for fast reconnects and is validated by Login().
+	// In Dynamic mode, this entire Client struct will be Garbage Collected once the IRC session dies.
 
 	if strings.Contains(m.Credentials.Pass, model.SessionCookieToken) {
 		m.logger.Debug("Not invalidating session in logout, credential is a token")
-
 		return nil
 	}
 
