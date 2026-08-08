@@ -560,13 +560,13 @@ func (m *Client) UpdateChannelsTeam(ctx context.Context, teamID string) error {
 			if cached.Purpose != ch.Purpose {
 				cached.Purpose = ch.Purpose
 			}
-			if cached.UpdateAt != ch.UpdateAt {
+			if cached.UpdateAt < ch.UpdateAt {
 				cached.UpdateAt = ch.UpdateAt
 			}
 			if cached.DeleteAt != ch.DeleteAt {
 				cached.DeleteAt = ch.DeleteAt
 			}
-			if cached.LastPostAt != ch.LastPostAt {
+			if cached.LastPostAt < ch.LastPostAt {
 				cached.LastPostAt = ch.LastPostAt
 			}
 			if newType := internType(ch.Type); cached.Type != newType {
@@ -606,13 +606,13 @@ func (m *Client) UpdateChannelsTeam(ctx context.Context, teamID string) error {
 			if cached.Purpose != ch.Purpose {
 				cached.Purpose = ch.Purpose
 			}
-			if cached.UpdateAt != ch.UpdateAt {
+			if cached.UpdateAt < ch.UpdateAt {
 				cached.UpdateAt = ch.UpdateAt
 			}
 			if cached.DeleteAt != ch.DeleteAt {
 				cached.DeleteAt = ch.DeleteAt
 			}
-			if cached.LastPostAt != ch.LastPostAt {
+			if cached.LastPostAt < ch.LastPostAt {
 				cached.LastPostAt = ch.LastPostAt
 			}
 			if newType := internType(ch.Type); cached.Type != newType {
