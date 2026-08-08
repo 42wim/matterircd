@@ -1439,12 +1439,15 @@ func (m *Client) maintainUsersCache(ctx context.Context, event *model.WebSocketE
 			_ = json.NewDecoder(strings.NewReader(chStr)).Decode(&summary)
 			channel = &model.Channel{
 				Id:          summary.Id,
+				UpdateAt:    summary.UpdateAt,
+				DeleteAt:    summary.DeleteAt,
 				TeamId:      summary.TeamId,
 				Type:        model.ChannelType(summary.Type),
 				DisplayName: summary.DisplayName,
 				Name:        summary.Name,
 				Header:      summary.Header,
 				Purpose:     summary.Purpose,
+				LastPostAt:  summary.LastPostAt,
 				CreatorId:   summary.CreatorId,
 			}
 		}
