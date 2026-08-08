@@ -69,7 +69,7 @@ You can find the binaries [here](https://github.com/42wim/matterircd/releases/la
 Go 1.22+ is required
 
 ```bash
-go build -ldflags="-X main.githash=$(git rev-parse --short HEAD)"
+go build -ldflags="-X main.githash=$(git describe --always --dirty --exclude '*')"
 ```
 
 Or:
