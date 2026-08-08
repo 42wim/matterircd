@@ -148,6 +148,8 @@ func (m *Mattermost) loginToMattermost(ctx context.Context, onWsConnect func()) 
 	mc.AntiIdle = !rc.Mattermost.DisableAutoView || rc.Mattermost.ForceAntiIdle
 	mc.AntiIdleChan = rc.Mattermost.AntiIdleChannel
 	mc.AntiIdleIntvl = rc.Mattermost.AntiIdleInterval
+	mc.ForceSyncOnReconnect = rc.Mattermost.ForceSyncOnReconnect
+
 	mc.Ctx = ctx
 	mc.OnWsConnect = onWsConnect
 

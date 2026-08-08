@@ -193,6 +193,9 @@ ReplayStrategy = "hybrid"
 # Enable EXPERIMENTAL "lazy-join" to only join channels active within the last 21-days.
 # This helps speed up initial start up and reduces channel clutter in your IRC client.
 #EnableLazyJoin = true
+# Force a full synchronization of channel users on reconnect if offline for more than 15 minutes.
+# By default, this is disabled to ensure lightning-fast reconnects, relying on dynamic nicklist updates.
+#ForceSyncOnReconnect = false
 
 #############################
 ##### SLACK EXAMPLE #########
