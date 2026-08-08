@@ -748,9 +748,10 @@ func (u *User) addUsersToChannels() {
 	}
 
 	u.eventLoopMutex.Lock()
+	lastSyncThreshold := u.lastSync
 	isHeavySync := !u.eventLoopStarted || time.Since(u.lastSync) > 15*time.Minute
-	u.lastSync = time.Now()
 	u.eventLoopMutex.Unlock()
+
 	syncStartTime := time.Now()
 
 	ellipsis := "..."
@@ -795,10 +796,21 @@ func (u *User) addUsersToChannels() {
 	// Fetch, filter, and sort the channels alphabetically
 	var joinChannels []*bridge.ChannelInfo
 	for _, brchannel := range u.br.GetChannels() {
-		// only joindm when specified
 		if brchannel.DM && !u.br.BridgeConfig().JoinDM {
-			logger.Debugf("Skipping IM channel %s", brchannel.Name)
-			continue
+			lastPost := time.UnixMilli(brchannel.LastPostAt)
+
+			threshold := lastSyncThreshold
+			if threshold.IsZero() {
+				threshold = time.Now().Add(-24 * time.Hour)
+			}
+
+			// If the channel has been dormant since before our threshold, safely skip it
+			if lastPost.Before(threshold) {
+				logger.Debugf("Skipping dormant DM channel %s (LastPost: %v, Threshold: %v)", brchannel.Name, lastPost, threshold)
+				continue
+			}
+
+			logger.Debugf("SmartJoin: Joining DM channel %s due to recent offline activity (LastPost: %v, Threshold: %v)", brchannel.Name, lastPost, threshold)
 		}
 		joinChannels = append(joinChannels, brchannel)
 	}
@@ -841,6 +853,13 @@ func (u *User) addUsersToChannels() {
 		wg.Wait()
 		throttle.Stop()
 
+		// Now that every worker has successfully finished syncing, move the watermark forward.
+		u.eventLoopMutex.Lock()
+		if syncStartTime.After(u.lastSync) {
+			u.lastSync = syncStartTime
+		}
+		u.eventLoopMutex.Unlock()
+
 		// Only announce completion if it was a heavy sync and wasn't aborted
 		if isHeavySync && u.ctx != nil && u.ctx.Err() == nil {
 			if svc, ok := u.Srv.HasUser(u.br.Protocol()); ok {
@@ -879,7 +898,8 @@ func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(string, string, .
 }
 
 // getChannelSince calculates the 'since' timestamp for a channel based on the configured strategy.
-func (u *User) getChannelSince(ctx context.Context, channelID string) (int64, string, bool) {
+//nolint:funlen,gocyclo
+func (u *User) getChannelSince(ctx context.Context, brchannel *bridge.ChannelInfo, replayCutoff int64) (int64, string, bool) {
 	// Fetch server-side last viewed if strategy allows
 	strategy := u.cfg.Mattermost().ReplayStrategy
 	if strategy == "" {
@@ -896,11 +916,17 @@ func (u *User) getChannelSince(ctx context.Context, channelID string) (int64, st
 
 	var serverSince int64
 	if strategy != "saved" {
-		serverSince = u.br.GetLastViewedAt(ctx, channelID)
+		serverSince = u.br.GetLastViewedAt(ctx, brchannel.ID)
 	}
 
 	// If strategy is server-only, return immediately
 	if strategy == "server-only" {
+		if serverSince == 0 {
+			if brchannel.LastPostAt > replayCutoff {
+				return brchannel.LastPostAt, "lastpost-fallback", false
+			}
+			return replayCutoff, "cutoff-fallback", false
+		}
 		return serverSince, "server", false
 	}
 
@@ -914,32 +940,38 @@ func (u *User) getChannelSince(ctx context.Context, channelID string) (int64, st
 			if b == nil {
 				return nil
 			}
-
-			v := b.Get([]byte(channelID))
-			if v == nil {
-				return nil
+			v := b.Get([]byte(brchannel.ID))
+			if v != nil {
+				val := binary.LittleEndian.Uint64(v)
+				if val <= math.MaxInt64 {
+					savedSince = int64(val)
+					inDB = true
+				}
 			}
-
-			val := binary.LittleEndian.Uint64(v)
-			if val <= math.MaxInt64 {
-				savedSince = int64(val)
-				inDB = true
-			}
-
 			return nil
 		})
 	}
 
-	if strategy == "saved" {
-		return savedSince, "stored", inDB
+	bestSince := serverSince
+	source := "server"
+	if strategy == "saved" || savedSince > bestSince {
+		bestSince = savedSince
+		source = "stored"
 	}
 
-	// "hybrid" behavior: use whichever value is later
-	if savedSince > serverSince {
-		return savedSince, "stored", inDB
+	// If both server and BoltDB are 0 (or we don't have it in DB for a DM)
+	isDM := strings.Contains(brchannel.Name, "__")
+	if bestSince == 0 || (isDM && !inDB) {
+		// If Mattermost gave us a valid LastPostAt, use it (if it's newer than 31 days)
+		if brchannel.LastPostAt > replayCutoff {
+			return brchannel.LastPostAt, "lastpost-fallback", inDB
+		}
+		// If LastPostAt is 0 (API omitted it) or it's older than replayCutoff,
+		// guarantee we don't return 0 by enforcing the replayCutoff window!
+		return replayCutoff, "cutoff-fallback", inDB
 	}
 
-	return serverSince, "server", inDB
+	return bestSince, source, inDB
 }
 
 //nolint:funlen,cyclop,gocognit,gocyclo
@@ -952,13 +984,9 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 	// Currently only supported and tested with Mattermost
 	lazyJoin := u.br.Protocol() == "mattermost" && u.cfg.Mattermost().EnableLazyJoin
 
-	// TODO: Make these configuration options?
-	lazyJoinDuration := 21 * 24 * time.Hour
+	// TODO: Make this configuration options?
 	replayDuration := 31 * 24 * time.Hour
-
-	lazyJoinCutoff := time.Now().Add(-lazyJoinDuration).UnixMilli()
 	replayCutoff := time.Now().Add(-replayDuration).UnixMilli()
-	dmFallbackCutoff := time.Now().Add(-(lazyJoinDuration / 2)).UnixMilli()
 
 	for {
 		select {
@@ -981,50 +1009,51 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			case <-throttle.C:
 			}
 
-			since, sinceStr, inDB := u.getChannelSince(u.ctx, brchannel.ID)
+			since, sinceStr, inDB := u.getChannelSince(u.ctx, brchannel, replayCutoff)
 
-			// Catch the edge case where an offline DM (never seen before in BoltDB)
-			// returns 0 or a very old timestamp from the server.
-			isDM := strings.Contains(brchannel.Name, "__")
-			if isDM && !inDB {
-				// This catches both since == 0 AND very old createAt timestamps
-				if since < dmFallbackCutoff {
-					logger.Debugf("Untracked DM detected for %s, applying fallback timestamp", brchannel.Name)
-					since = dmFallbackCutoff
-					sinceStr = "dm-offline-fallback"
-				}
+			// If EnableLazyJoin is true AND strategy is "saved", ONLY join channels already in BoltDB.
+			// If EnableLazyJoin is false, this is bypassed and it joins all 400+ channels!
+			if strategy == "saved" && lazyJoin && !inDB {
+				continue
 			}
 
 			// If the channel has a valid timestamp, but it's from years ago,
-			// cap it to 31 days so we don't flood the IRC client with massive history.
-			if since < replayCutoff {
+			// cap it to replayDuration so we don't flood the IRC client with massive history.
+			if since > 0 && since < replayCutoff {
 				logger.Infof("Capping replay history for %s to %s (original since: %s)",
 					brchannel.Name,
 					replayDuration,
 					time.UnixMilli(since).Format("2006-01-02"),
 				)
 				since = replayCutoff
-				sinceStr = "replay-cutoff-fallback"
+				sinceStr = "replay-cutoff"
 			}
 
-			// If enabled, use Lazy Join to speed up initial matterircd start up and also
-			// not have a flood of channels in the IRC client.
-			if lazyJoin && since > 0 {
-				// If last viewed more than the cutoff duration ago -> SKIP!
-				if since < lazyJoinCutoff {
-					logger.Debugf("Lazy-joining %s: last viewed over %v (since: %s)", brchannel.Name, lazyJoinDuration, time.UnixMilli(since).Format("2006-01-02 15:04:05"))
+			// Temporal Lazy Join (Dormant Channel Filter)
+			isDM := strings.Contains(brchannel.Name, "__")
+			if lazyJoin && since > 0 && !isDM {
+				u.eventLoopMutex.Lock()
+				threshold := u.lastSync
+				u.eventLoopMutex.Unlock()
+
+				if threshold.IsZero() {
+					// On a fresh boot, only join public channels active in the last 24 hours
+					threshold = time.Now().Add(-24 * time.Hour)
+				}
+
+				// If no one has spoken in this public channel since we last synced, skip it!
+				if since < threshold.UnixMilli() {
+					logger.Debugf("Smart Lazy-join: Skipping dormant public channel %s", brchannel.Name)
 					continue
 				}
 			}
 
-			// exclude direct messages
-			if !strings.Contains(brchannel.Name, "__") {
+			// Actually join the IRC channel!
+			if !isDM {
 				channelName := brchannel.Name
-
 				if brchannel.TeamID != u.br.GetMe().TeamID || (u.br.Protocol() == "mattermost" && u.cfg.Mattermost().PrefixMainTeam) {
 					channelName = u.br.GetTeamName(u.ctx, brchannel.TeamID) + "/" + brchannel.Name
 				}
-
 				u.syncChannel(brchannel.ID, "#"+channelName)
 			}
 

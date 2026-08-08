@@ -35,12 +35,15 @@ func (m *Client) GetChannel(ctx context.Context, channelID string) *model.Channe
 
 	mmchannel := &model.Channel{
 		Id:          summary.Id,
+		UpdateAt:    summary.UpdateAt,
+		DeleteAt:    summary.DeleteAt,
 		TeamId:      summary.TeamId,
 		Type:        model.ChannelType(summary.Type),
 		DisplayName: summary.DisplayName,
 		Name:        summary.Name,
 		Header:      summary.Header,
 		Purpose:     summary.Purpose,
+		LastPostAt:  summary.LastPostAt,
 		CreatorId:   summary.CreatorId,
 	}
 
@@ -129,12 +132,15 @@ func (m *Client) getChannelIDTeam(ctx context.Context, name string, teamID strin
 
 	channel := &model.Channel{
 		Id:          summary.Id,
+		UpdateAt:    summary.UpdateAt,
+		DeleteAt:    summary.DeleteAt,
 		TeamId:      summary.TeamId,
 		Type:        model.ChannelType(summary.Type),
 		DisplayName: summary.DisplayName,
 		Name:        summary.Name,
 		Header:      summary.Header,
 		Purpose:     summary.Purpose,
+		LastPostAt:  summary.LastPostAt,
 		CreatorId:   summary.CreatorId,
 	}
 
@@ -404,16 +410,6 @@ func (m *Client) JoinChannel(ctx context.Context, channelID string) error {
 
 //nolint:funlen,gocognit,gocyclo
 func (m *Client) UpdateChannelsTeam(ctx context.Context, teamID string) error {
-	m.RLock()
-	if team, exists := m.OtherTeams[teamID]; exists {
-		if time.Since(team.LastChannelSync) < 30*time.Minute {
-			m.RUnlock()
-			m.logger.Debugf("skipping channel fetch for team %s: cache is only %v old", teamID, time.Since(team.LastChannelSync).Round(time.Second))
-			return nil
-		}
-	}
-	m.RUnlock()
-
 	const batchSize = 200
 
 	var joinedSummaries []ChannelSummary
@@ -447,45 +443,65 @@ func (m *Client) UpdateChannelsTeam(ctx context.Context, teamID string) error {
 		break
 	}
 
-	publicSummaries := make([]ChannelSummary, 0, batchSize)
-	var list []ChannelSummary
+	// Fetch public channels using an inline function to allow for an early return
+	publicSummaries, err := func() ([]ChannelSummary, error) {
+		m.Users.mu.RLock()
+		hasCache := len(m.Users.channelData) > 0
+		m.Users.mu.RUnlock()
 
-	idx := 0
-	retryCount = 0
-	for {
-		if m.IsAborted(ctx) {
-			return errors.New("login aborted")
+		// Skip the heavy public channel crawl if we have a cache and aren't forcing a sync.
+		// We rely on WebSocket events to keep public channels updated organically.
+		if hasCache && !m.ForceSyncOnReconnect {
+			m.logger.Debug("UpdateChannelsTeam: skipping public channel fetch (using cache)")
+			return nil, nil // Early return!
 		}
-		query := "/teams/" + teamID + "/channels?page=" + strconv.Itoa(idx) + "&per_page=" + strconv.Itoa(batchSize)
-		m.apiLogger.Warnf("UpdateChannelsTeam: DoAPIGet: query %s #%d", query, retryCount)
-		resp, err := m.Client.DoAPIGet(ctx, query, "")
-		if err != nil {
-			var mResp *model.Response
-			if resp != nil {
-				mResp = model.BuildResponse(resp)
-			}
-			shouldRetry, hErr := m.HandleRetry(ctx, "GetPublicChannelsForTeam", err, retryCount, 10, mResp)
-			if hErr == nil && shouldRetry {
-				retryCount++
-				continue
-			}
-			return err
-		}
-		retryCount = 0
 
-		list = list[:0]
-		if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
+		m.apiLogger.Warnf("UpdateChannelsTeam: fetching public channels (cache empty or ForceSyncOnReconnect enabled)")
+
+		summaries := make([]ChannelSummary, 0, batchSize)
+		var list []ChannelSummary
+
+		idx := 0
+		retryCount := 0
+		for {
+			if m.IsAborted(ctx) {
+				return nil, errors.New("login aborted")
+			}
+			query := "/teams/" + teamID + "/channels?page=" + strconv.Itoa(idx) + "&per_page=" + strconv.Itoa(batchSize)
+			m.apiLogger.Warnf("UpdateChannelsTeam: DoAPIGet: query %s #%d", query, retryCount)
+			resp, err := m.Client.DoAPIGet(ctx, query, "")
+			if err != nil {
+				var mResp *model.Response
+				if resp != nil {
+					mResp = model.BuildResponse(resp)
+				}
+				shouldRetry, hErr := m.HandleRetry(ctx, "GetPublicChannelsForTeam", err, retryCount, 10, mResp)
+				if hErr == nil && shouldRetry {
+					retryCount++
+					continue
+				}
+				return nil, err
+			}
+			retryCount = 0
+
+			list = list[:0]
+			if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
+				resp.Body.Close()
+				return nil, err
+			}
 			resp.Body.Close()
-			return err
-		}
-		resp.Body.Close()
 
-		publicSummaries = append(publicSummaries, list...)
+			summaries = append(summaries, list...)
 
-		if len(list) < batchSize {
-			break
+			if len(list) < batchSize {
+				break
+			}
+			idx++
 		}
-		idx++
+		return summaries, nil
+	}()
+	if err != nil {
+		return err
 	}
 
 	// Helper to intern highly repetitive channel types
@@ -519,12 +535,15 @@ func (m *Client) UpdateChannelsTeam(ctx context.Context, teamID string) error {
 		if !exists { //nolint:nestif
 			cached = &model.Channel{
 				Id:          ch.Id,
+				UpdateAt:    ch.UpdateAt,
+				DeleteAt:    ch.DeleteAt,
 				TeamId:      teamID,
 				Type:        internType(ch.Type),
 				DisplayName: ch.DisplayName,
 				Name:        ch.Name,
 				Header:      ch.Header,
 				Purpose:     ch.Purpose,
+				LastPostAt:  ch.LastPostAt,
 				CreatorId:   ch.CreatorId,
 			}
 			m.Users.channelData[cached.Id] = cached
@@ -540,6 +559,15 @@ func (m *Client) UpdateChannelsTeam(ctx context.Context, teamID string) error {
 			}
 			if cached.Purpose != ch.Purpose {
 				cached.Purpose = ch.Purpose
+			}
+			if cached.UpdateAt < ch.UpdateAt {
+				cached.UpdateAt = ch.UpdateAt
+			}
+			if cached.DeleteAt != ch.DeleteAt {
+				cached.DeleteAt = ch.DeleteAt
+			}
+			if cached.LastPostAt < ch.LastPostAt {
+				cached.LastPostAt = ch.LastPostAt
 			}
 			if newType := internType(ch.Type); cached.Type != newType {
 				cached.Type = newType
@@ -553,6 +581,8 @@ func (m *Client) UpdateChannelsTeam(ctx context.Context, teamID string) error {
 		if !exists { //nolint:nestif
 			cached = &model.Channel{
 				Id:          ch.Id,
+				UpdateAt:    ch.UpdateAt,
+				DeleteAt:    ch.DeleteAt,
 				TeamId:      teamID,
 				Type:        internType(ch.Type),
 				DisplayName: ch.DisplayName,
@@ -560,6 +590,7 @@ func (m *Client) UpdateChannelsTeam(ctx context.Context, teamID string) error {
 				Header:      ch.Header,
 				Purpose:     ch.Purpose,
 				CreatorId:   ch.CreatorId,
+				LastPostAt:  ch.LastPostAt,
 			}
 			m.Users.channelData[cached.Id] = cached
 		} else {
@@ -574,6 +605,15 @@ func (m *Client) UpdateChannelsTeam(ctx context.Context, teamID string) error {
 			}
 			if cached.Purpose != ch.Purpose {
 				cached.Purpose = ch.Purpose
+			}
+			if cached.UpdateAt < ch.UpdateAt {
+				cached.UpdateAt = ch.UpdateAt
+			}
+			if cached.DeleteAt != ch.DeleteAt {
+				cached.DeleteAt = ch.DeleteAt
+			}
+			if cached.LastPostAt < ch.LastPostAt {
+				cached.LastPostAt = ch.LastPostAt
 			}
 			if newType := internType(ch.Type); cached.Type != newType {
 				cached.Type = newType

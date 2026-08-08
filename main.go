@@ -319,6 +319,11 @@ func tlsbind() net.Listener {
 }
 
 func start(socket net.Listener) {
+	fullVersion := version
+	if githash != "" {
+		fullVersion = version + " (" + githash + ")"
+	}
+
 	for {
 		conn, err := socket.Accept()
 		if err != nil {
@@ -327,7 +332,7 @@ func start(socket net.Listener) {
 		}
 
 		go func() {
-			newsrv := irckit.ServerConfig{Name: project, Version: version}.Server()
+			newsrv := irckit.ServerConfig{Name: project, Version: fullVersion}.Server()
 
 			logger.Infof("New connection: %s", conn.RemoteAddr())
 

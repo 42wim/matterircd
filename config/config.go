@@ -133,10 +133,11 @@ type MattermostConfig struct {
 	DisableDefaultMentions bool
 	DisableShowOwnModified bool
 
-	DisableAutoView    bool
-	LastViewedSaveFile string
-	ReplayStrategy     string
-	EnableLazyJoin     bool
+	DisableAutoView      bool
+	LastViewedSaveFile   string
+	ReplayStrategy       string
+	EnableLazyJoin       bool
+	ForceSyncOnReconnect bool
 }
 
 type SlackConfig struct {
@@ -318,10 +319,11 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 			DisableDefaultMentions: c.v.GetBool("mattermost.DisableDefaultMentions"),
 			DisableShowOwnModified: c.v.GetBool("mattermost.DisableShowOwnModified"),
 
-			DisableAutoView:    c.v.GetBool("mattermost.DisableAutoView"),
-			LastViewedSaveFile: c.v.GetString("mattermost.LastViewedSaveFile"),
-			ReplayStrategy:     c.v.GetString("mattermost.ReplayStrategy"),
-			EnableLazyJoin:     c.v.GetBool("mattermost.EnableLazyJoin"),
+			DisableAutoView:      c.v.GetBool("mattermost.DisableAutoView"),
+			LastViewedSaveFile:   c.v.GetString("mattermost.LastViewedSaveFile"),
+			ReplayStrategy:       c.v.GetString("mattermost.ReplayStrategy"),
+			EnableLazyJoin:       c.v.GetBool("mattermost.EnableLazyJoin"),
+			ForceSyncOnReconnect: c.v.GetBool("mattermost.ForceSyncOnReconnect"),
 		},
 
 		Slack: SlackConfig{

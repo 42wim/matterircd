@@ -246,7 +246,9 @@ func replay(u *User, toUser *User, args []string, service string) {
 
 	// If no custom duration was provided, fall back to our configured strategy
 	if since == 0 {
-		since, logSince, _ = u.getChannelSince(u.ctx, brchannel.ID)
+		// Cap manual unbounded replays to 31 days just like the startup worker
+		replayCutoff := time.Now().Add(-31 * 24 * time.Hour).UnixMilli()
+		since, logSince, _ = u.getChannelSince(u.ctx, brchannel, replayCutoff)
 	}
 
 	u.replayHistory(brchannel, since, logSince)

@@ -148,6 +148,8 @@ func (m *Mattermost) loginToMattermost(ctx context.Context, onWsConnect func()) 
 	mc.AntiIdle = !rc.Mattermost.DisableAutoView || rc.Mattermost.ForceAntiIdle
 	mc.AntiIdleChan = rc.Mattermost.AntiIdleChannel
 	mc.AntiIdleIntvl = rc.Mattermost.AntiIdleInterval
+	mc.ForceSyncOnReconnect = rc.Mattermost.ForceSyncOnReconnect
+
 	mc.Ctx = ctx
 	mc.OnWsConnect = onWsConnect
 
@@ -651,11 +653,12 @@ func (m *Mattermost) GetChannels() []*bridge.ChannelInfo {
 		}
 
 		channels = append(channels, &bridge.ChannelInfo{
-			Name:    mmchannel.Name,
-			ID:      mmchannel.Id,
-			TeamID:  mmchannel.TeamId,
-			DM:      mmchannel.IsGroupOrDirect(),
-			Private: !mmchannel.IsOpen(),
+			Name:       mmchannel.Name,
+			ID:         mmchannel.Id,
+			TeamID:     mmchannel.TeamId,
+			DM:         mmchannel.IsGroupOrDirect(),
+			Private:    !mmchannel.IsOpen(),
+			LastPostAt: mmchannel.LastPostAt,
 		})
 
 		chanMap[mmchannel.Id] = true

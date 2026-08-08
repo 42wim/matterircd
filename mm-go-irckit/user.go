@@ -152,7 +152,7 @@ func (u *User) Encode(msgs ...*irc.Message) (err error) {
 			logger.Warnf("failed to set write deadline for %s: %v", u.Nick, err)
 		}
 
-		if msg.Command == "PRIVMSG" && (msg.Prefix.Name == "slack" || msg.Prefix.Name == "mattermost") && msg.Prefix.Host == "service" && strings.Contains(msg.Trailing, "token") {
+		if msg.Command == irc.PRIVMSG && (msg.Prefix.Name == "slack" || msg.Prefix.Name == "mattermost") && msg.Prefix.Host == "service" && strings.Contains(msg.Trailing, "token") {
 			logger.Debugf("-> %s %s %s", msg.Command, msg.Prefix.Name, "[token redacted]")
 
 			err := u.Conn.Encode(msg)
@@ -163,7 +163,7 @@ func (u *User) Encode(msgs ...*irc.Message) (err error) {
 			continue
 		}
 
-		if msg.Command == "PONG" {
+		if msg.Command == irc.PONG || msg.Command == irc.RPL_NAMREPLY {
 			logger.Tracef("-> %q", msg.String())
 		} else {
 			logger.Debugf("-> %q", msg.String())
@@ -286,7 +286,7 @@ func (u *User) Decode() {
 		}
 
 		dmsg := "<- " + msg.String()
-		if msg.Command == "PRIVMSG" && msg.Params != nil && (msg.Params[0] == "slack" || msg.Params[0] == "mattermost") {
+		if msg.Command == irc.PRIVMSG && msg.Params != nil && (msg.Params[0] == "slack" || msg.Params[0] == "mattermost") {
 			// Don't log sensitive information
 			trail := strings.Split(msg.Trailing, " ")
 			if (msg.Trailing != "" && trail[0] == "login") || (len(msg.Params) > 1 && msg.Params[1] == "login") {
@@ -294,13 +294,14 @@ func (u *User) Decode() {
 			}
 		}
 		// PRIVMSG can be buffered
-		if msg.Command == "PRIVMSG" {
+		switch {
+		case msg.Command == irc.PRIVMSG:
 			logger.Debugf("B: %#v", dmsg)
 			buffer <- msg
-		} else if msg.Command == "PING" {
+		case msg.Command == irc.PING:
 			logger.Trace(dmsg)
 			u.DecodeCh <- msg
-		} else {
+		default:
 			logger.Debug(dmsg)
 			u.DecodeCh <- msg
 		}

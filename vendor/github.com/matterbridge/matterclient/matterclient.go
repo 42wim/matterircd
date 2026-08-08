@@ -126,11 +126,11 @@ type Client struct {
 	reconnectBusy bool
 	Timeout       int
 
-	logger      *logrus.Entry
-	rootLogger  *logrus.Logger
+	logger     *logrus.Entry
+	rootLogger *logrus.Logger
 
-	apiLogger      *logrus.Entry
-	rootAPILogger  *logrus.Logger
+	apiLogger     *logrus.Entry
+	rootAPILogger *logrus.Logger
 
 	lruCache    *lru.Cache[string, bool]
 	aliveChan   chan bool
@@ -138,6 +138,8 @@ type Client struct {
 
 	lastWsActivity atomic.Int64
 	connectedAt    atomic.Int64
+
+	ForceSyncOnReconnect bool
 
 	//nolint:containedctx // Tied to the lifecycle of the persistent client session
 	Ctx context.Context
@@ -156,7 +158,7 @@ func New(login string, pass string, team string, server string, mfatoken string)
 	// Logger for Mattermost API calls
 	rootAPILogger := logrus.New()
 	rootAPILogger.SetFormatter(&prefixed.TextFormatter{
-		PrefixPadding: 21,
+		PrefixPadding: 18,
 		DisableColors: false,
 		FullTimestamp: true,
 	})
@@ -187,19 +189,20 @@ func New(login string, pass string, team string, server string, mfatoken string)
 
 			channelLastViewedAt: make(map[string]int64, 1000),
 		},
-		lruCache:   cache,
+		lruCache: cache,
 
 		rootLogger: rootLogger,
 		logger:     rootLogger.WithFields(logrus.Fields{"prefix": "matterclient"}),
 
 		rootAPILogger: rootAPILogger,
-		apiLogger:     rootAPILogger.WithFields(logrus.Fields{"prefix": "matterclient: MM API"}),
+		apiLogger:     rootAPILogger.WithFields(logrus.Fields{"prefix": "matterclient: API"}),
 
-		aliveChan:  make(chan bool),
+		aliveChan: make(chan bool),
 	}
 }
 
 // Login tries to connect the client with the loging details with which it was initialized.
+//
 //nolint:funlen,gocyclo
 func (m *Client) Login(ctx context.Context) error {
 	// check if this is a first connect or a reconnection
@@ -211,8 +214,10 @@ func (m *Client) Login(ctx context.Context) error {
 	if !firstConnection {
 		lastUpdatedUnix := m.Users.lastUpdated.Load()
 		timeOffline := time.Since(time.Unix(lastUpdatedUnix, 0))
+		cacheClearCutoff := 15 * time.Minute
 
-		if timeOffline > 15*time.Minute {
+		switch {
+		case timeOffline > cacheClearCutoff && m.ForceSyncOnReconnect:
 			m.logger.Info("reconnect: flushing channel user cache to ensure state consistency")
 
 			m.Users.mu.Lock()
@@ -220,7 +225,9 @@ func (m *Client) Login(ctx context.Context) error {
 			m.Users.mu.Unlock()
 
 			m.Users.lastUpdated.Store(time.Now().Unix())
-		} else {
+		case timeOffline > cacheClearCutoff:
+			m.logger.Debug("reconnect: skipping channel user cache flush (ForceSyncOnReconnect is disabled)")
+		default:
 			m.logger.Debugf("reconnect: preserving channel user cache (offline for only %v)", timeOffline.Round(time.Second))
 		}
 	}
@@ -274,21 +281,19 @@ func (m *Client) Login(ctx context.Context) error {
 	bgCtx, loginCancel := context.WithCancel(parentCtx)
 	m.loginCancel = loginCancel
 
-	m.logger.Debug("starting wsreceiver")
-
+	m.logger.Trace("executing WsReceiver()")
 	// Pass the long-lived background context to the goroutines.
 	// They will run until m.loginCancel() is called during Logout.
 	//nolint:contextcheck
 	go m.WsReceiver(bgCtx)
 
 	if m.WsClient != nil {
-		m.logger.Debug("requesting initial user statuses for cache")
+		m.logger.Trace("requesting initial user statuses for cache")
 		m.WsClient.GetStatuses()
 	}
 
 	if m.OnWsConnect != nil {
-		m.logger.Debug("executing OnWsConnect()")
-
+		m.logger.Trace("executing OnWsConnect()")
 		go m.OnWsConnect()
 	}
 
@@ -463,6 +468,7 @@ func (m *Client) serverAlive(ctx context.Context, b *backoff.Backoff) error {
 }
 
 // initialize user and teams
+//
 //nolint:funlen,gocognit,gocyclo
 func (m *Client) initUser(ctx context.Context) error {
 	m.Lock()
@@ -502,9 +508,12 @@ func (m *Client) initUser(ctx context.Context) error {
 
 		m.Lock()
 		existingTeam, exists := m.OtherTeams[team.Id]
+		if team.Name == m.Credentials.Team {
+			m.logger.Debugf("found our team %s (id: %s)", team.Name, team.Id)
+		}
 		m.Unlock()
 
-		if exists && time.Since(existingTeam.LastUserSync) < 15*time.Minute {
+		if exists && (!m.ForceSyncOnReconnect || time.Since(existingTeam.LastUserSync) < 15*time.Minute) {
 			m.logger.Debugf("skipping user fetch for team %s: cache is only %v old", team.Name, time.Since(existingTeam.LastUserSync).Round(time.Second))
 			m.Lock()
 			if team.Name == m.Credentials.Team {
@@ -514,7 +523,7 @@ func (m *Client) initUser(ctx context.Context) error {
 			continue
 		}
 
-		m.logger.Debugf("fetching users for team %s (cache expired or missing)", team.Name)
+		m.logger.Tracef("fetching users for team %s (cache expired or missing)", team.Name)
 
 		fetchedUsers := make([]UserSummary, 0, batchSize)
 
@@ -562,7 +571,11 @@ func (m *Client) initUser(ctx context.Context) error {
 			case <-time.After(time.Millisecond * 200):
 			}
 		}
-		m.logger.Debugf("found %d users in team %s", len(fetchedUsers), team.Name)
+		if !exists {
+			m.logger.Debugf("found %d users in team %s", len(fetchedUsers), team.Name)
+		} else {
+			m.logger.Debugf("found %d users in team %s (cache expired)", len(fetchedUsers), team.Name)
+		}
 
 		m.Users.mu.Lock()
 		if m.Users.teams == nil {
@@ -625,7 +638,6 @@ func (m *Client) initUser(ctx context.Context) error {
 
 		if team.Name == m.Credentials.Team {
 			m.Team = m.OtherTeams[team.Id]
-			m.logger.Debugf("initUser(): found our team %s (id: %s)", team.Name, team.Id)
 		}
 		m.Unlock()
 	}
@@ -647,16 +659,6 @@ func (m *Client) initUserChannels(ctx context.Context) error {
 
 	m.Users.mu.RLock()
 	defer m.Users.mu.RUnlock()
-
-	var dmCount int
-	for id, ch := range m.Users.channelData {
-		if ch.TeamId == "" {
-			if _, joined := m.Users.joinedChannels[id]; joined {
-				dmCount++
-			}
-		}
-	}
-	m.logger.Debugf("found %d direct/group message channels", dmCount)
 
 	for _, t := range teams {
 		var joinedCount, publicCount int
@@ -811,7 +813,7 @@ func (m *Client) wsConnect(ctx context.Context) {
 	header := http.Header{}
 	header.Set(model.HeaderAuth, "BEARER "+m.Client.AuthToken)
 
-	m.logger.Debugf("WsClient: making connection: %s", wsurl)
+	m.logger.Tracef("WsClient: making connection: %s", wsurl)
 
 	for {
 		if ctx.Err() != nil {
@@ -1089,24 +1091,19 @@ func (m *Client) Logout(ctx context.Context) error {
 
 	m.logger.Debugf("logout as %s (team: %s) on %s", m.Credentials.Login, m.Credentials.Team, m.Credentials.Server)
 	m.WsQuit = true
-	// close the websocket
-	m.logger.Debug("closing websocket")
-	m.WsClient.Close()
 
-	// Replace the heavy maps with fresh, empty ones. The old, massive maps
-	// are orphaned for the Garbage Collector, and lingering goroutines
-	// can safely write to these new maps without panicking.
-	m.Users.mu.Lock()
-	m.Users.users = make(map[string]*model.User)
-	m.Users.channels = make(map[string]map[string]struct{})
-	m.Users.channelData = make(map[string]*model.Channel)
-	m.Users.joinedChannels = make(map[string]struct{})
-	m.Users.teams = make(map[string]map[string]struct{})
-	m.Users.mu.Unlock()
+	// close the websocket
+	if m.WsClient != nil {
+		m.logger.Debug("closing websocket")
+		m.WsClient.Close()
+	}
+
+	// NOTE: We no longer wipe the m.Users maps here.
+	// In Bouncer mode, the cache survives for fast reconnects and is validated by Login().
+	// In Dynamic mode, this entire Client struct will be Garbage Collected once the IRC session dies.
 
 	if strings.Contains(m.Credentials.Pass, model.SessionCookieToken) {
 		m.logger.Debug("Not invalidating session in logout, credential is a token")
-
 		return nil
 	}
 
@@ -1432,12 +1429,15 @@ func (m *Client) maintainUsersCache(ctx context.Context, event *model.WebSocketE
 			_ = json.NewDecoder(strings.NewReader(chStr)).Decode(&summary)
 			channel = &model.Channel{
 				Id:          summary.Id,
+				UpdateAt:    summary.UpdateAt,
+				DeleteAt:    summary.DeleteAt,
 				TeamId:      summary.TeamId,
 				Type:        model.ChannelType(summary.Type),
 				DisplayName: summary.DisplayName,
 				Name:        summary.Name,
 				Header:      summary.Header,
 				Purpose:     summary.Purpose,
+				LastPostAt:  summary.LastPostAt,
 				CreatorId:   summary.CreatorId,
 			}
 		}
