@@ -238,6 +238,8 @@ github.com/matterbridge/logrus-prefixed-formatter v0.5.3-0.20200523233437-d97130
 github.com/matterbridge/logrus-prefixed-formatter v0.5.3-0.20200523233437-d971309a77ba/go.mod h1:iXGEotOvwI1R1SjLxRc+BF5rUORTMtE0iMZBT2lxqAU=
 github.com/matterbridge/matterclient v0.0.0-20260808112133-25740422e9c0 h1:P1KF3H4/aEDe8tWmysyydDCNryy3/Zdd9hLe/KzXSIo=
 github.com/matterbridge/matterclient v0.0.0-20260808112133-25740422e9c0/go.mod h1:5+Z8FKATFPNAzp702walUDWmWo+7FruwxQS1vgE0o6s=
+github.com/matterbridge/matterclient v0.0.0-20260808195557-a95262b5c146 h1:Z3wUUPFxMQr3xCv4+8i38SS89gS7AQAUs7Rp9TLTXPU=
+github.com/matterbridge/matterclient v0.0.0-20260808195557-a95262b5c146/go.mod h1:5+Z8FKATFPNAzp702walUDWmWo+7FruwxQS1vgE0o6s=
 github.com/mattermost/go-i18n v1.11.1-0.20211013152124-5c415071e404 h1:Khvh6waxG1cHc4Cz5ef9n3XVCxRWpAKUtqg9PJl5+y8=
 github.com/mattermost/go-i18n v1.11.1-0.20211013152124-5c415071e404/go.mod h1:RyS7FDNQlzF1PsjbJWHRI35exqaKGSO9qD4iv8QjE34=
 github.com/mattermost/ldap v0.0.0-20231116144001-0f480c025956 h1:Y1Tu/swM31pVwwb2BTCsOdamENjjWCI6qmfHLbk6OZI=
