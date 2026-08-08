@@ -10,7 +10,7 @@ require (
 	github.com/hashicorp/golang-lru v0.6.0
 	github.com/kenshaw/emoji v0.3.3
 	github.com/matterbridge/logrus-prefixed-formatter v0.5.3-0.20200523233437-d971309a77ba
-	github.com/matterbridge/matterclient v0.0.0-20260807032746-670224bdba83
+	github.com/matterbridge/matterclient v0.0.0-20260808021730-237e5820d8e4
 	github.com/mattermost/mattermost/server/public v0.1.3
 	github.com/mattn/go-mastodon v0.0.6
 	github.com/mitchellh/mapstructure v1.5.0
