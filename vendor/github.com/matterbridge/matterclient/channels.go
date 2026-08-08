@@ -404,16 +404,6 @@ func (m *Client) JoinChannel(ctx context.Context, channelID string) error {
 
 //nolint:funlen,gocognit,gocyclo
 func (m *Client) UpdateChannelsTeam(ctx context.Context, teamID string) error {
-	m.RLock()
-	if team, exists := m.OtherTeams[teamID]; exists {
-		if time.Since(team.LastChannelSync) < 15*time.Minute {
-			m.RUnlock()
-			m.logger.Debugf("skipping channel fetch for team %s: cache is only %v old", teamID, time.Since(team.LastChannelSync).Round(time.Second))
-			return nil
-		}
-	}
-	m.RUnlock()
-
 	const batchSize = 200
 
 	var joinedSummaries []ChannelSummary
@@ -447,19 +437,29 @@ func (m *Client) UpdateChannelsTeam(ctx context.Context, teamID string) error {
 		break
 	}
 
-	publicSummaries := make([]ChannelSummary, 0, batchSize)
-	var list []ChannelSummary
+	// Fetch public channels using an inline function to allow for an early return
+	publicSummaries, err := func() ([]ChannelSummary, error) {
+		m.Users.mu.RLock()
+		hasCache := len(m.Users.channelData) > 0
+		m.Users.mu.RUnlock()
 
-	m.Users.mu.RLock()
-	skipPublic := !m.ForceSyncOnReconnect && len(m.Users.channelData) > 0
-	m.Users.mu.RUnlock()
+		// Skip the heavy public channel crawl if we have a cache and aren't forcing a sync.
+		// We rely on WebSocket events to keep public channels updated organically.
+		if hasCache && !m.ForceSyncOnReconnect {
+			m.logger.Debug("UpdateChannelsTeam: skipping public channel fetch (using cache)")
+			return nil, nil // Early return!
+		}
 
-	if !skipPublic { //nolint:nestif
+		m.apiLogger.Warnf("UpdateChannelsTeam: fetching public channels (cache empty or ForceSyncOnReconnect enabled)")
+
+		summaries := make([]ChannelSummary, 0, batchSize)
+		var list []ChannelSummary
+
 		idx := 0
-		retryCount = 0
+		retryCount := 0
 		for {
 			if m.IsAborted(ctx) {
-				return errors.New("login aborted")
+				return nil, errors.New("login aborted")
 			}
 			query := "/teams/" + teamID + "/channels?page=" + strconv.Itoa(idx) + "&per_page=" + strconv.Itoa(batchSize)
 			m.apiLogger.Warnf("UpdateChannelsTeam: DoAPIGet: query %s #%d", query, retryCount)
@@ -474,26 +474,28 @@ func (m *Client) UpdateChannelsTeam(ctx context.Context, teamID string) error {
 					retryCount++
 					continue
 				}
-				return err
+				return nil, err
 			}
 			retryCount = 0
 
 			list = list[:0]
 			if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
 				resp.Body.Close()
-				return err
+				return nil, err
 			}
 			resp.Body.Close()
 
-			publicSummaries = append(publicSummaries, list...)
+			summaries = append(summaries, list...)
 
 			if len(list) < batchSize {
 				break
 			}
 			idx++
 		}
-	} else {
-		m.logger.Debug("UpdateChannelsTeam: skipping public channel fetch (ForceSyncOnReconnect is disabled)")
+		return summaries, nil
+	}()
+	if err != nil {
+		return err
 	}
 
 	// Helper to intern highly repetitive channel types
