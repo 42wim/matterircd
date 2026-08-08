@@ -113,7 +113,7 @@ github.com/magiconair/properties
 # github.com/matterbridge/logrus-prefixed-formatter v0.5.3-0.20200523233437-d971309a77ba
 ## explicit
 github.com/matterbridge/logrus-prefixed-formatter
-# github.com/matterbridge/matterclient v0.0.0-20260808021730-237e5820d8e4
+# github.com/matterbridge/matterclient v0.0.0-20260808054910-fa27cc58428a
 ## explicit; go 1.21
 github.com/matterbridge/matterclient
 # github.com/mattermost/go-i18n v1.11.1-0.20211013152124-5c415071e404
