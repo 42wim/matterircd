@@ -653,11 +653,12 @@ func (m *Mattermost) GetChannels() []*bridge.ChannelInfo {
 		}
 
 		channels = append(channels, &bridge.ChannelInfo{
-			Name:    mmchannel.Name,
-			ID:      mmchannel.Id,
-			TeamID:  mmchannel.TeamId,
-			DM:      mmchannel.IsGroupOrDirect(),
-			Private: !mmchannel.IsOpen(),
+			Name:       mmchannel.Name,
+			ID:         mmchannel.Id,
+			TeamID:     mmchannel.TeamId,
+			DM:         mmchannel.IsGroupOrDirect(),
+			Private:    !mmchannel.IsOpen(),
+			LastPostAt: mmchannel.LastPostAt,
 		})
 
 		chanMap[mmchannel.Id] = true

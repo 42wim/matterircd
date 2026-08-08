@@ -71,11 +71,12 @@ type Bridger interface {
 }
 
 type ChannelInfo struct {
-	Name    string
-	ID      string
-	TeamID  string
-	DM      bool
-	Private bool
+	Name       string
+	ID         string
+	TeamID     string
+	DM         bool
+	Private    bool
+	LastPostAt int64
 }
 
 type UserInfo struct {

@@ -748,9 +748,10 @@ func (u *User) addUsersToChannels() {
 	}
 
 	u.eventLoopMutex.Lock()
+	lastSyncThreshold := u.lastSync
 	isHeavySync := !u.eventLoopStarted || time.Since(u.lastSync) > 15*time.Minute
-	u.lastSync = time.Now()
 	u.eventLoopMutex.Unlock()
+
 	syncStartTime := time.Now()
 
 	ellipsis := "..."
@@ -795,10 +796,21 @@ func (u *User) addUsersToChannels() {
 	// Fetch, filter, and sort the channels alphabetically
 	var joinChannels []*bridge.ChannelInfo
 	for _, brchannel := range u.br.GetChannels() {
-		// only joindm when specified
 		if brchannel.DM && !u.br.BridgeConfig().JoinDM {
-			logger.Debugf("Skipping IM channel %s", brchannel.Name)
-			continue
+			lastPost := time.UnixMilli(brchannel.LastPostAt)
+
+			threshold := lastSyncThreshold
+			if threshold.IsZero() {
+				threshold = time.Now().Add(-24 * time.Hour)
+			}
+
+			// If the channel has been dormant since before our threshold, safely skip it
+			if lastPost.Before(threshold) {
+				logger.Debugf("Skipping dormant IM channel %s (LastPost: %v, Threshold: %v)", brchannel.Name, lastPost, threshold)
+				continue
+			}
+
+			logger.Debugf("SmartJoin: Joining IM channel %s due to recent offline activity (LastPost: %v, Threshold: %v)", brchannel.Name, lastPost, threshold)
 		}
 		joinChannels = append(joinChannels, brchannel)
 	}
@@ -840,6 +852,13 @@ func (u *User) addUsersToChannels() {
 	go func() {
 		wg.Wait()
 		throttle.Stop()
+
+		// Now that every worker has successfully finished syncing, move the watermark forward.
+		u.eventLoopMutex.Lock()
+		if syncStartTime.After(u.lastSync) {
+			u.lastSync = syncStartTime
+		}
+		u.eventLoopMutex.Unlock()
 
 		// Only announce completion if it was a heavy sync and wasn't aborted
 		if isHeavySync && u.ctx != nil && u.ctx.Err() == nil {
