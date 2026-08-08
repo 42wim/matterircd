@@ -507,6 +507,9 @@ func (m *Client) initUser(ctx context.Context) error {
 
 		m.Lock()
 		existingTeam, exists := m.OtherTeams[team.Id]
+		if team.Name == m.Credentials.Team {
+			m.logger.Debugf("found our team %s (id: %s)", team.Name, team.Id)
+		}
 		m.Unlock()
 
 		if exists && (!m.ForceSyncOnReconnect || time.Since(existingTeam.LastUserSync) < 15*time.Minute) {
@@ -519,7 +522,7 @@ func (m *Client) initUser(ctx context.Context) error {
 			continue
 		}
 
-		m.logger.Debugf("fetching users for team %s (cache expired or missing)", team.Name)
+		m.logger.Tracef("fetching users for team %s (cache expired or missing)", team.Name)
 
 		fetchedUsers := make([]UserSummary, 0, batchSize)
 
@@ -567,7 +570,11 @@ func (m *Client) initUser(ctx context.Context) error {
 			case <-time.After(time.Millisecond * 200):
 			}
 		}
-		m.logger.Debugf("found %d users in team %s", len(fetchedUsers), team.Name)
+		if !exists {
+			m.logger.Debugf("found %d users in team %s", len(fetchedUsers), team.Name)
+		} else {
+			m.logger.Debugf("found %d users in team %s (cache expired)", len(fetchedUsers), team.Name)
+		}
 
 		m.Users.mu.Lock()
 		if m.Users.teams == nil {
@@ -630,7 +637,6 @@ func (m *Client) initUser(ctx context.Context) error {
 
 		if team.Name == m.Credentials.Team {
 			m.Team = m.OtherTeams[team.Id]
-			m.logger.Debugf("initUser(): found our team %s (id: %s)", team.Name, team.Id)
 		}
 		m.Unlock()
 	}
@@ -652,16 +658,6 @@ func (m *Client) initUserChannels(ctx context.Context) error {
 
 	m.Users.mu.RLock()
 	defer m.Users.mu.RUnlock()
-
-	var dmCount int
-	for id, ch := range m.Users.channelData {
-		if ch.TeamId == "" {
-			if _, joined := m.Users.joinedChannels[id]; joined {
-				dmCount++
-			}
-		}
-	}
-	m.logger.Debugf("found %d direct/group message channels", dmCount)
 
 	for _, t := range teams {
 		var joinedCount, publicCount int

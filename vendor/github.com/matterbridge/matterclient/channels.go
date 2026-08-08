@@ -451,7 +451,7 @@ func (m *Client) UpdateChannelsTeam(ctx context.Context, teamID string) error {
 	var list []ChannelSummary
 
 	m.Users.mu.RLock()
-	skipPublic := !m.ForceSyncOnReconnect && m.Users.channelData != nil
+	skipPublic := !m.ForceSyncOnReconnect && len(m.Users.channelData) > 0
 	m.Users.mu.RUnlock()
 
 	if !skipPublic { //nolint:nestif
