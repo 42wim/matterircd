@@ -898,7 +898,7 @@ func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(string, string, .
 }
 
 // getChannelSince calculates the 'since' timestamp for a channel based on the configured strategy.
-func (u *User) getChannelSince(ctx context.Context, channelID string) (int64, string, bool) {
+func (u *User) getChannelSince(ctx context.Context, brchannel *bridge.ChannelInfo, replayCutoff int64) (int64, string, bool) {
 	// Fetch server-side last viewed if strategy allows
 	strategy := u.cfg.Mattermost().ReplayStrategy
 	if strategy == "" {
@@ -915,11 +915,18 @@ func (u *User) getChannelSince(ctx context.Context, channelID string) (int64, st
 
 	var serverSince int64
 	if strategy != "saved" {
-		serverSince = u.br.GetLastViewedAt(ctx, channelID)
+		serverSince = u.br.GetLastViewedAt(ctx, brchannel.ID)
 	}
 
 	// If strategy is server-only, return immediately
 	if strategy == "server-only" {
+		// Fallback for missing server state (common for DMs on reconnect)
+		if serverSince == 0 && brchannel.LastPostAt > 0 {
+			if brchannel.LastPostAt > replayCutoff {
+				return brchannel.LastPostAt, "lastpost", false
+			}
+			return replayCutoff, "lastpost", false
+		}
 		return serverSince, "server", false
 	}
 
@@ -933,32 +940,35 @@ func (u *User) getChannelSince(ctx context.Context, channelID string) (int64, st
 			if b == nil {
 				return nil
 			}
-
-			v := b.Get([]byte(channelID))
-			if v == nil {
-				return nil
+			v := b.Get([]byte(brchannel.ID))
+			if v != nil {
+				val := binary.LittleEndian.Uint64(v)
+				if val <= math.MaxInt64 {
+					savedSince = int64(val)
+					inDB = true
+				}
 			}
-
-			val := binary.LittleEndian.Uint64(v)
-			if val <= math.MaxInt64 {
-				savedSince = int64(val)
-				inDB = true
-			}
-
 			return nil
 		})
 	}
 
-	if strategy == "saved" {
-		return savedSince, "stored", inDB
+	bestSince := serverSince
+	source := "server"
+	if strategy == "saved" || savedSince > bestSince {
+		bestSince = savedSince
+		source = "stored"
 	}
 
-	// "hybrid" behavior: use whichever value is later
-	if savedSince > serverSince {
-		return savedSince, "stored", inDB
+	// If both server and BoltDB are 0 (or we don't have it in DB for a DM)
+	isDM := strings.Contains(brchannel.Name, "__")
+	if (bestSince == 0 || (isDM && !inDB)) && brchannel.LastPostAt > 0 {
+		if brchannel.LastPostAt > replayCutoff {
+			return brchannel.LastPostAt, "lastpost-fallback", inDB
+		}
+		return replayCutoff, "lastpost-fallback", inDB
 	}
 
-	return serverSince, "server", inDB
+	return bestSince, source, inDB
 }
 
 //nolint:funlen,cyclop,gocognit,gocyclo
@@ -977,7 +987,6 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 
 	lazyJoinCutoff := time.Now().Add(-lazyJoinDuration).UnixMilli()
 	replayCutoff := time.Now().Add(-replayDuration).UnixMilli()
-	dmFallbackCutoff := time.Now().Add(-(lazyJoinDuration / 2)).UnixMilli()
 
 	for {
 		select {
@@ -1000,51 +1009,27 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			case <-throttle.C:
 			}
 
-			since, sinceStr, inDB := u.getChannelSince(u.ctx, brchannel.ID)
-
-			// Catch the edge case where an offline DM (never seen before in BoltDB)
-			// returns 0 or a very old timestamp from the server.
-			isDM := strings.Contains(brchannel.Name, "__")
-			if isDM && !inDB {
-				// This catches both since == 0 AND very old createAt timestamps
-				if since < dmFallbackCutoff {
-					logger.Debugf("Untracked DM detected for %s, applying fallback timestamp", brchannel.Name)
-					since = dmFallbackCutoff
-					sinceStr = "dm-offline-fallback"
-				}
-			}
+			since, sinceStr, _ := u.getChannelSince(u.ctx, brchannel, replayCutoff)
 
 			// If the channel has a valid timestamp, but it's from years ago,
-			// cap it to 31 days so we don't flood the IRC client with massive history.
-			if since < replayCutoff {
+			// cap it to replayDuration so we don't flood the IRC client with massive history.
+			if since > 0 && since < replayCutoff {
 				logger.Infof("Capping replay history for %s to %s (original since: %s)",
 					brchannel.Name,
 					replayDuration,
 					time.UnixMilli(since).Format("2006-01-02"),
 				)
 				since = replayCutoff
-				sinceStr = "replay-cutoff-fallback"
+				sinceStr = "replay-cutoff"
 			}
 
-			// If enabled, use Lazy Join to speed up initial matterircd start up and also
-			// not have a flood of channels in the IRC client.
-			if lazyJoin && since > 0 {
-				// If last viewed more than the cutoff duration ago -> SKIP!
+			// If enabled, use Lazy Join...
+			isDM := strings.Contains(brchannel.Name, "__")
+			if lazyJoin && since > 0 && !isDM {
 				if since < lazyJoinCutoff {
 					logger.Debugf("Lazy-joining %s: last viewed over %v (since: %s)", brchannel.Name, lazyJoinDuration, time.UnixMilli(since).Format("2006-01-02 15:04:05"))
 					continue
 				}
-			}
-
-			// exclude direct messages
-			if !strings.Contains(brchannel.Name, "__") {
-				channelName := brchannel.Name
-
-				if brchannel.TeamID != u.br.GetMe().TeamID || (u.br.Protocol() == "mattermost" && u.cfg.Mattermost().PrefixMainTeam) {
-					channelName = u.br.GetTeamName(u.ctx, brchannel.TeamID) + "/" + brchannel.Name
-				}
-
-				u.syncChannel(brchannel.ID, "#"+channelName)
 			}
 
 			u.replayHistory(brchannel, since, sinceStr)
