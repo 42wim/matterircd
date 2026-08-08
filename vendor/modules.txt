@@ -104,8 +104,8 @@ github.com/hashicorp/yamux
 # github.com/jpillora/backoff v1.0.0
 ## explicit; go 1.13
 github.com/jpillora/backoff
-# github.com/kenshaw/emoji v0.3.3
-## explicit; go 1.17
+# github.com/kenshaw/emoji v0.4.0
+## explicit; go 1.22
 github.com/kenshaw/emoji
 # github.com/magiconair/properties v1.8.7
 ## explicit; go 1.19
@@ -113,7 +113,7 @@ github.com/magiconair/properties
 # github.com/matterbridge/logrus-prefixed-formatter v0.5.3-0.20200523233437-d971309a77ba
 ## explicit
 github.com/matterbridge/logrus-prefixed-formatter
-# github.com/matterbridge/matterclient v0.0.0-20260808195557-a95262b5c146
+# github.com/matterbridge/matterclient v0.0.0-20260808230600-cfe5154d67a1
 ## explicit; go 1.21
 github.com/matterbridge/matterclient
 # github.com/mattermost/go-i18n v1.11.1-0.20211013152124-5c415071e404

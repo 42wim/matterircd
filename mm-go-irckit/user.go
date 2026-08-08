@@ -294,13 +294,14 @@ func (u *User) Decode() {
 			}
 		}
 		// PRIVMSG can be buffered
-		if msg.Command == irc.PRIVMSG {
+		switch {
+		case msg.Command == irc.PRIVMSG:
 			logger.Debugf("B: %#v", dmsg)
 			buffer <- msg
-		} else if msg.Command == irc.PING {
+		case msg.Command == irc.PING:
 			logger.Trace(dmsg)
 			u.DecodeCh <- msg
-		} else {
+		default:
 			logger.Debug(dmsg)
 			u.DecodeCh <- msg
 		}

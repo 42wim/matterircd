@@ -126,11 +126,11 @@ type Client struct {
 	reconnectBusy bool
 	Timeout       int
 
-	logger      *logrus.Entry
-	rootLogger  *logrus.Logger
+	logger     *logrus.Entry
+	rootLogger *logrus.Logger
 
-	apiLogger      *logrus.Entry
-	rootAPILogger  *logrus.Logger
+	apiLogger     *logrus.Entry
+	rootAPILogger *logrus.Logger
 
 	lruCache    *lru.Cache[string, bool]
 	aliveChan   chan bool
@@ -189,7 +189,7 @@ func New(login string, pass string, team string, server string, mfatoken string)
 
 			channelLastViewedAt: make(map[string]int64, 1000),
 		},
-		lruCache:   cache,
+		lruCache: cache,
 
 		rootLogger: rootLogger,
 		logger:     rootLogger.WithFields(logrus.Fields{"prefix": "matterclient"}),
@@ -197,11 +197,12 @@ func New(login string, pass string, team string, server string, mfatoken string)
 		rootAPILogger: rootAPILogger,
 		apiLogger:     rootAPILogger.WithFields(logrus.Fields{"prefix": "matterclient: API"}),
 
-		aliveChan:  make(chan bool),
+		aliveChan: make(chan bool),
 	}
 }
 
 // Login tries to connect the client with the loging details with which it was initialized.
+//
 //nolint:funlen,gocyclo
 func (m *Client) Login(ctx context.Context) error {
 	// check if this is a first connect or a reconnection
@@ -213,7 +214,7 @@ func (m *Client) Login(ctx context.Context) error {
 	if !firstConnection {
 		lastUpdatedUnix := m.Users.lastUpdated.Load()
 		timeOffline := time.Since(time.Unix(lastUpdatedUnix, 0))
-		cacheClearCutoff := 15*time.Minute
+		cacheClearCutoff := 15 * time.Minute
 
 		switch {
 		case timeOffline > cacheClearCutoff && m.ForceSyncOnReconnect:
@@ -467,6 +468,7 @@ func (m *Client) serverAlive(ctx context.Context, b *backoff.Backoff) error {
 }
 
 // initialize user and teams
+//
 //nolint:funlen,gocognit,gocyclo
 func (m *Client) initUser(ctx context.Context) error {
 	m.Lock()

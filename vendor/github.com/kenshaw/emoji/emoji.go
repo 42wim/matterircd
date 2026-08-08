@@ -73,6 +73,41 @@ const (
 	Dark        SkinTone = 0x1f3ff
 )
 
+// ParseSkinTone parses the skin tone from the passed string.
+func ParseSkinTone(str string) (SkinTone, error) {
+	s := strings.TrimSpace(strings.ToLower(str))
+	if s == "" {
+		return Neutral, nil
+	}
+	switch cleanRE.ReplaceAllString(s, "") {
+	case "neutral":
+		return Neutral, nil
+	case "light", "lite":
+		return Light, nil
+	case "mediumlight", "mediumlite":
+		return MediumLight, nil
+	case "medium":
+		return Medium, nil
+	case "mediumdark":
+		return MediumDark, nil
+	case "dark":
+		return Dark, nil
+	}
+	return Neutral, fmt.Errorf("invalid skin tone: %q", str)
+}
+
+// UnmarshalText satisfies the [encoding.TextUnmarshaler] interface.
+func (s *SkinTone) UnmarshalText(text []byte) error {
+	var err error
+	*s, err = ParseSkinTone(string(text))
+	return err
+}
+
+// MarshalText satisfies the [encoding.TextMarshaler] interface.
+func (s *SkinTone) MarshalText() ([]byte, error) {
+	return []byte(s.String()), nil
+}
+
 // String satisfies the [fmt.Stringer] interface.
 func (s SkinTone) String() string {
 	switch s {
@@ -269,3 +304,6 @@ var emoticonMap = map[string][]string{
 	"sunglasses":                   {"8)"},
 	"wink":                         {";)", ";-)"},
 }
+
+// cleanRE is matches non alpha characters.
+var cleanRE = regexp.MustCompile(`(?i)[^a-z]`)
