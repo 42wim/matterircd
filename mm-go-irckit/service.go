@@ -251,6 +251,7 @@ func replay(u *User, toUser *User, args []string, service string) {
 		if maxReplay == 0 {
 			maxReplay = 31 * 24 * time.Hour
 		}
+
 		replayCutoff := time.Now().Add(-maxReplay).UnixMilli()
 		since, logSince, _ = u.getChannelSince(u.ctx, brchannel, replayCutoff)
 	}
