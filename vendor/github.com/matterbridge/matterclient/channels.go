@@ -11,6 +11,36 @@ import (
 	"github.com/mattermost/mattermost/server/public/model"
 )
 
+func (m *Client) CreateChannel(ctx context.Context, teamID string, channelName string, channelType model.ChannelType) (*model.Channel, error) {
+	if channelType == "" {
+		channelType = model.ChannelTypeOpen
+	}
+
+	channelReq := &model.Channel{
+		Name:        channelName,
+		DisplayName: channelName,
+		Type:        channelType,
+		TeamId:      teamID,
+	}
+
+	m.apiLogger.Warnf("CreateChannel: CreateChannel for %s", channelName)
+
+	mmchannel, _, err := m.Client.CreateChannel(ctx, channelReq)
+	if err != nil {
+		return nil, err
+	}
+
+	// Cache it so subsequent GetChannel calls are fast
+	m.Users.mu.Lock()
+	if m.Users.channelData == nil {
+		m.Users.channelData = make(map[string]*model.Channel)
+	}
+	m.Users.channelData[mmchannel.Id] = mmchannel
+	m.Users.mu.Unlock()
+
+	return mmchannel, nil
+}
+
 func (m *Client) GetChannel(ctx context.Context, channelID string) *model.Channel {
 	m.Users.mu.RLock()
 	ch, exists := m.Users.channelData[channelID]

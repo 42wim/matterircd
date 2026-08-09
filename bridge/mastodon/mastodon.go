@@ -170,7 +170,7 @@ func (m *Mastodon) GetChannels() []*bridge.ChannelInfo {
 	return nil
 }
 
-func (m *Mastodon) CreateChannel(ctx context.Context, channelName string) (*bridge.ChannelInfo, error) {
+func (m *Mastodon) CreateChannel(ctx context.Context, channelName string, channelType string) (*bridge.ChannelInfo, error) {
 	return nil, errors.New("not implemented yet")
 }
 

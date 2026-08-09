@@ -673,8 +673,30 @@ func (m *Mattermost) GetChannels() []*bridge.ChannelInfo {
 	return channels
 }
 
-func (m *Mattermost) CreateChannel(ctx context.Context, channelName string) (*bridge.ChannelInfo, error) {
-	return nil, errors.New("not implemented yet")
+func (m *Mattermost) CreateChannel(ctx context.Context, channelName string, channelType string) (*bridge.ChannelInfo, error) {
+	teamID := m.GetMe().TeamID
+
+	// Map user input to Mattermost channel types, defaulting to Open/Public
+	cType := model.ChannelTypeOpen
+	switch strings.ToLower(channelType) {
+	case "private", "p", string(model.ChannelTypePrivate):
+		cType = model.ChannelTypePrivate
+	}
+
+	mmchan, err := m.mc.CreateChannel(ctx, teamID, channelName, cType)
+	if err != nil {
+		return nil, err
+	}
+
+	return &bridge.ChannelInfo{
+		Name:       mmchan.Name,
+		ID:         mmchan.Id,
+		TeamID:     mmchan.TeamId,
+		DM:         mmchan.Type == model.ChannelTypeDirect || mmchan.Type == model.ChannelTypeGroup,
+		Private:    mmchan.Type == model.ChannelTypePrivate,
+		LastPostAt: mmchan.LastPostAt,
+		DeleteAt:   mmchan.DeleteAt,
+	}, nil
 }
 
 func (m *Mattermost) GetChannel(ctx context.Context, channelID string) (*bridge.ChannelInfo, error) {

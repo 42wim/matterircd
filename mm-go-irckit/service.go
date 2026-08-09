@@ -684,7 +684,7 @@ func updatelastviewed(u *User, toUser *User, args []string, service string) {
 }
 
 var cmds = map[string]Command{
-	"channel":          {handler: channelCmd, login: true, minParams: 2, maxParams: 2},
+	"channel":          {handler: channelCmd, login: true, minParams: 2, maxParams: 3},
 	"details":          {handler: details, login: true, minParams: 1, maxParams: 1},
 	"header":           {handler: channelHeader, login: true, minParams: 2, maxParams: -1},
 	"lastsent":         {handler: lastsent, login: true, minParams: 0, maxParams: 0},
@@ -930,9 +930,10 @@ func channelCmd(u *User, toUser *User, args []string, service string) {
 	}
 
 	showHelp := func() {
-		u.MsgUser(toUser, "need CHANNEL CREATE #<channel>")
+		u.MsgUser(toUser, "need CHANNEL CREATE #<channel> [public|private]")
 		u.MsgUser(toUser, "e.g. CHANNEL CREATE #new-bugs")
-		u.MsgUser(toUser, "need CHANNEL INFO #<channel>")
+		u.MsgUser(toUser, "e.g. CHANNEL CREATE #secret-bugs private")
+		u.MsgUser(toUser, "need CHANNEL INFO (#<channel>|<id>)")
 		u.MsgUser(toUser, "e.g. CHANNEL INFO #bugs")
 	}
 
@@ -949,13 +950,23 @@ func channelCmd(u *User, toUser *User, args []string, service string) {
 
 	switch cmd {
 	case "create":
-		info, err := u.br.CreateChannel(u.ctx, channelName)
+		channelType := ""
+		if len(args) > 2 {
+			channelType = args[2]
+		}
+
+		info, err := u.br.CreateChannel(u.ctx, channelName, channelType)
 		if err != nil {
 			u.MsgUser(toUser, "failed to create channel: "+err.Error())
 			return
 		}
 
-		u.MsgUser(toUser, fmt.Sprintf("Channel %s created successfully.", channelStr))
+		typeStr := "public"
+		if info.Private {
+			typeStr = "private"
+		}
+
+		u.MsgUser(toUser, fmt.Sprintf("Channel %s (%s) created successfully.", channelStr, typeStr))
 		u.MsgUser(toUser, "ID: "+info.ID)
 
 	case "info":
