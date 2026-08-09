@@ -8,40 +8,39 @@ import (
 )
 
 const (
-	DEFAULT_STARS_USER  = ""
-	DEFAULT_STARS_COUNT = 100
-	DEFAULT_STARS_PAGE  = 1
+	DEFAULT_STARS_USER = ""
 )
 
 type StarsParameters struct {
-	User  string
-	Count int
-	Page  int
+	User   string
+	Cursor string
+	Limit  int
+	TeamID string
 }
 
 type StarredItem Item
 
 type listResponseFull struct {
-	Items  []Item `json:"items"`
-	Paging `json:"paging"`
+	Items []Item `json:"items"`
 	SlackResponse
+	ResponseMetadata `json:"response_metadata"`
 }
 
 // NewStarsParameters initialises StarsParameters with default values
 func NewStarsParameters() StarsParameters {
 	return StarsParameters{
-		User:  DEFAULT_STARS_USER,
-		Count: DEFAULT_STARS_COUNT,
-		Page:  DEFAULT_STARS_PAGE,
+		User: DEFAULT_STARS_USER,
 	}
 }
 
-// AddStar stars an item in a channel
+// AddStar stars an item in a channel.
+// For more information see the AddStarContext documentation.
 func (api *Client) AddStar(channel string, item ItemRef) error {
 	return api.AddStarContext(context.Background(), channel, item)
 }
 
-// AddStarContext stars an item in a channel with a custom context
+// AddStarContext stars an item in a channel with a custom context.
+// Slack API docs: https://api.slack.com/methods/stars.add
 func (api *Client) AddStarContext(ctx context.Context, channel string, item ItemRef) error {
 	values := url.Values{
 		"channel": {channel},
@@ -65,12 +64,14 @@ func (api *Client) AddStarContext(ctx context.Context, channel string, item Item
 	return response.Err()
 }
 
-// RemoveStar removes a starred item from a channel
+// RemoveStar removes a starred item from a channel.
+// For more information see the RemoveStarContext documentation.
 func (api *Client) RemoveStar(channel string, item ItemRef) error {
 	return api.RemoveStarContext(context.Background(), channel, item)
 }
 
-// RemoveStarContext removes a starred item from a channel with a custom context
+// RemoveStarContext removes a starred item from a channel with a custom context.
+// Slack API docs: https://api.slack.com/methods/stars.remove
 func (api *Client) RemoveStarContext(ctx context.Context, channel string, item ItemRef) error {
 	values := url.Values{
 		"channel": {channel},
@@ -94,37 +95,42 @@ func (api *Client) RemoveStarContext(ctx context.Context, channel string, item I
 	return response.Err()
 }
 
-// ListStars returns information about the stars a user added
-func (api *Client) ListStars(params StarsParameters) ([]Item, *Paging, error) {
+// ListStars returns information about the stars a user added.
+// For more information see the ListStarsContext documentation.
+func (api *Client) ListStars(params StarsParameters) ([]Item, string, error) {
 	return api.ListStarsContext(context.Background(), params)
 }
 
-// ListStarsContext returns information about the stars a user added with a custom context
-func (api *Client) ListStarsContext(ctx context.Context, params StarsParameters) ([]Item, *Paging, error) {
+// ListStarsContext returns information about the stars a user added with a custom context.
+// Slack API docs: https://api.slack.com/methods/stars.list
+func (api *Client) ListStarsContext(ctx context.Context, params StarsParameters) ([]Item, string, error) {
 	values := url.Values{
 		"token": {api.token},
 	}
 	if params.User != DEFAULT_STARS_USER {
 		values.Add("user", params.User)
 	}
-	if params.Count != DEFAULT_STARS_COUNT {
-		values.Add("count", strconv.Itoa(params.Count))
+	if params.Cursor != "" {
+		values.Add("cursor", params.Cursor)
 	}
-	if params.Page != DEFAULT_STARS_PAGE {
-		values.Add("page", strconv.Itoa(params.Page))
+	if params.Limit != 0 {
+		values.Add("limit", strconv.Itoa(params.Limit))
+	}
+	if params.TeamID != "" {
+		values.Add("team_id", params.TeamID)
 	}
 
 	response := &listResponseFull{}
 	err := api.postMethod(ctx, "stars.list", values, response)
 	if err != nil {
-		return nil, nil, err
+		return nil, "", err
 	}
 
 	if err := response.Err(); err != nil {
-		return nil, nil, err
+		return nil, "", err
 	}
 
-	return response.Items, &response.Paging, nil
+	return response.Items, response.ResponseMetadata.Cursor, nil
 }
 
 // GetStarred returns a list of StarredItem items.
@@ -133,32 +139,31 @@ func (api *Client) ListStarsContext(ctx context.Context, params StarsParameters)
 // be looking at according to what is in the Type:
 //
 //	for _, item := range items {
-//	    switch c.Type {
-//	    case "file_comment":
-//	        log.Println(c.Comment)
-//	    case "file":
-//	        ...
+//		switch c.Type {
+//		case "file_comment":
+//			log.Println(c.Comment)
+//		case "file":
+//			...
 //	}
 //
 // This function still exists to maintain backwards compatibility.
 // I exposed it as returning []StarredItem, so it shall stay as StarredItem.
-func (api *Client) GetStarred(params StarsParameters) ([]StarredItem, *Paging, error) {
+func (api *Client) GetStarred(params StarsParameters) ([]StarredItem, string, error) {
 	return api.GetStarredContext(context.Background(), params)
 }
 
 // GetStarredContext returns a list of StarredItem items with a custom context
-//
 // For more details see GetStarred
-func (api *Client) GetStarredContext(ctx context.Context, params StarsParameters) ([]StarredItem, *Paging, error) {
-	items, paging, err := api.ListStarsContext(ctx, params)
+func (api *Client) GetStarredContext(ctx context.Context, params StarsParameters) ([]StarredItem, string, error) {
+	items, nextCursor, err := api.ListStarsContext(ctx, params)
 	if err != nil {
-		return nil, nil, err
+		return nil, "", err
 	}
 	starredItems := make([]StarredItem, len(items))
 	for i, item := range items {
 		starredItems[i] = StarredItem(item)
 	}
-	return starredItems, paging, nil
+	return starredItems, nextCursor, nil
 }
 
 type listResponsePaginated struct {

@@ -19,11 +19,15 @@ type EventAuthorization struct {
 	IsEnterpriseInstall bool   `json:"is_enterprise_install"`
 }
 
+// ListEventAuthorizations lists authed users and teams for the given event_context.
+// You must provide an app-level token to the client using OptionAppLevelToken.
+// For more details, see ListEventAuthorizationsContext documentation.
 func (api *Client) ListEventAuthorizations(eventContext string) ([]EventAuthorization, error) {
 	return api.ListEventAuthorizationsContext(context.Background(), eventContext)
 }
 
-// ListEventAuthorizationsContext lists authed users and teams for the given event_context. You must provide an app-level token to the client using OptionAppLevelToken. More info: https://api.slack.com/methods/apps.event.authorizations.list
+// ListEventAuthorizationsContext lists authed users and teams for the given event_context with a custom context.
+// Slack API docs: https://api.slack.com/methods/apps.event.authorizations.list
 func (api *Client) ListEventAuthorizationsContext(ctx context.Context, eventContext string) ([]EventAuthorization, error) {
 	resp := &listEventAuthorizationsResponse{}
 
@@ -31,7 +35,7 @@ func (api *Client) ListEventAuthorizationsContext(ctx context.Context, eventCont
 		"event_context": eventContext,
 	})
 
-	err := postJSON(ctx, api.httpclient, api.endpoint+"apps.event.authorizations.list", api.appLevelToken, request, &resp, api)
+	err := api.postJSONMethod(ctx, "apps.event.authorizations.list", api.appLevelToken, request, &resp)
 
 	if err != nil {
 		return nil, err
@@ -43,10 +47,14 @@ func (api *Client) ListEventAuthorizationsContext(ctx context.Context, eventCont
 	return resp.Authorizations, nil
 }
 
+// UninstallApp uninstalls your app from a workspace.
+// For more details, see UninstallAppContext documentation.
 func (api *Client) UninstallApp(clientID, clientSecret string) error {
 	return api.UninstallAppContext(context.Background(), clientID, clientSecret)
 }
 
+// UninstallAppContext uninstalls your app from a workspace with a custom context.
+// Slack API docs: https://api.slack.com/methods/apps.uninstall
 func (api *Client) UninstallAppContext(ctx context.Context, clientID, clientSecret string) error {
 	values := url.Values{
 		"client_id":     {clientID},
