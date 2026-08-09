@@ -813,11 +813,19 @@ func (u *User) addUsersToChannels() {
 
 			// If the channel has been dormant since before our threshold, safely skip it
 			if lastPost.Before(threshold) {
-				logger.Debugf("Skipping dormant DM channel %s (LastPost: %v, Threshold: %v)", brchannel.Name, lastPost, threshold)
+				if logger.Logger.IsLevelEnabled(logrus.TraceLevel) {
+					logger.Tracef("Skipping dormant DM channel %s (LastPost: %v, Threshold: %v)", brchannel.Name, lastPost, threshold)
+				} else {
+					logger.Debugf("Skipping dormant DM channel %s (LastPost: %v)", brchannel.Name, lastPost)
+				}
 				continue
 			}
 
-			logger.Debugf("SmartJoin: Joining DM channel %s due to recent offline activity (LastPost: %v, Threshold: %v)", brchannel.Name, lastPost, threshold)
+			if logger.Logger.IsLevelEnabled(logrus.TraceLevel) {
+				logger.Tracef("SmartJoin: Joining DM channel %s due to recent offline activity (LastPost: %v, Threshold: %v)", brchannel.Name, lastPost, threshold)
+			} else {
+				logger.Debugf("SmartJoin: Joining DM channel %s due to recent offline activity (LastPost: %v)", brchannel.Name, lastPost)
+			}
 		}
 		joinChannels = append(joinChannels, brchannel)
 	}
