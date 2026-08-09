@@ -1024,15 +1024,39 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			}
 
 			since, sinceStr, inDB := u.getChannelSince(u.ctx, brchannel, replayCutoff)
+			isDM := strings.Contains(brchannel.Name, "__")
 
-			// If EnableLazyJoin is true AND strategy is "saved", ONLY join channels already in BoltDB.
-			// If EnableLazyJoin is false, this is bypassed and it joins all 400+ channels!
-			if strategy == "saved" && lazyJoin && !inDB {
+			// If Lazy-Join is enabled AND replay strategy is "saved", ONLY join channels already known in
+			// the last saved DB. If Lazy-Join is disabled, joins all channels user is member of!
+			if strategy == "saved" && lazyJoin && !inDB && !isDM {
 				continue
 			}
 
-			// If the channel has a valid timestamp, but it's from years ago,
-			// cap it to replayDuration so we don't flood the IRC client with massive history.
+			// Dormancy Filter for Public Channels
+			// DMs bypass this because they are already strictly filtered by
+			// DefaultDMOfflineThreshold upstream in addUsersToChannels().
+			if lazyJoin && !isDM {
+				u.eventLoopMutex.Lock()
+				syncTime := u.lastSync
+				u.eventLoopMutex.Unlock()
+
+				var cutoff int64
+				if syncTime.IsZero() {
+					// Fresh boot: Use the lazy join window to catch recent history
+					cutoff = lazyJoinCutoff
+				} else {
+					// Dynamic Reconnect: Use the exact time you dropped off
+					cutoff = syncTime.UnixMilli()
+				}
+
+				// Evaluate dormancy using the ACTUAL Mattermost server activity
+				if brchannel.LastPostAt < cutoff {
+					logger.Debugf("Smart Lazy-join: Skipping dormant public channel %s (LastPost: %v)", brchannel.Name, time.UnixMilli(brchannel.LastPostAt).Format("2006-01-02 15:04:05"))
+					continue
+				}
+			}
+
+			// Replay Window Cap (Applies to ALL channels)
 			if since > 0 && since < replayCutoff {
 				logger.Infof("Capping replay history for %s to %s (original since: %s)",
 					brchannel.Name,
@@ -1041,28 +1065,6 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 				)
 				since = replayCutoff
 				sinceStr = "replay-cutoff"
-			}
-
-			// Temporal Lazy Join (Dormant Channel Filter)
-			isDM := strings.Contains(brchannel.Name, "__")
-			if lazyJoin && since > 0 && !isDM {
-				u.eventLoopMutex.Lock()
-				threshold := u.lastSync
-				u.eventLoopMutex.Unlock()
-
-				if threshold.IsZero() {
-					dmThresh := u.cfg.Mattermost().DefaultDMOfflineThreshold
-					if dmThresh == 0 {
-						dmThresh = 24 * time.Hour
-					}
-					threshold = time.Now().Add(-dmThresh)
-				}
-
-				// If no one has spoken in this public channel since we last synced, skip it!
-				if since < threshold.UnixMilli() {
-					logger.Debugf("Smart Lazy-join: Skipping dormant public channel %s", brchannel.Name)
-					continue
-				}
 			}
 
 			// Actually join the IRC channel!
