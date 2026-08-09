@@ -134,18 +134,23 @@ func FindClosestIRCColor(hexColor string) string {
 }
 
 // FormatFullCodeBlock handles syntax highlighting entirely in-memory and yields lines
-func FormatFullCodeBlock(text, lexer string, opts ProcessMessageOpts, yield func(string)) {
+//
+//nolint:funlen
+func FormatFullCodeBlock(text, lexer, indent string, opts ProcessMessageOpts, yield func(string)) {
+	// Prepend the block's leading markdown indentation to the IRC prefix
+	prefix := indent + opts.CodeBlockPrefix
+
 	if text == "" {
-		yield(opts.CodeBlockPrefix + " ")
+		yield(prefix + " ")
 		return
 	}
 
 	if lexer != "" {
-		yield(opts.CodeBlockPrefix + "\x16" + lexer + "\x16")
+		yield(prefix + "\x16" + lexer + "\x16")
 	}
 
 	if opts.SyntaxHighlighting == "" || lexer == "" {
-		emitLines(text, opts.CodeBlockPrefix, yield)
+		emitLines(text, prefix, yield)
 		return
 	}
 
@@ -191,13 +196,13 @@ func FormatFullCodeBlock(text, lexer string, opts ProcessMessageOpts, yield func
 			buf.WriteString(resetSeq)
 		}
 
-		emitLines(buf.String(), opts.CodeBlockPrefix, yield)
+		emitLines(buf.String(), prefix, yield)
 
 		return
 	}
 
 	// Fallback
-	emitLines(text, opts.CodeBlockPrefix, yield)
+	emitLines(text, prefix, yield)
 }
 
 // ProcessMessageText abstracts the parsing loop, multi-line code handling,
@@ -216,29 +221,35 @@ func ProcessMessageText(text string, opts ProcessMessageOpts, yield func(line st
 		inCodeBlock      bool
 		codeBlockMarker  string
 		lexer            string
+		currentIndent    string // Tracks leading whitespace for nested blocks
 	)
 
 	for text != "" {
 		line, rest, _ := strings.Cut(text, "\n")
 		text = rest
 
-		origLine := line // Keep original to preserve \r
+		origLine := line // Keep original to preserve \r and precise indentation
 		line = strings.TrimSuffix(line, "\r")
 		trimmed := strings.TrimSpace(line)
 
-		if inCodeBlock {
+		if inCodeBlock { //nolint:nestif
 			if strings.HasPrefix(trimmed, codeBlockMarker) {
 				inCodeBlock = false
 				lastBlockWasCode = true
 
-				FormatFullCodeBlock(codeBuilder.String(), lexer, opts, yield)
+				FormatFullCodeBlock(codeBuilder.String(), lexer, currentIndent, opts, yield)
 				codeBuilder.Reset() // Frees builder state for next block
 			} else {
 				if codeBuilder.Len() > 0 {
 					codeBuilder.WriteByte('\n')
 				}
-				// Append original line exactly as it was
-				codeBuilder.WriteString(origLine)
+				// Strip the structural leading whitespace to prevent double-indentation
+				contentLine := origLine
+				if currentIndent != "" && strings.HasPrefix(contentLine, currentIndent) {
+					contentLine = contentLine[len(currentIndent):]
+				}
+
+				codeBuilder.WriteString(contentLine)
 			}
 
 			continue
@@ -247,10 +258,18 @@ func ProcessMessageText(text string, opts ProcessMessageOpts, yield func(line st
 		isBacktick := strings.HasPrefix(trimmed, "```")
 		isTilde := strings.HasPrefix(trimmed, "~~~")
 
-		if isBacktick || isTilde {
+		if isBacktick || isTilde { //nolint:nestif
 			marker := "```"
 			if isTilde {
 				marker = "~~~"
+			}
+
+			// Capture the leading whitespace to use as indentation for the whole block
+			idx := strings.Index(line, marker)
+			if idx >= 0 {
+				currentIndent = line[:idx]
+			} else {
+				currentIndent = ""
 			}
 
 			inCodeBlock = true
@@ -259,7 +278,7 @@ func ProcessMessageText(text string, opts ProcessMessageOpts, yield func(line st
 
 			// Logic for back-to-back code blocks
 			if lastBlockWasCode && opts.CodeBlockSeparator != "" {
-				yield(opts.CodeBlockSeparator)
+				yield(currentIndent + opts.CodeBlockSeparator)
 			} else if !lastBlockWasCode {
 				// Flush empty lines if they weren't between code blocks
 				for _, el := range emptyLines {
@@ -301,7 +320,7 @@ func ProcessMessageText(text string, opts ProcessMessageOpts, yield func(line st
 
 	// Flush remaining state if EOF reached
 	if inCodeBlock {
-		FormatFullCodeBlock(codeBuilder.String(), lexer, opts, yield)
+		FormatFullCodeBlock(codeBuilder.String(), lexer, currentIndent, opts, yield)
 	} else {
 		for _, el := range emptyLines {
 			yield(el)
