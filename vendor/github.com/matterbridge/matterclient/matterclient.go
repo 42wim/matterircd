@@ -148,6 +148,10 @@ type Client struct {
 
 var Matterircd bool
 
+// Mattermost has a hardcoded `PerPageMaximum = 200` & `LimitMaximum = 200`
+// See https://github.com/mattermost/mattermost/blob/master/server/channels/web/params.go
+const mattermostPerPageMax = 200
+
 func New(login string, pass string, team string, server string, mfatoken string) *Client {
 	// Logger for the rest of matterclient
 	rootLogger := logrus.New()
@@ -502,7 +506,7 @@ func (m *Client) initUser(ctx context.Context) error {
 		return err
 	}
 
-	const batchSize = 200
+	const batchSize = mattermostPerPageMax
 
 	for _, team := range teams {
 		if m.IsAborted(ctx) {

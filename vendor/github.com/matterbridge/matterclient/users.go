@@ -240,7 +240,7 @@ func (m *Client) SetUserStatus(userID string, rawStatus string) string {
 
 //nolint:funlen,gocognit,gocyclo
 func (m *Client) UpdateUsers(ctx context.Context) error {
-	const batchSize = 200
+	const batchSize = mattermostPerPageMax
 
 	idx := 0
 	retryCount := 0
@@ -353,7 +353,7 @@ func (m *Client) UpdateUserNick(ctx context.Context, nick string) error {
 }
 
 func (m *Client) UsernamesInChannel(ctx context.Context, channelID string) []string {
-	const batchSize = 200
+	const batchSize = mattermostPerPageMax
 
 	allusers := m.GetUsers()
 	result := make([]string, 0, batchSize)

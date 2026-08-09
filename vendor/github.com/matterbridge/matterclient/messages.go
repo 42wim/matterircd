@@ -106,7 +106,7 @@ func (m *Client) GetPost(ctx context.Context, postID string) (*model.Post, error
 }
 
 func (m *Client) GetPosts(ctx context.Context, channelID string, limit int) *model.PostList {
-	const batchSize = 200
+	const batchSize = mattermostPerPageMax
 
 	if limit <= 0 {
 		limit = 60
