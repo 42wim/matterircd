@@ -747,12 +747,15 @@ func (u *User) addUsersToChannels() {
 		time.Sleep(time.Millisecond * 500)
 	}
 
+	syncStartTime := time.Now()
+	syncThresh := u.cfg.Mattermost().HeavySyncThreshold
+	if syncThresh == 0 {
+		syncThresh = 15 * time.Minute
+	}
 	u.eventLoopMutex.Lock()
 	lastSyncThreshold := u.lastSync
-	isHeavySync := !u.eventLoopStarted || time.Since(u.lastSync) > 15*time.Minute
+	isHeavySync := !u.eventLoopStarted || time.Since(u.lastSync) > syncThresh
 	u.eventLoopMutex.Unlock()
-
-	syncStartTime := time.Now()
 
 	ellipsis := "..."
 	if u.br.FormatterConfig().Unicode {
@@ -801,7 +804,11 @@ func (u *User) addUsersToChannels() {
 
 			threshold := lastSyncThreshold
 			if threshold.IsZero() {
-				threshold = time.Now().Add(-24 * time.Hour)
+				dmThresh := u.cfg.Mattermost().DefaultDMOfflineThreshold
+				if dmThresh == 0 {
+					dmThresh = 24 * time.Hour
+				}
+				threshold = time.Now().Add(-dmThresh)
 			}
 
 			// If the channel has been dormant since before our threshold, safely skip it
@@ -981,12 +988,19 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 		strategy = "hybrid"
 	}
 
+	replayDuration := u.cfg.Mattermost().MaxReplayDuration
+	if replayDuration == 0 {
+		replayDuration = 31 * 24 * time.Hour
+	}
+	replayCutoff := time.Now().Add(-replayDuration).UnixMilli()
+
 	// Currently only supported and tested with Mattermost
 	lazyJoin := u.br.Protocol() == "mattermost" && u.cfg.Mattermost().EnableLazyJoin
-
-	// TODO: Make this configuration options?
-	replayDuration := 31 * 24 * time.Hour
-	replayCutoff := time.Now().Add(-replayDuration).UnixMilli()
+	lazyJoinDuration := u.cfg.Mattermost().LazyJoinDuration
+	if lazyJoinDuration == 0 {
+		lazyJoinDuration = 21 * 24 * time.Hour
+	}
+	lazyJoinCutoff := time.Now().Add(-lazyJoinDuration).UnixMilli()
 
 	for {
 		select {
@@ -1037,8 +1051,11 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 				u.eventLoopMutex.Unlock()
 
 				if threshold.IsZero() {
-					// On a fresh boot, only join public channels active in the last 24 hours
-					threshold = time.Now().Add(-24 * time.Hour)
+					dmThresh := u.cfg.Mattermost().DefaultDMOfflineThreshold
+					if dmThresh == 0 {
+						dmThresh = 24 * time.Hour
+					}
+					threshold = time.Now().Add(-dmThresh)
 				}
 
 				// If no one has spoken in this public channel since we last synced, skip it!

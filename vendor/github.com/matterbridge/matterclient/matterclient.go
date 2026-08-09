@@ -140,6 +140,7 @@ type Client struct {
 	connectedAt    atomic.Int64
 
 	ForceSyncOnReconnect bool
+	CacheClearCutoff     time.Duration
 
 	//nolint:containedctx // Tied to the lifecycle of the persistent client session
 	Ctx context.Context
@@ -198,6 +199,9 @@ func New(login string, pass string, team string, server string, mfatoken string)
 		apiLogger:     rootAPILogger.WithFields(logrus.Fields{"prefix": "matterclient: API"}),
 
 		aliveChan: make(chan bool),
+
+		ForceSyncOnReconnect: false,
+		CacheClearCutoff:     15 * time.Minute,
 	}
 }
 
@@ -214,10 +218,9 @@ func (m *Client) Login(ctx context.Context) error {
 	if !firstConnection {
 		lastUpdatedUnix := m.Users.lastUpdated.Load()
 		timeOffline := time.Since(time.Unix(lastUpdatedUnix, 0))
-		cacheClearCutoff := 15 * time.Minute
 
 		switch {
-		case timeOffline > cacheClearCutoff && m.ForceSyncOnReconnect:
+		case timeOffline > m.CacheClearCutoff && m.ForceSyncOnReconnect:
 			m.logger.Info("reconnect: flushing channel user cache to ensure state consistency")
 
 			m.Users.mu.Lock()
@@ -225,7 +228,7 @@ func (m *Client) Login(ctx context.Context) error {
 			m.Users.mu.Unlock()
 
 			m.Users.lastUpdated.Store(time.Now().Unix())
-		case timeOffline > cacheClearCutoff:
+		case timeOffline > m.CacheClearCutoff:
 			m.logger.Debug("reconnect: skipping channel user cache flush (ForceSyncOnReconnect is disabled)")
 		default:
 			m.logger.Debugf("reconnect: preserving channel user cache (offline for only %v)", timeOffline.Round(time.Second))
@@ -513,7 +516,7 @@ func (m *Client) initUser(ctx context.Context) error {
 		}
 		m.Unlock()
 
-		if exists && (!m.ForceSyncOnReconnect || time.Since(existingTeam.LastUserSync) < 15*time.Minute) {
+		if exists && (!m.ForceSyncOnReconnect || time.Since(existingTeam.LastUserSync) < m.CacheClearCutoff) {
 			m.logger.Debugf("skipping user fetch for team %s: cache is only %v old", team.Name, time.Since(existingTeam.LastUserSync).Round(time.Second))
 			m.Lock()
 			if team.Name == m.Credentials.Team {
