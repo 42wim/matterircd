@@ -524,9 +524,10 @@ outerloop:
 						if u.Caps == nil {
 							u.Caps = make(map[string]bool)
 						}
+
 						u.Caps["message-tags"] = true
 
-						params := fmt.Sprintf("* ACK :message-tags")
+						params := "* ACK :message-tags"
 						s.EncodeMessage(u, irc.CAP, []string{params}, "") //nolint:errcheck
 					} else {
 						// NAK (reject) anything else they requested

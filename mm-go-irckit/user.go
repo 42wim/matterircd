@@ -319,11 +319,12 @@ func (u *User) Decode() {
 	}
 }
 
-func (u *User) HasCapability(cap string) bool {
-    if u.Caps == nil {
-        return false
-    }
-    return u.Caps[cap]
+func (u *User) HasCapability(capability string) bool {
+	if u.Caps == nil {
+		return false
+	}
+
+	return u.Caps[capability]
 }
 
 func (u *User) createService(nick string, what string) {

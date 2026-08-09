@@ -48,6 +48,38 @@ type CachedPost struct {
 
 var logger *logrus.Entry
 
+func (m *Mattermost) Config() any {
+	return &m.cfg.Current().Mattermost
+}
+
+func (m *Mattermost) BridgeConfig() *config.BridgeConfig {
+	return &m.cfg.Current().Mattermost.Bridge
+}
+
+func (m *Mattermost) FormatterConfig() *config.FormatterConfig {
+	return &m.cfg.Current().Mattermost.Formatter
+}
+
+func (m *Mattermost) GetLastSentMsgs() []string {
+	data := make([]string, 0)
+
+	for _, k := range m.msgLastSentCache.Keys() {
+		if msg, ok := m.msgLastSentCache.Get(k); ok {
+			data = append(data, "[@@"+fmt.Sprint(k)+"] "+msg)
+		}
+	}
+
+	return data
+}
+
+func (m *Mattermost) GetReplayEvents(ctx context.Context, channelID string, since int64) []*bridge.Event {
+	// TODO: Switch from using GetPostsSince() to GetPostsAfter()
+	// TODO: which also does pagination rather than the 200 post limit.
+	// TODO: Or maybe a combination with GetPostsSince() getting the
+	// TODO: first post ID to use for GetPostsAfter().
+	return m.postListToEvents(ctx, m.mc.GetPostsSince(ctx, channelID, since), "replay", since)
+}
+
 //nolint:funlen
 func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Event, onWsConnect func()) (bridge.Bridger, *matterclient.Client, error) {
 	m := &Mattermost{
@@ -1655,67 +1687,6 @@ func (m *Mattermost) handleReactionEvent(ctx context.Context, rmsg *model.WebSoc
 	m.eventChan <- event
 }
 
-func (m *Mattermost) handleTypingEvent(ctx context.Context, rmsg *model.WebSocketEvent, logger *logrus.Entry) {
-	// Extract the user ID from the event data or broadcast info
-	typingUserID, ok := rmsg.GetData()["user_id"].(string)
-	if !ok || typingUserID == "" {
-		// Fallback depending on MM version
-		typingUserID = rmsg.GetBroadcast().UserId
-	}
-	if typingUserID == "" {
-		return
-	}
-
-	channelID := rmsg.GetBroadcast().ChannelId
-	if channelID == "" {
-		return
-	}
-
-	// Resolve the user
-	userID := m.GetUser(ctx, typingUserID)
-	if userID == nil {
-		return
-	}
-
-	// Ignore our own typing events
-	if userID.Me {
-		return
-	}
-
-	sender := userID
-	receiver := m.GetMe()
-	channelType := ""
-	name := m.GetChannelName(ctx, channelID)
-
-	// Check if this is a Direct Message
-	if strings.Contains(name, "__") {
-		channelType = "D"
-		dmUser := m.getDMUser(ctx, name)
-		if dmUser == nil {
-			logger.Tracef("typing: unable to resolve DM peer for channel %q", name)
-			return
-		}
-
-		if userID.Me {
-			receiver = m.getDMUser(ctx, name)
-		} else {
-			receiver = sender
-			sender = m.getDMUser(ctx, name)
-		}
-	}
-
-	// Send it down the internal event channel
-	m.eventChan <- &bridge.Event{
-		Type: "typing",
-		Data: &bridge.TypingEvent{
-			ChannelID:   channelID,
-			ChannelType: channelType,
-			Receiver:    receiver,
-			Sender:      sender,
-		},
-	}
-}
-
 func (m *Mattermost) GetTeamName(ctx context.Context, teamID string) string {
 	return m.mc.GetTeamName(ctx, teamID)
 }
@@ -1808,6 +1779,69 @@ func Decode(input interface{}, output interface{}) error {
 	}
 
 	return decoder.Decode(input)
+}
+
+func (m *Mattermost) handleTypingEvent(ctx context.Context, rmsg *model.WebSocketEvent, logger *logrus.Entry) {
+	// Extract the user ID from the event data or broadcast info
+	typingUserID, ok := rmsg.GetData()["user_id"].(string)
+	if !ok || typingUserID == "" {
+		// Fallback depending on MM version
+		typingUserID = rmsg.GetBroadcast().UserId
+	}
+
+	if typingUserID == "" {
+		return
+	}
+
+	channelID := rmsg.GetBroadcast().ChannelId
+	if channelID == "" {
+		return
+	}
+
+	// Resolve the user
+	userID := m.GetUser(ctx, typingUserID)
+	if userID == nil {
+		return
+	}
+
+	// Ignore our own typing events
+	if userID.Me {
+		return
+	}
+
+	sender := userID
+	receiver := m.GetMe()
+	channelType := ""
+	name := m.GetChannelName(ctx, channelID)
+
+	// Check if this is a Direct Message
+	if strings.Contains(name, "__") {
+		channelType = "D"
+
+		dmUser := m.getDMUser(ctx, name)
+		if dmUser == nil {
+			logger.Tracef("typing: unable to resolve DM peer for channel %q", name)
+			return
+		}
+
+		if userID.Me {
+			receiver = m.getDMUser(ctx, name)
+		} else {
+			receiver = sender
+			sender = m.getDMUser(ctx, name)
+		}
+	}
+
+	// Send it down the internal event channel
+	m.eventChan <- &bridge.Event{
+		Type: "typing",
+		Data: &bridge.TypingEvent{
+			ChannelID:   channelID,
+			ChannelType: channelType,
+			Receiver:    receiver,
+			Sender:      sender,
+		},
+	}
 }
 
 func (m *Mattermost) getDMUser(ctx context.Context, name interface{}) *bridge.UserInfo {
@@ -2345,25 +2379,6 @@ func (m *Mattermost) parsePreviewPost(b *strings.Builder, user string, channel s
 	}
 }
 
-func (m *Mattermost) GetLastSentMsgs() []string {
-	data := make([]string, 0)
-
-	for _, k := range m.msgLastSentCache.Keys() {
-		if msg, ok := m.msgLastSentCache.Get(k); ok {
-			data = append(data, "[@@"+fmt.Sprint(k)+"] "+msg)
-		}
-	}
-
-	return data
-}
-
-func (m *Mattermost) GetReplayEvents(ctx context.Context, channelID string, since int64) []*bridge.Event {
-	// TODO: Switch from using GetPostsSince() to GetPostsAfter()
-	// TODO: which also does pagination rather than the 200 post limit.
-	// TODO: Or maybe a combination with GetPostsSince() getting the
-	// TODO: first post ID to use for GetPostsAfter().
-	return m.postListToEvents(ctx, m.mc.GetPostsSince(ctx, channelID, since), "replay", since)
-}
 
 func (m *Mattermost) postListToEvents(ctx context.Context, postlist interface{}, eventType string, since int64) []*bridge.Event {
 	if postlist == nil {
@@ -2496,16 +2511,4 @@ func (m *Mattermost) postToEvent(ctx context.Context, p *model.Post, eventType s
 			},
 		}
 	}
-}
-
-func (m *Mattermost) Config() any {
-	return &m.cfg.Current().Mattermost
-}
-
-func (m *Mattermost) BridgeConfig() *config.BridgeConfig {
-	return &m.cfg.Current().Mattermost.Bridge
-}
-
-func (m *Mattermost) FormatterConfig() *config.FormatterConfig {
-	return &m.cfg.Current().Mattermost.Formatter
 }

@@ -1297,10 +1297,12 @@ func (c *channel) BroadcastTyping(from *User, status string) {
 		if u == from {
 			continue
 		}
+
 		if !u.HasCapability("message-tags") {
 			continue
 		}
-		u.Encode(msg)
+
+		_ = u.Encode(msg)
 	}
 }
 
@@ -1316,7 +1318,7 @@ func (u *User) SendTypingTo(target *User, status string) {
 		Params:  []string{target.Nick},
 	}
 
-	target.Encode(msg)
+	_ = target.Encode(msg)
 }
 
 func (u *User) syncChannel(id string, name string) {
