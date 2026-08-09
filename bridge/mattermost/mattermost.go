@@ -15,7 +15,7 @@ import (
 	"github.com/42wim/matterircd/config"
 	"github.com/42wim/matterircd/utils"
 	"github.com/davecgh/go-spew/spew"
-	lru "github.com/hashicorp/golang-lru"
+	lru "github.com/hashicorp/golang-lru/v2"
 	prefixed "github.com/matterbridge/logrus-prefixed-formatter"
 	"github.com/matterbridge/matterclient"
 	"github.com/mattermost/mattermost/server/public/model"
@@ -31,8 +31,8 @@ type Mattermost struct {
 	connected   bool
 	instanceTag string
 
-	msgParentCache   *lru.Cache
-	msgLastSentCache *lru.Cache
+	msgParentCache   *lru.Cache[string, CachedPost]
+	msgLastSentCache *lru.Cache[string, string]
 
 	cfg *config.Config
 
@@ -58,8 +58,8 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 
 	rc := cfg.Current()
 
-	m.msgParentCache, _ = lru.New(100)
-	m.msgLastSentCache, _ = lru.New(10)
+	m.msgParentCache, _ = lru.New[string, CachedPost](128)
+	m.msgLastSentCache, _ = lru.New[string, string](16)
 
 	ourlog := logrus.New()
 	ourlog.SetFormatter(&prefixed.TextFormatter{
@@ -979,11 +979,9 @@ func (m *Mattermost) getCachedPostInfo(ctx context.Context, postID string, preFe
 
 	// Search and use cached reply if it exists.
 	// None found, so we'll need to create one and save it for future uses.
-	if v, ok := m.msgParentCache.Get(postID); ok {
-		if cp, ok := v.(CachedPost); ok {
-			logger.Tracef("Found saved reply for parent post %s, using:%s", postID, cp.ReplyMsg)
-			return cp, nil
-		}
+	if cp, ok := m.msgParentCache.Get(postID); ok {
+		logger.Tracef("Found saved reply for parent post %s, using:%s", postID, cp.ReplyMsg)
+		return cp, nil
 	}
 
 	var post *model.Post
@@ -2261,8 +2259,7 @@ func (m *Mattermost) GetLastSentMsgs() []string {
 	data := make([]string, 0)
 
 	for _, k := range m.msgLastSentCache.Keys() {
-		if v, ok := m.msgLastSentCache.Get(k); ok {
-			msg, _ := v.(string)
+		if msg, ok := m.msgLastSentCache.Get(k); ok {
 			data = append(data, "[@@"+fmt.Sprint(k)+"] "+msg)
 		}
 	}
