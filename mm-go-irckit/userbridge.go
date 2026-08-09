@@ -1655,6 +1655,7 @@ func (u *User) handleTyping(e *bridge.TypingEvent) {
 	// Construct the ghost user's IRC prefix safely from the Bridge event
 	nick := e.Sender.Nick
 	user := e.Sender.User
+
 	if user == "" {
 		user = nick
 	}
@@ -1663,6 +1664,7 @@ func (u *User) handleTyping(e *bridge.TypingEvent) {
 	if host == "" {
 		host = "mattermost"
 	}
+
 	prefix := fmt.Sprintf("%s!%s@%s", nick, user, host)
 
 	// Determine the target routing (DM vs Channel)
@@ -1684,5 +1686,5 @@ func (u *User) handleTyping(e *bridge.TypingEvent) {
 		Params:  []string{target},
 	}
 
-	u.Encode(msg)
+	_ = u.Encode(msg)
 }
