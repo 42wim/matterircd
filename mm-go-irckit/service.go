@@ -959,11 +959,12 @@ func channelCmd(u *User, toUser *User, args []string, service string) {
 		u.MsgUser(toUser, "ID: "+info.ID)
 
 	case "info":
-		// We first need the ID to query the channel info
+		// Try to resolve it as a channel name first
 		channelID := u.br.GetChannelID(u.ctx, channelName, u.br.GetMe().TeamID)
+
+		// If that fails, assume the input is directly an ID
 		if channelID == "" {
-			u.MsgUser(toUser, "channel does not exist on this team")
-			return
+			channelID = channelName
 		}
 
 		info, err := u.br.GetChannel(u.ctx, channelID)
@@ -972,7 +973,12 @@ func channelCmd(u *User, toUser *User, args []string, service string) {
 			return
 		}
 
-		u.MsgUser(toUser, fmt.Sprintf("--- Channel Info for %s ---", channelStr))
+		displayName := "#" + info.Name
+		if info.DM {
+			displayName = "DM (" + info.Name + ")"
+		}
+
+		u.MsgUser(toUser, fmt.Sprintf("--- Channel Info for %s ---", displayName))
 		u.MsgUser(toUser, "ID: "+info.ID)
 		u.MsgUser(toUser, "Name: "+info.Name)
 
@@ -980,12 +986,14 @@ func channelCmd(u *User, toUser *User, args []string, service string) {
 		if info.Private {
 			isPrivate = "Yes"
 		}
+
 		u.MsgUser(toUser, "Private: "+isPrivate)
 
 		isDM := "No"
 		if info.DM {
 			isDM = "Yes"
 		}
+
 		u.MsgUser(toUser, "Direct Message: "+isDM)
 
 		// Mattermost stores timestamps in milliseconds
@@ -1002,6 +1010,7 @@ func channelCmd(u *User, toUser *User, args []string, service string) {
 		} else {
 			u.MsgUser(toUser, "Last Post At: Never")
 		}
+
 		u.MsgUser(toUser, "---------------------------")
 
 	default:
