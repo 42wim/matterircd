@@ -307,6 +307,17 @@ func details(u *User, toUser *User, args []string, service string) {
 	inlineCode := u.br.FormatterConfig().MarkdownInlineCode
 	blockQuoteChar, codeBlockPrefix := u.getMarkdownBlockCodePrefix()
 	syntaxHighlighting := u.br.FormatterConfig().SyntaxHighlighting
+	codeBlockSeparator := u.br.FormatterConfig().CodeBlockSeparator
+
+	opts := utils.ProcessMessageOpts{
+		DisableMarkdown:    disableMarkdown,
+		DisableEmoji:       disableEmoji,
+		SyntaxHighlighting: syntaxHighlighting,
+		CodeBlockPrefix:    codeBlockPrefix,
+		CodeBlockSeparator: codeBlockSeparator,
+		BlockquoteChar:     blockQuoteChar,
+		InlineCodeChar:     inlineCode,
+	}
 
 	for _, event := range events {
 		var createAt int64
@@ -324,34 +335,15 @@ func details(u *User, toUser *User, args []string, service string) {
 		ts := time.Unix(0, createAt*int64(time.Millisecond)).Format("2006-01-02 15:04:05")
 		u.MsgUser(toUser, prefix+"["+ts+"] <"+nick+"> in "+channel)
 
-		lexer := ""
-		codeBlockBackTick := false
-		codeBlockTilde := false
 		textToProcess := utils.WrapMessage(text, 440)
-		for {
-			line, rest, found := strings.Cut(textToProcess, "\n")
-			line = strings.TrimSuffix(line, "\r")
 
-			line, codeBlockBackTick, codeBlockTilde, lexer = utils.FormatCodeBlockText(line, codeBlockBackTick, codeBlockTilde, lexer, syntaxHighlighting, codeBlockPrefix)
-
-			if !disableMarkdown && !codeBlockBackTick && !codeBlockTilde {
-				line = utils.Markdown2irc(line, blockQuoteChar, inlineCode)
-			}
-
-			if !disableEmoji && !codeBlockBackTick && !codeBlockTilde {
-				line = utils.EmojiReplaceAliases(line)
-			}
-
+		utils.ProcessMessageText(textToProcess, opts, func(line string) {
 			// Visually translate actions for the details view
 			if strings.HasPrefix(line, "\x01ACTION ") && strings.HasSuffix(line, "\x01") {
 				line = "* " + nick + " " + line[8:len(line)-1]
 			}
 			u.MsgUser(toUser, prefix+"  "+line)
-			if !found {
-				break
-			}
-			textToProcess = rest
-		}
+		})
 	}
 }
 
@@ -558,25 +550,21 @@ func dispatchHistoricalEvent(u *User, toUser *User, event *bridge.Event, searchC
 	inlineCode := u.br.FormatterConfig().MarkdownInlineCode
 	blockQuoteChar, codeBlockPrefix := u.getMarkdownBlockCodePrefix()
 	syntaxHighlighting := u.br.FormatterConfig().SyntaxHighlighting
+	codeBlockSeparator := u.br.FormatterConfig().CodeBlockSeparator
 
-	lexer := ""
-	codeBlockBackTick := false
-	codeBlockTilde := false
+	opts := utils.ProcessMessageOpts{
+		DisableMarkdown:    disableMarkdown,
+		DisableEmoji:       disableEmoji,
+		SyntaxHighlighting: syntaxHighlighting,
+		CodeBlockPrefix:    codeBlockPrefix,
+		CodeBlockSeparator: codeBlockSeparator,
+		BlockquoteChar:     blockQuoteChar,
+		InlineCodeChar:     inlineCode,
+	}
+
 	textToProcess := utils.WrapMessage(text, 440)
-	for {
-		line, rest, found := strings.Cut(textToProcess, "\n")
-		line = strings.TrimSuffix(line, "\r")
 
-		line, codeBlockBackTick, codeBlockTilde, lexer = utils.FormatCodeBlockText(line, codeBlockBackTick, codeBlockTilde, lexer, syntaxHighlighting, codeBlockPrefix)
-
-		if !disableMarkdown && !codeBlockBackTick && !codeBlockTilde {
-			line = utils.Markdown2irc(line, blockQuoteChar, inlineCode)
-		}
-
-		if !disableEmoji && !codeBlockBackTick && !codeBlockTilde {
-			line = utils.EmojiReplaceAliases(line)
-		}
-
+	utils.ProcessMessageText(textToProcess, opts, func(line string) {
 		if line != "" {
 			if nick == systemUser {
 				line = "\x1d" + line + "\x1d"
@@ -588,12 +576,7 @@ func dispatchHistoricalEvent(u *User, toUser *User, event *bridge.Event, searchC
 			}
 			formatScrollbackMsg(u, channelID, channelName, scrollbackUser, nick, tsStr, msgID, parentID, line)
 		}
-
-		if !found {
-			break
-		}
-		textToProcess = rest
-	}
+	})
 
 	for _, f := range files {
 		fileMsg := "\x1ddownload file - " + f.Name + "\x1d"

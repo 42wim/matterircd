@@ -182,6 +182,9 @@ ShowMentions = false
 SyntaxHighlighting = "terminal256:pygments"
 #DisableCodeBlockPrefix = true
 CodeBlockPrefix = "\\x1b[1;38;2;0;82;204m|\\x1b[0m "
+# The string used to separate consecutive code blocks (e.g. "--").
+# If empty, consecutive code blocks will not have a visual separator.
+#CodeBlockSeparator = ""
 
 # Path to file to store last viewed information. This is useful for replying only
 # the messages missed.
