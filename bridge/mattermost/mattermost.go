@@ -673,6 +673,10 @@ func (m *Mattermost) GetChannels() []*bridge.ChannelInfo {
 	return channels
 }
 
+func (m *Mattermost) CreateChannel(ctx context.Context, channelName string) (*bridge.ChannelInfo, error) {
+	return nil, errors.New("not implemented yet")
+}
+
 func (m *Mattermost) GetChannel(ctx context.Context, channelID string) (*bridge.ChannelInfo, error) {
 	if channelID == "" || strings.HasPrefix(channelID, "&") || channelID == m.mc.User.Nickname || channelID == m.mc.User.Username {
 		return nil, errors.New("invalid channel id")

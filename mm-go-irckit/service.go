@@ -684,6 +684,7 @@ func updatelastviewed(u *User, toUser *User, args []string, service string) {
 }
 
 var cmds = map[string]Command{
+	"channel":          {handler: channelCmd, login: true, minParams: 2, maxParams: 2},
 	"details":          {handler: details, login: true, minParams: 1, maxParams: 1},
 	"header":           {handler: channelHeader, login: true, minParams: 2, maxParams: -1},
 	"lastsent":         {handler: lastsent, login: true, minParams: 0, maxParams: 0},
@@ -918,5 +919,92 @@ func channelHeader(u *User, toUser *User, args []string, service string) {
 	default:
 		showHelp()
 		return
+	}
+}
+
+//nolint:funlen
+func channelCmd(u *User, toUser *User, args []string, service string) {
+	if service == "slack" {
+		u.MsgUser(toUser, "not implemented")
+		return
+	}
+
+	showHelp := func() {
+		u.MsgUser(toUser, "need CHANNEL CREATE #<channel>")
+		u.MsgUser(toUser, "e.g. CHANNEL CREATE #new-bugs")
+		u.MsgUser(toUser, "need CHANNEL INFO #<channel>")
+		u.MsgUser(toUser, "e.g. CHANNEL INFO #bugs")
+	}
+
+	if len(args) < 2 {
+		showHelp()
+		return
+	}
+
+	cmd := strings.ToLower(args[0])
+	channelStr := args[1]
+
+	// Strip the '#' for API calls
+	channelName := strings.TrimPrefix(channelStr, "#")
+
+	switch cmd {
+	case "create":
+		info, err := u.br.CreateChannel(u.ctx, channelName)
+		if err != nil {
+			u.MsgUser(toUser, "failed to create channel: "+err.Error())
+			return
+		}
+
+		u.MsgUser(toUser, fmt.Sprintf("Channel %s created successfully.", channelStr))
+		u.MsgUser(toUser, "ID: "+info.ID)
+
+	case "info":
+		// We first need the ID to query the channel info
+		channelID := u.br.GetChannelID(u.ctx, channelName, u.br.GetMe().TeamID)
+		if channelID == "" {
+			u.MsgUser(toUser, "channel does not exist on this team")
+			return
+		}
+
+		info, err := u.br.GetChannel(u.ctx, channelID)
+		if err != nil {
+			u.MsgUser(toUser, "failed to get channel info: "+err.Error())
+			return
+		}
+
+		u.MsgUser(toUser, fmt.Sprintf("--- Channel Info for %s ---", channelStr))
+		u.MsgUser(toUser, "ID: "+info.ID)
+		u.MsgUser(toUser, "Name: "+info.Name)
+
+		isPrivate := "No"
+		if info.Private {
+			isPrivate = "Yes"
+		}
+		u.MsgUser(toUser, "Private: "+isPrivate)
+
+		isDM := "No"
+		if info.DM {
+			isDM = "Yes"
+		}
+		u.MsgUser(toUser, "Direct Message: "+isDM)
+
+		// Mattermost stores timestamps in milliseconds
+		if info.DeleteAt > 0 {
+			delTime := time.Unix(info.DeleteAt/1000, 0).Format(time.RFC1123)
+			u.MsgUser(toUser, "Status: Deleted at "+delTime)
+		} else {
+			u.MsgUser(toUser, "Status: Active")
+		}
+
+		if info.LastPostAt > 0 {
+			lastPost := time.Unix(info.LastPostAt/1000, 0).Format(time.RFC1123)
+			u.MsgUser(toUser, "Last Post At: "+lastPost)
+		} else {
+			u.MsgUser(toUser, "Last Post At: Never")
+		}
+		u.MsgUser(toUser, "---------------------------")
+
+	default:
+		showHelp()
 	}
 }
