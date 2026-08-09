@@ -1,10 +1,6 @@
-<<<<<<<< HEAD:vendor/google.golang.org/protobuf/LICENSE
-Copyright (c) 2018 The Go Authors. All rights reserved.
-========
 This license applies to simplelru/list.go
 
 Copyright (c) 2009 The Go Authors. All rights reserved.
->>>>>>>> origin/master:vendor/github.com/hashicorp/golang-lru/v2/simplelru/LICENSE_list
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions are

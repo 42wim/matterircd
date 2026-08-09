@@ -30,9 +30,6 @@ func Names(withAliases bool) []string {
 }
 
 // Get a Lexer by name, alias or file extension.
-//
-// Note that this if there isn't an exact match on name or alias, this will
-// call Match(), so it is not efficient.
 func Get(name string) chroma.Lexer {
 	return GlobalLexerRegistry.Get(name)
 }
@@ -43,9 +40,6 @@ func MatchMimeType(mimeType string) chroma.Lexer {
 }
 
 // Match returns the first lexer matching filename.
-//
-// Note that this iterates over all file patterns in all lexers, so it's not
-// particularly efficient.
 func Match(filename string) chroma.Lexer {
 	return GlobalLexerRegistry.Match(filename)
 }
