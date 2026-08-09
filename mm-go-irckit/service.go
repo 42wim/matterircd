@@ -808,25 +808,27 @@ func lastsent(u *User, toUser *User, args []string, service string) {
 
 //nolint:funlen
 func channelHeader(u *User, toUser *User, args []string, service string) {
-	if service != "mattermost" {
-		u.MsgUser(toUser, "not implemented")
-		return
-	}
-
-	if len(args) < 2 {
+	showHelp := func() {
 		u.MsgUser(toUser, "need HEADER GET (#<channel>|<user>)")
 		u.MsgUser(toUser, "e.g. HEADER GET #bugs")
 		u.MsgUser(toUser, "need HEADER SET (#<channel>|<user>) <new header>")
 		u.MsgUser(toUser, "e.g. HEADER SET #bugs I have just set a new header here")
+		u.MsgUser(toUser, "need HEADER UPDATE (#<channel>|<user>) s/search/replace/")
+		u.MsgUser(toUser, "e.g. HEADER UPDATE #bugs s/my topic/updated my new topic with stuff/")
+	}
+
+	if len(args) < 2 {
+		showHelp()
 		return
 	}
 
 	cmd := strings.ToLower(args[0])
 	channel := args[1]
-	if cmd == "set" {
+
+	// Both SET and UPDATE require additional arguments
+	if cmd == "set" || cmd == "update" {
 		if len(args) <= 2 {
-			u.MsgUser(toUser, "need HEADER SET (#<channel>|<user>) <new header>")
-			u.MsgUser(toUser, "e.g. HEADER SET #bugs I have just set a new header here")
+			showHelp()
 			return
 		}
 		args = args[2:]
@@ -847,10 +849,7 @@ func channelHeader(u *User, toUser *User, args []string, service string) {
 		channelName = userIDs[0] + "__" + userIDs[1]
 		channelID = u.br.GetChannelID(u.ctx, channelName, u.br.GetMe().TeamID)
 	default:
-		u.MsgUser(toUser, "need HEADER GET (#<channel>|<user>)")
-		u.MsgUser(toUser, "e.g. HEADER GET #bugs")
-		u.MsgUser(toUser, "need HEADER SET (#<channel>|<user>) <new header>")
-		u.MsgUser(toUser, "e.g. HEADER SET #bugs I have just set a new header here")
+		showHelp()
 		return
 	}
 
@@ -863,16 +862,61 @@ func channelHeader(u *User, toUser *User, args []string, service string) {
 	case cmd == "get":
 		currentHeader := u.br.Topic(u.ctx, channelID)
 		u.MsgUser(toUser, channel+"'s channel header is: "+currentHeader)
+
 	case cmd == "set":
 		err := u.br.SetTopic(u.ctx, channelID, strings.Join(args, " "))
 		if err != nil {
 			u.MsgUser(toUser, "failed to set header: "+err.Error())
+		} else {
+			u.MsgUser(toUser, channel+"'s channel header updated successfully.")
 		}
+
+	case cmd == "update":
+		payload := strings.Join(args, " ")
+
+		// Basic check for the sed-like substitute string (e.g. "s/old/new/")
+		if len(payload) < 4 || payload[0] != 's' {
+			u.MsgUser(toUser, "update format must be s/search/replace/")
+			return
+		}
+
+		// Use the character right after 's' as the delimiter (usually '/')
+		delim := string(payload[1])
+
+		// Split into a max of 3 parts to allow delimiters inside the replacement text if needed
+		parts := strings.SplitN(payload[2:], delim, 3)
+		if len(parts) < 2 {
+			u.MsgUser(toUser, "update format must be s/search/replace/")
+			return
+		}
+
+		searchPattern := parts[0]
+		replaceStr := parts[1]
+
+		// Compile the regex pattern
+		re, err := regexp.Compile(searchPattern)
+		if err != nil {
+			u.MsgUser(toUser, "invalid regex pattern: "+err.Error())
+			return
+		}
+
+		currentHeader := u.br.Topic(u.ctx, channelID)
+		newHeader := re.ReplaceAllString(currentHeader, replaceStr)
+
+		if newHeader == currentHeader {
+			u.MsgUser(toUser, "header unchanged (no match found for '"+searchPattern+"')")
+			return
+		}
+
+		err = u.br.SetTopic(u.ctx, channelID, newHeader)
+		if err != nil {
+			u.MsgUser(toUser, "failed to update header: "+err.Error())
+		} else {
+			u.MsgUser(toUser, channel+"'s channel header updated to: "+newHeader)
+		}
+
 	default:
-		u.MsgUser(toUser, "need HEADER GET (#<channel>|<user>)")
-		u.MsgUser(toUser, "e.g. HEADER GET #bugs")
-		u.MsgUser(toUser, "need HEADER SET (#<channel>|<user>) <new header>")
-		u.MsgUser(toUser, "e.g. HEADER SET #bugs I have just set a new header here")
+		showHelp()
 		return
 	}
 }
