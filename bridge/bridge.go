@@ -77,6 +77,7 @@ type ChannelInfo struct {
 	DM         bool
 	Private    bool
 	LastPostAt int64
+	DeleteAt   int64
 }
 
 type UserInfo struct {

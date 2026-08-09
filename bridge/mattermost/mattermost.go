@@ -664,6 +664,7 @@ func (m *Mattermost) GetChannels() []*bridge.ChannelInfo {
 			DM:         mmchannel.IsGroupOrDirect(),
 			Private:    !mmchannel.IsOpen(),
 			LastPostAt: mmchannel.LastPostAt,
+			DeleteAt:   mmchannel.DeleteAt,
 		})
 
 		chanMap[mmchannel.Id] = true
@@ -683,11 +684,13 @@ func (m *Mattermost) GetChannel(ctx context.Context, channelID string) (*bridge.
 	}
 
 	return &bridge.ChannelInfo{
-		Name:    mmchannel.Name,
-		ID:      mmchannel.Id,
-		TeamID:  mmchannel.TeamId,
-		DM:      mmchannel.IsGroupOrDirect(),
-		Private: !mmchannel.IsOpen(),
+		Name:       mmchannel.Name,
+		ID:         mmchannel.Id,
+		TeamID:     mmchannel.TeamId,
+		DM:         mmchannel.IsGroupOrDirect(),
+		Private:    !mmchannel.IsOpen(),
+		LastPostAt: mmchannel.LastPostAt,
+		DeleteAt:   mmchannel.DeleteAt,
 	}, nil
 }
 
