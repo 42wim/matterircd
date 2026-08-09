@@ -2,6 +2,7 @@ package mastodon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -167,6 +168,10 @@ func (m *Mastodon) GetUsers() []*bridge.UserInfo {
 
 func (m *Mastodon) GetChannels() []*bridge.ChannelInfo {
 	return nil
+}
+
+func (m *Mastodon) CreateChannel(ctx context.Context, channelName string, channelType string) (*bridge.ChannelInfo, error) {
+	return nil, errors.New("not implemented yet")
 }
 
 func (m *Mastodon) GetChannel(ctx context.Context, channelID string) (*bridge.ChannelInfo, error) {

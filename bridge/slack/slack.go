@@ -414,6 +414,10 @@ func (s *Slack) GetChannels() []*bridge.ChannelInfo {
 	return channels
 }
 
+func (s *Slack) CreateChannel(ctx context.Context, channelName string, channelType string) (*bridge.ChannelInfo, error) {
+	return nil, errors.New("not implemented yet")
+}
+
 func (s *Slack) GetChannel(ctx context.Context, channelID string) (*bridge.ChannelInfo, error) {
 	channels := s.GetChannels()
 	for _, channel := range channels {

@@ -35,6 +35,7 @@ type Bridger interface {
 
 	Protocol() string
 
+	CreateChannel(ctx context.Context, channelName string, channelType string) (*ChannelInfo, error)
 	GetChannels() []*ChannelInfo
 	GetChannel(ctx context.Context, channelID string) (*ChannelInfo, error)
 	GetChannelName(ctx context.Context, channelID string) string
