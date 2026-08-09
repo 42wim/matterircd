@@ -17,6 +17,10 @@ type Message struct {
 	Msg
 	SubMessage      *Msg `json:"message,omitempty"`
 	PreviousMessage *Msg `json:"previous_message,omitempty"`
+	// Root is the message that was broadcast to the channel when the SubType is
+	// thread_broadcast. If this is not a thread_broadcast message event, this
+	// value is nil.
+	Root *Msg `json:"root,omitempty"`
 }
 
 // Msg SubTypes (https://api.slack.com/events/message)
@@ -49,6 +53,7 @@ const (
 	MsgSubTypeUnpinnedItem              = "unpinned_item"               // [RTM] An item was unpinned from a channel
 	MsgSubTypeEkmAccessDenied           = "ekm_access_denied"           // [Events API, RTM] Message content redacted due to Enterprise Key Management (EKM)
 	MsgSubTypeChannelPostingPermissions = "channel_posting_permissions" // [Events API, RTM] The posting permissions for a channel changed
+	MsgSubTypeAssistantAppThread        = "assistant_app_thread"        // [Events API, RTM] The message is an app assistant thread
 )
 
 // Msg contains information about a slack message
@@ -82,6 +87,16 @@ type Msg struct {
 	Username   string      `json:"username,omitempty"`
 	Icons      *Icon       `json:"icons,omitempty"`
 	BotProfile *BotProfile `json:"bot_profile,omitempty"`
+
+	// These tend to be present in some of the messages, especially when triggered through
+	// a workflow. The API documentation is not clear about which ones are present in
+	// which messages, so we make them all optional.
+	//
+	// I'm adding them here for completeness but none of the Slack official libraries seem
+	// to support these fields. Be warned that they may be removed in future versions of
+	// the API, and that they may not be present in all messages.
+	TriggerID  string `json:"trigger_id,omitempty"`
+	WorkflowID string `json:"workflow_id,omitempty"`
 
 	// channel_join, group_join
 	Inviter string `json:"inviter,omitempty"`
