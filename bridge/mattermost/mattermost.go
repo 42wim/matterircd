@@ -678,6 +678,7 @@ func (m *Mattermost) CreateChannel(ctx context.Context, channelName string, chan
 
 	// Map user input to Mattermost channel types, defaulting to Open/Public
 	cType := model.ChannelTypeOpen
+
 	switch strings.ToLower(channelType) {
 	case "private", "p", string(model.ChannelTypePrivate):
 		cType = model.ChannelTypePrivate
