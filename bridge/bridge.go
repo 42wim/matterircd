@@ -200,6 +200,13 @@ type StatusChangeEvent struct {
 	Status string
 }
 
+type TypingEvent struct {
+	ChannelID   string
+	ChannelType string
+	Receiver    *UserInfo
+	Sender      *UserInfo
+}
+
 type LogoutEvent struct{}
 
 type File struct {

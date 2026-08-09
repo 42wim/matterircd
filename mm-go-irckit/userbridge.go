@@ -1280,6 +1280,45 @@ func (u *User) MsgSpoofUser(sender *User, rcvuser string, text string, maxlen ..
 	}
 }
 
+// BroadcastTyping sends an IRCv3 TAGMSG to channel members indicating typing status
+func (c *channel) BroadcastTyping(from *User, status string) {
+	// Because sorcix/irc lacks native Tags support in this version, we smuggle
+	// the tags and the prefix directly into the Command field.
+	// This perfectly outputs: @+typing=active :nick!user@host TAGMSG #channel
+	rawCommand := fmt.Sprintf("@+typing=%s :%s TAGMSG", status, from.Prefix().String())
+
+	msg := &irc.Message{
+		Command: rawCommand,
+		Params:  []string{c.name},
+	}
+
+	// Use c.Users() method instead of the unexported property
+	for _, u := range c.Users() {
+		if u == from {
+			continue
+		}
+		if !u.HasCapability("message-tags") {
+			continue
+		}
+		u.Encode(msg)
+	}
+}
+
+// SendTypingTo sends a typing TAGMSG directly to another user (for DMs)
+func (u *User) SendTypingTo(target *User, status string) {
+	if !target.HasCapability("message-tags") {
+		return
+	}
+
+	rawCommand := fmt.Sprintf("@+typing=%s :%s TAGMSG", status, u.Prefix().String())
+	msg := &irc.Message{
+		Command: rawCommand,
+		Params:  []string{target.Nick},
+	}
+
+	target.Encode(msg)
+}
+
 func (u *User) syncChannel(id string, name string) {
 	users, err := u.br.GetChannelUsers(u.ctx, id)
 	if err != nil {

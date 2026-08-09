@@ -277,6 +277,8 @@ func (m *Mattermost) handleWsMessage(ctx context.Context, quitChan chan struct{}
 				m.handleStatusChangeEvent(message.Raw, logger)
 			case model.WebsocketEventReactionAdded, model.WebsocketEventReactionRemoved:
 				m.handleReactionEvent(ctx, message.Raw, logger)
+			case model.WebsocketEventTyping:
+				m.handleTypingEvent(ctx, message.Raw, logger)
 			}
 		}
 	}
@@ -1651,6 +1653,67 @@ func (m *Mattermost) handleReactionEvent(ctx context.Context, rmsg *model.WebSoc
 	}
 
 	m.eventChan <- event
+}
+
+func (m *Mattermost) handleTypingEvent(ctx context.Context, rmsg *model.WebSocketEvent, logger *logrus.Entry) {
+	// Extract the user ID from the event data or broadcast info
+	typingUserID, ok := rmsg.GetData()["user_id"].(string)
+	if !ok || typingUserID == "" {
+		// Fallback depending on MM version
+		typingUserID = rmsg.GetBroadcast().UserId
+	}
+	if typingUserID == "" {
+		return
+	}
+
+	channelID := rmsg.GetBroadcast().ChannelId
+	if channelID == "" {
+		return
+	}
+
+	// Resolve the user
+	userID := m.GetUser(ctx, typingUserID)
+	if userID == nil {
+		return
+	}
+
+	// Ignore our own typing events
+	if userID.Me {
+		return
+	}
+
+	sender := userID
+	receiver := m.GetMe()
+	channelType := ""
+	name := m.GetChannelName(ctx, channelID)
+
+	// Check if this is a Direct Message
+	if strings.Contains(name, "__") {
+		channelType = "D"
+		dmUser := m.getDMUser(ctx, name)
+		if dmUser == nil {
+			logger.Tracef("typing: unable to resolve DM peer for channel %q", name)
+			return
+		}
+
+		if userID.Me {
+			receiver = m.getDMUser(ctx, name)
+		} else {
+			receiver = sender
+			sender = m.getDMUser(ctx, name)
+		}
+	}
+
+	// Send it down the internal event channel
+	m.eventChan <- &bridge.Event{
+		Type: "typing",
+		Data: &bridge.TypingEvent{
+			ChannelID:   channelID,
+			ChannelType: channelType,
+			Receiver:    receiver,
+			Sender:      sender,
+		},
+	}
 }
 
 func (m *Mattermost) GetTeamName(ctx context.Context, teamID string) string {

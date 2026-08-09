@@ -66,6 +66,9 @@ type User struct {
 	cancel context.CancelFunc
 
 	lastSync time.Time
+
+	// IRCv3 capabilities client negotiated
+	Caps map[string]bool
 }
 
 func (u *User) ID() string {
@@ -314,6 +317,13 @@ func (u *User) Decode() {
 	if u.DecodeCh != nil {
 		close(u.DecodeCh)
 	}
+}
+
+func (u *User) HasCapability(cap string) bool {
+    if u.Caps == nil {
+        return false
+    }
+    return u.Caps[cap]
 }
 
 func (u *User) createService(nick string, what string) {
