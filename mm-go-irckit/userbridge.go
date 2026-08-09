@@ -258,7 +258,6 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 		}
 
 		if showContext || addPrefix {
-			// Using standard string concatenation is highly optimized in Go
 			line = prefix + line + suffix
 			addPrefix = false
 		}
@@ -451,7 +450,6 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		}
 
 		if showContext || addPrefix {
-			// Fast native string concatenation
 			line = prefix + line + suffix
 			addPrefix = false
 		}
@@ -1108,7 +1106,6 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 	syntaxHighlighting := u.br.FormatterConfig().SyntaxHighlighting
 	codeBlockSeparator := u.br.FormatterConfig().CodeBlockSeparator
 
-	// Define options ONCE outside the loop to maximize replay speed
 	opts := utils.ProcessMessageOpts{
 		DisableMarkdown:    disableMarkdown,
 		DisableEmoji:       disableEmoji,

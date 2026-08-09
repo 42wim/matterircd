@@ -179,6 +179,8 @@ func FormatFullCodeBlock(text, lexer string, opts ProcessMessageOpts, yield func
 			end -= len(resetSeq)
 		}
 
+		// Work around https://github.com/alecthomas/chroma/issues/716
+		// Safely strip the trailing newline without touching the linePrefix
 		if end > 0 && bs[end-1] == '\n' {
 			end--
 		}
@@ -265,7 +267,8 @@ func ProcessMessageText(text string, opts ProcessMessageOpts, yield func(line st
 				}
 			}
 
-			emptyLines = emptyLines[:0] // Reset slice length without freeing memory
+			// Reset slice length without freeing memory
+			emptyLines = emptyLines[:0]
 
 			codeBuilder.Grow(256)
 
@@ -273,7 +276,8 @@ func ProcessMessageText(text string, opts ProcessMessageOpts, yield func(line st
 		}
 
 		if trimmed == "" {
-			emptyLines = append(emptyLines, line) // Buffer empty lines
+			// Buffer empty lines
+			emptyLines = append(emptyLines, line)
 		} else {
 			// Normal text line - flush buffered empty lines first
 			for _, el := range emptyLines {
