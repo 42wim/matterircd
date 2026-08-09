@@ -360,7 +360,7 @@ func replaceCode(msg, startCode, endCode string) string {
 const blockQuoteCharDefault = ">"
 
 func Markdown2irc(msg string, blockQuoteChar string, inlineCode string) string {
-	if !strings.ContainsAny(msg, "*_`>") {
+	if !strings.ContainsAny(msg, "*_`>~") {
 		return msg
 	}
 
@@ -378,7 +378,12 @@ func Markdown2irc(msg string, blockQuoteChar string, inlineCode string) string {
 		msg = replacePattern(msg, "_", "\x1d", "\x1d", true)
 	}
 
-	// Code / Monospace 0x11
+	// Strikethrough 0x1E processing
+	if strings.Contains(msg, "~") {
+		msg = replacePattern(msg, "~~", "\x1e", "\x1e", false)
+	}
+
+	// Code / Monospace 0x11 processing
 	if strings.Contains(msg, "`") {
 		inlineCodeStart := "\x0f`\x11\x02\x030,14"
 		inlineCodeEnd := "\x11\x0f`"
