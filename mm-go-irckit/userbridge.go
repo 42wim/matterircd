@@ -109,6 +109,8 @@ func (u *User) handleEventChan() {
 			u.handleStatusChangeEvent(e)
 		case *bridge.ReactionAddEvent, *bridge.ReactionRemoveEvent:
 			u.handleReactionEvent(e)
+		case *bridge.TypingEvent:
+			u.handleTyping(e)
 		case *bridge.LogoutEvent:
 			return
 		}
@@ -1280,47 +1282,6 @@ func (u *User) MsgSpoofUser(sender *User, rcvuser string, text string, maxlen ..
 	}
 }
 
-// BroadcastTyping sends an IRCv3 TAGMSG to channel members indicating typing status
-func (c *channel) BroadcastTyping(from *User, status string) {
-	// Because sorcix/irc lacks native Tags support in this version, we smuggle
-	// the tags and the prefix directly into the Command field.
-	// This perfectly outputs: @+typing=active :nick!user@host TAGMSG #channel
-	rawCommand := fmt.Sprintf("@+typing=%s :%s TAGMSG", status, from.Prefix().String())
-
-	msg := &irc.Message{
-		Command: rawCommand,
-		Params:  []string{c.name},
-	}
-
-	// Use c.Users() method instead of the unexported property
-	for _, u := range c.Users() {
-		if u == from {
-			continue
-		}
-
-		if !u.HasCapability("message-tags") {
-			continue
-		}
-
-		_ = u.Encode(msg)
-	}
-}
-
-// SendTypingTo sends a typing TAGMSG directly to another user (for DMs)
-func (u *User) SendTypingTo(target *User, status string) {
-	if !target.HasCapability("message-tags") {
-		return
-	}
-
-	rawCommand := fmt.Sprintf("@+typing=%s :%s TAGMSG", status, u.Prefix().String())
-	msg := &irc.Message{
-		Command: rawCommand,
-		Params:  []string{target.Nick},
-	}
-
-	_ = target.Encode(msg)
-}
-
 func (u *User) syncChannel(id string, name string) {
 	users, err := u.br.GetChannelUsers(u.ctx, id)
 	if err != nil {
@@ -1683,4 +1644,45 @@ func (u *User) handleMessageThreadContext(channelID, messageID, parentID, event,
 	}
 
 	return newText, prefix, suffix, showContext, maxlen
+}
+
+func (u *User) handleTyping(e *bridge.TypingEvent) {
+	// Only send if this specific connected client negotiated message-tags
+	if !u.HasCapability("message-tags") {
+		return
+	}
+
+	// Construct the ghost user's IRC prefix safely from the Bridge event
+	nick := e.Sender.Nick
+	user := e.Sender.User
+	if user == "" {
+		user = nick
+	}
+
+	host := e.Sender.Host
+	if host == "" {
+		host = "mattermost"
+	}
+	prefix := fmt.Sprintf("%s!%s@%s", nick, user, host)
+
+	// Determine the target routing (DM vs Channel)
+	var target string
+	if e.ChannelType == "D" {
+		// For Direct Messages, the target is the connected client's own nick
+		target = u.Nick
+	} else {
+		// For standard channels, resolve the mapped IRC channel name
+		target = u.br.GetChannelName(u.ctx, e.ChannelID)
+	}
+
+	// Smuggle the IRCv3 tags and the prefix into the Command string
+	// so the parser outputs it perfectly without needing native Tag support
+	rawCommand := fmt.Sprintf("@+typing=active :%s TAGMSG", prefix)
+
+	msg := &irc.Message{
+		Command: rawCommand,
+		Params:  []string{target},
+	}
+
+	u.Encode(msg)
 }
