@@ -190,12 +190,24 @@ LastViewedSaveFile = "matterircd-lastsaved.db"
 # in persistent storage. "server" will use the "LastViewedAt" timestamp Mattermost records server-side.
 # "hybrid" uses both and uses whichever is the latest.
 ReplayStrategy = "hybrid"
+# Maximum amount of channel history to fetch/replay on startup.
+# Limits the massive scrollback if a channel is very old. (Default: 744h / 31 days)
+MaxReplayDuration = "744h"
 # Enable EXPERIMENTAL "lazy-join" to only join channels active within the last 21-days.
 # This helps speed up initial start up and reduces channel clutter in your IRC client.
 #EnableLazyJoin = true
+# If EnableLazyJoin=true, channels without activity within this duration are skipped.
+# (Default: 504h / 21 days)
+#LazyJoinDuration = "504h"
+# If Smart DM Join is active, but the bridge has no record of your last sync,
+# it will join any DM active within this fallback window. (Default: 24h)
+#DefaultDMOfflineThreshold = "24h"
 # Force a full synchronization of channel users on reconnect if offline for more than 15 minutes.
 # By default, this is disabled to ensure lightning-fast reconnects, relying on dynamic nicklist updates.
 #ForceSyncOnReconnect = false
+# How long your IRC client must be disconnected before the bridge considers it
+# a "Heavy Sync" and triggers a full nicklist/cache flush on reconnect. (Default: 15m)
+#HeavySyncThreshold = "15m"
 
 #############################
 ##### SLACK EXAMPLE #########

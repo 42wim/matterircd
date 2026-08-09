@@ -150,6 +150,11 @@ func (m *Mattermost) loginToMattermost(ctx context.Context, onWsConnect func()) 
 	mc.AntiIdleIntvl = rc.Mattermost.AntiIdleInterval
 	mc.ForceSyncOnReconnect = rc.Mattermost.ForceSyncOnReconnect
 
+	mc.CacheClearCutoff = rc.Mattermost.HeavySyncThreshold
+	if mc.CacheClearCutoff == 0 {
+		mc.CacheClearCutoff = 15 * time.Minute
+	}
+
 	mc.Ctx = ctx
 	mc.OnWsConnect = onWsConnect
 
@@ -659,6 +664,7 @@ func (m *Mattermost) GetChannels() []*bridge.ChannelInfo {
 			DM:         mmchannel.IsGroupOrDirect(),
 			Private:    !mmchannel.IsOpen(),
 			LastPostAt: mmchannel.LastPostAt,
+			DeleteAt:   mmchannel.DeleteAt,
 		})
 
 		chanMap[mmchannel.Id] = true
@@ -678,11 +684,13 @@ func (m *Mattermost) GetChannel(ctx context.Context, channelID string) (*bridge.
 	}
 
 	return &bridge.ChannelInfo{
-		Name:    mmchannel.Name,
-		ID:      mmchannel.Id,
-		TeamID:  mmchannel.TeamId,
-		DM:      mmchannel.IsGroupOrDirect(),
-		Private: !mmchannel.IsOpen(),
+		Name:       mmchannel.Name,
+		ID:         mmchannel.Id,
+		TeamID:     mmchannel.TeamId,
+		DM:         mmchannel.IsGroupOrDirect(),
+		Private:    !mmchannel.IsOpen(),
+		LastPostAt: mmchannel.LastPostAt,
+		DeleteAt:   mmchannel.DeleteAt,
 	}, nil
 }
 

@@ -138,6 +138,11 @@ type MattermostConfig struct {
 	ReplayStrategy       string
 	EnableLazyJoin       bool
 	ForceSyncOnReconnect bool
+
+	MaxReplayDuration         time.Duration
+	LazyJoinDuration          time.Duration
+	DefaultDMOfflineThreshold time.Duration
+	HeavySyncThreshold        time.Duration
 }
 
 type SlackConfig struct {
@@ -324,6 +329,11 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 			ReplayStrategy:       c.v.GetString("mattermost.ReplayStrategy"),
 			EnableLazyJoin:       c.v.GetBool("mattermost.EnableLazyJoin"),
 			ForceSyncOnReconnect: c.v.GetBool("mattermost.ForceSyncOnReconnect"),
+
+			MaxReplayDuration:         c.v.GetDuration("mattermost.MaxReplayDuration"),
+			LazyJoinDuration:          c.v.GetDuration("mattermost.LazyJoinDuration"),
+			DefaultDMOfflineThreshold: c.v.GetDuration("mattermost.DefaultDMOfflineThreshold"),
+			HeavySyncThreshold:        c.v.GetDuration("mattermost.HeavySyncThreshold"),
 		},
 
 		Slack: SlackConfig{
