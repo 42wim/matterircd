@@ -57,6 +57,7 @@ func initializePalette() {
 		if seenHex[hex] {
 			continue
 		}
+
 		seenHex[hex] = true
 
 		r, _ := strconv.ParseInt(hex[0:2], 16, 32)
