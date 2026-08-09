@@ -152,7 +152,7 @@ func (u *User) Encode(msgs ...*irc.Message) (err error) {
 			logger.Warnf("failed to set write deadline for %s: %v", u.Nick, err)
 		}
 
-		if msg.Command == irc.PRIVMSG && (msg.Prefix.Name == "slack" || msg.Prefix.Name == "mattermost") && msg.Prefix.Host == "service" && strings.Contains(msg.Trailing, "token") {
+		if msg.Command == irc.PRIVMSG && (msg.Prefix.Name == "slack" || msg.Prefix.Name == "mattermost") && msg.Prefix.Host == "service" && strings.Contains(msg.Trailing, "token") { //nolint:goconst,staticcheck
 			logger.Debugf("-> %s %s %s", msg.Command, msg.Prefix.Name, "[token redacted]")
 
 			err := u.Conn.Encode(msg)
@@ -294,11 +294,11 @@ func (u *User) Decode() {
 			}
 		}
 		// PRIVMSG can be buffered
-		switch {
-		case msg.Command == irc.PRIVMSG:
+		switch msg.Command {
+		case irc.PRIVMSG:
 			logger.Debugf("B: %#v", dmsg)
 			buffer <- msg
-		case msg.Command == irc.PING:
+		case irc.PING:
 			logger.Trace(dmsg)
 			u.DecodeCh <- msg
 		default:

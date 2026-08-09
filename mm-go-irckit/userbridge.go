@@ -749,6 +749,7 @@ func (u *User) addUsersToChannels() {
 
 	syncStartTime := time.Now()
 	syncThresh := u.cfg.Mattermost().HeavySyncThreshold
+
 	if syncThresh == 0 {
 		syncThresh = 15 * time.Minute
 	}
@@ -808,6 +809,7 @@ func (u *User) addUsersToChannels() {
 				if dmThresh == 0 {
 					dmThresh = 24 * time.Hour
 				}
+
 				threshold = time.Now().Add(-dmThresh)
 			}
 
@@ -818,6 +820,7 @@ func (u *User) addUsersToChannels() {
 				} else {
 					logger.Debugf("Skipping dormant DM channel %s (LastPost: %v)", brchannel.Name, lastPost)
 				}
+
 				continue
 			}
 
@@ -940,6 +943,7 @@ func (u *User) getChannelSince(ctx context.Context, brchannel *bridge.ChannelInf
 			if brchannel.LastPostAt > replayCutoff {
 				return brchannel.LastPostAt, "lastpost-fallback", false
 			}
+
 			return replayCutoff, "cutoff-fallback", false
 		}
 		return serverSince, "server", false
@@ -955,6 +959,7 @@ func (u *User) getChannelSince(ctx context.Context, brchannel *bridge.ChannelInf
 			if b == nil {
 				return nil
 			}
+
 			v := b.Get([]byte(brchannel.ID))
 			if v != nil {
 				val := binary.LittleEndian.Uint64(v)
@@ -969,6 +974,7 @@ func (u *User) getChannelSince(ctx context.Context, brchannel *bridge.ChannelInf
 
 	bestSince := serverSince
 	source := "server"
+
 	if strategy == "saved" || savedSince > bestSince {
 		bestSince = savedSince
 		source = "stored"
@@ -1000,14 +1006,17 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 	if replayDuration == 0 {
 		replayDuration = 31 * 24 * time.Hour
 	}
+
 	replayCutoff := time.Now().Add(-replayDuration).UnixMilli()
 
 	// Currently only supported and tested with Mattermost
 	lazyJoin := u.br.Protocol() == "mattermost" && u.cfg.Mattermost().EnableLazyJoin
+
 	lazyJoinDuration := u.cfg.Mattermost().LazyJoinDuration
 	if lazyJoinDuration == 0 {
 		lazyJoinDuration = 21 * 24 * time.Hour
 	}
+
 	lazyJoinCutoff := time.Now().Add(-lazyJoinDuration).UnixMilli()
 
 	for {
