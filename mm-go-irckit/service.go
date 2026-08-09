@@ -912,7 +912,7 @@ func channelHeader(u *User, toUser *User, args []string, service string) {
 		if err != nil {
 			u.MsgUser(toUser, "failed to update header: "+err.Error())
 		} else {
-			u.MsgUser(toUser, channel+"'s channel header updated to: " + newHeader)
+			u.MsgUser(toUser, channel+"'s channel header updated to: "+newHeader)
 		}
 
 	default:
