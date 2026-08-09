@@ -1,6 +1,15 @@
+<<<<<<<< HEAD:vendor/google.golang.org/grpc/internal/channelz/util_nonlinux.go
+//go:build !linux
+// +build !linux
+
+/*
+ *
+ * Copyright 2018 gRPC authors.
+========
 /*
  *
  * Copyright 2015 gRPC authors.
+>>>>>>>> origin/master:vendor/google.golang.org/grpc/doc.go
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +25,15 @@
  *
  */
 
-//go:generate ./regenerate.sh
+<<<<<<<< HEAD:vendor/google.golang.org/grpc/internal/channelz/util_nonlinux.go
+package channelz
+
+// GetSocketOption gets the socket option info of the conn.
+func GetSocketOption(c any) *SocketOptionData {
+	return nil
+}
+========
+//go:generate ./scripts/regenerate.sh
 
 /*
 Package grpc implements an RPC system called gRPC.
@@ -24,3 +41,4 @@ Package grpc implements an RPC system called gRPC.
 See grpc.io for more information about gRPC.
 */
 package grpc // import "google.golang.org/grpc"
+>>>>>>>> origin/master:vendor/google.golang.org/grpc/doc.go

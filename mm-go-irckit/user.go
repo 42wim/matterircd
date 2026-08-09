@@ -1,7 +1,9 @@
 package irckit
 
 import (
-	"fmt"
+	"context"
+	"errors"
+	"io"
 	"net"
 	"regexp"
 	"strings"
@@ -9,21 +11,28 @@ import (
 	"time"
 
 	"github.com/42wim/matterircd/bridge"
+	"github.com/42wim/matterircd/config"
 	"github.com/desertbit/timer"
 	"github.com/sorcix/irc"
-	"github.com/spf13/viper"
 )
 
 // NewUser creates a *User, wrapping a connection with metadata we need for our server.
 func NewUser(c Conn) *User {
-	return &User{
-		Conn: c,
-		UserInfo: &bridge.UserInfo{
-			Host: "*",
-		},
-		channels: map[Channel]struct{}{},
-		DecodeCh: make(chan *irc.Message),
+	ctx, cancel := context.WithCancel(context.Background())
+	u := &User{
+		Conn:   c,
+		cancel: cancel,
+		ctx:    ctx,
 	}
+
+	if c != nil {
+		u.UserInfo = &bridge.UserInfo{
+			Host: "*",
+		}
+		u.DecodeCh = make(chan *irc.Message)
+	}
+
+	return u
 }
 
 // NewUserNet creates a *User from a net.Conn connection.
@@ -48,9 +57,15 @@ type User struct {
 
 	channels map[Channel]struct{}
 
-	v *viper.Viper
+	cfg *config.Config
 
 	UserBridge
+
+	//nolint:containedctx // Tied to the lifecycle of the persistent client session
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	lastSync time.Time
 }
 
 func (u *User) ID() string {
@@ -124,6 +139,8 @@ func (u *User) VisibleTo() []*User {
 	return users
 }
 
+const writeTimeout = 10 * time.Second
+
 // Encode and send each msg until an error occurs, then returns.
 func (u *User) Encode(msgs ...*irc.Message) (err error) {
 	if u.Ghost {
@@ -131,7 +148,11 @@ func (u *User) Encode(msgs ...*irc.Message) (err error) {
 	}
 
 	for _, msg := range msgs {
-		if msg.Command == "PRIVMSG" && (msg.Prefix.Name == "slack" || msg.Prefix.Name == "mattermost") && msg.Prefix.Host == "service" && strings.Contains(msg.Trailing, "token") {
+		if err := u.Conn.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil {
+			logger.Warnf("failed to set write deadline for %s: %v", u.Nick, err)
+		}
+
+		if msg.Command == irc.PRIVMSG && (msg.Prefix.Name == "slack" || msg.Prefix.Name == "mattermost") && msg.Prefix.Host == "service" && strings.Contains(msg.Trailing, "token") { //nolint:goconst,staticcheck
 			logger.Debugf("-> %s %s %s", msg.Command, msg.Prefix.Name, "[token redacted]")
 
 			err := u.Conn.Encode(msg)
@@ -142,7 +163,11 @@ func (u *User) Encode(msgs ...*irc.Message) (err error) {
 			continue
 		}
 
-		logger.Debugf("-> \"%s\"", msg)
+		if msg.Command == irc.PONG || msg.Command == irc.RPL_NAMREPLY {
+			logger.Tracef("-> %q", msg.String())
+		} else {
+			logger.Debugf("-> %q", msg.String())
+		}
 
 		err := u.Conn.Encode(msg)
 		if err != nil {
@@ -162,69 +187,96 @@ var (
 // nolint:funlen,gocognit,gocyclo
 func (u *User) Decode() {
 	if u.Ghost {
-		// block
-		c := make(chan struct{})
-		<-c
+		logger.Trace("ghost user, skipping Decode()")
+		return
 	}
-	buffer := make(chan *irc.Message)
-	stop := make(chan struct{})
-	bufferTimeout := u.v.GetInt("PasteBufferTimeout")
+	buffer := make(chan *irc.Message, 512)
+	bufferTimeout := u.cfg.Current().PasteBufferTimeout
 	// we need at least 100
 	if bufferTimeout < 100 {
 		bufferTimeout = 100
 	}
-	logger.Debugf("using paste buffer timeout: %#v", bufferTimeout)
-	t := timer.NewTimer(time.Duration(bufferTimeout) * time.Millisecond)
+	logger.Tracef("using paste buffer timeout: %#v", bufferTimeout)
+	timeout := time.Duration(bufferTimeout) * time.Millisecond
+	t := timer.NewTimer(timeout)
 	t.Stop()
-	go func(buffer chan *irc.Message, stop chan struct{}) {
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func(buffer chan *irc.Message) {
+		defer wg.Done()
+
+		var bufferedMsg *irc.Message
+
+		flush := func() {
+			t.Stop()
+			if bufferedMsg == nil {
+				return
+			}
+
+			// trim last newline
+			bufferedMsg.Trailing = strings.TrimSpace(bufferedMsg.Trailing)
+			logger.Tracef("flushing buffer: %#v", bufferedMsg)
+			u.DecodeCh <- bufferedMsg
+			// clear buffer
+			bufferedMsg = nil
+		}
 		for {
 			select {
-			case msg := <-buffer:
+			case msg, ok := <-buffer:
+				if !ok {
+					// Best-effort flush on shutdown. Avoid blocking forever if nobody is draining DecodeCh.
+					t.Stop()
+					if bufferedMsg != nil {
+						// trim last newline
+						bufferedMsg.Trailing = strings.TrimSpace(bufferedMsg.Trailing)
+						select {
+						case u.DecodeCh <- bufferedMsg:
+						case <-time.After(1 * time.Second):
+							logger.Warnf("timed out flushing decode buffer for %s", u.Nick)
+						}
+						bufferedMsg = nil
+					}
+					logger.Tracef("decode buffer goroutine exiting for %s", u.Nick)
+					return
+				}
 				// are we starting a new buffer ?
-				if u.BufferedMsg == nil {
-					u.BufferedMsg = msg
+				if bufferedMsg == nil {
+					bufferedMsg = msg
 					// start timer now
-					t.Reset(time.Duration(bufferTimeout) * time.Millisecond)
+					t.Reset(timeout)
 				} else {
 					if strings.HasPrefix(msg.Trailing, "\x01ACTION") || replyRegExp.MatchString(msg.Trailing) || modifyRegExp.MatchString(msg.Trailing) {
 						// flush buffer
-						logger.Debug("flushing buffer because of /me, replies to threads, and message modifications")
-						u.BufferedMsg.Trailing = strings.TrimSpace(u.BufferedMsg.Trailing)
-						u.DecodeCh <- u.BufferedMsg
-						u.BufferedMsg = nil
+						logger.Trace("flushing buffer because of /me, replies to threads, and message modifications")
+						flush()
 						// send CTCP message
 						u.DecodeCh <- msg
 						continue
 					}
 					// make sure we're sending to the same recipient in the buffer
-					if u.BufferedMsg.Params[0] == msg.Params[0] {
-						u.BufferedMsg.Trailing += "\n" + msg.Trailing
+					if bufferedMsg.Params[0] == msg.Params[0] {
+						bufferedMsg.Trailing += "\n" + msg.Trailing
 					} else {
-						u.DecodeCh <- msg
+						flush()
+						bufferedMsg = msg
+						t.Reset(timeout)
 					}
 				}
 			case <-t.C:
-				if u.BufferedMsg != nil {
-					// trim last newline
-					u.BufferedMsg.Trailing = strings.TrimSpace(u.BufferedMsg.Trailing)
-					logger.Debugf("flushing buffer: %#v", u.BufferedMsg)
-					u.DecodeCh <- u.BufferedMsg
-					// clear buffer
-					u.BufferedMsg = nil
-					t.Stop()
-				}
-			case <-stop:
-				logger.Debug("closing decode()")
-				return
+				flush()
 			}
 		}
-	}(buffer, stop)
+	}(buffer)
 	for {
 		msg, err := u.Conn.Decode()
 		if err != nil {
-			close(stop)
-			if err.Error() != "EOF" {
-				logger.Errorf("msg: %s err: %s", msg, err)
+			close(buffer)
+			wg.Wait()
+
+			isEOF := errors.Is(err, io.EOF) || err.Error() == "EOF"
+			isClosed := errors.Is(err, net.ErrClosed) || strings.Contains(err.Error(), "use of closed network connection")
+			if !isEOF && !isClosed {
+				logger.Errorf("msg: %v err: %v", msg, err)
 			}
 			break
 		}
@@ -233,22 +285,34 @@ func (u *User) Decode() {
 			continue
 		}
 
-		dmsg := fmt.Sprintf("<- %s", msg)
-		if msg.Command == "PRIVMSG" && msg.Params != nil && (msg.Params[0] == "slack" || msg.Params[0] == "mattermost") {
+		dmsg := "<- " + msg.String()
+		if msg.Command == irc.PRIVMSG && msg.Params != nil && (msg.Params[0] == "slack" || msg.Params[0] == "mattermost") {
 			// Don't log sensitive information
 			trail := strings.Split(msg.Trailing, " ")
 			if (msg.Trailing != "" && trail[0] == "login") || (len(msg.Params) > 1 && msg.Params[1] == "login") {
-				dmsg = fmt.Sprintf("<- PRIVMSG %s :login [redacted]", msg.Params[0])
+				dmsg = "<- PRIVMSG " + msg.Params[0] + " :login [redacted]"
 			}
 		}
 		// PRIVMSG can be buffered
-		if msg.Command == "PRIVMSG" {
+		switch msg.Command {
+		case irc.PRIVMSG:
 			logger.Debugf("B: %#v", dmsg)
 			buffer <- msg
-		} else {
+		case irc.PING:
+			logger.Trace(dmsg)
+			u.DecodeCh <- msg
+		default:
 			logger.Debug(dmsg)
 			u.DecodeCh <- msg
 		}
+	}
+
+	if u.Srv != nil {
+		u.Srv.Quit(u, "connection closed")
+	}
+
+	if u.DecodeCh != nil {
+		close(u.DecodeCh)
 	}
 }
 

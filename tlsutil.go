@@ -16,7 +16,6 @@ type keypairReloader struct {
 	keyPath  string
 }
 
-// nolint:golint
 func NewKeypairReloader(certPath, keyPath string) (*keypairReloader, error) {
 	result := &keypairReloader{
 		certPath: certPath,

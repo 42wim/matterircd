@@ -1,6 +1,7 @@
 package slack
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -8,11 +9,11 @@ import (
 	"time"
 
 	"github.com/42wim/matterircd/bridge"
+	"github.com/42wim/matterircd/config"
 	"github.com/davecgh/go-spew/spew"
 	prefixed "github.com/matterbridge/logrus-prefixed-formatter"
 	"github.com/sirupsen/logrus"
 	"github.com/slack-go/slack"
-	"github.com/spf13/viper"
 )
 
 type Slack struct {
@@ -27,40 +28,62 @@ type Slack struct {
 	onConnect    func()
 	msgLast      map[string]string
 	sync.RWMutex
-	v *viper.Viper
+
+	cfg *config.Config
 }
 
 var logger *logrus.Entry
 
-func New(v *viper.Viper, cred bridge.Credentials, eventChan chan *bridge.Event, onConnect func()) (bridge.Bridger, error) {
+func New(cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Event, onConnect func()) (bridge.Bridger, error) {
 	s := &Slack{
 		credentials: cred,
 		eventChan:   eventChan,
 		onConnect:   onConnect,
-		v:           v,
+		cfg:         cfg,
 	}
 
-	var err error
+	rc := cfg.Current()
 
 	ourlog := logrus.New()
 	ourlog.SetFormatter(&prefixed.TextFormatter{
 		PrefixPadding: 13,
+		DisableColors: false,
 		FullTimestamp: true,
 	})
 	logger = ourlog.WithFields(logrus.Fields{"prefix": "bridge/slack"})
-	if v.GetBool("debug") {
+	if rc.Debug {
 		ourlog.SetLevel(logrus.DebugLevel)
 	}
 
-	if v.GetBool("trace") {
+	if rc.Trace {
 		ourlog.SetLevel(logrus.TraceLevel)
 	}
 
-	s.sc, err = s.loginToSlack()
+	sc, err := s.loginToSlack()
 	if err != nil {
 		return nil, err
 	}
+	// Helper closure to set bridge levels
+	setBridgeLogLevels := func(rc *config.RuntimeConfig) {
+		switch {
+		case rc.Trace:
+			ourlog.SetLevel(logrus.TraceLevel)
+		case rc.Debug:
+			ourlog.SetLevel(logrus.DebugLevel)
+		default:
+			ourlog.SetLevel(logrus.InfoLevel)
+		}
+	}
 
+	// Set initial log level
+	setBridgeLogLevels(rc)
+
+	// Register hook to update live on reloads
+	cfg.RegisterReloadHook(func(newRC *config.RuntimeConfig) {
+		setBridgeLogLevels(newRC)
+	})
+
+	s.sc = sc
 	s.msgLast = make(map[string]string)
 
 	users, _ := s.sc.GetUsers()
@@ -78,12 +101,23 @@ func New(v *viper.Viper, cred bridge.Credentials, eventChan chan *bridge.Event, 
 	return s, nil
 }
 
-func (s *Slack) Invite(channelID, username string) error {
+func (s *Slack) Invite(ctx context.Context, channelID, username string) error {
 	_, err := s.sc.InviteUsersToConversation(strings.ToUpper(channelID), username)
 	return err
 }
 
-func (s *Slack) Join(channelName string) (string, string, error) {
+func (s *Slack) IsChannelMember(channelID string) bool {
+	info, err := s.sc.GetConversationInfo(&slack.GetConversationInfoInput{
+		ChannelID: channelID,
+	})
+	if err != nil || info == nil {
+		return false
+	}
+
+	return info.IsMember
+}
+
+func (s *Slack) Join(ctx context.Context, channelName string) (string, string, error) {
 	mychan, _, _, err := s.sc.JoinConversation(channelName)
 	if err != nil {
 		return "", "", fmt.Errorf("cannot join channel (+i): %s", err)
@@ -92,7 +126,7 @@ func (s *Slack) Join(channelName string) (string, string, error) {
 	return mychan.ID, mychan.Topic.Value, nil
 }
 
-func (s *Slack) List() (map[string]string, error) {
+func (s *Slack) List(ctx context.Context) (map[string]string, error) {
 	channelinfo := make(map[string]string)
 
 	params := slack.GetConversationsParameters{
@@ -118,16 +152,16 @@ OUTER:
 	return channelinfo, nil
 }
 
-func (s *Slack) Part(channelID string) error {
+func (s *Slack) Part(ctx context.Context, channelID string) error {
 	_, err := s.sc.LeaveConversation(strings.ToUpper(channelID))
 	return err
 }
 
-func (s *Slack) UpdateChannels() error {
+func (s *Slack) UpdateChannels(ctx context.Context) error {
 	return nil
 }
 
-func (s *Slack) Logout() error {
+func (s *Slack) Logout(ctx context.Context) error {
 	logger.Debug("calling logout from slack")
 
 	err := s.rtm.Disconnect()
@@ -166,12 +200,19 @@ func (s *Slack) createSlackMsgOption(text string) []slack.MsgOption {
 	return opts
 }
 
-func (s *Slack) MsgUser(username, text string) (string, error) {
+func (s *Slack) MsgUser(ctx context.Context, username, text string) (string, error) {
 	dchannel, _, _, err := s.sc.OpenConversation(&slack.OpenConversationParameters{
 		Users: []string{username},
 	})
 	if err != nil {
 		return "", err
+	}
+
+	// CTCP ACTION (/me)
+	if strings.HasPrefix(text, "\x01ACTION ") {
+		text = strings.TrimPrefix(text, "\x01ACTION ")
+		text = strings.TrimSuffix(text, "\x01")
+		text = "*" + text + "*"
 	}
 
 	opts := s.createSlackMsgOption(text)
@@ -188,7 +229,14 @@ func (s *Slack) MsgUser(username, text string) (string, error) {
 	return msgID, nil
 }
 
-func (s *Slack) MsgChannel(channelID, text string) (string, error) {
+func (s *Slack) MsgChannel(ctx context.Context, channelID, text string) (string, error) {
+	// CTCP ACTION (/me)
+	if strings.HasPrefix(text, "\x01ACTION ") {
+		text = strings.TrimPrefix(text, "\x01ACTION ")
+		text = strings.TrimSuffix(text, "\x01")
+		text = "*" + text + "*"
+	}
+
 	opts := s.createSlackMsgOption(text)
 
 	_, msgID, err := s.sc.PostMessage(strings.ToUpper(channelID), opts...)
@@ -203,7 +251,7 @@ func (s *Slack) MsgChannel(channelID, text string) (string, error) {
 	return msgID, nil
 }
 
-func (s *Slack) Topic(channelID string) string {
+func (s *Slack) Topic(ctx context.Context, channelID string) string {
 	info, err := s.sc.GetConversationInfo(&slack.GetConversationInfoInput{
 		ChannelID: strings.ToUpper(channelID),
 	})
@@ -215,16 +263,16 @@ func (s *Slack) Topic(channelID string) string {
 	return info.Topic.Value
 }
 
-func (s *Slack) SetTopic(channelID, text string) error {
+func (s *Slack) SetTopic(ctx context.Context, channelID, text string) error {
 	_, err := s.sc.SetTopicOfConversation(strings.ToUpper(channelID), text)
 	return err
 }
 
-func (s *Slack) StatusUser(name string) (string, error) {
+func (s *Slack) StatusUser(ctx context.Context, name string) (string, error) {
 	return "", nil
 }
 
-func (s *Slack) StatusUsers() (map[string]string, error) {
+func (s *Slack) StatusUsers(ctx context.Context) (map[string]string, error) {
 	return make(map[string]string), nil
 }
 
@@ -232,11 +280,11 @@ func (s *Slack) Protocol() string {
 	return "slack"
 }
 
-func (s *Slack) Kick(channelID, username string) error {
+func (s *Slack) Kick(ctx context.Context, channelID, username string) error {
 	return s.sc.KickUserFromConversation(strings.ToUpper(channelID), username)
 }
 
-func (s *Slack) SetStatus(status string) error {
+func (s *Slack) SetStatus(ctx context.Context, status string) error {
 	switch status {
 	case "online":
 		return s.sc.SetUserPresence("auto")
@@ -247,11 +295,11 @@ func (s *Slack) SetStatus(status string) error {
 	return nil
 }
 
-func (s *Slack) Nick(name string) error {
+func (s *Slack) Nick(ctx context.Context, name string) error {
 	return nil
 }
 
-func (s *Slack) GetChannelName(channelID string) string {
+func (s *Slack) GetChannelName(ctx context.Context, channelID string) string {
 	var name string
 
 	info, err := s.sc.GetConversationInfo(&slack.GetConversationInfoInput{
@@ -266,7 +314,7 @@ func (s *Slack) GetChannelName(channelID string) string {
 	return name
 }
 
-func (s *Slack) GetChannelUsers(channelID string) ([]*bridge.UserInfo, error) {
+func (s *Slack) GetChannelUsers(ctx context.Context, channelID string) ([]*bridge.UserInfo, error) {
 	var users []*bridge.UserInfo
 
 	limit := 100
@@ -366,7 +414,7 @@ func (s *Slack) GetChannels() []*bridge.ChannelInfo {
 	return channels
 }
 
-func (s *Slack) GetChannel(channelID string) (*bridge.ChannelInfo, error) {
+func (s *Slack) GetChannel(ctx context.Context, channelID string) (*bridge.ChannelInfo, error) {
 	channels := s.GetChannels()
 	for _, channel := range channels {
 		if channel.ID == channelID {
@@ -377,7 +425,7 @@ func (s *Slack) GetChannel(channelID string) (*bridge.ChannelInfo, error) {
 	return nil, errors.New("channel not found")
 }
 
-func (s *Slack) GetUser(userID string) *bridge.UserInfo {
+func (s *Slack) GetUser(ctx context.Context, userID string) *bridge.UserInfo {
 	return s.createUser(s.getSlackUser(userID))
 }
 
@@ -386,59 +434,60 @@ func (s *Slack) GetMe() *bridge.UserInfo {
 	return s.createUser(me)
 }
 
-func (s *Slack) GetUserByUsername(username string) *bridge.UserInfo {
+func (s *Slack) GetUserByUsername(ctx context.Context, username string) *bridge.UserInfo {
 	return nil
 }
 
-func (s *Slack) GetTeamName(teamID string) string {
+func (s *Slack) GetTeamName(ctx context.Context, teamID string) string {
 	return s.sinfo.Team.Name
 }
 
-func (s *Slack) GetLastViewedAt(channelID string) int64 {
+func (s *Slack) GetLastViewedAt(ctx context.Context, channelID string) int64 {
 	return 0
 }
 
-func (s *Slack) GetPostsSince(channelID string, since int64) interface{} {
+func (s *Slack) GetPostsSince(ctx context.Context, channelID string, since int64) []*bridge.Event {
+	return []*bridge.Event{}
+}
+
+func (s *Slack) SearchPosts(ctx context.Context, search string) []*bridge.Event {
+	return []*bridge.Event{}
+}
+
+func (s *Slack) UpdateLastViewed(ctx context.Context, channelID string) {
+}
+
+func (s *Slack) UpdateLastViewedUser(ctx context.Context, userID string) error {
 	return nil
 }
 
-func (s *Slack) SearchPosts(search string) interface{} {
-	return nil
-}
-
-func (s *Slack) UpdateLastViewed(channelID string) {
-}
-
-func (s *Slack) UpdateLastViewedUser(userID string) error {
-	return nil
-}
-
-func (s *Slack) GetFileLinks(fileIDs []string) []string {
+func (s *Slack) GetFileLinks(ctx context.Context, fileIDs []string) []string {
 	return []string{}
 }
 
-func (s *Slack) SearchUsers(query string) ([]*bridge.UserInfo, error) {
+func (s *Slack) SearchUsers(ctx context.Context, query string) ([]*bridge.UserInfo, error) {
 	return nil, nil
 }
 
-func (s *Slack) GetPosts(channelID string, limit int) interface{} {
-	return nil
+func (s *Slack) GetPosts(ctx context.Context, channelID string, limit int) []*bridge.Event {
+	return []*bridge.Event{}
 }
 
-func (s *Slack) GetPostThread(channelID string) interface{} {
-	return nil
+func (s *Slack) GetPostThread(ctx context.Context, channelID string) []*bridge.Event {
+	return []*bridge.Event{}
 }
 
-func (s *Slack) GetChannelID(name, teamID string) string {
+func (s *Slack) GetChannelID(ctx context.Context, name, teamID string) string {
 	return ""
 }
 
 func (s *Slack) allowedLogin() error {
+	rc := s.cfg.Current()
 	// we only know which server we are connecting to when we actually are connected.
 	// disconnect if we're not allowed
-	if len(s.v.GetStringSlice("slack.restrict")) > 0 {
+	if len(rc.Slack.Bridge.Restrict) > 0 {
 		ok := false
-		for _, domain := range s.v.GetStringSlice("slack.restrict") {
+		for _, domain := range rc.Slack.Bridge.Restrict {
 			if domain == s.sinfo.Team.Domain {
 				ok = true
 				break
@@ -451,9 +500,9 @@ func (s *Slack) allowedLogin() error {
 	}
 	// we only know which user we are when we actually are connected.
 	// disconnect if we're not allowed
-	if len(s.v.GetStringSlice("slack.DenyUsers")) > 0 {
+	if len(rc.Slack.DenyUsers) > 0 {
 		ok := false
-		for _, user := range s.v.GetStringSlice("slack.DenyUsers") {
+		for _, user := range rc.Slack.DenyUsers {
 			if user == s.sinfo.User.Name {
 				ok = true
 				break
@@ -518,7 +567,7 @@ func (s *Slack) loginToSlack() (*slack.Client, error) {
 		return nil, err
 	}
 
-	go s.handleSlack()
+	go s.handleSlack(context.TODO())
 	go s.onConnect()
 
 	s.connected = true
@@ -526,7 +575,8 @@ func (s *Slack) loginToSlack() (*slack.Client, error) {
 	return s.sc, nil
 }
 
-func (s *Slack) handleSlack() {
+//nolint:funlen,gocyclo
+func (s *Slack) handleSlack(ctx context.Context) {
 	for msg := range s.rtm.IncomingEvents {
 		logger.Tracef("handleSlack %s", spew.Sdump(msg))
 		switch ev := msg.Data.(type) {
@@ -537,9 +587,9 @@ func (s *Slack) handleSlack() {
 				s.handleSlackActionPost(ev)
 			}
 		case *slack.MemberLeftChannelEvent:
-			s.handleMemberLeftChannel(ev)
+			s.handleMemberLeftChannel(ctx, ev)
 		case *slack.MemberJoinedChannelEvent:
-			s.handleMemberJoinedChannel(ev)
+			s.handleMemberJoinedChannel(ctx, ev)
 		case *slack.DisconnectedEvent:
 			logger.Debug("disconnected event received, we should reconnect now..")
 		case *slack.ReactionAddedEvent:
@@ -631,12 +681,12 @@ func (s *Slack) handleActionMisc(userID, channelID, msg string) {
 	}
 }
 
-func (s *Slack) handleMemberLeftChannel(rmsg *slack.MemberLeftChannelEvent) {
+func (s *Slack) handleMemberLeftChannel(ctx context.Context, rmsg *slack.MemberLeftChannelEvent) {
 	event := &bridge.Event{
 		Type: "channel_remove",
 		Data: &bridge.ChannelRemoveEvent{
 			Removed: []*bridge.UserInfo{
-				s.GetUser(rmsg.User),
+				s.GetUser(ctx, rmsg.User),
 			},
 			ChannelID: rmsg.Channel,
 		},
@@ -645,12 +695,12 @@ func (s *Slack) handleMemberLeftChannel(rmsg *slack.MemberLeftChannelEvent) {
 	s.eventChan <- event
 }
 
-func (s *Slack) handleMemberJoinedChannel(rmsg *slack.MemberJoinedChannelEvent) {
+func (s *Slack) handleMemberJoinedChannel(ctx context.Context, rmsg *slack.MemberJoinedChannelEvent) {
 	var adder *bridge.UserInfo
 
 	if rmsg.Inviter != "" {
 		adder = &bridge.UserInfo{
-			Nick: s.GetUser(rmsg.Inviter).Nick,
+			Nick: s.GetUser(ctx, rmsg.Inviter).Nick,
 		}
 	}
 
@@ -658,7 +708,7 @@ func (s *Slack) handleMemberJoinedChannel(rmsg *slack.MemberJoinedChannelEvent) 
 		Type: "channel_add",
 		Data: &bridge.ChannelAddEvent{
 			Added: []*bridge.UserInfo{
-				s.GetUser(rmsg.User),
+				s.GetUser(ctx, rmsg.User),
 			},
 			Adder:     adder,
 			ChannelID: rmsg.Channel,
@@ -690,9 +740,7 @@ func (s *Slack) getSlackUserFromMessage(rmsg *slack.MessageEvent) (*slack.User, 
 		}
 
 		if rmsg.Username == "" {
-			bot, err := s.rtm.GetBotInfo(slack.GetBotInfoParameters{
-				Bot: rmsg.BotID,
-			})
+			bot, err := s.rtm.GetBotInfo(slack.GetBotInfoParameters{Bot: rmsg.BotID})
 			if err != nil {
 				suser.Profile.DisplayName = "bot"
 				suser.Name = "bot"
@@ -878,8 +926,10 @@ func (s *Slack) createUser(slackuser *slack.User) *bridge.UserInfo {
 		return &bridge.UserInfo{}
 	}
 
+	rc := s.cfg.Current()
+
 	nick := slackuser.Name
-	if (s.v.GetBool("slack.PreferNickname") || s.v.GetBool("slack.UseDisplayName")) && isValidNick(slackuser.Profile.DisplayName) {
+	if (rc.Slack.PreferNickname || rc.Slack.UseDisplayName) && isValidNick(slackuser.Profile.DisplayName) {
 		nick = slackuser.Profile.DisplayName
 	}
 
@@ -961,26 +1011,42 @@ func (s *Slack) Connected() bool {
 	return s.connected
 }
 
-func (s *Slack) MsgUserThread(username, parentID, text string) (string, error) {
+func (s *Slack) MsgUserThread(ctx context.Context, username, parentID, text string) (string, error) {
 	return "", nil
 }
 
-func (s *Slack) MsgChannelThread(username, parentID, text string) (string, error) {
+func (s *Slack) MsgChannelThread(ctx context.Context, username, parentID, text string) (string, error) {
 	return "", nil
 }
 
-func (s *Slack) ModifyPost(channelID, text string) error {
+func (s *Slack) ModifyPost(ctx context.Context, channelID, text string) error {
 	return nil
 }
 
-func (s *Slack) AddReaction(msgID, emoji string) error {
+func (s *Slack) AddReaction(ctx context.Context, msgID, emoji string) error {
 	return nil
 }
 
-func (s *Slack) RemoveReaction(msgID, emoji string) error {
+func (s *Slack) RemoveReaction(ctx context.Context, msgID, emoji string) error {
 	return nil
 }
 
 func (s *Slack) GetLastSentMsgs() []string {
 	return []string{}
+}
+
+func (s *Slack) Config() any {
+	return &s.cfg.Current().Slack
+}
+
+func (s *Slack) BridgeConfig() *config.BridgeConfig {
+	return &s.cfg.Current().Slack.Bridge
+}
+
+func (s *Slack) FormatterConfig() *config.FormatterConfig {
+	return &s.cfg.Current().Slack.Formatter
+}
+
+func (s *Slack) GetReplayEvents(ctx context.Context, channelID string, since int64) []*bridge.Event {
+	return []*bridge.Event{}
 }

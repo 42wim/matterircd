@@ -24,12 +24,12 @@
 
 [![Join the IRC chat at https://web.libera.chat/gamja/?channels=#matterircd](https://img.shields.io/badge/IRC-matterircd-green.svg)](https://web.libera.chat/gamja/?channels=#matterircd)
 
-Minimal IRC server which integrates with [mattermost](https://www.mattermost.org) and [slack](https://www.slack.com)
+Minimal IRC server which integrates with [mattermost](https://www.mattermost.org) and [slack](https://www.slack.com).  
 Tested on FreeBSD / Linux / Windows
 
 ## Compatibility
 
-- Matterircd works with slack, mastodon and mattermost 6.x, 7.x
+- Matterircd works with slack, mastodon and mattermost 10.x, 11.x
 
 Master branch of matterircd should always work against latest STABLE mattermost release.
 
@@ -66,7 +66,13 @@ You can find the binaries [here](https://github.com/42wim/matterircd/releases/la
 
 ## Building
 
-Go 1.17+ is required
+Go 1.22+ is required
+
+```bash
+go build -ldflags="-X main.githash=$(git describe --always --dirty --exclude '*')"
+```
+
+Or:
 
 ```bash
 go install github.com/42wim/matterircd
@@ -81,7 +87,7 @@ matterircd
 
 ## Config file
 
-See [matterircd.toml.example](https://github.com/42wim/matterircd/blob/master/matterircd.toml.example)  
+See [matterircd.toml.example](https://github.com/42wim/matterircd/blob/master/matterircd.toml.example).  
 Run with `matterircd --conf matterircd.toml`
 
 ## Usage
@@ -267,4 +273,5 @@ running more quickly:
 
 ## Related
 
-- [matterircd-complete](https://github.com/hloeung/matterircd-complete) - better irssi/mattermost/matterircd integration
+- [matterclient](https://github.com/matterbridge/matterclient) - Minimal library used to interact with the Mattermost chat server.
+- [matterircd-complete](https://github.com/hloeung/matterircd-complete) - better irssi/mattermost/matterircd integration.

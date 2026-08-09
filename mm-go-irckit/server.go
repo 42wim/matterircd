@@ -94,6 +94,8 @@ type ServerConfig struct {
 	Commands Commands
 }
 
+var serviceName = "service"
+
 func (c ServerConfig) Server() Server {
 	if c.NewChannel == nil {
 		c.NewChannel = NewChannel
@@ -224,46 +226,72 @@ func (s *server) HasChannel(channelID string) (Channel, bool) {
 
 // Channel returns an existing or new channel with the give name.
 func (s *server) Channel(channelID string) Channel {
-	s.Lock()
+	s.RLock()
 	ch, ok := s.channels[channelID]
-	if !ok {
-		service := s.u.br.Protocol()
-		name := s.u.br.GetChannelName(channelID)
+	s.RUnlock()
 
-		info, err := s.u.br.GetChannel(channelID)
-		if err != nil {
-			// don't error on our special channels
-			if channelID != "" && !strings.HasPrefix(channelID, "&") && channelID != s.u.Nick && channelID != s.u.Username {
-				logger.Errorf("didn't find channel %s (%s): %s", channelID, name, err)
-			}
-			info = &bridge.ChannelInfo{}
-		}
-
-		modes := make(map[string]bool)
-		modes["p"] = info.Private
-
-		newFn := s.config.NewChannel
-		ch = newFn(s, channelID, name, service, modes)
-
-		logger.Debugf("new channel id: %s, name: %s", channelID, name)
-
-		s.channels[channelID] = ch
-		s.channels[name] = ch
-		s.Unlock()
-	} else {
-		s.Unlock()
+	if ok {
+		return ch
 	}
-	return ch
+
+	var service, name string
+	var info *bridge.ChannelInfo
+	var err error
+
+	// Safely retrieve the global user pointer to prevent concurrent dereference panics
+	s.RLock()
+	u := s.u
+	s.RUnlock()
+
+	if u != nil && u.br != nil {
+		service = u.br.Protocol()
+		name = u.br.GetChannelName(u.ctx, channelID)
+		info, err = u.br.GetChannel(u.ctx, channelID)
+	} else {
+		service = serviceName
+		name = channelID
+		err = errors.New("no active user bridge")
+	}
+
+	if err != nil {
+		// don't error on our special channels
+		if channelID != "" && !strings.HasPrefix(channelID, "&") && u != nil && channelID != u.Nick && channelID != u.Username {
+			logger.Errorf("didn't find channel %s (%s): %s", channelID, name, err)
+		}
+		info = &bridge.ChannelInfo{}
+	}
+
+	modes := make(map[string]bool, 1)
+	if info.Private {
+		modes["p"] = true
+	}
+
+	newCh := s.config.NewChannel(s, channelID, name, service, modes)
+
+	s.Lock()
+	defer s.Unlock()
+
+	if ch, ok := s.channels[channelID]; ok {
+		return ch
+	}
+
+	logger.Tracef("new channel %s (id: %s)", name, channelID)
+
+	s.channels[channelID] = newCh
+	s.channels[name] = newCh
+
+	return newCh
 }
 
-// UnlinkChannel unlinks the channel from the server's storage, returns whether it existed.
+// UnlinkChannel unlinks the channel from the server's storage.
+// By iterating the entire map, we guarantee all aliases are eradicated,
+// preventing ghost channels from lingering in memory and blocking the GC.
 func (s *server) UnlinkChannel(ch Channel) {
 	s.Lock()
-	chStored := s.channels[ch.String()]
-	r := chStored == ch
-	if r {
-		delete(s.channels, ch.String())
-		delete(s.channels, ch.ID())
+	for k, v := range s.channels {
+		if v == ch {
+			delete(s.channels, k)
+		}
 	}
 	s.Unlock()
 }
@@ -281,12 +309,27 @@ func (s *server) Connect(u *User) error {
 
 // Quit will remove the user from all channels and disconnect.
 func (s *server) Quit(u *User, message string) {
-	go u.Close()
-	s.Lock()
-	delete(s.users, u.ID())
-	s.Unlock()
+	if u.ctx != nil && u.ctx.Err() != nil {
+		return
+	}
 
-	u.br.Logout()
+	if u.cancel != nil {
+		u.cancel()
+	}
+
+	u.eventLoopMutex.Lock()
+	if u.br != nil {
+		_ = u.br.Logout(u.ctx)
+	}
+	u.eventLoopMutex.Unlock()
+
+	for _, ch := range u.Channels() {
+		ch.Part(u, message)
+	}
+
+	s.sweep(u)
+
+	go u.Close()
 }
 
 // Len returns the number of users connected to the server.
@@ -317,9 +360,9 @@ func (s *server) welcome(u *User) error {
 			Trailing: fmt.Sprintf("This server was created %s", s.created.Format(time.UnixDate)),
 		},
 		&irc.Message{
-			Prefix:   s.Prefix(),
-			Command:  irc.RPL_MYINFO,
-			Params:   []string{u.Nick, s.config.Name, s.config.Version, "o", "o"},
+			Prefix:  s.Prefix(),
+			Command: irc.RPL_MYINFO,
+			Params:  []string{u.Nick, s.config.Name, s.config.Version, "o", "o"},
 		},
 		&irc.Message{
 			Prefix:   s.Prefix(),
@@ -358,19 +401,33 @@ func (s *server) handle(u *User) {
 		}
 		go func(msg *irc.Message) {
 			err := s.commands.Run(s, u, msg)
-			logger.Debugf("Executed %#v %#v", msg, err)
+			if msg.Command == irc.PING {
+				logger.Tracef("Executed %#v %#v", msg, err)
+			} else {
+				logger.Debugf("Executed %#v %#v", msg, err)
+			}
 			if err == ErrUnknownCommand {
 				// TODO: Emit event?
 			} else if err != nil {
-				logger.Errorf("handler error for %s: %s", u.ID(), err.Error())
+				errMsg := fmt.Sprintf("%s: %#v", err.Error(), msg)
+				logger.Errorf("handler error for %s: %s", u.ID(), errMsg)
+				s.EncodeMessage(u, irc.PRIVMSG, []string{u.Nick}, errMsg) //nolint:errcheck
 			}
 		}(msg)
 	}
 }
 
 func (s *server) BatchAdd(users []*User) {
+	if len(users) == 0 {
+		return
+	}
+
 	s.Lock()
 	defer s.Unlock()
+
+	if s.users == nil {
+		s.users = make(map[string]*User, len(users))
+	}
 
 	for _, u := range users {
 		id := u.ID()
@@ -403,7 +460,7 @@ func (s *server) handshake(u *User) error {
 	u.Host = u.ResolveHost()
 	go u.Decode()
 
-	timeout := u.v.GetInt("HandshakeTimeout")
+	timeout := u.cfg.Current().HandshakeTimeout
 	if timeout == 0 {
 		timeout = 10
 	}
@@ -487,7 +544,7 @@ outerloop:
 						Nick: service,
 						User: service,
 						Real: service,
-						Host: "service",
+						Host: serviceName,
 					},
 					channels: map[Channel]struct{}{},
 				},
@@ -504,15 +561,95 @@ outerloop:
 }
 
 func (s *server) Logout(user *User) {
-	channels := user.Channels()
-	for _, ch := range channels {
-		for _, other := range ch.Users() {
-			s.Lock()
-			delete(s.users, other.ID())
-			s.Unlock()
-		}
+	for _, ch := range user.Channels() {
 		ch.Part(user, "")
-		ch.Unlink()
+	}
+
+	s.sweep(user)
+}
+
+// sweep cleans up empty channels, orphaned ghosts, and the global server registry.
+//
+//nolint:funlen,gocognit,gocyclo
+func (s *server) sweep(u *User) {
+	// Global Channel Sweep
+	s.RLock()
+	uniqueChannels := make(map[Channel]struct{})
+	for _, ch := range s.channels {
+		uniqueChannels[ch] = struct{}{}
+	}
+	s.RUnlock()
+
+	for ch := range uniqueChannels {
+		realUsers := 0
+		for _, other := range ch.Users() {
+			if !other.Ghost {
+				realUsers++
+			}
+		}
+
+		if realUsers == 0 {
+			for _, other := range ch.Users() {
+				ch.Part(other, "")
+			}
+			s.UnlinkChannel(ch)
+		}
+	}
+
+	// Global Server Registry & Pointer Sweep
+	s.Lock()
+	for id, userPtr := range s.users {
+		if userPtr == u {
+			delete(s.users, id)
+		}
+	}
+
+	if s.u == u {
+		s.u = nil
+		for _, other := range s.users {
+			if !other.Ghost && other.br != nil {
+				s.u = other
+				break
+			}
+		}
+	}
+	s.Unlock()
+
+	// Ghost Sweeper
+	s.RLock()
+	activeGhosts := make(map[*User]struct{})
+	for _, ch := range s.channels {
+		for _, usr := range ch.Users() {
+			// Deterministic check: No TCP connection + not the service bot = Ghost
+			if usr.Conn == nil && usr.Host != serviceName {
+				activeGhosts[usr] = struct{}{}
+			}
+		}
+	}
+
+	var orphaned []string
+	for id, ghost := range s.users {
+		if ghost.Conn == nil && ghost.Host != serviceName {
+			if _, isActive := activeGhosts[ghost]; !isActive {
+				orphaned = append(orphaned, id)
+			}
+		}
+	}
+	s.RUnlock()
+
+	if len(orphaned) > 0 {
+		s.Lock()
+		for _, id := range orphaned {
+			if ghost, ok := s.users[id]; ok {
+				// EXPLICITLY release the context to prevent the Go runtime
+				// from leaking the struct in the heap!
+				if ghost.cancel != nil {
+					ghost.cancel()
+				}
+			}
+			delete(s.users, id)
+		}
+		s.Unlock()
 	}
 }
 

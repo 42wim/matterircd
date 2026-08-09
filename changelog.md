@@ -1,3 +1,107 @@
+# v0.31.0
+
+## New features
+
+- general: Go version upgrade, v1.21 -> 1.24 (#661)
+- general: Rework the "config" hot-reloading (#692, #712, #726)
+- general: Add option to enable profiling with Go pprof (#727)
+- general: Allow toggling of DEBUG & TRACE level logging as well as profiling on the fly without requiring a full restart (#728)
+- mattermost: Add support for emoji and Markdown in Mattermost message attachments (#663)
+- mattermost: Add support for showing embeds & preview for posts (#708, #711)
+- mattermost: Add support for custom user statuses (#732)
+
+## Enhancement
+
+- general: Reduce memory allocations
+  - Preallocate slices (#647)
+  - Refactor CmdWho(), CmdNames() & SendNamesResponse() (#704)
+- general: Reduce memory usage
+  - Avoid string copying where we can (#648)
+  - Use strings.Builder where we can (#650)
+  - Replace with zero-allocation string splitting (#654, #655)
+  - Improve how we handle emojis and reactions (#694, #701)
+  - Improve how we handle line word wrapping (#696)
+  - Switch BatchJoin() to use lazy allocation as well as zero-allocation (#700)
+  - Improve how we handle Markdown processing (#702)
+- general: Cleaner IRC disconnect / cose (#662)
+- general: Reduce initial start up time by reducing throttling (#716)
+- general: Sort channels on initial start up batch join (#716)
+- general: Sort WHO, NAMES, LIST IRC replies (#731)
+- general: Reduce logging noise on DEBUG level logging (#730, #735)
+- general: Improve logging (#733, #737)
+- mattermost: Allow overriding Markdown block quote character (#636)
+- mattermost: Apply HTTP connection tuning (#638)
+- mattermost: Better handle channels with large no. of users by batching getting user statuses (#643)
+- mattermost: Reduce Mattermost API calls
+  - Refactor pagination (#644, #645)
+  - Cache team/users & channels on reconnect (#656, #715)
+  - Replace user status gathering to use WebSocket and caching (#665)
+  - Cache users & users in channels/teams (#667)
+  - Cache channels (#668)
+  - Reduce channel sync API calls on join / leave (#687)
+  - Reduce channel sync API calls on various WebSocket events (#688, #738)
+  - Remove duplicate GetPost() API calls when dealing with *reaction* events (#689)
+  - Save channels' LastPostAt and have GetPostsSince() use it (#721)
+  - Save channels' LastPostAt and have GetLastViewedAt() use it (#722)
+  - Reduce for parent reply messages, especially for reactions (#736)
+- mattermost: Improve connection aliveness check using a combination of WebSocket and HTTP API calls (#657)
+- mattermost: Use Goroutines for parallel processing of events off the message channel (#658, #659, #669)
+- mattermost: Reduce memory allocations / usage
+  - JSON payload processing (#660, #717)
+  - Disable WebSocket compression (#693)
+  - Store a minimal "summarized" user info records (#697)
+  - Improve Mattermost API data retrieval (#734)
+
+## Bugfix
+
+- general: Surface errors to user when cannot send DM as well as handler errors (#641)
+- general: Fix handling of Markdown block quotes (#653)
+- general: Improve locking so it's not held waiting on external API calls (#681)
+- general: Improve locking so it's not held waiting for write/Encode to the connected IRC client to complete (#682)
+- general: Rework the "config" hot-reloading fixing concurrent config map read & write crashes (#692)
+- general: Surface errors on failing to listen/bind on network port and DB errors on start up (#729)
+- general: Fix Goroutine & memory leaks on disconnect / reconnect accumulating on frequence occurances (#739)
+- mattermost: Fix segmentation fault on login when no primary team (#646)
+- mattermost: Fix handling of CTCP ACTION (/me) messages (#649)
+- mattermost: Fix crash on "system" user lookup (#651)
+- mattermost: Fix catastrophic backtracking / ReDoS in Markdown formatting RegEx (#666)
+- mattermost: Fix infinite HTTP API loop (#670)
+- mattermost: Fix to ensure all system messages are from the "system" user (#678)
+- mattermost: Fix to ensure all tickets / timers are cleaned up (#679)
+- mattermost: Fix handling of archived & converted channels (#705, #706)
+- mattermost: Surface errors for when failing to join channels (#720)
+
+# v0.30.0
+
+## New features
+
+- general: Convert IRC formatting / emphasis to Markdown (#546)
+- general: Show emojis by converting their string/aliases to unicode (#564, #629, #631)
+- mattermost: Add support for Slack Message attachments (#575, #597, #598, #599, #601, #629)
+- mattermost: Add support for Direct Message (DM) header updates, as topics (#581)
+- mattermost: Add support for Mattermost's own message attachments (#610, #611, #612, #613, #617, #618, #621, #622, #625, #629)
+- mattermost: Add "details" service to show details on a specified Mattermost post (#605)
+- mattermost: Add support for ephemeral posts (#614, #616, #624)
+- mattermost: Add option to show own reactions "added to" or "removed from" posts (#630)
+- mattermost: Add basic Mattermost channel header get & set (#615)
+
+## Enhancement
+
+- mattermost: Improve message search (#553)
+- mattermost: Allow overriding Default Server & Default Team (#558)
+- mattermost: Updated to support and work with Mattermost 11 (#591)
+- mattermost: Improve Matterpoll messages (#602)
+- mattermost: Allow showing own posts when edited or deleted (#603)
+- mattermost: Allow prefixing code block texts (#606, #607, #608)
+- mattermost: Reduce Mattermost API GetData() calls (#609)
+- mattermost: Add support for markdown block quotes in addition to the usual bold & italics (#623)
+
+## Bugfix
+
+- mattermost: join and part/leave on message replay (#567)
+- mattermost: Fix addition of edited/deleted postfix/suffix so not on a new line (#600, #628)
+- mattermost: Fix crash for scrollback when no channel found or no access as reported in #586 (#604)
+
 # v0.29.0
 
 ## Enhancement

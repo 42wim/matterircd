@@ -6,8 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mattermost/mattermost/server/public/model"
-	"github.com/muesli/reflow/wordwrap"
+	"github.com/42wim/matterircd/utils"
 	"github.com/sorcix/irc"
 )
 
@@ -102,6 +101,9 @@ func NewChannel(server Server, channelID string, name string, service string, mo
 }
 
 func (ch *channel) GetTopic() string {
+	ch.mu.RLock()
+	defer ch.mu.RUnlock()
+
 	return ch.topic
 }
 
@@ -128,24 +130,30 @@ func (ch *channel) ID() string {
 }
 
 func (ch *channel) Message(from *User, text string) {
-	text = wordwrap.String(text, 440)
-	lines := strings.Split(text, "\n")
-	for _, l := range lines {
-		msg := &irc.Message{
-			Prefix:        from.Prefix(),
-			Command:       irc.PRIVMSG,
-			Params:        []string{ch.name},
-			Trailing:      l,
-			EmptyTrailing: true,
+	text = utils.WrapMessage(text, 440)
+
+	msg := irc.Message{
+		Prefix:        from.Prefix(),
+		Command:       irc.PRIVMSG,
+		Params:        []string{ch.name},
+		EmptyTrailing: true,
+	}
+
+	users := ch.Users()
+
+	for {
+		line, rest, found := strings.Cut(text, "\n")
+		line = strings.TrimSuffix(line, "\r")
+		msg.Trailing = line
+
+		for _, to := range users {
+			to.Encode(&msg) //nolint:errcheck
 		}
 
-		ch.mu.RLock()
-
-		for _, to := range ch.usersIdx {
-			to.Encode(msg)
+		if !found {
+			break
 		}
-
-		ch.mu.RUnlock()
+		text = rest
 	}
 }
 
@@ -167,29 +175,30 @@ func (ch *channel) Part(u *User, text string) {
 			Prefix:   ch.Prefix(),
 			Command:  irc.ERR_NOTONCHANNEL,
 			Params:   []string{ch.name},
-			Trailing: "You're not on that channel",
+			Trailing: "User not on that channel",
 		})
 
 		return
 	}
 
-	u.Encode(msg)
-
 	delete(ch.usersIdx, u.ID())
+	users := make([]*User, 0, len(ch.usersIdx))
+	for _, to := range ch.usersIdx {
+		users = append(users, to)
+	}
+	ch.mu.Unlock()
 
 	u.Lock()
-
 	delete(u.channels, ch)
-
 	u.Unlock()
 
-	for _, to := range ch.usersIdx {
+	u.Encode(msg) //nolint:errcheck
+
+	for _, to := range users {
 		if !to.Ghost {
 			to.Encode(msg)
 		}
 	}
-
-	ch.mu.Unlock()
 }
 
 // Unlink will disassociate the Channel from the Server.
@@ -200,18 +209,20 @@ func (ch *channel) Unlink() {
 // Close will evict all users in the channel.
 func (ch *channel) Close() error {
 	ch.mu.Lock()
+	users := make([]*User, 0, len(ch.usersIdx))
+	for _, u := range ch.usersIdx {
+		users = append(users, u)
+	}
+	ch.usersIdx = make(map[string]*User)
+	ch.mu.Unlock()
 
-	for _, to := range ch.usersIdx {
+	for _, to := range users {
 		to.Encode(&irc.Message{
 			Prefix:  to.Prefix(),
 			Command: irc.PART,
 			Params:  []string{ch.name},
 		})
 	}
-
-	ch.usersIdx = make(map[string]*User)
-
-	ch.mu.Unlock()
 
 	return nil
 }
@@ -228,18 +239,18 @@ func (ch *channel) Invite(from Prefixer, u *User) error {
 
 // Topic sets the topic of the channel (handler for TOPIC).
 func (ch *channel) Topic(from Prefixer, text string) {
-	ch.mu.RLock()
+	ch.mu.Lock()
 
 	// this probably an echo
 	if ch.topic == text {
-		ch.mu.RUnlock()
+		ch.mu.Unlock()
 		return
 	}
 
-	ch.topic = text
 	// no newlines in topic
-	ch.topic = strings.ReplaceAll(ch.topic, "\n", " ")
-	ch.topic = strings.ReplaceAll(ch.topic, "\r", " ")
+	text = strings.ReplaceAll(text, "\n", " ")
+	text = strings.ReplaceAll(text, "\r", " ")
+	ch.topic = text
 
 	msg := &irc.Message{
 		Prefix:   from.Prefix(),
@@ -248,75 +259,123 @@ func (ch *channel) Topic(from Prefixer, text string) {
 		Trailing: ch.topic,
 	}
 
+	users := make([]*User, 0, len(ch.usersIdx))
+	for _, u := range ch.usersIdx {
+		users = append(users, u)
+	}
+
+	ch.mu.Unlock()
+
 	// only send join messages to real users
-	for _, to := range ch.usersIdx {
+	for _, to := range users {
 		if !to.Ghost {
 			to.Encode(msg)
 		}
 	}
-
-	ch.mu.RUnlock()
 }
 
 // SendNamesResponse sends a User messages indicating the current members of the Channel.
 func (ch *channel) SendNamesResponse(u *User) error {
-	msgs := []*irc.Message{}
-	line := ""
-	i := 0
+	names := ch.Names()
+	sort.Strings(names)
 
-	for _, name := range ch.Names() {
-		if i+len(name) < 400 {
-			line += name + " "
-			i += len(name)
+	prefix := ch.Prefix()
+	if len(names) == 0 {
+		end := &irc.Message{
+			Prefix:   prefix,
+			Params:   []string{u.Nick, ch.name},
+			Command:  irc.RPL_ENDOFNAMES,
+			Trailing: "End of /NAMES list.",
+		}
+		return u.Encode(end)
+	}
+
+	estimatedMsgs := (len(names) / 20) + 2
+	messages := make([]irc.Message, 0, estimatedMsgs)
+	sharedNamReplyParams := []string{u.Nick, "=", ch.name}
+
+	var line strings.Builder
+	line.Grow(512)
+	i := 0
+	for _, name := range names {
+		nameLen := len(name) + 1
+		if i+nameLen < 400 {
+			line.WriteString(name)
+			line.WriteByte(' ')
+			i += nameLen
 		} else {
-			msgs = append(msgs, &irc.Message{
-				Prefix:   ch.Prefix(),
+			messages = append(messages, irc.Message{
+				Prefix:   prefix,
 				Command:  irc.RPL_NAMREPLY,
-				Params:   []string{u.Nick, "=", ch.name},
-				Trailing: line,
+				Params:   sharedNamReplyParams,
+				Trailing: line.String(),
 			})
-			line = ""
-			line += name + " "
-			i = len(name)
+			line.Reset()
+			line.WriteString(name)
+			line.WriteByte(' ')
+			i = nameLen
 		}
 	}
 
-	msgs = append(msgs, &irc.Message{
-		Prefix:   ch.Prefix(),
-		Command:  irc.RPL_NAMREPLY,
-		Params:   []string{u.Nick, "=", ch.name},
-		Trailing: line,
-	})
+	if line.Len() > 0 {
+		messages = append(messages, irc.Message{
+			Prefix:   prefix,
+			Command:  irc.RPL_NAMREPLY,
+			Params:   sharedNamReplyParams,
+			Trailing: line.String(),
+		})
+	}
 
-	msgs = append(msgs, &irc.Message{
-		Prefix:   ch.Prefix(),
+	messages = append(messages, irc.Message{
+		Prefix:   prefix,
 		Params:   []string{u.Nick, ch.name},
 		Command:  irc.RPL_ENDOFNAMES,
 		Trailing: "End of /NAMES list.",
 	})
 
-	return u.Encode(msgs...)
+	r := make([]*irc.Message, len(messages))
+	for j := range messages {
+		r[j] = &messages[j]
+	}
+
+	return u.Encode(r...)
 }
 
 func (ch *channel) BatchJoin(inputusers []*User) error {
-	// TODO: Check if user is already here?
-	var users []*User
-
-	ch.mu.Lock()
-
-	for _, u := range inputusers {
-		if _, exists := ch.usersIdx[u.ID()]; !exists {
-			users = append(users, u)
-		}
+	if len(inputusers) == 0 {
+		return nil
 	}
 
+	ch.mu.Lock()
+	if ch.usersIdx == nil {
+		ch.usersIdx = make(map[string]*User, len(inputusers))
+	}
+
+	// We only need to post-process the "Me" user to update their internal map.
+	// A tiny stack buffer is more than enough since there is typically only 1 "Me" user.
+	var inlineBuf [2]*User
+	meUsers := inlineBuf[:0]
+
+	for _, u := range inputusers {
+		uid := u.ID()
+		if _, exists := ch.usersIdx[uid]; !exists {
+			ch.usersIdx[uid] = u
+
+			// Only gather the "Me" user(s) for the secondary loop.
+			// This prevents allocating a massive slice for ghost users.
+			if u.UserInfo != nil && u.UserInfo.Me {
+				meUsers = append(meUsers, u)
+			}
+		}
+	}
 	ch.mu.Unlock()
 
-	for _, u := range users {
-		ch.mu.Lock()
-		ch.usersIdx[u.ID()] = u
-		ch.mu.Unlock()
+	// Process only the "Me" user(s)
+	for _, u := range meUsers {
 		u.Lock()
+		if u.channels == nil {
+			u.channels = make(map[Channel]struct{}, 2)
+		}
 		u.channels[ch] = struct{}{}
 		u.Unlock()
 	}
@@ -327,12 +386,14 @@ func (ch *channel) BatchJoin(inputusers []*User) error {
 // Join introduces a User to the channel (sends relevant messages, stores).
 func (ch *channel) Join(u *User) error {
 	// TODO: Check if user is already here?
-	ch.mu.Lock()
 
 	if u.ID() == "" {
-		ch.mu.Unlock()
-
 		return nil
+	}
+
+	ch.mu.Lock()
+	if ch.usersIdx == nil {
+		ch.usersIdx = make(map[string]*User)
 	}
 
 	if _, exists := ch.usersIdx[u.ID()]; exists {
@@ -344,6 +405,10 @@ func (ch *channel) Join(u *User) error {
 
 	ch.mu.Unlock()
 	u.Lock()
+
+	if u.channels == nil {
+		u.channels = make(map[Channel]struct{})
+	}
 
 	u.channels[ch] = struct{}{}
 
@@ -361,16 +426,14 @@ func (ch *channel) Join(u *User) error {
 	}
 
 	// send regular users a notification of the join
-	ch.mu.RLock()
+	users := ch.Users()
 
-	for _, to := range ch.usersIdx {
+	for _, to := range users {
 		// only send join messages to real users
 		if !to.Ghost {
 			to.Encode(msg)
 		}
 	}
-
-	ch.mu.RUnlock()
 
 	ch.SendNamesResponse(u)
 
@@ -379,24 +442,21 @@ func (ch *channel) Join(u *User) error {
 
 func (ch *channel) HasUser(u *User) bool {
 	ch.mu.RLock()
+	defer ch.mu.RUnlock()
 
 	_, ok := ch.usersIdx[u.ID()]
-
-	ch.mu.RUnlock()
-
 	return ok
 }
 
 // Users returns an unsorted slice of users who are in the channel.
 func (ch *channel) Users() []*User {
 	ch.mu.RLock()
+	defer ch.mu.RUnlock()
 
 	users := make([]*User, 0, len(ch.usersIdx))
 	for _, u := range ch.usersIdx {
 		users = append(users, u)
 	}
-
-	ch.mu.RUnlock()
 
 	return users
 }
@@ -407,7 +467,7 @@ func (ch *channel) Names() []string {
 	names := make([]string, 0, len(users))
 
 	for _, u := range users {
-		if strings.Contains(u.Roles, model.SystemAdminRoleId) {
+		if strings.Contains(u.Roles, "system_admin") {
 			names = append(names, "@"+u.Nick)
 		} else {
 			names = append(names, u.Nick)
@@ -430,27 +490,38 @@ func (ch *channel) Len() int {
 
 func (ch *channel) Spoof(from string, text string, cmd string, maxlen ...int) {
 	if len(maxlen) == 0 {
-		text = wordwrap.String(text, 440)
+		text = utils.WrapMessage(text, 440)
 	} else {
-		text = wordwrap.String(text, maxlen[0])
+		text = utils.WrapMessage(text, maxlen[0])
 	}
-	lines := strings.Split(text, "\n")
-	for _, l := range lines {
-		msg := &irc.Message{
-			Prefix:        &irc.Prefix{Name: from, User: from, Host: from},
-			Command:       cmd,
-			Params:        []string{ch.name},
-			Trailing:      l,
-			EmptyTrailing: true,
+
+	prefix := irc.Prefix{
+		Name: from,
+		User: from,
+		Host: from,
+	}
+	msg := irc.Message{
+		Prefix:        &prefix,
+		Command:       cmd,
+		Params:        []string{ch.name},
+		EmptyTrailing: true,
+	}
+
+	users := ch.Users()
+
+	for {
+		line, rest, found := strings.Cut(text, "\n")
+		line = strings.TrimSuffix(line, "\r")
+		msg.Trailing = line
+
+		for _, to := range users {
+			to.Encode(&msg) //nolint:errcheck
 		}
 
-		ch.mu.RLock()
-
-		for _, to := range ch.usersIdx {
-			to.Encode(msg)
+		if !found {
+			break
 		}
-
-		ch.mu.RUnlock()
+		text = rest
 	}
 }
 

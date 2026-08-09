@@ -1,70 +1,83 @@
 package bridge
 
 import (
+	"context"
 	"time"
+
+	"github.com/42wim/matterircd/config"
 )
 
 type Bridger interface {
-	Invite(channelID, username string) error
-	Join(channelName string) (string, string, error)
-	List() (map[string]string, error)
-	Part(channel string) error
-	SetTopic(channelID, text string) error
-	Topic(channelID string) string
-	Kick(channelID, username string) error
-	Nick(name string) error
+	Invite(ctx context.Context, channelID, username string) error
+	Join(ctx context.Context, channelName string) (string, string, error)
+	List(ctx context.Context) (map[string]string, error)
+	Part(ctx context.Context, channel string) error
+	SetTopic(ctx context.Context, channelID, text string) error
+	Topic(ctx context.Context, channelID string) string
+	Kick(ctx context.Context, channelID, username string) error
+	Nick(ctx context.Context, name string) error
 
-	UpdateChannels() error
-	Logout() error
+	UpdateChannels(ctx context.Context) error
+	Logout(ctx context.Context) error
 	Connected() bool
 
-	MsgUser(userID, text string) (string, error)
-	MsgUserThread(userID, parentID, text string) (string, error)
-	MsgChannel(channelID, text string) (string, error)
-	MsgChannelThread(channelID, parentID, text string) (string, error)
+	MsgUser(ctx context.Context, userID, text string) (string, error)
+	MsgUserThread(ctx context.Context, userID, parentID, text string) (string, error)
+	MsgChannel(ctx context.Context, channelID, text string) (string, error)
+	MsgChannelThread(ctx context.Context, channelID, parentID, text string) (string, error)
 
-	AddReaction(msgID, emoji string) error
-	RemoveReaction(msgID, emoji string) error
+	AddReaction(ctx context.Context, msgID, emoji string) error
+	RemoveReaction(ctx context.Context, msgID, emoji string) error
 
-	StatusUser(userID string) (string, error)
-	StatusUsers() (map[string]string, error)
-	SetStatus(status string) error
+	StatusUser(ctx context.Context, userID string) (string, error)
+	StatusUsers(ctx context.Context) (map[string]string, error)
+	SetStatus(ctx context.Context, status string) error
 
 	Protocol() string
 
 	GetChannels() []*ChannelInfo
-	GetChannel(channelID string) (*ChannelInfo, error)
-	GetChannelName(channelID string) string
-	GetLastViewedAt(channelID string) int64
-	UpdateLastViewed(channelID string)
-	UpdateLastViewedUser(userID string) error
-	GetChannelID(name, teamID string) string
+	GetChannel(ctx context.Context, channelID string) (*ChannelInfo, error)
+	GetChannelName(ctx context.Context, channelID string) string
+	GetLastViewedAt(ctx context.Context, channelID string) int64
+	UpdateLastViewed(ctx context.Context, channelID string)
+	UpdateLastViewedUser(ctx context.Context, userID string) error
+	GetChannelID(ctx context.Context, name, teamID string) string
 
-	GetChannelUsers(channelID string) ([]*UserInfo, error)
+	GetChannelUsers(ctx context.Context, channelID string) ([]*UserInfo, error)
 	GetUsers() []*UserInfo
-	GetUser(userID string) *UserInfo
+	GetUser(ctx context.Context, userID string) *UserInfo
 	GetMe() *UserInfo
-	GetUserByUsername(username string) *UserInfo
-	SearchUsers(query string) ([]*UserInfo, error)
+	GetUserByUsername(ctx context.Context, username string) *UserInfo
+	SearchUsers(ctx context.Context, query string) ([]*UserInfo, error)
 
-	GetTeamName(teamID string) string
+	GetTeamName(ctx context.Context, teamID string) string
 
-	GetPostsSince(channelID string, since int64) interface{}
-	GetPosts(channelID string, limit int) interface{}
-	GetPostThread(postID string) interface{}
-	SearchPosts(search string) interface{}
-	ModifyPost(msgID, text string) error
-	GetFileLinks(fileIDs []string) []string
+	GetPostsSince(ctx context.Context, channelID string, since int64) []*Event
+	GetPosts(ctx context.Context, channelID string, limit int) []*Event
+	GetPostThread(ctx context.Context, postID string) []*Event
+	GetReplayEvents(ctx context.Context, channelID string, since int64) []*Event
+	SearchPosts(ctx context.Context, search string) []*Event
+
+	ModifyPost(ctx context.Context, msgID, text string) error
+	GetFileLinks(ctx context.Context, fileIDs []string) []string
 
 	GetLastSentMsgs() []string
+
+	Config() any
+	BridgeConfig() *config.BridgeConfig
+	FormatterConfig() *config.FormatterConfig
+
+	IsChannelMember(channelID string) bool
 }
 
 type ChannelInfo struct {
-	Name    string
-	ID      string
-	TeamID  string
-	DM      bool
-	Private bool
+	Name       string
+	ID         string
+	TeamID     string
+	DM         bool
+	Private    bool
+	LastPostAt int64
+	DeleteAt   int64
 }
 
 type UserInfo struct {
@@ -102,12 +115,16 @@ type ChannelAddEvent struct {
 	Adder     *UserInfo
 	Added     []*UserInfo
 	ChannelID string
+	Text      string
+	CreateAt  int64
 }
 
 type ChannelRemoveEvent struct {
 	Remover   *UserInfo
 	Removed   []*UserInfo
 	ChannelID string
+	Text      string
+	CreateAt  int64
 }
 
 type ChannelCreateEvent struct {
@@ -128,6 +145,7 @@ type ChannelMessageEvent struct {
 	MessageID   string
 	Event       string
 	ParentID    string
+	CreateAt    int64
 }
 
 type ChannelTopicEvent struct {
@@ -145,6 +163,7 @@ type DirectMessageEvent struct {
 	MessageID string
 	Event     string
 	ParentID  string
+	CreateAt  int64
 }
 
 type FileEvent struct {
@@ -158,6 +177,7 @@ type FileEvent struct {
 }
 
 type ReactionAddEvent struct {
+	Receiver    *UserInfo
 	Sender      *UserInfo
 	ChannelID   string
 	MessageID   string

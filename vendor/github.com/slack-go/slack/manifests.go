@@ -15,12 +15,14 @@ type Manifest struct {
 	OAuthConfig OAuthConfig      `json:"oauth_config,omitempty" yaml:"oauth_config,omitempty"`
 }
 
-// CreateManifest creates an app from an app manifest
+// CreateManifest creates an app from an app manifest.
+// For more details, see CreateManifestContext documentation.
 func (api *Client) CreateManifest(manifest *Manifest, token string) (*ManifestResponse, error) {
 	return api.CreateManifestContext(context.Background(), manifest, token)
 }
 
-// CreateManifestContext creates an app from an app manifest with a custom context
+// CreateManifestContext creates an app from an app manifest with a custom context.
+// Slack API docs: https://api.slack.com/methods/apps.manifest.create
 func (api *Client) CreateManifestContext(ctx context.Context, manifest *Manifest, token string) (*ManifestResponse, error) {
 	if token == "" {
 		token = api.configToken
@@ -45,12 +47,14 @@ func (api *Client) CreateManifestContext(ctx context.Context, manifest *Manifest
 	return response, response.Err()
 }
 
-// DeleteManifest permanently deletes an app created through app manifests
+// DeleteManifest permanently deletes an app created through app manifests.
+// For more details, see DeleteManifestContext documentation.
 func (api *Client) DeleteManifest(token string, appId string) (*SlackResponse, error) {
 	return api.DeleteManifestContext(context.Background(), token, appId)
 }
 
-// DeleteManifestContext permanently deletes an app created through app manifests with a custom context
+// DeleteManifestContext permanently deletes an app created through app manifests with a custom context.
+// Slack API docs: https://api.slack.com/methods/apps.manifest.delete
 func (api *Client) DeleteManifestContext(ctx context.Context, token string, appId string) (*SlackResponse, error) {
 	if token == "" {
 		token = api.configToken
@@ -70,12 +74,14 @@ func (api *Client) DeleteManifestContext(ctx context.Context, token string, appI
 	return response, response.Err()
 }
 
-// ExportManifest exports an app manifest from an existing app
+// ExportManifest exports an app manifest from an existing app.
+// For more details, see ExportManifestContext documentation.
 func (api *Client) ExportManifest(token string, appId string) (*Manifest, error) {
 	return api.ExportManifestContext(context.Background(), token, appId)
 }
 
-// ExportManifestContext exports an app manifest from an existing app with a custom context
+// ExportManifestContext exports an app manifest from an existing app with a custom context.
+// Slack API docs: https://api.slack.com/methods/apps.manifest.export
 func (api *Client) ExportManifestContext(ctx context.Context, token string, appId string) (*Manifest, error) {
 	if token == "" {
 		token = api.configToken
@@ -95,12 +101,14 @@ func (api *Client) ExportManifestContext(ctx context.Context, token string, appI
 	return &response.Manifest, response.Err()
 }
 
-// UpdateManifest updates an app from an app manifest
+// UpdateManifest updates an app from an app manifest.
+// For more details, see UpdateManifestContext documentation.
 func (api *Client) UpdateManifest(manifest *Manifest, token string, appId string) (*UpdateManifestResponse, error) {
 	return api.UpdateManifestContext(context.Background(), manifest, token, appId)
 }
 
-// UpdateManifestContext updates an app from an app manifest with a custom context
+// UpdateManifestContext updates an app from an app manifest with a custom context.
+// Slack API docs: https://api.slack.com/methods/apps.manifest.update
 func (api *Client) UpdateManifestContext(ctx context.Context, manifest *Manifest, token string, appId string) (*UpdateManifestResponse, error) {
 	if token == "" {
 		token = api.configToken
@@ -126,12 +134,14 @@ func (api *Client) UpdateManifestContext(ctx context.Context, manifest *Manifest
 	return response, response.Err()
 }
 
-// ValidateManifest sends a request to apps.manifest.validate to validate your app manifest
+// ValidateManifest sends a request to apps.manifest.validate to validate your app manifest.
+// For more details, see ValidateManifestContext documentation.
 func (api *Client) ValidateManifest(manifest *Manifest, token string, appId string) (*ManifestResponse, error) {
 	return api.ValidateManifestContext(context.Background(), manifest, token, appId)
 }
 
-// ValidateManifestContext sends a request to apps.manifest.validate to validate your app manifest with a custom context
+// ValidateManifestContext sends a request to apps.manifest.validate to validate your app manifest with a custom context.
+// Slack API docs: https://api.slack.com/methods/apps.manifest.validate
 func (api *Client) ValidateManifestContext(ctx context.Context, manifest *Manifest, token string, appId string) (*ManifestResponse, error) {
 	if token == "" {
 		token = api.configToken
@@ -177,11 +187,11 @@ type Display struct {
 
 // Settings is a group of settings corresponding to the Settings section of the app config pages.
 type Settings struct {
-	AllowedIPAddressRanges []string           `json:"allowed_ip_address_ranges,omitempty" yaml:"allowed_ip_address_ranges,omitempty"`
-	EventSubscriptions     EventSubscriptions `json:"event_subscriptions,omitempty" yaml:"event_subscriptions,omitempty"`
-	Interactivity          Interactivity      `json:"interactivity,omitempty" yaml:"interactivity,omitempty"`
-	OrgDeployEnabled       bool               `json:"org_deploy_enabled,omitempty" yaml:"org_deploy_enabled,omitempty"`
-	SocketModeEnabled      bool               `json:"socket_mode_enabled,omitempty" yaml:"socket_mode_enabled,omitempty"`
+	AllowedIPAddressRanges []string            `json:"allowed_ip_address_ranges,omitempty" yaml:"allowed_ip_address_ranges,omitempty"`
+	EventSubscriptions     *EventSubscriptions `json:"event_subscriptions,omitempty" yaml:"event_subscriptions,omitempty"`
+	Interactivity          *Interactivity      `json:"interactivity,omitempty" yaml:"interactivity,omitempty"`
+	OrgDeployEnabled       bool                `json:"org_deploy_enabled,omitempty" yaml:"org_deploy_enabled,omitempty"`
+	SocketModeEnabled      bool                `json:"socket_mode_enabled,omitempty" yaml:"socket_mode_enabled,omitempty"`
 }
 
 // EventSubscriptions is a group of settings that describe the Events API configuration
@@ -259,8 +269,10 @@ type OAuthConfig struct {
 
 // OAuthScopes is a group of settings that describe permission scopes configuration
 type OAuthScopes struct {
-	Bot  []string `json:"bot,omitempty" yaml:"bot,omitempty"`
-	User []string `json:"user,omitempty" yaml:"user,omitempty"`
+	Bot          []string `json:"bot,omitempty" yaml:"bot,omitempty"`
+	User         []string `json:"user,omitempty" yaml:"user,omitempty"`
+	BotOptional  []string `json:"bot_optional,omitempty" yaml:"bot_optional,omitempty"`
+	UserOptional []string `json:"user_optional,omitempty" yaml:"user_optional,omitempty"`
 }
 
 // ManifestResponse is the response returned by the API for apps.manifest.x endpoints
