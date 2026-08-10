@@ -35,6 +35,17 @@ type ProcessMessageOpts struct {
 	InlineCodeChar     string
 }
 
+// SummaryOpts holds configuration for shortening and summarizing text.
+type SummaryOpts struct {
+	DisableMarkdown bool
+	DisableEmoji    bool
+	BlockquoteChar  string
+	InlineCodeChar  string
+	MaxLength       int
+	UncountedPrefix string
+	Unicode         bool
+}
+
 // Reuse bytes.Buffer for Chroma to prevent large chunk allocations
 var chromaBufPool = sync.Pool{
 	New: func() any {
@@ -131,6 +142,70 @@ func FindClosestIRCColor(hexColor string) string {
 	}
 
 	return bestCode
+}
+
+// FormatAndShortenSummary formats markdown/emoji, collapses newlines, and shortens text.
+func FormatAndShortenSummary(text string, opts SummaryOpts) string {
+	if text == "" {
+		return ""
+	}
+
+	// Replace all newlines with space upfront to simplify processing.
+	// strings.ReplaceAll is highly optimized and allocation-free if there's no match.
+	text = strings.ReplaceAll(text, "\n", " ")
+
+	if !opts.DisableMarkdown {
+		text = Markdown2irc(text, opts.BlockquoteChar, opts.InlineCodeChar)
+	}
+
+	if !opts.DisableEmoji {
+		text = EmojiReplaceAliases(text)
+	}
+
+	if opts.MaxLength <= 0 || len(text) <= opts.MaxLength {
+		return text
+	}
+
+	ellipsis := "..."
+	if opts.Unicode {
+		ellipsis = "…"
+	}
+
+	var b strings.Builder
+	b.Grow(opts.MaxLength + 16)
+	currentLimit := opts.MaxLength
+
+	msg := text
+	for len(msg) > 0 {
+		if b.Len() >= currentLimit {
+			break
+		}
+
+		idx := strings.IndexAny(msg, " \t")
+		switch idx {
+		case -1:
+			processSummaryWord(&b, msg, opts.UncountedPrefix, ellipsis, &currentLimit)
+			msg = ""
+		case 0:
+			if b.Len() < currentLimit {
+				b.WriteByte(msg[0])
+			}
+
+			msg = msg[1:]
+		default:
+			processSummaryWord(&b, msg[:idx], opts.UncountedPrefix, ellipsis, &currentLimit)
+			msg = msg[idx:]
+		}
+	}
+
+	// Only append ellipsis if we actually cut the message short
+	if len(msg) > 0 {
+		b.WriteByte('\x0f')
+		b.WriteByte(' ')
+		b.WriteString(ellipsis)
+	}
+
+	return b.String()
 }
 
 // FormatFullCodeBlock handles syntax highlighting entirely in-memory and yields lines
@@ -328,14 +403,6 @@ func ProcessMessageText(text string, opts ProcessMessageOpts, yield func(line st
 	}
 }
 
-// isWordChar mimics ASCII \w (letters, digits, and underscores)
-func isWordChar(c byte) bool {
-	return (c >= 'a' && c <= 'z') ||
-		(c >= 'A' && c <= 'Z') ||
-		(c >= '0' && c <= '9') ||
-		c == '_'
-}
-
 func checkWordBoundaryStart(s string, idx int) bool {
 	if idx == 0 {
 		return true
@@ -363,6 +430,39 @@ func emitLines(text, prefix string, yield func(string)) {
 		}
 
 		text = rest
+	}
+}
+
+// isWordChar mimics ASCII \w (letters, digits, and underscores)
+func isWordChar(c byte) bool {
+	return (c >= 'a' && c <= 'z') ||
+		(c >= 'A' && c <= 'Z') ||
+		(c >= '0' && c <= '9') ||
+		c == '_'
+}
+
+func processSummaryWord(b *strings.Builder, word, uncounted, ellipsis string, currentLimit *int) {
+	if uncounted != "" && strings.HasPrefix(word, uncounted) {
+		*currentLimit += len(word) + 1
+		b.WriteString(word)
+
+		return
+	}
+
+	if len(word) > *currentLimit {
+		cut := min(*currentLimit*2/3, len(word))
+
+		// UTF-8 boundary check to avoid splitting runes
+		for cut > 0 && (word[cut]&0xC0) == 0x80 {
+			cut--
+		}
+
+		b.WriteString(word[:cut])
+		b.WriteString("[")
+		b.WriteString(ellipsis)
+		b.WriteString("]")
+	} else {
+		b.WriteString(word)
 	}
 }
 
