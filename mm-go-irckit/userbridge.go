@@ -432,16 +432,19 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 	suffix := ""
 	showContext := false
 	maxlen := 440
-	if u.Nick != systemUser {
+
+	if u.Nick == systemUser || (event.Sender != nil && event.Sender.Nick == systemUser) {
+		text = "\x1d" + text + "\x1d"
+	} else {
 		// Block quotes
 		trimmedText := strings.TrimLeft(text, " \t")
 		if !disableMarkdown && strings.HasPrefix(trimmedText, blockQuoteCharDefault) && blockQuoteChar != blockQuoteCharDefault {
 			text = strings.Replace(text, blockQuoteCharDefault, blockQuoteChar, 1)
 		}
+
 		text, prefix, suffix, showContext, maxlen = u.handleMessageThreadContext(event.ChannelID, event.MessageID, event.ParentID, event.Event, text)
-	} else {
-		text = "\x1d" + event.Text + "\x1d"
 	}
+
 	trimmedPrefix := strings.TrimSpace(prefix)
 	trimmedSuffix := strings.TrimSpace(suffix)
 

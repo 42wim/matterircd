@@ -1263,9 +1263,9 @@ func (m *Mattermost) handleWsActionPost(ctx context.Context, rmsg *model.WebSock
 			break
 		}
 
-		ghost = &bridge.UserInfo{
-			Nick: systemUser,
-		}
+		ghost = &bridge.UserInfo{Nick: systemUser}
+		msgID := ""
+		parentID := ""
 
 		if channelType == "D" {
 			sendSystemDM(data.Message, string(rmsg.EventType()))
@@ -1279,7 +1279,8 @@ func (m *Mattermost) handleWsActionPost(ctx context.Context, rmsg *model.WebSock
 				ChannelID:   data.ChannelId,
 				Sender:      ghost,
 				ChannelType: channelType,
-				MessageID:   data.Id,
+				MessageID:   msgID,
+				ParentID:    parentID,
 				Event:       string(rmsg.EventType()),
 			},
 		}
