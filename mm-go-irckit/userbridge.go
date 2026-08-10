@@ -125,6 +125,8 @@ func (u *User) handleEventChan() {
 				u.handleChannelCreateEvent(e)
 			case *bridge.ChannelDeleteEvent:
 				u.handleChannelDeleteEvent(e)
+			case *bridge.ChannelUpdateEvent:
+				u.handleChannelUpdateEvent(e)
 			case *bridge.UserUpdateEvent:
 				u.handleUserUpdateEvent(e)
 			case *bridge.StatusChangeEvent:
@@ -572,6 +574,61 @@ func (u *User) handleChannelDeleteEvent(event *bridge.ChannelDeleteEvent) {
 	} else {
 		logger.Debugf("ACTION_CHANNEL_DELETED not in channel %s (%s)", u.br.GetChannelName(u.ctx, event.ChannelID), event.ChannelID)
 	}
+}
+
+func (u *User) handleChannelUpdateEvent(e *bridge.ChannelUpdateEvent) {
+	newIRCChan := "#" + e.Name
+
+	ch := u.Srv.Channel(newIRCChan)
+	u.RLock()
+	_, alreadyJoined := u.channels[ch]
+	u.RUnlock()
+
+	// If we are already joined, it means only the Display Name or Purpose changed,
+	// not the actual URL/Routing name. Just send a notice.
+	if alreadyJoined {
+		noticeMsg := &irc.Message{
+			Prefix:   u.Srv.Prefix(),
+			Command:  irc.NOTICE,
+			Params:   []string{newIRCChan},
+			Trailing: fmt.Sprintf("[SERVER NOTICE] Channel updated. Display Name is now: %s", e.DisplayName),
+		}
+		_ = u.Encode(noticeMsg)
+
+		return
+	}
+
+	// The actual routing name changed. We join them to the new channel and leave
+	// the old window open so they keep their chat history.
+
+	// Send JOIN to the IRC client so it opens the new window
+	joinMsg := &irc.Message{
+		Prefix: &irc.Prefix{
+			Name: u.Nick,
+			User: u.User,
+			Host: u.Host,
+		},
+		Command: "JOIN",
+		Params:  []string{newIRCChan},
+	}
+	_ = u.Encode(joinMsg)
+
+	// Give them context in the new window so they aren't confused why it opened
+	noticeMsg := &irc.Message{
+		Prefix:   u.Srv.Prefix(),
+		Command:  irc.NOTICE,
+		Params:   []string{newIRCChan},
+		Trailing: fmt.Sprintf("[SERVER NOTICE] You have been joined here because an existing channel was renamed to %s (Display Name: %s).", newIRCChan, e.DisplayName),
+	}
+	_ = u.Encode(noticeMsg)
+
+	u.Lock()
+	if u.channels == nil {
+		u.channels = make(map[Channel]struct{})
+	}
+
+	u.channels[ch] = struct{}{}
+	u.Unlock()
 }
 
 func (u *User) handleUserUpdateEvent(event *bridge.UserUpdateEvent) {
@@ -1547,9 +1604,9 @@ func (u *User) updateMsgMapIndex(channelID string, counter int, messageID string
 func (u *User) formatContextMessage(ts, threadMsgID, msg string) string {
 	var formattedMsg string
 	switch {
-	case u.br.BridgeConfig().PrefixContext:
+	case u.br.BridgeConfig().PrefixContext && threadMsgID != "":
 		formattedMsg = threadMsgID + " " + msg
-	case u.br.BridgeConfig().SuffixContext:
+	case u.br.BridgeConfig().SuffixContext && threadMsgID != "":
 		formattedMsg = msg + " " + threadMsgID
 	default:
 		formattedMsg = msg
@@ -1562,6 +1619,12 @@ func (u *User) formatContextMessage(ts, threadMsgID, msg string) string {
 
 func (u *User) prefixContext(channelID, messageID, parentID, event string) string {
 	logger.Tracef("prefixContext ch %s msg %s parent %s event %s", channelID, messageID, parentID, event)
+
+	// If the MessageID was deliberately blanked out (e.g., for system messages),
+	// it is impossible to reply to it. Abort and return no thread context.
+	if messageID == "" {
+		return ""
+	}
 
 	prefixChar := "->"
 	if u.br.FormatterConfig().Unicode {
@@ -1721,7 +1784,7 @@ func (u *User) handleBannerChangeEvent(e *bridge.BannerChangeEvent) {
 
 	msg := &irc.Message{
 		Prefix:   u.Srv.Prefix(),
-		Command:  "NOTICE",
+		Command:  irc.NOTICE,
 		Params:   []string{"*"},
 		Trailing: noticeMsg,
 	}
