@@ -41,6 +41,8 @@ type Mattermost struct {
 	//nolint:containedctx
 	wsCtx    context.Context
 	wsCancel context.CancelFunc
+
+	lastBannerText string
 }
 
 type CachedPost struct {
@@ -291,6 +293,8 @@ func (m *Mattermost) handleWsMessage(ctx context.Context, quitChan chan struct{}
 			}
 
 			switch eventType {
+			case model.WebsocketEventConfigChanged:
+				m.handleConfigChangedEvent(message.Raw, logger)
 			case model.WebsocketEventPosted:
 				m.handleWsActionPost(ctx, message.Raw, logger)
 			case model.WebsocketEventPostEdited:
@@ -1790,7 +1794,48 @@ func Decode(input interface{}, output interface{}) error {
 	return decoder.Decode(input)
 }
 
+func (m *Mattermost) handleConfigChangedEvent(rmsg *model.WebSocketEvent, logger *logrus.Entry) {
+	logger.Trace("in handleConfigChangedEvent")
+
+	data := rmsg.GetData()
+
+	configMap, ok := data["config"].(map[string]any)
+	if !ok {
+		return
+	}
+
+	bannerEnabled := false
+	if enableStr, ok := configMap["EnableBanner"].(string); ok {
+		bannerEnabled = (enableStr == "true")
+	} else if enableBool, ok := configMap["EnableBanner"].(bool); ok {
+		bannerEnabled = enableBool
+	}
+
+	bannerText := ""
+	if text, ok := configMap["BannerText"].(string); ok {
+		bannerText = text
+	}
+
+	// Trigger only if enabled and actually changed
+	if bannerEnabled && bannerText != "" {
+		if m.lastBannerText != bannerText {
+			m.lastBannerText = bannerText
+
+			m.eventChan <- &bridge.Event{
+				Type: "banner_change",
+				Data: &bridge.BannerChangeEvent{
+					Text: bannerText,
+				},
+			}
+		}
+	} else {
+		// Banner disabled or cleared
+		m.lastBannerText = ""
+	}
+}
+
 func (m *Mattermost) handleTypingEvent(ctx context.Context, rmsg *model.WebSocketEvent, logger *logrus.Entry) {
+	logger.Trace("in handleTypingEvent")
 	// Extract the user ID from the event data or broadcast info
 	typingUserID, ok := rmsg.GetData()["user_id"].(string)
 	if !ok || typingUserID == "" {
@@ -2431,6 +2476,7 @@ func (m *Mattermost) postToEvent(ctx context.Context, p *model.Post, eventType s
 		if addedUserID, ok := props["addedUserId"].(string); ok {
 			targetUser = m.GetUser(ctx, addedUserID)
 		}
+
 		return &bridge.Event{
 			Type: "channel_add",
 			Data: &bridge.ChannelAddEvent{
@@ -2440,11 +2486,13 @@ func (m *Mattermost) postToEvent(ctx context.Context, p *model.Post, eventType s
 				CreateAt:  p.CreateAt,
 			},
 		}
+
 	case model.PostTypeRemoveFromTeam, model.PostTypeLeaveChannel, model.PostTypeRemoveFromChannel:
 		targetUser := user
 		if removedUserID, ok := props["removedUserId"].(string); ok {
 			targetUser = m.GetUser(ctx, removedUserID)
 		}
+
 		return &bridge.Event{
 			Type: "channel_remove",
 			Data: &bridge.ChannelRemoveEvent{
@@ -2454,6 +2502,19 @@ func (m *Mattermost) postToEvent(ctx context.Context, p *model.Post, eventType s
 				CreateAt:  p.CreateAt,
 			},
 		}
+
+	case model.PostTypeHeaderChange:
+		newHeader, _ := props["new_header"].(string)
+
+		return &bridge.Event{
+			Type: "channel_topic",
+			Data: &bridge.ChannelTopicEvent{
+				ChannelID: p.ChannelId,
+				Text:      newHeader,
+				UserID:    p.UserId,
+			},
+		}
+
 	default:
 		var files []*bridge.File
 		if len(p.FileIds) > 0 {

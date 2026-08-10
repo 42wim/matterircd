@@ -107,6 +107,8 @@ func (u *User) handleEventChan() {
 
 			// Process the event
 			switch e := event.Data.(type) {
+			case *bridge.BannerChangeEvent:
+				u.handleBannerChangeEvent(e)
 			case *bridge.ChannelMessageEvent:
 				u.handleChannelMessageEvent(e)
 			case *bridge.DirectMessageEvent:
@@ -1188,6 +1190,8 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 				ghost := u.createUserFromInfo(e.Removed[0])
 				u.Srv.Channel(brchannel.ID).Part(ghost, "")
 			}
+		case *bridge.ChannelTopicEvent:
+			u.handleChannelTopicEvent(e)
 		default:
 			continue
 		}
@@ -1664,6 +1668,21 @@ func (u *User) getMattermostVersion() string {
 	defer resp.Body.Close()
 
 	return resp.Header.Get("X-Version-Id")
+}
+
+func (u *User) handleBannerChangeEvent(e *bridge.BannerChangeEvent) {
+	// Prepending "*** " is a standard IRC convention for server announcements.
+	// Many IRC clients look for this and will colorize it nicely in the main window.
+	noticeMsg := "*** " + e.Text
+
+	msg := &irc.Message{
+		Prefix:   u.Srv.Prefix(),
+		Command:  "NOTICE",
+		Params:   []string{"*"},
+		Trailing: noticeMsg,
+	}
+
+	_ = u.Encode(msg)
 }
 
 func (u *User) handleMessageThreadContext(channelID, messageID, parentID, event, text string) (string, string, string, bool, int) {

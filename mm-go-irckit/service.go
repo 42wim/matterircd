@@ -149,9 +149,9 @@ func login(u *User, toUser *User, args []string, service string) {
 		cred.Server = teamOrServer
 	}
 
-	logger.Debugf("args_len: %d", len(args))
-	logger.Debugf("team: %s", cred.Team)
-	logger.Debugf("server: %s", cred.Server)
+	logger.Tracef("args_len: %d", len(args))
+	logger.Tracef("team: %s", cred.Team)
+	logger.Tracef("server: %s", cred.Server)
 	if cred.MFAToken != "" {
 		logger.Debug("found MFAToken")
 	}
