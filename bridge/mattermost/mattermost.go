@@ -199,7 +199,7 @@ func (m *Mattermost) loginToMattermost(ctx context.Context, onWsConnect func()) 
 
 	if rc.Debug {
 		mc.SetLogLevel("debug")
-		mc.SetLogAPICalls("info")
+		mc.SetLogAPICalls("warn")
 	}
 
 	if rc.Trace {

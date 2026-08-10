@@ -15,6 +15,7 @@ func DefaultCommands() Commands {
 	cmds := commands{}
 
 	cmds.Add(Handler{Command: irc.AWAY, Call: CmdAway, LoggedIn: true})
+	cmds.Add(Handler{Command: irc.CAP, Call: CmdCap})
 	cmds.Add(Handler{Command: irc.ISON, Call: CmdIson})
 	cmds.Add(Handler{Command: irc.INVITE, Call: CmdInvite, LoggedIn: true, MinParams: 2})
 	cmds.Add(Handler{Command: irc.JOIN, Call: CmdJoin, MinParams: 1, LoggedIn: true})
@@ -44,6 +45,49 @@ func CmdAway(s Server, u *User, msg *irc.Message) error {
 
 	_ = u.br.SetStatus(u.ctx, "away")
 	return s.EncodeMessage(u, irc.RPL_NOWAWAY, []string{u.Nick}, "You have been marked as being away")
+}
+
+func CmdCap(s Server, u *User, msg *irc.Message) error {
+	if len(msg.Params) < 1 {
+		return nil
+	}
+
+	subcommand := strings.ToUpper(msg.Params[0])
+	switch subcommand {
+	case irc.CAP_LS, irc.CAP_LIST:
+		params := fmt.Sprintf("* %s :message-tags", subcommand)
+		_ = s.EncodeMessage(u, irc.CAP, []string{params}, "")
+
+	case irc.CAP_REQ:
+		reqCaps := msg.Trailing
+		if reqCaps == "" && len(msg.Params) > 1 {
+			reqCaps = msg.Params[1]
+		}
+
+		if strings.Contains(reqCaps, "message-tags") {
+			if u.Caps == nil {
+				u.Caps = make(map[string]bool)
+			}
+
+			u.Caps["message-tags"] = true
+
+			// Ensure we are sending the ACK EXACTLY as IRCv3 expects.
+			// IRC formatting: CAP * ACK :message-tags
+			params := fmt.Sprintf("* ACK :%s", reqCaps)
+			_ = s.EncodeMessage(u, irc.CAP, []string{params}, "")
+		} else {
+			params := fmt.Sprintf("* NAK :%s", reqCaps)
+			_ = s.EncodeMessage(u, irc.CAP, []string{params}, "")
+		}
+
+	case irc.CAP_END:
+		// Do nothing
+	default:
+		params := fmt.Sprintf("* %s", subcommand)
+		_ = s.EncodeMessage(u, "410", []string{params}, "Invalid or unsupported CAP command")
+	}
+
+	return nil
 }
 
 func CmdInvite(s Server, u *User, msg *irc.Message) error {

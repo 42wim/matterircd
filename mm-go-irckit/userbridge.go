@@ -1732,8 +1732,11 @@ func (u *User) handleTyping(e *bridge.TypingEvent) {
 		target = u.br.GetChannelName(u.ctx, e.ChannelID)
 	}
 
-	// Smuggle the IRCv3 tags and the prefix into the Command string
-	// so the parser outputs it perfectly without needing native Tag support
+	if target == "" {
+		return
+	}
+
+	// Construct and encode TAGMSG
 	rawCommand := fmt.Sprintf("@+typing=active :%s TAGMSG", prefix)
 
 	msg := &irc.Message{
