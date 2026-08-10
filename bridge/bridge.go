@@ -107,6 +107,10 @@ type Credentials struct {
 	MFAToken string
 }
 
+type BannerChangeEvent struct {
+	Text string
+}
+
 type Event struct {
 	Type string
 	Data interface{}
