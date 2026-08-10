@@ -132,7 +132,12 @@ func (m *Client) GetTeamName(ctx context.Context, teamID string) string {
 	return ""
 }
 
+// GetUser for backwards compatibility
 func (m *Client) GetUser(ctx context.Context, userID string) *model.User {
+	return m.GetUserByUserID(ctx, userID)
+}
+
+func (m *Client) GetUserByUserID(ctx context.Context, userID string) *model.User {
 	m.Users.mu.RLock()
 	user, exists := m.Users.users[userID]
 	m.Users.mu.RUnlock()
@@ -141,23 +146,78 @@ func (m *Client) GetUser(ctx context.Context, userID string) *model.User {
 		return user
 	}
 
-	m.apiLogger.Warnf("GetUser: UserID: %s", userID)
-	res, _, err := m.Client.GetUser(ctx, userID, "")
-	if err != nil {
+	var mmuser *model.User
+	retryCount := 0
+	for {
+		m.apiLogger.Warnf("GetUser: UserID: %s #%d", userID, retryCount)
+		res, resp, err := m.Client.GetUser(ctx, userID, "")
+		if err == nil {
+			mmuser = res
+			break
+		}
+
+		shouldRetry, hErr := m.HandleRetry(ctx, "GetUser", err, retryCount, 10, resp)
+		if hErr == nil && shouldRetry {
+			retryCount++
+			continue
+		}
+
 		m.logger.Debugf("GetUser failed to fetch missing user %s: %s", userID, err)
 		return nil
 	}
 
-	res.Id = strings.Clone(res.Id)
-	res.Username = strings.Clone(res.Username)
-	res.FirstName = strings.Clone(res.FirstName)
-	res.LastName = strings.Clone(res.LastName)
-	res.Nickname = strings.Clone(res.Nickname)
-	res.Roles = strings.Clone(res.Roles)
+	mmuser.Id = strings.Clone(mmuser.Id)
+	mmuser.Username = strings.Clone(mmuser.Username)
+	mmuser.FirstName = strings.Clone(mmuser.FirstName)
+	mmuser.LastName = strings.Clone(mmuser.LastName)
+	mmuser.Nickname = strings.Clone(mmuser.Nickname)
+	mmuser.Roles = strings.Clone(mmuser.Roles)
 
-	m.UpdateUser(res)
+	m.UpdateUser(mmuser)
 
-	return res
+	return mmuser
+}
+
+func (m *Client) GetUserByUsername(ctx context.Context, username string) *model.User {
+	m.Users.mu.RLock()
+	for _, u := range m.Users.users {
+		if u.Username == username {
+			m.Users.mu.RUnlock()
+			return u
+		}
+	}
+	m.Users.mu.RUnlock()
+
+	var mmuser *model.User
+	retryCount := 0
+	for {
+		m.apiLogger.Warnf("GetUserByUsername: User: %s #%d", username, retryCount)
+		res, resp, err := m.Client.GetUserByUsername(ctx, username, "")
+		if err == nil {
+			mmuser = res
+			break
+		}
+
+		shouldRetry, hErr := m.HandleRetry(ctx, "GetUserByUsername", err, retryCount, 10, resp)
+		if hErr == nil && shouldRetry {
+			retryCount++
+			continue
+		}
+
+		m.logger.Debugf("GetUserByUsername failed to fetch missing user %s: %v", username, err)
+		return nil
+	}
+
+	mmuser.Id = strings.Clone(mmuser.Id)
+	mmuser.Username = strings.Clone(mmuser.Username)
+	mmuser.FirstName = strings.Clone(mmuser.FirstName)
+	mmuser.LastName = strings.Clone(mmuser.LastName)
+	mmuser.Nickname = strings.Clone(mmuser.Nickname)
+	mmuser.Roles = strings.Clone(mmuser.Roles)
+
+	m.UpdateUser(mmuser)
+
+	return mmuser
 }
 
 func (c *UsersCache) GetUserCustomStatus(userID string) string {

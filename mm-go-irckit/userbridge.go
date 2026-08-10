@@ -303,9 +303,18 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 			if event.Receiver.Me {
 				u.MsgSpoofUser(u, u.Nick, line, len(line))
 			} else {
-				u.MsgSpoofUser(u, event.Receiver.Nick, line, len(line))
+				// Outbound DM (e.g. from history replay)
+				// Spoof as us, but target THEIR nick so it routes to their query window
+
+				// FORCE ghost creation to bypass irckit's local-echo routing trap
+				event.Sender.Me = false
+				ghostMe := u.createUserFromInfo(event.Sender)
+				event.Sender.Me = true
+				u.MsgSpoofUser(ghostMe, event.Receiver.Nick, line, len(line))
 			}
 		} else {
+			// Inbound DM
+			// Spoof as them, target OUR nick
 			u.MsgSpoofUser(u.createUserFromInfo(event.Sender), u.Nick, line, len(line))
 		}
 	})
@@ -529,7 +538,10 @@ func (u *User) handleFileEvent(event *bridge.FileEvent) {
 				if event.Receiver.Me {
 					u.MsgSpoofUser(u, u.Nick, fileMsg)
 				} else {
-					u.MsgSpoofUser(u, event.Receiver.Nick, fileMsg)
+					event.Sender.Me = false
+					ghostMe := u.createUserFromInfo(event.Sender)
+					event.Sender.Me = true
+					u.MsgSpoofUser(ghostMe, event.Receiver.Nick, fileMsg)
 				}
 			} else {
 				u.MsgSpoofUser(u.createUserFromInfo(event.Sender), u.Nick, fileMsg)
@@ -915,19 +927,51 @@ func (u *User) addUsersToChannels() {
 }
 
 func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(string, string, ...int) {
-	if strings.Contains(mmchannel.Name, "__") {
-		return func(nick string, msg string, maxlen ...int) {
-			if usr, ok := u.Srv.HasUser(nick); ok {
-				u.MsgSpoofUser(usr, u.Nick, msg)
-			} else {
-				logger.Errorf("%s not found for replay msg", nick)
-			}
+	if !strings.Contains(mmchannel.Name, "__") {
+		return u.Srv.Channel(mmchannel.ID).SpoofMessage
+	}
+
+	var otherNick string
+
+	// Resolve the other participant's IRC nick for DMs
+	parts := strings.Split(mmchannel.Name, "__")
+	if len(parts) == 2 {
+		myID := u.br.GetMe().User
+		otherID := parts[0]
+
+		if otherID == myID {
+			otherID = parts[1]
+		}
+
+		if info := u.br.GetUser(u.ctx, otherID); info != nil {
+			otherNick = info.Nick
 		}
 	}
 
-	ch := u.Srv.Channel(mmchannel.ID)
+	spoofDM := func(nick string, msg string, maxlen ...int) {
+		// Outbound DM: Bypass local-echo trap and route to their query window
+		if nick == u.Nick && otherNick != "" {
+			_ = u.Encode(&irc.Message{
+				Prefix:  u.Prefix(),
+				Command: irc.PRIVMSG,
+				Params:  []string{otherNick, msg},
+			})
 
-	return ch.SpoofMessage
+			return
+		}
+
+		// Inbound DM (or fallback if the user wasn't resolved)
+		usr, ok := u.Srv.HasUser(nick)
+		if !ok {
+			logger.Errorf("%s not found for replay msg", nick)
+
+			return
+		}
+
+		u.MsgSpoofUser(usr, u.Nick, msg)
+	}
+
+	return spoofDM
 }
 
 // getChannelSince calculates the 'since' timestamp for a channel based on the configured strategy.
