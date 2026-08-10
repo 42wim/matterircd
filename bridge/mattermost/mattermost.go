@@ -199,6 +199,12 @@ func (m *Mattermost) loginToMattermost(ctx context.Context, onWsConnect func()) 
 
 	if rc.Debug {
 		mc.SetLogLevel("debug")
+		mc.SetLogAPICalls("info")
+	}
+
+	if rc.Trace {
+		mc.SetLogLevel("trace")
+		mc.SetLogAPICalls("trace")
 	}
 
 	mc.Credentials.SkipTLSVerify = rc.Mattermost.SkipTLSVerify
