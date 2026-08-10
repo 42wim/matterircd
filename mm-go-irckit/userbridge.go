@@ -41,6 +41,9 @@ type UserBridge struct {
 
 	lastViewedAtDB *bolt.DB
 
+	lastEventTimeMutex sync.RWMutex
+	lastEventTime      int64
+
 	msgCounterMutex sync.RWMutex
 	msgCounter      map[string]int
 
@@ -82,37 +85,67 @@ func NewUserBridge(c net.Conn, srv Server, cfg *config.Config, db *bolt.DB) *Use
 }
 
 func (u *User) handleEventChan() {
-	for event := range u.eventChan {
-		if logger.Level.String() == "trace" {
-			logger.Tracef("eventchan %s", spew.Sdump(event))
-		}
-		switch e := event.Data.(type) {
-		case *bridge.ChannelMessageEvent:
-			u.handleChannelMessageEvent(e)
-		case *bridge.DirectMessageEvent:
-			u.handleDirectMessageEvent(e)
-		case *bridge.ChannelTopicEvent:
-			u.handleChannelTopicEvent(e)
-		case *bridge.FileEvent:
-			u.handleFileEvent(e)
-		case *bridge.ChannelAddEvent:
-			u.handleChannelAddEvent(e)
-		case *bridge.ChannelRemoveEvent:
-			u.handleChannelRemoveEvent(e)
-		case *bridge.ChannelCreateEvent:
-			u.handleChannelCreateEvent(e)
-		case *bridge.ChannelDeleteEvent:
-			u.handleChannelDeleteEvent(e)
-		case *bridge.UserUpdateEvent:
-			u.handleUserUpdateEvent(e)
-		case *bridge.StatusChangeEvent:
-			u.handleStatusChangeEvent(e)
-		case *bridge.ReactionAddEvent, *bridge.ReactionRemoveEvent:
-			u.handleReactionEvent(e)
-		case *bridge.TypingEvent:
-			u.handleTyping(e)
-		case *bridge.LogoutEvent:
-			return
+	// Flush to disk every 2 minutes to prevent I/O bottlenecks
+	flushTicker := time.NewTicker(2 * time.Minute)
+	defer flushTicker.Stop()
+
+	for {
+		select {
+		case event, ok := <-u.eventChan:
+			if !ok {
+				return
+			}
+
+			// Update our in-memory global timestamp on every event
+			u.lastEventTimeMutex.Lock()
+			u.lastEventTime = time.Now().UnixMilli()
+			u.lastEventTimeMutex.Unlock()
+
+			if logger.Level.String() == "trace" {
+				logger.Tracef("eventchan %s", spew.Sdump(event))
+			}
+
+			// Process the event
+			switch e := event.Data.(type) {
+			case *bridge.ChannelMessageEvent:
+				u.handleChannelMessageEvent(e)
+			case *bridge.DirectMessageEvent:
+				u.handleDirectMessageEvent(e)
+			case *bridge.ChannelTopicEvent:
+				u.handleChannelTopicEvent(e)
+			case *bridge.FileEvent:
+				u.handleFileEvent(e)
+			case *bridge.ChannelAddEvent:
+				u.handleChannelAddEvent(e)
+			case *bridge.ChannelRemoveEvent:
+				u.handleChannelRemoveEvent(e)
+			case *bridge.ChannelCreateEvent:
+				u.handleChannelCreateEvent(e)
+			case *bridge.ChannelDeleteEvent:
+				u.handleChannelDeleteEvent(e)
+			case *bridge.UserUpdateEvent:
+				u.handleUserUpdateEvent(e)
+			case *bridge.StatusChangeEvent:
+				u.handleStatusChangeEvent(e)
+			case *bridge.ReactionAddEvent, *bridge.ReactionRemoveEvent:
+				u.handleReactionEvent(e)
+			case *bridge.TypingEvent:
+				u.handleTyping(e)
+			case *bridge.LogoutEvent:
+				// Flush immediately on explicit logout
+				u.lastEventTimeMutex.RLock()
+				u.saveGlobalLastEventTime(u.lastEventTime)
+				u.lastEventTimeMutex.RUnlock()
+
+				return
+			}
+
+		case <-flushTicker.C:
+			// Periodically flush the timestamp to BoltDB
+			u.lastEventTimeMutex.RLock()
+			currentTimestamp := u.lastEventTime
+			u.lastEventTimeMutex.RUnlock()
+			u.saveGlobalLastEventTime(currentTimestamp)
 		}
 	}
 }
@@ -743,6 +776,11 @@ func (u *User) addUsersToChannels() {
 		}
 	}
 
+	globalSince := u.getGlobalLastEventTime()
+	if globalSince > 0 {
+		logger.Infof("Loaded global last event timestamp: %s", time.UnixMilli(globalSince).Format("2006-01-02 15:04:05"))
+	}
+
 	srv := u.Srv
 	throttle := time.NewTicker(time.Millisecond * 8)
 
@@ -956,11 +994,17 @@ func (u *User) getChannelSince(ctx context.Context, brchannel *bridge.ChannelInf
 	isDM := strings.Contains(brchannel.Name, "__")
 	if bestSince == 0 || (isDM && !inDB) {
 		// If Mattermost gave us a valid LastPostAt, use it (if it's newer than 31 days)
-		if brchannel.LastPostAt > replayCutoff {
+		if brchannel.LastPostAt > 0 {
 			return brchannel.LastPostAt, "lastpost-fallback", inDB
 		}
-		// If LastPostAt is 0 (API omitted it) or it's older than replayCutoff,
-		// guarantee we don't return 0 by enforcing the replayCutoff window!
+
+		// If Mattermost failed, use our Global Last Event Timestamp
+		globalSince := u.getGlobalLastEventTime()
+		if globalSince > 0 {
+			return globalSince, "global-event-fallback", inDB
+		}
+
+		// Only if it's the very first time booting up
 		return replayCutoff, "cutoff-fallback", inDB
 	}
 
@@ -1553,6 +1597,53 @@ func (u *User) saveLastViewedAt(channelID string) {
 	if err != nil {
 		logger.Fatal(err)
 	}
+}
+
+func (u *User) saveGlobalLastEventTime(timestamp int64) {
+	if timestamp <= 0 {
+		return
+	}
+
+	_ = u.lastViewedAtDB.Update(func(tx *bolt.Tx) error {
+		b, err := tx.CreateBucketIfNotExists([]byte(u.User))
+		if err != nil {
+			return err
+		}
+
+		// Use a reserved key that won't conflict with channel IDs
+		buf := make([]byte, 8)
+
+		//nolint:gosec // timestamp is strictly positive UnixMilli, safe to convert
+		binary.LittleEndian.PutUint64(buf, uint64(timestamp))
+
+		return b.Put([]byte("__global_last_event__"), buf)
+	})
+}
+
+func (u *User) getGlobalLastEventTime() int64 {
+	var timestamp int64
+
+	_ = u.lastViewedAtDB.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(u.User))
+		if b == nil {
+			return nil
+		}
+
+		v := b.Get([]byte("__global_last_event__"))
+
+		if v != nil {
+			val := binary.LittleEndian.Uint64(v)
+
+			// Add a safety bounds check
+			if val <= math.MaxInt64 {
+				timestamp = int64(val)
+			}
+		}
+
+		return nil
+	})
+
+	return timestamp
 }
 
 func (u *User) getMattermostVersion() string {
