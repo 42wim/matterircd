@@ -109,6 +109,8 @@ func (u *User) handleEventChan() {
 			u.handleStatusChangeEvent(e)
 		case *bridge.ReactionAddEvent, *bridge.ReactionRemoveEvent:
 			u.handleReactionEvent(e)
+		case *bridge.TypingEvent:
+			u.handleTyping(e)
 		case *bridge.LogoutEvent:
 			return
 		}
@@ -1603,4 +1605,47 @@ func (u *User) handleMessageThreadContext(channelID, messageID, parentID, event,
 	}
 
 	return newText, prefix, suffix, showContext, maxlen
+}
+
+func (u *User) handleTyping(e *bridge.TypingEvent) {
+	// Only send if this specific connected client negotiated message-tags
+	if !u.HasCapability("message-tags") {
+		return
+	}
+
+	// Construct the ghost user's IRC prefix safely from the Bridge event
+	nick := e.Sender.Nick
+	user := e.Sender.User
+
+	if user == "" {
+		user = nick
+	}
+
+	host := e.Sender.Host
+	if host == "" {
+		host = "mattermost"
+	}
+
+	prefix := fmt.Sprintf("%s!%s@%s", nick, user, host)
+
+	// Determine the target routing (DM vs Channel)
+	var target string
+	if e.ChannelType == "D" {
+		// For Direct Messages, the target is the connected client's own nick
+		target = u.Nick
+	} else {
+		// For standard channels, resolve the mapped IRC channel name
+		target = u.br.GetChannelName(u.ctx, e.ChannelID)
+	}
+
+	// Smuggle the IRCv3 tags and the prefix into the Command string
+	// so the parser outputs it perfectly without needing native Tag support
+	rawCommand := fmt.Sprintf("@+typing=active :%s TAGMSG", prefix)
+
+	msg := &irc.Message{
+		Command: rawCommand,
+		Params:  []string{target},
+	}
+
+	_ = u.Encode(msg)
 }
