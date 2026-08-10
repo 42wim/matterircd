@@ -776,16 +776,7 @@ func (m *Mattermost) GetMe() *bridge.UserInfo {
 }
 
 func (m *Mattermost) GetUserByUsername(ctx context.Context, username string) *bridge.UserInfo {
-	for {
-		mmuser, resp, err := m.mc.Client.GetUserByUsername(ctx, username, "")
-		if err == nil {
-			return m.createUser(mmuser)
-		}
-
-		if err := m.mc.HandleRatelimit(ctx, "GetUserByUsername", resp); err != nil {
-			return &bridge.UserInfo{}
-		}
-	}
+	return m.createUser(m.mc.GetUserByUsername(ctx, username))
 }
 
 func (m *Mattermost) createUser(mmuser *model.User) *bridge.UserInfo {
@@ -1772,7 +1763,30 @@ func (m *Mattermost) GetPostThread(ctx context.Context, postID string) []*bridge
 }
 
 func (m *Mattermost) GetChannelID(ctx context.Context, name, teamID string) string {
-	return m.mc.GetChannelID(ctx, name, teamID)
+	// Try standard public/private channel lookup
+	id := m.mc.GetChannelID(ctx, name, teamID)
+	if id != "" {
+		return id
+	}
+
+	// Fallback: Check if 'name' is actually a username for a DM replay.
+	// We need the Mattermost UserID to construct the DM channel string.
+	user := m.GetUserByUsername(ctx, name)
+	if user != nil && user.User != "" {
+		targetID := user.User
+		myID := m.mc.User.Id
+
+		// Mattermost DM channels are ALWAYS formatted as:
+		// [Alphabetically First ID]__[Alphabetically Second ID]
+		dmName := myID + "__" + targetID
+		if myID > targetID {
+			dmName = targetID + "__" + myID
+		}
+
+		return m.mc.GetChannelID(ctx, dmName, teamID)
+	}
+
+	return ""
 }
 
 func (m *Mattermost) Connected() bool {
