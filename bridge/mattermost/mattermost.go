@@ -1925,6 +1925,7 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 	useUnicode := rc.Mattermost.Formatter.Unicode
 	syntaxHighlighting := rc.Mattermost.Formatter.SyntaxHighlighting
 	codeBlockPrefix := rc.Mattermost.Formatter.CodeBlockPrefix
+	codeBlockSeparator := rc.Mattermost.Formatter.CodeBlockSeparator
 	disableMarkdown := rc.Mattermost.Formatter.DisableMarkdown
 	disableEmoji := rc.Mattermost.Formatter.DisableEmoji
 	enableIRCHexColors := rc.Mattermost.Formatter.EnableIRCHexColors
@@ -2027,35 +2028,25 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 			}
 			b.WriteByte('\n')
 		}
+
 		if attachment.Text != "" {
-			lexer := ""
-			codeBlockBackTick := false
-			codeBlockTilde := false
-			text := attachment.Text
-			for {
-				line, rest, found := strings.Cut(text, "\n")
-				line = strings.TrimSuffix(line, "\r")
+			opts := utils.ProcessMessageOpts{
+				DisableMarkdown:    disableMarkdown,
+				DisableEmoji:       disableEmoji,
+				SyntaxHighlighting: syntaxHighlighting,
+				CodeBlockPrefix:    codeBlockPrefix,
+				CodeBlockSeparator: codeBlockSeparator,
+				BlockquoteChar:     blockquoteChar,
+				InlineCodeChar:     inlineCode,
+			}
 
-				line, codeBlockBackTick, codeBlockTilde, lexer = utils.FormatCodeBlockText(line, codeBlockBackTick, codeBlockTilde, lexer, syntaxHighlighting, codeBlockPrefix)
-
-				if !disableMarkdown && !codeBlockBackTick && !codeBlockTilde {
-					line = utils.Markdown2irc(line, blockquoteChar, inlineCode)
-				}
-
-				if !disableEmoji && !codeBlockBackTick && !codeBlockTilde {
-					line = utils.EmojiReplaceAliases(line)
-				}
-
+			utils.ProcessMessageText(attachment.Text, opts, func(line string) {
 				b.WriteString(prefix)
 				b.WriteString(line)
 				b.WriteByte('\n')
-
-				if !found {
-					break
-				}
-				text = rest
-			}
+			})
 		}
+
 		if attachment.ImageURL != "" {
 			b.WriteString(prefix)
 			b.WriteString(attachment.ImageURL)
@@ -2136,24 +2127,17 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 					b.WriteByte('\n')
 				}
 
-				lexer := ""
-				codeBlockBackTick := false
-				codeBlockTilde := false
-				text := val1Str
-				for {
-					line, rest, found := strings.Cut(text, "\n")
-					line = strings.TrimSuffix(line, "\r")
+				opts := utils.ProcessMessageOpts{
+					DisableMarkdown:    disableMarkdown,
+					DisableEmoji:       disableEmoji,
+					SyntaxHighlighting: syntaxHighlighting,
+					CodeBlockPrefix:    codeBlockPrefix,
+					CodeBlockSeparator: codeBlockSeparator,
+					BlockquoteChar:     blockquoteChar,
+					InlineCodeChar:     inlineCode,
+				}
 
-					line, codeBlockBackTick, codeBlockTilde, lexer = utils.FormatCodeBlockText(line, codeBlockBackTick, codeBlockTilde, lexer, syntaxHighlighting, codeBlockPrefix)
-
-					if !disableMarkdown && !codeBlockBackTick && !codeBlockTilde {
-						line = utils.Markdown2irc(line, blockquoteChar, inlineCode)
-					}
-
-					if !disableEmoji && !codeBlockBackTick && !codeBlockTilde {
-						line = utils.EmojiReplaceAliases(line)
-					}
-
+				utils.ProcessMessageText(val1Str, opts, func(line string) {
 					// Ignore duplicate content when field value is the same as fallback
 					// e.g. https://github.com/jenkinsci/mattermost-plugin/pull/18
 					isDuplicate := useFallback && fallbackText != "" && line == fallbackText
@@ -2162,12 +2146,7 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 						b.WriteString(line)
 						b.WriteByte('\n')
 					}
-
-					if !found {
-						break
-					}
-					text = rest
-				}
+				})
 
 				i++
 			}
@@ -2219,6 +2198,7 @@ func (m *Mattermost) parsePreviewPost(b *strings.Builder, user string, channel s
 	useUnicode := rc.Mattermost.Formatter.Unicode
 	syntaxHighlighting := rc.Mattermost.Formatter.SyntaxHighlighting
 	codeBlockPrefix := rc.Mattermost.Formatter.CodeBlockPrefix
+	codeBlockSeparator := rc.Mattermost.Formatter.CodeBlockSeparator
 	disableMarkdown := rc.Mattermost.Formatter.DisableMarkdown
 	disableEmoji := rc.Mattermost.Formatter.DisableEmoji
 
@@ -2253,33 +2233,29 @@ func (m *Mattermost) parsePreviewPost(b *strings.Builder, user string, channel s
 	}
 	b.WriteByte('\n')
 
-	lexer := ""
-	codeBlockBackTick := false
-	codeBlockTilde := false
+	opts := utils.ProcessMessageOpts{
+		DisableMarkdown:    disableMarkdown,
+		DisableEmoji:       disableEmoji,
+		SyntaxHighlighting: syntaxHighlighting,
+		CodeBlockPrefix:    codeBlockPrefix,
+		CodeBlockSeparator: codeBlockSeparator,
+		BlockquoteChar:     blockquoteChar,
+		InlineCodeChar:     inlineCode,
+	}
 
-	for {
-		line, rest, found := strings.Cut(text, "\n")
-		line = strings.TrimSuffix(line, "\r")
+	first := true
 
-		line, codeBlockBackTick, codeBlockTilde, lexer = utils.FormatCodeBlockText(line, codeBlockBackTick, codeBlockTilde, lexer, syntaxHighlighting, codeBlockPrefix)
-
-		if !disableMarkdown && !codeBlockBackTick && !codeBlockTilde {
-			line = utils.Markdown2irc(line, blockquoteChar, inlineCode)
+	utils.ProcessMessageText(text, opts, func(line string) {
+		// Mirror original behavior: write newline before subsequent lines,
+		// avoiding a trailing newline at the very end.
+		if !first {
+			b.WriteByte('\n')
 		}
 
-		if !disableEmoji && !codeBlockBackTick && !codeBlockTilde {
-			line = utils.EmojiReplaceAliases(line)
-		}
-
+		first = false
 		b.WriteString(prefix)
 		b.WriteString(line)
-
-		if !found {
-			break
-		}
-		b.WriteByte('\n')
-		text = rest
-	}
+	})
 }
 
 func (m *Mattermost) GetLastSentMsgs() []string {

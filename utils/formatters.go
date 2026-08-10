@@ -24,6 +24,25 @@ var (
 	paletteOnce          sync.Once
 )
 
+// ProcessMessageOpts holds the configuration for text processing
+type ProcessMessageOpts struct {
+	DisableMarkdown    bool
+	DisableEmoji       bool
+	SyntaxHighlighting string
+	CodeBlockPrefix    string
+	CodeBlockSeparator string
+	BlockquoteChar     string
+	InlineCodeChar     string
+}
+
+// Reuse bytes.Buffer for Chroma to prevent large chunk allocations
+var chromaBufPool = sync.Pool{
+	New: func() any {
+		// Pre-allocate 1KB to handle most code blocks without slice growth
+		return bytes.NewBuffer(make([]byte, 0, 1024))
+	},
+}
+
 func initializePalette() {
 	// 00-98 raw hex codes
 	rawColors := []string{
@@ -114,68 +133,49 @@ func FindClosestIRCColor(hexColor string) string {
 	return bestCode
 }
 
-//nolint:funlen,gocyclo
-func FormatCodeBlockText(text string, codeBlockBackTick bool, codeBlockTilde bool, lexer string, syntaxHighlighting string, linePrefix string) (string, bool, bool, string) {
-	trimmedText := strings.TrimLeft(text, " \t")
-
-	// Inline backtick toggle logic to avoid closure allocations
-	if strings.HasPrefix(trimmedText, "```") && !codeBlockTilde {
-		codeBlockBackTick = !codeBlockBackTick
-		if codeBlockBackTick {
-			newLexer := strings.TrimSpace(strings.TrimPrefix(trimmedText, "```"))
-			if newLexer != "" {
-				lexer = newLexer
-				return linePrefix + "\x16" + lexer + "\x16", codeBlockBackTick, codeBlockTilde, lexer
-			}
-		} else {
-			lexer = ""
-		}
-		return "", codeBlockBackTick, codeBlockTilde, lexer
-	}
-
-	// Inline tilde toggle logic
-	if strings.HasPrefix(trimmedText, "~~~") && !codeBlockBackTick {
-		codeBlockTilde = !codeBlockTilde
-		if codeBlockTilde {
-			newLexer := strings.TrimSpace(strings.TrimPrefix(trimmedText, "~~~"))
-			if newLexer != "" {
-				lexer = newLexer
-				return linePrefix + "\x16" + lexer + "\x16", codeBlockBackTick, codeBlockTilde, lexer
-			}
-		} else {
-			lexer = ""
-		}
-		return "", codeBlockBackTick, codeBlockTilde, lexer
-	}
-
-	codeBlock := codeBlockBackTick || codeBlockTilde
-	if !codeBlock {
-		return text, codeBlockBackTick, codeBlockTilde, lexer
-	}
+// FormatFullCodeBlock handles syntax highlighting entirely in-memory and yields lines
+//
+//nolint:funlen
+func FormatFullCodeBlock(text, lexer, indent string, opts ProcessMessageOpts, yield func(string)) {
+	// Prepend the block's leading markdown indentation to the IRC prefix
+	prefix := indent + opts.CodeBlockPrefix
 
 	if text == "" {
-		return linePrefix + " ", codeBlockBackTick, codeBlockTilde, lexer
+		yield(prefix + " ")
+		return
 	}
 
-	if syntaxHighlighting == "" || lexer == "" {
-		// Use native string concatenation instead of a Builder for simple 2-string joins
-		return linePrefix + text, codeBlockBackTick, codeBlockTilde, lexer
+	if lexer != "" {
+		yield(prefix + "\x16" + lexer + "\x16")
 	}
 
-	formatter := "terminal256"
-	style := "pygments"
-	if idx := strings.IndexByte(syntaxHighlighting, ':'); idx >= 0 {
-		formatter = syntaxHighlighting[:idx]
-		style = syntaxHighlighting[idx+1:]
+	if opts.SyntaxHighlighting == "" || lexer == "" {
+		emitLines(text, prefix, yield)
+		return
 	}
 
-	// Single buffer approach: pre-allocate enough capacity to prevent reallocation
-	var b bytes.Buffer
-	b.Grow(len(linePrefix) + len(text) + 64)
-	b.WriteString(linePrefix)
+	formatter, style := "terminal256", "pygments"
+	if idx := strings.IndexByte(opts.SyntaxHighlighting, ':'); idx >= 0 {
+		formatter = opts.SyntaxHighlighting[:idx]
+		style = opts.SyntaxHighlighting[idx+1:]
+	}
 
-	if err := quick.Highlight(&b, text, lexer, formatter, style); err == nil {
-		bs := b.Bytes()
+	bufInter := chromaBufPool.Get()
+	buf, ok := bufInter.(*bytes.Buffer)
+
+	if !ok {
+		// Fallback just in case the pool returns something unexpected
+		buf = bytes.NewBuffer(make([]byte, 0, 1024))
+	}
+
+	defer func() {
+		buf.Reset()
+		chromaBufPool.Put(buf)
+	}()
+
+	err := quick.Highlight(buf, text, lexer, formatter, style)
+	if err == nil {
+		bs := buf.Bytes()
 		const resetSeq = "\x1b[0m"
 		hasReset := bytes.HasSuffix(bs, []byte(resetSeq))
 
@@ -186,23 +186,146 @@ func FormatCodeBlockText(text string, codeBlockBackTick bool, codeBlockTilde boo
 
 		// Work around https://github.com/alecthomas/chroma/issues/716
 		// Safely strip the trailing newline without touching the linePrefix
-		if end > len(linePrefix) && bs[end-1] == '\n' {
+		if end > 0 && bs[end-1] == '\n' {
 			end--
 		}
 
-		// If we need to modify the tail, do it in-place using the buffer
-		if end != len(bs) {
-			b.Truncate(end)
-			if hasReset {
-				b.WriteString(resetSeq)
-			}
+		buf.Truncate(end)
+
+		if hasReset {
+			buf.WriteString(resetSeq)
 		}
 
-		return b.String(), codeBlockBackTick, codeBlockTilde, lexer
+		emitLines(buf.String(), prefix, yield)
+
+		return
 	}
 
-	// Fallback if highlight fails
-	return linePrefix + text, codeBlockBackTick, codeBlockTilde, lexer
+	// Fallback
+	emitLines(text, prefix, yield)
+}
+
+// ProcessMessageText abstracts the parsing loop, multi-line code handling,
+// and formatting. It uses a zero-allocation callback (yield) to return lines.
+//
+//nolint:funlen,gocognit,gocyclo
+func ProcessMessageText(text string, opts ProcessMessageOpts, yield func(line string)) {
+	if text == "" {
+		return
+	}
+
+	var (
+		codeBuilder      strings.Builder
+		emptyLines       []string
+		lastBlockWasCode bool
+		inCodeBlock      bool
+		codeBlockMarker  string
+		lexer            string
+		currentIndent    string // Tracks leading whitespace for nested blocks
+	)
+
+	for text != "" {
+		line, rest, _ := strings.Cut(text, "\n")
+		text = rest
+
+		origLine := line // Keep original to preserve \r and precise indentation
+		line = strings.TrimSuffix(line, "\r")
+		trimmed := strings.TrimSpace(line)
+
+		if inCodeBlock { //nolint:nestif
+			if strings.HasPrefix(trimmed, codeBlockMarker) {
+				inCodeBlock = false
+				lastBlockWasCode = true
+
+				FormatFullCodeBlock(codeBuilder.String(), lexer, currentIndent, opts, yield)
+				codeBuilder.Reset() // Frees builder state for next block
+			} else {
+				if codeBuilder.Len() > 0 {
+					codeBuilder.WriteByte('\n')
+				}
+				// Strip the structural leading whitespace to prevent double-indentation
+				contentLine := origLine
+				if currentIndent != "" && strings.HasPrefix(contentLine, currentIndent) {
+					contentLine = contentLine[len(currentIndent):]
+				}
+
+				codeBuilder.WriteString(contentLine)
+			}
+
+			continue
+		}
+
+		isBacktick := strings.HasPrefix(trimmed, "```")
+		isTilde := strings.HasPrefix(trimmed, "~~~")
+
+		if isBacktick || isTilde { //nolint:nestif
+			marker := "```"
+			if isTilde {
+				marker = "~~~"
+			}
+
+			// Capture the leading whitespace to use as indentation for the whole block
+			idx := strings.Index(line, marker)
+			if idx >= 0 {
+				currentIndent = line[:idx]
+			} else {
+				currentIndent = ""
+			}
+
+			inCodeBlock = true
+			codeBlockMarker = marker
+			lexer = strings.TrimSpace(strings.TrimPrefix(trimmed, marker))
+
+			// Logic for back-to-back code blocks
+			if lastBlockWasCode && opts.CodeBlockSeparator != "" {
+				yield(currentIndent + opts.CodeBlockSeparator)
+			} else if !lastBlockWasCode {
+				// Flush empty lines if they weren't between code blocks
+				for _, el := range emptyLines {
+					yield(el)
+				}
+			}
+
+			// Reset slice length without freeing memory
+			emptyLines = emptyLines[:0]
+
+			codeBuilder.Grow(256)
+
+			continue
+		}
+
+		if trimmed == "" {
+			// Buffer empty lines
+			emptyLines = append(emptyLines, line)
+		} else {
+			// Normal text line - flush buffered empty lines first
+			for _, el := range emptyLines {
+				yield(el)
+			}
+
+			emptyLines = emptyLines[:0]
+			lastBlockWasCode = false
+
+			if !opts.DisableMarkdown {
+				line = Markdown2irc(line, opts.BlockquoteChar, opts.InlineCodeChar)
+			}
+
+			if !opts.DisableEmoji {
+				line = EmojiReplaceAliases(line)
+			}
+
+			yield(line)
+		}
+	}
+
+	// Flush remaining state if EOF reached
+	if inCodeBlock {
+		FormatFullCodeBlock(codeBuilder.String(), lexer, currentIndent, opts, yield)
+	} else {
+		for _, el := range emptyLines {
+			yield(el)
+		}
+	}
 }
 
 // isWordChar mimics ASCII \w (letters, digits, and underscores)
@@ -225,6 +348,22 @@ func checkWordBoundaryEnd(s string, idx int) bool {
 		return true
 	}
 	return !isWordChar(s[idx]) // Must transition to a non-word char
+}
+
+func emitLines(text, prefix string, yield func(string)) {
+	for text != "" {
+		line, rest, _ := strings.Cut(text, "\n")
+		line = strings.TrimSuffix(line, "\r")
+
+		// Skip allocation completely if no prefix is needed
+		if prefix == "" {
+			yield(line)
+		} else {
+			yield(prefix + line)
+		}
+
+		text = rest
+	}
 }
 
 // replacePattern simulates greedy regex matching like \*\*([^\*]+)\*\*

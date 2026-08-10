@@ -222,53 +222,43 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 	prefixContext := u.br.BridgeConfig().PrefixContext
 	showContextMulti := u.br.BridgeConfig().ShowContextMulti
 	syntaxHighlighting := u.br.FormatterConfig().SyntaxHighlighting
+	codeBlockSeparator := u.br.FormatterConfig().CodeBlockSeparator
 
-	lexer := ""
-	codeBlockBackTick := false
-	codeBlockTilde := false
 	text = utils.WrapMessage(text, maxlen)
 	addPrefix := false
-	for {
-		line, rest, found := strings.Cut(text, "\n")
-		line = strings.TrimSuffix(line, "\r")
 
-		// Remove message thread context prefix for formatting and remember to add it back
-		if !addPrefix && prefixContext && !showContextMulti {
-			if prefix != "" && strings.HasPrefix(line, prefix) {
-				line = strings.TrimPrefix(line, prefix)
-				addPrefix = true
-			} else if trimmedPrefix != "" && line == trimmedPrefix {
-				line = ""
-				addPrefix = true
-			}
+	// Remove message thread context prefix for formatting and remember to add it back
+	if !addPrefix && prefixContext && !showContextMulti {
+		switch {
+		case prefix != "" && strings.HasPrefix(text, prefix):
+			text = strings.TrimPrefix(text, prefix)
+			addPrefix = true
+		case trimmedPrefix != "" && strings.HasPrefix(text, trimmedPrefix+"\n"):
+			text = strings.TrimPrefix(text, trimmedPrefix+"\n")
+			addPrefix = true
+		case trimmedPrefix != "" && text == trimmedPrefix:
+			text = ""
+			addPrefix = true
 		}
+	}
 
-		// TODO: Ideally, we want to read the whole code block and syntax highlight on that, but let's go with per-line for now.
-		line, codeBlockBackTick, codeBlockTilde, lexer = utils.FormatCodeBlockText(line, codeBlockBackTick, codeBlockTilde, lexer, syntaxHighlighting, codeBlockPrefix)
+	opts := utils.ProcessMessageOpts{
+		DisableMarkdown:    disableMarkdown,
+		DisableEmoji:       disableEmoji,
+		SyntaxHighlighting: syntaxHighlighting,
+		CodeBlockPrefix:    codeBlockPrefix,
+		CodeBlockSeparator: codeBlockSeparator,
+		BlockquoteChar:     blockQuoteChar,
+		InlineCodeChar:     inlineCode,
+	}
 
+	utils.ProcessMessageText(text, opts, func(line string) {
 		if line == "" || line == trimmedPrefix || line == trimmedSuffix {
-			if !found {
-				break
-			}
-			text = rest
-			continue
-		}
-
-		if !disableMarkdown && !codeBlockBackTick && !codeBlockTilde {
-			line = utils.Markdown2irc(line, blockQuoteChar, inlineCode)
-		}
-
-		if !disableEmoji && !codeBlockBackTick && !codeBlockTilde {
-			line = utils.EmojiReplaceAliases(line)
+			return
 		}
 
 		if showContext || addPrefix {
-			var b strings.Builder
-			b.Grow(len(prefix) + len(line) + len(suffix))
-			b.WriteString(prefix)
-			b.WriteString(line)
-			b.WriteString(suffix)
-			line = b.String()
+			line = prefix + line + suffix
 			addPrefix = false
 		}
 
@@ -281,12 +271,7 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 		} else {
 			u.MsgSpoofUser(u.createUserFromInfo(event.Sender), u.Nick, line, len(line))
 		}
-
-		if !found {
-			break
-		}
-		text = rest
-	}
+	})
 
 	if u.br.Protocol() == "mattermost" && !u.cfg.Mattermost().DisableAutoView {
 		u.updateLastViewed(event.ChannelID)
@@ -429,53 +414,43 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 	prefixContext := u.br.BridgeConfig().PrefixContext
 	showContextMulti := u.br.BridgeConfig().ShowContextMulti
 	syntaxHighlighting := u.br.FormatterConfig().SyntaxHighlighting
+	codeBlockSeparator := u.br.FormatterConfig().CodeBlockSeparator
 
-	lexer := ""
-	codeBlockBackTick := false
-	codeBlockTilde := false
 	text = utils.WrapMessage(text, maxlen)
 	addPrefix := false
-	for {
-		line, rest, found := strings.Cut(text, "\n")
-		line = strings.TrimSuffix(line, "\r")
 
-		// Remove message thread context prefix for formatting and remember to add it back
-		if !addPrefix && prefixContext && !showContextMulti {
-			if prefix != "" && strings.HasPrefix(line, prefix) {
-				line = strings.TrimPrefix(line, prefix)
-				addPrefix = true
-			} else if trimmedPrefix != "" && line == trimmedPrefix {
-				line = ""
-				addPrefix = true
-			}
+	// Remove message thread context prefix for formatting and remember to add it back
+	if !addPrefix && prefixContext && !showContextMulti {
+		switch {
+		case prefix != "" && strings.HasPrefix(text, prefix):
+			text = strings.TrimPrefix(text, prefix)
+			addPrefix = true
+		case trimmedPrefix != "" && strings.HasPrefix(text, trimmedPrefix+"\n"):
+			text = strings.TrimPrefix(text, trimmedPrefix+"\n")
+			addPrefix = true
+		case trimmedPrefix != "" && text == trimmedPrefix:
+			text = ""
+			addPrefix = true
 		}
+	}
 
-		// TODO: Ideally, we want to read the whole code block and syntax highlight on that, but let's go with per-line for now.
-		line, codeBlockBackTick, codeBlockTilde, lexer = utils.FormatCodeBlockText(line, codeBlockBackTick, codeBlockTilde, lexer, syntaxHighlighting, codeBlockPrefix)
+	opts := utils.ProcessMessageOpts{
+		DisableMarkdown:    disableMarkdown,
+		DisableEmoji:       disableEmoji,
+		SyntaxHighlighting: syntaxHighlighting,
+		CodeBlockPrefix:    codeBlockPrefix,
+		CodeBlockSeparator: codeBlockSeparator,
+		BlockquoteChar:     blockQuoteChar,
+		InlineCodeChar:     inlineCode,
+	}
 
+	utils.ProcessMessageText(text, opts, func(line string) {
 		if line == "" || line == trimmedPrefix || line == trimmedSuffix {
-			if !found {
-				break
-			}
-			text = rest
-			continue
-		}
-
-		if !disableMarkdown && !codeBlockBackTick && !codeBlockTilde {
-			line = utils.Markdown2irc(line, blockQuoteChar, inlineCode)
-		}
-
-		if !disableEmoji && !codeBlockBackTick && !codeBlockTilde {
-			line = utils.EmojiReplaceAliases(line)
+			return
 		}
 
 		if showContext || addPrefix {
-			var b strings.Builder
-			b.Grow(len(prefix) + len(line) + len(suffix))
-			b.WriteString(prefix)
-			b.WriteString(line)
-			b.WriteString(suffix)
-			line = b.String()
+			line = prefix + line + suffix
 			addPrefix = false
 		}
 
@@ -485,12 +460,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		default:
 			ch.SpoofMessage(nick, line, len(line))
 		}
-
-		if !found {
-			break
-		}
-		text = rest
-	}
+	})
 
 	if u.br.Protocol() == "mattermost" && !u.cfg.Mattermost().DisableAutoView {
 		u.updateLastViewed(event.ChannelID)
@@ -1134,6 +1104,17 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 	inlineCode := u.br.FormatterConfig().MarkdownInlineCode
 	blockQuoteChar, codeBlockPrefix := u.getMarkdownBlockCodePrefix()
 	syntaxHighlighting := u.br.FormatterConfig().SyntaxHighlighting
+	codeBlockSeparator := u.br.FormatterConfig().CodeBlockSeparator
+
+	opts := utils.ProcessMessageOpts{
+		DisableMarkdown:    disableMarkdown,
+		DisableEmoji:       disableEmoji,
+		SyntaxHighlighting: syntaxHighlighting,
+		CodeBlockPrefix:    codeBlockPrefix,
+		CodeBlockSeparator: codeBlockSeparator,
+		BlockquoteChar:     blockQuoteChar,
+		InlineCodeChar:     inlineCode,
+	}
 
 	for _, event := range events {
 		var createAt int64
@@ -1177,24 +1158,9 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 			showReplayHdr = false
 		}
 
-		lexer := ""
-		codeBlockBackTick := false
-		codeBlockTilde := false
 		textToProcess := utils.WrapMessage(text, 440)
-		for {
-			line, rest, found := strings.Cut(textToProcess, "\n")
-			line = strings.TrimSuffix(line, "\r")
 
-			line, codeBlockBackTick, codeBlockTilde, lexer = utils.FormatCodeBlockText(line, codeBlockBackTick, codeBlockTilde, lexer, syntaxHighlighting, codeBlockPrefix)
-
-			if !disableMarkdown && !codeBlockBackTick && !codeBlockTilde {
-				line = utils.Markdown2irc(line, blockQuoteChar, inlineCode)
-			}
-
-			if !disableEmoji && !codeBlockBackTick && !codeBlockTilde {
-				line = utils.EmojiReplaceAliases(line)
-			}
-
+		utils.ProcessMessageText(textToProcess, opts, func(line string) {
 			if line != "" {
 				if nick == systemUser {
 					line = "\x1d" + line + "\x1d"
@@ -1219,12 +1185,7 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 
 				spoof(nick, replayMsg)
 			}
-
-			if !found {
-				break
-			}
-			textToProcess = rest
-		}
+		})
 
 		for _, f := range files {
 			fileMsg := "\x1ddownload file - " + f.Name + "\x1d"

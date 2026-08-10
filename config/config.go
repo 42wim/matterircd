@@ -92,6 +92,7 @@ type FormatterConfig struct {
 	SyntaxHighlighting     string
 	DisableCodeBlockPrefix bool
 	CodeBlockPrefix        string
+	CodeBlockSeparator     string
 
 	Unicode bool
 
@@ -229,6 +230,7 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 
 		DisableCodeBlockPrefix: c.v.GetBool("mattermost.DisableCodeBlockPrefix"),
 		CodeBlockPrefix:        unquoteString(c.v.GetString("mattermost.CodeBlockPrefix")),
+		CodeBlockSeparator:     unquoteString(c.v.GetString("mattermost.CodeBlockSeparator")),
 		SyntaxHighlighting:     c.v.GetString("mattermost.SyntaxHighlighting"),
 
 		Unicode: c.v.GetBool("mattermost.Unicode"),
@@ -245,6 +247,7 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 
 		DisableCodeBlockPrefix: c.v.GetBool("slack.DisableCodeBlockPrefix"),
 		CodeBlockPrefix:        unquoteString(c.v.GetString("slack.CodeBlockPrefix")),
+		CodeBlockSeparator:     unquoteString(c.v.GetString("slack.CodeBlockSeparator")),
 		SyntaxHighlighting:     c.v.GetString("slack.SyntaxHighlighting"),
 
 		Unicode: c.v.GetBool("slack.Unicode"),
@@ -261,6 +264,7 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 
 		DisableCodeBlockPrefix: c.v.GetBool("mastodon.DisableCodeBlockPrefix"),
 		CodeBlockPrefix:        unquoteString(c.v.GetString("mastodon.CodeBlockPrefix")),
+		CodeBlockSeparator:     unquoteString(c.v.GetString("mastodon.CodeBlockSeparator")),
 		SyntaxHighlighting:     c.v.GetString("mastodon.SyntaxHighlighting"),
 
 		Unicode: c.v.GetBool("mastodon.Unicode"),
