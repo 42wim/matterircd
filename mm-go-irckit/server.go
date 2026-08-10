@@ -503,45 +503,7 @@ outerloop:
 				s.EncodeMessage(u, irc.ERR_NOTREGISTERED, []string{"*"}, "Please register first")
 			// https://ircv3.net/specs/extensions/capability-negotiation.html
 			case irc.CAP:
-				subcommand := strings.ToUpper(msg.Params[0])
-				switch subcommand {
-				case irc.CAP_LS, irc.CAP_LIST:
-					// Advertise support for message-tags
-					params := fmt.Sprintf("* %s :message-tags", subcommand)
-					s.EncodeMessage(u, irc.CAP, []string{params}, "") //nolint:errcheck
-
-				case irc.CAP_REQ:
-					// The requested capabilities are usually in the trailing parameter
-					reqCaps := msg.Trailing
-					if reqCaps == "" && len(msg.Params) > 1 {
-						reqCaps = msg.Params[1]
-					}
-
-					// We only support message-tags right now.
-					// If they request it, ACK it and save it to the user's state.
-					if strings.Contains(reqCaps, "message-tags") {
-						// Ensure the Caps map is initialized
-						if u.Caps == nil {
-							u.Caps = make(map[string]bool)
-						}
-
-						u.Caps["message-tags"] = true
-
-						params := "* ACK :message-tags"
-						s.EncodeMessage(u, irc.CAP, []string{params}, "") //nolint:errcheck
-					} else {
-						// NAK (reject) anything else they requested
-						params := fmt.Sprintf("* NAK :%s", reqCaps)
-						s.EncodeMessage(u, irc.CAP, []string{params}, "") //nolint:errcheck
-					}
-
-				case irc.CAP_END:
-					// Do nothing. Client finished negotiating capabilities.
-				default:
-					params := fmt.Sprintf("* %s", subcommand)
-					// github.com/sorcix/irc doesn't yet support ERR_INVALIDCAPCMD (410)
-					s.EncodeMessage(u, "410", []string{params}, "Invalid or unsupported CAP command") //nolint:errcheck
-				}
+				_ = CmdCap(s, u, msg)
 				continue
 			}
 
