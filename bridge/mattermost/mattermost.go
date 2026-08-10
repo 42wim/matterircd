@@ -23,6 +23,8 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+const systemUser = "system"
+
 type Mattermost struct {
 	mc          *matterclient.Client
 	credentials bridge.Credentials
@@ -1256,7 +1258,7 @@ func (m *Mattermost) handleWsActionPost(ctx context.Context, rmsg *model.WebSock
 		}
 
 		ghost = &bridge.UserInfo{
-			Nick: "system",
+			Nick: systemUser,
 		}
 
 		if channelType == "D" {
@@ -1472,7 +1474,7 @@ func (m *Mattermost) handleWsActionUserAdded(ctx context.Context, rmsg *model.We
 				m.GetUser(ctx, userID),
 			},
 			Adder: &bridge.UserInfo{
-				Nick: "system",
+				Nick: systemUser,
 			},
 			ChannelID: rmsg.GetBroadcast().ChannelId,
 		},
@@ -2457,17 +2459,27 @@ func (m *Mattermost) postToEvent(ctx context.Context, p *model.Post, eventType s
 
 		formattedMsg := m.formatMessage(ctx, p, eventType, logger)
 
+		sender := user
+		msgID := p.Id
+		parentID := p.RootId
+
+		if strings.HasPrefix(p.Type, model.PostSystemMessagePrefix) {
+			sender = &bridge.UserInfo{Nick: systemUser}
+			msgID = ""
+			parentID = ""
+		}
+
 		if isDM {
 			return &bridge.Event{
 				Type: "direct_message",
 				Data: &bridge.DirectMessageEvent{
 					Text:      formattedMsg,
 					ChannelID: p.ChannelId,
-					Sender:    user,
+					Sender:    sender,
 					Receiver:  m.getDMUser(ctx, channelName),
 					Files:     files,
-					MessageID: p.Id,
-					ParentID:  p.RootId,
+					MessageID: msgID,
+					ParentID:  parentID,
 					Event:     eventType,
 					CreateAt:  p.CreateAt,
 				},
@@ -2478,10 +2490,10 @@ func (m *Mattermost) postToEvent(ctx context.Context, p *model.Post, eventType s
 			Data: &bridge.ChannelMessageEvent{
 				Text:      formattedMsg,
 				ChannelID: p.ChannelId,
-				Sender:    user,
+				Sender:    sender,
 				Files:     files,
-				MessageID: p.Id,
-				ParentID:  p.RootId,
+				MessageID: msgID,
+				ParentID:  parentID,
 				Event:     eventType,
 				CreateAt:  p.CreateAt,
 			},
