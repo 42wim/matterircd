@@ -333,12 +333,8 @@ func (m *Mattermost) handleWsMessage(ctx context.Context, quitChan chan struct{}
 }
 
 func (m *Mattermost) Invite(ctx context.Context, channelID, username string) error {
-	_, _, err := m.mc.Client.AddChannelMember(ctx, channelID, username)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	_, err := m.mc.AddChannelMember(ctx, channelID, username)
+	return err
 }
 
 func (m *Mattermost) IsChannelMember(channelID string) bool {
@@ -404,9 +400,7 @@ func (m *Mattermost) List(ctx context.Context) (map[string]string, error) {
 }
 
 func (m *Mattermost) Part(ctx context.Context, channelID string) error {
-	_, err := m.mc.Client.RemoveUserFromChannel(ctx, channelID, m.mc.User.Id)
-
-	return err
+	return m.mc.RemoveUserFromChannel(ctx, channelID, m.mc.User.Id)
 }
 
 func (m *Mattermost) UpdateChannels(ctx context.Context) error {
@@ -567,16 +561,14 @@ func (m *Mattermost) Topic(ctx context.Context, channelID string) string {
 
 func (m *Mattermost) SetTopic(ctx context.Context, channelID, text string) error {
 	logger.Debugf("Updating channel header/topic %#v, %#v", channelID, text)
+
 	patch := &model.ChannelPatch{
 		Header: &text,
 	}
 
-	_, _, err := m.mc.Client.PatchChannel(ctx, channelID, patch)
-	if err != nil {
-		return err
-	}
+	_, err := m.mc.PatchChannel(ctx, channelID, patch)
 
-	return nil
+	return err
 }
 
 func (m *Mattermost) StatusUser(ctx context.Context, userID string) (string, error) {
@@ -592,12 +584,7 @@ func (m *Mattermost) Protocol() string {
 }
 
 func (m *Mattermost) Kick(ctx context.Context, channelID, username string) error {
-	_, err := m.mc.Client.RemoveUserFromChannel(ctx, channelID, username)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return m.mc.RemoveUserFromChannel(ctx, channelID, username)
 }
 
 func (m *Mattermost) SetStatus(ctx context.Context, status string) error {
@@ -1653,16 +1640,12 @@ func (m *Mattermost) UpdateLastViewed(ctx context.Context, channelID string) {
 }
 
 func (m *Mattermost) UpdateLastViewedUser(ctx context.Context, userID string) error {
-	for {
-		dc, resp, err := m.mc.Client.CreateDirectChannel(ctx, m.mc.User.Id, userID)
-		if err == nil {
-			return m.mc.UpdateLastViewed(ctx, dc.Id)
-		}
-
-		if err := m.mc.HandleRatelimit(ctx, "CreateDirectChannel", resp); err != nil {
-			return err
-		}
+	dc, err := m.mc.CreateDirectChannel(ctx, m.mc.User.Id, userID)
+	if err != nil {
+		return err
 	}
+
+	return m.mc.UpdateLastViewed(ctx, dc.Id)
 }
 
 func (m *Mattermost) SearchPosts(ctx context.Context, search string) []*bridge.Event {

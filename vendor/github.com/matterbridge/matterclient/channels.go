@@ -508,17 +508,25 @@ func (m *Client) JoinChannel(ctx context.Context, channelID string) error {
 
 	m.logger.Debug("Joining ", channelID)
 
+	_, err := m.AddChannelMember(ctx, channelID, m.User.Id)
+	if err == nil {
+		m.Users.mu.Lock()
+		m.Users.joinedChannels[channelID] = struct{}{}
+		m.Users.mu.Unlock()
+		return nil
+	}
+
+	return err
+}
+
+func (m *Client) AddChannelMember(ctx context.Context, channelID, userID string) (*model.ChannelMember, error) {
 	retryCount := 0
 	for {
-		m.apiLogger.Warnf("JoinChannel: ChannelID: %s, UserID: %s #%d", channelID, m.User.Id, retryCount)
+		m.apiLogger.Warnf("AddChannelMember: ChannelID: %s, UserID: %s #%d", channelID, userID, retryCount)
 
-		_, resp, err := m.Client.AddChannelMember(ctx, channelID, m.User.Id)
+		member, resp, err := m.Client.AddChannelMember(ctx, channelID, userID)
 		if err == nil {
-			m.Users.mu.Lock()
-			m.Users.joinedChannels[channelID] = struct{}{}
-			m.Users.mu.Unlock()
-
-			return nil
+			return member, nil
 		}
 
 		shouldRetry, hErr := m.HandleRetry(ctx, "AddChannelMember", err, retryCount, 10, resp)
@@ -528,9 +536,64 @@ func (m *Client) JoinChannel(ctx context.Context, channelID string) error {
 			continue
 		}
 
-		m.logger.Errorf("JoinChannel failed for %s: %v", channelID, err)
+		m.logger.Errorf("AddChannelMember failed for channel %s (user %s): %v", channelID, userID, err)
 
+		return nil, err
+	}
+}
+
+func (m *Client) RemoveUserFromChannel(ctx context.Context, channelID, userID string) error {
+	retryCount := 0
+	for {
+		m.apiLogger.Warnf("RemoveUserFromChannel: ChannelID: %s, UserID: %s #%d", channelID, userID, retryCount)
+
+		resp, err := m.Client.RemoveUserFromChannel(ctx, channelID, userID)
+		if err == nil {
+			// If we are removing ourselves, clean up our joinedChannels cache
+			if m.User != nil && userID == m.User.Id {
+				m.Users.mu.Lock()
+				delete(m.Users.joinedChannels, channelID)
+				m.Users.mu.Unlock()
+			}
+			return nil
+		}
+
+		shouldRetry, hErr := m.HandleRetry(ctx, "RemoveUserFromChannel", err, retryCount, 10, resp)
+		if hErr == nil && shouldRetry {
+			retryCount++
+			continue
+		}
+
+		m.logger.Errorf("RemoveUserFromChannel failed for channel %s (user %s): %v", channelID, userID, err)
 		return err
+	}
+}
+
+func (m *Client) PatchChannel(ctx context.Context, channelID string, patch *model.ChannelPatch) (*model.Channel, error) {
+	retryCount := 0
+	for {
+		m.apiLogger.Warnf("PatchChannel: ChannelID: %s #%d", channelID, retryCount)
+
+		channel, resp, err := m.Client.PatchChannel(ctx, channelID, patch)
+		if err == nil {
+			// Update local cache so GetChannel immediately reflects the updated topic/header
+			m.Users.mu.Lock()
+			m.Users.channelData[channelID] = channel
+			m.Users.mu.Unlock()
+
+			return channel, nil
+		}
+
+		shouldRetry, hErr := m.HandleRetry(ctx, "PatchChannel", err, retryCount, 10, resp)
+		if hErr == nil && shouldRetry {
+			retryCount++
+
+			continue
+		}
+
+		m.logger.Errorf("PatchChannel failed for %s: %v", channelID, err)
+
+		return nil, err
 	}
 }
 
