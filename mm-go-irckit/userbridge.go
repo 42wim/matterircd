@@ -576,59 +576,85 @@ func (u *User) handleChannelDeleteEvent(event *bridge.ChannelDeleteEvent) {
 	}
 }
 
+//nolint:funlen
 func (u *User) handleChannelUpdateEvent(e *bridge.ChannelUpdateEvent) {
-	newIRCChan := "#" + e.Name
+	newIRCChanStr := "#" + e.Name
 
-	ch := u.Srv.Channel(newIRCChan)
+	// Snapshot the joined channels so we don't hold the lock during API calls
 	u.RLock()
-	_, alreadyJoined := u.channels[ch]
+
+	channelsToCheck := make([]Channel, 0, len(u.channels))
+	for ch := range u.channels {
+		channelsToCheck = append(channelsToCheck, ch)
+	}
+
 	u.RUnlock()
 
-	// If we are already joined, it means only the Display Name or Purpose changed,
-	// not the actual URL/Routing name. Just send a notice.
-	if alreadyJoined {
-		noticeMsg := &irc.Message{
-			Prefix:   u.Srv.Prefix(),
-			Command:  irc.NOTICE,
-			Params:   []string{newIRCChan},
-			Trailing: fmt.Sprintf("[SERVER NOTICE] Channel updated. Display Name is now: %s", e.DisplayName),
-		}
-		_ = u.Encode(noticeMsg)
+	var staleChannels []Channel
 
+	alreadyJoinedNew := false
+
+	// Identify the stale channels using proper ch.String() calls
+	for _, ch := range channelsToCheck {
+		// Skip special matterircd system channels (they don't exist on Mattermost)
+		if strings.HasPrefix(ch.String(), "&") {
+			continue
+		}
+
+		if ch.String() == newIRCChanStr {
+			alreadyJoinedNew = true
+			continue
+		}
+
+		chName := strings.TrimPrefix(ch.String(), "#")
+		chID := u.br.GetChannelID(u.ctx, chName, u.br.GetMe().TeamID)
+
+		// A channel is stale if Mattermost 404s it (returns ""),
+		// OR if the cache still links this old name to the ID that was just renamed!
+		if chID == "" || chID == e.ChannelID {
+			staleChannels = append(staleChannels, ch)
+		}
+	}
+
+	// Just a display name change? exit.
+	if alreadyJoinedNew && len(staleChannels) == 0 {
 		return
 	}
 
-	// The actual routing name changed. We join them to the new channel and leave
-	// the old window open so they keep their chat history.
+	// Part the stale channels, purge them from our routing map, AND Unlink them!
+	// We MUST do this before joining the new one, so the IRC server forgets the old object completely.
+	for _, ch := range staleChannels {
+		ch.Part(u, "Channel renamed on server")
 
-	// Send JOIN to the IRC client so it opens the new window
-	joinMsg := &irc.Message{
-		Prefix: &irc.Prefix{
-			Name: u.Nick,
-			User: u.User,
-			Host: u.Host,
-		},
-		Command: "JOIN",
-		Params:  []string{newIRCChan},
-	}
-	_ = u.Encode(joinMsg)
+		u.Lock()
+		delete(u.channels, ch)
+		u.Unlock()
 
-	// Give them context in the new window so they aren't confused why it opened
-	noticeMsg := &irc.Message{
-		Prefix:   u.Srv.Prefix(),
-		Command:  irc.NOTICE,
-		Params:   []string{newIRCChan},
-		Trailing: fmt.Sprintf("[SERVER NOTICE] You have been joined here because an existing channel was renamed to %s (Display Name: %s).", newIRCChan, e.DisplayName),
-	}
-	_ = u.Encode(noticeMsg)
-
-	u.Lock()
-	if u.channels == nil {
-		u.channels = make(map[Channel]struct{})
+		// Nuke the channel from the IRC server's global registry so it cannot be reused or aliased
+		ch.Unlink()
 	}
 
-	u.channels[ch] = struct{}{}
-	u.Unlock()
+	// Join the new channel and bind it to our routing map
+	if !alreadyJoinedNew {
+		newCh := u.Srv.Channel(newIRCChanStr)
+		_ = newCh.Join(u)
+
+		u.Lock()
+		if u.channels == nil {
+			u.channels = make(map[Channel]struct{})
+		}
+
+		u.channels[newCh] = struct{}{}
+		u.Unlock()
+
+		noticeMsg := &irc.Message{
+			Prefix:   u.Srv.Prefix(),
+			Command:  irc.NOTICE,
+			Params:   []string{newIRCChanStr},
+			Trailing: fmt.Sprintf("[SERVER NOTICE] You have been joined here because an existing channel was renamed to %s (Display Name: %s).", newIRCChanStr, e.DisplayName),
+		}
+		_ = u.Encode(noticeMsg)
+	}
 }
 
 func (u *User) handleUserUpdateEvent(event *bridge.UserUpdateEvent) {

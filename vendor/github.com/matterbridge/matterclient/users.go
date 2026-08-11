@@ -147,9 +147,11 @@ func (m *Client) GetUserByUserID(ctx context.Context, userID string) *model.User
 	}
 
 	var mmuser *model.User
+
 	retryCount := 0
 	for {
 		m.apiLogger.Warnf("GetUser: UserID: %s #%d", userID, retryCount)
+
 		res, resp, err := m.Client.GetUser(ctx, userID, "")
 		if err == nil {
 			mmuser = res
@@ -180,18 +182,22 @@ func (m *Client) GetUserByUserID(ctx context.Context, userID string) *model.User
 
 func (m *Client) GetUserByUsername(ctx context.Context, username string) *model.User {
 	m.Users.mu.RLock()
+
 	for _, u := range m.Users.users {
 		if u.Username == username {
 			m.Users.mu.RUnlock()
 			return u
 		}
 	}
+
 	m.Users.mu.RUnlock()
 
 	var mmuser *model.User
+
 	retryCount := 0
 	for {
 		m.apiLogger.Warnf("GetUserByUsername: User: %s #%d", username, retryCount)
+
 		res, resp, err := m.Client.GetUserByUsername(ctx, username, "")
 		if err == nil {
 			mmuser = res
@@ -205,6 +211,7 @@ func (m *Client) GetUserByUsername(ctx context.Context, username string) *model.
 		}
 
 		m.logger.Debugf("GetUserByUsername failed to fetch missing user %s: %v", username, err)
+
 		return nil
 	}
 
