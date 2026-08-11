@@ -1124,9 +1124,9 @@ func (m *Mattermost) handleWsActionPost(ctx context.Context, rmsg *model.WebSock
 		myUser := m.GetMe().User
 		addedUserID, _ := data.GetProps()["addedUserId"].(string)
 		if data.UserId != myUser && addedUserID != myUser {
-			logger.Debugf("Skipping channel sync because user %s joined/left, not us.", data.UserId)
+			logger.Tracef("Skipping channel sync because user %s joined/left, not us.", data.UserId)
 		} else if data.Type == model.PostTypeLeaveChannel {
-			logger.Debugf("Left channel %s, skipping full channel sync", data.ChannelId)
+			logger.Tracef("Left channel %s, skipping full channel sync", data.ChannelId)
 		} else if _, err := m.GetChannel(ctx, data.ChannelId); err != nil {
 			logger.Errorf("Failed to fetch new channel %s: %v", data.ChannelId, err)
 		} else {
