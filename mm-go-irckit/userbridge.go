@@ -910,8 +910,8 @@ func (u *User) addUsersToChannels() {
 	// Fetch, filter, and sort the channels alphabetically
 	var joinChannels []*bridge.ChannelInfo
 	for _, brchannel := range u.br.GetChannels() {
+		lastPost := time.UnixMilli(brchannel.LastPostAt)
 		if brchannel.DM && !u.br.BridgeConfig().JoinDM {
-			lastPost := time.UnixMilli(brchannel.LastPostAt)
 
 			threshold := lastSyncThreshold
 			if threshold.IsZero() {
@@ -940,6 +940,14 @@ func (u *User) addUsersToChannels() {
 				logger.Debugf("SmartJoin: Joining DM channel %s due to recent offline activity (LastPost: %v)", brchannel.Name, lastPost)
 			}
 		}
+
+		// If the channel is explicitly excluded in matterircd.toml, drop it now.
+		if !brchannel.DM && !u.mayJoin(brchannel.ID) {
+			logger.Debugf("Skipping channel %s due to JoinExclude/JoinOnly configuration (LastPost: %v)", brchannel.Name, lastPost)
+
+			continue
+		}
+
 		joinChannels = append(joinChannels, brchannel)
 	}
 
