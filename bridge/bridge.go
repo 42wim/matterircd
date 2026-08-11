@@ -159,6 +159,12 @@ type ChannelTopicEvent struct {
 	UserID    string
 }
 
+type ChannelUpdateEvent struct {
+	ChannelID   string
+	Name        string
+	DisplayName string
+}
+
 type DirectMessageEvent struct {
 	Text      string
 	ChannelID string

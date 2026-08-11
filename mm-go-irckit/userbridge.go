@@ -125,6 +125,8 @@ func (u *User) handleEventChan() {
 				u.handleChannelCreateEvent(e)
 			case *bridge.ChannelDeleteEvent:
 				u.handleChannelDeleteEvent(e)
+			case *bridge.ChannelUpdateEvent:
+				u.handleChannelUpdateEvent(e)
 			case *bridge.UserUpdateEvent:
 				u.handleUserUpdateEvent(e)
 			case *bridge.StatusChangeEvent:
@@ -571,6 +573,87 @@ func (u *User) handleChannelDeleteEvent(event *bridge.ChannelDeleteEvent) {
 		ch.Part(u, "")
 	} else {
 		logger.Debugf("ACTION_CHANNEL_DELETED not in channel %s (%s)", u.br.GetChannelName(u.ctx, event.ChannelID), event.ChannelID)
+	}
+}
+
+//nolint:funlen
+func (u *User) handleChannelUpdateEvent(e *bridge.ChannelUpdateEvent) {
+	newIRCChanStr := "#" + e.Name
+
+	// Snapshot the joined channels so we don't hold the lock during API calls
+	u.RLock()
+
+	channelsToCheck := make([]Channel, 0, len(u.channels))
+	for ch := range u.channels {
+		channelsToCheck = append(channelsToCheck, ch)
+	}
+
+	u.RUnlock()
+
+	var staleChannels []Channel
+
+	alreadyJoinedNew := false
+
+	// Identify the stale channels using proper ch.String() calls
+	for _, ch := range channelsToCheck {
+		// Skip special matterircd system channels (they don't exist on Mattermost)
+		if strings.HasPrefix(ch.String(), "&") {
+			continue
+		}
+
+		if ch.String() == newIRCChanStr {
+			alreadyJoinedNew = true
+			continue
+		}
+
+		chName := strings.TrimPrefix(ch.String(), "#")
+		chID := u.br.GetChannelID(u.ctx, chName, u.br.GetMe().TeamID)
+
+		// A channel is stale if Mattermost 404s it (returns ""),
+		// OR if the cache still links this old name to the ID that was just renamed!
+		if chID == "" || chID == e.ChannelID {
+			staleChannels = append(staleChannels, ch)
+		}
+	}
+
+	// Just a display name change? exit.
+	if alreadyJoinedNew && len(staleChannels) == 0 {
+		return
+	}
+
+	// Part the stale channels, purge them from our routing map, AND Unlink them!
+	// We MUST do this before joining the new one, so the IRC server forgets the old object completely.
+	for _, ch := range staleChannels {
+		ch.Part(u, "Channel renamed on server")
+
+		u.Lock()
+		delete(u.channels, ch)
+		u.Unlock()
+
+		// Nuke the channel from the IRC server's global registry so it cannot be reused or aliased
+		ch.Unlink()
+	}
+
+	// Join the new channel and bind it to our routing map
+	if !alreadyJoinedNew {
+		newCh := u.Srv.Channel(newIRCChanStr)
+		_ = newCh.Join(u)
+
+		u.Lock()
+		if u.channels == nil {
+			u.channels = make(map[Channel]struct{})
+		}
+
+		u.channels[newCh] = struct{}{}
+		u.Unlock()
+
+		noticeMsg := &irc.Message{
+			Prefix:   u.Srv.Prefix(),
+			Command:  irc.NOTICE,
+			Params:   []string{newIRCChanStr},
+			Trailing: fmt.Sprintf("[SERVER NOTICE] You have been joined here because an existing channel was renamed to %s (Display Name: %s).", newIRCChanStr, e.DisplayName),
+		}
+		_ = u.Encode(noticeMsg)
 	}
 }
 
@@ -1547,9 +1630,9 @@ func (u *User) updateMsgMapIndex(channelID string, counter int, messageID string
 func (u *User) formatContextMessage(ts, threadMsgID, msg string) string {
 	var formattedMsg string
 	switch {
-	case u.br.BridgeConfig().PrefixContext:
+	case u.br.BridgeConfig().PrefixContext && threadMsgID != "":
 		formattedMsg = threadMsgID + " " + msg
-	case u.br.BridgeConfig().SuffixContext:
+	case u.br.BridgeConfig().SuffixContext && threadMsgID != "":
 		formattedMsg = msg + " " + threadMsgID
 	default:
 		formattedMsg = msg
@@ -1562,6 +1645,12 @@ func (u *User) formatContextMessage(ts, threadMsgID, msg string) string {
 
 func (u *User) prefixContext(channelID, messageID, parentID, event string) string {
 	logger.Tracef("prefixContext ch %s msg %s parent %s event %s", channelID, messageID, parentID, event)
+
+	// If the MessageID was deliberately blanked out (e.g., for system messages),
+	// it is impossible to reply to it. Abort and return no thread context.
+	if messageID == "" {
+		return ""
+	}
 
 	prefixChar := "->"
 	if u.br.FormatterConfig().Unicode {
@@ -1721,7 +1810,7 @@ func (u *User) handleBannerChangeEvent(e *bridge.BannerChangeEvent) {
 
 	msg := &irc.Message{
 		Prefix:   u.Srv.Prefix(),
-		Command:  "NOTICE",
+		Command:  irc.NOTICE,
 		Params:   []string{"*"},
 		Trailing: noticeMsg,
 	}

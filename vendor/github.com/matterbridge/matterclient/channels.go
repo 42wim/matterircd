@@ -23,22 +23,30 @@ func (m *Client) CreateChannel(ctx context.Context, teamID string, channelName s
 		TeamId:      teamID,
 	}
 
-	m.apiLogger.Warnf("CreateChannel: CreateChannel for %s", channelName)
+	retryCount := 0
+	for {
+		m.apiLogger.Warnf("CreateChannel: CreateChannel for %s #%d", channelName, retryCount)
 
-	mmchannel, _, err := m.Client.CreateChannel(ctx, channelReq)
-	if err != nil {
+		mmchannel, resp, err := m.Client.CreateChannel(ctx, channelReq)
+		if err == nil {
+			// Cache it so subsequent GetChannel calls are fast
+			m.Users.mu.Lock()
+			m.Users.channelData[mmchannel.Id] = mmchannel
+			m.Users.mu.Unlock()
+
+			return mmchannel, nil
+		}
+
+		shouldRetry, hErr := m.HandleRetry(ctx, "CreateChannel", err, retryCount, 10, resp)
+		if hErr == nil && shouldRetry {
+			retryCount++
+			continue
+		}
+
+		m.logger.Errorf("CreateChannel failed for %s: %v", channelName, err)
+
 		return nil, err
 	}
-
-	// Cache it so subsequent GetChannel calls are fast
-	m.Users.mu.Lock()
-	if m.Users.channelData == nil {
-		m.Users.channelData = make(map[string]*model.Channel)
-	}
-	m.Users.channelData[mmchannel.Id] = mmchannel
-	m.Users.mu.Unlock()
-
-	return mmchannel, nil
 }
 
 func (m *Client) GetChannel(ctx context.Context, channelID string) *model.Channel {
@@ -51,40 +59,66 @@ func (m *Client) GetChannel(ctx context.Context, channelID string) *model.Channe
 	}
 
 	query := "/channels/" + channelID
-	m.apiLogger.Warnf("GetChannel: DoAPIGet: query %s", query)
-	resp, err := m.Client.DoAPIGet(ctx, query, "")
-	if err != nil {
+	retryCount := 0
+
+	for {
+		m.apiLogger.Warnf("GetChannel: DoAPIGet: query %s #%d", query, retryCount)
+		resp, err := m.Client.DoAPIGet(ctx, query, "")
+
+		if err == nil {
+			var summary ChannelSummary
+
+			decodeErr := json.NewDecoder(resp.Body).Decode(&summary)
+			resp.Body.Close()
+
+			if decodeErr == nil {
+				mmchannel := &model.Channel{
+					Id:          summary.Id,
+					UpdateAt:    summary.UpdateAt,
+					DeleteAt:    summary.DeleteAt,
+					TeamId:      summary.TeamId,
+					Type:        model.ChannelType(summary.Type),
+					DisplayName: summary.DisplayName,
+					Name:        summary.Name,
+					Header:      summary.Header,
+					Purpose:     summary.Purpose,
+					LastPostAt:  summary.LastPostAt,
+					CreatorId:   summary.CreatorId,
+				}
+
+				m.Users.mu.Lock()
+				m.Users.channelData[channelID] = mmchannel
+				m.Users.mu.Unlock()
+
+				return mmchannel
+			}
+
+			m.logger.Errorf("GetChannel decode failed for %s: %v", channelID, decodeErr)
+
+			return nil
+		}
+
+		var mResp *model.Response
+		if resp != nil {
+			mResp = model.BuildResponse(resp)
+		}
+
+		shouldRetry, hErr := m.HandleRetry(ctx, "GetChannel", err, retryCount, 10, mResp)
+
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
+		}
+
+		if hErr == nil && shouldRetry {
+			retryCount++
+
+			continue
+		}
+
+		m.logger.Errorf("GetChannel failed for %s: %v", channelID, err)
+
 		return nil
 	}
-	defer resp.Body.Close()
-
-	var summary ChannelSummary
-	if err := json.NewDecoder(resp.Body).Decode(&summary); err != nil {
-		return nil
-	}
-
-	mmchannel := &model.Channel{
-		Id:          summary.Id,
-		UpdateAt:    summary.UpdateAt,
-		DeleteAt:    summary.DeleteAt,
-		TeamId:      summary.TeamId,
-		Type:        model.ChannelType(summary.Type),
-		DisplayName: summary.DisplayName,
-		Name:        summary.Name,
-		Header:      summary.Header,
-		Purpose:     summary.Purpose,
-		LastPostAt:  summary.LastPostAt,
-		CreatorId:   summary.CreatorId,
-	}
-
-	m.Users.mu.Lock()
-	if m.Users.channelData == nil {
-		m.Users.channelData = make(map[string]*model.Channel)
-	}
-	m.Users.channelData[channelID] = mmchannel
-	m.Users.mu.Unlock()
-
-	return mmchannel
 }
 
 // GetChannels returns all channels we're members off
@@ -148,40 +182,65 @@ func (m *Client) getChannelIDTeam(ctx context.Context, name string, teamID strin
 	m.Users.mu.RUnlock()
 
 	query := "/teams/" + teamID + "/channels/name/" + name
-	m.apiLogger.Warnf("getChannelIDTeam: DoAPIGet: query %s", query)
-	resp, err := m.Client.DoAPIGet(ctx, query, "")
-	if err != nil {
+	retryCount := 0
+
+	for {
+		m.apiLogger.Warnf("getChannelIDTeam: DoAPIGet: query %s #%d", query, retryCount)
+		resp, err := m.Client.DoAPIGet(ctx, query, "")
+
+		if err == nil {
+			var summary ChannelSummary
+
+			decodeErr := json.NewDecoder(resp.Body).Decode(&summary)
+			resp.Body.Close()
+
+			if decodeErr == nil {
+				channel := &model.Channel{
+					Id:          summary.Id,
+					UpdateAt:    summary.UpdateAt,
+					DeleteAt:    summary.DeleteAt,
+					TeamId:      summary.TeamId,
+					Type:        model.ChannelType(summary.Type),
+					DisplayName: summary.DisplayName,
+					Name:        summary.Name,
+					Header:      summary.Header,
+					Purpose:     summary.Purpose,
+					LastPostAt:  summary.LastPostAt,
+					CreatorId:   summary.CreatorId,
+				}
+
+				m.Users.mu.Lock()
+				m.Users.channelData[channel.Id] = channel
+				m.Users.mu.Unlock()
+
+				return channel.Id
+			}
+
+			m.logger.Errorf("getChannelIDTeam decode failed for %s: %v", name, decodeErr)
+
+			return ""
+		}
+
+		var mResp *model.Response
+		if resp != nil {
+			mResp = model.BuildResponse(resp)
+		}
+
+		shouldRetry, hErr := m.HandleRetry(ctx, "getChannelIDTeam", err, retryCount, 10, mResp)
+
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
+		}
+
+		if hErr == nil && shouldRetry {
+			retryCount++
+			continue
+		}
+
+		m.logger.Errorf("getChannelIDTeam failed for %s: %v", name, err)
+
 		return ""
 	}
-	defer resp.Body.Close()
-
-	var summary ChannelSummary
-	if err := json.NewDecoder(resp.Body).Decode(&summary); err != nil {
-		return ""
-	}
-
-	channel := &model.Channel{
-		Id:          summary.Id,
-		UpdateAt:    summary.UpdateAt,
-		DeleteAt:    summary.DeleteAt,
-		TeamId:      summary.TeamId,
-		Type:        model.ChannelType(summary.Type),
-		DisplayName: summary.DisplayName,
-		Name:        summary.Name,
-		Header:      summary.Header,
-		Purpose:     summary.Purpose,
-		LastPostAt:  summary.LastPostAt,
-		CreatorId:   summary.CreatorId,
-	}
-
-	m.Users.mu.Lock()
-	if m.Users.channelData == nil {
-		m.Users.channelData = make(map[string]*model.Channel)
-	}
-	m.Users.channelData[channel.Id] = channel
-	m.Users.mu.Unlock()
-
-	return channel.Id
 }
 
 func (m *Client) GetChannelName(ctx context.Context, channelID string) string {
@@ -422,20 +481,30 @@ func (m *Client) JoinChannel(ctx context.Context, channelID string) error {
 
 	m.logger.Debug("Joining ", channelID)
 
-	m.apiLogger.Warnf("JoinChannel: ChannelID: %s, UserID: %s", channelID, m.User.Id)
-	_, _, err := m.Client.AddChannelMember(ctx, channelID, m.User.Id)
-	if err != nil {
+	retryCount := 0
+	for {
+		m.apiLogger.Warnf("JoinChannel: ChannelID: %s, UserID: %s #%d", channelID, m.User.Id, retryCount)
+
+		_, resp, err := m.Client.AddChannelMember(ctx, channelID, m.User.Id)
+		if err == nil {
+			m.Users.mu.Lock()
+			m.Users.joinedChannels[channelID] = struct{}{}
+			m.Users.mu.Unlock()
+
+			return nil
+		}
+
+		shouldRetry, hErr := m.HandleRetry(ctx, "AddChannelMember", err, retryCount, 10, resp)
+		if hErr == nil && shouldRetry {
+			retryCount++
+
+			continue
+		}
+
+		m.logger.Errorf("JoinChannel failed for %s: %v", channelID, err)
+
 		return err
 	}
-
-	m.Users.mu.Lock()
-	if m.Users.joinedChannels == nil {
-		m.Users.joinedChannels = make(map[string]struct{})
-	}
-	m.Users.joinedChannels[channelID] = struct{}{}
-	m.Users.mu.Unlock()
-
-	return nil
 }
 
 //nolint:funlen,gocognit,gocyclo
@@ -688,13 +757,27 @@ func (m *Client) UpdateChannels(ctx context.Context) error {
 
 func (m *Client) UpdateChannelHeader(ctx context.Context, channelID string, header string) {
 	channel := &model.Channel{Id: channelID, Header: header}
-
 	m.logger.Debugf("updating channelheader %#v, %#v", channelID, header)
 
-	m.apiLogger.Warnf("UpdateChannelHeader: ChannelID: %s", channelID)
-	_, _, err := m.Client.UpdateChannel(ctx, channel)
-	if err != nil {
-		m.logger.Error(err)
+	retryCount := 0
+	for {
+		m.apiLogger.Warnf("UpdateChannelHeader: ChannelID: %s #%d", channelID, retryCount)
+
+		_, resp, err := m.Client.UpdateChannel(ctx, channel)
+		if err == nil {
+			return
+		}
+
+		shouldRetry, hErr := m.HandleRetry(ctx, "UpdateChannel", err, retryCount, 10, resp)
+		if hErr == nil && shouldRetry {
+			retryCount++
+
+			continue
+		}
+
+		m.logger.Errorf("UpdateChannelHeader failed for %s: %v", channelID, err)
+
+		return
 	}
 }
 

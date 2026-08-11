@@ -64,6 +64,10 @@ func (m *Mattermost) FormatterConfig() *config.FormatterConfig {
 	return &m.cfg.Current().Mattermost.Formatter
 }
 
+func (m *Mattermost) Connected() bool {
+	return m.connected
+}
+
 func (m *Mattermost) GetLastSentMsgs() []string {
 	data := make([]string, 0)
 
@@ -314,7 +318,7 @@ func (m *Mattermost) handleWsMessage(ctx context.Context, quitChan chan struct{}
 			case model.WebsocketEventChannelRestored:
 				m.handleWsActionChannelCreated(message.Raw, logger)
 			case model.WebsocketEventChannelUpdated:
-				m.handleWsActionPost(ctx, message.Raw, logger)
+				m.handleWsActionChannelUpdated(message.Raw, logger)
 			case model.WebsocketEventUserUpdated:
 				m.handleWsActionUserUpdated(message.Raw, logger)
 			case model.WebsocketEventStatusChange:
@@ -1789,10 +1793,6 @@ func (m *Mattermost) GetChannelID(ctx context.Context, name, teamID string) stri
 	return ""
 }
 
-func (m *Mattermost) Connected() bool {
-	return m.connected
-}
-
 func Decode(input interface{}, output interface{}) error {
 	config := &mapstructure.DecoderConfig{
 		Metadata: nil,
@@ -1806,6 +1806,32 @@ func Decode(input interface{}, output interface{}) error {
 	}
 
 	return decoder.Decode(input)
+}
+
+func (m *Mattermost) handleWsActionChannelUpdated(rmsg *model.WebSocketEvent, logger *logrus.Entry) {
+	logger.Trace("in handleWsActionChannelUpdated")
+
+	channelStr, ok := rmsg.GetData()["channel"].(string)
+	if !ok || channelStr == "" {
+		return
+	}
+
+	var updatedChannel model.Channel
+
+	err := json.NewDecoder(strings.NewReader(channelStr)).Decode(&updatedChannel)
+	if err != nil {
+		logger.Errorf("Failed to decode updated channel: %v", err)
+		return
+	}
+
+	m.eventChan <- &bridge.Event{
+		Type: "channel_update",
+		Data: &bridge.ChannelUpdateEvent{
+			ChannelID:   updatedChannel.Id,
+			Name:        updatedChannel.Name,
+			DisplayName: updatedChannel.DisplayName,
+		},
+	}
 }
 
 func (m *Mattermost) handleConfigChangedEvent(rmsg *model.WebSocketEvent, logger *logrus.Entry) {
