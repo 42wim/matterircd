@@ -40,13 +40,24 @@ func (m *Client) CreatePost(ctx context.Context, post *model.Post) (*model.Post,
 }
 
 func (m *Client) DeleteMessage(ctx context.Context, postID string) error {
-	m.apiLogger.Warnf("DeleteMessage: PostID: %s", postID)
-	_, err := m.Client.DeletePost(ctx, postID)
-	if err != nil {
+	retryCount := 0
+	for {
+		m.apiLogger.Warnf("DeleteMessage: PostID: %s #%d", postID, retryCount)
+
+		resp, err := m.Client.DeletePost(ctx, postID)
+		if err == nil {
+			return nil
+		}
+
+		shouldRetry, hErr := m.HandleRetry(ctx, "DeletePost", err, retryCount, 10, resp)
+		if hErr == nil && shouldRetry {
+			retryCount++
+			continue
+		}
+
+		m.logger.Errorf("DeleteMessage failed for %s: %v", postID, err)
 		return err
 	}
-
-	return nil
 }
 
 func (m *Client) EditMessage(ctx context.Context, postID string, text string) (string, error) {
@@ -249,6 +260,28 @@ func (m *Client) GetPublicLinks(ctx context.Context, filenames []string) []strin
 	}
 
 	return output
+}
+
+func (m *Client) PatchPost(ctx context.Context, postID string, patch *model.PostPatch) (*model.Post, error) {
+	retryCount := 0
+	for {
+		m.apiLogger.Warnf("PatchPost: PostID: %s #%d", postID, retryCount)
+
+		post, resp, err := m.Client.PatchPost(ctx, postID, patch)
+		if err == nil {
+			return post, nil
+		}
+
+		shouldRetry, hErr := m.HandleRetry(ctx, "PatchPost", err, retryCount, 10, resp)
+		if hErr == nil && shouldRetry {
+			retryCount++
+			continue
+		}
+
+		m.logger.Errorf("PatchPost failed for %s: %v", postID, err)
+
+		return nil, err
+	}
 }
 
 func (m *Client) PostMessage(ctx context.Context, channelID string, text string, rootID string) (string, error) {

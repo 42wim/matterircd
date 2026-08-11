@@ -49,6 +49,33 @@ func (m *Client) CreateChannel(ctx context.Context, teamID string, channelName s
 	}
 }
 
+func (m *Client) CreateDirectChannel(ctx context.Context, userID1, userID2 string) (*model.Channel, error) {
+	retryCount := 0
+	for {
+		m.apiLogger.Warnf("CreateDirectChannel for users %s and %s #%d", userID1, userID2, retryCount)
+
+		mmchannel, resp, err := m.Client.CreateDirectChannel(ctx, userID1, userID2)
+		if err == nil {
+			// Cache the DM channel so GetChannel is fast
+			m.Users.mu.Lock()
+			m.Users.channelData[mmchannel.Id] = mmchannel
+			m.Users.mu.Unlock()
+
+			return mmchannel, nil
+		}
+
+		shouldRetry, hErr := m.HandleRetry(ctx, "CreateDirectChannel", err, retryCount, 10, resp)
+		if hErr == nil && shouldRetry {
+			retryCount++
+			continue
+		}
+
+		m.logger.Errorf("CreateDirectChannel failed for %s, %s: %v", userID1, userID2, err)
+
+		return nil, err
+	}
+}
+
 func (m *Client) GetChannel(ctx context.Context, channelID string) *model.Channel {
 	m.Users.mu.RLock()
 	ch, exists := m.Users.channelData[channelID]
