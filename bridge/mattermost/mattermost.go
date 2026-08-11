@@ -346,7 +346,7 @@ func (m *Mattermost) Join(ctx context.Context, channelName string) (string, stri
 
 	sp := strings.Split(channelName, "/")
 	if len(sp) > 1 {
-		team, _, err := m.mc.Client.GetTeamByName(ctx, sp[0], "")
+		team, err := m.mc.GetTeamByName(ctx, sp[0])
 		if team == nil {
 			if err != nil {
 				return "", "", fmt.Errorf("team not found: %v", err)
@@ -588,15 +588,7 @@ func (m *Mattermost) Kick(ctx context.Context, channelID, username string) error
 }
 
 func (m *Mattermost) SetStatus(ctx context.Context, status string) error {
-	_, _, err := m.mc.Client.UpdateUserStatus(ctx, m.mc.User.Id, &model.Status{
-		Status: status,
-		UserId: m.mc.User.Id,
-	})
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return m.mc.UpdateStatus(ctx, m.mc.User.Id, status)
 }
 
 func (m *Mattermost) Nick(ctx context.Context, name string) error {
@@ -1657,7 +1649,7 @@ func (m *Mattermost) GetFileLinks(ctx context.Context, fileIDs []string) []strin
 }
 
 func (m *Mattermost) SearchUsers(ctx context.Context, query string) ([]*bridge.UserInfo, error) {
-	users, _, err := m.mc.Client.SearchUsers(ctx, &model.UserSearch{Term: query})
+	users, err := m.mc.SearchUsers(ctx, &model.UserSearch{Term: query})
 	if err != nil {
 		return nil, err
 	}
