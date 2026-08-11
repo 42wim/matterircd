@@ -798,7 +798,7 @@ func (s *Slack) sendPublicMessage(ghost *bridge.UserInfo, msg, channelID string)
 
 // nolint:funlen,gocognit,gocyclo
 func (s *Slack) handleSlackActionPost(rmsg *slack.MessageEvent) {
-	logger.Debugf("handleSlackActionPost() receiving msg %#v", rmsg)
+	logger.Debugf("handleSlackActionPost: receiving msg %#v", rmsg)
 
 	// Is this our own message
 	if rmsg.User == s.sinfo.User.ID {

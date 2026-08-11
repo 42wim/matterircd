@@ -1021,6 +1021,7 @@ var (
 
 //nolint:funlen,gocognit,gocyclo,cyclop,forcetypeassert
 func (m *Mattermost) handleWsActionPost(ctx context.Context, rmsg *model.WebSocketEvent, logger *logrus.Entry) {
+	logger.Trace("in handleWsActionPost")
 	wsData := rmsg.GetData()
 	postData, ok := wsData["post"].(string)
 	if !ok {
@@ -1034,7 +1035,7 @@ func (m *Mattermost) handleWsActionPost(ctx context.Context, rmsg *model.WebSock
 	}
 	extraProps := data.GetProps()
 
-	logger.Tracef("handleWsActionPost() receiving userid %s", data.UserId)
+	logger.Tracef("receiving userid %s", data.UserId)
 	if m.wsActionPostSkip(ctx, rmsg, logger) {
 		return
 	}
@@ -1264,7 +1265,7 @@ func (m *Mattermost) handleWsActionPost(ctx context.Context, rmsg *model.WebSock
 		m.handleFileEvent(ctx, channelType, ghost, &data, rmsg, logger)
 	}
 
-	logger.Debugf("handleWsActionPost() user %s sent %#v", ghost.Nick, formattedMsg)
+	logger.Debugf("user %s sent %#v", ghost.Nick, formattedMsg)
 	logger.Tracef("%#v", data) //nolint:govet
 }
 
@@ -1303,7 +1304,7 @@ func (m *Mattermost) handleFileEvent(ctx context.Context, channelType string, gh
 	}
 
 	if len(fileEvent.Files) == 0 {
-		logger.Debugf("handleFileEvent() user %s sent 0 files %#v", ghost.Nick, data.FileIds)
+		logger.Debugf("handleFileEvent: user %s sent 0 files %#v", ghost.Nick, data.FileIds)
 		return
 	}
 
@@ -1327,7 +1328,7 @@ func (m *Mattermost) handleFileEvent(ctx context.Context, channelType string, gh
 		m.eventChan <- event
 	}
 
-	logger.Debugf("handleFileEvent() user %s sent %d files %#v", ghost.Nick, len(fileEvent.Files), data.FileIds)
+	logger.Debugf("handleFileEvent: user %s sent %d files %#v", ghost.Nick, len(fileEvent.Files), data.FileIds)
 }
 
 func (m *Mattermost) wsActionPostJoinLeave(ctx context.Context, data *model.Post, extraProps map[string]interface{}, logger *logrus.Entry) {

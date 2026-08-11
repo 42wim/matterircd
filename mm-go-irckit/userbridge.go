@@ -837,7 +837,7 @@ func (u *User) createUserFromInfo(info *bridge.UserInfo) *User {
 }
 
 func (u *User) addUsersToChannel(users []*User, channel string, channelID string) {
-	logger.Debugf("adding %d to %s", len(users), channel)
+	logger.Tracef("adding %d to %s", len(users), channel)
 
 	ch := u.Srv.Channel(channelID)
 
@@ -884,7 +884,7 @@ func (u *User) addUsersToChannels() {
 	srv := u.Srv
 	throttle := time.NewTicker(time.Millisecond * 8)
 
-	logger.Trace("in addUsersToChannels()")
+	logger.Trace("in addUsersToChannels")
 	// add all users, also who are not on channels
 	ch := srv.Channel("&users")
 
@@ -1439,7 +1439,7 @@ func (u *User) syncChannel(id string, name string) {
 	// add myself ONLY if I am actually a member
 	ch := srv.Channel(id)
 	if u.br.IsChannelMember(id) && !ch.HasUser(u) && u.mayJoin(id) {
-		logger.Debugf("syncChannel adding myself to %s (id: %s)", name, id)
+		logger.Tracef("syncChannel adding myself to %s (id: %s)", name, id)
 		ch.Join(u)
 		svc, _ := srv.HasUser(u.br.Protocol())
 		ch.Topic(svc, u.br.Topic(u.ctx, ch.ID()))
