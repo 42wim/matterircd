@@ -333,12 +333,8 @@ func (m *Mattermost) handleWsMessage(ctx context.Context, quitChan chan struct{}
 }
 
 func (m *Mattermost) Invite(ctx context.Context, channelID, username string) error {
-	_, _, err := m.mc.Client.AddChannelMember(ctx, channelID, username)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	_, err := m.mc.AddChannelMember(ctx, channelID, username)
+	return err
 }
 
 func (m *Mattermost) IsChannelMember(channelID string) bool {
@@ -350,7 +346,7 @@ func (m *Mattermost) Join(ctx context.Context, channelName string) (string, stri
 
 	sp := strings.Split(channelName, "/")
 	if len(sp) > 1 {
-		team, _, err := m.mc.Client.GetTeamByName(ctx, sp[0], "")
+		team, err := m.mc.GetTeamByName(ctx, sp[0])
 		if team == nil {
 			if err != nil {
 				return "", "", fmt.Errorf("team not found: %v", err)
@@ -404,9 +400,7 @@ func (m *Mattermost) List(ctx context.Context) (map[string]string, error) {
 }
 
 func (m *Mattermost) Part(ctx context.Context, channelID string) error {
-	_, err := m.mc.Client.RemoveUserFromChannel(ctx, channelID, m.mc.User.Id)
-
-	return err
+	return m.mc.RemoveUserFromChannel(ctx, channelID, m.mc.User.Id)
 }
 
 func (m *Mattermost) UpdateChannels(ctx context.Context) error {
@@ -536,12 +530,9 @@ func (m *Mattermost) AddReaction(ctx context.Context, msgID, emoji string) error
 		CreateAt:  0,
 	}
 
-	_, _, err := m.mc.Client.SaveReaction(ctx, reaction)
-	if err != nil {
-		return err
-	}
+	_, err := m.mc.SaveReaction(ctx, reaction)
 
-	return nil
+	return err
 }
 
 func (m *Mattermost) RemoveReaction(ctx context.Context, msgID, emoji string) error {
@@ -553,12 +544,7 @@ func (m *Mattermost) RemoveReaction(ctx context.Context, msgID, emoji string) er
 		CreateAt:  0,
 	}
 
-	_, err := m.mc.Client.DeleteReaction(ctx, reaction)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return m.mc.DeleteReaction(ctx, reaction)
 }
 
 func (m *Mattermost) Topic(ctx context.Context, channelID string) string {
@@ -567,16 +553,14 @@ func (m *Mattermost) Topic(ctx context.Context, channelID string) string {
 
 func (m *Mattermost) SetTopic(ctx context.Context, channelID, text string) error {
 	logger.Debugf("Updating channel header/topic %#v, %#v", channelID, text)
+
 	patch := &model.ChannelPatch{
 		Header: &text,
 	}
 
-	_, _, err := m.mc.Client.PatchChannel(ctx, channelID, patch)
-	if err != nil {
-		return err
-	}
+	_, err := m.mc.PatchChannel(ctx, channelID, patch)
 
-	return nil
+	return err
 }
 
 func (m *Mattermost) StatusUser(ctx context.Context, userID string) (string, error) {
@@ -592,24 +576,11 @@ func (m *Mattermost) Protocol() string {
 }
 
 func (m *Mattermost) Kick(ctx context.Context, channelID, username string) error {
-	_, err := m.mc.Client.RemoveUserFromChannel(ctx, channelID, username)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return m.mc.RemoveUserFromChannel(ctx, channelID, username)
 }
 
 func (m *Mattermost) SetStatus(ctx context.Context, status string) error {
-	_, _, err := m.mc.Client.UpdateUserStatus(ctx, m.mc.User.Id, &model.Status{
-		Status: status,
-		UserId: m.mc.User.Id,
-	})
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return m.mc.UpdateStatus(ctx, m.mc.User.Id, status)
 }
 
 func (m *Mattermost) Nick(ctx context.Context, name string) error {
@@ -1050,6 +1021,7 @@ var (
 
 //nolint:funlen,gocognit,gocyclo,cyclop,forcetypeassert
 func (m *Mattermost) handleWsActionPost(ctx context.Context, rmsg *model.WebSocketEvent, logger *logrus.Entry) {
+	logger.Trace("in handleWsActionPost")
 	wsData := rmsg.GetData()
 	postData, ok := wsData["post"].(string)
 	if !ok {
@@ -1063,7 +1035,7 @@ func (m *Mattermost) handleWsActionPost(ctx context.Context, rmsg *model.WebSock
 	}
 	extraProps := data.GetProps()
 
-	logger.Tracef("handleWsActionPost() receiving userid %s", data.UserId)
+	logger.Tracef("receiving userid %s", data.UserId)
 	if m.wsActionPostSkip(ctx, rmsg, logger) {
 		return
 	}
@@ -1152,9 +1124,9 @@ func (m *Mattermost) handleWsActionPost(ctx context.Context, rmsg *model.WebSock
 		myUser := m.GetMe().User
 		addedUserID, _ := data.GetProps()["addedUserId"].(string)
 		if data.UserId != myUser && addedUserID != myUser {
-			logger.Debugf("Skipping channel sync because user %s joined/left, not us.", data.UserId)
+			logger.Tracef("Skipping channel sync because user %s joined/left, not us.", data.UserId)
 		} else if data.Type == model.PostTypeLeaveChannel {
-			logger.Debugf("Left channel %s, skipping full channel sync", data.ChannelId)
+			logger.Tracef("Left channel %s, skipping full channel sync", data.ChannelId)
 		} else if _, err := m.GetChannel(ctx, data.ChannelId); err != nil {
 			logger.Errorf("Failed to fetch new channel %s: %v", data.ChannelId, err)
 		} else {
@@ -1293,7 +1265,7 @@ func (m *Mattermost) handleWsActionPost(ctx context.Context, rmsg *model.WebSock
 		m.handleFileEvent(ctx, channelType, ghost, &data, rmsg, logger)
 	}
 
-	logger.Debugf("handleWsActionPost() user %s sent %#v", ghost.Nick, formattedMsg)
+	logger.Debugf("user %s sent %#v", ghost.Nick, formattedMsg)
 	logger.Tracef("%#v", data) //nolint:govet
 }
 
@@ -1332,7 +1304,7 @@ func (m *Mattermost) handleFileEvent(ctx context.Context, channelType string, gh
 	}
 
 	if len(fileEvent.Files) == 0 {
-		logger.Debugf("handleFileEvent() user %s sent 0 files %#v", ghost.Nick, data.FileIds)
+		logger.Debugf("handleFileEvent: user %s sent 0 files %#v", ghost.Nick, data.FileIds)
 		return
 	}
 
@@ -1356,7 +1328,7 @@ func (m *Mattermost) handleFileEvent(ctx context.Context, channelType string, gh
 		m.eventChan <- event
 	}
 
-	logger.Debugf("handleFileEvent() user %s sent %d files %#v", ghost.Nick, len(fileEvent.Files), data.FileIds)
+	logger.Debugf("handleFileEvent: user %s sent %d files %#v", ghost.Nick, len(fileEvent.Files), data.FileIds)
 }
 
 func (m *Mattermost) wsActionPostJoinLeave(ctx context.Context, data *model.Post, extraProps map[string]interface{}, logger *logrus.Entry) {
@@ -1653,16 +1625,12 @@ func (m *Mattermost) UpdateLastViewed(ctx context.Context, channelID string) {
 }
 
 func (m *Mattermost) UpdateLastViewedUser(ctx context.Context, userID string) error {
-	for {
-		dc, resp, err := m.mc.Client.CreateDirectChannel(ctx, m.mc.User.Id, userID)
-		if err == nil {
-			return m.mc.UpdateLastViewed(ctx, dc.Id)
-		}
-
-		if err := m.mc.HandleRatelimit(ctx, "CreateDirectChannel", resp); err != nil {
-			return err
-		}
+	dc, err := m.mc.CreateDirectChannel(ctx, m.mc.User.Id, userID)
+	if err != nil {
+		return err
 	}
+
+	return m.mc.UpdateLastViewed(ctx, dc.Id)
 }
 
 func (m *Mattermost) SearchPosts(ctx context.Context, search string) []*bridge.Event {
@@ -1674,7 +1642,7 @@ func (m *Mattermost) GetFileLinks(ctx context.Context, fileIDs []string) []strin
 }
 
 func (m *Mattermost) SearchUsers(ctx context.Context, query string) ([]*bridge.UserInfo, error) {
-	users, _, err := m.mc.Client.SearchUsers(ctx, &model.UserSearch{Term: query})
+	users, err := m.mc.SearchUsers(ctx, &model.UserSearch{Term: query})
 	if err != nil {
 		return nil, err
 	}

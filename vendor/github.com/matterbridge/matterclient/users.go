@@ -26,12 +26,28 @@ func (m *Client) GetStatus(ctx context.Context, userID string) string {
 	m.Users.mu.RUnlock()
 
 	if !ok {
-		m.apiLogger.Warnf("GetStatus: GetUserStatus: UserID: %s", userID)
-		res, _, err := m.Client.GetUserStatus(ctx, userID, "")
-		if err != nil {
+		retryCount := 0
+		for {
+			m.apiLogger.Warnf("GetStatus: GetUserStatus: UserID: %s #%d", userID, retryCount)
+
+			res, resp, err := m.Client.GetUserStatus(ctx, userID, "")
+			if err == nil {
+				status = m.SetUserStatus(userID, res.Status)
+
+				break
+			}
+
+			shouldRetry, hErr := m.HandleRetry(ctx, "GetUserStatus", err, retryCount, 10, resp)
+			if hErr == nil && shouldRetry {
+				retryCount++
+
+				continue
+			}
+
+			// If it completely fails, we assume offline and break the loop
 			status = "offline"
-		} else {
-			status = m.SetUserStatus(userID, res.Status)
+
+			break
 		}
 	}
 
@@ -41,6 +57,7 @@ func (m *Client) GetStatus(ctx context.Context, userID string) string {
 
 	if !tracked {
 		user := m.GetUser(ctx, userID)
+
 		var rawJSON string
 		if user != nil && user.Props != nil {
 			if val, propOk := user.Props["customStatus"]; propOk {
@@ -60,6 +77,7 @@ func (m *Client) GetStatus(ctx context.Context, userID string) string {
 		if status != "online" && status != "" {
 			return status + ": " + customStatus
 		}
+
 		return customStatus
 	}
 
@@ -91,17 +109,33 @@ func (m *Client) GetStatuses(ctx context.Context) map[string]string {
 		if end > len(missingIDs) {
 			end = len(missingIDs)
 		}
-
 		batch := missingIDs[i:end]
-		m.apiLogger.Warnf("GetStatuses: GetUsersStatusesByIds: Batch: %d #%d", len(batch), i)
-		res, _, err := m.Client.GetUsersStatusesByIds(ctx, batch)
-		if err != nil {
-			continue
-		}
 
-		for _, st := range res {
-			cleanID := strings.Clone(st.UserId)
-			statuses[cleanID] = m.SetUserStatus(cleanID, st.Status)
+		retryCount := 0
+		for {
+			m.apiLogger.Warnf("GetStatuses: GetUsersStatusesByIds: Batch: %d #%d", len(batch), retryCount)
+
+			res, resp, err := m.Client.GetUsersStatusesByIds(ctx, batch)
+			if err == nil {
+				for _, st := range res {
+					cleanID := strings.Clone(st.UserId)
+					statuses[cleanID] = m.SetUserStatus(cleanID, st.Status)
+				}
+
+				break // Break the retry loop on success to move to the next batch
+			}
+
+			shouldRetry, hErr := m.HandleRetry(ctx, "GetUsersStatusesByIds", err, retryCount, 10, resp)
+			if hErr == nil && shouldRetry {
+				retryCount++
+
+				continue
+			}
+
+			// If it completely fails after retries, break the loop and continue to the next batch
+			m.logger.Errorf("GetStatuses failed for batch starting at index %d: %v", i, err)
+
+			break
 		}
 	}
 
@@ -112,6 +146,29 @@ func (m *Client) GetStatuses(ctx context.Context) map[string]string {
 	}
 
 	return statuses
+}
+
+func (m *Client) GetTeamByName(ctx context.Context, name string) (*model.Team, error) {
+	retryCount := 0
+	for {
+		m.apiLogger.Warnf("GetTeamByName: TeamName: %s #%d", name, retryCount)
+
+		team, resp, err := m.Client.GetTeamByName(ctx, name, "")
+		if err == nil {
+			return team, nil
+		}
+
+		shouldRetry, hErr := m.HandleRetry(ctx, "GetTeamByName", err, retryCount, 10, resp)
+		if hErr == nil && shouldRetry {
+			retryCount++
+
+			continue
+		}
+
+		m.logger.Errorf("GetTeamByName failed for %s: %v", name, err)
+
+		return nil, err
+	}
 }
 
 func (m *Client) GetTeamID() string {
@@ -253,6 +310,29 @@ func (m *Client) GetUsers() map[string]*model.User {
 	}
 
 	return users
+}
+
+func (m *Client) SearchUsers(ctx context.Context, search *model.UserSearch) ([]*model.User, error) {
+	retryCount := 0
+	for {
+		m.apiLogger.Warnf("SearchUsers: Term: %s #%d", search.Term, retryCount)
+
+		users, resp, err := m.Client.SearchUsers(ctx, search)
+		if err == nil {
+			return users, nil
+		}
+
+		shouldRetry, hErr := m.HandleRetry(ctx, "SearchUsers", err, retryCount, 10, resp)
+		if hErr == nil && shouldRetry {
+			retryCount++
+
+			continue
+		}
+
+		m.logger.Errorf("SearchUsers failed for %s: %v", search.Term, err)
+
+		return nil, err
+	}
 }
 
 func (c *UsersCache) SetUserCustomStatus(userID string, rawJSON string) {
@@ -399,24 +479,39 @@ func (m *Client) UpdateUserNick(ctx context.Context, nick string) error {
 	m.RLock()
 	if m.User == nil {
 		m.RUnlock()
+
 		return fmt.Errorf("current user profile is not loaded")
 	}
+
 	userClone := *m.User
 	m.RUnlock()
 	userClone.Nickname = nick
 
-	m.apiLogger.Warnf("UpdateUserNick: nick: %s", nick)
-	updatedUser, _, err := m.Client.UpdateUser(ctx, &userClone)
-	if err != nil {
+	retryCount := 0
+	for {
+		m.apiLogger.Warnf("UpdateUserNick: nick: %s #%d", nick, retryCount)
+
+		updatedUser, resp, err := m.Client.UpdateUser(ctx, &userClone)
+		if err == nil {
+			m.Lock()
+			m.User = updatedUser
+			m.Unlock()
+			m.UpdateUser(updatedUser)
+
+			return nil
+		}
+
+		shouldRetry, hErr := m.HandleRetry(ctx, "UpdateUser", err, retryCount, 10, resp)
+		if hErr == nil && shouldRetry {
+			retryCount++
+
+			continue
+		}
+
+		m.logger.Errorf("UpdateUserNick failed for %s: %v", nick, err)
+
 		return err
 	}
-
-	m.Lock()
-	m.User = updatedUser
-	m.Unlock()
-	m.UpdateUser(updatedUser)
-
-	return nil
 }
 
 func (m *Client) UsernamesInChannel(ctx context.Context, channelID string) []string {
@@ -459,15 +554,28 @@ func (m *Client) UsernamesInChannel(ctx context.Context, channelID string) []str
 }
 
 func (m *Client) UpdateStatus(ctx context.Context, userID string, status string) error {
-	m.apiLogger.Warnf("UpdateStatus: UserID: %s, Status: %s", userID, status)
-	_, _, err := m.Client.UpdateUserStatus(ctx, userID, &model.Status{Status: status})
-	if err != nil {
+	retryCount := 0
+	for {
+		m.apiLogger.Warnf("UpdateStatus: UserID: %s, Status: %s #%d", userID, status, retryCount)
+
+		_, resp, err := m.Client.UpdateUserStatus(ctx, userID, &model.Status{Status: status})
+		if err == nil {
+			m.SetUserStatus(userID, status)
+
+			return nil
+		}
+
+		shouldRetry, hErr := m.HandleRetry(ctx, "UpdateUserStatus", err, retryCount, 10, resp)
+		if hErr == nil && shouldRetry {
+			retryCount++
+
+			continue
+		}
+
+		m.logger.Errorf("UpdateStatus failed for %s: %v", userID, err)
+
 		return err
 	}
-
-	m.SetUserStatus(userID, status)
-
-	return nil
 }
 
 func (m *Client) UpdateUser(user *model.User) {

@@ -166,7 +166,7 @@ func (u *User) Encode(msgs ...*irc.Message) (err error) {
 			continue
 		}
 
-		if msg.Command == irc.PONG || msg.Command == irc.RPL_NAMREPLY {
+		if msg.Command == irc.PONG || msg.Command == irc.RPL_NAMREPLY || msg.Command == irc.TOPIC || strings.Contains(msg.Command, "@+typing=active") {
 			logger.Tracef("-> %q", msg.String())
 		} else {
 			logger.Debugf("-> %q", msg.String())
@@ -190,7 +190,7 @@ var (
 // nolint:funlen,gocognit,gocyclo
 func (u *User) Decode() {
 	if u.Ghost {
-		logger.Trace("ghost user, skipping Decode()")
+		logger.Trace("ghost user, skipping Decode")
 		return
 	}
 	buffer := make(chan *irc.Message, 512)
