@@ -910,8 +910,8 @@ func (u *User) addUsersToChannels() {
 	// Fetch, filter, and sort the channels alphabetically
 	var joinChannels []*bridge.ChannelInfo
 	for _, brchannel := range u.br.GetChannels() {
+		lastPost := time.UnixMilli(brchannel.LastPostAt)
 		if brchannel.DM && !u.br.BridgeConfig().JoinDM {
-			lastPost := time.UnixMilli(brchannel.LastPostAt)
 
 			threshold := lastSyncThreshold
 			if threshold.IsZero() {
@@ -940,6 +940,14 @@ func (u *User) addUsersToChannels() {
 				logger.Debugf("SmartJoin: Joining DM channel %s due to recent offline activity (LastPost: %v)", brchannel.Name, lastPost)
 			}
 		}
+
+		// If the channel is explicitly excluded in matterircd.toml, drop it now.
+		if !brchannel.DM && !u.mayJoin(brchannel.ID) {
+			logger.Debugf("Skipping channel %s due to JoinExclude/JoinOnly configuration (LastPost: %v)", brchannel.Name, lastPost)
+
+			continue
+		}
+
 		joinChannels = append(joinChannels, brchannel)
 	}
 
@@ -1453,7 +1461,16 @@ func (u *User) mayJoin(channelID string) bool {
 	ji := u.br.BridgeConfig().JoinInclude
 	je := u.br.BridgeConfig().JoinExclude
 
+	// If no join restrictions are configured, allow instantly
+	if len(jo) == 0 && len(ji) == 0 && len(je) == 0 {
+		return true
+	}
+
 	switch {
+	// If we have joinonly channels specified and it matches, join
+	case len(jo) != 0 && stringInRegexp(ch.String(), jo):
+		logger.Tracef("mayjoin 0 %t ch: %s, match: %s", true, ch.String(), jo)
+		return true
 	// if we have joinonly channels specified we are only allowed to join those
 	case len(jo) != 0 && !stringInRegexp(ch.String(), jo):
 		logger.Tracef("mayjoin 0 %t ch: %s, match: %s", false, ch.String(), jo)
@@ -1476,7 +1493,13 @@ func (u *User) mayJoin(channelID string) bool {
 	case len(ji) != 0 && len(je) != 0:
 		// if explicit in ji we also may join
 		mayjoin := stringInRegexp(ch.String(), ji)
-		logger.Tracef("mayjoin 4 %t ch: %s, match: %s", mayjoin, ch.String(), ji)
+		if mayjoin {
+			logger.Tracef("mayjoin 4 %t ch: %s, match: %s", mayjoin, ch.String(), ji)
+			return true
+		}
+		// otherwise evaluate against joinexclude
+		mayjoin = !stringInRegexp(ch.String(), je)
+		logger.Tracef("mayjoin 4 %t ch: %s, match: %s", mayjoin, ch.String(), je)
 		return mayjoin
 	}
 
