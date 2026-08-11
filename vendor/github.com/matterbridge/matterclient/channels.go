@@ -551,7 +551,10 @@ func (m *Client) RemoveUserFromChannel(ctx context.Context, channelID, userID st
 		resp, err := m.Client.RemoveUserFromChannel(ctx, channelID, userID)
 		if err == nil {
 			// If we are removing ourselves, clean up our joinedChannels cache
-			if m.User != nil && userID == m.User.Id {
+			m.RLock()
+			isCurrentUser := m.User != nil && userID == m.User.Id
+			m.RUnlock()
+			if isCurrentUser {
 				m.Users.mu.Lock()
 				delete(m.Users.joinedChannels, channelID)
 				m.Users.mu.Unlock()
