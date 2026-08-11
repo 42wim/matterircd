@@ -558,7 +558,10 @@ func (m *Client) UpdateStatus(ctx context.Context, userID string, status string)
 	for {
 		m.apiLogger.Warnf("UpdateStatus: UserID: %s, Status: %s #%d", userID, status, retryCount)
 
-		_, resp, err := m.Client.UpdateUserStatus(ctx, userID, &model.Status{Status: status})
+		_, resp, err := m.Client.UpdateUserStatus(ctx, userID, &model.Status{
+			UserId: userID,
+			Status: status,
+		})
 		if err == nil {
 			m.SetUserStatus(userID, status)
 
