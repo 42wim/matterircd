@@ -438,6 +438,52 @@ func (m *Client) SendDirectMessageProps(ctx context.Context, toUserID string, ms
 	}
 }
 
+func (m *Client) SaveReaction(ctx context.Context, reaction *model.Reaction) (*model.Reaction, error) {
+	retryCount := 0
+	for {
+		m.apiLogger.Warnf("SaveReaction: PostID: %s, Emoji: %s #%d", reaction.PostId, reaction.EmojiName, retryCount)
+
+		res, resp, err := m.Client.SaveReaction(ctx, reaction)
+		if err == nil {
+			return res, nil
+		}
+
+		shouldRetry, hErr := m.HandleRetry(ctx, "SaveReaction", err, retryCount, 10, resp)
+		if hErr == nil && shouldRetry {
+			retryCount++
+
+			continue
+		}
+
+		m.logger.Errorf("SaveReaction failed for %s (emoji: %s): %v", reaction.PostId, reaction.EmojiName, err)
+
+		return nil, err
+	}
+}
+
+func (m *Client) DeleteReaction(ctx context.Context, reaction *model.Reaction) error {
+	retryCount := 0
+	for {
+		m.apiLogger.Warnf("DeleteReaction: PostID: %s, Emoji: %s #%d", reaction.PostId, reaction.EmojiName, retryCount)
+
+		resp, err := m.Client.DeleteReaction(ctx, reaction)
+		if err == nil {
+			return nil
+		}
+
+		shouldRetry, hErr := m.HandleRetry(ctx, "DeleteReaction", err, retryCount, 10, resp)
+		if hErr == nil && shouldRetry {
+			retryCount++
+
+			continue
+		}
+
+		m.logger.Errorf("DeleteReaction failed for %s (emoji: %s): %v", reaction.PostId, reaction.EmojiName, err)
+
+		return err
+	}
+}
+
 func (m *Client) UploadFile(ctx context.Context, data []byte, channelID string, filename string) (string, error) {
 	retryCount := 0
 	for {

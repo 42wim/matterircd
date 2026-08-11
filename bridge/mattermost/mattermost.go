@@ -530,12 +530,9 @@ func (m *Mattermost) AddReaction(ctx context.Context, msgID, emoji string) error
 		CreateAt:  0,
 	}
 
-	_, _, err := m.mc.Client.SaveReaction(ctx, reaction)
-	if err != nil {
-		return err
-	}
+	_, err := m.mc.SaveReaction(ctx, reaction)
 
-	return nil
+	return err
 }
 
 func (m *Mattermost) RemoveReaction(ctx context.Context, msgID, emoji string) error {
@@ -547,12 +544,7 @@ func (m *Mattermost) RemoveReaction(ctx context.Context, msgID, emoji string) er
 		CreateAt:  0,
 	}
 
-	_, err := m.mc.Client.DeleteReaction(ctx, reaction)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return m.mc.DeleteReaction(ctx, reaction)
 }
 
 func (m *Mattermost) Topic(ctx context.Context, channelID string) string {

@@ -513,6 +513,7 @@ func (m *Client) JoinChannel(ctx context.Context, channelID string) error {
 		m.Users.mu.Lock()
 		m.Users.joinedChannels[channelID] = struct{}{}
 		m.Users.mu.Unlock()
+
 		return nil
 	}
 
@@ -555,6 +556,7 @@ func (m *Client) RemoveUserFromChannel(ctx context.Context, channelID, userID st
 				delete(m.Users.joinedChannels, channelID)
 				m.Users.mu.Unlock()
 			}
+
 			return nil
 		}
 
@@ -565,6 +567,7 @@ func (m *Client) RemoveUserFromChannel(ctx context.Context, channelID, userID st
 		}
 
 		m.logger.Errorf("RemoveUserFromChannel failed for channel %s (user %s): %v", channelID, userID, err)
+
 		return err
 	}
 }
