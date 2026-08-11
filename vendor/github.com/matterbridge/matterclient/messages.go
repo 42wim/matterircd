@@ -5,6 +5,7 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"strconv"
 	"strings"
 
@@ -40,25 +41,49 @@ func (m *Client) CreatePost(ctx context.Context, post *model.Post) (*model.Post,
 }
 
 func (m *Client) DeleteMessage(ctx context.Context, postID string) error {
-	m.apiLogger.Warnf("DeleteMessage: PostID: %s", postID)
-	_, err := m.Client.DeletePost(ctx, postID)
-	if err != nil {
+	retryCount := 0
+	for {
+		m.apiLogger.Warnf("DeleteMessage: PostID: %s #%d", postID, retryCount)
+
+		resp, err := m.Client.DeletePost(ctx, postID)
+		if err == nil {
+			return nil
+		}
+
+		shouldRetry, hErr := m.HandleRetry(ctx, "DeletePost", err, retryCount, 10, resp)
+		if hErr == nil && shouldRetry {
+			retryCount++
+			continue
+		}
+
+		m.logger.Errorf("DeleteMessage failed for %s: %v", postID, err)
 		return err
 	}
-
-	return nil
 }
 
 func (m *Client) EditMessage(ctx context.Context, postID string, text string) (string, error) {
 	post := &model.Post{Message: text, Id: postID}
 
-	m.apiLogger.Warnf("EditMessage: PostID: %s", postID)
-	res, _, err := m.Client.UpdatePost(ctx, postID, post)
-	if err != nil {
+	retryCount := 0
+	for {
+		m.apiLogger.Warnf("EditMessage: PostID: %s #%d", postID, retryCount)
+
+		res, resp, err := m.Client.UpdatePost(ctx, postID, post)
+		if err == nil {
+			return res.Id, nil
+		}
+
+		shouldRetry, hErr := m.HandleRetry(ctx, "UpdatePost", err, retryCount, 10, resp)
+		if hErr == nil && shouldRetry {
+			retryCount++
+
+			continue
+		}
+
+		m.logger.Errorf("EditMessage failed for %s: %v", postID, err)
+
 		return "", err
 	}
-
-	return res.Id, nil
 }
 
 func (m *Client) GetFileLinks(ctx context.Context, filenames []string) []string {
@@ -70,16 +95,13 @@ func (m *Client) GetFileLinks(ctx context.Context, filenames []string) []string 
 	var output []string
 
 	for _, f := range filenames {
-		m.apiLogger.Infof("GetFileLinks: file: %s", f)
-		res, _, err := m.Client.GetFileLink(ctx, f)
-		if err != nil {
-			// public links is probably disabled, create the link ourselves
+		link := m.GetPublicLink(ctx, f)
+		if link != "" {
+			output = append(output, link)
+		} else {
+			// public links is probably disabled or failed, create the link ourselves
 			output = append(output, uriScheme+m.Credentials.Server+model.APIURLSuffix+"/files/"+f)
-
-			continue
 		}
-
-		output = append(output, res)
 	}
 
 	return output
@@ -226,29 +248,61 @@ func (m *Client) GetPostsSince(ctx context.Context, channelID string, time int64
 }
 
 func (m *Client) GetPublicLink(ctx context.Context, filename string) string {
-	m.apiLogger.Infof("GetPublicLink: file: %s", filename)
-	res, _, err := m.Client.GetFileLink(ctx, filename)
-	if err != nil {
+	retryCount := 0
+	for {
+		m.apiLogger.Infof("GetPublicLink: file: %s #%d", filename, retryCount)
+
+		res, resp, err := m.Client.GetFileLink(ctx, filename)
+		if err == nil {
+			return res
+		}
+
+		// If public links are disabled, Mattermost returns a 501 Not Implemented or 400 Bad Request.
+		// HandleRetry will correctly see the 4xx/501 error, return false, and break the loop gracefully.
+		shouldRetry, hErr := m.HandleRetry(ctx, "GetFileLink", err, retryCount, 10, resp)
+		if hErr == nil && shouldRetry {
+			retryCount++
+
+			continue
+		}
+
 		return ""
 	}
-
-	return res
 }
 
 func (m *Client) GetPublicLinks(ctx context.Context, filenames []string) []string {
 	var output []string
 
 	for _, f := range filenames {
-		m.apiLogger.Infof("GetPublicLinks: file: %s", f)
-		res, _, err := m.Client.GetFileLink(ctx, f)
-		if err != nil {
-			continue
+		link := m.GetPublicLink(ctx, f)
+		if link != "" {
+			output = append(output, link)
 		}
-
-		output = append(output, res)
 	}
 
 	return output
+}
+
+func (m *Client) PatchPost(ctx context.Context, postID string, patch *model.PostPatch) (*model.Post, error) {
+	retryCount := 0
+	for {
+		m.apiLogger.Warnf("PatchPost: PostID: %s #%d", postID, retryCount)
+
+		post, resp, err := m.Client.PatchPost(ctx, postID, patch)
+		if err == nil {
+			return post, nil
+		}
+
+		shouldRetry, hErr := m.HandleRetry(ctx, "PatchPost", err, retryCount, 10, resp)
+		if hErr == nil && shouldRetry {
+			retryCount++
+			continue
+		}
+
+		m.logger.Errorf("PatchPost failed for %s: %v", postID, err)
+
+		return nil, err
+	}
 }
 
 func (m *Client) PostMessage(ctx context.Context, channelID string, text string, rootID string) (string, error) {
@@ -385,13 +439,30 @@ func (m *Client) SendDirectMessageProps(ctx context.Context, toUserID string, ms
 }
 
 func (m *Client) UploadFile(ctx context.Context, data []byte, channelID string, filename string) (string, error) {
-	m.apiLogger.Warnf("UploadFile: ChannelID: %s, filename: %s", channelID, filename)
-	f, _, err := m.Client.UploadFile(ctx, data, channelID, filename)
-	if err != nil {
+	retryCount := 0
+	for {
+		m.apiLogger.Warnf("UploadFile: ChannelID: %s, filename: %s #%d", channelID, filename, retryCount)
+
+		f, resp, err := m.Client.UploadFile(ctx, data, channelID, filename)
+		if err == nil && f != nil && len(f.FileInfos) > 0 {
+			return f.FileInfos[0].Id, nil
+		}
+
+		if err == nil {
+			err = errors.New("file upload succeeded but FileInfos was empty")
+		}
+
+		shouldRetry, hErr := m.HandleRetry(ctx, "UploadFile", err, retryCount, 10, resp)
+		if hErr == nil && shouldRetry {
+			retryCount++
+
+			continue
+		}
+
+		m.logger.Errorf("UploadFile failed for %s: %v", filename, err)
+
 		return "", err
 	}
-
-	return f.FileInfos[0].Id, nil
 }
 
 func (m *Client) parseActionPost(ctx context.Context, rmsg *Message) {

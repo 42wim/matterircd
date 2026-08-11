@@ -443,34 +443,44 @@ func (m *Client) handleLoginToken() error {
 }
 
 func (m *Client) serverAlive(ctx context.Context, b *backoff.Backoff) error {
-	defer b.Reset()
+	if b != nil {
+		defer b.Reset()
+	}
 
+	retryCount := 0
 	for {
 		if m.IsAborted(ctx) || ctx.Err() != nil {
 			return errors.New("login aborted")
 		}
 
-		d := b.Duration()
 		// bogus call to get the serverversion
-		m.apiLogger.Info("serverAlive: Logout")
+		m.apiLogger.Infof("serverAlive: Logout check #%d", retryCount)
 		resp, err := m.Client.Logout(ctx)
-		if err != nil {
-			return err
-		}
 
-		if resp.ServerVersion == "" {
-			m.logger.Debugf("Server not up yet, reconnecting in %s", d)
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(d):
-				// continue loop
-			}
-		} else {
+		// Success condition: No error, and we have a server version
+		if err == nil && resp != nil && resp.ServerVersion != "" {
 			m.logger.Infof("Found version %s", resp.ServerVersion)
 
 			return nil
 		}
+
+		// If the API succeeded but the server version is empty,
+		// we construct an error so HandleRetry knows to back off.
+		if err == nil {
+			err = errors.New("server up but returned empty ServerVersion")
+		}
+
+		// We use a higher maxLimit here (e.g. 30) because a server restart can
+		// take a few minutes. 30 retries = ~7.5 minutes of total backoff time.
+		shouldRetry, hErr := m.HandleRetry(ctx, "serverAlive", err, retryCount, 30, resp)
+		if hErr == nil && shouldRetry {
+			retryCount++
+			continue
+		}
+
+		m.logger.Errorf("serverAlive check failed: %v", err)
+
+		return err
 	}
 }
 
@@ -688,62 +698,73 @@ func (m *Client) initUserChannels(ctx context.Context) error {
 }
 
 func (m *Client) doLogin(ctx context.Context, firstConnection bool, b *backoff.Backoff) error {
+	// b is kept for signature compatibility.
+	if b != nil {
+		defer b.Reset()
+	}
+
 	var (
 		logmsg = "trying login"
 		err    error
+		resp   *model.Response
 		user   *model.User
 	)
 
+	retryCount := 0
 	for {
 		if m.IsAborted(ctx) || ctx.Err() != nil {
 			return errors.New("login aborted")
 		}
 
-		m.logger.Debugf("%s %s %s %s", logmsg, m.Credentials.Team, m.Credentials.Login, m.Credentials.Server)
+		m.logger.Debugf("%s %s %s %s #%d", logmsg, m.Credentials.Team, m.Credentials.Login, m.Credentials.Server, retryCount)
 
+		// Attempt the appropriate login method
 		switch {
 		case m.Credentials.Token != "":
-			user, _, err = m.doLoginToken(ctx)
-			if err != nil {
-				return err
-			}
+			user, resp, err = m.doLoginToken(ctx)
 		case m.Credentials.MFAToken != "":
 			m.apiLogger.Info("doLogin: LoginWithMFA")
-			user, _, err = m.Client.LoginWithMFA(ctx, m.Credentials.Login, m.Credentials.Pass, m.Credentials.MFAToken)
+			user, resp, err = m.Client.LoginWithMFA(ctx, m.Credentials.Login, m.Credentials.Pass, m.Credentials.MFAToken)
 		default:
 			m.apiLogger.Info("doLogin: Login")
-			user, _, err = m.Client.Login(ctx, m.Credentials.Login, m.Credentials.Pass)
+			user, resp, err = m.Client.Login(ctx, m.Credentials.Login, m.Credentials.Pass)
 		}
 
+		// Success condition
+		if err == nil && user != nil {
+			m.User = user
+
+			return nil
+		}
+
+		//  Log the error and handle the firstConnection fail-fast behavior
 		if err != nil {
-			d := b.Duration()
-
 			m.logger.Debug(err)
+		}
 
-			if firstConnection {
-				return err
-			}
+		if firstConnection {
+			return err
+		}
 
-			m.logger.Debugf("LOGIN: %s, reconnecting in %s", err, d)
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(d):
-			}
+		// Construct an error if user is somehow nil but the HTTP request didn't fail
+		if err == nil && user == nil {
+			err = errors.New("login succeeded but returned a nil user")
+		}
 
+		// Let HandleRetry dictate if we should loop.
+		// We use a high maxLimit (e.g., 60) so it can survive an extended server outage (like a 1-hour DB maintenance)
+		shouldRetry, hErr := m.HandleRetry(ctx, "doLogin", err, retryCount, 60, resp)
+		if hErr == nil && shouldRetry {
 			logmsg = "retrying login"
+			retryCount++
 
 			continue
 		}
 
-		m.User = user
+		m.logger.Errorf("LOGIN failed: %v", err)
 
-		break
+		return err
 	}
-	// reset timer
-	b.Reset()
-
-	return nil
 }
 
 func (m *Client) doLoginToken(ctx context.Context) (*model.User, *model.Response, error) {
@@ -758,13 +779,14 @@ func (m *Client) doLoginToken(ctx context.Context) (*model.User, *model.Response
 	m.Client.AuthToken = m.Credentials.Token
 
 	if m.Credentials.CookieToken {
-		m.logger.Debugf(logmsg + " with cookie (MMAUTH) token")
+		m.logger.Debugf("%s with cookie (MMAUTH) token", logmsg)
 		m.Client.HTTPClient.Jar = m.createCookieJar(m.Credentials.Token)
 	} else {
-		m.logger.Debugf(logmsg + " with personal token")
+		m.logger.Debugf("%s with personal token", logmsg)
 	}
 
 	m.apiLogger.Info("doLoginToken: GetMe")
+
 	user, resp, err = m.Client.GetMe(ctx, "")
 	if err != nil {
 		return user, resp, err

@@ -446,7 +446,7 @@ func (m *Mattermost) MsgUser(ctx context.Context, userID, text string) (string, 
 
 func (m *Mattermost) MsgUserThread(ctx context.Context, userID, parentID, text string) (string, error) {
 	// create DM channel (only happens on first message)
-	dchannel, _, err := m.mc.Client.CreateDirectChannel(ctx, m.mc.User.Id, userID)
+	dchannel, err := m.mc.CreateDirectChannel(ctx, m.mc.User.Id, userID)
 	if err != nil {
 		return "", err
 	}
@@ -517,22 +517,14 @@ func (m *Mattermost) MsgChannelThread(ctx context.Context, channelID, parentID, 
 
 func (m *Mattermost) ModifyPost(ctx context.Context, msgID, text string) error {
 	if text == "" {
-		_, err := m.mc.Client.DeletePost(ctx, msgID)
-		if err != nil {
-			return err
-		}
-
-		return nil
+		return m.mc.DeleteMessage(ctx, msgID)
 	}
 
-	_, _, err := m.mc.Client.PatchPost(ctx, msgID, &model.PostPatch{
+	_, err := m.mc.PatchPost(ctx, msgID, &model.PostPatch{
 		Message: &text,
 	})
-	if err != nil {
-		return err
-	}
 
-	return nil
+	return err
 }
 
 func (m *Mattermost) AddReaction(ctx context.Context, msgID, emoji string) error {
