@@ -951,87 +951,23 @@ func (m *Mattermost) wsActionPostSkip(ctx context.Context, rmsg *model.WebSocket
 		}
 	}
 
-	lastSentMsg := strings.ReplaceAll(data.Message, "\n", " ")
-
-	if !disableMarkdown {
-		lastSentMsg = utils.Markdown2irc(lastSentMsg, blockquoteChar, inlineCode)
+	opts := utils.SummaryOpts{
+		DisableMarkdown: disableMarkdown,
+		DisableEmoji:    disableEmoji,
+		BlockquoteChar:  blockquoteChar,
+		InlineCodeChar:  inlineCode,
+		MaxLength:       90,
+		UncountedPrefix: "@",
+		Unicode:         useUnicode,
 	}
 
-	if !disableEmoji {
-		lastSentMsg = utils.EmojiReplaceAliases(lastSentMsg)
-	}
-
-	lastSentMsg = maybeShorten(lastSentMsg, 90, "@", useUnicode)
-	var sb strings.Builder
-	sb.Grow(len(lastSentMsg) + shortenMsgLen + 32)
-	sb.WriteString(channel)
-	sb.WriteString(": ")
-	sb.WriteString(lastSentMsg)
-	sb.WriteString(sbSuffix.String())
-	m.msgLastSentCache.Add(msgID, sb.String())
+	lastSentMsg := utils.FormatAndShortenSummary(data.Message, opts)
+	cachedMsg := channel + ": " + lastSentMsg + sbSuffix.String()
+	m.msgLastSentCache.Add(msgID, cachedMsg)
 
 	logger.Tracef("message is sent from this matterircd instance, not relaying %#v", data.Message)
-	return true
-}
 
-// maybeShorten returns a prefix of msg that is approximately newLen
-// characters long, followed by "...".  Words that start with uncounted
-// are included in the result but are not reckoned against newLen.
-//
-//nolint:gocyclo
-func maybeShorten(msg string, newLen int, uncounted string, unicode bool) string {
-	if newLen == 0 || len(msg) < newLen {
-		return msg
-	}
-	ellipsis := "..."
-	if unicode {
-		ellipsis = "…"
-	}
-	var b strings.Builder
-	b.Grow(newLen + 8)
-	i := 0
-	for i < len(msg) {
-		if b.Len() >= newLen {
-			break
-		}
-		switch {
-		case msg[i] == ' ' || msg[i] == '\t' || msg[i] == '\n':
-			for i < len(msg) && (msg[i] == ' ' || msg[i] == '\t' || msg[i] == '\n') {
-				if b.Len() >= newLen {
-					break
-				}
-				if msg[i] == '\n' {
-					b.WriteByte(' ')
-				} else {
-					b.WriteByte(msg[i])
-				}
-				i++
-			}
-		default:
-			start := i
-			for i < len(msg) && msg[i] != ' ' && msg[i] != '\t' && msg[i] != '\n' {
-				i++
-			}
-			word := msg[start:i]
-			if uncounted != "" && strings.HasPrefix(word, uncounted) {
-				newLen += len(word) + 1
-			} else if len(word) > newLen {
-				cut := newLen * 2 / 3
-				if cut > len(word) {
-					cut = len(word)
-				}
-				for cut > 0 && (word[cut]&0xC0) == 0x80 {
-					cut--
-				}
-				word = word[:cut] + "[" + ellipsis + "]"
-			}
-			b.WriteString(word)
-		}
-	}
-	b.WriteByte('\x0f')
-	b.WriteByte(' ')
-	b.WriteString(ellipsis)
-	return b.String()
+	return true
 }
 
 var markdownReplacer = strings.NewReplacer(
@@ -1091,20 +1027,22 @@ func (m *Mattermost) getCachedPostInfo(ctx context.Context, postID string, preFe
 		msg = utils.EmojiReplaceAliases(msg)
 	}
 
-	parentUser := m.GetUser(ctx, post.UserId)
-	parentMessage := maybeShorten(msg, newLen, uncounted, unicode)
 
-	var b strings.Builder
-	b.Grow(9 + len(parentUser.Nick) + len(parentMessage))
-	b.WriteString(" (re @")
-	b.WriteString(parentUser.Nick)
-	b.WriteString(": ")
-	b.WriteString(parentMessage)
-	b.WriteString(")")
+	opts := utils.SummaryOpts{
+		DisableMarkdown: true,
+		DisableEmoji:    true,
+		MaxLength:       newLen,
+		UncountedPrefix: uncounted,
+		Unicode:         unicode,
+	}
+
+	parentUser := m.GetUser(ctx, post.UserId)
+	parentMessage := utils.FormatAndShortenSummary(msg, opts)
 
 	cp := CachedPost{
 		RootID:   post.RootId,
-		ReplyMsg: b.String(),
+		// Fast native string concatenation
+		ReplyMsg: " (re @" + parentUser.Nick + ": " + parentMessage + ")",
 	}
 
 	logger.Tracef("Created cached post info for %s: %s", postID, cp.ReplyMsg)
