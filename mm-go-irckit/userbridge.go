@@ -1461,7 +1461,16 @@ func (u *User) mayJoin(channelID string) bool {
 	ji := u.br.BridgeConfig().JoinInclude
 	je := u.br.BridgeConfig().JoinExclude
 
+	// If no join restrictions are configured, allow instantly
+	if len(jo) == 0 && len(ji) == 0 && len(je) == 0 {
+		return true
+	}
+
 	switch {
+	// If we have joinonly channels specified and it matches, join
+	case len(jo) != 0 && stringInRegexp(ch.String(), jo):
+		logger.Tracef("mayjoin 0 %t ch: %s, match: %s", true, ch.String(), jo)
+		return true
 	// if we have joinonly channels specified we are only allowed to join those
 	case len(jo) != 0 && !stringInRegexp(ch.String(), jo):
 		logger.Tracef("mayjoin 0 %t ch: %s, match: %s", false, ch.String(), jo)
@@ -1484,7 +1493,13 @@ func (u *User) mayJoin(channelID string) bool {
 	case len(ji) != 0 && len(je) != 0:
 		// if explicit in ji we also may join
 		mayjoin := stringInRegexp(ch.String(), ji)
-		logger.Tracef("mayjoin 4 %t ch: %s, match: %s", mayjoin, ch.String(), ji)
+		if mayjoin {
+			logger.Tracef("mayjoin 4 %t ch: %s, match: %s", mayjoin, ch.String(), ji)
+			return true
+		}
+		// otherwise evaluate against joinexclude
+		mayjoin = !stringInRegexp(ch.String(), je)
+		logger.Tracef("mayjoin 4 %t ch: %s, match: %s", mayjoin, ch.String(), je)
 		return mayjoin
 	}
 
