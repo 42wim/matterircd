@@ -465,8 +465,8 @@ func (s *Slack) UpdateLastViewedUser(ctx context.Context, userID string) error {
 	return nil
 }
 
-func (s *Slack) GetFileLinks(ctx context.Context, fileIDs []string) []string {
-	return []string{}
+func (s *Slack) GetFilesInfo(ctx context.Context, fileIDs []string) []*bridge.File {
+	return []*bridge.File{}
 }
 
 func (s *Slack) SearchUsers(ctx context.Context, query string) ([]*bridge.UserInfo, error) {

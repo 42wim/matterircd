@@ -579,7 +579,12 @@ func dispatchHistoricalEvent(u *User, toUser *User, event *bridge.Event, searchC
 	})
 
 	for _, f := range files {
-		fileMsg := "\x1ddownload file - " + f.Name + "\x1d"
+		sizeKB := f.Size / 1024
+		if sizeKB == 0 && f.Size > 0 {
+			sizeKB = 1
+		}
+
+		fileMsg := fmt.Sprintf("\x1ddownload file - %s (%s, %dKBytes)\x1d", f.URL, f.Name, sizeKB)
 		formatScrollbackMsg(u, channelID, channelName, scrollbackUser, nick, tsStr, msgID, parentID, fileMsg)
 	}
 }

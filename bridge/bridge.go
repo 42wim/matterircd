@@ -60,7 +60,7 @@ type Bridger interface {
 	SearchPosts(ctx context.Context, search string) []*Event
 
 	ModifyPost(ctx context.Context, msgID, text string) error
-	GetFileLinks(ctx context.Context, fileIDs []string) []string
+	GetFilesInfo(ctx context.Context, fileIDs []string) []*File
 
 	GetLastSentMsgs() []string
 
@@ -221,6 +221,8 @@ type LogoutEvent struct{}
 
 type File struct {
 	Name string
+	Size int64
+	URL  string
 }
 
 type Message struct {

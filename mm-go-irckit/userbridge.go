@@ -527,8 +527,13 @@ func (u *User) handleFileEvent(event *bridge.FileEvent) {
 		}
 	}
 
-	for _, fname := range event.Files {
-		fileMsg := "\x1ddownload file - " + fname.Name + "\x1d"
+	for _, f := range event.Files {
+		sizeKB := f.Size / 1024
+		if sizeKB == 0 && f.Size > 0 {
+			sizeKB = 1
+		}
+
+		fileMsg := fmt.Sprintf("\x1ddownload file - %s (%s, %dKBytes)\x1d", f.URL, f.Name, sizeKB)
 		if u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext {
 			threadMsgID := u.prefixContext(event.ChannelID, event.MessageID, event.ParentID, "posted_file")
 			fileMsg = u.formatContextMessage("", threadMsgID, fileMsg)
@@ -1405,11 +1410,17 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 		})
 
 		for _, f := range files {
-			fileMsg := "\x1ddownload file - " + f.Name + "\x1d"
+			sizeKB := f.Size / 1024
+			if sizeKB == 0 && f.Size > 0 {
+				sizeKB = 1
+			}
+
+			fileMsg := fmt.Sprintf("\x1ddownload file - %s (%s, %dKBytes)\x1d", f.URL, f.Name, sizeKB)
 			if u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext {
 				threadMsgID := u.prefixContext(brchannel.ID, msgID, parentID, "replay_file")
 				fileMsg = u.formatContextMessage(tsStr, threadMsgID, fileMsg)
 			}
+
 			spoof(nick, fileMsg)
 		}
 	}

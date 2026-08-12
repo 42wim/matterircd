@@ -86,10 +86,68 @@ func (m *Client) EditMessage(ctx context.Context, postID string, text string) (s
 	}
 }
 
-func (m *Client) GetFileLinks(ctx context.Context, filenames []string) []string {
-	uriScheme := "https://"
+// GetFileInfo fetches a single file's metadata from the Mattermost API with retry logic
+func (m *Client) GetFileInfo(ctx context.Context, fileID string) (*model.FileInfo, error) {
+	retryCount := 0
+	for {
+		m.apiLogger.Warnf("GetFileInfo: FileID: %s #%d", fileID, retryCount)
+
+		res, resp, err := m.Client.GetFileInfo(ctx, fileID)
+		if err == nil {
+			return res, nil
+		}
+
+		shouldRetry, hErr := m.HandleRetry(ctx, "GetFileInfo", err, retryCount, 10, resp)
+		if hErr == nil && shouldRetry {
+			retryCount++
+			continue
+		}
+
+		m.logger.Errorf("GetFileInfo failed for %s: %v", fileID, err)
+
+		return nil, err
+	}
+}
+
+// GetFilesInfo replaces GetFileLinks, retrieving both the URL and file metadata
+func (m *Client) GetFilesInfo(ctx context.Context, fileIDs []string) []*FileInfo {
+	uriScheme := schemeHTTPS
 	if m.NoTLS {
-		uriScheme = "http://"
+		uriScheme = schemeHTTP
+	}
+
+	var output []*FileInfo
+
+	for _, f := range fileIDs {
+		info := &FileInfo{}
+
+		link := m.GetPublicLink(ctx, f)
+		if link != "" {
+			info.URL = link
+		} else {
+			// public links is probably disabled or failed, create the link ourselves
+			info.URL = uriScheme + m.Server + model.APIURLSuffix + "/files/" + f
+		}
+
+		// Fetch the file metadata using the Mattermost API client with retry logic
+		fileMeta, err := m.GetFileInfo(ctx, f)
+		if err == nil && fileMeta != nil {
+			info.Name = fileMeta.Name
+			info.Size = fileMeta.Size
+		} else {
+			info.Name = info.URL // Fallback to URL if the API fails
+		}
+
+		output = append(output, info)
+	}
+
+	return output
+}
+
+func (m *Client) GetFileLinks(ctx context.Context, filenames []string) []string {
+	uriScheme := schemeHTTPS
+	if m.NoTLS {
+		uriScheme = schemeHTTP
 	}
 
 	var output []string
