@@ -813,7 +813,9 @@ func EmojiFromAlias(alias string) (string, bool) {
 		if baseAlias, ok := strings.CutSuffix(base, st.match); ok {
 			idx, mapOk := emojiAliasMap[baseAlias]
 			if !mapOk {
-				return "", false
+				// "_light" matches the end of "_medium_light".
+				// Continue to get the correct skin tone.
+				continue
 			}
 
 			return emojiData[idx].Tone(st.tone), true
