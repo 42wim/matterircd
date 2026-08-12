@@ -59,6 +59,23 @@ type CustomStatus struct {
 	ExpiresAt string `json:"expires_at"`
 }
 
+type FileInfo struct {
+	Name string
+	Size int64
+	URL  string
+}
+
+type Message struct {
+	Raw      *model.WebSocketEvent
+	Post     *model.Post
+	Team     string
+	Channel  string
+	Username string
+	Text     string
+	Type     string
+	UserID   string
+}
+
 type UsersCache struct {
 	mu       sync.RWMutex
 	users    map[string]*model.User
@@ -93,17 +110,6 @@ type Team struct {
 
 	LastUserSync    time.Time
 	LastChannelSync time.Time
-}
-
-type Message struct {
-	Raw      *model.WebSocketEvent
-	Post     *model.Post
-	Team     string
-	Channel  string
-	Username string
-	Text     string
-	Type     string
-	UserID   string
 }
 
 type Client struct {
@@ -155,6 +161,11 @@ type UserAgentTransport struct {
 }
 
 var Matterircd bool
+
+const (
+	schemeHTTPS = "https://"
+	schemeHTTP  = "http://"
+)
 
 // Mattermost has a hardcoded `PerPageMaximum = 200` & `LimitMaximum = 200`
 // See https://github.com/mattermost/mattermost/blob/master/server/channels/web/params.go
@@ -399,9 +410,9 @@ func (t *UserAgentTransport) RoundTrip(req *http.Request) (*http.Response, error
 }
 
 func (m *Client) initClient(ctx context.Context, b *backoff.Backoff) error {
-	uriScheme := "https://"
+	uriScheme := schemeHTTPS
 	if m.NoTLS {
-		uriScheme = "http://"
+		uriScheme = schemeHTTP
 	}
 	// login to mattermost
 	m.Client = model.NewAPIv4Client(uriScheme + m.Credentials.Server)
@@ -849,7 +860,7 @@ func (m *Client) createCookieJar(token string) *cookiejar.Jar {
 	}
 
 	cookies = append(cookies, firstCookie)
-	cookieURL, _ := url.Parse("https://" + m.Credentials.Server)
+	cookieURL, _ := url.Parse(schemeHTTPS + m.Server)
 
 	jar.SetCookies(cookieURL, cookies)
 

@@ -223,8 +223,8 @@ func (m *Mastodon) UpdateLastViewedUser(ctx context.Context, userID string) erro
 	return nil
 }
 
-func (m *Mastodon) GetFileLinks(ctx context.Context, fileIDs []string) []string {
-	return []string{}
+func (m *Mastodon) GetFilesInfo(ctx context.Context, fileIDs []string) []*bridge.File {
+	return []*bridge.File{}
 }
 
 func (m *Mastodon) SearchUsers(ctx context.Context, query string) ([]*bridge.UserInfo, error) {

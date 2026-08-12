@@ -1270,18 +1270,6 @@ func (m *Mattermost) handleWsActionPost(ctx context.Context, rmsg *model.WebSock
 	logger.Tracef("%#v", data) //nolint:govet
 }
 
-func (m *Mattermost) getFilesFromData(ctx context.Context, data *model.Post) []*bridge.File {
-	files := []*bridge.File{}
-
-	for _, fname := range m.mc.GetFileLinks(ctx, data.FileIds) {
-		files = append(files, &bridge.File{
-			Name: fname,
-		})
-	}
-
-	return files
-}
-
 func (m *Mattermost) handleFileEvent(ctx context.Context, channelType string, ghost *bridge.UserInfo, data *model.Post, rmsg *model.WebSocketEvent, logger *logrus.Entry) {
 	event := &bridge.Event{
 		Type: "file_event",
@@ -1298,10 +1286,8 @@ func (m *Mattermost) handleFileEvent(ctx context.Context, channelType string, gh
 
 	event.Data = fileEvent
 
-	for _, fname := range m.getFilesFromData(ctx, data) {
-		fileEvent.Files = append(fileEvent.Files, &bridge.File{
-			Name: fname.Name,
-		})
+	if len(data.FileIds) > 0 {
+		fileEvent.Files = m.GetFilesInfo(ctx, data.FileIds)
 	}
 
 	if len(fileEvent.Files) == 0 {
@@ -1638,23 +1624,19 @@ func (m *Mattermost) SearchPosts(ctx context.Context, search string) []*bridge.E
 	return m.postListToEvents(ctx, m.mc.SearchPosts(ctx, search), "search", 0)
 }
 
-func (m *Mattermost) GetFileLinks(ctx context.Context, fileIDs []string) []string {
-	return m.mc.GetFileLinks(ctx, fileIDs)
-}
+func (m *Mattermost) GetFilesInfo(ctx context.Context, fileIDs []string) []*bridge.File {
+	mcFiles := m.mc.GetFilesInfo(ctx, fileIDs)
+	files := make([]*bridge.File, 0, len(mcFiles))
 
-func (m *Mattermost) SearchUsers(ctx context.Context, query string) ([]*bridge.UserInfo, error) {
-	users, err := m.mc.SearchUsers(ctx, &model.UserSearch{Term: query})
-	if err != nil {
-		return nil, err
+	for _, f := range mcFiles {
+		files = append(files, &bridge.File{
+			Name: f.Name,
+			Size: f.Size,
+			URL:  f.URL,
+		})
 	}
 
-	brusers := make([]*bridge.UserInfo, 0, len(users))
-
-	for _, u := range users {
-		brusers = append(brusers, m.createUser(u))
-	}
-
-	return brusers, nil
+	return files
 }
 
 func (m *Mattermost) GetPosts(ctx context.Context, channelID string, limit int) []*bridge.Event {
@@ -1690,6 +1672,21 @@ func (m *Mattermost) GetChannelID(ctx context.Context, name, teamID string) stri
 	}
 
 	return ""
+}
+
+func (m *Mattermost) SearchUsers(ctx context.Context, query string) ([]*bridge.UserInfo, error) {
+	users, err := m.mc.SearchUsers(ctx, &model.UserSearch{Term: query})
+	if err != nil {
+		return nil, err
+	}
+
+	brusers := make([]*bridge.UserInfo, 0, len(users))
+
+	for _, u := range users {
+		brusers = append(brusers, m.createUser(u))
+	}
+
+	return brusers, nil
 }
 
 func Decode(input interface{}, output interface{}) error {
@@ -2472,11 +2469,7 @@ func (m *Mattermost) postToEvent(ctx context.Context, p *model.Post, eventType s
 	default:
 		var files []*bridge.File
 		if len(p.FileIds) > 0 {
-			fileLinks := m.GetFileLinks(ctx, p.FileIds)
-			files = make([]*bridge.File, 0, len(fileLinks))
-			for _, fname := range fileLinks {
-				files = append(files, &bridge.File{Name: fname})
-			}
+			files = m.GetFilesInfo(ctx, p.FileIds)
 		}
 
 		formattedMsg := m.formatMessage(ctx, p, eventType, logger)
