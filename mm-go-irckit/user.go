@@ -205,6 +205,7 @@ func (u *User) Decode() {
 	t.Stop()
 	var wg sync.WaitGroup
 	wg.Add(1)
+
 	go func(buffer chan *irc.Message) {
 		defer wg.Done()
 
@@ -218,11 +219,22 @@ func (u *User) Decode() {
 
 			// trim last newline
 			bufferedMsg.Trailing = strings.TrimSpace(bufferedMsg.Trailing)
-			logger.Tracef("flushing buffer: %#v", bufferedMsg)
+
+			// Redact sensitive information for logging
+			logMsg := bufferedMsg
+			if bufferedMsg.Command == irc.PRIVMSG && strings.HasPrefix(bufferedMsg.Trailing, "login") {
+				// Create a shallow copy so we don't mutate the actual message sent to the channel
+				redactedMsg := *bufferedMsg
+				redactedMsg.Trailing = "login [redacted]"
+				logMsg = &redactedMsg
+			}
+
+			logger.Tracef("flushing buffer: %#v", logMsg)
 			u.DecodeCh <- bufferedMsg
 			// clear buffer
 			bufferedMsg = nil
 		}
+
 		for {
 			select {
 			case msg, ok := <-buffer:
@@ -270,6 +282,7 @@ func (u *User) Decode() {
 			}
 		}
 	}(buffer)
+
 	for {
 		msg, err := u.Conn.Decode()
 		if err != nil {
@@ -296,6 +309,7 @@ func (u *User) Decode() {
 				dmsg = "<- PRIVMSG " + msg.Params[0] + " :login [redacted]"
 			}
 		}
+
 		// PRIVMSG can be buffered
 		switch msg.Command {
 		case irc.PRIVMSG:
