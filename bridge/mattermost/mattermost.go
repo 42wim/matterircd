@@ -241,7 +241,7 @@ func (m *Mattermost) loginToMattermost(ctx context.Context, onWsConnect func()) 
 		}
 
 		// Create a new logger instance for this specific worker
-		workerLogger := logger.WithField("prefix", fmt.Sprintf("%shandleWsMessage%d", currentPrefix, i))
+		workerLogger := logger.WithField("prefix", fmt.Sprintf("%shandleWsMsg%d", currentPrefix, i))
 
 		//nolint:contextcheck
 		go m.handleWsMessage(m.wsCtx, quitChan, workerLogger)
@@ -282,13 +282,13 @@ func (m *Mattermost) handleWsMessage(ctx context.Context, quitChan chan struct{}
 
 				switch eventType {
 				case model.WebsocketEventTyping, model.WebsocketEventUserUpdated:
-					logger.Tracef("WsReceiver%s: %#v", userInfo, message.Raw)
+					logger.Tracef("WsRecvr%s: %#v", userInfo, message.Raw)
 				case model.WebsocketEventMultipleChannelsViewed:
-					logger.Tracef("WsReceiver%s: %#v", userInfo, message.Raw)
+					logger.Tracef("WsRecvr%s: %#v", userInfo, message.Raw)
 				case model.WebsocketEventPreferencesChanged, model.WebsocketEventSidebarCategoryUpdated:
-					logger.Tracef("WsReceiver%s: %#v", userInfo, message.Raw)
+					logger.Tracef("WsRecvr%s: %#v", userInfo, message.Raw)
 				default:
-					logger.Debugf("WsReceiver%s: %#v", userInfo, message.Raw)
+					logger.Debugf("WsRcvr%s: %#v", userInfo, message.Raw)
 				}
 
 				if logger.Logger.IsLevelEnabled(logrus.TraceLevel) {
