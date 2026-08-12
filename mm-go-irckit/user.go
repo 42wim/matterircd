@@ -308,6 +308,8 @@ func (u *User) Decode() {
 			if (msg.Trailing != "" && trail[0] == "login") || (len(msg.Params) > 1 && msg.Params[1] == "login") {
 				dmsg = "<- PRIVMSG " + msg.Params[0] + " :login [redacted]"
 			}
+		} else if msg.Command == irc.PASS {
+			dmsg = "<- PASS [redacted]"
 		}
 
 		// PRIVMSG can be buffered
