@@ -189,6 +189,7 @@ func (m *Mattermost) loginToMattermost(ctx context.Context, onWsConnect func()) 
 	mc.AntiIdleChan = rc.Mattermost.AntiIdleChannel
 	mc.AntiIdleIntvl = rc.Mattermost.AntiIdleInterval
 	mc.ForceSyncOnReconnect = rc.Mattermost.ForceSyncOnReconnect
+	mc.UserAgent = config.UserAgent
 
 	mc.CacheClearCutoff = rc.Mattermost.HeavySyncThreshold
 	if mc.CacheClearCutoff == 0 {
