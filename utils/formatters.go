@@ -244,8 +244,12 @@ func FormatFullCodeBlock(text, lexer, indent string, opts ProcessMessageOpts, yi
 	}
 
 	defer func() {
-		buf.Reset()
-		chromaBufPool.Put(buf)
+		// Prevent memory leaks from massive pasted code blocks.
+		// If the buffer grew beyond 64KB, let the garbage collector claim it.
+		if buf.Cap() <= 64*1024 {
+			buf.Reset()
+			chromaBufPool.Put(buf)
+		}
 	}()
 
 	err := quick.Highlight(buf, text, lexer, formatter, style)
@@ -291,7 +295,7 @@ func ProcessMessageText(text string, opts ProcessMessageOpts, yield func(line st
 
 	var (
 		codeBuilder      strings.Builder
-		emptyLines       []string
+		emptyLines       = make([]string, 0, 4)
 		lastBlockWasCode bool
 		inCodeBlock      bool
 		codeBlockMarker  string
@@ -458,9 +462,9 @@ func processSummaryWord(b *strings.Builder, word, uncounted, ellipsis string, cu
 		}
 
 		b.WriteString(word[:cut])
-		b.WriteString("[")
+		b.WriteByte('[')
 		b.WriteString(ellipsis)
-		b.WriteString("]")
+		b.WriteByte(']')
 	} else {
 		b.WriteString(word)
 	}
@@ -642,6 +646,8 @@ func Markdown2irc(msg string, blockQuoteChar string, inlineCode string) string {
 	trimmedText := strings.TrimLeft(msg, " \t")
 	if strings.HasPrefix(trimmedText, blockQuoteCharDefault) && blockQuoteChar != blockQuoteCharDefault {
 		var newPrefix strings.Builder
+		newPrefix.Grow(len(trimmedText)) // Pre-allocate exactly what we need
+
 		idx := 0
 	ParseLoop:
 		for idx < len(trimmedText) {
@@ -661,7 +667,9 @@ func Markdown2irc(msg string, blockQuoteChar string, inlineCode string) string {
 			}
 		}
 
-		msg = newPrefix.String() + trimmedText[idx:]
+		// Zero-allocation write of the remaining string
+		newPrefix.WriteString(trimmedText[idx:])
+		msg = newPrefix.String()
 	}
 
 	return msg
@@ -724,16 +732,16 @@ func EmojiReplaceAliases(s string) string {
 
 	emojiInitOnce.Do(initEmoji)
 
-	var builder strings.Builder
-	builder.Grow(len(s))
+	var (
+		b           strings.Builder
+		initialized bool
+		lastWrite   int
+	)
 
 	start := -1
 	for i := range len(s) {
 		// Handle normal characters outside of colons
 		if s[i] != ':' {
-			if start == -1 {
-				builder.WriteByte(s[i])
-			}
 			continue
 		}
 
@@ -746,22 +754,36 @@ func EmojiReplaceAliases(s string) string {
 		// We found a second colon, test the substring
 		code := s[start : i+1]
 		if emojiStr, ok := EmojiFromAlias(code); ok {
-			builder.WriteString(emojiStr)
+			// This is our first confirmed emoji. Initialize the builder.
+			if !initialized {
+				b.Grow(len(s))
+
+				initialized = true
+			}
+
+			// Write the text between the last write and the start of this emoji
+			b.WriteString(s[lastWrite:start])
+			// Write the actual emoji
+			b.WriteString(emojiStr)
+
+			lastWrite = i + 1
 			start = -1 // Reset for the next emoji
 		} else {
-			// Not a valid emoji. Write everything up to this colon,
-			// and treat this current colon as the new start.
-			builder.WriteString(s[start:i])
+			// Not a valid emoji (e.g., a timestamp "12:30:00").
+			// Treat this current colon as the new start in case it opens an emoji.
 			start = i
 		}
 	}
 
-	// Write any unclosed trailing colons/text
-	if start != -1 {
-		builder.WriteString(s[start:])
+	// If we never found a valid emoji, return the original string with zero allocations.
+	if !initialized {
+		return s
 	}
 
-	return builder.String()
+	// Write any remaining text after the last replaced emoji
+	b.WriteString(s[lastWrite:])
+
+	return b.String()
 }
 
 func EmojiFromAlias(alias string) (string, bool) {
@@ -788,18 +810,14 @@ func EmojiFromAlias(alias string) (string, bool) {
 
 	// Support skin tones
 	for _, st := range emojiSkinTones {
-		if !strings.HasSuffix(base, st.match) {
-			continue
+		if baseAlias, ok := strings.CutSuffix(base, st.match); ok {
+			idx, mapOk := emojiAliasMap[baseAlias]
+			if !mapOk {
+				return "", false
+			}
+
+			return emojiData[idx].Tone(st.tone), true
 		}
-
-		baseAlias := strings.TrimSuffix(base, st.match)
-
-		idx, ok := emojiAliasMap[baseAlias]
-		if !ok {
-			return "", false
-		}
-
-		return emojiData[idx].Tone(st.tone), true
 	}
 
 	return "", false
@@ -817,8 +835,11 @@ func WrapMessage(msg string, maxLen int) string {
 		return msg
 	}
 
-	var b strings.Builder
-	b.Grow(len(msg) + (len(msg)/maxLen)*2)
+	var (
+		b           strings.Builder
+		initialized bool
+		lastWrite   int
+	)
 
 	lineLen := 0
 	spaceStart, spaceLen := 0, 0
@@ -834,7 +855,7 @@ func WrapMessage(msg string, maxLen int) string {
 			spaceLen = i - spaceStart
 
 		case msg[i] == '\n':
-			b.WriteByte('\n')
+			// Natural newline resets line length, no need to wrap
 			lineLen, spaceLen = 0, 0
 			i++
 
@@ -843,21 +864,39 @@ func WrapMessage(msg string, maxLen int) string {
 			for i < len(msg) && msg[i] != ' ' && msg[i] != '\t' && msg[i] != '\n' {
 				i++
 			}
-			word := msg[start:i]
 
-			if lineLen > 0 && lineLen+spaceLen+len(word) > maxLen {
-				b.WriteByte('\n')
-				lineLen, spaceLen = 0, 0 // drop pending spaces, don't carry to new line
-			} else if spaceLen > 0 {
-				b.WriteString(msg[spaceStart : spaceStart+spaceLen])
-				lineLen += spaceLen
+			wordLen := i - start
+
+			// If this word pushes us over the limit, we need to inject a newline
+			if lineLen > 0 && lineLen+spaceLen+wordLen > maxLen {
+				if !initialized {
+					b.Grow(len(msg) + (len(msg)/maxLen)*2)
+
+					initialized = true
+				}
+
+				// Write everything from our last position up to the spaces we are splitting on
+				b.WriteString(msg[lastWrite:spaceStart])
+				b.WriteByte('\n') // Inject the wrap
+
+				// Skip over the spaces we just wrapped on
+				lastWrite = spaceStart + spaceLen
+
+				lineLen = wordLen
+				spaceLen = 0
+			} else {
+				lineLen += spaceLen + wordLen
 				spaceLen = 0
 			}
-
-			b.WriteString(word)
-			lineLen += len(word)
 		}
 	}
 
+	// Fast path: no wraps were ever required, return original string
+	if !initialized {
+		return msg
+	}
+
+	// Flush whatever remains of the string
+	b.WriteString(msg[lastWrite:])
 	return b.String()
 }
