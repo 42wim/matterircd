@@ -19,6 +19,8 @@ import (
 var (
 	logger   *logrus.Entry
 	LogLevel string
+
+	UserAgent string
 )
 
 type Config struct {

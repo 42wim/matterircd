@@ -78,6 +78,13 @@ func main() {
 		logger.Infof("WARNING: THIS IS A DEVELOPMENT VERSION. Things may break.")
 	}
 
+	userAgent := project + "/" + version
+	if githash != "" {
+		userAgent = userAgent + " (" + githash + ")"
+	}
+
+	config.UserAgent = userAgent
+
 	// Attempt to load values from the config file
 	var err error
 	cfg, err = config.Load(*flagConfig, pflag.CommandLine)

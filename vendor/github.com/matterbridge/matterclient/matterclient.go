@@ -142,8 +142,16 @@ type Client struct {
 	ForceSyncOnReconnect bool
 	CacheClearCutoff     time.Duration
 
+	UserAgent string
+
 	//nolint:containedctx // Tied to the lifecycle of the persistent client session
 	Ctx context.Context
+}
+
+// UserAgentTransport wraps an existing RoundTripper to inject a User-Agent header
+type UserAgentTransport struct {
+	Transport http.RoundTripper
+	UserAgent string
 }
 
 var Matterircd bool
@@ -180,6 +188,8 @@ func New(login string, pass string, team string, server string, mfatoken string)
 
 	cache, _ := lru.New[string, bool](500)
 
+	defaultUserAgent := "matterclient/0.0"
+
 	return &Client{
 		Credentials: cred,
 		MessageChan: make(chan *Message, 100),
@@ -206,6 +216,8 @@ func New(login string, pass string, team string, server string, mfatoken string)
 
 		ForceSyncOnReconnect: false,
 		CacheClearCutoff:     15 * time.Minute,
+
+		UserAgent: defaultUserAgent,
 	}
 }
 
@@ -373,6 +385,19 @@ func (m *Client) Reconnect(ctx context.Context) {
 	m.logger.Info("reconnect successful")
 }
 
+// RoundTrip executes a single HTTP transaction, adding the User-Agent
+func (t *UserAgentTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	reqCopy := req.Clone(req.Context())
+	reqCopy.Header.Set("User-Agent", t.UserAgent)
+
+	transport := t.Transport
+	if transport == nil {
+		transport = http.DefaultTransport
+	}
+
+	return transport.RoundTrip(reqCopy)
+}
+
 func (m *Client) initClient(ctx context.Context, b *backoff.Backoff) error {
 	uriScheme := "https://"
 	if m.NoTLS {
@@ -384,7 +409,9 @@ func (m *Client) initClient(ctx context.Context, b *backoff.Backoff) error {
 	if m.Timeout == 0 {
 		m.Timeout = 10
 	}
-	m.Client.HTTPClient.Transport = &http.Transport{
+
+	// Create the base transport with existing tuning
+	baseTransport := &http.Transport{
 		TLSClientConfig: &tls.Config{
 			InsecureSkipVerify: m.SkipTLSVerify, //nolint:gosec
 		},
@@ -403,6 +430,14 @@ func (m *Client) initClient(ctx context.Context, b *backoff.Backoff) error {
 
 		// Additional tuning
 		MaxIdleConnsPerHost: 10,
+
+		DisableCompression: true,
+	}
+
+	// Wrap the base transport to inject the User-Agent
+	m.Client.HTTPClient.Transport = &UserAgentTransport{
+		Transport: baseTransport,
+		UserAgent: m.UserAgent,
 	}
 
 	m.Client.HTTPClient.Timeout = time.Second * time.Duration(m.Timeout)
