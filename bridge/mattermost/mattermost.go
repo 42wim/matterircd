@@ -241,7 +241,7 @@ func (m *Mattermost) loginToMattermost(ctx context.Context, onWsConnect func()) 
 		}
 
 		// Create a new logger instance for this specific worker
-		workerLogger := logger.WithField("prefix", fmt.Sprintf("%shandleWsMessage%d", currentPrefix, i))
+		workerLogger := logger.WithField("prefix", fmt.Sprintf("%shandleWsMsg%d", currentPrefix, i))
 
 		//nolint:contextcheck
 		go m.handleWsMessage(m.wsCtx, quitChan, workerLogger)
@@ -282,13 +282,13 @@ func (m *Mattermost) handleWsMessage(ctx context.Context, quitChan chan struct{}
 
 				switch eventType {
 				case model.WebsocketEventTyping, model.WebsocketEventUserUpdated:
-					logger.Tracef("WsReceiver%s: %#v", userInfo, message.Raw)
+					logger.Tracef("WsRecvr%s: %#v", userInfo, message.Raw)
 				case model.WebsocketEventMultipleChannelsViewed:
-					logger.Tracef("WsReceiver%s: %#v", userInfo, message.Raw)
+					logger.Tracef("WsRecvr%s: %#v", userInfo, message.Raw)
 				case model.WebsocketEventPreferencesChanged, model.WebsocketEventSidebarCategoryUpdated:
-					logger.Tracef("WsReceiver%s: %#v", userInfo, message.Raw)
+					logger.Tracef("WsRecvr%s: %#v", userInfo, message.Raw)
 				default:
-					logger.Debugf("WsReceiver%s: %#v", userInfo, message.Raw)
+					logger.Debugf("WsRcvr%s: %#v", userInfo, message.Raw)
 				}
 
 				if logger.Logger.IsLevelEnabled(logrus.TraceLevel) {
@@ -1905,7 +1905,7 @@ func (m *Mattermost) formatMessage(ctx context.Context, data *model.Post, eventT
 		}
 		useFallback := len(msg) == 0
 		// https://docs.slack.dev/tools/node-slack-sdk/reference/web-api/interfaces/MessageAttachment/
-		m.parseMessageAttachments(&sbMsg, attachments, useFallback)
+		m.parseMessageAttachments(&sbMsg, attachments, useFallback, msg)
 	case data.Type == "custom_matterpoll":
 		pollMsg := parseMatterpollToMsg(attachments, useUnicode)
 		sbMsg.WriteString(msg)
@@ -1916,7 +1916,7 @@ func (m *Mattermost) formatMessage(ctx context.Context, data *model.Post, eventT
 		}
 		useFallback := len(msg) == 0
 		// https://developers.mattermost.com/integrate/reference/message-attachments/
-		m.parseMessageAttachments(&sbMsg, attachments, useFallback)
+		m.parseMessageAttachments(&sbMsg, attachments, useFallback, msg)
 	default:
 		sbMsg.WriteString(msg)
 	}
@@ -2003,7 +2003,7 @@ func parseMatterpollToMsg(attachments []*model.SlackAttachment, unicode bool) st
 const blockQuoteCharDefault = ">"
 
 //nolint:funlen,gocognit,gocyclo
-func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*model.SlackAttachment, useFallback bool) {
+func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*model.SlackAttachment, useFallback bool, rootMsg string) {
 	// If the main message builder already has content, add a newline before our preview
 	if b.Len() > 0 {
 		b.WriteByte('\n')
@@ -2073,16 +2073,25 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 				}
 			}
 
-			if !disableMarkdown {
-				fallbackText = utils.Markdown2irc(fallbackText, blockquoteChar, inlineCode)
+			attFallbackStr := attachment.Fallback
+			for len(attFallbackStr) > 0 && attFallbackStr[len(attFallbackStr)-1] == '\n' {
+				attFallbackStr = attFallbackStr[:len(attFallbackStr)-1]
 			}
 
-			if !disableEmoji {
-				fallbackText = utils.EmojiReplaceAliases(fallbackText)
-			}
+			// Only write to buffer if it's not a duplicate of the main message
+			if attFallbackStr != rootMsg {
+				outFallback := fallbackText
+				if !disableMarkdown {
+					outFallback = utils.Markdown2irc(outFallback, blockquoteChar, inlineCode)
+				}
 
-			b.WriteString(fallbackText)
-			b.WriteByte('\n')
+				if !disableEmoji {
+					outFallback = utils.EmojiReplaceAliases(outFallback)
+				}
+
+				b.WriteString(outFallback)
+				b.WriteByte('\n')
+			}
 		}
 
 		if attachment.AuthorName != "" {
@@ -2118,7 +2127,13 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 			b.WriteByte('\n')
 		}
 
-		if attachment.Text != "" {
+		attTextStr := attachment.Text
+		for len(attTextStr) > 0 && attTextStr[len(attTextStr)-1] == '\n' {
+			attTextStr = attTextStr[:len(attTextStr)-1]
+		}
+
+		// Prevent duplicate text block
+		if attachment.Text != "" && attTextStr != rootMsg {
 			opts := utils.ProcessMessageOpts{
 				DisableMarkdown:    disableMarkdown,
 				DisableEmoji:       disableEmoji,

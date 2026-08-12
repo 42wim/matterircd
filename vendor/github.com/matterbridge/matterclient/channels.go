@@ -651,7 +651,7 @@ func (m *Client) UpdateChannelsTeam(ctx context.Context, teamID string) error {
 			return nil, nil // Early return!
 		}
 
-		m.apiLogger.Warnf("UpdateChannelsTeam: fetching public channels (cache empty or ForceSyncOnReconnect enabled)")
+		m.logger.Debug("UpdateChannelsTeam: fetching public channels (cache empty or ForceSyncOnReconnect enabled)")
 
 		summaries := make([]ChannelSummary, 0, batchSize)
 		var list []ChannelSummary
@@ -906,7 +906,7 @@ func (m *Client) UpdateLastViewed(ctx context.Context, channelID string) error {
 
 	retryCount := 0
 	for {
-		m.apiLogger.Warnf("UpdateLastViewed: ChannelID: %s, UserID: %s #%d", channelID, m.User.Id, retryCount)
+		m.apiLogger.Infof("UpdateLastViewed: ChannelID: %s, UserID: %s #%d", channelID, m.User.Id, retryCount)
 		_, resp, err := m.Client.ViewChannel(ctx, m.User.Id, view)
 		if err == nil {
 			return nil
