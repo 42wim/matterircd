@@ -1240,13 +1240,42 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 				sinceStr = "replay-cutoff"
 			}
 
-			// Actually join the IRC channel!
+			var syncErr error
+
+			success := true
 			if !isDM {
 				channelName := brchannel.Name
 				if brchannel.TeamID != u.br.GetMe().TeamID || (u.br.Protocol() == "mattermost" && u.cfg.Mattermost().PrefixMainTeam) {
 					channelName = u.br.GetTeamName(u.ctx, brchannel.TeamID) + "/" + brchannel.Name
 				}
-				u.syncChannel(brchannel.ID, "#"+channelName)
+
+				// Give the bridge up to 3 attempts to fetch the heavy nicklist
+				success = false
+
+				for attempts := 1; attempts <= 3; attempts++ {
+					syncErr = u.syncChannel(brchannel.ID, "#"+channelName)
+					if syncErr == nil {
+						success = true
+
+						break
+					}
+
+					logger.Warnf("Failed to sync channel %s (attempt %d/3): %v", brchannel.Name, attempts, syncErr)
+
+					// Wait 5 seconds before retrying, but abort if the bridge is shutting down
+					select {
+					case <-u.ctx.Done():
+						return
+					case <-time.After(time.Second * 5):
+					}
+				}
+			}
+
+			// THE SHIELD: If it failed all 3 attempts, abort!
+			// Do NOT replay history invisibly, and do NOT update the BoltDB.
+			if !success {
+				logger.Errorf("Giving up on syncing %s. Skipping replay to PRESERVE history for next startup.", brchannel.Name)
+				continue
 			}
 
 			u.replayHistory(brchannel, since, sinceStr)
@@ -1429,11 +1458,12 @@ func (u *User) MsgSpoofUser(sender *User, rcvuser string, text string, maxlen ..
 	}
 }
 
-func (u *User) syncChannel(id string, name string) {
+func (u *User) syncChannel(id string, name string) error {
 	users, err := u.br.GetChannelUsers(u.ctx, id)
 	if err != nil {
 		logger.Error(err)
-		return
+
+		return err
 	}
 
 	srv := u.Srv
@@ -1452,6 +1482,8 @@ func (u *User) syncChannel(id string, name string) {
 		svc, _ := srv.HasUser(u.br.Protocol())
 		ch.Topic(svc, u.br.Topic(u.ctx, ch.ID()))
 	}
+
+	return nil
 }
 
 func (u *User) mayJoin(channelID string) bool {
