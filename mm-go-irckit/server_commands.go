@@ -153,8 +153,6 @@ func CmdKick(s Server, u *User, msg *irc.Message) error {
 
 // CmdJoin is a handler for the /JOIN command.
 func CmdJoin(s Server, u *User, msg *irc.Message) error {
-	var sync func(string, string)
-
 	channels := strings.Split(msg.Params[0], ",")
 	for _, channel := range channels {
 		channelName := strings.Replace(channel, "#", "", 1)
@@ -174,11 +172,27 @@ func CmdJoin(s Server, u *User, msg *irc.Message) error {
 
 		logger.Tracef("Join channel %s, id %s, err: %v", channelName, channelID, err)
 
-		sync = u.syncChannel
-
 		ch := s.Channel(channelID)
-		sync(channelID, channelName)
-		ch.Join(u)
+
+		err = u.syncChannel(channelID, channelName)
+		if err == nil {
+			_ = ch.Join(u)
+
+			continue
+		}
+
+		// The error path: log, notify, and safely degrade by joining anyway
+		logger.Warnf("Failed to sync nicklist for manual join to %s: %v", channelName, err)
+
+		errMsg := fmt.Sprintf("Warning: Failed to fetch the user list for %s (timeout). You have joined the channel, but the nicklist may be incomplete.", channel)
+
+		if svc, ok := s.HasUser(u.br.Protocol()); ok {
+			u.MsgUser(svc, errMsg)
+		} else {
+			_ = s.EncodeMessage(u, "NOTICE", []string{u.Nick}, errMsg)
+		}
+
+		_ = ch.Join(u)
 	}
 
 	return nil
