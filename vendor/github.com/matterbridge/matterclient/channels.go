@@ -651,7 +651,7 @@ func (m *Client) UpdateChannelsTeam(ctx context.Context, teamID string) error {
 			return nil, nil // Early return!
 		}
 
-		m.logger.Debug("UpdateChannelsTeam: fetching public channels (cache empty or ForceSyncOnReconnect enabled)")
+		m.logger.Trace("UpdateChannelsTeam: fetching public channels (cache empty or ForceSyncOnReconnect enabled)")
 
 		summaries := make([]ChannelSummary, 0, batchSize)
 		var list []ChannelSummary
