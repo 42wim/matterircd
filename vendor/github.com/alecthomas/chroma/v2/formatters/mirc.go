@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -18,8 +17,6 @@ var mIRC100 = Register("mirc100", chroma.FormatterFunc(mIRCExtendedColorFormatte
 // mIRC16m is a true-colour formatter.
 var mIRC16m = Register("mirc16m", chroma.FormatterFunc(mIRCHexColorFormatter))
 
-var mIRCcrOrCrLf = regexp.MustCompile(`\r?\n`)
-
 // Print the text with the given formatting, resetting the formatting at the end
 // of each line and resuming it on the next line.
 //
@@ -31,7 +28,7 @@ func mIRCwriteToken(w io.Writer, formatting string, text string) {
 		return
 	}
 
-	newlineIndices := mIRCcrOrCrLf.FindAllStringIndex(text, -1)
+	newlineIndices := crOrCrLf.FindAllStringIndex(text, -1)
 
 	afterLastNewline := 0
 	for _, indices := range newlineIndices {
@@ -181,7 +178,7 @@ func mIRCExtendedColorFormatter(w io.Writer, style *chroma.Style, it chroma.Iter
 			}
 		}
 
-		writeToken(w, formatting, token.Value)
+		mIRCwriteToken(w, formatting, token.Value)
 	}
 	return nil
 }
@@ -209,7 +206,7 @@ func mIRCHexColorFormatter(w io.Writer, style *chroma.Style, it chroma.Iterator)
 			formatting += fmt.Sprintf("\x04%02X%02X%02X", entry.Colour.Red(), entry.Colour.Green(), entry.Colour.Blue())
 		}
 
-		writeToken(w, formatting, token.Value)
+		mIRCwriteToken(w, formatting, token.Value)
 	}
 	return nil
 }
