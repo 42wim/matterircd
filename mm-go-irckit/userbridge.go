@@ -1753,12 +1753,15 @@ func (u *User) saveLastViewedAt(channelID string) {
 	binary.LittleEndian.PutUint64(currentTime, uint64(time.Now().UnixMilli()))
 
 	err := u.lastViewedAtDB.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(u.User))
-		err := b.Put([]byte(channelID), currentTime)
-		return err
+		b, err := tx.CreateBucketIfNotExists([]byte(u.User))
+		if err != nil {
+			return err
+		}
+
+		return b.Put([]byte(channelID), currentTime)
 	})
 	if err != nil {
-		logger.Fatal(err)
+		logger.Errorf("Failed to save last viewed time for channel %s: %v", channelID, err)
 	}
 }
 
