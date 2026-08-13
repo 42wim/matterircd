@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -1924,17 +1925,19 @@ func (m *Mattermost) formatMessage(ctx context.Context, data *model.Post, eventT
 	}
 
 	// We can't use data.GetPreviewPost() due to a bug so use our own
-	previewText, previewUserID, previewChannelID := extractPreviewData(data.Metadata)
+	previewText, previewUserID, previewChannelID, replyCount, lastReplyAt := extractPreviewData(data.Metadata)
 	if !(previewText == "" && previewUserID == "" && previewChannelID == "") {
 		nick := previewUserID
 		if user := m.GetUser(ctx, previewUserID); user != nil {
 			nick = user.Nick
 		}
+
 		channel := m.GetChannelName(ctx, previewChannelID)
 		if strings.Contains(channel, "__") {
 			channel = ""
 		}
-		m.parsePreviewPost(&sbMsg, nick, channel, previewText)
+
+		m.parsePreviewPost(&sbMsg, nick, channel, previewText, replyCount, lastReplyAt)
 	}
 
 	return sbMsg.String()
@@ -2257,39 +2260,70 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 }
 
 // XXX: Bug in Mattermost itself and PostEmbed Data interface{}
-// extractPreviewData returns (message, userID, channelID)
-func extractPreviewData(metadata *model.PostMetadata) (string, string, string) {
-	if metadata == nil || len(metadata.Embeds) == 0 {
-		return "", "", ""
+//
+//nolint:gocyclo
+func extractPreviewData(metadata *model.PostMetadata) (string, string, string, int64, int64) {
+	if metadata == nil {
+		return "", "", "", 0, 0
 	}
 
 	for _, embed := range metadata.Embeds {
-		if embed.Type == "permalink" && embed.Data != nil { //nolint:nestif
-			if dataMap, ok := embed.Data.(map[string]interface{}); ok {
-				if postMap, ok := dataMap["post"].(map[string]interface{}); ok {
-					var msg, userID, channelID string
+		if embed.Type != "permalink" || embed.Data == nil {
+			continue
+		}
 
-					if val, ok := postMap["message"].(string); ok {
-						msg = val
-					}
-					if val, ok := postMap["user_id"].(string); ok {
-						userID = val
-					}
-					if val, ok := postMap["channel_id"].(string); ok {
-						channelID = val
-					}
+		dataMap, ok := embed.Data.(map[string]any)
+		if !ok {
+			continue
+		}
 
-					return msg, userID, channelID
-				}
+		postMap, ok := dataMap["post"].(map[string]any)
+		if !ok {
+			continue
+		}
+
+		var (
+			msg, userID, channelID  string
+			replyCount, lastReplyAt int64
+		)
+
+		if val, ok := postMap["message"].(string); ok {
+			msg = val
+		}
+
+		if val, ok := postMap["user_id"].(string); ok {
+			userID = val
+		}
+
+		if val, ok := postMap["channel_id"].(string); ok {
+			channelID = val
+		}
+
+		if val, ok := postMap["reply_count"].(float64); ok {
+			replyCount = int64(val)
+		}
+
+		if val, ok := postMap["last_reply_at"].(float64); ok {
+			lastReplyAt = int64(val)
+		}
+
+		// Fall back to update_at (or create_at) if last_reply_at is 0
+		if lastReplyAt == 0 {
+			if val, ok := postMap["update_at"].(float64); ok && int64(val) > 0 {
+				lastReplyAt = int64(val)
+			} else if val, ok := postMap["create_at"].(float64); ok {
+				lastReplyAt = int64(val)
 			}
 		}
+
+		return msg, userID, channelID, replyCount, lastReplyAt
 	}
 
-	return "", "", ""
+	return "", "", "", 0, 0
 }
 
 //nolint:funlen
-func (m *Mattermost) parsePreviewPost(b *strings.Builder, user string, channel string, text string) {
+func (m *Mattermost) parsePreviewPost(b *strings.Builder, user string, channel string, text string, replyCount int64, lastReplyAt int64) {
 	// If the main message builder already has content, add a newline before our preview
 	if b.Len() > 0 {
 		b.WriteByte('\n')
@@ -2321,7 +2355,7 @@ func (m *Mattermost) parsePreviewPost(b *strings.Builder, user string, channel s
 		}
 	}
 
-	b.Grow(len(text) + 64)
+	b.Grow(len(text) + 128)
 	prefix := prefixChar + spaceChar
 
 	b.WriteString(prefix)
@@ -2333,7 +2367,26 @@ func (m *Mattermost) parsePreviewPost(b *strings.Builder, user string, channel s
 		b.WriteString(channel)
 		b.WriteByte('\x1d')
 	}
-	b.WriteByte('\n')
+
+	// Append reply metadata if replies exist
+	if replyCount > 0 {
+		b.WriteString(" (")
+		b.WriteString(strconv.FormatInt(replyCount, 10))
+
+		if replyCount == 1 {
+			b.WriteString(" reply")
+		} else {
+			b.WriteString(" replies")
+		}
+
+		b.WriteString(", last at ")
+		// Mattermost timestamps are in Unix milliseconds
+		t := time.Unix(lastReplyAt/1000, 0)
+		b.WriteString(t.Format("2006-01-02 15:04:05"))
+		b.WriteByte(')')
+	}
+
+	b.WriteString(":\n")
 
 	opts := utils.ProcessMessageOpts{
 		DisableMarkdown:    disableMarkdown,
