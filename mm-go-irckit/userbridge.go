@@ -444,7 +444,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 	prefix := ""
 	suffix := ""
 	showContext := false
-	maxlen := 440
+	maxlen := 460
 
 	if u.Nick == systemUser || (event.Sender != nil && event.Sender.Nick == systemUser) {
 		text = "\x1d" + text + "\x1d"
@@ -1380,7 +1380,7 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 			showReplayHdr = false
 		}
 
-		textToProcess := utils.WrapMessage(text, 440)
+		textToProcess := utils.WrapMessage(text, 460)
 
 		utils.ProcessMessageText(textToProcess, opts, func(line string) {
 			if line != "" {
@@ -1438,7 +1438,7 @@ func (u *User) MsgUser(toUser *User, msg string) {
 
 func (u *User) MsgSpoofUser(sender *User, rcvuser string, text string, maxlen ...int) {
 	if len(maxlen) == 0 {
-		text = utils.WrapMessage(text, 440)
+		text = utils.WrapMessage(text, 460)
 	} else {
 		text = utils.WrapMessage(text, maxlen[0])
 	}
@@ -1890,7 +1890,7 @@ func (u *User) handleBannerChangeEvent(e *bridge.BannerChangeEvent) {
 func (u *User) handleMessageThreadContext(channelID, messageID, parentID, event, text string) (string, string, string, bool, int) {
 	prefix := ""
 	suffix := ""
-	maxlen := 440
+	maxlen := 460
 	showContext := false
 
 	newText := text

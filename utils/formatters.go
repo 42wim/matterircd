@@ -907,7 +907,7 @@ func EmojiFromAlias(alias string) (string, bool) {
 // WrapMessage soft-wraps msg into lines of at most maxLen bytes, breaking
 // only at spaces/newlines. Words longer than maxLen are left unbroken and
 // overflow their line rather than being split - fine here since IRC's real
-// line limit (512) leaves headroom above maxLen (440), and splitting mid-
+// line limit (512) leaves headroom above maxLen (460), and splitting mid-
 // word would corrupt URLs/tokens. Pure byte scanning throughout
 //
 //nolint:gocyclo

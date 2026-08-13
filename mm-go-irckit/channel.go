@@ -130,7 +130,7 @@ func (ch *channel) ID() string {
 }
 
 func (ch *channel) Message(from *User, text string) {
-	text = utils.WrapMessage(text, 440)
+	text = utils.WrapMessage(text, 460)
 
 	msg := irc.Message{
 		Prefix:        from.Prefix(),
@@ -490,7 +490,7 @@ func (ch *channel) Len() int {
 
 func (ch *channel) Spoof(from string, text string, cmd string, maxlen ...int) {
 	if len(maxlen) == 0 {
-		text = utils.WrapMessage(text, 440)
+		text = utils.WrapMessage(text, 460)
 	} else {
 		text = utils.WrapMessage(text, maxlen[0])
 	}
@@ -527,7 +527,7 @@ func (ch *channel) Spoof(from string, text string, cmd string, maxlen ...int) {
 
 func (ch *channel) SpoofMessage(from string, text string, maxlen ...int) {
 	if len(maxlen) == 0 {
-		ch.Spoof(from, text, irc.PRIVMSG, 440)
+		ch.Spoof(from, text, irc.PRIVMSG, 460)
 	} else {
 		ch.Spoof(from, text, irc.PRIVMSG, maxlen[0])
 	}
@@ -535,7 +535,7 @@ func (ch *channel) SpoofMessage(from string, text string, maxlen ...int) {
 
 func (ch *channel) SpoofNotice(from string, text string, maxlen ...int) {
 	if len(maxlen) == 0 {
-		ch.Spoof(from, text, irc.NOTICE, 440)
+		ch.Spoof(from, text, irc.NOTICE, 460)
 	} else {
 		ch.Spoof(from, text, irc.NOTICE, maxlen[0])
 	}
