@@ -2118,7 +2118,10 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 			b.WriteByte('\n')
 		}
 
-		isTitleDup := attachment.Title != "" && strings.Contains(rootMsg, attachment.Title)
+		isTitleDup := attachment.Title != "" &&
+			strings.Contains(rootMsg, attachment.Title) &&
+			(attachment.TitleLink == "" || strings.Contains(rootMsg, attachment.TitleLink))
+
 		if attachment.Title != "" && !isTitleDup {
 			b.WriteString(prefix)
 			b.WriteByte('\x02')
