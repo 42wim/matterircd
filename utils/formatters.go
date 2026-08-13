@@ -600,10 +600,84 @@ func replaceCode(msg, startCode, endCode string) string {
 	return b.String()
 }
 
+// replaceLinks simulates the `\[([^\]]+)\]\(([^\)]+)\)` regex for Markdown links
+func replaceLinks(msg string) string {
+	var b strings.Builder
+
+	start := 0
+	i := 0
+
+	for i < len(msg) {
+		// Find opening bracket
+		idx := strings.IndexByte(msg[i:], '[')
+		if idx == -1 {
+			break
+		}
+
+		absoluteIdx := i + idx
+
+		// Find closing bracket
+		closeBracketIdx := strings.IndexByte(msg[absoluteIdx+1:], ']')
+		if closeBracketIdx == -1 {
+			// No more complete brackets
+			break
+		}
+
+		absoluteCloseBracketIdx := absoluteIdx + 1 + closeBracketIdx
+
+		// Ensure '(' immediately follows ']'
+		if absoluteCloseBracketIdx+1 >= len(msg) || msg[absoluteCloseBracketIdx+1] != '(' {
+			// Not a markdown link, advance and continue searching
+			i = absoluteCloseBracketIdx + 1
+			continue
+		}
+
+		absoluteParenIdx := absoluteCloseBracketIdx + 1
+
+		// Find closing parenthesis
+		closeParenIdx := strings.IndexByte(msg[absoluteParenIdx+1:], ')')
+		if closeParenIdx == -1 {
+			i = absoluteParenIdx + 1
+			continue
+		}
+
+		absoluteCloseParenIdx := absoluteParenIdx + 1 + closeParenIdx
+
+		// Valid link found, lazy allocation
+		if start == 0 {
+			b.Grow(len(msg) + 32)
+		}
+
+		b.WriteString(msg[start:absoluteIdx])
+
+		// Underline the text: \x1F + text + \x1F
+		b.WriteString("\x1f")
+		b.WriteString(msg[absoluteIdx+1 : absoluteCloseBracketIdx])
+		b.WriteString("\x1f ") // Close underline and add the space
+
+		// Italicize the URL with parenthesis: (\x1D + url + \x1D)
+		b.WriteString("(\x1d")
+		b.WriteString(msg[absoluteParenIdx+1 : absoluteCloseParenIdx])
+		b.WriteString("\x1d)")
+
+		// Move start pointer past the matched link
+		start = absoluteCloseParenIdx + 1
+		i = start
+	}
+
+	if start == 0 {
+		return msg // Zero allocations if no valid links were found
+	}
+
+	b.WriteString(msg[start:])
+
+	return b.String()
+}
+
 const blockQuoteCharDefault = ">"
 
 func Markdown2irc(msg string, blockQuoteChar string, inlineCode string) string {
-	if !strings.ContainsAny(msg, "*_`>~") {
+	if !strings.ContainsAny(msg, "*_`>~[") {
 		return msg
 	}
 
@@ -640,6 +714,11 @@ func Markdown2irc(msg string, blockQuoteChar string, inlineCode string) string {
 		}
 		// Not all IRC clients support monospace (0x11) so keep the fence
 		msg = replaceCode(msg, inlineCodeStart, inlineCodeEnd)
+	}
+
+	// Links processing [text](url)
+	if strings.Contains(msg, "[") {
+		msg = replaceLinks(msg)
 	}
 
 	// Block quotes
@@ -828,7 +907,7 @@ func EmojiFromAlias(alias string) (string, bool) {
 // WrapMessage soft-wraps msg into lines of at most maxLen bytes, breaking
 // only at spaces/newlines. Words longer than maxLen are left unbroken and
 // overflow their line rather than being split - fine here since IRC's real
-// line limit (512) leaves headroom above maxLen (440), and splitting mid-
+// line limit (512) leaves headroom above maxLen (460), and splitting mid-
 // word would corrupt URLs/tokens. Pure byte scanning throughout
 //
 //nolint:gocyclo

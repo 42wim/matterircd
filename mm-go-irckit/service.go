@@ -335,7 +335,7 @@ func details(u *User, toUser *User, args []string, service string) {
 		ts := time.Unix(0, createAt*int64(time.Millisecond)).Format("2006-01-02 15:04:05")
 		u.MsgUser(toUser, prefix+"["+ts+"] <"+nick+"> in "+channel)
 
-		textToProcess := utils.WrapMessage(text, 440)
+		textToProcess := utils.WrapMessage(text, 460)
 
 		utils.ProcessMessageText(textToProcess, opts, func(line string) {
 			// Visually translate actions for the details view
@@ -562,7 +562,7 @@ func dispatchHistoricalEvent(u *User, toUser *User, event *bridge.Event, searchC
 		InlineCodeChar:     inlineCode,
 	}
 
-	textToProcess := utils.WrapMessage(text, 440)
+	textToProcess := utils.WrapMessage(text, 460)
 
 	utils.ProcessMessageText(textToProcess, opts, func(line string) {
 		if line != "" {
