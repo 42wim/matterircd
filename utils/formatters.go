@@ -255,7 +255,13 @@ func FormatFullCodeBlock(text, lexer, indent string, opts ProcessMessageOpts, yi
 	err := quick.Highlight(buf, text, lexer, formatter, style)
 	if err == nil {
 		bs := buf.Bytes()
-		const resetSeq = "\x1b[0m"
+
+		// Determine which reset sequence to look for based on the formatter
+		resetSeq := "\x1b[0m" // Default for terminal* formatters
+		if strings.HasPrefix(formatter, "mirc") {
+			resetSeq = "\x0f"
+		}
+
 		hasReset := bytes.HasSuffix(bs, []byte(resetSeq))
 
 		end := len(bs)
@@ -267,6 +273,10 @@ func FormatFullCodeBlock(text, lexer, indent string, opts ProcessMessageOpts, yi
 		// Safely strip the trailing newline without touching the linePrefix
 		if end > 0 && bs[end-1] == '\n' {
 			end--
+			// Also safely handle \r\n just in case
+			if end > 0 && bs[end-1] == '\r' {
+				end--
+			}
 		}
 
 		buf.Truncate(end)
