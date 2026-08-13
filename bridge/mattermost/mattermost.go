@@ -1920,6 +1920,17 @@ func (m *Mattermost) formatMessage(ctx context.Context, data *model.Post, eventT
 		sbMsg.WriteString(msg)
 	}
 
+	// Attachments and raw messages often leave trailing newlines in the builder.
+	// Strip them here so suffixes (like thread replies) stay on the same line.
+	finalBody := sbMsg.String()
+	for len(finalBody) > 0 && (finalBody[len(finalBody)-1] == '\n' || finalBody[len(finalBody)-1] == '\r') {
+		finalBody = finalBody[:len(finalBody)-1]
+	}
+
+	// Reset the builder and write the cleaned string back
+	sbMsg.Reset()
+	sbMsg.WriteString(finalBody)
+
 	if sbSuffix.Len() > 0 && data.Type != "me" {
 		sbMsg.WriteString(sbSuffix.String())
 	}
