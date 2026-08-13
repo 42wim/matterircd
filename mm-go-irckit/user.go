@@ -317,7 +317,7 @@ func (u *User) Decode() {
 		case irc.PRIVMSG:
 			logger.Debugf("B: %#v", dmsg)
 			buffer <- msg
-		case irc.PING:
+		case irc.PING, irc.MODE:
 			logger.Trace(dmsg)
 			u.DecodeCh <- msg
 		default:

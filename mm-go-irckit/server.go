@@ -407,7 +407,7 @@ func (s *server) handle(u *User) {
 		}
 		go func(msg *irc.Message) {
 			err := s.commands.Run(s, u, msg)
-			if msg.Command == irc.PING {
+			if msg.Command == irc.PING || msg.Command == irc.MODE {
 				logger.Tracef("Executed %#v %#v", msg, err)
 			} else {
 				logger.Debugf("Executed %#v %#v", msg, err)
