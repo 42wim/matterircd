@@ -2059,7 +2059,8 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 			}
 		}
 
-		var fallbackText string
+		var fallbackText, printedFallback string
+
 		if useFallback {
 			fallbackText, _, _ = strings.Cut(attachment.Fallback, "\n")
 			fallbackText = strings.TrimSuffix(fallbackText, "\r")
@@ -2094,23 +2095,31 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 				b.WriteString(outFallback)
 				b.WriteByte('\n')
 
-				// Make this the rootMsg so subsequent deduplication checks
-				// (Author, Title, Text) naturally check against the fallback we just printed!
-				rootMsg = attFallbackStr
+				// Mark that we printed the fallback so we can deduplicate against it!
+				printedFallback = attFallbackStr
 			}
 		}
 
+		// Zero-allocation closure to check both rootMsg and the fallback text we just printed
+		isDup := func(s string) bool {
+			if s == "" {
+				return false
+			}
+
+			return strings.Contains(rootMsg, s) || (printedFallback != "" && strings.Contains(printedFallback, s))
+		}
+
+		// Deduplicate Author block
 		isAuthorDup := attachment.AuthorName != "" &&
-			strings.Contains(rootMsg, attachment.AuthorName) &&
-			(attachment.AuthorLink == "" || strings.Contains(rootMsg, attachment.AuthorLink))
+			isDup(attachment.AuthorName) &&
+			(attachment.AuthorLink == "" || isDup(attachment.AuthorLink))
+
 		if attachment.AuthorName != "" && !isAuthorDup {
 			b.WriteString(prefix)
-
 			authorName := attachment.AuthorName
 			if !disableEmoji {
 				authorName = utils.EmojiReplaceAliases(authorName)
 			}
-
 			b.WriteString(authorName)
 			if attachment.AuthorLink != "" {
 				b.WriteString(spaceChar)
@@ -2118,33 +2127,29 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 				b.WriteString(attachment.AuthorLink)
 				b.WriteString(")")
 			}
-
 			b.WriteByte('\n')
 		}
 
+		// Deduplicate Title block
 		isTitleDup := attachment.Title != "" &&
-			strings.Contains(rootMsg, attachment.Title) &&
-			(attachment.TitleLink == "" || strings.Contains(rootMsg, attachment.TitleLink))
+			isDup(attachment.Title) &&
+			(attachment.TitleLink == "" || isDup(attachment.TitleLink))
 
 		if attachment.Title != "" && !isTitleDup {
 			b.WriteString(prefix)
 			b.WriteByte('\x02')
-
 			title := attachment.Title
 			if !disableEmoji {
 				title = utils.EmojiReplaceAliases(title)
 			}
-
 			b.WriteString(title)
 			b.WriteByte('\x02')
-
 			if attachment.TitleLink != "" {
 				b.WriteString(" (\x1d")
 				b.WriteString(attachment.TitleLink)
 				b.WriteByte('\x1d')
 				b.WriteByte(')')
 			}
-
 			b.WriteByte('\n')
 		}
 
@@ -2153,8 +2158,8 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 			attTextStr = attTextStr[:len(attTextStr)-1]
 		}
 
-		// Prevent duplicate text block
-		isTextDup := attTextStr != "" && strings.Contains(rootMsg, attTextStr)
+		// Deduplicate Text block
+		isTextDup := attTextStr != "" && isDup(attTextStr)
 		if attachment.Text != "" && !isTextDup {
 			opts := utils.ProcessMessageOpts{
 				DisableMarkdown:    disableMarkdown,
