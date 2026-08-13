@@ -1920,6 +1920,17 @@ func (m *Mattermost) formatMessage(ctx context.Context, data *model.Post, eventT
 		sbMsg.WriteString(msg)
 	}
 
+	// Attachments and raw messages often leave trailing newlines in the builder.
+	// Strip them here so suffixes (like thread replies) stay on the same line.
+	finalBody := sbMsg.String()
+	for len(finalBody) > 0 && (finalBody[len(finalBody)-1] == '\n' || finalBody[len(finalBody)-1] == '\r') {
+		finalBody = finalBody[:len(finalBody)-1]
+	}
+
+	// Reset the builder and write the cleaned string back
+	sbMsg.Reset()
+	sbMsg.WriteString(finalBody)
+
 	if sbSuffix.Len() > 0 && data.Type != "me" {
 		sbMsg.WriteString(sbSuffix.String())
 	}
@@ -2059,7 +2070,8 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 			}
 		}
 
-		var fallbackText string
+		var fallbackText, printedFallback string
+
 		if useFallback {
 			fallbackText, _, _ = strings.Cut(attachment.Fallback, "\n")
 			fallbackText = strings.TrimSuffix(fallbackText, "\r")
@@ -2079,8 +2091,9 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 				attFallbackStr = attFallbackStr[:len(attFallbackStr)-1]
 			}
 
-			// Only write to buffer if it's not a duplicate of the main message
-			if attFallbackStr != rootMsg {
+			// Only write to buffer if it's not a substring duplicate of the main message
+			isFallbackDup := attFallbackStr != "" && strings.Contains(rootMsg, attFallbackStr)
+			if !isFallbackDup {
 				outFallback := fallbackText
 				if !disableMarkdown {
 					outFallback = utils.Markdown2irc(outFallback, blockquoteChar, inlineCode)
@@ -2092,10 +2105,27 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 
 				b.WriteString(outFallback)
 				b.WriteByte('\n')
+
+				// Mark that we printed the fallback so we can deduplicate against it!
+				printedFallback = attFallbackStr
 			}
 		}
 
-		if attachment.AuthorName != "" {
+		// Zero-allocation closure to check both rootMsg and the fallback text we just printed
+		isDup := func(s string) bool {
+			if s == "" {
+				return false
+			}
+
+			return strings.Contains(rootMsg, s) || (printedFallback != "" && strings.Contains(printedFallback, s))
+		}
+
+		// Deduplicate Author block
+		isAuthorDup := attachment.AuthorName != "" &&
+			isDup(attachment.AuthorName) &&
+			(attachment.AuthorLink == "" || isDup(attachment.AuthorLink))
+
+		if attachment.AuthorName != "" && !isAuthorDup {
 			b.WriteString(prefix)
 			authorName := attachment.AuthorName
 			if !disableEmoji {
@@ -2110,7 +2140,13 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 			}
 			b.WriteByte('\n')
 		}
-		if attachment.Title != "" {
+
+		// Deduplicate Title block
+		isTitleDup := attachment.Title != "" &&
+			isDup(attachment.Title) &&
+			(attachment.TitleLink == "" || isDup(attachment.TitleLink))
+
+		if attachment.Title != "" && !isTitleDup {
 			b.WriteString(prefix)
 			b.WriteByte('\x02')
 			title := attachment.Title
@@ -2133,8 +2169,9 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 			attTextStr = attTextStr[:len(attTextStr)-1]
 		}
 
-		// Prevent duplicate text block
-		if attachment.Text != "" && attTextStr != rootMsg {
+		// Deduplicate Text block
+		isTextDup := attTextStr != "" && isDup(attTextStr)
+		if attachment.Text != "" && !isTextDup {
 			opts := utils.ProcessMessageOpts{
 				DisableMarkdown:    disableMarkdown,
 				DisableEmoji:       disableEmoji,
