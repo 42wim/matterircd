@@ -2093,6 +2093,10 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 
 				b.WriteString(outFallback)
 				b.WriteByte('\n')
+
+				// Make this the rootMsg so subsequent deduplication checks
+				// (Author, Title, Text) naturally check against the fallback we just printed!
+				rootMsg = attFallbackStr
 			}
 		}
 
