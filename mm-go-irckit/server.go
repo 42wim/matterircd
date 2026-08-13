@@ -366,6 +366,12 @@ func (s *server) welcome(u *User) error {
 		},
 		&irc.Message{
 			Prefix:   s.Prefix(),
+			Command:  irc.RPL_ISUPPORT,
+			Params:   []string{u.Nick, "CHANMODES=b,k,l,ps", "PREFIX=(ov)@+", "NETWORK=matterircd"},
+			Trailing: "are supported by this server",
+		},
+		&irc.Message{
+			Prefix:   s.Prefix(),
 			Command:  irc.RPL_LUSERCLIENT,
 			Params:   []string{u.Nick},
 			Trailing: fmt.Sprintf("There are %d users and 0 services on 1 servers", s.Len()),
