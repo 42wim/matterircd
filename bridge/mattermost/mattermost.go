@@ -2079,8 +2079,9 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 				attFallbackStr = attFallbackStr[:len(attFallbackStr)-1]
 			}
 
-			// Only write to buffer if it's not a duplicate of the main message
-			if attFallbackStr != rootMsg {
+			// Only write to buffer if it's not a substring duplicate of the main message
+			isFallbackDup := attFallbackStr != "" && strings.Contains(rootMsg, attFallbackStr)
+			if !isFallbackDup {
 				outFallback := fallbackText
 				if !disableMarkdown {
 					outFallback = utils.Markdown2irc(outFallback, blockquoteChar, inlineCode)
@@ -2095,12 +2096,17 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 			}
 		}
 
-		if attachment.AuthorName != "" {
+		isAuthorDup := attachment.AuthorName != "" &&
+			strings.Contains(rootMsg, attachment.AuthorName) &&
+			(attachment.AuthorLink == "" || strings.Contains(rootMsg, attachment.AuthorLink))
+		if attachment.AuthorName != "" && !isAuthorDup {
 			b.WriteString(prefix)
+
 			authorName := attachment.AuthorName
 			if !disableEmoji {
 				authorName = utils.EmojiReplaceAliases(authorName)
 			}
+
 			b.WriteString(authorName)
 			if attachment.AuthorLink != "" {
 				b.WriteString(spaceChar)
@@ -2108,23 +2114,30 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 				b.WriteString(attachment.AuthorLink)
 				b.WriteString(")")
 			}
+
 			b.WriteByte('\n')
 		}
-		if attachment.Title != "" {
+
+		isTitleDup := attachment.Title != "" && strings.Contains(rootMsg, attachment.Title)
+		if attachment.Title != "" && !isTitleDup {
 			b.WriteString(prefix)
 			b.WriteByte('\x02')
+
 			title := attachment.Title
 			if !disableEmoji {
 				title = utils.EmojiReplaceAliases(title)
 			}
+
 			b.WriteString(title)
 			b.WriteByte('\x02')
+
 			if attachment.TitleLink != "" {
 				b.WriteString(" (\x1d")
 				b.WriteString(attachment.TitleLink)
 				b.WriteByte('\x1d')
 				b.WriteByte(')')
 			}
+
 			b.WriteByte('\n')
 		}
 
@@ -2134,7 +2147,8 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 		}
 
 		// Prevent duplicate text block
-		if attachment.Text != "" && attTextStr != rootMsg {
+		isTextDup := attTextStr != "" && strings.Contains(rootMsg, attTextStr)
+		if attachment.Text != "" && !isTextDup {
 			opts := utils.ProcessMessageOpts{
 				DisableMarkdown:    disableMarkdown,
 				DisableEmoji:       disableEmoji,
