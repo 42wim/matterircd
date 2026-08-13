@@ -407,9 +407,12 @@ func (s *server) handle(u *User) {
 		}
 		go func(msg *irc.Message) {
 			err := s.commands.Run(s, u, msg)
-			if msg.Command == irc.PING || msg.Command == irc.MODE {
+			switch msg.Command {
+			case irc.PING, irc.MODE:
 				logger.Tracef("Executed %#v %#v", msg, err)
-			} else {
+			case irc.WHO, irc.WHOIS:
+				logger.Tracef("Executed %#v %#v", msg, err)
+			default:
 				logger.Debugf("Executed %#v %#v", msg, err)
 			}
 			if err == ErrUnknownCommand {

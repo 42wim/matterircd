@@ -166,10 +166,17 @@ func (u *User) Encode(msgs ...*irc.Message) (err error) {
 			continue
 		}
 
-		if msg.Command == irc.PONG || msg.Command == irc.RPL_NAMREPLY || msg.Command == irc.TOPIC || strings.Contains(msg.Command, "@+typing=active") {
+		switch msg.Command {
+		case irc.PONG, irc.TOPIC:
 			logger.Tracef("-> %q", msg.String())
-		} else {
-			logger.Debugf("-> %q", msg.String())
+		case irc.RPL_ENDOFBANLIST, irc.RPL_NAMREPLY:
+			logger.Tracef("-> %q", msg.String())
+		default:
+			if strings.Contains(msg.Command, "@+typing=active") {
+				logger.Tracef("-> %q", msg.String())
+			} else {
+				logger.Debugf("-> %q", msg.String())
+			}
 		}
 
 		err := u.Conn.Encode(msg)
