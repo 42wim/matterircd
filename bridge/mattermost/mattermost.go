@@ -2031,6 +2031,7 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 	codeBlockSeparator := rc.Mattermost.Formatter.CodeBlockSeparator
 	disableMarkdown := rc.Mattermost.Formatter.DisableMarkdown
 	disableEmoji := rc.Mattermost.Formatter.DisableEmoji
+	customEmoji := rc.Mattermost.Formatter.CustomEmoji
 	enableIRCHexColors := rc.Mattermost.Formatter.EnableIRCHexColors
 
 	prefixChar := messageAttachmentCharNonUnicode
@@ -2175,8 +2176,9 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 		isTextDup := attTextStr != "" && isDup(attTextStr)
 		if attachment.Text != "" && !isTextDup {
 			opts := utils.ProcessMessageOpts{
-				DisableMarkdown:    disableMarkdown,
 				DisableEmoji:       disableEmoji,
+				CustomEmoji:        customEmoji,
+				DisableMarkdown:    disableMarkdown,
 				SyntaxHighlighting: syntaxHighlighting,
 				CodeBlockPrefix:    codeBlockPrefix,
 				CodeBlockSeparator: codeBlockSeparator,
@@ -2272,8 +2274,9 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 				}
 
 				opts := utils.ProcessMessageOpts{
-					DisableMarkdown:    disableMarkdown,
 					DisableEmoji:       disableEmoji,
+					CustomEmoji:        customEmoji,
+					DisableMarkdown:    disableMarkdown,
 					SyntaxHighlighting: syntaxHighlighting,
 					CodeBlockPrefix:    codeBlockPrefix,
 					CodeBlockSeparator: codeBlockSeparator,
@@ -2376,6 +2379,7 @@ func (m *Mattermost) parsePreviewPost(b *strings.Builder, user string, channel s
 	codeBlockSeparator := rc.Mattermost.Formatter.CodeBlockSeparator
 	disableMarkdown := rc.Mattermost.Formatter.DisableMarkdown
 	disableEmoji := rc.Mattermost.Formatter.DisableEmoji
+	customEmoji := rc.Mattermost.Formatter.CustomEmoji
 
 	prefixChar := messageAttachmentCharNonUnicode
 	spaceChar := messageAttachmentSpaceNonUnicode
@@ -2428,8 +2432,9 @@ func (m *Mattermost) parsePreviewPost(b *strings.Builder, user string, channel s
 	b.WriteString(":\n")
 
 	opts := utils.ProcessMessageOpts{
-		DisableMarkdown:    disableMarkdown,
 		DisableEmoji:       disableEmoji,
+		CustomEmoji:        customEmoji,
+		DisableMarkdown:    disableMarkdown,
 		SyntaxHighlighting: syntaxHighlighting,
 		CodeBlockPrefix:    codeBlockPrefix,
 		CodeBlockSeparator: codeBlockSeparator,

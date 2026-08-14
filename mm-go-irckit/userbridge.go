@@ -283,8 +283,8 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 	}
 
 	opts := utils.ProcessMessageOpts{
-		CustomEmoji:        customEmoji,
 		DisableEmoji:       disableEmoji,
+		CustomEmoji:        customEmoji,
 		DisableMarkdown:    disableMarkdown,
 		SyntaxHighlighting: syntaxHighlighting,
 		CodeBlockPrefix:    codeBlockPrefix,
@@ -489,8 +489,8 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 	}
 
 	opts := utils.ProcessMessageOpts{
-		CustomEmoji:        customEmoji,
 		DisableEmoji:       disableEmoji,
+		CustomEmoji:        customEmoji,
 		DisableMarkdown:    disableMarkdown,
 		SyntaxHighlighting: syntaxHighlighting,
 		CodeBlockPrefix:    codeBlockPrefix,
@@ -1332,8 +1332,8 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 	codeBlockSeparator := u.br.FormatterConfig().CodeBlockSeparator
 
 	opts := utils.ProcessMessageOpts{
-		CustomEmoji:        customEmoji,
 		DisableEmoji:       disableEmoji,
+		CustomEmoji:        customEmoji,
 		DisableMarkdown:    disableMarkdown,
 		SyntaxHighlighting: syntaxHighlighting,
 		CodeBlockPrefix:    codeBlockPrefix,
