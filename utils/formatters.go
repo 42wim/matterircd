@@ -81,12 +81,14 @@ var getIRCPalette = sync.OnceValue(func() []IRCColor {
 	// Use a map to track and exclude duplicates.
 	// Because we iterate from 0 to 98, standard codes (0-15) are saved first.
 	seenHex := make(map[string]bool)
+
 	var palette []IRCColor
 
 	for i, hex := range rawColors {
 		if seenHex[hex] {
 			continue
 		}
+
 		seenHex[hex] = true
 
 		r, _ := strconv.ParseInt(hex[0:2], 16, 32)
@@ -155,13 +157,14 @@ func FormatAndShortenSummary(text string, opts SummaryOpts) string {
 	// strings.ReplaceAll is highly optimized and allocation-free if there's no match.
 	text = strings.ReplaceAll(text, "\n", " ")
 
-	if !opts.DisableMarkdown {
-		text = Markdown2irc(text, opts.BlockquoteChar, opts.InlineCodeChar)
-	}
-
-	if !opts.DisableEmoji {
-		text = EmojiReplaceAliases(text, opts.CustomEmoji)
-	}
+	text = FormatMarkdownAndEmoji(
+		text,
+		opts.DisableMarkdown,
+		opts.DisableEmoji,
+		opts.BlockquoteChar,
+		opts.InlineCodeChar,
+		opts.CustomEmoji,
+	)
 
 	if opts.MaxLength <= 0 || len(text) <= opts.MaxLength {
 		return text
@@ -295,6 +298,21 @@ func FormatFullCodeBlock(text, lexer, indent string, opts ProcessMessageOpts, yi
 	emitLines(text, prefix, yield)
 }
 
+// FormatMarkdownAndEmoji applies Markdown formatting and Emoji alias replacement.
+// It utilizes a fast-path single-pass check to bypass processing entirely if no
+// trigger characters are present, drastically reducing allocations and CPU usage.
+func FormatMarkdownAndEmoji(msg string, disableMarkdown bool, disableEmoji bool, blockQuoteChar string, inlineCode string, customEmoji map[string]string) string {
+	if !disableMarkdown {
+		msg = Markdown2irc(msg, blockQuoteChar, inlineCode)
+	}
+
+	if !disableEmoji {
+		msg = EmojiReplaceAliases(msg, customEmoji)
+	}
+
+	return msg
+}
+
 // ProcessMessageText abstracts the parsing loop, multi-line code handling,
 // and formatting. It uses a zero-allocation callback (yield) to return lines.
 //
@@ -396,13 +414,14 @@ func ProcessMessageText(text string, opts ProcessMessageOpts, yield func(line st
 			emptyLines = emptyLines[:0]
 			lastBlockWasCode = false
 
-			if !opts.DisableMarkdown {
-				line = Markdown2irc(line, opts.BlockquoteChar, opts.InlineCodeChar)
-			}
-
-			if !opts.DisableEmoji {
-				line = EmojiReplaceAliases(line, opts.CustomEmoji)
-			}
+			line = FormatMarkdownAndEmoji(
+				line,
+				opts.DisableMarkdown,
+				opts.DisableEmoji,
+				opts.BlockquoteChar,
+				opts.InlineCodeChar,
+				opts.CustomEmoji,
+			)
 
 			yield(line)
 		}

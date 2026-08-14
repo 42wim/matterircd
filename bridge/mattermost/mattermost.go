@@ -2033,6 +2033,11 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 	disableEmoji := rc.Mattermost.Formatter.DisableEmoji
 	customEmoji := rc.Mattermost.Formatter.CustomEmoji
 	enableIRCHexColors := rc.Mattermost.Formatter.EnableIRCHexColors
+	messageAttachmentShortFieldMaxLineLength := rc.Mattermost.MessageAttachmentShortFieldMaxLineLength
+
+	if messageAttachmentShortFieldMaxLineLength == 0 {
+		messageAttachmentShortFieldMaxLineLength = 100
+	}
 
 	prefixChar := messageAttachmentCharNonUnicode
 	spaceChar := messageAttachmentSpaceNonUnicode
@@ -2174,18 +2179,18 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 
 		// Deduplicate Text block
 		isTextDup := attTextStr != "" && isDup(attTextStr)
-		if attachment.Text != "" && !isTextDup {
-			opts := utils.ProcessMessageOpts{
-				DisableEmoji:       disableEmoji,
-				CustomEmoji:        customEmoji,
-				DisableMarkdown:    disableMarkdown,
-				SyntaxHighlighting: syntaxHighlighting,
-				CodeBlockPrefix:    codeBlockPrefix,
-				CodeBlockSeparator: codeBlockSeparator,
-				BlockquoteChar:     blockquoteChar,
-				InlineCodeChar:     inlineCode,
-			}
+		opts := utils.ProcessMessageOpts{
+			DisableEmoji:       disableEmoji,
+			CustomEmoji:        customEmoji,
+			DisableMarkdown:    disableMarkdown,
+			SyntaxHighlighting: syntaxHighlighting,
+			CodeBlockPrefix:    codeBlockPrefix,
+			CodeBlockSeparator: codeBlockSeparator,
+			BlockquoteChar:     blockquoteChar,
+			InlineCodeChar:     inlineCode,
+		}
 
+		if attachment.Text != "" && !isTextDup {
 			utils.ProcessMessageText(attachment.Text, opts, func(line string) {
 				b.WriteString(prefix)
 				b.WriteString(line)
@@ -2199,106 +2204,226 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 			b.WriteByte('\n')
 		}
 
-		for i := 0; i < len(attachment.Fields); {
-			field := attachment.Fields[i]
-			// In case the value has any new lines, strip it to avoid messing with our table format
-			val1Str := strings.TrimPrefix(fmt.Sprintf("%v", field.Value), "\n")
+		if len(attachment.Fields) > 0 {
+			maxLineLength := messageAttachmentShortFieldMaxLineLength
+			m.formatAttachmentFields(b, attachment.Fields, prefix, prefixChar, useFallback, fallbackText, opts, maxLineLength)
+		}
+	}
+}
 
-			// Block quotes
-			if !disableMarkdown && strings.HasPrefix(val1Str, blockQuoteCharDefault) {
-				val1Str = strings.Replace(val1Str, blockQuoteCharDefault, prefixChar, 1)
+//nolint:funlen,gocognit,gocyclo
+func (m *Mattermost) formatAttachmentFields(b *strings.Builder, fields []*model.SlackAttachmentField, prefix string, prefixChar string, useFallback bool, fallbackText string, opts utils.ProcessMessageOpts, maxLineLength int) {
+	const gutter = 2
+
+	var candidates [3]struct {
+		title  string
+		rawVal string
+		lines  []string
+	}
+
+	for i := 0; i < len(fields); {
+		groupSize := 1
+
+		// Check if this field and the next field are both flagged as "short"
+		if fields[i].Short {
+			if i+2 < len(fields) && fields[i+1].Short && fields[i+2].Short {
+				groupSize = 3
+			} else if i+1 < len(fields) && fields[i+1].Short {
+				groupSize = 2
+			}
+		}
+
+		var targetColWidth int
+
+		if groupSize > 1 { //nolint:nestif
+			// FAST PASS: Extract raw values for length evaluation
+			for j := range groupSize {
+				field := fields[i+j]
+
+				if s, ok := field.Value.(string); ok {
+					candidates[j].rawVal = s
+				} else {
+					candidates[j].rawVal = fmt.Sprintf("%v", field.Value)
+				}
 			}
 
-			// Check if this field and the next field are both flagged as "short"
-			if field.Short && i+1 < len(attachment.Fields) && attachment.Fields[i+1].Short {
-				nextField := attachment.Fields[i+1]
-				// Same, avoid messing with our table format
-				val2Str := strings.TrimPrefix(fmt.Sprintf("%v", nextField.Value), "\n")
+			// FAST PASS: Calculate column fitting without excessive nesting
+			if maxLineLength > 0 {
+				for groupSize > 1 {
+					totalGutters := (groupSize - 1) * gutter
+					targetColWidth = (maxLineLength - totalGutters) / groupSize
 
-				b.WriteString(prefix)
-				b.WriteByte('\x02')
-				title := field.Title
-				nextTitle := nextField.Title
-				if !disableEmoji {
-					title = utils.EmojiReplaceAliases(title, rc.Mattermost.Formatter.CustomEmoji)
-					nextTitle = utils.EmojiReplaceAliases(nextTitle, rc.Mattermost.Formatter.CustomEmoji)
+					if fieldsFitColWidth(fields[i:i+groupSize], candidates[:groupSize], targetColWidth) {
+						break
+					}
+
+					groupSize--
 				}
-				b.WriteString(fmt.Sprintf("%-30s %s", title, nextTitle))
-				b.WriteByte('\x02')
-				b.WriteByte('\n')
+			}
+		}
 
-				val1Lines := strings.Split(val1Str, "\n")
-				val2Lines := strings.Split(val2Str, "\n")
+		if groupSize == 1 {
+			m.formatSingleAttachmentField(b, fields[i], prefix, prefixChar, useFallback, fallbackText, opts)
+			i++
 
-				maxLines := len(val1Lines)
-				if len(val2Lines) > maxLines {
-					maxLines = len(val2Lines)
+			continue
+		}
+
+		// EXPENSIVE PASS: Process only confirmed columns
+		for j := range groupSize {
+			field := fields[i+j]
+
+			title := utils.FormatMarkdownAndEmoji(field.Title, true, opts.DisableEmoji, "", "", opts.CustomEmoji)
+			candidates[j].title = title
+			valStr := candidates[j].rawVal
+
+			valStr = strings.TrimPrefix(valStr, "\n")
+
+			if !opts.DisableMarkdown && strings.HasPrefix(valStr, blockQuoteCharDefault) {
+				valStr = strings.Replace(valStr, blockQuoteCharDefault, prefixChar, 1)
+			}
+
+			lines := strings.Split(valStr, "\n")
+
+			for k, line := range lines {
+				lines[k] = utils.FormatMarkdownAndEmoji(
+					line,
+					opts.DisableMarkdown,
+					opts.DisableEmoji,
+					opts.BlockquoteChar,
+					opts.InlineCodeChar,
+					opts.CustomEmoji,
+				)
+			}
+
+			candidates[j].lines = lines
+		}
+
+		// Print Field Titles
+		b.WriteString(prefix)
+		b.WriteByte('\x02')
+
+		for j := range groupSize {
+			b.WriteString(candidates[j].title)
+
+			if j < groupSize-1 {
+				padWidth := targetColWidth - len(candidates[j].title) + gutter
+
+				for range padWidth {
+					b.WriteByte(' ')
+				}
+			}
+		}
+
+		b.WriteByte('\x02')
+		b.WriteByte('\n')
+
+		// Calculate max line depth
+		maxLines := 0
+
+		for j := range groupSize {
+			if len(candidates[j].lines) > maxLines {
+				maxLines = len(candidates[j].lines)
+			}
+		}
+
+		// Print Field Values row by row
+		for lineIdx := range maxLines {
+			b.WriteString(prefix)
+
+			for j := range groupSize {
+				v := ""
+
+				if lineIdx < len(candidates[j].lines) {
+					v = candidates[j].lines[lineIdx]
 				}
 
-				for j := 0; j < maxLines; j++ {
-					v1, v2 := "", ""
+				b.WriteString(v)
 
-					if j < len(val1Lines) {
-						v1 = val1Lines[j]
+				if j < groupSize-1 {
+					padWidth := targetColWidth - len(v) + gutter
+
+					for range padWidth {
+						b.WriteByte(' ')
 					}
-					if j < len(val2Lines) {
-						v2 = val2Lines[j]
-					}
-					b.WriteString(prefix)
-					if !disableMarkdown {
-						v1 = utils.Markdown2irc(v1, blockquoteChar, inlineCode)
-						v2 = utils.Markdown2irc(v2, blockquoteChar, inlineCode)
-					}
-					if !disableEmoji {
-						v1 = utils.EmojiReplaceAliases(v1, rc.Mattermost.Formatter.CustomEmoji)
-						v2 = utils.EmojiReplaceAliases(v2, rc.Mattermost.Formatter.CustomEmoji)
-					}
-					b.WriteString(fmt.Sprintf("%-30s %s", v1, v2))
-					b.WriteByte('\n')
+				}
+			}
+
+			b.WriteByte('\n')
+		}
+
+		i += groupSize
+	}
+}
+
+// fieldsFitColWidth checks if all candidate fields and their multiline values fit within targetColWidth.
+func fieldsFitColWidth(
+	fields []*model.SlackAttachmentField,
+	candidates []struct {
+		title  string
+		rawVal string
+		lines  []string
+	},
+	targetColWidth int,
+) bool {
+	for j, field := range fields {
+		if len(field.Title) > targetColWidth {
+			return false
+		}
+
+		start := 0
+		valStr := candidates[j].rawVal
+
+		for k := 0; k <= len(valStr); k++ {
+			if k == len(valStr) || valStr[k] == '\n' {
+				if (k - start) > targetColWidth {
+					return false
 				}
 
-				i += 2
-			} else {
-				// Fallback to original behavior for long fields or unpaired short fields
-
-				if field.Title != "" {
-					b.WriteString(prefix)
-					b.WriteByte('\x02')
-					title := field.Title
-					if !disableEmoji {
-						title = utils.EmojiReplaceAliases(title, rc.Mattermost.Formatter.CustomEmoji)
-					}
-					b.WriteString(title)
-					b.WriteByte('\x02')
-					b.WriteByte('\n')
-				}
-
-				opts := utils.ProcessMessageOpts{
-					DisableEmoji:       disableEmoji,
-					CustomEmoji:        customEmoji,
-					DisableMarkdown:    disableMarkdown,
-					SyntaxHighlighting: syntaxHighlighting,
-					CodeBlockPrefix:    codeBlockPrefix,
-					CodeBlockSeparator: codeBlockSeparator,
-					BlockquoteChar:     blockquoteChar,
-					InlineCodeChar:     inlineCode,
-				}
-
-				utils.ProcessMessageText(val1Str, opts, func(line string) {
-					// Ignore duplicate content when field value is the same as fallback
-					// e.g. https://github.com/jenkinsci/mattermost-plugin/pull/18
-					isDuplicate := useFallback && fallbackText != "" && line == fallbackText
-					if !isDuplicate {
-						b.WriteString(prefix)
-						b.WriteString(line)
-						b.WriteByte('\n')
-					}
-				})
-
-				i++
+				start = k + 1
 			}
 		}
 	}
+
+	return true
+}
+
+func (m *Mattermost) formatSingleAttachmentField(b *strings.Builder, field *model.SlackAttachmentField, prefix string, prefixChar string, useFallback bool, fallbackText string, opts utils.ProcessMessageOpts) {
+	var valStr string
+
+	if s, ok := field.Value.(string); ok {
+		valStr = s
+	} else {
+		valStr = fmt.Sprintf("%v", field.Value)
+	}
+
+	valStr = strings.TrimPrefix(valStr, "\n")
+
+	if !opts.DisableMarkdown && strings.HasPrefix(valStr, blockQuoteCharDefault) {
+		valStr = strings.Replace(valStr, blockQuoteCharDefault, prefixChar, 1)
+	}
+
+	if field.Title != "" {
+		b.WriteString(prefix)
+		b.WriteByte('\x02')
+
+		title := utils.FormatMarkdownAndEmoji(field.Title, true, opts.DisableEmoji, "", "", opts.CustomEmoji)
+
+		b.WriteString(title)
+		b.WriteByte('\x02')
+		b.WriteByte('\n')
+	}
+
+	utils.ProcessMessageText(valStr, opts, func(line string) {
+		// Ignore duplicate content when field value is the same as fallback
+		isDuplicate := useFallback && fallbackText != "" && line == fallbackText
+
+		if !isDuplicate {
+			b.WriteString(prefix)
+			b.WriteString(line)
+			b.WriteByte('\n')
+		}
+	})
 }
 
 // XXX: Bug in Mattermost itself and PostEmbed Data interface{}

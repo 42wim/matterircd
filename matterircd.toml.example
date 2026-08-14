@@ -214,6 +214,9 @@ MaxReplayDuration = "744h"
 # a "Heavy Sync" and triggers a full nicklist/cache flush on reconnect. (Default: 15m)
 #HeavySyncThreshold = "15m"
 
+# Specify the maximum line length for short fields in Message Attachments.
+#MessageAttachmentShortFieldMaxLineLength = 100
+
 #############################
 ##### SLACK EXAMPLE #########
 #############################

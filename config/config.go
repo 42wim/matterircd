@@ -147,6 +147,8 @@ type MattermostConfig struct {
 	LazyJoinDuration          time.Duration
 	DefaultDMOfflineThreshold time.Duration
 	HeavySyncThreshold        time.Duration
+
+	MessageAttachmentShortFieldMaxLineLength int
 }
 
 type SlackConfig struct {
@@ -344,6 +346,8 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 			LazyJoinDuration:          c.v.GetDuration("mattermost.LazyJoinDuration"),
 			DefaultDMOfflineThreshold: c.v.GetDuration("mattermost.DefaultDMOfflineThreshold"),
 			HeavySyncThreshold:        c.v.GetDuration("mattermost.HeavySyncThreshold"),
+
+			MessageAttachmentShortFieldMaxLineLength: c.v.GetInt("mattermost.MessageAttachmentShortFieldMaxLineLength"),
 		},
 
 		Slack: SlackConfig{
