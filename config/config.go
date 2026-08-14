@@ -529,11 +529,13 @@ func parseCustomEmoji(slice []string) map[string]string {
 	if len(slice) == 0 {
 		return nil
 	}
+
 	m := make(map[string]string, len(slice))
 	for _, s := range slice {
 		if k, v, found := strings.Cut(s, "="); found {
 			m[strings.TrimSpace(k)] = strings.TrimSpace(v)
 		}
 	}
+
 	return m
 }

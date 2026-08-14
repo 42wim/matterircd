@@ -860,8 +860,9 @@ func (m *Mattermost) wsActionPostSkip(ctx context.Context, rmsg *model.WebSocket
 
 	rc := m.cfg.Current()
 
-	disableMarkdown := rc.Mattermost.Formatter.DisableMarkdown
+	customEmoji := rc.Mattermost.Formatter.CustomEmoji
 	disableEmoji := rc.Mattermost.Formatter.DisableEmoji
+	disableMarkdown := rc.Mattermost.Formatter.DisableMarkdown
 	useUnicode := rc.Mattermost.Formatter.Unicode
 	blockquoteChar := blockquoteCharNonUnicode
 	inlineCode := rc.Mattermost.Formatter.MarkdownInlineCode
@@ -917,8 +918,9 @@ func (m *Mattermost) wsActionPostSkip(ctx context.Context, rmsg *model.WebSocket
 	}
 
 	opts := utils.SummaryOpts{
-		DisableMarkdown: disableMarkdown,
 		DisableEmoji:    disableEmoji,
+		CustomEmoji:     customEmoji,
+		DisableMarkdown: disableMarkdown,
 		BlockquoteChar:  blockquoteChar,
 		InlineCodeChar:  inlineCode,
 		MaxLength:       90,

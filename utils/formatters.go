@@ -899,8 +899,10 @@ func EmojiFromAlias(alias string, customAliases map[string]string) (string, bool
 					return trimmed
 				}
 			}
+
 			return mapped
 		}
+
 		return a
 	}
 
