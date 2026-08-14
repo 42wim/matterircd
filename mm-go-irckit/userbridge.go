@@ -727,7 +727,7 @@ func (u *User) handleReactionEvent(event interface{}) {
 	}
 
 	if !u.br.FormatterConfig().DisableEmoji {
-		if reactionEmoji, ok := utils.EmojiFromAlias(reaction); ok {
+		if reactionEmoji, ok := utils.EmojiFromAlias(reaction, u.br.FormatterConfig().CustomEmoji); ok {
 			reaction = reactionEmoji
 		}
 	}

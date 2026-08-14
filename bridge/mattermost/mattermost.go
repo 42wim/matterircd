@@ -989,7 +989,7 @@ func (m *Mattermost) getCachedPostInfo(ctx context.Context, postID string, preFe
 	}
 
 	if !rc.Mattermost.Formatter.DisableEmoji {
-		msg = utils.EmojiReplaceAliases(msg)
+		msg = utils.EmojiReplaceAliases(msg, rc.Mattermost.Formatter.CustomEmoji)
 	}
 
 
@@ -2100,7 +2100,7 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 				}
 
 				if !disableEmoji {
-					outFallback = utils.EmojiReplaceAliases(outFallback)
+					outFallback = utils.EmojiReplaceAliases(outFallback, rc.Mattermost.Formatter.CustomEmoji)
 				}
 
 				b.WriteString(outFallback)
@@ -2129,7 +2129,7 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 			b.WriteString(prefix)
 			authorName := attachment.AuthorName
 			if !disableEmoji {
-				authorName = utils.EmojiReplaceAliases(authorName)
+				authorName = utils.EmojiReplaceAliases(authorName, rc.Mattermost.Formatter.CustomEmoji)
 			}
 			b.WriteString(authorName)
 			if attachment.AuthorLink != "" {
@@ -2151,7 +2151,7 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 			b.WriteByte('\x02')
 			title := attachment.Title
 			if !disableEmoji {
-				title = utils.EmojiReplaceAliases(title)
+				title = utils.EmojiReplaceAliases(title, rc.Mattermost.Formatter.CustomEmoji)
 			}
 			b.WriteString(title)
 			b.WriteByte('\x02')
@@ -2216,8 +2216,8 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 				title := field.Title
 				nextTitle := nextField.Title
 				if !disableEmoji {
-					title = utils.EmojiReplaceAliases(title)
-					nextTitle = utils.EmojiReplaceAliases(nextTitle)
+					title = utils.EmojiReplaceAliases(title, rc.Mattermost.Formatter.CustomEmoji)
+					nextTitle = utils.EmojiReplaceAliases(nextTitle, rc.Mattermost.Formatter.CustomEmoji)
 				}
 				b.WriteString(fmt.Sprintf("%-30s %s", title, nextTitle))
 				b.WriteByte('\x02')
@@ -2246,8 +2246,8 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 						v2 = utils.Markdown2irc(v2, blockquoteChar, inlineCode)
 					}
 					if !disableEmoji {
-						v1 = utils.EmojiReplaceAliases(v1)
-						v2 = utils.EmojiReplaceAliases(v2)
+						v1 = utils.EmojiReplaceAliases(v1, rc.Mattermost.Formatter.CustomEmoji)
+						v2 = utils.EmojiReplaceAliases(v2, rc.Mattermost.Formatter.CustomEmoji)
 					}
 					b.WriteString(fmt.Sprintf("%-30s %s", v1, v2))
 					b.WriteByte('\n')
@@ -2262,7 +2262,7 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 					b.WriteByte('\x02')
 					title := field.Title
 					if !disableEmoji {
-						title = utils.EmojiReplaceAliases(title)
+						title = utils.EmojiReplaceAliases(title, rc.Mattermost.Formatter.CustomEmoji)
 					}
 					b.WriteString(title)
 					b.WriteByte('\x02')

@@ -918,7 +918,7 @@ func CmdWhois(s Server, u *User, msg *irc.Message) error {
 				Prefix:   s.Prefix(),
 				Params:   []string{u.Nick, other.Nick},
 				Command:  irc.RPL_AWAY,
-				Trailing: utils.EmojiReplaceAliases(status),
+				Trailing: utils.EmojiReplaceAliases(status, u.br.FormatterConfig().CustomEmoji),
 			})
 		}
 
