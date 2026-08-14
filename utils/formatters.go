@@ -18,12 +18,6 @@ type IRCColor struct {
 	R, G, B int
 }
 
-var (
-	// precalculatedPalette will hold our unique colors
-	precalculatedPalette []IRCColor
-	paletteOnce          sync.Once
-)
-
 // ProcessMessageOpts holds the configuration for text processing
 type ProcessMessageOpts struct {
 	DisableEmoji bool
@@ -58,7 +52,8 @@ var chromaBufPool = sync.Pool{
 	},
 }
 
-func initializePalette() {
+// Precalculate the palette on first access and cache the returned slice.
+var getIRCPalette = sync.OnceValue(func() []IRCColor {
 	// 00-98 raw hex codes
 	rawColors := []string{
 		// 00-15
@@ -86,28 +81,30 @@ func initializePalette() {
 	// Use a map to track and exclude duplicates.
 	// Because we iterate from 0 to 98, standard codes (0-15) are saved first.
 	seenHex := make(map[string]bool)
+	var palette []IRCColor
 
 	for i, hex := range rawColors {
 		if seenHex[hex] {
 			continue
 		}
-
 		seenHex[hex] = true
 
 		r, _ := strconv.ParseInt(hex[0:2], 16, 32)
 		g, _ := strconv.ParseInt(hex[2:4], 16, 32)
 		b, _ := strconv.ParseInt(hex[4:6], 16, 32)
 
-		precalculatedPalette = append(precalculatedPalette, IRCColor{
+		palette = append(palette, IRCColor{
 			Code: fmt.Sprintf("%02d", i),
 			R:    int(r), G: int(g), B: int(b),
 		})
 	}
-}
+
+	return palette
+})
 
 // FindClosestIRCColor uses the precalculated palette to quickly find the nearest match.
 func FindClosestIRCColor(hexColor string) string {
-	paletteOnce.Do(initializePalette)
+	palette := getIRCPalette()
 
 	hexColor = strings.ToUpper(strings.TrimPrefix(hexColor, "#"))
 	if len(hexColor) != 6 {
@@ -122,7 +119,7 @@ func FindClosestIRCColor(hexColor string) string {
 	minDist := math.MaxInt32
 	bestCode := "01"
 
-	for _, c := range precalculatedPalette {
+	for _, c := range palette {
 		// Calculate the mean red level to adjust weights dynamically
 		rMean := (r1 + c.R) / 2
 
