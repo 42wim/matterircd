@@ -137,6 +137,8 @@ HideReactions = false
 # ShowOwnReactions = true
 # Disable converting emoji strings/aliases to their unicode equivalent. Best with fonts-noto-color-emoji installed.
 #DisableEmoji = true
+# Custom emoji mappings, "source=destination", e.g. "my-plus-1=+1" or "my-thumbs-up=thumbsup"
+#CustomEmoji = []
 
 # Disable formatting of text from Mattermost Markdown to IRC (bold, italics, block quotes, etc.)
 #DisableMarkdown = true
