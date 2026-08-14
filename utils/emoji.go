@@ -7,88 +7,149 @@ import (
 	"github.com/kenshaw/emoji"
 )
 
-var (
-	emojiInitOnce sync.Once
-	emojiData     []emoji.Emoji
-	emojiAliasMap map[string]int
+type SkinTone rune
+
+const (
+	SkinToneNeutral     SkinTone = 0
+	SkinToneLight       SkinTone = 0x1f3fb
+	SkinToneMediumLight SkinTone = 0x1f3fc
+	SkinToneMedium      SkinTone = 0x1f3fd
+	SkinToneMediumDark  SkinTone = 0x1f3fe
+	SkinToneDark        SkinTone = 0x1f3ff
 )
 
-type emojiSkinToneInfo struct {
+var skinToneSuffixes = []struct {
 	suffix string
-	match  string
-	tone   emoji.SkinTone
+	tone   SkinTone
+}{
+	{"_light_skin_tone", SkinToneLight},
+	{"_medium_light_skin_tone", SkinToneMediumLight},
+	{"_medium_skin_tone", SkinToneMedium},
+	{"_medium_dark_skin_tone", SkinToneMediumDark},
+	{"_dark_skin_tone", SkinToneDark},
+	{"_light", SkinToneLight},
+	{"_medium_light", SkinToneMediumLight},
+	{"_medium", SkinToneMedium},
+	{"_medium_dark", SkinToneMediumDark},
+	{"_dark", SkinToneDark},
 }
 
-var emojiSkinTones = []emojiSkinToneInfo{
-	{"light", "_light", emoji.Light},
-	{"medium_light", "_medium_light", emoji.MediumLight},
-	{"medium", "_medium", emoji.Medium},
-	{"medium_dark", "_medium_dark", emoji.MediumDark},
-	{"dark", "_dark", emoji.Dark},
+// defaultAliases maps custom/legacy shortcodes to target emoji keys or Unicode characters.
+var defaultAliases = map[string]string{
+	"alert":                         "rotating_light",
+	"checkmark":                     "white_check_mark",
+	"done2":                         "white_check_mark",
+	"jenkins_fire":                  "fire",
+	"rolling_on_the_floor_laughing": "rofl",
+	"shipit":                        "chipmunk",
 }
 
-func initEmoji() {
+// GetEmojiMap initializes and returns the immutable alias-to-Unicode map once using Go 1.21+ sync.OnceValue.
+var GetEmojiMap = sync.OnceValue(func() map[string]string {
 	data := emoji.Gemoji()
+	aliasMap := make(map[string]string, (len(data)*3)+len(defaultAliases))
 
-	emojiAliasMap = make(map[string]int, len(data))
+	register := func(name string, e emoji.Emoji) {
+		if name == "" {
+			return
+		}
 
-	for i, e := range data {
-		if e.Emoji == "" {
-			continue
+		// But only if it doesn't already exist, e.g. "angry"
+		if _, exists := aliasMap[name]; !exists {
+			aliasMap[name] = e.Emoji
 		}
-		for _, alias := range e.Aliases {
-			if alias == "" {
-				continue
-			}
-			emojiAliasMap[alias] = i
-		}
-		// In addition to emoji aliases, include emoji tags
-		for _, tag := range e.Tags {
-			if tag == "" {
-				continue
-			}
-			// But only if it doesn't already exist, e.g. "angry"
-			if _, ok := emojiAliasMap[tag]; !ok {
-				emojiAliasMap[tag] = i
+
+		// Support skin tones
+		for _, st := range skinToneSuffixes {
+			variantKey := name + st.suffix
+			if _, exists := aliasMap[variantKey]; !exists {
+				aliasMap[variantKey] = e.Tone(emoji.SkinTone(st.tone))
 			}
 		}
 	}
 
-	emojiData = data
-}
+	for _, e := range data {
+		if e.Emoji == "" {
+			continue
+		}
 
+		for _, alias := range e.Aliases {
+			register(alias, e)
+		}
+
+		// In addition to emoji aliases, include emoji tags
+		for _, tag := range e.Tags {
+			register(tag, e)
+		}
+	}
+
+	// Register built-in aliases
+	for alias, target := range defaultAliases {
+		targetClean := trimColons(target)
+		// If target resolves to an existing emoji, alias it
+		if unicodeVal, exists := aliasMap[targetClean]; exists {
+			if _, taken := aliasMap[alias]; !taken {
+				aliasMap[alias] = unicodeVal
+			}
+		}
+	}
+
+	return aliasMap
+})
+
+// EmojiReplaceAliases scans the input and replaces :alias: tokens with Unicode emojis.
+//
+//nolint:funlen
 func EmojiReplaceAliases(s string, customAliases map[string]string) string {
 	if strings.IndexByte(s, ':') < 0 {
 		return s
 	}
 
-	emojiInitOnce.Do(initEmoji)
+	emojiMap := GetEmojiMap()
 
 	var (
 		b           strings.Builder
 		initialized bool
 		lastWrite   int
+		start       = -1
 	)
 
-	start := -1
 	for i := range len(s) {
+		ch := s[i]
+
+		// Emojis never span across spaces or control characters
+		if ch <= ' ' {
+			start = -1
+
+			continue
+		}
+
 		// Handle normal characters outside of colons
-		if s[i] != ':' {
+		if ch != ':' {
 			continue
 		}
 
 		// We found a colon, mark it as the start of a potential emoji
 		if start == -1 {
 			start = i
+
+			continue
+		}
+
+		// Empty pair "::" — treat current index as a new candidate start
+		if i == start+1 {
+			start = i
+
 			continue
 		}
 
 		// We found a second colon, test the substring
-		code := s[start : i+1]
-		if emojiStr, ok := EmojiFromAlias(code, customAliases); ok {
-			// This is our first confirmed emoji. Initialize the builder.
+		inner := s[start+1 : i]
+
+		if emojiStr, ok := lookupEmoji(inner, emojiMap, customAliases); ok {
 			if !initialized {
 				b.Grow(len(s))
+
 				initialized = true
 			}
 
@@ -117,62 +178,43 @@ func EmojiReplaceAliases(s string, customAliases map[string]string) string {
 	return b.String()
 }
 
+// EmojiFromAlias looks up an emoji by shortcode, supporting with or without surrounding colons.
 func EmojiFromAlias(alias string, customAliases map[string]string) (string, bool) {
 	if alias == "" {
 		return "", false
 	}
 
-	emojiInitOnce.Do(initEmoji)
-
-	if a, ok := strings.CutPrefix(alias, ":"); ok {
-		if a, ok := strings.CutSuffix(a, ":"); ok {
-			alias = a
-		}
-	}
-
-	// Helper to resolve custom aliases and optionally strip colons if the user configured `plus1=:+1:`
-	resolveAlias := func(a string) string {
-		if mapped, ok := customAliases[a]; ok {
-			if trimmed, ok := strings.CutPrefix(mapped, ":"); ok {
-				if trimmed, ok := strings.CutSuffix(trimmed, ":"); ok {
-					return trimmed
-				}
-			}
-
-			return mapped
-		}
-
-		return a
-	}
-
-	// Check if the exact alias was mapped (e.g. plus1 -> +1)
-	lookupAlias := resolveAlias(alias)
-	if idx, ok := emojiAliasMap[lookupAlias]; ok {
-		return emojiData[idx].Emoji, true
-	}
-
-	// Skin tone support
-	base, ok := strings.CutSuffix(lookupAlias, "_skin_tone")
-	if !ok {
+	cleaned := trimColons(alias)
+	if cleaned == "" {
 		return "", false
 	}
 
-	// Support skin tones
-	for _, st := range emojiSkinTones {
-		if baseAlias, ok := strings.CutSuffix(base, st.match); ok {
-			// Check if the BASE was mapped (e.g., they mapped plus1=+1, and typed :plus1_dark_skin_tone:)
-			baseAlias = resolveAlias(baseAlias)
+	return lookupEmoji(cleaned, GetEmojiMap(), customAliases)
+}
 
-			idx, mapOk := emojiAliasMap[baseAlias]
-			if !mapOk {
-				// "_light" matches the end of "_medium_light".
-				// Continue to get the correct skin tone.
-				continue
-			}
-
-			return emojiData[idx].Tone(st.tone), true
+func lookupEmoji(alias string, emojiMap map[string]string, customAliases map[string]string) (string, bool) {
+	if len(customAliases) > 0 {
+		if mapped, ok := customAliases[alias]; ok {
+			alias = trimColons(mapped)
 		}
 	}
 
-	return "", false
+	val, ok := emojiMap[alias]
+
+	return val, ok
+}
+
+func trimColons(s string) string {
+	start := 0
+	end := len(s)
+
+	for start < end && s[start] == ':' {
+		start++
+	}
+
+	for end > start && s[end-1] == ':' {
+		end--
+	}
+
+	return s[start:end]
 }
