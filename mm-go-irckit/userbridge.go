@@ -257,6 +257,7 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 	trimmedPrefix := strings.TrimSpace(prefix)
 	trimmedSuffix := strings.TrimSpace(suffix)
 
+	customEmoji := u.br.FormatterConfig().CustomEmoji
 	disableEmoji := u.br.FormatterConfig().DisableEmoji
 	prefixContext := u.br.BridgeConfig().PrefixContext
 	showContextMulti := u.br.BridgeConfig().ShowContextMulti
@@ -282,8 +283,9 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 	}
 
 	opts := utils.ProcessMessageOpts{
-		DisableMarkdown:    disableMarkdown,
 		DisableEmoji:       disableEmoji,
+		CustomEmoji:        customEmoji,
+		DisableMarkdown:    disableMarkdown,
 		SyntaxHighlighting: syntaxHighlighting,
 		CodeBlockPrefix:    codeBlockPrefix,
 		CodeBlockSeparator: codeBlockSeparator,
@@ -461,6 +463,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 	trimmedPrefix := strings.TrimSpace(prefix)
 	trimmedSuffix := strings.TrimSpace(suffix)
 
+	customEmoji := u.br.FormatterConfig().CustomEmoji
 	disableEmoji := u.br.FormatterConfig().DisableEmoji
 	prefixContext := u.br.BridgeConfig().PrefixContext
 	showContextMulti := u.br.BridgeConfig().ShowContextMulti
@@ -486,8 +489,9 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 	}
 
 	opts := utils.ProcessMessageOpts{
-		DisableMarkdown:    disableMarkdown,
 		DisableEmoji:       disableEmoji,
+		CustomEmoji:        customEmoji,
+		DisableMarkdown:    disableMarkdown,
 		SyntaxHighlighting: syntaxHighlighting,
 		CodeBlockPrefix:    codeBlockPrefix,
 		CodeBlockSeparator: codeBlockSeparator,
@@ -727,7 +731,7 @@ func (u *User) handleReactionEvent(event interface{}) {
 	}
 
 	if !u.br.FormatterConfig().DisableEmoji {
-		if reactionEmoji, ok := utils.EmojiFromAlias(reaction); ok {
+		if reactionEmoji, ok := utils.EmojiFromAlias(reaction, u.br.FormatterConfig().CustomEmoji); ok {
 			reaction = reactionEmoji
 		}
 	}
@@ -1319,6 +1323,7 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 
 	showReplayHdr := true
 
+	customEmoji := u.br.FormatterConfig().CustomEmoji
 	disableEmoji := u.br.FormatterConfig().DisableEmoji
 	disableMarkdown := u.br.FormatterConfig().DisableMarkdown
 	inlineCode := u.br.FormatterConfig().MarkdownInlineCode
@@ -1327,8 +1332,9 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 	codeBlockSeparator := u.br.FormatterConfig().CodeBlockSeparator
 
 	opts := utils.ProcessMessageOpts{
-		DisableMarkdown:    disableMarkdown,
 		DisableEmoji:       disableEmoji,
+		CustomEmoji:        customEmoji,
+		DisableMarkdown:    disableMarkdown,
 		SyntaxHighlighting: syntaxHighlighting,
 		CodeBlockPrefix:    codeBlockPrefix,
 		CodeBlockSeparator: codeBlockSeparator,

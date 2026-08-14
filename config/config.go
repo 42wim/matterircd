@@ -85,6 +85,7 @@ type BridgeConfig struct {
 
 type FormatterConfig struct {
 	DisableEmoji bool
+	CustomEmoji  map[string]string
 
 	DisableMarkdown           bool
 	DisableMarkdownBlockQuote bool
@@ -224,6 +225,7 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 
 	mmFormatter := FormatterConfig{
 		DisableEmoji: c.v.GetBool("mattermost.DisableEmoji"),
+		CustomEmoji:  parseCustomEmoji(c.v.GetStringSlice("mattermost.CustomEmoji")),
 
 		DisableMarkdown:           c.v.GetBool("mattermost.DisableMarkdown"),
 		DisableMarkdownBlockQuote: c.v.GetBool("mattermost.DisableMarkdownBlockQuote"),
@@ -241,6 +243,7 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 	}
 	slFormatter := FormatterConfig{
 		DisableEmoji: c.v.GetBool("slack.DisableEmoji"),
+		CustomEmoji:  parseCustomEmoji(c.v.GetStringSlice("slack.CustomEmoji")),
 
 		DisableMarkdown:           c.v.GetBool("slack.DisableMarkdown"),
 		DisableMarkdownBlockQuote: c.v.GetBool("slack.DisableMarkdownBlockQuote"),
@@ -258,6 +261,7 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 	}
 	mdFormatter := FormatterConfig{
 		DisableEmoji: c.v.GetBool("mastodon.DisableEmoji"),
+		CustomEmoji:  parseCustomEmoji(c.v.GetStringSlice("mastodon.CustomEmoji")),
 
 		DisableMarkdown:           c.v.GetBool("mastodon.DisableMarkdown"),
 		DisableMarkdownBlockQuote: c.v.GetBool("mastodon.DisableMarkdownBlockQuote"),
@@ -519,4 +523,19 @@ func (c *Config) watch() {
 	})
 
 	c.v.WatchConfig()
+}
+
+func parseCustomEmoji(slice []string) map[string]string {
+	if len(slice) == 0 {
+		return nil
+	}
+
+	m := make(map[string]string, len(slice))
+	for _, s := range slice {
+		if k, v, found := strings.Cut(s, "="); found {
+			m[strings.TrimSpace(k)] = strings.TrimSpace(v)
+		}
+	}
+
+	return m
 }

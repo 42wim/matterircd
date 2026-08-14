@@ -302,6 +302,7 @@ func details(u *User, toUser *User, args []string, service string) {
 	prefix := "\x0312|\x0f "
 	u.MsgUser(toUser, prefix+postlistURL+postID)
 
+	customEmoji := u.br.FormatterConfig().CustomEmoji
 	disableEmoji := u.br.FormatterConfig().DisableEmoji
 	disableMarkdown := u.br.FormatterConfig().DisableMarkdown
 	inlineCode := u.br.FormatterConfig().MarkdownInlineCode
@@ -310,8 +311,9 @@ func details(u *User, toUser *User, args []string, service string) {
 	codeBlockSeparator := u.br.FormatterConfig().CodeBlockSeparator
 
 	opts := utils.ProcessMessageOpts{
-		DisableMarkdown:    disableMarkdown,
 		DisableEmoji:       disableEmoji,
+		CustomEmoji:        customEmoji,
+		DisableMarkdown:    disableMarkdown,
 		SyntaxHighlighting: syntaxHighlighting,
 		CodeBlockPrefix:    codeBlockPrefix,
 		CodeBlockSeparator: codeBlockSeparator,
@@ -545,6 +547,7 @@ func dispatchHistoricalEvent(u *User, toUser *User, event *bridge.Event, searchC
 
 	tsStr := time.Unix(0, createAt*int64(time.Millisecond)).Format("2006-01-02 15:04")
 
+	customEmoji := u.br.FormatterConfig().CustomEmoji
 	disableEmoji := u.br.FormatterConfig().DisableEmoji
 	disableMarkdown := u.br.FormatterConfig().DisableMarkdown
 	inlineCode := u.br.FormatterConfig().MarkdownInlineCode
@@ -553,8 +556,9 @@ func dispatchHistoricalEvent(u *User, toUser *User, event *bridge.Event, searchC
 	codeBlockSeparator := u.br.FormatterConfig().CodeBlockSeparator
 
 	opts := utils.ProcessMessageOpts{
-		DisableMarkdown:    disableMarkdown,
 		DisableEmoji:       disableEmoji,
+		CustomEmoji:        customEmoji,
+		DisableMarkdown:    disableMarkdown,
 		SyntaxHighlighting: syntaxHighlighting,
 		CodeBlockPrefix:    codeBlockPrefix,
 		CodeBlockSeparator: codeBlockSeparator,

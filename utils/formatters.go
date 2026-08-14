@@ -26,8 +26,10 @@ var (
 
 // ProcessMessageOpts holds the configuration for text processing
 type ProcessMessageOpts struct {
+	DisableEmoji bool
+	CustomEmoji  map[string]string
+
 	DisableMarkdown    bool
-	DisableEmoji       bool
 	SyntaxHighlighting string
 	CodeBlockPrefix    string
 	CodeBlockSeparator string
@@ -37,8 +39,10 @@ type ProcessMessageOpts struct {
 
 // SummaryOpts holds configuration for shortening and summarizing text.
 type SummaryOpts struct {
+	DisableEmoji bool
+	CustomEmoji  map[string]string
+
 	DisableMarkdown bool
-	DisableEmoji    bool
 	BlockquoteChar  string
 	InlineCodeChar  string
 	MaxLength       int
@@ -159,7 +163,7 @@ func FormatAndShortenSummary(text string, opts SummaryOpts) string {
 	}
 
 	if !opts.DisableEmoji {
-		text = EmojiReplaceAliases(text)
+		text = EmojiReplaceAliases(text, opts.CustomEmoji)
 	}
 
 	if opts.MaxLength <= 0 || len(text) <= opts.MaxLength {
@@ -400,7 +404,7 @@ func ProcessMessageText(text string, opts ProcessMessageOpts, yield func(line st
 			}
 
 			if !opts.DisableEmoji {
-				line = EmojiReplaceAliases(line)
+				line = EmojiReplaceAliases(line, opts.CustomEmoji)
 			}
 
 			yield(line)
@@ -814,7 +818,7 @@ func initEmoji() {
 	emojiData = data
 }
 
-func EmojiReplaceAliases(s string) string {
+func EmojiReplaceAliases(s string, customAliases map[string]string) string {
 	if strings.IndexByte(s, ':') < 0 {
 		return s
 	}
@@ -842,11 +846,10 @@ func EmojiReplaceAliases(s string) string {
 
 		// We found a second colon, test the substring
 		code := s[start : i+1]
-		if emojiStr, ok := EmojiFromAlias(code); ok {
+		if emojiStr, ok := EmojiFromAlias(code, customAliases); ok {
 			// This is our first confirmed emoji. Initialize the builder.
 			if !initialized {
 				b.Grow(len(s))
-
 				initialized = true
 			}
 
@@ -875,7 +878,7 @@ func EmojiReplaceAliases(s string) string {
 	return b.String()
 }
 
-func EmojiFromAlias(alias string) (string, bool) {
+func EmojiFromAlias(alias string, customAliases map[string]string) (string, bool) {
 	if alias == "" {
 		return "", false
 	}
@@ -888,11 +891,29 @@ func EmojiFromAlias(alias string) (string, bool) {
 		}
 	}
 
-	if idx, ok := emojiAliasMap[alias]; ok {
+	// Helper to resolve custom aliases and optionally strip colons if the user configured `plus1=:+1:`
+	resolveAlias := func(a string) string {
+		if mapped, ok := customAliases[a]; ok {
+			if trimmed, ok := strings.CutPrefix(mapped, ":"); ok {
+				if trimmed, ok := strings.CutSuffix(trimmed, ":"); ok {
+					return trimmed
+				}
+			}
+
+			return mapped
+		}
+
+		return a
+	}
+
+	// Check if the exact alias was mapped (e.g. plus1 -> +1)
+	lookupAlias := resolveAlias(alias)
+	if idx, ok := emojiAliasMap[lookupAlias]; ok {
 		return emojiData[idx].Emoji, true
 	}
 
-	base, ok := strings.CutSuffix(alias, "_skin_tone")
+	// Skin tone support
+	base, ok := strings.CutSuffix(lookupAlias, "_skin_tone")
 	if !ok {
 		return "", false
 	}
@@ -900,6 +921,9 @@ func EmojiFromAlias(alias string) (string, bool) {
 	// Support skin tones
 	for _, st := range emojiSkinTones {
 		if baseAlias, ok := strings.CutSuffix(base, st.match); ok {
+			// Check if the BASE was mapped (e.g., they mapped plus1=+1, and typed :plus1_dark_skin_tone:)
+			baseAlias = resolveAlias(baseAlias)
+
 			idx, mapOk := emojiAliasMap[baseAlias]
 			if !mapOk {
 				// "_light" matches the end of "_medium_light".
