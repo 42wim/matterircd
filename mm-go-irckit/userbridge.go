@@ -161,11 +161,27 @@ func (u *User) handleChannelTopicEvent(event *bridge.ChannelTopicEvent) {
 		tu = u
 	}
 
+	customEmoji := u.br.FormatterConfig().CustomEmoji
+	disableEmoji := u.br.FormatterConfig().DisableEmoji
+	disableMarkdown := u.br.FormatterConfig().DisableMarkdown
+	inlineCode := u.br.FormatterConfig().MarkdownInlineCode
+
 	if ok {
 		ch := u.Srv.Channel(event.ChannelID)
-		ch.Topic(tu, event.Text)
+
+		topic := utils.FormatMarkdownAndEmoji(
+			event.Text,
+			disableMarkdown,
+			disableEmoji,
+			blockQuoteCharDefault,
+			inlineCode,
+			customEmoji,
+		)
+
+		ch.Topic(tu, topic)
 
 		u.saveLastViewedAt(event.ChannelID)
+
 		return
 	}
 
@@ -173,7 +189,7 @@ func (u *User) handleChannelTopicEvent(event *bridge.ChannelTopicEvent) {
 }
 
 const (
-	blockQuoteCharDefault     = ">"
+	blockQuoteCharDefault     = utils.BlockQuoteCharDefault
 	blockQuoteCharNonUnicode  = "|"
 	blockQuoteCharUnicode     = "🮇"
 	codeBlockCharDefault      = ""
@@ -1491,13 +1507,29 @@ func (u *User) syncChannel(id string, name string) error {
 	u.addUsersToChannel(batchUsers, "&users", "&users")
 	u.addUsersToChannel(batchUsers, name, id)
 
+	customEmoji := u.br.FormatterConfig().CustomEmoji
+	disableEmoji := u.br.FormatterConfig().DisableEmoji
+	disableMarkdown := u.br.FormatterConfig().DisableMarkdown
+	inlineCode := u.br.FormatterConfig().MarkdownInlineCode
+
 	// add myself ONLY if I am actually a member
 	ch := srv.Channel(id)
 	if u.br.IsChannelMember(id) && !ch.HasUser(u) && u.mayJoin(id) {
 		logger.Tracef("syncChannel adding myself to %s (id: %s)", name, id)
 		ch.Join(u)
 		svc, _ := srv.HasUser(u.br.Protocol())
-		ch.Topic(svc, u.br.Topic(u.ctx, ch.ID()))
+
+		rawTopic := u.br.Topic(u.ctx, ch.ID())
+		topic := utils.FormatMarkdownAndEmoji(
+			rawTopic,
+			disableMarkdown,
+			disableEmoji,
+			blockQuoteCharDefault,
+			inlineCode,
+			customEmoji,
+		)
+
+		ch.Topic(svc, topic)
 	}
 
 	return nil

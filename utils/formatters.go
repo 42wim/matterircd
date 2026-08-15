@@ -703,7 +703,7 @@ func replaceLinks(msg string) string {
 	return b.String()
 }
 
-const blockQuoteCharDefault = ">"
+const BlockQuoteCharDefault = ">"
 
 func Markdown2irc(msg string, blockQuoteChar string, inlineCode string) string {
 	if !strings.ContainsAny(msg, "*_`>~[") {
@@ -752,7 +752,7 @@ func Markdown2irc(msg string, blockQuoteChar string, inlineCode string) string {
 
 	// Block quotes
 	trimmedText := strings.TrimLeft(msg, " \t")
-	if strings.HasPrefix(trimmedText, blockQuoteCharDefault) && blockQuoteChar != blockQuoteCharDefault {
+	if strings.HasPrefix(trimmedText, BlockQuoteCharDefault) && blockQuoteChar != BlockQuoteCharDefault {
 		var newPrefix strings.Builder
 		newPrefix.Grow(len(trimmedText)) // Pre-allocate exactly what we need
 
