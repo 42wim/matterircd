@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"slices"
 	"strings"
 	"sync"
 
@@ -207,40 +208,19 @@ func applySkinTone(baseEmoji string, tone SkinTone) string {
 		return baseEmoji
 	}
 
-	zwjIdx := -1
-	for i, r := range runes {
-		if r == 0x200D {
-			zwjIdx = i
+	insertAt := len(runes)
 
-			break
-		}
+	// Complex ZWJ sequence (e.g. 🙇‍♂: insert skin tone before the first ZWJ (0x200D)
+	if zwjIdx := slices.Index(runes, 0x200D); zwjIdx != -1 {
+		insertAt = zwjIdx
 	}
 
-	var result []rune
-
-	if zwjIdx != -1 {
-		// Complex ZWJ sequence (e.g. 🙇‍♂️): insert skin tone before the first ZWJ
-		insertAt := zwjIdx
-		if insertAt > 0 && runes[insertAt-1] == 0xFE0F {
-			insertAt--
-		}
-
-		result = append(result, runes[:insertAt]...)
-		result = append(result, rune(tone))
-		result = append(result, runes[insertAt:]...)
-	} else {
-		// Standard emoji: insert before trailing presentation selector \uFE0F if present
-		if runes[len(runes)-1] == 0xFE0F {
-			result = append(result, runes[:len(runes)-1]...)
-			result = append(result, rune(tone))
-			result = append(result, 0xFE0F)
-		} else {
-			result = append(result, runes...)
-			result = append(result, rune(tone))
-		}
+	// Standard emoji: insert before trailing presentation selector \uFE0F if present
+	if insertAt > 0 && runes[insertAt-1] == 0xFE0F {
+		insertAt--
 	}
 
-	return string(result)
+	return string(slices.Insert(runes, insertAt, rune(tone)))
 }
 
 func lookupEmoji(alias string, emojiMap map[string]string, customAliases map[string]string) (string, bool) {
