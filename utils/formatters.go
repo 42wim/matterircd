@@ -17,12 +17,6 @@ type IRCColor struct {
 	R, G, B int
 }
 
-var (
-	// precalculatedPalette will hold our unique colors
-	precalculatedPalette []IRCColor
-	paletteOnce          sync.Once
-)
-
 // ProcessMessageOpts holds the configuration for text processing
 type ProcessMessageOpts struct {
 	DisableEmoji bool
@@ -57,7 +51,8 @@ var chromaBufPool = sync.Pool{
 	},
 }
 
-func initializePalette() {
+// Precalculate the palette on first access and cache the returned slice.
+var getIRCPalette = sync.OnceValue(func() []IRCColor {
 	// 00-98 raw hex codes
 	rawColors := []string{
 		// 00-15
@@ -86,6 +81,8 @@ func initializePalette() {
 	// Because we iterate from 0 to 98, standard codes (0-15) are saved first.
 	seenHex := make(map[string]bool)
 
+	var palette []IRCColor
+
 	for i, hex := range rawColors {
 		if seenHex[hex] {
 			continue
@@ -97,16 +94,18 @@ func initializePalette() {
 		g, _ := strconv.ParseInt(hex[2:4], 16, 32)
 		b, _ := strconv.ParseInt(hex[4:6], 16, 32)
 
-		precalculatedPalette = append(precalculatedPalette, IRCColor{
+		palette = append(palette, IRCColor{
 			Code: fmt.Sprintf("%02d", i),
 			R:    int(r), G: int(g), B: int(b),
 		})
 	}
-}
+
+	return palette
+})
 
 // FindClosestIRCColor uses the precalculated palette to quickly find the nearest match.
 func FindClosestIRCColor(hexColor string) string {
-	paletteOnce.Do(initializePalette)
+	palette := getIRCPalette()
 
 	hexColor = strings.ToUpper(strings.TrimPrefix(hexColor, "#"))
 	if len(hexColor) != 6 {
@@ -121,7 +120,7 @@ func FindClosestIRCColor(hexColor string) string {
 	minDist := math.MaxInt32
 	bestCode := "01"
 
-	for _, c := range precalculatedPalette {
+	for _, c := range palette {
 		// Calculate the mean red level to adjust weights dynamically
 		rMean := (r1 + c.R) / 2
 
@@ -157,13 +156,14 @@ func FormatAndShortenSummary(text string, opts SummaryOpts) string {
 	// strings.ReplaceAll is highly optimized and allocation-free if there's no match.
 	text = strings.ReplaceAll(text, "\n", " ")
 
-	if !opts.DisableMarkdown {
-		text = Markdown2irc(text, opts.BlockquoteChar, opts.InlineCodeChar)
-	}
-
-	if !opts.DisableEmoji {
-		text = EmojiReplaceAliases(text, opts.CustomEmoji)
-	}
+	text = FormatMarkdownAndEmoji(
+		text,
+		opts.DisableMarkdown,
+		opts.DisableEmoji,
+		opts.BlockquoteChar,
+		opts.InlineCodeChar,
+		opts.CustomEmoji,
+	)
 
 	if opts.MaxLength <= 0 || len(text) <= opts.MaxLength {
 		return text
@@ -297,6 +297,21 @@ func FormatFullCodeBlock(text, lexer, indent string, opts ProcessMessageOpts, yi
 	emitLines(text, prefix, yield)
 }
 
+// FormatMarkdownAndEmoji applies Markdown formatting and Emoji alias replacement.
+// It utilizes a fast-path single-pass check to bypass processing entirely if no
+// trigger characters are present, drastically reducing allocations and CPU usage.
+func FormatMarkdownAndEmoji(msg string, disableMarkdown bool, disableEmoji bool, blockQuoteChar string, inlineCode string, customEmoji map[string]string) string {
+	if !disableMarkdown {
+		msg = Markdown2irc(msg, blockQuoteChar, inlineCode)
+	}
+
+	if !disableEmoji {
+		msg = EmojiReplaceAliases(msg, customEmoji)
+	}
+
+	return msg
+}
+
 // ProcessMessageText abstracts the parsing loop, multi-line code handling,
 // and formatting. It uses a zero-allocation callback (yield) to return lines.
 //
@@ -398,13 +413,14 @@ func ProcessMessageText(text string, opts ProcessMessageOpts, yield func(line st
 			emptyLines = emptyLines[:0]
 			lastBlockWasCode = false
 
-			if !opts.DisableMarkdown {
-				line = Markdown2irc(line, opts.BlockquoteChar, opts.InlineCodeChar)
-			}
-
-			if !opts.DisableEmoji {
-				line = EmojiReplaceAliases(line, opts.CustomEmoji)
-			}
+			line = FormatMarkdownAndEmoji(
+				line,
+				opts.DisableMarkdown,
+				opts.DisableEmoji,
+				opts.BlockquoteChar,
+				opts.InlineCodeChar,
+				opts.CustomEmoji,
+			)
 
 			yield(line)
 		}
