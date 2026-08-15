@@ -8,21 +8,26 @@ most useful when working with third-party APIs such as Slack, GitHub, etc.
 sheet names to unicode conversion and not the inverse. Additionally, there were
 no comprehensive [emoticon][wiki-emoticon] packages available at the time.
 
-## Gemoji Data
+[![Unit Tests][emoji-ci-status]][emoji-ci]
+[![Go Reference][goref-emoji-status]][goref-emoji]
+[![Releases][release-status]][Releases]
+[![Discord Discussion][discord-status]][discord]
 
-Data for this package is generated from GitHub's [gemoji][gemoji] project:
-
-```sh
-$ cd $GOPATH/src/github.com/kenshaw/emoji
-$ go generate
-```
+[emoji-ci]: https://github.com/kenshaw/emoji/actions/workflows/test.yml "Test CI"
+[emoji-ci-status]: https://github.com/kenshaw/emoji/actions/workflows/test.yml/badge.svg "Test CI"
+[goref-emoji]: https://pkg.go.dev/github.com/kenshaw/emoji "Go Reference"
+[goref-emoji-status]: https://pkg.go.dev/badge/github.com/kenshaw/emoji.svg "Go Reference"
+[release-status]: https://img.shields.io/github/v/release/kenshaw/emoji?display_name=tag&sort=semver "Latest Release"
+[discord]: https://discord.gg/WDWAgXwJqN "Discord Discussion"
+[discord-status]: https://img.shields.io/discord/829150509658013727.svg?label=Discord&logo=Discord&colorB=7289da&style=flat-square "Discord Discussion"
+[releases]: https://github.com/kenshaw/emoji/releases "Releases"
 
 ## Installing
 
 Install in the usual [Go][go-project] fashion:
 
 ```sh
-$ go get -u github.com/kenshaw/emoji
+$ go get github.com/kenshaw/emoji@latest
 ```
 
 ## Using
@@ -54,15 +59,28 @@ func main() {
 }
 ```
 
-Please see the [GoDoc][godoc] listing for the complete API listing.
+Please see the [Go Reference][goref-emoji] listing for the complete API listing.
+
+## Gemoji Data
+
+Data for this package is generated from GitHub's [`gemoji`][gemoji] project:
+
+```sh
+$ cd $GOPATH/src/github.com/kenshaw/emoji
+$ go generate
+```
 
 ## TODO
 
-* Convert `UnicodeVersion` and `IOSVersion` fields of `Emoji` type to something
+- Convert `UnicodeVersion` and `IOSVersion` fields of `Emoji` type to something
   more easily comparable (ie, int)
+
+## Related Projects
+
+- [`github.com/kenshaw/wofimoji`][wofimoji] - a rofi/wofi emoji picker
 
 [emoji-cheat-sheet]: http://www.webpagefx.com/tools/emoji-cheat-sheet/
 [gemoji]: https://github.com/github/gemoji
-[godoc]: https://godoc.org/github.com/kenshaw/emoji
 [go-project]: https://golang.org/project
+[wofimoji]: https://github.com/kenshaw/wofimoji
 [wiki-emoticon]: https://en.wikipedia.org/wiki/Emoticon
