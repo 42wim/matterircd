@@ -20,18 +20,18 @@ const (
 
 var skinToneSuffixes = []struct {
 	suffix string
-	tone   string
+	tone   SkinTone
 }{
-	{"_light_skin_tone", string(SkinToneLight)},
-	{"_medium_light_skin_tone", string(SkinToneMediumLight)},
-	{"_medium_skin_tone", string(SkinToneMedium)},
-	{"_medium_dark_skin_tone", string(SkinToneMediumDark)},
-	{"_dark_skin_tone", string(SkinToneDark)},
-	{"_light", string(SkinToneLight)},
-	{"_medium_light", string(SkinToneMediumLight)},
-	{"_medium", string(SkinToneMedium)},
-	{"_medium_dark", string(SkinToneMediumDark)},
-	{"_dark", string(SkinToneDark)},
+	{"_light_skin_tone", SkinToneLight},
+	{"_medium_light_skin_tone", SkinToneMediumLight},
+	{"_medium_skin_tone", SkinToneMedium},
+	{"_medium_dark_skin_tone", SkinToneMediumDark},
+	{"_dark_skin_tone", SkinToneDark},
+	{"_light", SkinToneLight},
+	{"_medium_light", SkinToneMediumLight},
+	{"_medium", SkinToneMedium},
+	{"_medium_dark", SkinToneMediumDark},
+	{"_dark", SkinToneDark},
 }
 
 // defaultAliases maps custom/legacy shortcodes to target emoji keys or Unicode characters.
@@ -67,7 +67,7 @@ var GetEmojiMap = sync.OnceValue(func() map[string]string {
 		for _, st := range skinToneSuffixes {
 			variantKey := name + st.suffix
 			if _, exists := aliasMap[variantKey]; !exists {
-				aliasMap[variantKey] = unicodeVal + st.tone
+				aliasMap[variantKey] = applySkinTone(unicodeVal, st.tone)
 			}
 		}
 	}
@@ -194,6 +194,53 @@ func EmojiFromAlias(alias string, customAliases map[string]string) (string, bool
 	}
 
 	return lookupEmoji(cleaned, GetEmojiMap(), customAliases)
+}
+
+// applySkinTone places the Fitzpatrick modifier in the correct Unicode sequence position.
+func applySkinTone(baseEmoji string, tone SkinTone) string {
+	if tone == SkinToneNeutral || baseEmoji == "" {
+		return baseEmoji
+	}
+
+	runes := []rune(baseEmoji)
+	if len(runes) == 0 {
+		return baseEmoji
+	}
+
+	zwjIdx := -1
+	for i, r := range runes {
+		if r == 0x200D {
+			zwjIdx = i
+
+			break
+		}
+	}
+
+	var result []rune
+
+	if zwjIdx != -1 {
+		// Complex ZWJ sequence (e.g. 🙇‍♂️): insert skin tone before the first ZWJ
+		insertAt := zwjIdx
+		if insertAt > 0 && runes[insertAt-1] == 0xFE0F {
+			insertAt--
+		}
+
+		result = append(result, runes[:insertAt]...)
+		result = append(result, rune(tone))
+		result = append(result, runes[insertAt:]...)
+	} else {
+		// Standard emoji: insert before trailing presentation selector \uFE0F if present
+		if runes[len(runes)-1] == 0xFE0F {
+			result = append(result, runes[:len(runes)-1]...)
+			result = append(result, rune(tone))
+			result = append(result, 0xFE0F)
+		} else {
+			result = append(result, runes...)
+			result = append(result, rune(tone))
+		}
+	}
+
+	return string(result)
 }
 
 func lookupEmoji(alias string, emojiMap map[string]string, customAliases map[string]string) (string, bool) {
