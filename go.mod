@@ -8,7 +8,7 @@ require (
 	github.com/google/gops v0.3.27
 	github.com/grokify/html-strip-tags-go v0.0.1
 	github.com/hashicorp/golang-lru/v2 v2.0.7
-	github.com/kenshaw/emoji v0.4.0
+	github.com/kenshaw/emoji v0.6.2
 	github.com/matterbridge/logrus-prefixed-formatter v0.5.3-0.20200523233437-d971309a77ba
 	github.com/matterbridge/matterclient v0.0.0-20260815094932-edc2ee7e69cc
 	github.com/mattermost/mattermost/server/public v0.1.3
