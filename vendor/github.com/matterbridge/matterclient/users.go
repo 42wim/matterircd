@@ -581,6 +581,15 @@ func (m *Client) UpdateStatus(ctx context.Context, userID string, status string)
 	}
 }
 
+func (m *Client) UpdateTeamUsersCacheRemove(teamID, userID string) {
+	m.Users.mu.Lock()
+	defer m.Users.mu.Unlock()
+
+	if userMap, exists := m.Users.teams[teamID]; exists {
+		delete(userMap, userID)
+	}
+}
+
 func (m *Client) UpdateUser(user *model.User) {
 	m.Users.mu.Lock()
 	defer m.Users.mu.Unlock()

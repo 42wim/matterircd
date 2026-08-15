@@ -1376,7 +1376,7 @@ func (m *Client) syncSingleUser(ctx context.Context, event *model.WebSocketEvent
 //nolint:gocognit,gocyclo,funlen
 func (m *Client) maintainUsersCache(ctx context.Context, event *model.WebSocketEvent) {
 	switch event.EventType() {
-	case model.WebsocketEventNewUser, model.WebsocketEventUserUpdated, model.WebsocketEventUserAdded:
+	case model.WebsocketEventNewUser, model.WebsocketEventUserUpdated, model.WebsocketEventUserAdded, model.WebsocketEventAddedToTeam:
 		var u *model.User
 
 		if userVal, ok := event.GetData()["user"]; ok {
@@ -1414,8 +1414,13 @@ func (m *Client) maintainUsersCache(ctx context.Context, event *model.WebSocketE
 				m.Users.lastUpdated.Store(time.Now().Unix())
 			}
 		} else {
-			// Handles NewUser and UserUpdated
-			if teamID, hasTeam := event.GetData()["team_id"].(string); hasTeam && teamID != "" {
+			// Handles NewUser, UserUpdated, and AddedToTeam
+			teamID, _ := event.GetData()["team_id"].(string)
+			if teamID == "" && event.GetBroadcast() != nil {
+				teamID = event.GetBroadcast().TeamId
+			}
+
+			if teamID != "" {
 				m.UpdateTeamUsersCache(teamID, u)
 			} else if eventType == model.WebsocketEventUserUpdated {
 				m.UpdateUser(u)
@@ -1431,6 +1436,18 @@ func (m *Client) maintainUsersCache(ctx context.Context, event *model.WebSocketE
 			if tracked {
 				m.Users.SetUserCustomStatus(u.Id, u.Props["customStatus"])
 			}
+		}
+
+	case model.WebsocketEventLeaveTeam:
+		userID, _ := event.GetData()["user_id"].(string)
+		teamID, _ := event.GetData()["team_id"].(string)
+		if teamID == "" && event.GetBroadcast() != nil {
+			teamID = event.GetBroadcast().TeamId
+		}
+
+		if userID != "" && teamID != "" {
+			m.UpdateTeamUsersCacheRemove(teamID, userID)
+			m.Users.lastUpdated.Store(time.Now().Unix())
 		}
 
 	case model.WebsocketEventUserRemoved:
