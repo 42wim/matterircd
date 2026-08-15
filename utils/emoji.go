@@ -20,18 +20,18 @@ const (
 
 var skinToneSuffixes = []struct {
 	suffix string
-	tone   SkinTone
+	tone   string
 }{
-	{"_light_skin_tone", SkinToneLight},
-	{"_medium_light_skin_tone", SkinToneMediumLight},
-	{"_medium_skin_tone", SkinToneMedium},
-	{"_medium_dark_skin_tone", SkinToneMediumDark},
-	{"_dark_skin_tone", SkinToneDark},
-	{"_light", SkinToneLight},
-	{"_medium_light", SkinToneMediumLight},
-	{"_medium", SkinToneMedium},
-	{"_medium_dark", SkinToneMediumDark},
-	{"_dark", SkinToneDark},
+	{"_light_skin_tone", string(SkinToneLight)},
+	{"_medium_light_skin_tone", string(SkinToneMediumLight)},
+	{"_medium_skin_tone", string(SkinToneMedium)},
+	{"_medium_dark_skin_tone", string(SkinToneMediumDark)},
+	{"_dark_skin_tone", string(SkinToneDark)},
+	{"_light", string(SkinToneLight)},
+	{"_medium_light", string(SkinToneMediumLight)},
+	{"_medium", string(SkinToneMedium)},
+	{"_medium_dark", string(SkinToneMediumDark)},
+	{"_dark", string(SkinToneDark)},
 }
 
 // defaultAliases maps custom/legacy shortcodes to target emoji keys or Unicode characters.
@@ -49,21 +49,25 @@ var GetEmojiMap = sync.OnceValue(func() map[string]string {
 	data := emoji.Gemoji()
 	aliasMap := make(map[string]string, (len(data)*3)+len(defaultAliases))
 
-	register := func(name string, e emoji.Emoji) {
+	register := func(name string, unicodeVal string, supportsSkinTone bool) {
 		if name == "" {
 			return
 		}
 
 		// But only if it doesn't already exist, e.g. "angry"
 		if _, exists := aliasMap[name]; !exists {
-			aliasMap[name] = e.Emoji
+			aliasMap[name] = unicodeVal
+		}
+
+		if !supportsSkinTone {
+			return
 		}
 
 		// Support skin tones
 		for _, st := range skinToneSuffixes {
 			variantKey := name + st.suffix
 			if _, exists := aliasMap[variantKey]; !exists {
-				aliasMap[variantKey] = e.Tone(emoji.SkinTone(st.tone))
+				aliasMap[variantKey] = unicodeVal + st.tone
 			}
 		}
 	}
@@ -74,12 +78,12 @@ var GetEmojiMap = sync.OnceValue(func() map[string]string {
 		}
 
 		for _, alias := range e.Aliases {
-			register(alias, e)
+			register(alias, e.Emoji, e.SkinTones)
 		}
 
 		// In addition to emoji aliases, include emoji tags
 		for _, tag := range e.Tags {
-			register(tag, e)
+			register(tag, e.Emoji, e.SkinTones)
 		}
 	}
 
