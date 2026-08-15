@@ -2014,7 +2014,7 @@ func parseMatterpollToMsg(attachments []*model.SlackAttachment, unicode bool) st
 	return strings.TrimRight(msg, "\n")
 }
 
-const blockQuoteCharDefault = ">"
+const blockQuoteCharDefault = utils.BlockQuoteCharDefault
 
 //nolint:funlen,gocognit,gocyclo
 func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*model.SlackAttachment, useFallback bool, rootMsg string) {
