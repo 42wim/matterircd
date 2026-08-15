@@ -209,21 +209,20 @@ func applySkinTone(baseEmoji string, tone SkinTone) string {
 	}
 
 	// If the emoji already contains any Fitzpatrick modifier, do not double-tone it
-	for _, r := range runes {
-		if r >= 0x1F3FB && r <= 0x1F3FF {
-			return baseEmoji
-		}
+	if slices.ContainsFunc(runes, func(r rune) bool { return r >= 0x1F3FB && r <= 0x1F3FF }) {
+		return baseEmoji
 	}
 
 	insertAt := len(runes)
 
-	// Complex ZWJ sequence (e.g. 🙇‍♂️): insert skin tone before the first ZWJ (0x200D)
+	// Complex ZWJ sequence (e.g. 🙇‍♂): insert skin tone before the first ZWJ (0x200D)
 	if zwjIdx := slices.Index(runes, 0x200D); zwjIdx != -1 {
 		insertAt = zwjIdx
 	}
 
 	// Standard emoji: insert before trailing presentation selector \uFE0F if present
 	if insertAt > 0 && runes[insertAt-1] == 0xFE0F {
+		runes = slices.Delete(runes, insertAt-1, insertAt)
 		insertAt--
 	}
 
