@@ -16,6 +16,17 @@ func (m *Client) CreateChannel(ctx context.Context, teamID string, channelName s
 		channelType = model.ChannelTypeOpen
 	}
 
+	// Check existing channelData cache first
+	m.Users.mu.RLock()
+	for _, ch := range m.Users.channelData {
+		if ch.TeamId == teamID && ch.Name == channelName {
+			m.Users.mu.RUnlock()
+			return ch, nil
+		}
+	}
+	m.Users.mu.RUnlock()
+
+	// Fallback to creating the channel via REST API
 	channelReq := &model.Channel{
 		Name:        channelName,
 		DisplayName: channelName,
@@ -50,6 +61,19 @@ func (m *Client) CreateChannel(ctx context.Context, teamID string, channelName s
 }
 
 func (m *Client) CreateDirectChannel(ctx context.Context, userID1, userID2 string) (*model.Channel, error) {
+	dmName := model.GetDMNameFromIds(userID1, userID2)
+
+	// Check existing channelData cache first
+	m.Users.mu.RLock()
+	for _, ch := range m.Users.channelData {
+		if ch.Type == model.ChannelTypeDirect && ch.Name == dmName {
+			m.Users.mu.RUnlock()
+			return ch, nil
+		}
+	}
+	m.Users.mu.RUnlock()
+
+	// Fallback to REST API
 	retryCount := 0
 	for {
 		m.apiLogger.Warnf("CreateDirectChannel for users %s and %s #%d", userID1, userID2, retryCount)
@@ -282,6 +306,10 @@ func (m *Client) GetChannelTeamID(ctx context.Context, id string) string {
 		return ch.TeamId
 	}
 	return ""
+}
+
+func (m *Client) GetDMChannelName(userID1 string, userID2 string) string {
+	return model.GetDMNameFromIds(userID1, userID2)
 }
 
 //nolint:funlen,gocognit,gocyclo
