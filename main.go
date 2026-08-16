@@ -19,8 +19,8 @@ import (
 	bolt "go.etcd.io/bbolt"
 
 	"github.com/42wim/matterircd/config"
-	"github.com/42wim/matterircd/utils"
 	irckit "github.com/42wim/matterircd/mm-go-irckit"
+	"github.com/42wim/matterircd/utils"
 	"github.com/google/gops/agent"
 	prefixed "github.com/matterbridge/logrus-prefixed-formatter"
 	"github.com/sirupsen/logrus"
@@ -138,7 +138,7 @@ func main() {
 	LastViewedSaveDB = db
 
 	aiCfg := cfg.Current().AI
-	if aiCfg.Enabled {
+	if aiCfg.Enabled { //nolint:nestif
 		if aiCfg.ServiceAccountFile == "" || aiCfg.Project == "" {
 			logger.Warn("AI summarization enabled, but service_account_file or project is missing")
 		} else {

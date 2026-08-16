@@ -38,11 +38,15 @@ gops = false
 #Depending on how fast you type 2500 is a good number
 PasteBufferTimeout = 2500
 
-##################################
-##### AI EXAMPLE #########
-##################################
+###################################
+##### EXPERIMENTAL AI EXAMPLE #####
+###################################
 
+# *** EXPERIMENTAL ***
 # XXX: Currently, only Gemini AI / Google Cloud Vertex AI is supported but others may follow
+
+# *** WARNING: Extra care should be taken on AI assistance service and model selection. ***
+# *** WARNING: Information fed through maybe be used to train these models. ***
 [ai]
 enabled = true
 service_account_file = "/etc/matterircd/sa.json"

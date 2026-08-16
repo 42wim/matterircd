@@ -47,15 +47,14 @@ type generateResponse struct {
 	} `json:"error,omitempty"`
 }
 
+// NewAIClient creates a new Gemini AI client authenticated via service account credentials.
 func NewAIClient(ctx context.Context, saFile, project, location, model string) (*Client, error) {
 	data, err := os.ReadFile(saFile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read service account file: %w", err)
 	}
 
-	creds, err := google.CredentialsFromJSONWithParams(ctx, data, google.CredentialsParams{
-		Scopes: []string{"https://www.googleapis.com/auth/cloud-platform"},
-	})
+	jwtCfg, err := google.JWTConfigFromJSON(data, "https://www.googleapis.com/auth/cloud-platform")
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse service account credentials: %w", err)
 	}
@@ -68,11 +67,12 @@ func NewAIClient(ctx context.Context, saFile, project, location, model string) (
 		project:     project,
 		location:    location,
 		model:       model,
-		tokenSource: creds.TokenSource,
+		tokenSource: jwtCfg.TokenSource(ctx),
 		httpClient:  &http.Client{Timeout: 30 * time.Second},
 	}, nil
 }
 
+//nolint:funlen
 func (c *Client) Summarize(ctx context.Context, prompt string) (string, error) {
 	token, err := c.tokenSource.Token()
 	if err != nil {
@@ -80,6 +80,7 @@ func (c *Client) Summarize(ctx context.Context, prompt string) (string, error) {
 	}
 
 	var endpointHost string
+
 	switch c.location {
 	case "", "global", "us":
 		endpointHost = "aiplatform.googleapis.com"

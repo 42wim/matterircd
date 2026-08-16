@@ -1141,7 +1141,12 @@ func summarize(u *User, toUser *User, args []string, service string) {
 		return
 	}
 
-	u.MsgUser(toUser, fmt.Sprintf("Fetching messages for %s and generating summary...", contextLabel))
+	ellipsis := "..."
+	if u.br.FormatterConfig().Unicode {
+		ellipsis = "…"
+	}
+
+	u.MsgUser(toUser, fmt.Sprintf("Fetching messages for %s and generating summary%s", contextLabel, ellipsis))
 
 	var transcript strings.Builder
 
