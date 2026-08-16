@@ -1843,6 +1843,7 @@ func (m *Mattermost) getDMChannelID(ctx context.Context, userID string) (string,
 	}
 
 	m.dmChannelCache.Add(userID, dchannel.Id)
+
 	return dchannel.Id, nil
 }
 
