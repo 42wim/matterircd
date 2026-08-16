@@ -34,6 +34,7 @@ type Mattermost struct {
 	connected   bool
 	instanceTag string
 
+	dmChannelCache   *lru.Cache[string, string]
 	msgParentCache   *lru.Cache[string, CachedPost]
 	msgLastSentCache *lru.Cache[string, string]
 
@@ -99,8 +100,9 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 
 	rc := cfg.Current()
 
+	m.dmChannelCache, _ = lru.New[string, string](128)
 	m.msgParentCache, _ = lru.New[string, CachedPost](128)
-	m.msgLastSentCache, _ = lru.New[string, string](16)
+	m.msgLastSentCache, _ = lru.New[string, string](128)
 
 	ourlog := logrus.New()
 	ourlog.SetFormatter(&prefixed.TextFormatter{
@@ -441,8 +443,7 @@ func (m *Mattermost) MsgUser(ctx context.Context, userID, text string) (string, 
 }
 
 func (m *Mattermost) MsgUserThread(ctx context.Context, userID, parentID, text string) (string, error) {
-	// create DM channel (only happens on first message)
-	dchannel, err := m.mc.CreateDirectChannel(ctx, m.mc.User.Id, userID)
+	channelID, err := m.getDMChannelID(ctx, userID)
 	if err != nil {
 		return "", err
 	}
@@ -450,7 +451,7 @@ func (m *Mattermost) MsgUserThread(ctx context.Context, userID, parentID, text s
 	// build & send the message
 	text = strings.ReplaceAll(text, "\r", "")
 
-	return m.MsgChannelThread(ctx, dchannel.Id, parentID, text)
+	return m.MsgChannelThread(ctx, channelID, parentID, text)
 }
 
 func (m *Mattermost) MsgChannel(ctx context.Context, channelID, text string) (string, error) {
@@ -1615,12 +1616,12 @@ func (m *Mattermost) UpdateLastViewed(ctx context.Context, channelID string) {
 }
 
 func (m *Mattermost) UpdateLastViewedUser(ctx context.Context, userID string) error {
-	dc, err := m.mc.CreateDirectChannel(ctx, m.mc.User.Id, userID)
+	channelID, err := m.getDMChannelID(ctx, userID)
 	if err != nil {
 		return err
 	}
 
-	return m.mc.UpdateLastViewed(ctx, dc.Id)
+	return m.mc.UpdateLastViewed(ctx, channelID)
 }
 
 func (m *Mattermost) SearchPosts(ctx context.Context, search string) []*bridge.Event {
@@ -1663,13 +1664,7 @@ func (m *Mattermost) GetChannelID(ctx context.Context, name, teamID string) stri
 	if user != nil && user.User != "" {
 		targetID := user.User
 		myID := m.mc.User.Id
-
-		// Mattermost DM channels are ALWAYS formatted as:
-		// [Alphabetically First ID]__[Alphabetically Second ID]
-		dmName := myID + "__" + targetID
-		if myID > targetID {
-			dmName = targetID + "__" + myID
-		}
+		dmName := m.mc.GetDMChannelName(myID, targetID)
 
 		return m.mc.GetChannelID(ctx, dmName, teamID)
 	}
@@ -1835,6 +1830,21 @@ func (m *Mattermost) handleTypingEvent(ctx context.Context, rmsg *model.WebSocke
 			Sender:      sender,
 		},
 	}
+}
+
+func (m *Mattermost) getDMChannelID(ctx context.Context, userID string) (string, error) {
+	if channelID, ok := m.dmChannelCache.Get(userID); ok {
+		return channelID, nil
+	}
+
+	dchannel, err := m.mc.CreateDirectChannel(ctx, m.mc.User.Id, userID)
+	if err != nil {
+		return "", err
+	}
+
+	m.dmChannelCache.Add(userID, dchannel.Id)
+
+	return dchannel.Id, nil
 }
 
 func (m *Mattermost) getDMUser(ctx context.Context, name interface{}) *bridge.UserInfo {
