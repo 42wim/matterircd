@@ -29,6 +29,7 @@ type AIConfig struct {
 	Project            string
 	Location           string
 	Model              string
+	Prompt             string
 	DefaultPostLimit   int
 	MaxPostLimit       int
 }
@@ -191,6 +192,7 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 		Project:            c.v.GetString("ai.project"),
 		Location:           c.v.GetString("ai.location"),
 		Model:              c.v.GetString("ai.model"),
+		Prompt:             c.v.GetString("ai.prompt"),
 		DefaultPostLimit:   c.v.GetInt("ai.default_post_limit"),
 		MaxPostLimit:       c.v.GetInt("ai.max_post_limit"),
 	}

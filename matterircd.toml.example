@@ -55,6 +55,8 @@ location = "eu"
 model = "gemini-3.7-flash"
 default_post_limit = 30
 max_post_limit = 100
+# Optional additional instructions appended to the summarizer prompt.
+# prompt = "Pay special attention to code reviews, diffs/patches, and deployment blockers."
 
 
 ##################################
