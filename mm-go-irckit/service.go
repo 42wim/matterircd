@@ -1030,19 +1030,42 @@ type summarizeQuery struct {
 }
 
 func (u *User) getSummarizeEvents(target string, query summarizeQuery) (string, []*bridge.Event, error) {
-	if strings.HasPrefix(target, "@@") || (!strings.HasPrefix(target, "#") && len(target) == 26) {
-		postID := strings.TrimPrefix(target, "@@")
+	// Post / Thread ID (@@...)
+	if postID, ok := strings.CutPrefix(target, "@@"); ok {
 		label := "Thread " + postID
 
 		return label, u.br.GetPostThread(u.ctx, postID), nil
 	}
 
-	channelName := strings.TrimPrefix(target, "#")
-	channelID := u.br.GetChannelID(u.ctx, channelName, u.br.GetMe().TeamID)
+	// Channel (#...)
+	if channelName, ok := strings.CutPrefix(target, "#"); ok {
+		teamID := u.br.GetMe().TeamID
+		channelID := u.br.GetChannelID(u.ctx, channelName, teamID)
+
+		brchannel, err := u.br.GetChannel(u.ctx, channelID)
+		if err != nil {
+			return "", nil, fmt.Errorf("channel '#%s' not found", channelName)
+		}
+
+		var events []*bridge.Event
+		if query.Since > 0 {
+			events = u.br.GetPostsSince(u.ctx, brchannel.ID, query.Since)
+		} else {
+			events = u.br.GetPosts(u.ctx, brchannel.ID, query.Count)
+		}
+
+		return "#" + channelName, events, nil
+	}
+
+	// Direct Message (user or @user)
+	userName := strings.TrimPrefix(target, "@")
+
+	// Passing empty teamID ("") skips team-scoped channel lookup and resolves the DM channel directly
+	channelID := u.br.GetChannelID(u.ctx, userName, "")
 
 	brchannel, err := u.br.GetChannel(u.ctx, channelID)
 	if err != nil {
-		return "", nil, fmt.Errorf("channel or user '%s' not found", target)
+		return "", nil, fmt.Errorf("user '@%s' not found", userName)
 	}
 
 	var events []*bridge.Event
@@ -1052,7 +1075,7 @@ func (u *User) getSummarizeEvents(target string, query summarizeQuery) (string, 
 		events = u.br.GetPosts(u.ctx, brchannel.ID, query.Count)
 	}
 
-	return target, events, nil
+	return "@" + userName, events, nil
 }
 
 func parseSummarizeLimit(arg string, defaultLimit, maxLimit int) (summarizeQuery, error) {
@@ -1104,7 +1127,7 @@ func summarize(u *User, toUser *User, args []string, service string) {
 
 	if len(args) == 0 || len(args) > 2 {
 		u.MsgUser(toUser, "Usage: SUMMARIZE <#channel | user | @@thread_id> [post_count | duration]")
-		u.MsgUser(toUser, "e.g. SUMMARIZE #dev 50, SUMMARIZE #dev 24h, SUMMARIZE @@q3kz9..., SUMMARIZE fercc17 30m")
+		u.MsgUser(toUser, "e.g. SUMMARIZE #dev 50, SUMMARIZE #dev 24h, SUMMARIZE @@q3kz9..., SUMMARIZE someuser 30m")
 
 		return
 	}
@@ -1183,7 +1206,7 @@ func summarize(u *User, toUser *User, args []string, service string) {
 		return
 	}
 
-	u.MsgUser(toUser, fmt.Sprintf("\x02=== Summary for %s ===\x02", contextLabel))
+	u.MsgUser(toUser, fmt.Sprintf("\x02\x1d=== Summary for %s ===\x1d\x02", contextLabel))
 
 	disableEmoji := u.br.FormatterConfig().DisableEmoji
 	disableMarkdown := u.br.FormatterConfig().DisableMarkdown
@@ -1209,5 +1232,5 @@ func summarize(u *User, toUser *User, args []string, service string) {
 		}
 	})
 
-	u.MsgUser(toUser, "\x02===============================\x02")
+	u.MsgUser(toUser, "\x02\x1d===============================\x1d\x02")
 }
