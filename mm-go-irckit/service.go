@@ -1166,8 +1166,9 @@ func summarize(u *User, toUser *User, args []string, service string) {
 	prompt := fmt.Sprintf(
 		"You are an assistant summarizing chat history for an IRC client. "+
 			"Summarize the following %s conversation concisely in short bullet points. "+
+			"Review if code block or diff/patch block provided. "+
 			"Highlight decisions, action items, and main points. Do not include markdown tables.\n\n"+
-			"Transcript:\n%s",
+			"[TRANSCRIPT]\n%s[/TRANSCRIPT]\n",
 		contextLabel, transcript.String(),
 	)
 
