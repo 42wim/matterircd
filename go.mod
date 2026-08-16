@@ -21,9 +21,11 @@ require (
 	github.com/spf13/viper v1.17.0
 	github.com/stretchr/testify v1.11.1
 	go.etcd.io/bbolt v1.3.7
+	golang.org/x/oauth2 v0.36.0
 )
 
 require (
+	cloud.google.com/go/compute/metadata v0.9.0 // indirect
 	github.com/blang/semver/v4 v4.0.0 // indirect
 	github.com/dlclark/regexp2/v2 v2.2.1 // indirect
 	github.com/dyatlov/go-opengraph/opengraph v0.0.0-20220524092352-606d7b1e5f8a // indirect

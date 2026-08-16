@@ -687,6 +687,9 @@ var cmds = map[string]Command{
 	"scrollback":       {handler: scrollback, login: true, minParams: 2, maxParams: 2},
 	"search":           {handler: search, login: true, minParams: 1, maxParams: -1},
 	"searchusers":      {handler: searchUsers, login: true, minParams: 1, maxParams: -1},
+	"summarize":        {handler: summarize, login: true, minParams: 1, maxParams: 2},
+	"summary":          {handler: summarize, login: true, minParams: 1, maxParams: 2},
+	"tldr":             {handler: summarize, login: true, minParams: 1, maxParams: 2},
 	"updatelastviewed": {handler: updatelastviewed, login: true, minParams: 1, maxParams: 1},
 }
 
@@ -1019,4 +1022,192 @@ func channelCmd(u *User, toUser *User, args []string, service string) {
 	default:
 		showHelp()
 	}
+}
+
+type summarizeQuery struct {
+	Count int
+	Since int64
+}
+
+func (u *User) getSummarizeEvents(target string, query summarizeQuery) (string, []*bridge.Event, error) {
+	if strings.HasPrefix(target, "@@") || (!strings.HasPrefix(target, "#") && len(target) == 26) {
+		postID := strings.TrimPrefix(target, "@@")
+		label := "Thread " + postID
+
+		return label, u.br.GetPostThread(u.ctx, postID), nil
+	}
+
+	channelName := strings.TrimPrefix(target, "#")
+	channelID := u.br.GetChannelID(u.ctx, channelName, u.br.GetMe().TeamID)
+
+	brchannel, err := u.br.GetChannel(u.ctx, channelID)
+	if err != nil {
+		return "", nil, fmt.Errorf("channel or user '%s' not found", target)
+	}
+
+	var events []*bridge.Event
+	if query.Since > 0 {
+		events = u.br.GetPostsSince(u.ctx, brchannel.ID, query.Since)
+	} else {
+		events = u.br.GetPosts(u.ctx, brchannel.ID, query.Count)
+	}
+
+	return target, events, nil
+}
+
+func parseSummarizeLimit(arg string, defaultLimit, maxLimit int) (summarizeQuery, error) {
+	if maxLimit == 0 {
+		maxLimit = 100
+	}
+
+	if defaultLimit == 0 {
+		defaultLimit = 30
+	}
+
+	if arg == "" {
+		return summarizeQuery{Count: defaultLimit}, nil
+	}
+
+	// Try parsing as a time duration (e.g. 24h, 30m)
+	d, err := time.ParseDuration(arg)
+	if err == nil {
+		if d <= 0 {
+			return summarizeQuery{}, errors.New("duration must be positive")
+		}
+
+		return summarizeQuery{
+			Since: time.Now().Add(-d).UnixMilli(),
+		}, nil
+	}
+
+	// Fall back to parsing as an integer count (e.g. 50)
+	val, err := strconv.Atoi(arg)
+	if err != nil || val <= 0 {
+		return summarizeQuery{}, errors.New("invalid post count limit or duration format. e.g. 50, 24h, 30m")
+	}
+
+	if val > maxLimit {
+		val = maxLimit
+	}
+
+	return summarizeQuery{Count: val}, nil
+}
+
+//nolint:funlen,gocyclo
+func summarize(u *User, toUser *User, args []string, service string) {
+	cfg := u.cfg.Current().AI
+	if !cfg.Enabled || cfg.ServiceAccountFile == "" {
+		u.MsgUser(toUser, "AI summarization is not enabled or configured.")
+
+		return
+	}
+
+	if len(args) == 0 || len(args) > 2 {
+		u.MsgUser(toUser, "Usage: SUMMARIZE <#channel | user | @@thread_id> [post_count | duration]")
+		u.MsgUser(toUser, "e.g. SUMMARIZE #dev 50, SUMMARIZE #dev 24h, SUMMARIZE @@q3kz9..., SUMMARIZE fercc17 30m")
+
+		return
+	}
+
+	limitArg := ""
+	if len(args) == 2 {
+		limitArg = args[1]
+	}
+
+	query, err := parseSummarizeLimit(limitArg, cfg.DefaultPostLimit, cfg.MaxPostLimit)
+	if err != nil {
+		u.MsgUser(toUser, err.Error())
+
+		return
+	}
+
+	aiClient, err := utils.NewAIClient(u.ctx, cfg.ServiceAccountFile, cfg.Project, cfg.Location, cfg.Model)
+	if err != nil {
+		u.MsgUser(toUser, fmt.Sprintf("Failed to initialize Gemini AI: %v", err))
+
+		return
+	}
+
+	contextLabel, events, err := u.getSummarizeEvents(args[0], query)
+	if err != nil {
+		u.MsgUser(toUser, err.Error())
+
+		return
+	}
+
+	if len(events) == 0 {
+		u.MsgUser(toUser, "No messages found to summarize.")
+
+		return
+	}
+
+	ellipsis := "..."
+	if u.br.FormatterConfig().Unicode {
+		ellipsis = "…"
+	}
+
+	u.MsgUser(toUser, fmt.Sprintf("Fetching messages for %s and generating summary%s", contextLabel, ellipsis))
+
+	var transcript strings.Builder
+
+	for _, event := range events {
+		switch e := event.Data.(type) {
+		case *bridge.ChannelMessageEvent:
+			if e.Sender != nil && e.Text != "" {
+				fmt.Fprintf(&transcript, "%s: %s\n", e.Sender.Nick, e.Text)
+			}
+		case *bridge.DirectMessageEvent:
+			if e.Sender != nil && e.Text != "" {
+				fmt.Fprintf(&transcript, "%s: %s\n", e.Sender.Nick, e.Text)
+			}
+		}
+	}
+
+	extraInstructions := ""
+	if trimmed := strings.TrimSpace(cfg.Prompt); trimmed != "" {
+		extraInstructions = trimmed + " "
+	}
+
+	prompt := fmt.Sprintf(
+		"You are an assistant summarizing chat history for an IRC client. "+
+			"Summarize the following %s conversation concisely in short bullet points. "+
+			"%sHighlight decisions, action items, and main points. Do not include markdown tables.\n\n"+
+			"[TRANSCRIPT]\n%s[/TRANSCRIPT]\n",
+		contextLabel, extraInstructions, transcript.String(),
+	)
+
+	summary, err := aiClient.Summarize(u.ctx, prompt)
+	if err != nil {
+		u.MsgUser(toUser, fmt.Sprintf("Summarization failed: %v", err))
+
+		return
+	}
+
+	u.MsgUser(toUser, fmt.Sprintf("\x02=== Summary for %s ===\x02", contextLabel))
+
+	disableEmoji := u.br.FormatterConfig().DisableEmoji
+	disableMarkdown := u.br.FormatterConfig().DisableMarkdown
+	inlineCode := u.br.FormatterConfig().MarkdownInlineCode
+	blockQuoteChar, codeBlockPrefix := u.getMarkdownBlockCodePrefix()
+	syntaxHighlighting := u.br.FormatterConfig().SyntaxHighlighting
+	codeBlockSeparator := u.br.FormatterConfig().CodeBlockSeparator
+
+	opts := utils.ProcessMessageOpts{
+		DisableMarkdown:    disableMarkdown,
+		DisableEmoji:       disableEmoji,
+		SyntaxHighlighting: syntaxHighlighting,
+		CodeBlockPrefix:    codeBlockPrefix,
+		CodeBlockSeparator: codeBlockSeparator,
+		BlockquoteChar:     blockQuoteChar,
+		InlineCodeChar:     inlineCode,
+	}
+
+	utils.ProcessMessageText(summary, opts, func(line string) {
+		trimmed := strings.TrimRight(line, " \r\t")
+		if trimmed != "" {
+			u.MsgUser(toUser, trimmed)
+		}
+	})
+
+	u.MsgUser(toUser, "\x02===============================\x02")
 }

@@ -23,6 +23,17 @@ var (
 	UserAgent string
 )
 
+type AIConfig struct {
+	Enabled            bool
+	ServiceAccountFile string
+	Project            string
+	Location           string
+	Model              string
+	Prompt             string
+	DefaultPostLimit   int
+	MaxPostLimit       int
+}
+
 type Config struct {
 	current atomic.Pointer[RuntimeConfig]
 
@@ -38,6 +49,8 @@ type Config struct {
 // reloaded and atomically published. Callers must never modify it.
 type RuntimeConfig struct {
 	GlobalConfig
+
+	AI AIConfig
 
 	Mattermost MattermostConfig
 	Slack      SlackConfig
@@ -173,6 +186,17 @@ type MastodonConfig struct {
 
 //nolint:funlen
 func (c *Config) buildRuntimeCfg() *RuntimeConfig {
+	aiCfg := AIConfig{
+		Enabled:            c.v.GetBool("ai.enabled"),
+		ServiceAccountFile: unquoteString(c.v.GetString("ai.service_account_file")),
+		Project:            c.v.GetString("ai.project"),
+		Location:           c.v.GetString("ai.location"),
+		Model:              c.v.GetString("ai.model"),
+		Prompt:             c.v.GetString("ai.prompt"),
+		DefaultPostLimit:   c.v.GetInt("ai.default_post_limit"),
+		MaxPostLimit:       c.v.GetInt("ai.max_post_limit"),
+	}
+
 	mmBridge := BridgeConfig{
 		Restrict: append([]string(nil), c.v.GetStringSlice("mattermost.Restrict")...),
 
@@ -301,6 +325,8 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 			PasteBufferTimeout: c.v.GetInt("PasteBufferTimeout"),
 		},
 
+		AI: aiCfg,
+
 		Mattermost: MattermostConfig{
 			Bridge:    mmBridge,
 			Formatter: mmFormatter,
@@ -370,6 +396,10 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 			AccessToken:  c.v.GetString("mastodon.accesstoken"),
 		},
 	}
+}
+
+func (c *Config) AI() *AIConfig {
+	return &c.Current().AI
 }
 
 func (c *Config) Current() *RuntimeConfig {
