@@ -19,6 +19,7 @@ import (
 	bolt "go.etcd.io/bbolt"
 
 	"github.com/42wim/matterircd/config"
+	"github.com/42wim/matterircd/utils"
 	irckit "github.com/42wim/matterircd/mm-go-irckit"
 	"github.com/google/gops/agent"
 	prefixed "github.com/matterbridge/logrus-prefixed-formatter"
@@ -135,6 +136,26 @@ func main() {
 	}
 	defer db.Close()
 	LastViewedSaveDB = db
+
+	aiCfg := cfg.Current().AI
+	if aiCfg.Enabled {
+		if aiCfg.ServiceAccountFile == "" || aiCfg.Project == "" {
+			logger.Warn("AI summarization enabled, but service_account_file or project is missing")
+		} else {
+			// Test credential file read during startup
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			_, err := utils.NewAIClient(ctx, aiCfg.ServiceAccountFile, aiCfg.Project, aiCfg.Location, aiCfg.Model)
+			if err != nil {
+				logger.Errorf("AI summarization setup error: %v", err)
+			} else {
+				logger.Infof("AI summarization enabled (model: %s, project: %s, region: %s)", aiCfg.Model, aiCfg.Project, aiCfg.Location)
+			}
+		}
+	} else {
+		logger.Debug("AI summarization is disabled")
+	}
 
 	// Start serving connections asynchronously
 	if tlsSocket != nil {

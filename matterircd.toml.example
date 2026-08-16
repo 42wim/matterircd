@@ -39,6 +39,21 @@ gops = false
 PasteBufferTimeout = 2500
 
 ##################################
+##### AI EXAMPLE #########
+##################################
+
+# XXX: Currently, only Gemini AI / Google Cloud Vertex AI is supported but others may follow
+[ai]
+enabled = true
+service_account_file = "/etc/matterircd/sa.json"
+project = "myproject-req-10375"
+location = "eu"
+model = "gemini-3.7-flash"
+default_post_limit = 30
+max_post_limit = 100
+
+
+##################################
 ##### MATTERMOST EXAMPLE #########
 ##################################
 [mattermost]
