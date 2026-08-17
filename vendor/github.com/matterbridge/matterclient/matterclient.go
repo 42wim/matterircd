@@ -138,7 +138,9 @@ type Client struct {
 	apiLogger     *logrus.Entry
 	rootAPILogger *logrus.Logger
 
-	lruCache    *lru.Cache[string, bool]
+	lruCache  *lru.Cache[string, bool]
+	postCache *lru.Cache[string, *model.Post]
+
 	aliveChan   chan bool
 	loginCancel context.CancelFunc
 
@@ -198,6 +200,7 @@ func New(login string, pass string, team string, server string, mfatoken string)
 	}
 
 	cache, _ := lru.New[string, bool](500)
+	postCache, _ := lru.New[string, *model.Post](2000)
 
 	defaultUserAgent := "matterclient/0.0"
 
@@ -215,7 +218,8 @@ func New(login string, pass string, team string, server string, mfatoken string)
 
 			channelLastViewedAt: make(map[string]int64, 1000),
 		},
-		lruCache: cache,
+		lruCache:  cache,
+		postCache: postCache,
 
 		rootLogger: rootLogger,
 		logger:     rootLogger.WithFields(logrus.Fields{"prefix": "matterclient"}),
@@ -1477,6 +1481,11 @@ func (m *Client) maintainUsersCache(ctx context.Context, event *model.WebSocketE
 			break
 		}
 
+		// Cache every incoming post for fast GetPost / thread lookups
+		if m.postCache != nil {
+			m.postCache.Add(post.Id, post)
+		}
+
 		// Update the LastPostAt in our channelData cache
 		m.Users.mu.Lock()
 		if ch, ok := m.Users.channelData[channelID]; ok {
@@ -1509,6 +1518,38 @@ func (m *Client) maintainUsersCache(ctx context.Context, event *model.WebSocketE
 			delete(m.Users.channels, channelID)
 			m.Users.mu.Unlock()
 			m.Users.lastUpdated.Store(time.Now().Unix())
+		}
+
+	case model.WebsocketEventPostEdited:
+		var post *model.Post
+
+		if postPtr, ok := event.GetData()["post"].(*model.Post); ok {
+			post = postPtr
+		} else if postStr, ok := event.GetData()["post"].(string); ok && postStr != "" {
+			post = &model.Post{}
+			_ = json.NewDecoder(strings.NewReader(postStr)).Decode(post)
+		}
+
+		if post != nil && post.Id != "" && m.postCache != nil {
+			m.postCache.Add(post.Id, post)
+		}
+
+	case model.WebsocketEventPostDeleted:
+		var postID string
+
+		if postPtr, ok := event.GetData()["post"].(*model.Post); ok {
+			postID = postPtr.Id
+		} else if postStr, ok := event.GetData()["post"].(string); ok && postStr != "" {
+			var post model.Post
+
+			_ = json.NewDecoder(strings.NewReader(postStr)).Decode(&post)
+			postID = post.Id
+		} else if id, ok := event.GetData()["post_id"].(string); ok {
+			postID = id
+		}
+
+		if postID != "" && m.postCache != nil {
+			m.postCache.Remove(postID)
 		}
 
 	case model.WebsocketEventChannelCreated, model.WebsocketEventDirectAdded, model.WebsocketEventChannelUpdated:
