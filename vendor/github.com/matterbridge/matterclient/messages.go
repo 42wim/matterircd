@@ -27,6 +27,7 @@ func (m *Client) CreatePost(ctx context.Context, post *model.Post) (*model.Post,
 		m.apiLogger.Warnf("CreatePost: UserID: %s, ChannelID: %s #%d", post.UserId, post.ChannelId, retryCount)
 		res, resp, err := m.Client.CreatePost(ctx, post)
 		if err == nil {
+			m.postCache.Add(res.Id, res)
 			return res, nil
 		}
 
@@ -166,12 +167,20 @@ func (m *Client) GetFileLinks(ctx context.Context, filenames []string) []string 
 }
 
 func (m *Client) GetPost(ctx context.Context, postID string) (*model.Post, error) {
+	// Check LRU cache first
+	if p, ok := m.postCache.Get(postID); ok {
+		return p, nil
+	}
+
+	// Fallback to REST API
 	retryCount := 0
 	for {
 		m.apiLogger.Warnf("GetPost: PostID: %s #%d", postID, retryCount)
-		res, resp, err := m.Client.GetPost(ctx, postID, "")
+
+		post, resp, err := m.Client.GetPost(ctx, postID, "")
 		if err == nil {
-			return res, nil
+			m.postCache.Add(post.Id, post)
+			return post, nil
 		}
 
 		shouldRetry, hErr := m.HandleRetry(ctx, "GetPost", err, retryCount, 10, resp)

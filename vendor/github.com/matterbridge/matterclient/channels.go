@@ -16,14 +16,16 @@ func (m *Client) CreateChannel(ctx context.Context, teamID string, channelName s
 		channelType = model.ChannelTypeOpen
 	}
 
-	// Check existing channelData cache first
 	m.Users.mu.RLock()
+
+	// Check existing channelData cache first
 	for _, ch := range m.Users.channelData {
 		if ch.TeamId == teamID && ch.Name == channelName {
 			m.Users.mu.RUnlock()
 			return ch, nil
 		}
 	}
+
 	m.Users.mu.RUnlock()
 
 	// Fallback to creating the channel via REST API
@@ -63,14 +65,16 @@ func (m *Client) CreateChannel(ctx context.Context, teamID string, channelName s
 func (m *Client) CreateDirectChannel(ctx context.Context, userID1, userID2 string) (*model.Channel, error) {
 	dmName := model.GetDMNameFromIds(userID1, userID2)
 
-	// Check existing channelData cache first
 	m.Users.mu.RLock()
+
+	// Check existing channelData cache first
 	for _, ch := range m.Users.channelData {
 		if ch.Type == model.ChannelTypeDirect && ch.Name == dmName {
 			m.Users.mu.RUnlock()
 			return ch, nil
 		}
 	}
+
 	m.Users.mu.RUnlock()
 
 	// Fallback to REST API
