@@ -37,7 +37,6 @@ type Credentials struct {
 	MFAToken         string
 }
 
-//nolint:stylecheck
 type ChannelSummary struct {
 	Id          string `json:"id"`
 	UpdateAt    int64  `json:"update_at"`
@@ -93,7 +92,6 @@ type UsersCache struct {
 	lastUpdated atomic.Int64
 }
 
-//nolint:stylecheck
 type UserSummary struct {
 	Id        string            `json:"id"`
 	Username  string            `json:"username"`
