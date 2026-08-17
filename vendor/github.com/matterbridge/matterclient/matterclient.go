@@ -1482,7 +1482,7 @@ func (m *Client) maintainUsersCache(ctx context.Context, event *model.WebSocketE
 		}
 
 		// Cache every incoming post for fast GetPost / thread lookups
-		if m.postCache != nil {
+		if m.postCache != nil && !strings.HasPrefix(post.Type, model.PostSystemMessagePrefix) {
 			m.postCache.Add(post.Id, post)
 		}
 
@@ -1530,7 +1530,7 @@ func (m *Client) maintainUsersCache(ctx context.Context, event *model.WebSocketE
 			_ = json.NewDecoder(strings.NewReader(postStr)).Decode(post)
 		}
 
-		if post != nil && post.Id != "" && m.postCache != nil {
+		if m.postCache != nil && !strings.HasPrefix(post.Type, model.PostSystemMessagePrefix) {
 			m.postCache.Add(post.Id, post)
 		}
 
