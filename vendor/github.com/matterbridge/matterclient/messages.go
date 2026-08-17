@@ -238,6 +238,9 @@ func (m *Client) GetPosts(ctx context.Context, channelID string, limit int) *mod
 			finalPostList.Order = append(finalPostList.Order, res.Order...)
 			for postID, post := range res.Posts {
 				finalPostList.Posts[postID] = post
+				if m.postCache != nil {
+					m.postCache.Add(postID, post)
+				}
 			}
 
 			fetched += len(res.Order)
@@ -266,6 +269,11 @@ func (m *Client) GetPostThread(ctx context.Context, postID string) *model.PostLi
 		m.apiLogger.Warnf("GetPostThread: PostID: %s #%d", postID, retryCount)
 		res, resp, err := m.Client.GetPostThreadWithOpts(ctx, postID, "", opts)
 		if err == nil {
+			if res != nil && m.postCache != nil {
+				for _, post := range res.Posts {
+					m.postCache.Add(post.Id, post)
+				}
+			}
 			return res
 		}
 
@@ -300,6 +308,12 @@ func (m *Client) GetPostsSince(ctx context.Context, channelID string, time int64
 		m.apiLogger.Warnf("GetPostsSince: ChannelID: %s, Since: %d #%d", channelID, time, retryCount)
 		res, resp, err := m.Client.GetPostsSince(ctx, channelID, time, false)
 		if err == nil {
+			if res != nil && m.postCache != nil {
+				for _, post := range res.Posts {
+					m.postCache.Add(post.Id, post)
+				}
+			}
+
 			return res
 		}
 
@@ -357,6 +371,9 @@ func (m *Client) PatchPost(ctx context.Context, postID string, patch *model.Post
 
 		post, resp, err := m.Client.PatchPost(ctx, postID, patch)
 		if err == nil {
+			if m.postCache != nil {
+				m.postCache.Add(post.Id, post)
+			}
 			return post, nil
 		}
 
@@ -367,7 +384,6 @@ func (m *Client) PatchPost(ctx context.Context, postID string, patch *model.Post
 		}
 
 		m.logger.Errorf("PatchPost failed for %s: %v", postID, err)
-
 		return nil, err
 	}
 }
@@ -384,6 +400,9 @@ func (m *Client) PostMessage(ctx context.Context, channelID string, text string,
 		m.apiLogger.Warnf("PostMessage: ChannelID: %s, RootID: %s #%d", channelID, rootID, retryCount)
 		res, resp, err := m.Client.CreatePost(ctx, post)
 		if err == nil {
+			if m.postCache != nil {
+				m.postCache.Add(res.Id, res)
+			}
 			return res.Id, nil
 		}
 
@@ -410,6 +429,9 @@ func (m *Client) PostMessageWithFiles(ctx context.Context, channelID string, tex
 		m.apiLogger.Warnf("PostMessageWithFiles: ChannelID: %s, RootID %s #%d", channelID, rootID, retryCount)
 		res, resp, err := m.Client.CreatePost(ctx, post)
 		if err == nil {
+			if m.postCache != nil {
+				m.postCache.Add(res.Id, res)
+			}
 			return res.Id, nil
 		}
 
@@ -429,6 +451,11 @@ func (m *Client) SearchPosts(ctx context.Context, query string) *model.PostList 
 		m.apiLogger.Warnf("SearchPosts: query: %s #%d", query, retryCount)
 		res, resp, err := m.Client.SearchPosts(ctx, m.Team.ID, query, false)
 		if err == nil {
+			if res != nil && m.postCache != nil {
+				for _, post := range res.Posts {
+					m.postCache.Add(post.Id, post)
+				}
+			}
 			return res
 		}
 
@@ -450,47 +477,30 @@ func (m *Client) SendDirectMessage(ctx context.Context, toUserID string, msg str
 func (m *Client) SendDirectMessageProps(ctx context.Context, toUserID string, msg string, rootID string, props map[string]interface{}) error {
 	m.logger.Debugf("SendDirectMessage to %s, msg %s", toUserID, msg)
 
-	retryCount := 0
-	for {
-		// create DM channel (only happens on first message)
-		m.apiLogger.Warnf("SendDirectMessageProps: CreateDirectChannel: UserID: %s, toUserID: %s #%d", m.User.Id, toUserID, retryCount)
-		_, resp, err := m.Client.CreateDirectChannel(ctx, m.User.Id, toUserID)
-		if err == nil {
-			break
-		}
-
-		shouldRetry, hErr := m.HandleRetry(ctx, "CreateDirectChannel", err, retryCount, 10, resp)
-		if hErr == nil && shouldRetry {
-			retryCount++
-			continue
-		}
-
+	dchannel, err := m.CreateDirectChannel(ctx, m.User.Id, toUserID)
+	if err != nil {
 		m.logger.Errorf("CreateDirectChannel to %s failed: %v", toUserID, err)
 		return err
-	}
-
-	channelName := model.GetDMNameFromIds(toUserID, m.User.Id)
-
-	// update our channels
-	if err := m.UpdateChannels(ctx); err != nil {
-		m.logger.Errorf("failed to update channels: %#v", err)
 	}
 
 	// build & send the message
 	msg = strings.ReplaceAll(msg, "\r", "")
 	post := &model.Post{
-		ChannelId: m.GetChannelID(ctx, channelName, m.Team.ID),
+		ChannelId: dchannel.Id,
 		Message:   msg,
 		RootId:    rootID,
 	}
-
 	post.SetProps(props)
 
-	retryCount = 0
+	retryCount := 0
 	for {
 		m.apiLogger.Warnf("SendDirectMessageProps: CreatePost: UserID: %s, ChannelID: %s #%d", post.UserId, post.ChannelId, retryCount)
-		_, resp, err := m.Client.CreatePost(ctx, post)
+
+		res, resp, err := m.Client.CreatePost(ctx, post)
 		if err == nil {
+			if m.postCache != nil {
+				m.postCache.Add(res.Id, res)
+			}
 			return nil
 		}
 
