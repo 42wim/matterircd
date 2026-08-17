@@ -27,7 +27,10 @@ func (m *Client) CreatePost(ctx context.Context, post *model.Post) (*model.Post,
 		m.apiLogger.Warnf("CreatePost: UserID: %s, ChannelID: %s #%d", post.UserId, post.ChannelId, retryCount)
 		res, resp, err := m.Client.CreatePost(ctx, post)
 		if err == nil {
-			m.postCache.Add(res.Id, res)
+			if m.postCache != nil {
+				m.postCache.Add(res.Id, res)
+			}
+
 			return res, nil
 		}
 
@@ -179,7 +182,10 @@ func (m *Client) GetPost(ctx context.Context, postID string) (*model.Post, error
 
 		post, resp, err := m.Client.GetPost(ctx, postID, "")
 		if err == nil {
-			m.postCache.Add(post.Id, post)
+			if m.postCache != nil && !strings.HasPrefix(post.Type, model.PostSystemMessagePrefix) {
+				m.postCache.Add(post.Id, post)
+			}
+
 			return post, nil
 		}
 
@@ -238,7 +244,7 @@ func (m *Client) GetPosts(ctx context.Context, channelID string, limit int) *mod
 			finalPostList.Order = append(finalPostList.Order, res.Order...)
 			for postID, post := range res.Posts {
 				finalPostList.Posts[postID] = post
-				if m.postCache != nil {
+				if m.postCache != nil && !strings.HasPrefix(post.Type, model.PostSystemMessagePrefix) {
 					m.postCache.Add(postID, post)
 				}
 			}
@@ -269,11 +275,16 @@ func (m *Client) GetPostThread(ctx context.Context, postID string) *model.PostLi
 		m.apiLogger.Warnf("GetPostThread: PostID: %s #%d", postID, retryCount)
 		res, resp, err := m.Client.GetPostThreadWithOpts(ctx, postID, "", opts)
 		if err == nil {
-			if res != nil && m.postCache != nil {
-				for _, post := range res.Posts {
+			if res == nil || m.postCache == nil {
+				return res
+			}
+
+			for _, post := range res.Posts {
+				if m.postCache != nil && !strings.HasPrefix(post.Type, model.PostSystemMessagePrefix) {
 					m.postCache.Add(post.Id, post)
 				}
 			}
+
 			return res
 		}
 
@@ -308,8 +319,12 @@ func (m *Client) GetPostsSince(ctx context.Context, channelID string, time int64
 		m.apiLogger.Warnf("GetPostsSince: ChannelID: %s, Since: %d #%d", channelID, time, retryCount)
 		res, resp, err := m.Client.GetPostsSince(ctx, channelID, time, false)
 		if err == nil {
-			if res != nil && m.postCache != nil {
-				for _, post := range res.Posts {
+			if res == nil || m.postCache == nil {
+				return res
+			}
+
+			for _, post := range res.Posts {
+				if m.postCache != nil && !strings.HasPrefix(post.Type, model.PostSystemMessagePrefix) {
 					m.postCache.Add(post.Id, post)
 				}
 			}
@@ -451,11 +466,16 @@ func (m *Client) SearchPosts(ctx context.Context, query string) *model.PostList 
 		m.apiLogger.Warnf("SearchPosts: query: %s #%d", query, retryCount)
 		res, resp, err := m.Client.SearchPosts(ctx, m.Team.ID, query, false)
 		if err == nil {
-			if res != nil && m.postCache != nil {
-				for _, post := range res.Posts {
+			if res == nil || m.postCache == nil {
+				return res
+			}
+
+			for _, post := range res.Posts {
+				if m.postCache != nil && !strings.HasPrefix(post.Type, model.PostSystemMessagePrefix) {
 					m.postCache.Add(post.Id, post)
 				}
 			}
+
 			return res
 		}
 

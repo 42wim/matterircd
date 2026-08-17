@@ -37,7 +37,6 @@ type Credentials struct {
 	MFAToken         string
 }
 
-//nolint:stylecheck
 type ChannelSummary struct {
 	Id          string `json:"id"`
 	UpdateAt    int64  `json:"update_at"`
@@ -93,7 +92,6 @@ type UsersCache struct {
 	lastUpdated atomic.Int64
 }
 
-//nolint:stylecheck
 type UserSummary struct {
 	Id        string            `json:"id"`
 	Username  string            `json:"username"`
@@ -1482,7 +1480,7 @@ func (m *Client) maintainUsersCache(ctx context.Context, event *model.WebSocketE
 		}
 
 		// Cache every incoming post for fast GetPost / thread lookups
-		if m.postCache != nil {
+		if m.postCache != nil && !strings.HasPrefix(post.Type, model.PostSystemMessagePrefix) {
 			m.postCache.Add(post.Id, post)
 		}
 
@@ -1530,7 +1528,7 @@ func (m *Client) maintainUsersCache(ctx context.Context, event *model.WebSocketE
 			_ = json.NewDecoder(strings.NewReader(postStr)).Decode(post)
 		}
 
-		if post != nil && post.Id != "" && m.postCache != nil {
+		if m.postCache != nil && !strings.HasPrefix(post.Type, model.PostSystemMessagePrefix) {
 			m.postCache.Add(post.Id, post)
 		}
 
