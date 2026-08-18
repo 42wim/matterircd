@@ -472,6 +472,7 @@ func (m *Mattermost) MsgChannelThread(ctx context.Context, channelID, parentID, 
 	}
 
 	post := &model.Post{
+		UserId:    m.mc.User.Id,
 		ChannelId: channelID,
 		Message:   text,
 		RootId:    parentID,
@@ -481,35 +482,11 @@ func (m *Mattermost) MsgChannelThread(ctx context.Context, channelID, parentID, 
 	post.SetProps(props)
 
 	rp, err := m.mc.CreatePost(ctx, post)
-	if err == nil {
-		return rp.Id, nil
-	}
-
-	if parentID == "" {
-		return "", err
-	}
-
-	// Try to work out if we're trying to reply to a post within a thread.
-	replyPost, err := m.mc.GetPost(ctx, parentID)
 	if err != nil {
 		return "", err
 	}
 
-	post = &model.Post{
-		ChannelId: channelID,
-		Message:   text,
-		RootId:    replyPost.RootId,
-		Type:      msgType,
-	}
-
-	post.SetProps(props)
-
-	rp, err = m.mc.CreatePost(ctx, post)
-	if err == nil {
-		return rp.Id, nil
-	}
-
-	return "", err
+	return rp.Id, nil
 }
 
 func (m *Mattermost) ModifyPost(ctx context.Context, msgID, text string) error {
