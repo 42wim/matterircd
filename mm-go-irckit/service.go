@@ -41,6 +41,15 @@ func login(u *User, toUser *User, args []string, service string) {
 	}
 
 	if service == "mastodon" {
+		u.inprogress = true
+		defer func() { u.inprogress = false }()
+
+		if u.br != nil && u.br.Connected() {
+			u.MsgUser(toUser, "already logged in to mastodon. Please log out first")
+
+			return
+		}
+
 		fmt.Println("login mastodon")
 		err := u.loginTo("mastodon")
 		if err != nil {
@@ -88,11 +97,9 @@ func login(u *User, toUser *User, args []string, service string) {
 		}
 
 		if u.br != nil && u.br.Connected() {
-			err = u.br.Logout(u.ctx)
-			if err != nil {
-				u.MsgUser(toUser, err.Error())
-				return
-			}
+			u.MsgUser(toUser, "already logged in to slack. Please log out first")
+
+			return
 		}
 
 		u.inprogress = true
@@ -189,12 +196,13 @@ func login(u *User, toUser *User, args []string, service string) {
 	}
 
 	if u.br != nil && u.br.Connected() {
-		err := u.br.Logout(u.ctx)
-		if err != nil {
-			u.MsgUser(toUser, err.Error())
-			return
-		}
+		u.MsgUser(toUser, "already logged in to mattermost. Please log out first")
+
+		return
 	}
+
+	u.inprogress = true
+	defer func() { u.inprogress = false }()
 
 	u.Credentials = cred
 

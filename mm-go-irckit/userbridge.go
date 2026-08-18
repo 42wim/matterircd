@@ -1645,6 +1645,10 @@ func (u *User) loginTo(protocol string) error {
 		}
 	}
 	if err != nil {
+		u.eventLoopMutex.Lock()
+		u.br = nil
+		u.eventLoopMutex.Unlock()
+
 		return err
 	}
 
@@ -1663,6 +1667,10 @@ func (u *User) loginTo(protocol string) error {
 		return err2
 	})
 	if err != nil {
+		u.eventLoopMutex.Lock()
+		u.br = nil
+		u.eventLoopMutex.Unlock()
+
 		return err
 	}
 
@@ -1672,6 +1680,13 @@ func (u *User) loginTo(protocol string) error {
 // nolint:unparam
 func (u *User) logoutFrom(protocol string) error {
 	logger.Debug("logging out from", protocol)
+
+	u.eventLoopMutex.Lock()
+	if u.br != nil {
+		_ = u.br.Logout(u.ctx)
+		u.br = nil
+	}
+	u.eventLoopMutex.Unlock()
 
 	u.Srv.Logout(u)
 	return nil
