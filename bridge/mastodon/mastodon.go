@@ -188,8 +188,16 @@ func (m *Mastodon) GetChannel(ctx context.Context, channelID string) (*bridge.Ch
 	}, nil
 }
 
+func (m *Mastodon) GetChannelCount() int {
+	return 0
+}
+
 func (m *Mastodon) GetUser(ctx context.Context, userID string) *bridge.UserInfo {
 	return nil
+}
+
+func (m *Mastodon) GetUserCount() int {
+	return 0
 }
 
 func (m *Mastodon) GetMe() *bridge.UserInfo {

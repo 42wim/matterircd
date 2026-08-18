@@ -714,8 +714,16 @@ func (m *Mattermost) GetChannel(ctx context.Context, channelID string) (*bridge.
 	}, nil
 }
 
+func (m *Mattermost) GetChannelCount() int {
+	return m.mc.GetChannelCount()
+}
+
 func (m *Mattermost) GetUser(ctx context.Context, userID string) *bridge.UserInfo {
 	return m.createUser(m.mc.GetUser(ctx, userID))
+}
+
+func (m *Mattermost) GetUserCount() int {
+	return m.mc.GetUserCount()
 }
 
 func (m *Mattermost) GetMe() *bridge.UserInfo {
