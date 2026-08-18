@@ -176,7 +176,7 @@ func (m *Client) GetChannel(ctx context.Context, channelID string) *model.Channe
 	}
 }
 
-// ChannelCount returns the number of active joined channels for the current user.
+// GetChannelCount returns the number of active joined channels for the current user.
 func (m *Client) GetChannelCount() int {
 	if m == nil || m.Users == nil {
 		return 0
@@ -186,6 +186,7 @@ func (m *Client) GetChannelCount() int {
 	defer m.Users.mu.RUnlock()
 
 	var count int
+
 	for id, ch := range m.Users.channelData {
 		if ch.DeleteAt != 0 {
 			continue

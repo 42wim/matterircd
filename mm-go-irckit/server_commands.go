@@ -239,7 +239,7 @@ func CmdList(s Server, u *User, msg *irc.Message) error {
 }
 
 // CmdLusers is a handler for the /LUSERS command.
-func CmdLusers(s Server, u *User, _ *irc.Message) error {
+func CmdLusers(s Server, u *User, msg *irc.Message) error {
 	var userCount, channelCount int
 
 	if u.br != nil {
@@ -321,18 +321,23 @@ func CmdMotd(s Server, u *User, _ *irc.Message) error {
 	}
 
 	clientCount := s.ClientCount()
+	motd := s.Motd()
 
 	err := u.Encode(&irc.Message{
 		Prefix:   s.Prefix(),
 		Command:  irc.RPL_MOTDSTART,
 		Params:   []string{u.Nick},
-		Trailing: fmt.Sprintf("- %s Message of the day -", s.Name()),
+		Trailing: fmt.Sprintf("- %s Message of the Day -", s.Name()),
 	})
 	if err != nil {
 		return err
 	}
 
-	for _, line := range s.Motd() {
+	if IsDebugLevel() {
+		motd = append(motd, "server is running in debugmode.")
+	}
+
+	for _, line := range motd {
 		err = u.Encode(&irc.Message{
 			Prefix:   s.Prefix(),
 			Command:  irc.RPL_MOTD,
