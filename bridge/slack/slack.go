@@ -429,8 +429,16 @@ func (s *Slack) GetChannel(ctx context.Context, channelID string) (*bridge.Chann
 	return nil, errors.New("channel not found")
 }
 
+func (s *Slack) GetChannelCount() int {
+	return 0
+}
+
 func (s *Slack) GetUser(ctx context.Context, userID string) *bridge.UserInfo {
 	return s.createUser(s.getSlackUser(userID))
+}
+
+func (s *Slack) GetUserCount() int {
+	return 0
 }
 
 func (s *Slack) GetMe() *bridge.UserInfo {

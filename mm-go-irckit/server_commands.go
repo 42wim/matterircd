@@ -240,8 +240,41 @@ func CmdList(s Server, u *User, msg *irc.Message) error {
 
 // CmdLusers is a handler for the /LUSERS command.
 func CmdLusers(s Server, u *User, msg *irc.Message) error {
-	return s.EncodeMessage(u, irc.RPL_LUSERCLIENT, []string{u.Nick},
-		"There are "+strconv.Itoa(s.UserCount())+" users and "+strconv.Itoa(s.ChannelCount())+" channels on 1 server")
+	var userCount, channelCount int
+
+	if u.br != nil {
+		userCount = u.br.GetUserCount()
+		channelCount = u.br.GetChannelCount()
+	} else {
+		userCount = s.UserCount()
+	}
+
+	var (
+		users    = strconv.Itoa(userCount)
+		clients  = strconv.Itoa(s.ClientCount())
+		channels = strconv.Itoa(channelCount)
+	)
+
+	return u.Encode(
+		&irc.Message{
+			Prefix:   s.Prefix(),
+			Command:  irc.RPL_LUSERCLIENT,
+			Params:   []string{u.Nick},
+			Trailing: "There are " + users + " users and 0 services on 1 servers",
+		},
+		&irc.Message{
+			Prefix:   s.Prefix(),
+			Command:  irc.RPL_LUSERCHANNELS,
+			Params:   []string{u.Nick, channels},
+			Trailing: "channels formed",
+		},
+		&irc.Message{
+			Prefix:   s.Prefix(),
+			Command:  irc.RPL_LUSERME,
+			Params:   []string{u.Nick},
+			Trailing: "I have " + clients + " clients and 1 servers",
+		},
+	)
 }
 
 // CmdMode is a handler for the /MODE command.
@@ -278,36 +311,65 @@ func CmdMode(s Server, u *User, msg *irc.Message) error {
 
 // CmdMotd is a handler for the /MOTD command.
 func CmdMotd(s Server, u *User, _ *irc.Message) error {
+	var userCount, channelCount int
+
+	if u.br != nil {
+		userCount = u.br.GetUserCount()
+		channelCount = u.br.GetChannelCount()
+	} else {
+		userCount = s.UserCount()
+	}
+
+	clientCount := s.ClientCount()
 	motd := s.Motd()
-	r := make([]*irc.Message, 0, len(motd)+2)
-	r = append(r, &irc.Message{
+
+	err := u.Encode(&irc.Message{
 		Prefix:   s.Prefix(),
 		Command:  irc.RPL_MOTDSTART,
 		Params:   []string{u.Nick},
 		Trailing: fmt.Sprintf("- %s Message of the Day -", s.Name()),
 	})
+	if err != nil {
+		return err
+	}
 
 	if IsDebugLevel() {
 		motd = append(motd, "server is running in debugmode.")
 	}
 
 	for _, line := range motd {
-		r = append(r, &irc.Message{
+		err = u.Encode(&irc.Message{
 			Prefix:   s.Prefix(),
 			Command:  irc.RPL_MOTD,
 			Params:   []string{u.Nick},
 			Trailing: fmt.Sprintf("- %s", line),
 		})
+		if err != nil {
+			return err
+		}
 	}
 
-	r = append(r, &irc.Message{
+	statsLine := fmt.Sprintf(
+		"Current stats: %d IRC client(s) connected | %d total team users | %d active channels",
+		clientCount, userCount, channelCount,
+	)
+
+	err = u.Encode(&irc.Message{
+		Prefix:   s.Prefix(),
+		Command:  irc.RPL_MOTD,
+		Params:   []string{u.Nick},
+		Trailing: fmt.Sprintf("- %s", statsLine),
+	})
+	if err != nil {
+		return err
+	}
+
+	return u.Encode(&irc.Message{
 		Prefix:   s.Prefix(),
 		Command:  irc.RPL_ENDOFMOTD,
 		Params:   []string{u.Nick},
 		Trailing: "End of /MOTD command.",
 	})
-
-	return u.Encode(r...)
 }
 
 // CmdNames is a handler for the /NAMES command.

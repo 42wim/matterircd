@@ -284,6 +284,19 @@ func (m *Client) GetUserByUsername(ctx context.Context, username string) *model.
 	return mmuser
 }
 
+// GetUserCount returns the total number of cached team users.
+func (m *Client) GetUserCount() int {
+	if m == nil || m.Users == nil {
+		return 0
+	}
+
+	m.Users.mu.RLock()
+	n := len(m.Users.users)
+	m.Users.mu.RUnlock()
+
+	return n
+}
+
 func (c *UsersCache) GetUserCustomStatus(userID string) string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()

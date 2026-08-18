@@ -726,19 +726,27 @@ func (m *Client) initUserChannels(ctx context.Context) error {
 	defer m.Users.mu.RUnlock()
 
 	for _, t := range teams {
-		var joinedCount, publicCount int
+		var joinedChannels, directMessages, publicCount int
 
 		for id, ch := range m.Users.channelData {
-			if ch.TeamId == t.ID {
-				if _, joined := m.Users.joinedChannels[id]; joined {
-					joinedCount++
-				} else {
-					publicCount++
+			if ch.TeamId != t.ID {
+				continue
+			}
+
+			if _, joined := m.Users.joinedChannels[id]; joined {
+				switch ch.Type {
+				case model.ChannelTypeDirect, model.ChannelTypeGroup:
+					directMessages++
+				default:
+					joinedChannels++
 				}
+			} else {
+				publicCount++
 			}
 		}
 
-		m.logger.Debugf("found %d channels for user in team %s", joinedCount, t.Team.Name)
+		m.logger.Debugf("found %d channels for user (%d channels, %d DMs/GMs) in team %s",
+			joinedChannels+directMessages, joinedChannels, directMessages, t.Team.Name)
 		m.logger.Debugf("found %d public channels in team %s", publicCount, t.Team.Name)
 	}
 

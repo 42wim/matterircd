@@ -38,6 +38,7 @@ type Bridger interface {
 	CreateChannel(ctx context.Context, channelName string, channelType string) (*ChannelInfo, error)
 	GetChannels() []*ChannelInfo
 	GetChannel(ctx context.Context, channelID string) (*ChannelInfo, error)
+	GetChannelCount() int
 	GetChannelName(ctx context.Context, channelID string) string
 	GetLastViewedAt(ctx context.Context, channelID string) int64
 	UpdateLastViewed(ctx context.Context, channelID string)
@@ -47,6 +48,7 @@ type Bridger interface {
 	GetChannelUsers(ctx context.Context, channelID string) ([]*UserInfo, error)
 	GetUsers() []*UserInfo
 	GetUser(ctx context.Context, userID string) *UserInfo
+	GetUserCount() int
 	GetMe() *UserInfo
 	GetUserByUsername(ctx context.Context, username string) *UserInfo
 	SearchUsers(ctx context.Context, query string) ([]*UserInfo, error)

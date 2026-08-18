@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/42wim/matterircd/bridge"
@@ -69,6 +70,7 @@ type Server interface {
 	Handle(u *User)
 	Logout(u *User)
 	ChannelCount() int
+	ClientCount() int
 	UserCount() int
 	EncodeMessage(u *User, cmd string, params []string, trailing string) error
 }
@@ -95,8 +97,11 @@ type ServerConfig struct {
 }
 
 var serviceName = "service"
+var activeClients atomic.Int64
 
 func (c ServerConfig) Server() Server {
+	activeClients.Add(1)
+
 	if c.NewChannel == nil {
 		c.NewChannel = NewChannel
 	}
@@ -138,6 +143,8 @@ type server struct {
 	sync.RWMutex
 	users    map[string]*User
 	channels map[string]Channel
+
+	closeOnce sync.Once
 }
 
 func (s *server) Name() string {
@@ -309,6 +316,10 @@ func (s *server) Connect(u *User) error {
 
 // Quit will remove the user from all channels and disconnect.
 func (s *server) Quit(u *User, message string) {
+	s.closeOnce.Do(func() {
+		activeClients.Add(-1)
+	})
+
 	if u.ctx != nil && u.ctx.Err() != nil {
 		return
 	}
@@ -330,6 +341,11 @@ func (s *server) Quit(u *User, message string) {
 	s.sweep(u)
 
 	go u.Close()
+}
+
+// ClientCount returns the global count of active IRC client connections.
+func (s *server) ClientCount() int {
+	return int(activeClients.Load())
 }
 
 // Len returns the number of users connected to the server.
@@ -370,16 +386,16 @@ func (s *server) welcome(u *User) error {
 			Params:   []string{u.Nick, "CHANMODES=b,k,l,ips", "PREFIX=(ov)@+", "NETWORK=matterircd"},
 			Trailing: "are supported by this server",
 		},
-		&irc.Message{
-			Prefix:   s.Prefix(),
-			Command:  irc.RPL_LUSERCLIENT,
-			Params:   []string{u.Nick},
-			Trailing: fmt.Sprintf("There are %d users and 0 services on 1 servers", s.Len()),
-		},
 	)
 	if err != nil {
 		return err
 	}
+
+	err = CmdLusers(s, u, nil)
+	if err != nil {
+		return err
+	}
+
 	// Always include motd, even if it's empty? Seems some clients expect it (libpurple?).
 	return CmdMotd(s, u, nil)
 }
