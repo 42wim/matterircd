@@ -49,7 +49,8 @@ func (m *Client) CreatePost(ctx context.Context, post *model.Post) (*model.Post,
 
 		// Reactive RootId resolution: if the API rejected it because RootId wasn't the root post
 		if post.RootId != "" && resp != nil && resp.StatusCode == http.StatusBadRequest {
-			if rootPost, gErr := m.GetPost(ctx, post.RootId); gErr == nil && rootPost.RootId != "" {
+			rootPost, gErr := m.GetPost(ctx, post.RootId)
+			if gErr == nil && rootPost.RootId != "" {
 				post.RootId = rootPost.RootId
 				continue
 			}
