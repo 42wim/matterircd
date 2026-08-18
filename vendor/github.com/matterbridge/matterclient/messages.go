@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"strconv"
 	"strings"
 
@@ -22,9 +23,21 @@ func (m *Client) parseResponse(rmsg *model.WebSocketResponse) {
 }
 
 func (m *Client) CreatePost(ctx context.Context, post *model.Post) (*model.Post, error) {
+	if post.UserId == "" && m.User != nil {
+		post.UserId = m.User.Id
+	}
+
+	// Proactive RootId resolution: if RootId points to a reply, flatten to root post
+	if post.RootId != "" && m.postCache != nil {
+		if cached, ok := m.postCache.Get(post.RootId); ok && cached.RootId != "" {
+			post.RootId = cached.RootId
+		}
+	}
+
 	retryCount := 0
 	for {
 		m.apiLogger.Warnf("CreatePost: UserID: %s, ChannelID: %s #%d", post.UserId, post.ChannelId, retryCount)
+
 		res, resp, err := m.Client.CreatePost(ctx, post)
 		if err == nil {
 			if m.postCache != nil {
@@ -32,6 +45,15 @@ func (m *Client) CreatePost(ctx context.Context, post *model.Post) (*model.Post,
 			}
 
 			return res, nil
+		}
+
+		// Reactive RootId resolution: if the API rejected it because RootId wasn't the root post
+		if post.RootId != "" && resp != nil && resp.StatusCode == http.StatusBadRequest {
+			rootPost, gErr := m.GetPost(ctx, post.RootId)
+			if gErr == nil && rootPost.RootId != "" {
+				post.RootId = rootPost.RootId
+				continue
+			}
 		}
 
 		shouldRetry, hErr := m.HandleRetry(ctx, "CreatePost", err, retryCount, 10, resp)
