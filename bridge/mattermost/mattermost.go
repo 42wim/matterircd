@@ -275,8 +275,9 @@ func (m *Mattermost) handleWsMessage(ctx context.Context, quitChan chan struct{}
 						userInfo = " [User: " + userPtr.Username + " (ID: " + userPtr.Id + ")]"
 					}
 				} else if userStr, ok := data["user"].(string); ok && userStr != "" {
-					var summary *model.User
-					_ = json.NewDecoder(strings.NewReader(userStr)).Decode(&summary)
+					var summary model.User
+
+					_ = json.Unmarshal([]byte(userStr), &summary)
 					if summary.Username != "" {
 						userInfo = " [User: " + summary.Username + " (ID: " + summary.Id + ")]"
 					}
@@ -837,13 +838,8 @@ const (
 	blockquoteCharUnicode    = "▕"
 )
 
-//nolint:funlen,gocyclo
-func (m *Mattermost) wsActionPostSkip(ctx context.Context, rmsg *model.WebSocketEvent, logger *logrus.Entry) bool {
-	postData, ok := rmsg.GetData()["post"].(string)
-	if !ok {
-		return true
-	}
-
+//nolint:funcorder,funlen
+func (m *Mattermost) wsActionPostSkip(ctx context.Context, data *model.Post, rmsg *model.WebSocketEvent, logger *logrus.Entry) bool {
 	rc := m.cfg.Current()
 
 	customEmoji := rc.Mattermost.Formatter.CustomEmoji
@@ -856,12 +852,6 @@ func (m *Mattermost) wsActionPostSkip(ctx context.Context, rmsg *model.WebSocket
 		blockquoteChar = blockquoteCharUnicode
 	}
 	shortenMsgLen := rc.Mattermost.ShortenRepliesTo
-
-	var data model.Post
-	if err := json.NewDecoder(strings.NewReader(postData)).Decode(&data); err != nil {
-		logger.Errorf("failed to unmarshal post: %v", err)
-		return true
-	}
 
 	if data.UserId != m.GetMe().User {
 		return false
@@ -1019,14 +1009,18 @@ func (m *Mattermost) handleWsActionPost(ctx context.Context, rmsg *model.WebSock
 	}
 
 	var data model.Post
-	if err := json.NewDecoder(strings.NewReader(postData)).Decode(&data); err != nil {
+
+	err := json.Unmarshal([]byte(postData), &data)
+	if err != nil {
 		logger.Errorf("failed to unmarshal postData: %v", err)
 		return
 	}
+
 	extraProps := data.GetProps()
 
 	logger.Tracef("receiving userid %s", data.UserId)
-	if m.wsActionPostSkip(ctx, rmsg, logger) {
+
+	if m.wsActionPostSkip(ctx, &data, rmsg, logger) {
 		return
 	}
 
@@ -1482,7 +1476,9 @@ func (m *Mattermost) handleReactionEvent(ctx context.Context, rmsg *model.WebSoc
 	}
 
 	var reaction model.Reaction
-	if err := json.NewDecoder(strings.NewReader(reactionData)).Decode(&reaction); err != nil {
+
+	err := json.Unmarshal([]byte(reactionData), &reaction)
+	if err != nil {
 		logger.Errorf("failed to unmarshal reactionData: %v", err)
 		return
 	}
@@ -1697,7 +1693,7 @@ func (m *Mattermost) handleWsActionChannelUpdated(rmsg *model.WebSocketEvent, lo
 
 	var updatedChannel model.Channel
 
-	err := json.NewDecoder(strings.NewReader(channelStr)).Decode(&updatedChannel)
+	err := json.Unmarshal([]byte(channelStr), &updatedChannel)
 	if err != nil {
 		logger.Errorf("Failed to decode updated channel: %v", err)
 		return
