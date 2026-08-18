@@ -331,6 +331,7 @@ func (s *server) Quit(u *User, message string) {
 	u.eventLoopMutex.Lock()
 	if u.br != nil {
 		_ = u.br.Logout(u.ctx)
+		u.br = nil
 	}
 	u.eventLoopMutex.Unlock()
 
