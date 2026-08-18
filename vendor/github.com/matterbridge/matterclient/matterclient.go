@@ -1080,7 +1080,8 @@ func (m *Client) WsReceiver(ctx context.Context) {
 					}
 				} else if userStr, ok := data["user"].(string); ok && userStr != "" {
 					var summary UserSummary
-					_ = json.NewDecoder(strings.NewReader(userStr)).Decode(&summary)
+
+					_ = json.Unmarshal([]byte(userStr), &summary)
 					if summary.Username != "" {
 						userInfo = " [User: " + summary.Username + " (ID: " + summary.Id + ")]"
 					}
@@ -1394,7 +1395,8 @@ func (m *Client) maintainUsersCache(ctx context.Context, event *model.WebSocketE
 				u = userPtr
 			} else if userStr, isStr := userVal.(string); isStr && userStr != "" {
 				var summary UserSummary
-				_ = json.NewDecoder(strings.NewReader(userStr)).Decode(&summary)
+
+				_ = json.Unmarshal([]byte(userStr), &summary)
 				// Map it back to the required model.User for the cache functions
 				u = &model.User{
 					Id:        summary.Id,
@@ -1480,7 +1482,7 @@ func (m *Client) maintainUsersCache(ctx context.Context, event *model.WebSocketE
 		} else if postStr, ok := event.GetData()["post"].(string); ok && postStr != "" {
 			// Fallback path: Driver left it as a JSON string
 			post = &model.Post{}
-			_ = json.NewDecoder(strings.NewReader(postStr)).Decode(post)
+			_ = json.Unmarshal([]byte(postStr), post)
 		}
 
 		if post == nil || post.Id == "" {
@@ -1533,10 +1535,10 @@ func (m *Client) maintainUsersCache(ctx context.Context, event *model.WebSocketE
 			post = postPtr
 		} else if postStr, ok := event.GetData()["post"].(string); ok && postStr != "" {
 			post = &model.Post{}
-			_ = json.NewDecoder(strings.NewReader(postStr)).Decode(post)
+			_ = json.Unmarshal([]byte(postStr), post)
 		}
 
-		if m.postCache != nil && !strings.HasPrefix(post.Type, model.PostSystemMessagePrefix) {
+		if post != nil && post.Id != "" && m.postCache != nil && !strings.HasPrefix(post.Type, model.PostSystemMessagePrefix) {
 			m.postCache.Add(post.Id, post)
 		}
 
@@ -1548,7 +1550,7 @@ func (m *Client) maintainUsersCache(ctx context.Context, event *model.WebSocketE
 		} else if postStr, ok := event.GetData()["post"].(string); ok && postStr != "" {
 			var post model.Post
 
-			_ = json.NewDecoder(strings.NewReader(postStr)).Decode(&post)
+			_ = json.Unmarshal([]byte(postStr), &post)
 			postID = post.Id
 		} else if id, ok := event.GetData()["post_id"].(string); ok {
 			postID = id
@@ -1565,7 +1567,8 @@ func (m *Client) maintainUsersCache(ctx context.Context, event *model.WebSocketE
 			channel = chPtr
 		} else if chStr, ok := event.GetData()["channel"].(string); ok && chStr != "" {
 			var summary ChannelSummary
-			_ = json.NewDecoder(strings.NewReader(chStr)).Decode(&summary)
+
+			_ = json.Unmarshal([]byte(chStr), &summary)
 			channel = &model.Channel{
 				Id:          summary.Id,
 				UpdateAt:    summary.UpdateAt,
@@ -1695,7 +1698,9 @@ func (m *Client) syncJoinedChannelsCache(event *model.WebSocketEvent) {
 				ID   string            `json:"id"`
 				Type model.ChannelType `json:"type"`
 			}
-			if err := json.NewDecoder(strings.NewReader(chStr)).Decode(&ch); err == nil {
+
+			err := json.Unmarshal([]byte(chStr), &ch)
+			if err == nil {
 				chID = ch.ID
 				chType = ch.Type
 			}
