@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"net/http"
 	"regexp"
 	"sort"
 	"strconv"
@@ -92,13 +93,20 @@ func (m *Mattermost) GetReplayEvents(ctx context.Context, channelID string, sinc
 
 //nolint:funlen
 func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Event, onWsConnect func()) (bridge.Bridger, *matterclient.Client, error) {
+	rc := cfg.Current()
+
+	if !rc.Mattermost.IgnoreServerVersion {
+		ver := getServerVersion(cfg, cred)
+		if !isSupportedVersion(ver) {
+			return nil, nil, fmt.Errorf("mattermost version %s not supported", ver)
+		}
+	}
+
 	m := &Mattermost{
 		credentials: cred,
 		eventChan:   eventChan,
 		cfg:         cfg,
 	}
-
-	rc := cfg.Current()
 
 	m.dmChannelCache, _ = lru.New[string, string](128)
 	m.msgParentCache, _ = lru.New[string, CachedPost](128)
@@ -2750,4 +2758,31 @@ func (m *Mattermost) postToEvent(ctx context.Context, p *model.Post, eventType s
 			},
 		}
 	}
+}
+
+func getServerVersion(cfg *config.Config, cred bridge.Credentials) string {
+	proto := "https"
+	if cfg.Current().Mattermost.Insecure {
+		proto = "http"
+	}
+
+	resp, err := http.Get(proto + "://" + cred.Server)
+	if err != nil {
+		logger.Errorf("Failed to get mattermost version: %s", err)
+		return ""
+	}
+	defer resp.Body.Close()
+
+	return resp.Header.Get("X-Version-Id")
+}
+
+func isSupportedVersion(version string) bool {
+	prefixes := [...]string{"7.", "8.", "9.", "10.", "11."}
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(version, prefix) {
+			return true
+		}
+	}
+
+	return false
 }
