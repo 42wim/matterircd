@@ -151,6 +151,8 @@ func (u *User) Encode(msgs ...*irc.Message) (err error) {
 	}
 
 	for _, msg := range msgs {
+		msg.Trailing = strings.TrimRight(msg.Trailing, " \t\r\n")
+
 		if err := u.Conn.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil {
 			logger.Warnf("failed to set write deadline for %s: %v", u.Nick, err)
 		}
