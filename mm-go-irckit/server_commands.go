@@ -607,8 +607,6 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 			u.msgLastMutex.Lock()
 			defer u.msgLastMutex.Unlock()
 			u.msgLast[toUser.User] = [2]string{msgID, ""}
-
-			// Save the actual DM channel ID to BoltDB for replay synchronization
 			u.saveLastViewedAt(u.br.GetChannelID(u.ctx, toUser.User, ""))
 
 			if u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext {
@@ -813,10 +811,10 @@ func threadMsgChannelUser(u *User, msg *irc.Message, channelID string, toUser bo
 	defer u.msgLastMutex.Unlock()
 	u.msgLast[channelID] = [2]string{msgID, threadID}
 
-	if toUser {
-		u.saveLastViewedAt(u.br.GetChannelID(u.ctx, channelID, ""))
-	} else {
+	if !toUser {
 		u.saveLastViewedAt(channelID)
+	} else {
+		u.saveLastViewedAt(u.br.GetChannelID(u.ctx, channelID, ""))
 	}
 
 	if u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext {
