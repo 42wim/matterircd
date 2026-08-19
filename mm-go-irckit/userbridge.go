@@ -297,6 +297,9 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 		}
 	}
 
+	// Strip trailing newlines/spaces from the entire message block first
+	text = strings.TrimRight(text, " \t\r\n")
+
 	opts := utils.ProcessMessageOpts{
 		DisableEmoji:       disableEmoji,
 		CustomEmoji:        customEmoji,
@@ -309,7 +312,10 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 	}
 
 	utils.ProcessMessageText(text, opts, func(line string) {
-		if line == "" || line == trimmedPrefix || line == trimmedSuffix {
+		line = strings.TrimRight(line, " \t\r")
+
+		// Check against empty trimmed prefixes/suffixes
+		if line == trimmedPrefix || line == trimmedSuffix {
 			return
 		}
 
@@ -503,6 +509,9 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		}
 	}
 
+	// Strip trailing newlines/spaces from the entire message block first
+	text = strings.TrimRight(text, " \t\r\n")
+
 	opts := utils.ProcessMessageOpts{
 		DisableEmoji:       disableEmoji,
 		CustomEmoji:        customEmoji,
@@ -515,7 +524,10 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 	}
 
 	utils.ProcessMessageText(text, opts, func(line string) {
-		if line == "" || line == trimmedPrefix || line == trimmedSuffix {
+		line = strings.TrimRight(line, " \t\r")
+
+		// Check against empty trimmed prefixes/suffixes
+		if line == trimmedPrefix || line == trimmedSuffix {
 			return
 		}
 
