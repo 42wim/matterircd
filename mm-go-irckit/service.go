@@ -418,12 +418,13 @@ func searchUsers(u *User, toUser *User, args []string, service string) {
 	}
 }
 
-func getMattermostChannelName(u *User, channelID string) string {
+func getChannelTargetName(u *User, channelID string) string {
 	channelName := u.br.GetChannelName(u.ctx, channelID)
-	otherUserID, ok := u.br.GetDMOtherUserID(channelName, u.br.GetMe().User)
 
-	if ok {
-		return otherUserID
+	if u.br.IsDMChannelName(channelName) {
+		if dmUser := u.br.GetDMUser(u.ctx, channelName); dmUser != nil && dmUser.Nick != "" {
+			return dmUser.Nick
+		}
 	}
 
 	return channelName
@@ -543,7 +544,7 @@ func dispatchHistoricalEvent(u *User, toUser *User, event *bridge.Event, searchC
 		return
 	}
 
-	channelName := getMattermostChannelName(u, channelID)
+	channelName := getChannelTargetName(u, channelID)
 	scrollbackUser, _ := u.Srv.HasUser(searchCtx)
 
 	tsStr := time.Unix(0, createAt*int64(time.Millisecond)).Format("2006-01-02 15:04")

@@ -631,6 +631,16 @@ func (m *Mattermost) GetDMChannelName(userID1 string, userID2 string) string {
 	return m.mc.GetDMChannelName(userID1, userID2)
 }
 
+func (m *Mattermost) GetDMUser(ctx context.Context, channelName string) *bridge.UserInfo {
+	otherUserID, ok := m.mc.GetDMOtherUserID(channelName, m.mc.User.Id)
+	if !ok {
+		logger.Errorf("not a DM message, incorrect channelName: %s", channelName)
+		return nil
+	}
+
+	return m.GetUser(ctx, otherUserID)
+}
+
 func (m *Mattermost) GetDMUserIDs(channelName string) (string, string, bool) {
 	return m.mc.GetDMUserIDs(channelName)
 }
@@ -891,7 +901,7 @@ func (m *Mattermost) wsActionPostSkip(ctx context.Context, data *model.Post, rms
 	channel := m.GetChannelName(ctx, data.ChannelId)
 
 	if m.mc.IsDMChannelName(channel) {
-		receiver := m.getDMUser(ctx, channel)
+		receiver := m.GetDMUser(ctx, channel)
 		channel = receiver.Username
 	}
 
@@ -1101,9 +1111,9 @@ func (m *Mattermost) handleWsActionPost(ctx context.Context, rmsg *model.WebSock
 
 		if userUpdated == m.GetMe().Nick {
 			d.Sender = ghost
-			d.Receiver = m.getDMUser(ctx, dmchannel)
+			d.Receiver = m.GetDMUser(ctx, dmchannel)
 		} else {
-			d.Sender = m.getDMUser(ctx, dmchannel)
+			d.Sender = m.GetDMUser(ctx, dmchannel)
 			d.Receiver = ghost
 		}
 
@@ -1223,9 +1233,9 @@ func (m *Mattermost) handleWsActionPost(ctx context.Context, rmsg *model.WebSock
 
 		if ghost.Me {
 			d.Sender = ghost
-			d.Receiver = m.getDMUser(ctx, dmchannel)
+			d.Receiver = m.GetDMUser(ctx, dmchannel)
 		} else {
-			d.Sender = m.getDMUser(ctx, dmchannel)
+			d.Sender = m.GetDMUser(ctx, dmchannel)
 			d.Receiver = ghost
 		}
 
@@ -1296,11 +1306,18 @@ func (m *Mattermost) handleFileEvent(ctx context.Context, channelType string, gh
 
 	switch {
 	case channelType == "D":
+		channelName, _ := rmsg.GetData()["channel_name"].(string)
+		if channelName == "" {
+			channelName = m.GetChannelName(ctx, data.ChannelId)
+		}
+
+		dmUser := m.GetDMUser(ctx, channelName)
+
 		if ghost.Me {
 			fileEvent.Sender = ghost
-			fileEvent.Receiver = m.getDMUser(ctx, rmsg.GetData()["channel_name"])
+			fileEvent.Receiver = dmUser
 		} else {
-			fileEvent.Sender = m.getDMUser(ctx, rmsg.GetData()["channel_name"])
+			fileEvent.Sender = dmUser
 			fileEvent.Receiver = ghost
 		}
 
@@ -1517,16 +1534,17 @@ func (m *Mattermost) handleReactionEvent(ctx context.Context, rmsg *model.WebSoc
 	name := m.GetChannelName(ctx, channelID)
 	if m.mc.IsDMChannelName(name) {
 		channelType = "D"
-		dmUser := m.getDMUser(ctx, name)
+		dmUser := m.GetDMUser(ctx, name)
+
 		if dmUser == nil {
 			logger.Errorf("reaction: unable to resolve DM peer for channel %q", name)
 			return
 		}
 		if userID.Me {
-			receiver = m.getDMUser(ctx, name)
+			receiver = m.GetDMUser(ctx, name)
 		} else {
 			receiver = sender
-			sender = m.getDMUser(ctx, name)
+			sender = m.GetDMUser(ctx, name)
 		}
 	}
 
@@ -1803,17 +1821,17 @@ func (m *Mattermost) handleTypingEvent(ctx context.Context, rmsg *model.WebSocke
 	if m.mc.IsDMChannelName(name) {
 		channelType = "D"
 
-		dmUser := m.getDMUser(ctx, name)
+		dmUser := m.GetDMUser(ctx, name)
 		if dmUser == nil {
 			logger.Tracef("typing: unable to resolve DM peer for channel %q", name)
 			return
 		}
 
 		if userID.Me {
-			receiver = m.getDMUser(ctx, name)
+			receiver = m.GetDMUser(ctx, name)
 		} else {
 			receiver = sender
-			sender = m.getDMUser(ctx, name)
+			sender = m.GetDMUser(ctx, name)
 		}
 	}
 
@@ -1842,22 +1860,6 @@ func (m *Mattermost) getDMChannelID(ctx context.Context, userID string) (string,
 	m.dmChannelCache.Add(userID, dchannel.Id)
 
 	return dchannel.Id, nil
-}
-
-func (m *Mattermost) getDMUser(ctx context.Context, name interface{}) *bridge.UserInfo {
-	channelName, ok := name.(string)
-	if !ok {
-		return nil
-	}
-
-	otherUserID, ok := m.mc.GetDMOtherUserID(channelName, m.mc.User.Id)
-	if !ok {
-		logger.Errorf("not a DM message, incorrect channelID: %s", channelName)
-
-		return nil
-	}
-
-	return m.GetUser(ctx, otherUserID)
 }
 
 //nolint:funlen,gocyclo
@@ -2712,7 +2714,7 @@ func (m *Mattermost) postToEvent(ctx context.Context, p *model.Post, eventType s
 					Text:      formattedMsg,
 					ChannelID: p.ChannelId,
 					Sender:    sender,
-					Receiver:  m.getDMUser(ctx, channelName),
+					Receiver:  m.GetDMUser(ctx, channelName),
 					Files:     files,
 					MessageID: msgID,
 					ParentID:  parentID,

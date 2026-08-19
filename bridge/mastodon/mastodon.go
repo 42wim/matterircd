@@ -166,6 +166,10 @@ func (m *Mastodon) GetDMChannelName(userID1 string, userID2 string) string {
 	return ""
 }
 
+func (m *Mastodon) GetDMUser(ctx context.Context, channelName string) *bridge.UserInfo {
+	return nil
+}
+
 func (m *Mastodon) GetDMUserIDs(channelName string) (string, string, bool) {
 	return "", "", false
 }

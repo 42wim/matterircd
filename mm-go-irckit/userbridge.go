@@ -1050,11 +1050,8 @@ func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(string, string, .
 	var otherNick string
 
 	// Resolve the other participant's IRC nick for DMs
-	otherID, ok := u.br.GetDMOtherUserID(mmchannel.Name, u.br.GetMe().User)
-	if ok {
-		if info := u.br.GetUser(u.ctx, otherID); info != nil {
-			otherNick = info.Nick
-		}
+	if dmUser := u.br.GetDMUser(u.ctx, mmchannel.Name); dmUser != nil {
+		otherNick = dmUser.Nick
 	}
 
 	spoofDM := func(nick string, msg string, maxlen ...int) {
