@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -421,16 +420,12 @@ func searchUsers(u *User, toUser *User, args []string, service string) {
 
 func getMattermostChannelName(u *User, channelID string) string {
 	channelName := u.br.GetChannelName(u.ctx, channelID)
-	channelMembers := strings.Split(channelName, "__")
-
-	if len(channelMembers) != 2 {
-		return channelName
+	otherUserID, ok := u.br.GetDMOtherUserID(channelName, u.br.GetMe().User)
+	if ok {
+		return otherUserID
 	}
 
-	if channelMembers[0] == u.br.GetMe().User {
-		return channelMembers[1]
-	}
-	return channelMembers[0]
+	return channelName
 }
 
 func part(u *User, toUser *User, args []string, service string) {
@@ -487,11 +482,8 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 		channelName := strings.ReplaceAll(search, "#", "")
 		channelID = u.br.GetChannelID(u.ctx, channelName, u.br.GetMe().TeamID)
 	case exists && scrollbackUser.Ghost:
-		// We need to sort the two user IDs to construct the DM
-		// channel name.
-		userIDs := []string{u.User, scrollbackUser.User}
-		sort.Strings(userIDs)
-		channelID = u.br.GetChannelID(u.ctx, userIDs[0]+"__"+userIDs[1], u.br.GetMe().TeamID)
+		dmName := u.br.GetDMChannelName(u.User, scrollbackUser.User)
+		channelID = u.br.GetChannelID(u.ctx, dmName, u.br.GetMe().TeamID)
 	case len(search) == 26:
 		searchPostID = search
 	case strings.HasPrefix(search, "@@"):
@@ -846,11 +838,7 @@ func channelHeader(u *User, toUser *User, args []string, service string) {
 		channelName = strings.ReplaceAll(channel, "#", "")
 		channelID = u.br.GetChannelID(u.ctx, channelName, u.br.GetMe().TeamID)
 	case exists && DMUser.Ghost:
-		// We need to sort the two user IDs to construct the DM
-		// channel name.
-		userIDs := []string{u.User, DMUser.User}
-		sort.Strings(userIDs)
-		channelName = userIDs[0] + "__" + userIDs[1]
+		channelName = u.br.GetDMChannelName(u.User, DMUser.User)
 		channelID = u.br.GetChannelID(u.ctx, channelName, u.br.GetMe().TeamID)
 	default:
 		showHelp()

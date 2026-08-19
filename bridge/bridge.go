@@ -53,6 +53,11 @@ type Bridger interface {
 	GetUserByUsername(ctx context.Context, username string) *UserInfo
 	SearchUsers(ctx context.Context, query string) ([]*UserInfo, error)
 
+	GetDMChannelName(userID1 string, userID2 string) string
+	GetDMUserIDs(channelName string) (userID1, userID2 string, ok bool)
+	GetDMOtherUserID(channelName, myUserID string) (string, bool)
+	IsDMChannelName(channelName string) bool
+
 	GetTeamName(ctx context.Context, teamID string) string
 
 	GetPostsSince(ctx context.Context, channelID string, since int64) []*Event

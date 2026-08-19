@@ -340,6 +340,37 @@ func (m *Client) GetDMChannelName(userID1 string, userID2 string) string {
 	return model.GetDMNameFromIds(userID1, userID2)
 }
 
+const mattermostIDLen = 26
+
+// GetDMUserIDs extracts the two user IDs from a direct message channel name (userID1__userID2).
+// It returns ok as false if the channel name does not conform to the DM naming format.
+func (m *Client) GetDMUserIDs(channelName string) (userID1, userID2 string, ok bool) {
+	userID1, userID2, ok = strings.Cut(channelName, "__")
+	if !ok || len(userID1) != mattermostIDLen || len(userID2) != mattermostIDLen {
+		return "", "", false
+	}
+
+	return userID1, userID2, true
+}
+
+// GetDMOtherUserID extracts the opposite participant's user ID from a DM channel name.
+func (m *Client) GetDMOtherUserID(channelName, myUserID string) (string, bool) {
+	userID1, userID2, ok := m.GetDMUserIDs(channelName)
+	if !ok {
+		return "", false
+	}
+
+	if userID1 == myUserID {
+		return userID2, true
+	}
+
+	if userID2 == myUserID {
+		return userID1, true
+	}
+
+	return "", false
+}
+
 //nolint:funlen,gocognit,gocyclo
 func (m *Client) GetChannelUsers(ctx context.Context, channelID string) ([]*model.User, error) {
 	m.Users.mu.RLock()
@@ -550,6 +581,14 @@ func (m *Client) IsChannelMember(channelID string) bool {
 
 	_, exists := m.Users.joinedChannels[channelID]
 	return exists
+}
+
+// IsDMChannelName reports whether the given channel name matches the Mattermost
+// direct message naming convention.
+func (m *Client) IsDMChannelName(channelName string) bool {
+	_, _, ok := m.GetDMUserIDs(channelName)
+
+	return ok
 }
 
 func (m *Client) JoinChannel(ctx context.Context, channelID string) error {

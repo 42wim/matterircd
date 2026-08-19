@@ -361,6 +361,18 @@ func (s *Slack) GetChannelUsers(ctx context.Context, channelID string) ([]*bridg
 	return users, nil
 }
 
+func (s *Slack) GetDMChannelName(userID1 string, userID2 string) string {
+	return ""
+}
+
+func (s *Slack) GetDMUserIDs(channelName string) (userID1, userID2 string, ok bool) {
+	return "", "", false
+}
+
+func (s *Slack) GetDMOtherUserID(channelName, myUserID string) (string, bool) {
+	return "", false
+}
+
 func (s *Slack) GetUsers() []*bridge.UserInfo {
 	var users []*bridge.UserInfo
 
@@ -460,6 +472,10 @@ func (s *Slack) GetLastViewedAt(ctx context.Context, channelID string) int64 {
 
 func (s *Slack) GetPostsSince(ctx context.Context, channelID string, since int64) []*bridge.Event {
 	return []*bridge.Event{}
+}
+
+func (s *Slack) IsDMChannelName(channelName string) bool {
+	return false
 }
 
 func (s *Slack) SearchPosts(ctx context.Context, search string) []*bridge.Event {

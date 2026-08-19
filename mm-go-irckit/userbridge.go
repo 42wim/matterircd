@@ -1043,22 +1043,15 @@ func (u *User) addUsersToChannels() {
 }
 
 func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(string, string, ...int) {
-	if !strings.Contains(mmchannel.Name, "__") {
+	if !u.br.IsDMChannelName(mmchannel.Name) {
 		return u.Srv.Channel(mmchannel.ID).SpoofMessage
 	}
 
 	var otherNick string
 
 	// Resolve the other participant's IRC nick for DMs
-	parts := strings.Split(mmchannel.Name, "__")
-	if len(parts) == 2 {
-		myID := u.br.GetMe().User
-		otherID := parts[0]
-
-		if otherID == myID {
-			otherID = parts[1]
-		}
-
+	otherID, ok := u.br.GetDMOtherUserID(mmchannel.Name, u.br.GetMe().User)
+	if ok {
 		if info := u.br.GetUser(u.ctx, otherID); info != nil {
 			otherNick = info.Nick
 		}
@@ -1156,7 +1149,7 @@ func (u *User) getChannelSince(ctx context.Context, brchannel *bridge.ChannelInf
 	}
 
 	// If both server and BoltDB are 0 (or we don't have it in DB for a DM)
-	isDM := strings.Contains(brchannel.Name, "__")
+	isDM := u.br.IsDMChannelName(brchannel.Name)
 	if bestSince == 0 || (isDM && !inDB) {
 		// If Mattermost gave us a valid LastPostAt, use it (if it's newer than 31 days)
 		if brchannel.LastPostAt > 0 {
@@ -1222,7 +1215,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			}
 
 			since, sinceStr, inDB := u.getChannelSince(u.ctx, brchannel, replayCutoff)
-			isDM := strings.Contains(brchannel.Name, "__")
+			isDM := u.br.IsDMChannelName(brchannel.Name)
 
 			// If Lazy-Join is enabled AND replay strategy is "saved", ONLY join channels already known in
 			// the last saved DB. If Lazy-Join is disabled, joins all channels user is member of!
