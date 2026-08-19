@@ -631,7 +631,7 @@ func (m *Mattermost) GetDMChannelName(userID1 string, userID2 string) string {
 	return m.mc.GetDMChannelName(userID1, userID2)
 }
 
-func (m *Mattermost) GetDMUserIDs(channelName string) (userID1 string, userID2 string, ok bool) {
+func (m *Mattermost) GetDMUserIDs(channelName string) (string, string, bool) {
 	return m.mc.GetDMUserIDs(channelName)
 }
 

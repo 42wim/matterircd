@@ -166,7 +166,7 @@ func (m *Mastodon) GetDMChannelName(userID1 string, userID2 string) string {
 	return ""
 }
 
-func (m *Mastodon) GetDMUserIDs(channelName string) (userID1 string, userID2 string, ok bool) {
+func (m *Mastodon) GetDMUserIDs(channelName string) (string, string, bool) {
 	return "", "", false
 }
 
