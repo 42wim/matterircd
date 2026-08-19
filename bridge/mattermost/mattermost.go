@@ -1108,12 +1108,13 @@ func (m *Mattermost) handleWsActionPost(ctx context.Context, rmsg *model.WebSock
 		}
 
 		userUpdated, _ := extraProps["username"].(string)
+		dmUser := m.GetDMUser(ctx, dmchannel)
 
 		if userUpdated == m.GetMe().Nick {
 			d.Sender = ghost
-			d.Receiver = m.GetDMUser(ctx, dmchannel)
+			d.Receiver = dmUser
 		} else {
-			d.Sender = m.GetDMUser(ctx, dmchannel)
+			d.Sender = dmUser
 			d.Receiver = ghost
 		}
 
@@ -1231,11 +1232,13 @@ func (m *Mattermost) handleWsActionPost(ctx context.Context, rmsg *model.WebSock
 			CreateAt:  data.CreateAt,
 		}
 
+		dmUser := m.GetDMUser(ctx, dmchannel)
+
 		if ghost.Me {
 			d.Sender = ghost
-			d.Receiver = m.GetDMUser(ctx, dmchannel)
+			d.Receiver = dmUser
 		} else {
-			d.Sender = m.GetDMUser(ctx, dmchannel)
+			d.Sender = dmUser
 			d.Receiver = ghost
 		}
 
@@ -1534,17 +1537,19 @@ func (m *Mattermost) handleReactionEvent(ctx context.Context, rmsg *model.WebSoc
 	name := m.GetChannelName(ctx, channelID)
 	if m.mc.IsDMChannelName(name) {
 		channelType = "D"
+
 		dmUser := m.GetDMUser(ctx, name)
 
 		if dmUser == nil {
 			logger.Errorf("reaction: unable to resolve DM peer for channel %q", name)
 			return
 		}
+
 		if userID.Me {
-			receiver = m.GetDMUser(ctx, name)
+			receiver = dmUser
 		} else {
 			receiver = sender
-			sender = m.GetDMUser(ctx, name)
+			sender = dmUser
 		}
 	}
 
@@ -1674,7 +1679,11 @@ func (m *Mattermost) GetChannelID(ctx context.Context, name, teamID string) stri
 	}
 
 	// Fallback: Check if 'name' is a user ID or username for a DM.
-	user := m.GetUser(ctx, name)
+	var user *bridge.UserInfo
+	if model.IsValidId(name) {
+		user = m.GetUser(ctx, name)
+	}
+
 	if user == nil || user.User == "" {
 		user = m.GetUserByUsername(ctx, name)
 	}
@@ -1825,16 +1834,17 @@ func (m *Mattermost) handleTypingEvent(ctx context.Context, rmsg *model.WebSocke
 		channelType = "D"
 
 		dmUser := m.GetDMUser(ctx, name)
+
 		if dmUser == nil {
 			logger.Tracef("typing: unable to resolve DM peer for channel %q", name)
 			return
 		}
 
 		if userID.Me {
-			receiver = m.GetDMUser(ctx, name)
+			receiver = dmUser
 		} else {
 			receiver = sender
-			sender = m.GetDMUser(ctx, name)
+			sender = dmUser
 		}
 	}
 

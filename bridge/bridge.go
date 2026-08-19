@@ -55,7 +55,7 @@ type Bridger interface {
 
 	GetDMChannelName(userID1 string, userID2 string) string
 	GetDMUser(ctx context.Context, channelName string) *UserInfo
-	GetDMUserIDs(channelName string) (userID1, userID2 string, ok bool)
+	GetDMUserIDs(channelName string) (string, string, bool)
 	GetDMOtherUserID(channelName, myUserID string) (string, bool)
 	IsDMChannelName(channelName string) bool
 
