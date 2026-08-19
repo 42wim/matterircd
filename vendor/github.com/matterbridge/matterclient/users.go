@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -270,7 +271,7 @@ func (m *Client) GetUserByUsername(ctx context.Context, username string) *model.
 		}
 
 		// If user not found and the string looks like an ID, cascade to GetUser
-		if resp != nil && resp.StatusCode == 404 && model.IsValidId(username) {
+		if resp != nil && resp.StatusCode == http.StatusNotFound && model.IsValidId(username) {
 			m.logger.Debugf("GetUserByUsername: %s not found as username, attempting lookup by User ID", username)
 			return m.GetUser(ctx, username)
 		}
