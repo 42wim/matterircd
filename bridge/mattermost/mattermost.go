@@ -388,7 +388,7 @@ func (m *Mattermost) List(ctx context.Context) (map[string]string, error) {
 
 	for _, channel := range append(m.mc.GetChannels(), m.mc.GetMoreChannels()...) {
 		// FIXME: This needs to be broken up into multiple messages to fit <510 chars
-		if strings.Contains(channel.Name, "__") {
+		if m.mc.IsDMChannelName(channel.Name) {
 			continue
 		}
 
@@ -589,7 +589,7 @@ func (m *Mattermost) GetChannelName(ctx context.Context, channelID string) strin
 	channelName = m.mc.GetChannelName(ctx, channelID)
 
 	// return DM channels immediately
-	if strings.Contains(channelName, "__") {
+	if m.mc.IsDMChannelName(channelName) {
 		return channelName
 	}
 
@@ -625,6 +625,28 @@ func (m *Mattermost) GetChannelUsers(ctx context.Context, channelID string) ([]*
 	}
 
 	return users, nil
+}
+
+func (m *Mattermost) GetDMChannelName(userID1 string, userID2 string) string {
+	return m.mc.GetDMChannelName(userID1, userID2)
+}
+
+func (m *Mattermost) GetDMUser(ctx context.Context, channelName string) *bridge.UserInfo {
+	otherUserID, ok := m.mc.GetDMOtherUserID(channelName, m.mc.User.Id)
+	if !ok {
+		logger.Errorf("not a DM message, incorrect channelName: %s", channelName)
+		return nil
+	}
+
+	return m.GetUser(ctx, otherUserID)
+}
+
+func (m *Mattermost) GetDMUserIDs(channelName string) (string, string, bool) {
+	return m.mc.GetDMUserIDs(channelName)
+}
+
+func (m *Mattermost) GetDMOtherUserID(channelName, myUserID string) (string, bool) {
+	return m.mc.GetDMOtherUserID(channelName, myUserID)
 }
 
 func (m *Mattermost) GetUsers() []*bridge.UserInfo {
@@ -733,6 +755,10 @@ func (m *Mattermost) GetMe() *bridge.UserInfo {
 
 func (m *Mattermost) GetUserByUsername(ctx context.Context, username string) *bridge.UserInfo {
 	return m.createUser(m.mc.GetUserByUsername(ctx, username))
+}
+
+func (m *Mattermost) IsDMChannelName(channelName string) bool {
+	return m.mc.IsDMChannelName(channelName)
 }
 
 func (m *Mattermost) createUser(mmuser *model.User) *bridge.UserInfo {
@@ -874,8 +900,8 @@ func (m *Mattermost) wsActionPostSkip(ctx context.Context, data *model.Post, rms
 
 	channel := m.GetChannelName(ctx, data.ChannelId)
 
-	if strings.Contains(channel, "__") {
-		receiver := m.getDMUser(ctx, channel)
+	if m.mc.IsDMChannelName(channel) {
+		receiver := m.GetDMUser(ctx, channel)
 		channel = receiver.Username
 	}
 
@@ -1082,12 +1108,13 @@ func (m *Mattermost) handleWsActionPost(ctx context.Context, rmsg *model.WebSock
 		}
 
 		userUpdated, _ := extraProps["username"].(string)
+		dmUser := m.GetDMUser(ctx, dmchannel)
 
 		if userUpdated == m.GetMe().Nick {
 			d.Sender = ghost
-			d.Receiver = m.getDMUser(ctx, dmchannel)
+			d.Receiver = dmUser
 		} else {
-			d.Sender = m.getDMUser(ctx, dmchannel)
+			d.Sender = dmUser
 			d.Receiver = ghost
 		}
 
@@ -1179,7 +1206,7 @@ func (m *Mattermost) handleWsActionPost(ctx context.Context, rmsg *model.WebSock
 	if eventType == model.WebsocketEventPostEdited || eventType == model.WebsocketEventPostDeleted {
 		// check if we have an edited direct message (channels have __)
 		name := m.GetChannelName(ctx, data.ChannelId)
-		if strings.Contains(name, "__") {
+		if m.mc.IsDMChannelName(name) {
 			channelType = "D"
 		}
 		dmchannel = name
@@ -1205,11 +1232,13 @@ func (m *Mattermost) handleWsActionPost(ctx context.Context, rmsg *model.WebSock
 			CreateAt:  data.CreateAt,
 		}
 
+		dmUser := m.GetDMUser(ctx, dmchannel)
+
 		if ghost.Me {
 			d.Sender = ghost
-			d.Receiver = m.getDMUser(ctx, dmchannel)
+			d.Receiver = dmUser
 		} else {
-			d.Sender = m.getDMUser(ctx, dmchannel)
+			d.Sender = dmUser
 			d.Receiver = ghost
 		}
 
@@ -1280,11 +1309,18 @@ func (m *Mattermost) handleFileEvent(ctx context.Context, channelType string, gh
 
 	switch {
 	case channelType == "D":
+		channelName, _ := rmsg.GetData()["channel_name"].(string)
+		if channelName == "" {
+			channelName = m.GetChannelName(ctx, data.ChannelId)
+		}
+
+		dmUser := m.GetDMUser(ctx, channelName)
+
 		if ghost.Me {
 			fileEvent.Sender = ghost
-			fileEvent.Receiver = m.getDMUser(ctx, rmsg.GetData()["channel_name"])
+			fileEvent.Receiver = dmUser
 		} else {
-			fileEvent.Sender = m.getDMUser(ctx, rmsg.GetData()["channel_name"])
+			fileEvent.Sender = dmUser
 			fileEvent.Receiver = ghost
 		}
 
@@ -1499,18 +1535,21 @@ func (m *Mattermost) handleReactionEvent(ctx context.Context, rmsg *model.WebSoc
 	channelType := ""
 	channelID := rmsg.GetBroadcast().ChannelId
 	name := m.GetChannelName(ctx, channelID)
-	if strings.Contains(name, "__") {
+	if m.mc.IsDMChannelName(name) {
 		channelType = "D"
-		dmUser := m.getDMUser(ctx, name)
+
+		dmUser := m.GetDMUser(ctx, name)
+
 		if dmUser == nil {
 			logger.Errorf("reaction: unable to resolve DM peer for channel %q", name)
 			return
 		}
+
 		if userID.Me {
-			receiver = m.getDMUser(ctx, name)
+			receiver = dmUser
 		} else {
 			receiver = sender
-			sender = m.getDMUser(ctx, name)
+			sender = dmUser
 		}
 	}
 
@@ -1639,9 +1678,16 @@ func (m *Mattermost) GetChannelID(ctx context.Context, name, teamID string) stri
 		return id
 	}
 
-	// Fallback: Check if 'name' is actually a username for a DM replay.
-	// We need the Mattermost UserID to construct the DM channel string.
-	user := m.GetUserByUsername(ctx, name)
+	// Fallback: Check if 'name' is a user ID or username for a DM.
+	var user *bridge.UserInfo
+	if model.IsValidId(name) {
+		user = m.GetUser(ctx, name)
+	}
+
+	if user == nil || user.User == "" {
+		user = m.GetUserByUsername(ctx, name)
+	}
+
 	if user != nil && user.User != "" {
 		targetID := user.User
 		myID := m.mc.User.Id
@@ -1784,20 +1830,21 @@ func (m *Mattermost) handleTypingEvent(ctx context.Context, rmsg *model.WebSocke
 	name := m.GetChannelName(ctx, channelID)
 
 	// Check if this is a Direct Message
-	if strings.Contains(name, "__") {
+	if m.mc.IsDMChannelName(name) {
 		channelType = "D"
 
-		dmUser := m.getDMUser(ctx, name)
+		dmUser := m.GetDMUser(ctx, name)
+
 		if dmUser == nil {
 			logger.Tracef("typing: unable to resolve DM peer for channel %q", name)
 			return
 		}
 
 		if userID.Me {
-			receiver = m.getDMUser(ctx, name)
+			receiver = dmUser
 		} else {
 			receiver = sender
-			sender = m.getDMUser(ctx, name)
+			sender = dmUser
 		}
 	}
 
@@ -1826,30 +1873,6 @@ func (m *Mattermost) getDMChannelID(ctx context.Context, userID string) (string,
 	m.dmChannelCache.Add(userID, dchannel.Id)
 
 	return dchannel.Id, nil
-}
-
-func (m *Mattermost) getDMUser(ctx context.Context, name interface{}) *bridge.UserInfo {
-	if channel, ok := name.(string); ok {
-		channelmembers := strings.Split(channel, "__")
-		if len(channelmembers) != 2 {
-			logger.Errorf("not a DM message, incorrect channelID: %s", channel)
-			return nil
-		}
-
-		// ourself
-		if channelmembers[0] == channelmembers[1] {
-			return m.createUser(m.mc.User)
-		}
-
-		otheruser := m.GetUser(ctx, channelmembers[1])
-		if channelmembers[1] == m.mc.User.Id {
-			otheruser = m.GetUser(ctx, channelmembers[0])
-		}
-
-		return otheruser
-	}
-
-	return nil
 }
 
 //nolint:funlen,gocyclo
@@ -1937,7 +1960,7 @@ func (m *Mattermost) formatMessage(ctx context.Context, data *model.Post, eventT
 		}
 
 		channel := m.GetChannelName(ctx, previewChannelID)
-		if strings.Contains(channel, "__") {
+		if m.mc.IsDMChannelName(channel) {
 			channel = ""
 		}
 
@@ -2625,7 +2648,7 @@ func (m *Mattermost) postListToEvents(ctx context.Context, postlist interface{},
 //nolint:funlen
 func (m *Mattermost) postToEvent(ctx context.Context, p *model.Post, eventType string) *bridge.Event {
 	channelName := m.GetChannelName(ctx, p.ChannelId)
-	isDM := strings.Contains(channelName, "__")
+	isDM := m.mc.IsDMChannelName(channelName)
 
 	props := p.GetProps()
 	botname, override := props["override_username"].(string)
@@ -2704,7 +2727,7 @@ func (m *Mattermost) postToEvent(ctx context.Context, p *model.Post, eventType s
 					Text:      formattedMsg,
 					ChannelID: p.ChannelId,
 					Sender:    sender,
-					Receiver:  m.getDMUser(ctx, channelName),
+					Receiver:  m.GetDMUser(ctx, channelName),
 					Files:     files,
 					MessageID: msgID,
 					ParentID:  parentID,

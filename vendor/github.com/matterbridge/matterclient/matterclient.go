@@ -167,6 +167,8 @@ const (
 	schemeHTTP  = "http://"
 )
 
+const mattermostIDLen = 26
+
 // Mattermost has a hardcoded `PerPageMaximum = 200` & `LimitMaximum = 200`
 // See https://github.com/mattermost/mattermost/blob/master/server/channels/web/params.go
 const mattermostPerPageMax = 200

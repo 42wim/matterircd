@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -240,6 +241,13 @@ func (m *Client) GetUserByUserID(ctx context.Context, userID string) *model.User
 func (m *Client) GetUserByUsername(ctx context.Context, username string) *model.User {
 	m.Users.mu.RLock()
 
+	// Fast path: check if caller passed an already-cached User ID
+	if u, ok := m.Users.users[username]; ok {
+		m.Users.mu.RUnlock()
+		return u
+	}
+
+	// Scan cached users by username
 	for _, u := range m.Users.users {
 		if u.Username == username {
 			m.Users.mu.RUnlock()
@@ -251,6 +259,7 @@ func (m *Client) GetUserByUsername(ctx context.Context, username string) *model.
 
 	var mmuser *model.User
 
+	// Query API by Username (handles genuine 26-character usernames)
 	retryCount := 0
 	for {
 		m.apiLogger.Warnf("GetUserByUsername: User: %s #%d", username, retryCount)
@@ -261,10 +270,21 @@ func (m *Client) GetUserByUsername(ctx context.Context, username string) *model.
 			break
 		}
 
+		// If user not found and the string looks like an ID, cascade to GetUser
+		if resp != nil && resp.StatusCode == http.StatusNotFound && model.IsValidId(username) {
+			m.logger.Debugf("GetUserByUsername: %s not found as username, attempting lookup by User ID", username)
+			return m.GetUser(ctx, username)
+		}
+
 		shouldRetry, hErr := m.HandleRetry(ctx, "GetUserByUsername", err, retryCount, 10, resp)
 		if hErr == nil && shouldRetry {
 			retryCount++
 			continue
+		}
+
+		// Fallback attempt by ID if error was not retryable
+		if model.IsValidId(username) {
+			return m.GetUser(ctx, username)
 		}
 
 		m.logger.Debugf("GetUserByUsername failed to fetch missing user %s: %v", username, err)

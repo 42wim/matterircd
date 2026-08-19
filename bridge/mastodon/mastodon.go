@@ -162,6 +162,22 @@ func (m *Mastodon) GetChannelUsers(ctx context.Context, channelID string) ([]*br
 	return nil, nil
 }
 
+func (m *Mastodon) GetDMChannelName(userID1 string, userID2 string) string {
+	return ""
+}
+
+func (m *Mastodon) GetDMUser(ctx context.Context, channelName string) *bridge.UserInfo {
+	return nil
+}
+
+func (m *Mastodon) GetDMUserIDs(channelName string) (string, string, bool) {
+	return "", "", false
+}
+
+func (m *Mastodon) GetDMOtherUserID(channelName, myUserID string) (string, bool) {
+	return "", false
+}
+
 func (m *Mastodon) GetUsers() []*bridge.UserInfo {
 	return []*bridge.UserInfo{}
 }
@@ -249,6 +265,10 @@ func (m *Mastodon) GetPostThread(ctx context.Context, postID string) []*bridge.E
 
 func (m *Mastodon) GetChannelID(ctx context.Context, name, teamID string) string {
 	return ""
+}
+
+func (m *Mastodon) IsDMChannelName(channelName string) bool {
+	return false
 }
 
 func (m *Mastodon) loginToMastodon() (*mastodon.Client, error) {
