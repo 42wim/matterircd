@@ -7,7 +7,6 @@ import (
 	"math"
 	"math/rand"
 	"net"
-	"net/http"
 	"sort"
 	"strings"
 	"sync"
@@ -1628,11 +1627,7 @@ func (u *User) loginTo(protocol string) error {
 		u.br, err = slack.New(u.cfg, u.Credentials, u.eventChan, u.addUsersToChannels)
 	case "mattermost":
 		u.eventChan = make(chan *bridge.Event)
-		if u.cfg.Mattermost().IgnoreServerVersion || strings.HasPrefix(u.getMattermostVersion(), "7.") || strings.HasPrefix(u.getMattermostVersion(), "8.") || strings.HasPrefix(u.getMattermostVersion(), "9.") || strings.HasPrefix(u.getMattermostVersion(), "10.") || strings.HasPrefix(u.getMattermostVersion(), "11.") {
-			u.br, _, err = mattermost.New(u.ctx, u.cfg, u.Credentials, u.eventChan, u.addUsersToChannels)
-		} else {
-			return fmt.Errorf("mattermost version %s not supported", u.getMattermostVersion())
-		}
+		u.br, _, err = mattermost.New(u.ctx, u.cfg, u.Credentials, u.eventChan, u.addUsersToChannels)
 	}
 	if err != nil {
 		u.eventLoopMutex.Lock()
@@ -1896,23 +1891,6 @@ func (u *User) getGlobalLastEventTime() int64 {
 	})
 
 	return timestamp
-}
-
-func (u *User) getMattermostVersion() string {
-	proto := "https"
-	if u.cfg.Mattermost().Insecure {
-		proto = "http"
-	}
-
-	resp, err := http.Get(proto + "://" + u.Credentials.Server)
-	if err != nil {
-		logger.Errorf("Failed to get mattermost version: %s", err)
-		return ""
-	}
-
-	defer resp.Body.Close()
-
-	return resp.Header.Get("X-Version-Id")
 }
 
 func (u *User) handleBannerChangeEvent(e *bridge.BannerChangeEvent) {
