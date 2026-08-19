@@ -1673,9 +1673,12 @@ func (m *Mattermost) GetChannelID(ctx context.Context, name, teamID string) stri
 		return id
 	}
 
-	// Fallback: Check if 'name' is actually a username for a DM replay.
-	// We need the Mattermost UserID to construct the DM channel string.
-	user := m.GetUserByUsername(ctx, name)
+	// Fallback: Check if 'name' is a user ID or username for a DM.
+	user := m.GetUser(ctx, name)
+	if user == nil || user.User == "" {
+		user = m.GetUserByUsername(ctx, name)
+	}
+
 	if user != nil && user.User != "" {
 		targetID := user.User
 		myID := m.mc.User.Id

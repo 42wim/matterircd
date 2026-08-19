@@ -340,8 +340,6 @@ func (m *Client) GetDMChannelName(userID1 string, userID2 string) string {
 	return model.GetDMNameFromIds(userID1, userID2)
 }
 
-const mattermostIDLen = 26
-
 // GetDMUserIDs extracts the two user IDs from a direct message channel name (userID1__userID2).
 // It returns ok as false if the channel name does not conform to the DM naming format.
 func (m *Client) GetDMUserIDs(channelName string) (string, string, bool) {
