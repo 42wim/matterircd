@@ -365,7 +365,7 @@ func (s *Slack) GetDMChannelName(userID1 string, userID2 string) string {
 	return ""
 }
 
-func (s *Slack) GetDMUserIDs(channelName string) (userID1, userID2 string, ok bool) {
+func (s *Slack) GetDMUserIDs(channelName string) (userID1 string, userID2 string, ok bool) {
 	return "", "", false
 }
 

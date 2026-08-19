@@ -421,6 +421,7 @@ func searchUsers(u *User, toUser *User, args []string, service string) {
 func getMattermostChannelName(u *User, channelID string) string {
 	channelName := u.br.GetChannelName(u.ctx, channelID)
 	otherUserID, ok := u.br.GetDMOtherUserID(channelName, u.br.GetMe().User)
+
 	if ok {
 		return otherUserID
 	}
