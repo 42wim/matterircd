@@ -337,7 +337,10 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 		}
 	}
 
-	var pendingEmpty []string
+	var (
+		pendingEmpty []string
+		hasEmitted   bool
+	)
 
 	utils.ProcessMessageText(text, opts, func(line string) {
 		line = strings.TrimRight(line, " \t\r")
@@ -356,11 +359,18 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 		for _, pending := range pendingEmpty {
 			emitLine(pending)
 		}
-
 		pendingEmpty = pendingEmpty[:0]
 
 		emitLine(line)
+		hasEmitted = true
 	})
+
+	// If the entire message consisted solely of markers (e.g. literal "|" or ">"), don't drop it completely
+	if !hasEmitted && len(pendingEmpty) > 0 {
+		for _, pending := range pendingEmpty {
+			emitLine(pending)
+		}
+	}
 
 	if u.br.Protocol() == "mattermost" && !u.cfg.Mattermost().DisableAutoView {
 		u.updateLastViewed(event.ChannelID)
@@ -554,7 +564,10 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		}
 	}
 
-	var pendingEmpty []string
+	var (
+		pendingEmpty []string
+		hasEmitted   bool
+	)
 
 	utils.ProcessMessageText(text, opts, func(line string) {
 		line = strings.TrimRight(line, " \t\r")
@@ -573,11 +586,18 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		for _, pending := range pendingEmpty {
 			emitLine(pending)
 		}
-
 		pendingEmpty = pendingEmpty[:0]
 
 		emitLine(line)
+		hasEmitted = true
 	})
+
+	// If the entire message consisted solely of markers (e.g. literal "|" or ">"), don't drop it completely
+	if !hasEmitted && len(pendingEmpty) > 0 {
+		for _, pending := range pendingEmpty {
+			emitLine(pending)
+		}
+	}
 
 	if u.br.Protocol() == "mattermost" && !u.cfg.Mattermost().DisableAutoView {
 		u.updateLastViewed(event.ChannelID)

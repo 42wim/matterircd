@@ -2513,11 +2513,6 @@ func extractPreviewData(metadata *model.PostMetadata) (string, string, string, i
 
 //nolint:funlen
 func (m *Mattermost) parsePreviewPost(b *strings.Builder, user string, channel string, text string, replyCount int64, lastReplyAt int64) {
-	// If the main message builder already has content, add a newline before our preview
-	if b.Len() > 0 {
-		b.WriteByte('\n')
-	}
-
 	rc := m.cfg.Current()
 
 	useUnicode := rc.Mattermost.Formatter.Unicode
@@ -2548,35 +2543,48 @@ func (m *Mattermost) parsePreviewPost(b *strings.Builder, user string, channel s
 	b.Grow(len(text) + 128)
 	prefix := prefixChar + spaceChar
 
-	b.WriteString(prefix)
-	b.WriteString("\x02@")
-	b.WriteString(user)
-	b.WriteString("\x02 wrote")
-	if channel != "" {
-		b.WriteString(" in \x1d")
-		b.WriteString(channel)
-		b.WriteByte('\x1d')
-	}
-
-	// Append reply metadata if replies exist
-	if replyCount > 0 {
-		b.WriteString(" (")
-		b.WriteString(strconv.FormatInt(replyCount, 10))
-
-		if replyCount == 1 {
-			b.WriteString(" reply")
-		} else {
-			b.WriteString(" replies")
+	headerWritten := false
+	writeHeader := func() {
+		if headerWritten {
+			return
 		}
 
-		b.WriteString(", last at ")
-		// Mattermost timestamps are in Unix milliseconds
-		t := time.Unix(lastReplyAt/1000, 0)
-		b.WriteString(t.Format("2006-01-02 15:04:05"))
-		b.WriteByte(')')
-	}
+		// If the main message builder already has content, add a newline before our preview
+		if b.Len() > 0 {
+			b.WriteByte('\n')
+		}
 
-	b.WriteString(":\n")
+		b.WriteString(prefix)
+		b.WriteString("\x02@")
+		b.WriteString(user)
+		b.WriteString("\x02 wrote")
+		if channel != "" {
+			b.WriteString(" in \x1d")
+			b.WriteString(channel)
+			b.WriteByte('\x1d')
+		}
+
+		// Append reply metadata if replies exist
+		if replyCount > 0 {
+			b.WriteString(" (")
+			b.WriteString(strconv.FormatInt(replyCount, 10))
+
+			if replyCount == 1 {
+				b.WriteString(" reply")
+			} else {
+				b.WriteString(" replies")
+			}
+
+			b.WriteString(", last at ")
+			// Mattermost timestamps are in Unix milliseconds
+			t := time.Unix(lastReplyAt/1000, 0)
+			b.WriteString(t.Format("2006-01-02 15:04:05"))
+			b.WriteByte(')')
+		}
+
+		b.WriteByte(':')
+		headerWritten = true
+	}
 
 	text = strings.TrimRight(text, " \t\r\n")
 
@@ -2596,24 +2604,21 @@ func (m *Mattermost) parsePreviewPost(b *strings.Builder, user string, channel s
 
 	var pendingLines []string
 
-	first := true
 	utils.ProcessMessageText(text, opts, func(line string) {
-		line = strings.TrimRight(line, " \t\r\u00a0")
+		line = strings.TrimRight(line, " \t\r")
 		trimmed := strings.TrimSpace(line)
 
+		// Check for empty or style-only lines
 		if trimmed == "" || trimmed == trimmedCodeBlockPrefix || trimmed == trimmedBlockquoteChar {
 			pendingLines = append(pendingLines, line)
 
 			return
 		}
 
+		writeHeader()
+
 		for _, pending := range pendingLines {
-			if !first {
-				b.WriteByte('\n')
-			}
-
-			first = false
-
+			b.WriteByte('\n')
 			b.WriteString(prefix)
 			b.WriteString(pending)
 		}
@@ -2622,11 +2627,7 @@ func (m *Mattermost) parsePreviewPost(b *strings.Builder, user string, channel s
 
 		// Mirror original behavior: write newline before subsequent lines,
 		// avoiding a trailing newline at the very end.
-		if !first {
-			b.WriteByte('\n')
-		}
-
-		first = false
+		b.WriteByte('\n')
 		b.WriteString(prefix)
 		b.WriteString(line)
 	})
