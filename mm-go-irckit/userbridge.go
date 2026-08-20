@@ -1122,6 +1122,11 @@ func (u *User) getChannelSince(ctx context.Context, brchannel *bridge.ChannelInf
 
 			return replayCutoff, "cutoff-fallback", false
 		}
+
+		if replayCutoff > 0 && serverSince < replayCutoff {
+			return replayCutoff, "server-clamped", false
+		}
+
 		return serverSince, "server", false
 	}
 
@@ -1144,6 +1149,7 @@ func (u *User) getChannelSince(ctx context.Context, brchannel *bridge.ChannelInf
 					inDB = true
 				}
 			}
+
 			return nil
 		})
 	}
@@ -1158,20 +1164,37 @@ func (u *User) getChannelSince(ctx context.Context, brchannel *bridge.ChannelInf
 
 	// If both server and BoltDB are 0 (or we don't have it in DB for a DM)
 	isDM := u.br.IsDMChannelName(brchannel.Name)
+
+	if strategy == "saved" && !inDB {
+		return replayCutoff, "cutoff-fallback", false
+	}
+
 	if bestSince == 0 || (isDM && !inDB) {
-		// If Mattermost gave us a valid LastPostAt, use it (if it's newer than 31 days)
+		// If Mattermost gave us a valid LastPostAt, use it (if it's newer than the cutoff)
 		if brchannel.LastPostAt > 0 {
+			if replayCutoff > 0 && brchannel.LastPostAt < replayCutoff {
+				return replayCutoff, "cutoff-fallback", inDB
+			}
+
 			return brchannel.LastPostAt, "lastpost-fallback", inDB
 		}
 
 		// If Mattermost failed, use our Global Last Event Timestamp
 		globalSince := u.getGlobalLastEventTime()
 		if globalSince > 0 {
+			if replayCutoff > 0 && globalSince < replayCutoff {
+				return replayCutoff, "cutoff-fallback", inDB
+			}
+
 			return globalSince, "global-event-fallback", inDB
 		}
 
 		// Only if it's the very first time booting up
 		return replayCutoff, "cutoff-fallback", inDB
+	}
+
+	if replayCutoff > 0 && bestSince < replayCutoff {
+		return replayCutoff, source + "-clamped", inDB
 	}
 
 	return bestSince, source, inDB
@@ -1225,16 +1248,24 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			since, sinceStr, inDB := u.getChannelSince(u.ctx, brchannel, replayCutoff)
 			isDM := u.br.IsDMChannelName(brchannel.Name)
 
+			// Determine if this channel is explicitly whitelisted in the config
+			chName := u.Srv.Channel(brchannel.ID).String()
+			jo := u.br.BridgeConfig().JoinOnly
+			ji := u.br.BridgeConfig().JoinInclude
+			isWhitelisted := (len(jo) > 0 && stringInRegexp(chName, jo)) || (len(ji) > 0 && stringInRegexp(chName, ji))
+
 			// If Lazy-Join is enabled AND replay strategy is "saved", ONLY join channels already known in
 			// the last saved DB. If Lazy-Join is disabled, joins all channels user is member of!
-			if strategy == "saved" && lazyJoin && !inDB && !isDM {
+			// Explicitly whitelisted channels bypass this!
+			if strategy == "saved" && lazyJoin && !inDB && !isDM && !isWhitelisted {
 				continue
 			}
 
 			// Dormancy Filter for Public Channels
 			// DMs bypass this because they are already strictly filtered by
 			// DefaultDMOfflineThreshold upstream in addUsersToChannels().
-			if lazyJoin && !isDM {
+			// Explicitly whitelisted channels bypass this!
+			if lazyJoin && !isDM && !isWhitelisted {
 				u.eventLoopMutex.Lock()
 				syncTime := u.lastSync
 				u.eventLoopMutex.Unlock()
@@ -1256,7 +1287,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			}
 
 			// Replay Window Cap (Applies to ALL channels)
-			if since > 0 && since < replayCutoff {
+			if replayCutoff > 0 && since > 0 && since < replayCutoff {
 				logger.Infof("Capping replay history for %s to %s (original since: %s)",
 					brchannel.Name,
 					replayDuration,
