@@ -947,7 +947,14 @@ func (m *Client) wsConnect(ctx context.Context) {
 	m.WsConnected = true
 }
 
-func (m *Client) doCheckAlive(ctx context.Context) error {
+//nolint:funcorder
+func (m *Client) doCheckAlive(ctx context.Context) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("websocket ping panic (connection closed): %v", r)
+		}
+	}()
+
 	if m.WsClient != nil && m.WsClient.ListenError != nil {
 		return fmt.Errorf("websocket listen error: %w", m.WsClient.ListenError)
 	}
