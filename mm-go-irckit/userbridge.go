@@ -359,9 +359,11 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 		for _, pending := range pendingEmpty {
 			emitLine(pending)
 		}
+
 		pendingEmpty = pendingEmpty[:0]
 
 		emitLine(line)
+
 		hasEmitted = true
 	})
 
@@ -586,9 +588,11 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		for _, pending := range pendingEmpty {
 			emitLine(pending)
 		}
+
 		pendingEmpty = pendingEmpty[:0]
 
 		emitLine(line)
+
 		hasEmitted = true
 	})
 

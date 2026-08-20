@@ -2558,6 +2558,7 @@ func (m *Mattermost) parsePreviewPost(b *strings.Builder, user string, channel s
 		b.WriteString("\x02@")
 		b.WriteString(user)
 		b.WriteString("\x02 wrote")
+
 		if channel != "" {
 			b.WriteString(" in \x1d")
 			b.WriteString(channel)
@@ -2583,6 +2584,7 @@ func (m *Mattermost) parsePreviewPost(b *strings.Builder, user string, channel s
 		}
 
 		b.WriteByte(':')
+
 		headerWritten = true
 	}
 
