@@ -230,11 +230,7 @@ func (u *User) getMarkdownBlockCodePrefix() (string, string) {
 func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 	if u.br.Protocol() == "mattermost" && u.cfg.Mattermost().ShowMentions {
 		for _, m := range u.MentionKeys {
-			if m == u.Nick {
-				continue
-			}
-
-			if m == "" {
+			if m == u.Nick || m == "" {
 				continue
 			}
 
@@ -269,6 +265,10 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 		}
 		text, prefix, suffix, showContext, maxlen = u.handleMessageThreadContext(prefixUser, event.MessageID, event.ParentID, event.Event, text)
 	}
+
+	trimmedBlockQuoteDefault := strings.TrimSpace(blockQuoteCharDefault)
+	trimmedBlockQuote := strings.TrimSpace(blockQuoteChar)
+	trimmedCodeBlock := strings.TrimSpace(codeBlockPrefix)
 	trimmedPrefix := strings.TrimSpace(prefix)
 	trimmedSuffix := strings.TrimSpace(suffix)
 
@@ -311,14 +311,7 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 		InlineCodeChar:     inlineCode,
 	}
 
-	utils.ProcessMessageText(text, opts, func(line string) {
-		line = strings.TrimRight(line, " \t\r")
-
-		// Check against empty trimmed prefixes/suffixes
-		if line == trimmedPrefix || line == trimmedSuffix {
-			return
-		}
-
+	emitLine := func(line string) {
 		if showContext || addPrefix {
 			line = prefix + line + suffix
 			addPrefix = false
@@ -342,7 +335,44 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 			// Spoof as them, target OUR nick
 			u.MsgSpoofUser(u.createUserFromInfo(event.Sender), u.Nick, line, len(line))
 		}
+	}
+
+	var (
+		pendingEmpty []string
+		hasEmitted   bool
+	)
+
+	utils.ProcessMessageText(text, opts, func(line string) {
+		line = strings.TrimRight(line, " \t\r")
+		trimmedLine := strings.TrimSpace(line)
+
+		isEmpty := trimmedLine == "" || trimmedLine == trimmedPrefix || trimmedLine == trimmedSuffix ||
+			trimmedLine == trimmedBlockQuote || trimmedLine == trimmedCodeBlock ||
+			trimmedLine == trimmedBlockQuoteDefault
+
+		if isEmpty {
+			pendingEmpty = append(pendingEmpty, line)
+
+			return
+		}
+
+		for _, pending := range pendingEmpty {
+			emitLine(pending)
+		}
+
+		pendingEmpty = pendingEmpty[:0]
+
+		emitLine(line)
+
+		hasEmitted = true
 	})
+
+	// If the entire message consisted solely of markers (e.g. literal "|" or ">"), don't drop it completely
+	if !hasEmitted && len(pendingEmpty) > 0 {
+		for _, pending := range pendingEmpty {
+			emitLine(pending)
+		}
+	}
 
 	if u.br.Protocol() == "mattermost" && !u.cfg.Mattermost().DisableAutoView {
 		u.updateLastViewed(event.ChannelID)
@@ -445,11 +475,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 
 	if u.br.Protocol() == "mattermost" && u.cfg.Mattermost().ShowMentions {
 		for _, m := range u.MentionKeys {
-			if m == u.Nick {
-				continue
-			}
-
-			if m == "" {
+			if m == u.Nick || m == "" {
 				continue
 			}
 
@@ -481,6 +507,9 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		text, prefix, suffix, showContext, maxlen = u.handleMessageThreadContext(event.ChannelID, event.MessageID, event.ParentID, event.Event, text)
 	}
 
+	trimmedBlockQuoteDefault := strings.TrimSpace(blockQuoteCharDefault)
+	trimmedBlockQuote := strings.TrimSpace(blockQuoteChar)
+	trimmedCodeBlock := strings.TrimSpace(codeBlockPrefix)
 	trimmedPrefix := strings.TrimSpace(prefix)
 	trimmedSuffix := strings.TrimSpace(suffix)
 
@@ -523,14 +552,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		InlineCodeChar:     inlineCode,
 	}
 
-	utils.ProcessMessageText(text, opts, func(line string) {
-		line = strings.TrimRight(line, " \t\r")
-
-		// Check against empty trimmed prefixes/suffixes
-		if line == trimmedPrefix || line == trimmedSuffix {
-			return
-		}
-
+	emitLine := func(line string) {
 		if showContext || addPrefix {
 			line = prefix + line + suffix
 			addPrefix = false
@@ -542,7 +564,44 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		default:
 			ch.SpoofMessage(nick, line, len(line))
 		}
+	}
+
+	var (
+		pendingEmpty []string
+		hasEmitted   bool
+	)
+
+	utils.ProcessMessageText(text, opts, func(line string) {
+		line = strings.TrimRight(line, " \t\r")
+		trimmedLine := strings.TrimSpace(line)
+
+		isEmpty := trimmedLine == "" || trimmedLine == trimmedPrefix || trimmedLine == trimmedSuffix ||
+			trimmedLine == trimmedBlockQuote || trimmedLine == trimmedCodeBlock ||
+			trimmedLine == trimmedBlockQuoteDefault
+
+		if isEmpty {
+			pendingEmpty = append(pendingEmpty, line)
+
+			return
+		}
+
+		for _, pending := range pendingEmpty {
+			emitLine(pending)
+		}
+
+		pendingEmpty = pendingEmpty[:0]
+
+		emitLine(line)
+
+		hasEmitted = true
 	})
+
+	// If the entire message consisted solely of markers (e.g. literal "|" or ">"), don't drop it completely
+	if !hasEmitted && len(pendingEmpty) > 0 {
+		for _, pending := range pendingEmpty {
+			emitLine(pending)
+		}
+	}
 
 	if u.br.Protocol() == "mattermost" && !u.cfg.Mattermost().DisableAutoView {
 		u.updateLastViewed(event.ChannelID)
