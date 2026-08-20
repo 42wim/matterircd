@@ -171,7 +171,7 @@ func (u *User) Encode(msgs ...*irc.Message) (err error) {
 		switch msg.Command {
 		case irc.PONG, irc.TOPIC:
 			logger.Tracef("-> %q", msg.String())
-		case irc.RPL_ENDOFBANLIST, irc.RPL_NAMREPLY:
+		case irc.RPL_ENDOFBANLIST, irc.RPL_NAMREPLY, irc.RPL_WHOREPLY:
 			logger.Tracef("-> %q", msg.String())
 		default:
 			if strings.Contains(msg.Command, "@+typing=active") {
