@@ -2578,6 +2578,8 @@ func (m *Mattermost) parsePreviewPost(b *strings.Builder, user string, channel s
 
 	b.WriteString(":\n")
 
+	text = strings.TrimRight(text, " \t\r\n")
+
 	opts := utils.ProcessMessageOpts{
 		DisableEmoji:       disableEmoji,
 		CustomEmoji:        customEmoji,
@@ -2589,9 +2591,35 @@ func (m *Mattermost) parsePreviewPost(b *strings.Builder, user string, channel s
 		InlineCodeChar:     inlineCode,
 	}
 
-	first := true
+	trimmedBlockquoteChar := strings.TrimSpace(blockquoteChar)
+	trimmedCodeBlockPrefix := strings.TrimSpace(codeBlockPrefix)
 
+	var pendingLines []string
+
+	first := true
 	utils.ProcessMessageText(text, opts, func(line string) {
+		line = strings.TrimRight(line, " \t\r\u00a0")
+		trimmed := strings.TrimSpace(line)
+
+		if trimmed == "" || trimmed == trimmedCodeBlockPrefix || trimmed == trimmedBlockquoteChar {
+			pendingLines = append(pendingLines, line)
+
+			return
+		}
+
+		for _, pending := range pendingLines {
+			if !first {
+				b.WriteByte('\n')
+			}
+
+			first = false
+
+			b.WriteString(prefix)
+			b.WriteString(pending)
+		}
+
+		pendingLines = pendingLines[:0]
+
 		// Mirror original behavior: write newline before subsequent lines,
 		// avoiding a trailing newline at the very end.
 		if !first {
@@ -2603,7 +2631,6 @@ func (m *Mattermost) parsePreviewPost(b *strings.Builder, user string, channel s
 		b.WriteString(line)
 	})
 }
-
 
 func (m *Mattermost) postListToEvents(ctx context.Context, postlist interface{}, eventType string, since int64) []*bridge.Event {
 	if postlist == nil {
