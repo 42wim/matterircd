@@ -1307,11 +1307,10 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			since, sinceStr, inDB := u.getChannelSince(u.ctx, brchannel, replayCutoff)
 			isDM := u.br.IsDMChannelName(brchannel.Name)
 
-			// Determine if this channel is explicitly whitelisted in the config
+			// Determine if this channel is explicitly whitelisted to bypass LazyJoin
 			chName := u.Srv.Channel(brchannel.ID).String()
-			jo := u.br.BridgeConfig().JoinOnly
-			ji := u.br.BridgeConfig().JoinInclude
-			isWhitelisted := (len(jo) > 0 && stringInRegexp(chName, jo)) || (len(ji) > 0 && stringInRegexp(chName, ji))
+			lje := u.cfg.Mattermost().LazyJoinExclude
+			isWhitelisted := len(lje) > 0 && stringInRegexp(chName, lje)
 
 			// If Lazy-Join is enabled AND replay strategy is "saved", ONLY join channels already known in
 			// the last saved DB. If Lazy-Join is disabled, joins all channels user is member of!
