@@ -3,6 +3,7 @@ package irckit
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 	"math/rand"
@@ -10,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	bolt "go.etcd.io/bbolt"
@@ -54,6 +56,8 @@ type UserBridge struct {
 	msgMapIndexMutex sync.RWMutex
 	msgMapIndex      map[string]map[int]string
 
+	requestedChannels atomic.Pointer[map[string]struct{}]
+
 	updateCounterMutex sync.Mutex
 	updateCounter      map[string]time.Time
 }
@@ -74,6 +78,9 @@ func NewUserBridge(c net.Conn, srv Server, cfg *config.Config, db *bolt.DB) *Use
 	u.msgCounter = make(map[string]int)
 	u.updateCounter = make(map[string]time.Time)
 	u.eventChan = make(chan *bridge.Event, 1000)
+
+	initialMap := make(map[string]struct{})
+	u.requestedChannels.Store(&initialMap)
 
 	// used for login
 	u.createService("mattermost", "loginservice")
@@ -1314,13 +1321,16 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			}
 
 			lje := u.cfg.Mattermost().LazyJoinExclude
-			isWhitelisted := len(lje) > 0 && (stringInRegexp(channelName, lje) || stringInRegexp("#"+channelName, lje))
+			isConfigWhitelisted := len(lje) > 0 && (stringInRegexp(channelName, lje) || stringInRegexp("#"+channelName, lje))
 
-			// If Lazy-Join is enabled AND replay strategy is "saved", ONLY join channels already known in
-			// the last saved DB. If Lazy-Join is disabled, joins all channels user is member of!
-			// Explicitly whitelisted channels bypass this!
-			if strategy == "saved" && lazyJoin && !inDB && !isDM && !isWhitelisted {
-				continue
+			isRequested := u.isRequestedChannel(channelName)
+			if !isRequested && channelName != brchannel.Name {
+				isRequested = u.isRequestedChannel(brchannel.Name)
+			}
+
+			isWhitelisted := isConfigWhitelisted || isRequested
+			if lazyJoin && isWhitelisted {
+				logger.Debugf("Whitelisted channel from LazyJoin: %s", channelName)
 			}
 
 			// Dormancy Filter for Public Channels
@@ -1328,6 +1338,16 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			// DefaultDMOfflineThreshold upstream in addUsersToChannels().
 			// Explicitly whitelisted channels bypass this!
 			if lazyJoin && !isDM && !isWhitelisted {
+				// Strategy "saved": require prior presence in local BoltDB
+				if strategy == "saved" && !inDB {
+					continue
+				}
+
+				// Strategies "server" & "hybrid": consult server channel state and skip deleted channels
+				if (strategy == "server" || strategy == "hybrid") && brchannel.DeleteAt > 0 {
+					continue
+				}
+
 				u.eventLoopMutex.Lock()
 				syncTime := u.lastSync
 				u.eventLoopMutex.Unlock()
@@ -1372,6 +1392,11 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 						success = true
 
 						break
+					}
+
+					// Fast exit on disconnect / shutdown
+					if errors.Is(syncErr, context.Canceled) || u.ctx.Err() != nil {
+						return
 					}
 
 					logger.Warnf("Failed to sync channel %s (attempt %d/3): %v", brchannel.Name, attempts, syncErr)
@@ -1581,6 +1606,14 @@ func (u *User) MsgSpoofUser(sender *User, rcvuser string, text string, maxlen ..
 }
 
 func (u *User) syncChannel(id string, name string) error {
+	if u.ctx.Err() != nil {
+		return u.ctx.Err()
+	}
+
+	if u.br == nil {
+		return context.Canceled
+	}
+
 	users, err := u.br.GetChannelUsers(u.ctx, id)
 	if err != nil {
 		logger.Error(err)
@@ -2087,4 +2120,55 @@ func (u *User) handleTyping(e *bridge.TypingEvent) {
 	}
 
 	_ = u.Encode(msg)
+}
+
+func (u *User) addRequestedChannels(channelNames []string) {
+	nameMap := make(map[string]struct{}, len(channelNames))
+	for _, raw := range channelNames {
+		name := strings.TrimPrefix(raw, "#")
+		if name != "" && name != "&messages" && name != "&users" { //nolint:goconst
+			nameMap[name] = struct{}{}
+		}
+	}
+
+	if len(nameMap) == 0 {
+		return
+	}
+
+	for {
+		currentPtr := u.requestedChannels.Load()
+		currentLen := 0
+
+		if currentPtr != nil {
+			currentLen = len(*currentPtr)
+		}
+
+		newMap := make(map[string]struct{}, currentLen+len(nameMap))
+
+		if currentPtr != nil {
+			for k := range *currentPtr {
+				newMap[k] = struct{}{}
+			}
+		}
+
+		for k := range nameMap {
+			newMap[k] = struct{}{}
+		}
+
+		if u.requestedChannels.CompareAndSwap(currentPtr, &newMap) {
+			return
+		}
+	}
+}
+
+func (u *User) isRequestedChannel(channelName string) bool {
+	m := u.requestedChannels.Load()
+	if m == nil {
+		return false
+	}
+
+	name := strings.TrimPrefix(channelName, "#")
+	_, ok := (*m)[name]
+
+	return ok
 }
