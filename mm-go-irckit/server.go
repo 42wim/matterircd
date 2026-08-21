@@ -526,6 +526,10 @@ outerloop:
 			case irc.PASS:
 				u.Pass = msg.Params
 			case irc.JOIN:
+				if len(msg.Params) > 0 {
+					channels := strings.Split(msg.Params[0], ",")
+					u.addRequestedChannels(channels)
+				}
 				s.EncodeMessage(u, irc.ERR_NOTREGISTERED, []string{"*"}, "Please register first")
 			// https://ircv3.net/specs/extensions/capability-negotiation.html
 			case irc.CAP:
@@ -549,7 +553,49 @@ outerloop:
 			s.u = u
 
 			err := s.welcome(u)
-			if err == nil && u.Pass != nil {
+			if err != nil {
+				return err
+			}
+
+			// Wait briefly for the client's auto-JOIN burst sent immediately after MOTD
+			drainTimer := time.NewTimer(500 * time.Millisecond)
+			defer drainTimer.Stop()
+
+		postWelcomeLoop:
+			for {
+				select {
+				case postMsg := <-u.DecodeCh:
+					if postMsg == nil {
+						break postWelcomeLoop
+					}
+
+					if postMsg.Command == irc.JOIN && len(postMsg.Params) > 0 {
+						channels := strings.Split(postMsg.Params[0], ",")
+						u.addRequestedChannels(channels)
+						logger.Debugf("Handshake captured autojoin channels: %v", channels)
+
+						// Reset timer to quickly catch any subsequent split JOIN lines
+						if !drainTimer.Stop() {
+							select {
+							case <-drainTimer.C:
+							default:
+							}
+						}
+
+						drainTimer.Reset(100 * time.Millisecond)
+
+						continue
+					}
+
+					// Route any non-JOIN message received during the wait window
+					_ = s.commands.Run(s, u, postMsg)
+
+				case <-drainTimer.C:
+					break postWelcomeLoop
+				}
+			}
+
+			if u.Pass != nil {
 				service := "mattermost"
 				if len(u.Pass) == 1 {
 					service = "slack"
@@ -567,7 +613,7 @@ outerloop:
 					service)
 			}
 
-			return err
+			return nil
 		case <-time.After(time.Duration(timeout) * time.Second):
 			return ErrHandshakeFailed
 		}

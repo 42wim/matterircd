@@ -156,9 +156,6 @@ func CmdJoin(s Server, u *User, msg *irc.Message) error {
 	channels := strings.Split(msg.Params[0], ",")
 	for _, channel := range channels {
 		channelName := strings.Replace(channel, "#", "", 1)
-		// you can only join existing channels
-		var err error
-
 		if channelName == "&messages" || channelName == "&users" { //nolint:goconst
 			continue
 		}
