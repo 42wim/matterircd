@@ -1308,9 +1308,13 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			isDM := u.br.IsDMChannelName(brchannel.Name)
 
 			// Determine if this channel is explicitly whitelisted to bypass LazyJoin
-			chName := u.Srv.Channel(brchannel.ID).String()
+			channelName := brchannel.Name
+			if brchannel.TeamID != u.br.GetMe().TeamID || (u.br.Protocol() == "mattermost" && u.cfg.Mattermost().PrefixMainTeam) {
+				channelName = u.br.GetTeamName(u.ctx, brchannel.TeamID) + "/" + brchannel.Name
+			}
+
 			lje := u.cfg.Mattermost().LazyJoinExclude
-			isWhitelisted := len(lje) > 0 && stringInRegexp(chName, lje)
+			isWhitelisted := len(lje) > 0 && (stringInRegexp(channelName, lje) || stringInRegexp("#"+channelName, lje))
 
 			// If Lazy-Join is enabled AND replay strategy is "saved", ONLY join channels already known in
 			// the last saved DB. If Lazy-Join is disabled, joins all channels user is member of!
@@ -1359,11 +1363,6 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 
 			success := true
 			if !isDM {
-				channelName := brchannel.Name
-				if brchannel.TeamID != u.br.GetMe().TeamID || (u.br.Protocol() == "mattermost" && u.cfg.Mattermost().PrefixMainTeam) {
-					channelName = u.br.GetTeamName(u.ctx, brchannel.TeamID) + "/" + brchannel.Name
-				}
-
 				// Give the bridge up to 3 attempts to fetch the heavy nicklist
 				success = false
 
