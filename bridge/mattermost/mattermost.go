@@ -1307,7 +1307,7 @@ func (m *Mattermost) handleFileEvent(ctx context.Context, channelType string, gh
 	event.Data = fileEvent
 
 	if len(data.FileIds) > 0 {
-		fileEvent.Files = m.GetFilesInfo(ctx, data.FileIds)
+		fileEvent.Files = m.GetFilesInfoFromPost(ctx, data)
 	}
 
 	if len(fileEvent.Files) == 0 {
@@ -1658,6 +1658,25 @@ func (m *Mattermost) SearchPosts(ctx context.Context, search string) []*bridge.E
 
 func (m *Mattermost) GetFilesInfo(ctx context.Context, fileIDs []string) []*bridge.File {
 	mcFiles := m.mc.GetFilesInfo(ctx, fileIDs)
+	files := make([]*bridge.File, 0, len(mcFiles))
+
+	for _, f := range mcFiles {
+		files = append(files, &bridge.File{
+			Name: f.Name,
+			Size: f.Size,
+			URL:  f.URL,
+		})
+	}
+
+	return files
+}
+
+func (m *Mattermost) GetFilesInfoFromPost(ctx context.Context, p *model.Post) []*bridge.File {
+	if p == nil || len(p.FileIds) == 0 {
+		return nil
+	}
+
+	mcFiles := m.mc.GetFilesInfoFromPost(ctx, p)
 	files := make([]*bridge.File, 0, len(mcFiles))
 
 	for _, f := range mcFiles {
@@ -2743,7 +2762,7 @@ func (m *Mattermost) postToEvent(ctx context.Context, p *model.Post, eventType s
 	default:
 		var files []*bridge.File
 		if len(p.FileIds) > 0 {
-			files = m.GetFilesInfo(ctx, p.FileIds)
+			files = m.GetFilesInfoFromPost(ctx, p)
 		}
 
 		formattedMsg := m.formatMessage(ctx, p, eventType, logger)
