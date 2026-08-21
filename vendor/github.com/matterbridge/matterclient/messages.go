@@ -170,6 +170,43 @@ func (m *Client) GetFilesInfo(ctx context.Context, fileIDs []string) []*FileInfo
 	return output
 }
 
+// GetFilesInfoFromPost extracts file information using embedded metadata from the post,
+// falling back to GetFilesInfo only when the server omits post.Metadata.Files.
+func (m *Client) GetFilesInfoFromPost(ctx context.Context, p *model.Post) []*FileInfo {
+	if p == nil || len(p.FileIds) == 0 {
+		return nil
+	}
+
+	uriScheme := schemeHTTPS
+	if m.NoTLS {
+		uriScheme = schemeHTTP
+	}
+
+	// Use metadata already populated by the Mattermost server
+	if p.Metadata != nil && len(p.Metadata.Files) > 0 {
+		output := make([]*FileInfo, 0, len(p.Metadata.Files))
+
+		for _, f := range p.Metadata.Files {
+			if f == nil {
+				continue
+			}
+
+			output = append(output, &FileInfo{
+				Name: f.Name,
+				Size: f.Size,
+				URL:  uriScheme + m.Server + model.APIURLSuffix + "/files/" + f.Id,
+			})
+		}
+
+		if len(output) == len(p.FileIds) {
+			return output
+		}
+	}
+
+	// Fallback if server did not populate post.Metadata.Files
+	return m.GetFilesInfo(ctx, p.FileIds)
+}
+
 func (m *Client) GetFileLinks(ctx context.Context, filenames []string) []string {
 	uriScheme := schemeHTTPS
 	if m.NoTLS {
