@@ -72,6 +72,17 @@ func (m *Client) GetStatus(ctx context.Context, userID string) string {
 		m.Users.mu.RLock()
 		customStatus = m.Users.customStatuses[userID]
 		m.Users.mu.RUnlock()
+	} else if customStatus != "" {
+		// Re-validate against user props in cache to catch time-expired statuses
+		if user := m.GetUser(ctx, userID); user != nil && user.Props != nil {
+			if rawJSON, ok := user.Props["customStatus"]; ok {
+				m.Users.SetUserCustomStatus(userID, rawJSON)
+
+				m.Users.mu.RLock()
+				customStatus = m.Users.customStatuses[userID]
+				m.Users.mu.RUnlock()
+			}
+		}
 	}
 
 	if customStatus != "" {
@@ -392,6 +403,20 @@ func (c *UsersCache) SetUserCustomStatus(userID string, rawJSON string) {
 	if status.Text == "" {
 		c.customStatuses[userID] = ""
 		return
+	}
+
+	if status.ExpiresAt != "" {
+		expiry, parseErr := time.Parse(time.RFC3339, status.ExpiresAt)
+		if parseErr == nil && time.Now().After(expiry) {
+			c.customStatuses[userID] = ""
+			return
+		}
+
+		unixVal, parseErr := strconv.ParseInt(status.ExpiresAt, 10, 64)
+		if parseErr == nil && unixVal > 0 && time.Now().Unix() > unixVal {
+			c.customStatuses[userID] = ""
+			return
+		}
 	}
 
 	if status.Emoji != "" {
