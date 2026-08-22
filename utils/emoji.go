@@ -48,7 +48,7 @@ var defaultAliases = map[string]string{
 // GetEmojiMap initializes and returns the immutable alias-to-Unicode map once using Go 1.21+ sync.OnceValue.
 var GetEmojiMap = sync.OnceValue(func() map[string]string {
 	data := emoji.Gemoji()
-	aliasMap := make(map[string]string, (len(data)*3)+len(defaultAliases))
+	aliasMap := make(map[string]string, (len(data)*6)+len(defaultAliases))
 
 	register := func(name string, unicodeVal string, supportsSkinTone bool) {
 		if name == "" {
@@ -73,18 +73,44 @@ var GetEmojiMap = sync.OnceValue(func() map[string]string {
 		}
 	}
 
+	// Support for EmojiMart / Emojione (JoyPixels) naming convention
+	// (man-verb / woman-verb / man_profession) vs. (verb_man / verb_woman / male_profession)
+	registerWithVariants := func(name string, unicodeVal string, supportsSkinTone bool) {
+		register(name, unicodeVal, supportsSkinTone)
+
+		// Hyphen normalization (e.g. man-bowing -> man_bowing)
+		if strings.ContainsRune(name, '-') {
+			register(strings.ReplaceAll(name, "-", "_"), unicodeVal, supportsSkinTone)
+		}
+
+		// Gender inversions (e.g. bowing_man -> man_bowing, male_artist -> man_artist)
+		if rest, ok := strings.CutSuffix(name, "_man"); ok {
+			register("man_"+rest, unicodeVal, supportsSkinTone)
+			register("man-"+strings.ReplaceAll(rest, "_", "-"), unicodeVal, supportsSkinTone)
+		} else if rest, ok := strings.CutSuffix(name, "_woman"); ok {
+			register("woman_"+rest, unicodeVal, supportsSkinTone)
+			register("woman-"+strings.ReplaceAll(rest, "_", "-"), unicodeVal, supportsSkinTone)
+		} else if rest, ok := strings.CutPrefix(name, "male_"); ok {
+			register("man_"+rest, unicodeVal, supportsSkinTone)
+			register("man-"+strings.ReplaceAll(rest, "_", "-"), unicodeVal, supportsSkinTone)
+		} else if rest, ok := strings.CutPrefix(name, "female_"); ok {
+			register("woman_"+rest, unicodeVal, supportsSkinTone)
+			register("woman-"+strings.ReplaceAll(rest, "_", "-"), unicodeVal, supportsSkinTone)
+		}
+	}
+
 	for _, e := range data {
 		if e.Emoji == "" {
 			continue
 		}
 
 		for _, alias := range e.Aliases {
-			register(alias, e.Emoji, e.SkinTones)
+			registerWithVariants(alias, e.Emoji, e.SkinTones)
 		}
 
 		// In addition to emoji aliases, include emoji tags
 		for _, tag := range e.Tags {
-			register(tag, e.Emoji, e.SkinTones)
+			registerWithVariants(tag, e.Emoji, e.SkinTones)
 		}
 	}
 
@@ -93,9 +119,7 @@ var GetEmojiMap = sync.OnceValue(func() map[string]string {
 		targetClean := trimColons(target)
 		// If target resolves to an existing emoji, alias it
 		if unicodeVal, exists := aliasMap[targetClean]; exists {
-			if _, taken := aliasMap[alias]; !taken {
-				aliasMap[alias] = unicodeVal
-			}
+			registerWithVariants(alias, unicodeVal, true)
 		}
 	}
 

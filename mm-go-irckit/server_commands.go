@@ -659,7 +659,7 @@ func parseReactionToMsg(u *User, msg *irc.Message, channelID string) bool {
 	if action == "-" {
 		err := u.br.RemoveReaction(u.ctx, msgID, emoji)
 		if err != nil {
-			u.MsgSpoofUser(u, u.br.Protocol(), "reaction: "+emoji+" could not be removed "+err.Error())
+			u.MsgSpoofUser(u, u.br.Protocol(), "reaction: "+emoji+" could not be removed: "+err.Error())
 		}
 
 		return true
@@ -667,7 +667,7 @@ func parseReactionToMsg(u *User, msg *irc.Message, channelID string) bool {
 
 	err := u.br.AddReaction(u.ctx, msgID, emoji)
 	if err != nil {
-		u.MsgSpoofUser(u, u.br.Protocol(), "reaction: "+emoji+" could not be added "+err.Error())
+		u.MsgSpoofUser(u, u.br.Protocol(), "reaction: "+emoji+" could not be added: "+err.Error())
 	}
 
 	return true
