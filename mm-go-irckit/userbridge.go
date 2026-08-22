@@ -33,7 +33,7 @@ type UserBridge struct {
 	Srv         Server
 	Credentials bridge.Credentials
 	br          bridge.Bridger
-	inprogress  bool
+	inprogress  atomic.Bool
 	eventChan   chan *bridge.Event
 	away        atomic.Bool
 
