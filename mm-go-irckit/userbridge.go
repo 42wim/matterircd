@@ -42,8 +42,7 @@ type UserBridge struct {
 
 	lastViewedAtDB *bolt.DB
 
-	lastEventTimeMutex sync.RWMutex
-	lastEventTime      int64
+	lastEventTime atomic.Int64
 
 	msgCounterMutex sync.RWMutex
 	msgCounter      map[string]int
@@ -103,9 +102,7 @@ func (u *User) handleEventChan() {
 			}
 
 			// Update our in-memory global timestamp on every event
-			u.lastEventTimeMutex.Lock()
-			u.lastEventTime = time.Now().UnixMilli()
-			u.lastEventTimeMutex.Unlock()
+			u.lastEventTime.Store(time.Now().UnixMilli())
 
 			if logger.Level.String() == "trace" {
 				logger.Tracef("eventchan %s", spew.Sdump(event))
@@ -143,19 +140,14 @@ func (u *User) handleEventChan() {
 				u.handleTyping(e)
 			case *bridge.LogoutEvent:
 				// Flush immediately on explicit logout
-				u.lastEventTimeMutex.RLock()
-				u.saveGlobalLastEventTime(u.lastEventTime)
-				u.lastEventTimeMutex.RUnlock()
+				u.saveGlobalLastEventTime(u.lastEventTime.Load())
 
 				return
 			}
 
 		case <-flushTicker.C:
 			// Periodically flush the timestamp to BoltDB
-			u.lastEventTimeMutex.RLock()
-			currentTimestamp := u.lastEventTime
-			u.lastEventTimeMutex.RUnlock()
-			u.saveGlobalLastEventTime(currentTimestamp)
+			u.saveGlobalLastEventTime(u.lastEventTime.Load())
 		}
 	}
 }
