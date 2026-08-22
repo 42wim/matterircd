@@ -545,11 +545,11 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 			return nil
 		}
 
-		if threadMsgChannel(u, msg, ch.ID()) {
+		if parseModifyMsg(u, msg, ch.ID()) {
 			return nil
 		}
 
-		if parseModifyMsg(u, msg, ch.ID()) {
+		if threadMsgChannel(u, msg, ch.ID()) {
 			return nil
 		}
 
@@ -594,6 +594,11 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 				return nil
 			}
 
+			if parseModifyMsg(u, msg, toUser.User) {
+				logger.Trace("matched parseModifyMsg")
+				return nil
+			}
+
 			// If the user is away, DND, offline, or has a custom status, reply with 301 RPL_AWAY
 			// But after reactions as we don't care if we're reacting to an existing message.
 			status, err := u.br.StatusUser(u.ctx, toUser.User)
@@ -604,11 +609,6 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 
 			if threadMsgUser(u, msg, toUser.User) {
 				logger.Trace("matched threadMsgUser")
-				return nil
-			}
-
-			if parseModifyMsg(u, msg, toUser.User) {
-				logger.Trace("matched parseModifyMsg")
 				return nil
 			}
 
