@@ -656,7 +656,7 @@ func (m *Client) AddChannelMember(ctx context.Context, channelID, userID string)
 			continue
 		}
 
-		m.logger.Errorf("AddChannelMember failed for channel %s (%s) (user %s): %v", channelName, channelID, userID, err)
+		m.logger.Errorf("AddChannelMember failed for channel %s (%s) (user %s (%s)): %v", channelName, channelID, userName, userID, err)
 
 		return nil, err
 	}
@@ -668,7 +668,7 @@ func (m *Client) RemoveUserFromChannel(ctx context.Context, channelID, userID st
 	retryCount := 0
 
 	for {
-		m.apiLogger.Warnf("RemoveUserFromChannel: Channel: %s (%s), User: %s (%s) #%d", channelName, channelID, userID, userName, retryCount)
+		m.apiLogger.Warnf("RemoveUserFromChannel: Channel: %s (%s), User: %s (%s) #%d", channelName, channelID, userName, userID, retryCount)
 
 		resp, err := m.Client.RemoveUserFromChannel(ctx, channelID, userID)
 		if err == nil {
@@ -691,7 +691,7 @@ func (m *Client) RemoveUserFromChannel(ctx context.Context, channelID, userID st
 			continue
 		}
 
-		m.logger.Errorf("RemoveUserFromChannel failed for channel %s (%s) (user %s): %v", channelName, channelID, userID, err)
+		m.logger.Errorf("RemoveUserFromChannel failed for channel %s (%s) (user %s (%s)): %v", channelName, channelID, userName, userID, err)
 
 		return err
 	}
