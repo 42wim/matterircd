@@ -640,6 +640,10 @@ func (m *Mattermost) GetDMChannelName(userID1 string, userID2 string) string {
 }
 
 func (m *Mattermost) GetDMUser(ctx context.Context, channelName string) *bridge.UserInfo {
+	if !m.mc.IsDMChannelName(channelName) {
+		return nil
+	}
+
 	otherUserID, ok := m.mc.GetDMOtherUserID(channelName, m.mc.User.Id)
 	if !ok {
 		logger.Errorf("not a DM message, incorrect channelName: %s", channelName)
@@ -682,13 +686,14 @@ func (m *Mattermost) GetChannels() []*bridge.ChannelInfo {
 		}
 
 		channels = append(channels, &bridge.ChannelInfo{
-			Name:       mmchannel.Name,
-			ID:         mmchannel.Id,
-			TeamID:     mmchannel.TeamId,
-			DM:         mmchannel.IsGroupOrDirect(),
-			Private:    !mmchannel.IsOpen(),
-			LastPostAt: mmchannel.LastPostAt,
-			DeleteAt:   mmchannel.DeleteAt,
+			Name:        mmchannel.Name,
+			ID:          mmchannel.Id,
+			TeamID:      mmchannel.TeamId,
+			DM:          mmchannel.IsGroupOrDirect(),
+			Private:     !mmchannel.IsOpen(),
+			DisplayName: mmchannel.DisplayName,
+			LastPostAt:  mmchannel.LastPostAt,
+			DeleteAt:    mmchannel.DeleteAt,
 		})
 
 		chanMap[mmchannel.Id] = true
@@ -714,13 +719,14 @@ func (m *Mattermost) CreateChannel(ctx context.Context, channelName string, chan
 	}
 
 	return &bridge.ChannelInfo{
-		Name:       mmchan.Name,
-		ID:         mmchan.Id,
-		TeamID:     mmchan.TeamId,
-		DM:         mmchan.Type == model.ChannelTypeDirect || mmchan.Type == model.ChannelTypeGroup,
-		Private:    mmchan.Type == model.ChannelTypePrivate,
-		LastPostAt: mmchan.LastPostAt,
-		DeleteAt:   mmchan.DeleteAt,
+		Name:        mmchan.Name,
+		ID:          mmchan.Id,
+		TeamID:      mmchan.TeamId,
+		DM:          mmchan.Type == model.ChannelTypeDirect || mmchan.Type == model.ChannelTypeGroup,
+		Private:     mmchan.Type == model.ChannelTypePrivate,
+		DisplayName: mmchan.DisplayName,
+		LastPostAt:  mmchan.LastPostAt,
+		DeleteAt:    mmchan.DeleteAt,
 	}, nil
 }
 
@@ -735,13 +741,14 @@ func (m *Mattermost) GetChannel(ctx context.Context, channelID string) (*bridge.
 	}
 
 	return &bridge.ChannelInfo{
-		Name:       mmchannel.Name,
-		ID:         mmchannel.Id,
-		TeamID:     mmchannel.TeamId,
-		DM:         mmchannel.IsGroupOrDirect(),
-		Private:    !mmchannel.IsOpen(),
-		LastPostAt: mmchannel.LastPostAt,
-		DeleteAt:   mmchannel.DeleteAt,
+		Name:        mmchannel.Name,
+		ID:          mmchannel.Id,
+		TeamID:      mmchannel.TeamId,
+		DM:          mmchannel.IsGroupOrDirect(),
+		Private:     !mmchannel.IsOpen(),
+		DisplayName: mmchannel.DisplayName,
+		LastPostAt:  mmchannel.LastPostAt,
+		DeleteAt:    mmchannel.DeleteAt,
 	}, nil
 }
 

@@ -34,9 +34,12 @@ func (m *Client) CreatePost(ctx context.Context, post *model.Post) (*model.Post,
 		}
 	}
 
+	channelName := m.GetChannelName(ctx, post.ChannelId)
+	userName := m.GetUserName(ctx, post.UserId)
 	retryCount := 0
+
 	for {
-		m.apiLogger.Warnf("CreatePost: UserID: %s, ChannelID: %s #%d", post.UserId, post.ChannelId, retryCount)
+		m.apiLogger.Warnf("CreatePost: User: %s (%s), Channel: %s (%s) #%d", userName, post.UserId, channelName, post.ChannelId, retryCount)
 
 		res, resp, err := m.Client.CreatePost(ctx, post)
 		if err == nil {

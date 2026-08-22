@@ -1006,6 +1006,12 @@ func (u *User) addUsersToChannels() {
 	for _, brchannel := range u.br.GetChannels() {
 		lastPost := time.UnixMilli(brchannel.LastPostAt)
 		if brchannel.DM && !u.br.BridgeConfig().JoinDM {
+			channelDesc := brchannel.Name
+			if mUser := u.br.GetDMUser(u.ctx, brchannel.Name); mUser != nil {
+				channelDesc = fmt.Sprintf("DM with %s (%s)", mUser.Nick, mUser.User)
+			} else if brchannel.DisplayName != "" {
+				channelDesc = fmt.Sprintf("GM with %s (%s)", brchannel.DisplayName, brchannel.Name)
+			}
 
 			threshold := lastSyncThreshold
 			if threshold.IsZero() {
@@ -1020,18 +1026,16 @@ func (u *User) addUsersToChannels() {
 			// If the channel has been dormant since before our threshold, safely skip it
 			if lastPost.Before(threshold) {
 				if logger.Logger.IsLevelEnabled(logrus.TraceLevel) {
-					logger.Tracef("Skipping dormant DM channel %s (LastPost: %v, Threshold: %v)", brchannel.Name, lastPost, threshold)
-				} else {
-					logger.Debugf("Skipping dormant DM channel %s (LastPost: %v)", brchannel.Name, lastPost)
+					logger.Tracef("Skipping dormant %s (LastPost: %v, Threshold: %v)", channelDesc, lastPost, threshold)
 				}
 
 				continue
 			}
 
 			if logger.Logger.IsLevelEnabled(logrus.TraceLevel) {
-				logger.Tracef("SmartJoin: Joining DM channel %s due to recent offline activity (LastPost: %v, Threshold: %v)", brchannel.Name, lastPost, threshold)
+				logger.Tracef("SmartJoin: Joining %s due to recent offline activity (LastPost: %v, Threshold: %v)", channelDesc, lastPost, threshold)
 			} else {
-				logger.Debugf("SmartJoin: Joining DM channel %s due to recent offline activity (LastPost: %v)", brchannel.Name, lastPost)
+				logger.Debugf("SmartJoin: Joining %s due to recent offline activity (LastPost: %v)", channelDesc, lastPost)
 			}
 		}
 

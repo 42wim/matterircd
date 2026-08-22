@@ -80,13 +80,14 @@ type Bridger interface {
 }
 
 type ChannelInfo struct {
-	Name       string
-	ID         string
-	TeamID     string
-	DM         bool
-	Private    bool
-	LastPostAt int64
-	DeleteAt   int64
+	Name        string
+	ID          string
+	TeamID      string
+	DM          bool
+	Private     bool
+	DisplayName string
+	LastPostAt  int64
+	DeleteAt    int64
 }
 
 type UserInfo struct {
