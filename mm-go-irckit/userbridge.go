@@ -35,7 +35,7 @@ type UserBridge struct {
 	br          bridge.Bridger
 	inprogress  bool
 	eventChan   chan *bridge.Event
-	away        bool
+	away        atomic.Bool
 
 	eventLoopMutex   sync.Mutex
 	eventLoopStarted bool
@@ -759,18 +759,18 @@ func (u *User) handleStatusChangeEvent(event *bridge.StatusChangeEvent) {
 	if event.UserID == u.br.GetMe().User {
 		switch event.Status {
 		case "online":
-			if u.away {
+			if u.away.Load() {
 				logger.Debug("setting myself online")
-				u.away = false
+				u.away.Store(false)
 				u.Srv.EncodeMessage(u, irc.RPL_UNAWAY, []string{u.Nick}, "You are no longer marked as being away") //nolint:errcheck
 			}
 		// Ignore `offline` status changes to prevent bouncing between being marked away and not.
 		case "offline":
 			logger.Debugf("doing nothing as status %s", event.Status)
 		default:
-			if !u.away {
+			if !u.away.Load() {
 				logger.Debug("setting myself away")
-				u.away = true
+				u.away.Store(true)
 				u.Srv.EncodeMessage(u, irc.RPL_NOWAWAY, []string{u.Nick}, "You have been marked as being away") //nolint:errcheck
 			}
 		}
