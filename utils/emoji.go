@@ -229,6 +229,52 @@ func applySkinTone(baseEmoji string, tone SkinTone) string {
 	return string(slices.Insert(runes, insertAt, rune(tone)))
 }
 
+// Support for EmojiMart / Emojione (JoyPixels) naming convention
+// (man-verb / woman-verb / man_profession) vs. (verb_man / verb_woman / male_profession)
+func fallbackGenderLookup(alias string, emojiMap map[string]string) (string, bool) {
+	// Detect and separate skin tone suffix if present
+	core := alias
+	suffix := ""
+
+	for _, st := range skinToneSuffixes {
+		if before, ok := strings.CutSuffix(alias, st.suffix); ok {
+			core = before
+			suffix = st.suffix
+
+			break
+		}
+	}
+
+	var gender, maleFemale, rest string
+
+	switch {
+	case strings.HasPrefix(core, "man_"):
+		gender = "man"
+		maleFemale = "male"
+		rest = core[4:]
+	case strings.HasPrefix(core, "woman_"):
+		gender = "woman"
+		maleFemale = "female"
+		rest = core[6:]
+	default:
+		return "", false
+	}
+
+	// Inversion (e.g. "man_bowing" -> "bowing_man")
+	inverted := rest + "_" + gender + suffix
+	if val, ok := emojiMap[inverted]; ok {
+		return val, true
+	}
+
+	// Prefix swap (e.g. "man_artist" -> "male_artist")
+	swapped := maleFemale + "_" + rest + suffix
+	if val, ok := emojiMap[swapped]; ok {
+		return val, true
+	}
+
+	return "", false
+}
+
 func lookupEmoji(alias string, emojiMap map[string]string, customAliases map[string]string) (string, bool) {
 	if len(customAliases) > 0 {
 		if mapped, ok := customAliases[alias]; ok {
@@ -236,9 +282,20 @@ func lookupEmoji(alias string, emojiMap map[string]string, customAliases map[str
 		}
 	}
 
-	val, ok := emojiMap[alias]
+	if val, ok := emojiMap[alias]; ok {
+		return val, true
+	}
 
-	return val, ok
+	// Normalize hyphens to underscores (e.g. "man-bowing" -> "man_bowing")
+	normalized := alias
+	if strings.ContainsRune(alias, '-') {
+		normalized = strings.ReplaceAll(alias, "-", "_")
+		if val, ok := emojiMap[normalized]; ok {
+			return val, true
+		}
+	}
+
+	return fallbackGenderLookup(normalized, emojiMap)
 }
 
 func trimColons(s string) string {
