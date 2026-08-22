@@ -48,7 +48,7 @@ var defaultAliases = map[string]string{
 // GetEmojiMap initializes and returns the immutable alias-to-Unicode map once using Go 1.21+ sync.OnceValue.
 var GetEmojiMap = sync.OnceValue(func() map[string]string {
 	data := emoji.Gemoji()
-	aliasMap := make(map[string]string, (len(data)*3)+len(defaultAliases))
+	aliasMap := make(map[string]string, (len(data)*6)+len(defaultAliases))
 
 	register := func(name string, unicodeVal string, supportsSkinTone bool) {
 		if name == "" {
@@ -73,18 +73,44 @@ var GetEmojiMap = sync.OnceValue(func() map[string]string {
 		}
 	}
 
+	// Support for EmojiMart / Emojione (JoyPixels) naming convention
+	// (man-verb / woman-verb / man_profession) vs. (verb_man / verb_woman / male_profession)
+	registerWithVariants := func(name string, unicodeVal string, supportsSkinTone bool) {
+		register(name, unicodeVal, supportsSkinTone)
+
+		// Hyphen normalization (e.g. man-bowing -> man_bowing)
+		if strings.ContainsRune(name, '-') {
+			register(strings.ReplaceAll(name, "-", "_"), unicodeVal, supportsSkinTone)
+		}
+
+		// Gender inversions (e.g. bowing_man -> man_bowing, male_artist -> man_artist)
+		if rest, ok := strings.CutSuffix(name, "_man"); ok {
+			register("man_"+rest, unicodeVal, supportsSkinTone)
+			register("man-"+strings.ReplaceAll(rest, "_", "-"), unicodeVal, supportsSkinTone)
+		} else if rest, ok := strings.CutSuffix(name, "_woman"); ok {
+			register("woman_"+rest, unicodeVal, supportsSkinTone)
+			register("woman-"+strings.ReplaceAll(rest, "_", "-"), unicodeVal, supportsSkinTone)
+		} else if rest, ok := strings.CutPrefix(name, "male_"); ok {
+			register("man_"+rest, unicodeVal, supportsSkinTone)
+			register("man-"+strings.ReplaceAll(rest, "_", "-"), unicodeVal, supportsSkinTone)
+		} else if rest, ok := strings.CutPrefix(name, "female_"); ok {
+			register("woman_"+rest, unicodeVal, supportsSkinTone)
+			register("woman-"+strings.ReplaceAll(rest, "_", "-"), unicodeVal, supportsSkinTone)
+		}
+	}
+
 	for _, e := range data {
 		if e.Emoji == "" {
 			continue
 		}
 
 		for _, alias := range e.Aliases {
-			register(alias, e.Emoji, e.SkinTones)
+			registerWithVariants(alias, e.Emoji, e.SkinTones)
 		}
 
 		// In addition to emoji aliases, include emoji tags
 		for _, tag := range e.Tags {
-			register(tag, e.Emoji, e.SkinTones)
+			registerWithVariants(tag, e.Emoji, e.SkinTones)
 		}
 	}
 
@@ -93,9 +119,7 @@ var GetEmojiMap = sync.OnceValue(func() map[string]string {
 		targetClean := trimColons(target)
 		// If target resolves to an existing emoji, alias it
 		if unicodeVal, exists := aliasMap[targetClean]; exists {
-			if _, taken := aliasMap[alias]; !taken {
-				aliasMap[alias] = unicodeVal
-			}
+			registerWithVariants(alias, unicodeVal, true)
 		}
 	}
 
@@ -229,52 +253,6 @@ func applySkinTone(baseEmoji string, tone SkinTone) string {
 	return string(slices.Insert(runes, insertAt, rune(tone)))
 }
 
-// Support for EmojiMart / Emojione (JoyPixels) naming convention
-// (man-verb / woman-verb / man_profession) vs. (verb_man / verb_woman / male_profession)
-func fallbackGenderLookup(alias string, emojiMap map[string]string) (string, bool) {
-	// Detect and separate skin tone suffix if present
-	core := alias
-	suffix := ""
-
-	for _, st := range skinToneSuffixes {
-		if before, ok := strings.CutSuffix(alias, st.suffix); ok {
-			core = before
-			suffix = st.suffix
-
-			break
-		}
-	}
-
-	var gender, maleFemale, rest string
-
-	switch {
-	case strings.HasPrefix(core, "man_"):
-		gender = "man"
-		maleFemale = "male"
-		rest = core[4:]
-	case strings.HasPrefix(core, "woman_"):
-		gender = "woman"
-		maleFemale = "female"
-		rest = core[6:]
-	default:
-		return "", false
-	}
-
-	// Inversion (e.g. "man_bowing" -> "bowing_man")
-	inverted := rest + "_" + gender + suffix
-	if val, ok := emojiMap[inverted]; ok {
-		return val, true
-	}
-
-	// Prefix swap (e.g. "man_artist" -> "male_artist")
-	swapped := maleFemale + "_" + rest + suffix
-	if val, ok := emojiMap[swapped]; ok {
-		return val, true
-	}
-
-	return "", false
-}
-
 func lookupEmoji(alias string, emojiMap map[string]string, customAliases map[string]string) (string, bool) {
 	if len(customAliases) > 0 {
 		if mapped, ok := customAliases[alias]; ok {
@@ -282,20 +260,9 @@ func lookupEmoji(alias string, emojiMap map[string]string, customAliases map[str
 		}
 	}
 
-	if val, ok := emojiMap[alias]; ok {
-		return val, true
-	}
+	val, ok := emojiMap[alias]
 
-	// Normalize hyphens to underscores (e.g. "man-bowing" -> "man_bowing")
-	normalized := alias
-	if strings.ContainsRune(alias, '-') {
-		normalized = strings.ReplaceAll(alias, "-", "_")
-		if val, ok := emojiMap[normalized]; ok {
-			return val, true
-		}
-	}
-
-	return fallbackGenderLookup(normalized, emojiMap)
+	return val, ok
 }
 
 func trimColons(s string) string {
