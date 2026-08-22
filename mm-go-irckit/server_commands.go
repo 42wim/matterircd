@@ -594,6 +594,14 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 				return nil
 			}
 
+			// If the user is away, DND, offline, or has a custom status, reply with 301 RPL_AWAY
+			// But after reactions as we don't care if we're reacting to an existing message.
+			status, err := u.br.StatusUser(u.ctx, toUser.User)
+			if err == nil && status != "" && status != "online" { //nolint:goconst
+				status = utils.EmojiReplaceAliases(status, u.br.FormatterConfig().CustomEmoji)
+				_ = s.EncodeMessage(u, irc.RPL_AWAY, []string{u.Nick, toUser.Nick}, status)
+			}
+
 			if threadMsgUser(u, msg, toUser.User) {
 				logger.Trace("matched threadMsgUser")
 				return nil
@@ -608,13 +616,6 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 			if err2 != nil {
 				u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+msg.Trailing+" could not be sent "+err2.Error())
 				return err2
-			}
-
-			// If the user is away, DND, offline, or has a custom status, reply with 301 RPL_AWAY
-			status, err := u.br.StatusUser(u.ctx, toUser.User)
-			if err == nil && status != "" && status != "online" { //nolint:goconst
-				status = utils.EmojiReplaceAliases(status, u.br.FormatterConfig().CustomEmoji)
-				_ = s.EncodeMessage(u, irc.RPL_AWAY, []string{u.Nick, toUser.Nick}, status)
 			}
 
 			u.msgLastMutex.Lock()
