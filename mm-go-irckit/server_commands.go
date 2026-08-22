@@ -537,6 +537,10 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 			return nil
 		}
 
+		targetLock := u.getMsgChanLock(ch.ID())
+		targetLock.Lock()
+		defer targetLock.Unlock()
+
 		if parseReactionToMsg(u, msg, ch.ID()) {
 			return nil
 		}
@@ -556,8 +560,8 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 		}
 
 		u.msgLastMutex.Lock()
-		defer u.msgLastMutex.Unlock()
 		u.msgLast[ch.ID()] = [2]string{msgID, ""}
+		u.msgLastMutex.Unlock()
 		u.saveLastViewedAt(ch.ID())
 
 		if u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext {
@@ -581,6 +585,10 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 				return nil
 			}
 
+			targetLock := u.getMsgChanLock(toUser.User)
+			targetLock.Lock()
+			defer targetLock.Unlock()
+
 			if parseReactionToMsg(u, msg, toUser.User) {
 				logger.Trace("matched parseReactionToMsg")
 				return nil
@@ -601,9 +609,10 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 				u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+msg.Trailing+" could not be sent "+err2.Error())
 				return err2
 			}
+
 			u.msgLastMutex.Lock()
-			defer u.msgLastMutex.Unlock()
 			u.msgLast[toUser.User] = [2]string{msgID, ""}
+			u.msgLastMutex.Unlock()
 			u.saveLastViewedAt(u.br.GetChannelID(u.ctx, toUser.User, ""))
 
 			if u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext {

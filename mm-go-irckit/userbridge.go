@@ -40,9 +40,11 @@ type UserBridge struct {
 	eventLoopMutex   sync.Mutex
 	eventLoopStarted bool
 
+	lastEventTime  atomic.Int64
 	lastViewedAtDB *bolt.DB
 
-	lastEventTime atomic.Int64
+	msgChanLockMutex sync.Mutex
+	msgChanLocks     map[string]*sync.Mutex
 
 	msgCounterMutex sync.RWMutex
 	msgCounter      map[string]int
@@ -71,6 +73,8 @@ func NewUserBridge(c net.Conn, srv Server, cfg *config.Config, db *bolt.DB) *Use
 	u.Srv = srv
 	u.cfg = cfg
 	u.lastViewedAtDB = db
+
+	u.msgChanLocks = make(map[string]*sync.Mutex)
 	u.msgLast = make(map[string][2]string)
 	u.msgMap = make(map[string]map[string]int)
 	u.msgMapIndex = make(map[string]map[int]string)
@@ -2185,4 +2189,17 @@ func (u *User) isRequestedChannel(channelName string) bool {
 	_, ok := (*m)[name]
 
 	return ok
+}
+
+func (u *UserBridge) getMsgChanLock(target string) *sync.Mutex {
+	u.msgChanLockMutex.Lock()
+	defer u.msgChanLockMutex.Unlock()
+
+	lock, ok := u.msgChanLocks[target]
+	if !ok {
+		lock = &sync.Mutex{}
+		u.msgChanLocks[target] = lock
+	}
+
+	return lock
 }
