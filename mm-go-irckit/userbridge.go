@@ -1043,6 +1043,8 @@ func (u *User) addUsersToChannels() {
 			if lastPost.Before(threshold) {
 				if logger.Logger.IsLevelEnabled(logrus.TraceLevel) {
 					logger.Tracef("Skipping dormant %s (LastPost: %v, Threshold: %v)", formatChannelDesc(), lastPost, threshold)
+				} else {
+					logger.Debugf("Skipping dormant %s (LastPost: %v)", formatChannelDesc(), lastPost)
 				}
 
 				continue
