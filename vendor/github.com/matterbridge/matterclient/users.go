@@ -420,11 +420,13 @@ func (c *UsersCache) SetUserCustomStatus(userID string, rawJSON string) {
 	}
 
 	var formattedStatus string
-	if status.Emoji != "" && status.Text != "" {
+
+	switch {
+	case status.Emoji != "" && status.Text != "":
 		formattedStatus = ":" + status.Emoji + ": " + status.Text
-	} else if status.Emoji != "" {
+	case status.Emoji != "":
 		formattedStatus = ":" + status.Emoji + ":"
-	} else {
+	default:
 		formattedStatus = status.Text
 	}
 
