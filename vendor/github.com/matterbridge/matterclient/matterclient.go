@@ -1379,7 +1379,9 @@ func (m *Client) syncSingleUser(ctx context.Context, event *model.WebSocketEvent
 		return
 	}
 
-	m.apiLogger.Warnf("syncSingleUser: GetUser: UserID: %s", userID)
+	userName := m.GetCachedUserName(userID)
+	m.apiLogger.Warnf("syncSingleUser: GetUser: User: %s (%s)", userName, userID)
+
 	user, _, err := m.Client.GetUser(ctx, userID, "")
 	if err != nil {
 		m.logger.Errorf("syncSingleUser failed to get user %s: %v", userID, err)
