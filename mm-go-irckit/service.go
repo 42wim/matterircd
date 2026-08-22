@@ -25,23 +25,27 @@ type Command struct {
 }
 
 func logout(u *User, toUser *User, args []string, service string) {
-	if u.inprogress {
+	if u.inprogress.Load() {
 		u.MsgUser(toUser, "login or logout in progress. Please wait")
 		return
 	}
+
+	u.inprogress.Store(true)
+	defer u.inprogress.Store(false)
+
 	_ = u.br.Logout(u.ctx)
 	u.logoutFrom(u.br.Protocol())
 }
 
 func login(u *User, toUser *User, args []string, service string) {
-	if u.inprogress {
+	if u.inprogress.Load() {
 		u.MsgUser(toUser, "login or logout in progress. Please wait")
 		return
 	}
 
 	if service == "mastodon" {
-		u.inprogress = true
-		defer func() { u.inprogress = false }()
+		u.inprogress.Store(true)
+		defer u.inprogress.Store(false)
 
 		if u.br != nil && u.br.Connected() {
 			u.MsgUser(toUser, "already logged in to mastodon. Please log out first")
@@ -101,8 +105,8 @@ func login(u *User, toUser *User, args []string, service string) {
 			return
 		}
 
-		u.inprogress = true
-		defer func() { u.inprogress = false }()
+		u.inprogress.Store(true)
+		defer u.inprogress.Store(false)
 
 		err = u.loginTo("slack")
 		if err != nil {
@@ -200,8 +204,8 @@ func login(u *User, toUser *User, args []string, service string) {
 		return
 	}
 
-	u.inprogress = true
-	defer func() { u.inprogress = false }()
+	u.inprogress.Store(true)
+	defer u.inprogress.Store(false)
 
 	u.Credentials = cred
 

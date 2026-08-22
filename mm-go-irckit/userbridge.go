@@ -33,17 +33,16 @@ type UserBridge struct {
 	Srv         Server
 	Credentials bridge.Credentials
 	br          bridge.Bridger
-	inprogress  bool
+	inprogress  atomic.Bool
 	eventChan   chan *bridge.Event
-	away        bool
+	away        atomic.Bool
 
 	eventLoopMutex   sync.Mutex
 	eventLoopStarted bool
 
 	lastViewedAtDB *bolt.DB
 
-	lastEventTimeMutex sync.RWMutex
-	lastEventTime      int64
+	lastEventTime atomic.Int64
 
 	msgCounterMutex sync.RWMutex
 	msgCounter      map[string]int
@@ -103,9 +102,7 @@ func (u *User) handleEventChan() {
 			}
 
 			// Update our in-memory global timestamp on every event
-			u.lastEventTimeMutex.Lock()
-			u.lastEventTime = time.Now().UnixMilli()
-			u.lastEventTimeMutex.Unlock()
+			u.lastEventTime.Store(time.Now().UnixMilli())
 
 			if logger.Level.String() == "trace" {
 				logger.Tracef("eventchan %s", spew.Sdump(event))
@@ -143,19 +140,14 @@ func (u *User) handleEventChan() {
 				u.handleTyping(e)
 			case *bridge.LogoutEvent:
 				// Flush immediately on explicit logout
-				u.lastEventTimeMutex.RLock()
-				u.saveGlobalLastEventTime(u.lastEventTime)
-				u.lastEventTimeMutex.RUnlock()
+				u.saveGlobalLastEventTime(u.lastEventTime.Load())
 
 				return
 			}
 
 		case <-flushTicker.C:
 			// Periodically flush the timestamp to BoltDB
-			u.lastEventTimeMutex.RLock()
-			currentTimestamp := u.lastEventTime
-			u.lastEventTimeMutex.RUnlock()
-			u.saveGlobalLastEventTime(currentTimestamp)
+			u.saveGlobalLastEventTime(u.lastEventTime.Load())
 		}
 	}
 }
@@ -767,18 +759,18 @@ func (u *User) handleStatusChangeEvent(event *bridge.StatusChangeEvent) {
 	if event.UserID == u.br.GetMe().User {
 		switch event.Status {
 		case "online":
-			if u.away {
+			if u.away.Load() {
 				logger.Debug("setting myself online")
-				u.away = false
+				u.away.Store(false)
 				u.Srv.EncodeMessage(u, irc.RPL_UNAWAY, []string{u.Nick}, "You are no longer marked as being away") //nolint:errcheck
 			}
 		// Ignore `offline` status changes to prevent bouncing between being marked away and not.
 		case "offline":
 			logger.Debugf("doing nothing as status %s", event.Status)
 		default:
-			if !u.away {
+			if !u.away.Load() {
 				logger.Debug("setting myself away")
-				u.away = true
+				u.away.Store(true)
 				u.Srv.EncodeMessage(u, irc.RPL_NOWAWAY, []string{u.Nick}, "You have been marked as being away") //nolint:errcheck
 			}
 		}
