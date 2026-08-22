@@ -612,9 +612,9 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 
 			// If the user is away, DND, offline, or has a custom status, reply with 301 RPL_AWAY
 			status, err := u.br.StatusUser(u.ctx, toUser.User)
-			if err == nil && status != "" && status != "online" {
+			if err == nil && status != "" && status != "online" { //nolint:goconst
 				status = utils.EmojiReplaceAliases(status, u.br.FormatterConfig().CustomEmoji)
-				s.EncodeMessage(u, irc.RPL_AWAY, []string{u.Nick, toUser.Nick}, status)
+				_ = s.EncodeMessage(u, irc.RPL_AWAY, []string{u.Nick, toUser.Nick}, status)
 			}
 
 			u.msgLastMutex.Lock()
