@@ -80,7 +80,7 @@ func (m *Client) CreateDirectChannel(ctx context.Context, userID1, userID2 strin
 	// Fallback to REST API
 	retryCount := 0
 	for {
-		m.apiLogger.Warnf("CreateDirectChannel for users %s and %s #%d", userID1, userID2, retryCount)
+		m.apiLogger.Warnf("CreateDirectChannel for users %s and %s (%s) #%d", userID1, userID2, dmName, retryCount)
 
 		mmchannel, resp, err := m.Client.CreateDirectChannel(ctx, userID1, userID2)
 		if err == nil {
@@ -98,7 +98,7 @@ func (m *Client) CreateDirectChannel(ctx context.Context, userID1, userID2 strin
 			continue
 		}
 
-		m.logger.Errorf("CreateDirectChannel failed for %s, %s: %v", userID1, userID2, err)
+		m.logger.Errorf("CreateDirectChannel failed for %s, %s (%s): %v", userID1, userID2, dmName, err)
 
 		return nil, err
 	}
@@ -113,11 +113,12 @@ func (m *Client) GetChannel(ctx context.Context, channelID string) *model.Channe
 		return ch
 	}
 
+	channelName := m.GetChannelName(ctx, channelID)
 	query := "/channels/" + channelID
 	retryCount := 0
 
 	for {
-		m.apiLogger.Warnf("GetChannel: DoAPIGet: query %s #%d", query, retryCount)
+		m.apiLogger.Warnf("GetChannel: DoAPIGet: %s: query %s #%d", channelName, query, retryCount)
 		resp, err := m.Client.DoAPIGet(ctx, query, "")
 
 		if err == nil {
@@ -148,7 +149,7 @@ func (m *Client) GetChannel(ctx context.Context, channelID string) *model.Channe
 				return mmchannel
 			}
 
-			m.logger.Errorf("GetChannel decode failed for %s: %v", channelID, decodeErr)
+			m.logger.Errorf("GetChannel decode failed for %s (%s): %v", channelName, channelID, decodeErr)
 
 			return nil
 		}
@@ -170,7 +171,7 @@ func (m *Client) GetChannel(ctx context.Context, channelID string) *model.Channe
 			continue
 		}
 
-		m.logger.Errorf("GetChannel failed for %s: %v", channelID, err)
+		m.logger.Errorf("GetChannel failed for %s (%s): %v", channelName, channelID, err)
 
 		return nil
 	}
@@ -387,15 +388,17 @@ func (m *Client) GetChannelUsers(ctx context.Context, channelID string) ([]*mode
 	const batchSize = mattermostPerPageMax
 	fetchedUsers := make([]UserSummary, 0, batchSize)
 
+	channelName := m.GetChannelName(ctx, channelID)
 	idx := 0
 	retryCount := 0
+
 	for {
 		if m.IsAborted(ctx) {
 			return nil, errors.New("login aborted")
 		}
 
 		query := "/users?in_channel=" + channelID + "&page=" + strconv.Itoa(idx) + "&per_page=" + strconv.Itoa(batchSize)
-		m.apiLogger.Warnf("GetChannelUsers: DoAPIGet: query %s #%d", query, retryCount)
+		m.apiLogger.Warnf("GetChannelUsers: DoAPIGet: %s: query %s #%d", channelName, query, retryCount)
 		resp, err := m.Client.DoAPIGet(ctx, query, "")
 		if err != nil {
 			var mResp *model.Response
@@ -509,9 +512,12 @@ func (m *Client) GetLastViewedAt(ctx context.Context, channelID string) int64 {
 	userID := m.User.Id
 	m.RUnlock()
 
+	channelName := m.GetChannelName(ctx, channelID)
+	userName := m.GetUserName(ctx, userID)
 	retryCount := 0
+
 	for {
-		m.apiLogger.Warnf("GetLastViewedAt: ChannelID: %s, UserID: %s #%d", channelID, userID, retryCount)
+		m.apiLogger.Warnf("GetLastViewedAt: Channel %s (%s), User: %s (%s) #%d", channelName, channelID, userName, userID, retryCount)
 		res, resp, err := m.Client.GetChannelMember(ctx, channelID, userID, "")
 		if err == nil {
 			viewedAt := res.LastViewedAt
@@ -532,7 +538,7 @@ func (m *Client) GetLastViewedAt(ctx context.Context, channelID string) int64 {
 			continue
 		}
 
-		m.logger.Errorf("GetChannelMember failed for %s: %v", channelID, err)
+		m.logger.Errorf("GetChannelMember failed for %s (%s): %v", channelName, channelID, err)
 
 		// Fallback on error: Return CreateAt if we know it, otherwise current time
 		if createAt > 0 {
@@ -594,12 +600,13 @@ func (m *Client) JoinChannel(ctx context.Context, channelID string) error {
 	_, joined := m.Users.joinedChannels[channelID]
 	m.Users.mu.RUnlock()
 
+	channelName := m.GetChannelName(ctx, channelID)
 	if joined {
-		m.logger.Debug("Not joining ", channelID, " already joined.")
+		m.logger.Debugf("Not joining %s (%s) already joined.", channelName, channelID)
 		return nil
 	}
 
-	m.logger.Debug("Joining ", channelID)
+	m.logger.Debugf("Joining %s (%s)", channelName, channelID)
 
 	_, err := m.AddChannelMember(ctx, channelID, m.User.Id)
 	if err == nil {
@@ -614,9 +621,12 @@ func (m *Client) JoinChannel(ctx context.Context, channelID string) error {
 }
 
 func (m *Client) AddChannelMember(ctx context.Context, channelID, userID string) (*model.ChannelMember, error) {
+	channelName := m.GetChannelName(ctx, channelID)
+	userName := m.GetUserName(ctx, userID)
 	retryCount := 0
+
 	for {
-		m.apiLogger.Warnf("AddChannelMember: ChannelID: %s, UserID: %s #%d", channelID, userID, retryCount)
+		m.apiLogger.Warnf("AddChannelMember: Channel: %s (%s), User: %s (%s) #%d", channelName, channelID, userName, userID, retryCount)
 
 		member, resp, err := m.Client.AddChannelMember(ctx, channelID, userID)
 		if err == nil {
@@ -630,16 +640,19 @@ func (m *Client) AddChannelMember(ctx context.Context, channelID, userID string)
 			continue
 		}
 
-		m.logger.Errorf("AddChannelMember failed for channel %s (user %s): %v", channelID, userID, err)
+		m.logger.Errorf("AddChannelMember failed for channel %s (%s) (user %s): %v", channelName, channelID, userID, err)
 
 		return nil, err
 	}
 }
 
 func (m *Client) RemoveUserFromChannel(ctx context.Context, channelID, userID string) error {
+	channelName := m.GetChannelName(ctx, channelID)
+	userName := m.GetUserName(ctx, userID)
 	retryCount := 0
+
 	for {
-		m.apiLogger.Warnf("RemoveUserFromChannel: ChannelID: %s, UserID: %s #%d", channelID, userID, retryCount)
+		m.apiLogger.Warnf("RemoveUserFromChannel: Channel: %s (%s), User: %s (%s) #%d", channelName, channelID, userID, userName, retryCount)
 
 		resp, err := m.Client.RemoveUserFromChannel(ctx, channelID, userID)
 		if err == nil {
@@ -662,16 +675,18 @@ func (m *Client) RemoveUserFromChannel(ctx context.Context, channelID, userID st
 			continue
 		}
 
-		m.logger.Errorf("RemoveUserFromChannel failed for channel %s (user %s): %v", channelID, userID, err)
+		m.logger.Errorf("RemoveUserFromChannel failed for channel %s (%s) (user %s): %v", channelName, channelID, userID, err)
 
 		return err
 	}
 }
 
 func (m *Client) PatchChannel(ctx context.Context, channelID string, patch *model.ChannelPatch) (*model.Channel, error) {
+	channelName := m.GetChannelName(ctx, channelID)
 	retryCount := 0
+
 	for {
-		m.apiLogger.Warnf("PatchChannel: ChannelID: %s #%d", channelID, retryCount)
+		m.apiLogger.Warnf("PatchChannel: Channel: %s (%s) #%d", channelName, channelID, retryCount)
 
 		channel, resp, err := m.Client.PatchChannel(ctx, channelID, patch)
 		if err == nil {
@@ -690,7 +705,7 @@ func (m *Client) PatchChannel(ctx context.Context, channelID string, patch *mode
 			continue
 		}
 
-		m.logger.Errorf("PatchChannel failed for %s: %v", channelID, err)
+		m.logger.Errorf("PatchChannel failed for %s (%s): %v", channelName, channelID, err)
 
 		return nil, err
 	}
@@ -701,6 +716,7 @@ func (m *Client) UpdateChannelsTeam(ctx context.Context, teamID string) error {
 	const batchSize = mattermostPerPageMax
 
 	var joinedSummaries []ChannelSummary
+
 	retryCount := 0
 	for {
 		if m.IsAborted(ctx) {
@@ -948,9 +964,11 @@ func (m *Client) UpdateChannelHeader(ctx context.Context, channelID string, head
 	channel := &model.Channel{Id: channelID, Header: header}
 	m.logger.Debugf("updating channelheader %#v, %#v", channelID, header)
 
+	channelName := m.GetChannelName(ctx, channelID)
 	retryCount := 0
+
 	for {
-		m.apiLogger.Warnf("UpdateChannelHeader: ChannelID: %s #%d", channelID, retryCount)
+		m.apiLogger.Warnf("UpdateChannelHeader: Channel: %s (%s) #%d", channelName, channelID, retryCount)
 
 		_, resp, err := m.Client.UpdateChannel(ctx, channel)
 		if err == nil {
@@ -964,7 +982,7 @@ func (m *Client) UpdateChannelHeader(ctx context.Context, channelID string, head
 			continue
 		}
 
-		m.logger.Errorf("UpdateChannelHeader failed for %s: %v", channelID, err)
+		m.logger.Errorf("UpdateChannelHeader failed for %s (%s): %v", channelName, channelID, err)
 
 		return
 	}
@@ -993,13 +1011,16 @@ func (m *Client) UpdateChannelUsersCacheRemove(channelID string, userID string) 
 }
 
 func (m *Client) UpdateLastViewed(ctx context.Context, channelID string) error {
-	m.logger.Debugf("posting lastview %#v", channelID)
+	channelName := m.GetChannelName(ctx, channelID)
+	userName := m.GetUserName(ctx, m.User.Id)
+
+	m.logger.Debugf("posting lastview %s %#v", channelName, channelID)
 
 	view := &model.ChannelView{ChannelId: channelID}
 
 	retryCount := 0
 	for {
-		m.apiLogger.Infof("UpdateLastViewed: ChannelID: %s, UserID: %s #%d", channelID, m.User.Id, retryCount)
+		m.apiLogger.Infof("UpdateLastViewed: Channel: %s (%s), User: %s (%s) #%d", channelName, channelID, userName, m.User.Id, retryCount)
 		_, resp, err := m.Client.ViewChannel(ctx, m.User.Id, view)
 		if err == nil {
 			return nil
@@ -1011,7 +1032,7 @@ func (m *Client) UpdateLastViewed(ctx context.Context, channelID string) error {
 			continue
 		}
 
-		m.logger.Errorf("ChannelView update for %s failed: %v", channelID, err)
+		m.logger.Errorf("ChannelView update for %s (%s) failed: %v", channelName, channelID, err)
 		return err
 	}
 }

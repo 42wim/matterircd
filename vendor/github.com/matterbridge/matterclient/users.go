@@ -26,10 +26,12 @@ func (m *Client) GetStatus(ctx context.Context, userID string) string {
 	status, ok := m.Users.statuses[userID]
 	m.Users.mu.RUnlock()
 
+	userName := m.GetUserName(ctx, userID)
+
 	if !ok {
 		retryCount := 0
 		for {
-			m.apiLogger.Warnf("GetStatus: GetUserStatus: UserID: %s #%d", userID, retryCount)
+			m.apiLogger.Warnf("GetStatus: GetUserStatus: User: %s (%s) #%d", userName, userID, retryCount)
 
 			res, resp, err := m.Client.GetUserStatus(ctx, userID, "")
 			if err == nil {
@@ -578,11 +580,12 @@ func (m *Client) UsernamesInChannel(ctx context.Context, channelID string) []str
 
 	allusers := m.GetUsers()
 	result := make([]string, 0, batchSize)
+	channelName := m.GetChannelName(ctx, channelID)
 
 	idx := 0
 	retryCount := 0
 	for {
-		m.apiLogger.Warnf("UsernamesInChannel: GetChannelMembers: ChannelID: %s, Page: %d, PerPage: %d #%d", channelID, idx, batchSize, retryCount)
+		m.apiLogger.Warnf("UsernamesInChannel: GetChannelMembers: Channel: %s (%s), Page: %d, PerPage: %d #%d", channelName, channelID, idx, batchSize, retryCount)
 		res, resp, err := m.Client.GetChannelMembers(ctx, channelID, idx, batchSize, "")
 		if err != nil {
 			shouldRetry, hErr := m.HandleRetry(ctx, "UsernamesInChannel", err, retryCount, 10, resp)
@@ -591,7 +594,7 @@ func (m *Client) UsernamesInChannel(ctx context.Context, channelID string) []str
 				continue
 			}
 
-			m.logger.Errorf("UsernamesInChannel(%s) failed: %s", channelID, err)
+			m.logger.Errorf("UsernamesInChannel %s (%s) failed: %s", channelName, channelID, err)
 			return result
 		}
 		retryCount = 0
@@ -613,9 +616,11 @@ func (m *Client) UsernamesInChannel(ctx context.Context, channelID string) []str
 }
 
 func (m *Client) UpdateStatus(ctx context.Context, userID string, status string) error {
+	userName := m.GetUserName(ctx, userID)
 	retryCount := 0
+
 	for {
-		m.apiLogger.Warnf("UpdateStatus: UserID: %s, Status: %s #%d", userID, status, retryCount)
+		m.apiLogger.Warnf("UpdateStatus: User: %s (%s), Status: %s #%d", userName, userID, status, retryCount)
 
 		_, resp, err := m.Client.UpdateUserStatus(ctx, userID, &model.Status{
 			UserId: userID,
@@ -634,7 +639,7 @@ func (m *Client) UpdateStatus(ctx context.Context, userID string, status string)
 			continue
 		}
 
-		m.logger.Errorf("UpdateStatus failed for %s: %v", userID, err)
+		m.logger.Errorf("UpdateStatus failed for %s (%s): %v", userName, userID, err)
 
 		return err
 	}
