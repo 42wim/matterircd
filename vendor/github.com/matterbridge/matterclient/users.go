@@ -13,6 +13,23 @@ import (
 	"github.com/mattermost/mattermost/server/public/model"
 )
 
+// GetCachedUser returns the user from local cache without triggering a REST API lookup.
+func (m *Client) GetCachedUser(userID string) *model.User {
+	m.Users.mu.RLock()
+	defer m.Users.mu.RUnlock()
+
+	return m.Users.users[userID]
+}
+
+// GetCachedUserName returns the cached username if available, or empty string.
+func (m *Client) GetCachedUserName(userID string) string {
+	if u := m.GetCachedUser(userID); u != nil {
+		return u.Username
+	}
+
+	return ""
+}
+
 func (m *Client) GetNickName(ctx context.Context, userID string) string {
 	if user := m.GetUser(ctx, userID); user != nil {
 		return user.Nickname
@@ -26,7 +43,7 @@ func (m *Client) GetStatus(ctx context.Context, userID string) string {
 	status, ok := m.Users.statuses[userID]
 	m.Users.mu.RUnlock()
 
-	userName := m.GetUserName(ctx, userID)
+	userName := m.GetCachedUserName(userID)
 
 	if !ok {
 		retryCount := 0
@@ -580,7 +597,7 @@ func (m *Client) UsernamesInChannel(ctx context.Context, channelID string) []str
 
 	allusers := m.GetUsers()
 	result := make([]string, 0, batchSize)
-	channelName := m.GetChannelName(ctx, channelID)
+	channelName := m.GetCachedChannelName(channelID)
 
 	idx := 0
 	retryCount := 0
@@ -616,7 +633,7 @@ func (m *Client) UsernamesInChannel(ctx context.Context, channelID string) []str
 }
 
 func (m *Client) UpdateStatus(ctx context.Context, userID string, status string) error {
-	userName := m.GetUserName(ctx, userID)
+	userName := m.GetCachedUserName(userID)
 	retryCount := 0
 
 	for {

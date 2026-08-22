@@ -34,8 +34,8 @@ func (m *Client) CreatePost(ctx context.Context, post *model.Post) (*model.Post,
 		}
 	}
 
-	channelName := m.GetChannelName(ctx, post.ChannelId)
-	userName := m.GetUserName(ctx, post.UserId)
+	channelName := m.GetCachedChannelName(post.ChannelId)
+	userName := m.GetCachedUserName(post.UserId)
 	retryCount := 0
 
 	for {
@@ -274,9 +274,11 @@ func (m *Client) GetPosts(ctx context.Context, channelID string, limit int) *mod
 		Posts: make(map[string]*model.Post),
 	}
 
+	channelName := m.GetCachedChannelName(channelID)
 	idx := 0
 	retryCount := 0
 	fetched := 0
+
 	for fetched < limit {
 		// Figure out how many posts to fetch in this batch.
 		// It will be 200, unless we are close to the limit.
@@ -285,7 +287,7 @@ func (m *Client) GetPosts(ctx context.Context, channelID string, limit int) *mod
 			currentBatchSize = limit - fetched
 		}
 
-		m.apiLogger.Warnf("GetPosts: ChannelID: %s, Page: %d, PerPage: %d #%d", channelID, idx, currentBatchSize, retryCount)
+		m.apiLogger.Warnf("GetPosts: Channel: %s (%s), Page: %d, PerPage: %d #%d", channelName, channelID, idx, currentBatchSize, retryCount)
 		res, resp, err := m.Client.GetPostsForChannel(ctx, channelID, idx, currentBatchSize, "", false, false)
 		if err != nil {
 			shouldRetry, hErr := m.HandleRetry(ctx, "GetPostsForChannel", err, retryCount, 10, resp)
@@ -294,7 +296,7 @@ func (m *Client) GetPosts(ctx context.Context, channelID string, limit int) *mod
 				continue
 			}
 
-			m.logger.Errorf("GetPostsForChannel failed for %s at page %d: %v", channelID, idx, err)
+			m.logger.Errorf("GetPostsForChannel failed for %s (%s) at page %d: %v", channelName, channelID, idx, err)
 			if len(finalPostList.Order) == 0 {
 				return nil
 			}
@@ -376,9 +378,11 @@ func (m *Client) GetPostsSince(ctx context.Context, channelID string, time int64
 		}
 	}
 
+	channelName := m.GetCachedChannelName(channelID)
 	retryCount := 0
+
 	for {
-		m.apiLogger.Warnf("GetPostsSince: ChannelID: %s, Since: %d #%d", channelID, time, retryCount)
+		m.apiLogger.Warnf("GetPostsSince: Channel: %s (%s), Since: %d #%d", channelName, channelID, time, retryCount)
 		res, resp, err := m.Client.GetPostsSince(ctx, channelID, time, false)
 		if err == nil {
 			if res == nil || m.postCache == nil {
@@ -400,7 +404,7 @@ func (m *Client) GetPostsSince(ctx context.Context, channelID string, time int64
 			continue
 		}
 
-		m.logger.Errorf("GetPostsSince failed for %s: %v", channelID, err)
+		m.logger.Errorf("GetPostsSince failed for %s (%s): %v", channelName, channelID, err)
 		return nil
 	}
 }
@@ -472,9 +476,11 @@ func (m *Client) PostMessage(ctx context.Context, channelID string, text string,
 		RootId:    rootID,
 	}
 
+	channelName := m.GetCachedChannelName(channelID)
 	retryCount := 0
+
 	for {
-		m.apiLogger.Warnf("PostMessage: ChannelID: %s, RootID: %s #%d", channelID, rootID, retryCount)
+		m.apiLogger.Warnf("PostMessage: Channel: %s (%s), RootID: %s #%d", channelName, channelID, rootID, retryCount)
 		res, resp, err := m.Client.CreatePost(ctx, post)
 		if err == nil {
 			if m.postCache != nil {
@@ -488,6 +494,8 @@ func (m *Client) PostMessage(ctx context.Context, channelID string, text string,
 			retryCount++
 			continue
 		}
+
+		m.logger.Errorf("PostMessage failed for %s (%s) %s: %v", channelName, channelID, rootID, err)
 
 		return "", err
 	}
@@ -501,9 +509,11 @@ func (m *Client) PostMessageWithFiles(ctx context.Context, channelID string, tex
 		FileIds:   fileIds,
 	}
 
+	channelName := m.GetCachedChannelName(channelID)
 	retryCount := 0
+
 	for {
-		m.apiLogger.Warnf("PostMessageWithFiles: ChannelID: %s, RootID %s #%d", channelID, rootID, retryCount)
+		m.apiLogger.Warnf("PostMessageWithFiles: Channel: %s (%s), RootID %s #%d", channelName, channelID, rootID, retryCount)
 		res, resp, err := m.Client.CreatePost(ctx, post)
 		if err == nil {
 			if m.postCache != nil {
@@ -517,6 +527,8 @@ func (m *Client) PostMessageWithFiles(ctx context.Context, channelID string, tex
 			retryCount++
 			continue
 		}
+
+		m.logger.Errorf("PostMessageWithFiles failed for %s (%s) %s: %v", channelName, channelID, rootID, err)
 
 		return "", err
 	}
@@ -574,9 +586,12 @@ func (m *Client) SendDirectMessageProps(ctx context.Context, toUserID string, ms
 	}
 	post.SetProps(props)
 
+	channelName := m.GetCachedChannelName(post.ChannelId)
+	userName := m.GetCachedUserName(post.UserId)
 	retryCount := 0
+
 	for {
-		m.apiLogger.Warnf("SendDirectMessageProps: CreatePost: UserID: %s, ChannelID: %s #%d", post.UserId, post.ChannelId, retryCount)
+		m.apiLogger.Warnf("SendDirectMessageProps: CreatePost: User: %s (%s), Channel: %s (%s) #%d", userName, post.UserId, channelName, post.ChannelId, retryCount)
 
 		res, resp, err := m.Client.CreatePost(ctx, post)
 		if err == nil {
@@ -644,9 +659,11 @@ func (m *Client) DeleteReaction(ctx context.Context, reaction *model.Reaction) e
 }
 
 func (m *Client) UploadFile(ctx context.Context, data []byte, channelID string, filename string) (string, error) {
+	channelName := m.GetCachedChannelName(channelID)
 	retryCount := 0
+
 	for {
-		m.apiLogger.Warnf("UploadFile: ChannelID: %s, filename: %s #%d", channelID, filename, retryCount)
+		m.apiLogger.Warnf("UploadFile: Channel: %s (%s), filename: %s #%d", channelName, channelID, filename, retryCount)
 
 		f, resp, err := m.Client.UploadFile(ctx, data, channelID, filename)
 		if err == nil && f != nil && len(f.FileInfos) > 0 {
