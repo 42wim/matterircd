@@ -419,30 +419,54 @@ func (c *UsersCache) SetUserCustomStatus(userID string, rawJSON string) {
 		return
 	}
 
-	if status.Text == "" {
+	var formattedStatus string
+
+	switch {
+	case status.Emoji != "" && status.Text != "":
+		formattedStatus = ":" + status.Emoji + ": " + status.Text
+	case status.Emoji != "":
+		formattedStatus = ":" + status.Emoji + ":"
+	default:
+		formattedStatus = status.Text
+	}
+
+	if formattedStatus == "" {
 		c.customStatuses[userID] = ""
 		return
 	}
 
 	if status.ExpiresAt != "" {
 		expiry, parseErr := time.Parse(time.RFC3339, status.ExpiresAt)
-		if parseErr == nil && time.Now().After(expiry) {
-			c.customStatuses[userID] = ""
-			return
-		}
+		if parseErr == nil {
+			now := time.Now().Local()
+			expLocal := expiry.Local()
 
-		unixVal, parseErr := strconv.ParseInt(status.ExpiresAt, 10, 64)
-		if parseErr == nil && unixVal > 0 && time.Now().Unix() > unixVal {
-			c.customStatuses[userID] = ""
-			return
+			if !expLocal.After(now) {
+				c.customStatuses[userID] = ""
+
+				return
+			}
+
+			timeStr := expLocal.Format("15:04")
+			nowDay := now.YearDay()
+			expDay := expLocal.YearDay()
+
+			var dateStr string
+
+			switch {
+			case now.Year() == expLocal.Year() && expDay == nowDay:
+				dateStr = "Today at " + timeStr
+			case now.Year() == expLocal.Year() && expDay == nowDay+1:
+				dateStr = "Tomorrow at " + timeStr
+			default:
+				dateStr = expLocal.Format("Mon, 02 Jan 15:04")
+			}
+
+			formattedStatus += " (Until " + dateStr + ")"
 		}
 	}
 
-	if status.Emoji != "" {
-		c.customStatuses[userID] = ":" + status.Emoji + ": " + status.Text
-	} else {
-		c.customStatuses[userID] = status.Text
-	}
+	c.customStatuses[userID] = formattedStatus
 }
 
 func (m *Client) SetUserStatus(userID string, rawStatus string) string {
