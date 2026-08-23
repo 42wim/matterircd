@@ -2477,7 +2477,7 @@ func (m *Mattermost) formatSingleAttachmentField(b *strings.Builder, field *mode
 // XXX: Bug in Mattermost itself and PostEmbed Data interface{}
 // extractPreviewData returns (message, userID, channelID, replyCount, lastReplyAt, attachments)
 //
-//nolint:gocyclo
+//nolint:funlen,gocyclo,gocognit
 func extractPreviewData(metadata *model.PostMetadata) (string, string, string, int64, int64, []*model.SlackAttachment) {
 	if metadata == nil {
 		return "", "", "", 0, 0, nil
@@ -2536,7 +2536,8 @@ func extractPreviewData(metadata *model.PostMetadata) (string, string, string, i
 		// Extract attachments if present in props
 		if props, ok := postMap["props"].(map[string]any); ok {
 			if attsRaw, ok := props["attachments"].([]any); ok && len(attsRaw) > 0 {
-				if b, err := json.Marshal(attsRaw); err == nil {
+				b, err := json.Marshal(attsRaw)
+				if err == nil {
 					_ = json.Unmarshal(b, &attachments)
 				}
 			}
