@@ -12,7 +12,7 @@
 # prefixcontext
 
 When enabling this you'll get a hex number between [000] and [fff] prefixed to each message.
-Every channel/direct message will have a seperate counter.
+Every channel/direct message will have a separate counter.
 
 This way you can see what operation has happened on which message.
 
