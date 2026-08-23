@@ -73,6 +73,8 @@ type Server interface {
 	ClientCount() int
 	UserCount() int
 	EncodeMessage(u *User, cmd string, params []string, trailing string) error
+
+	Version() string
 }
 
 // ServerConfig produces a Server setup with configuration options.
@@ -720,4 +722,8 @@ func (s *server) ChannelCount() int {
 
 func (s *server) UserCount() int {
 	return len(s.users)
+}
+
+func (s *server) Version() string {
+	return s.config.Version
 }

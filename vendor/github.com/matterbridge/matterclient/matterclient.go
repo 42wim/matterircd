@@ -150,6 +150,9 @@ type Client struct {
 
 	UserAgent string
 
+	pingSeq   atomic.Int64
+	pingChans sync.Map
+
 	//nolint:containedctx // Tied to the lifecycle of the persistent client session
 	Ctx context.Context
 }
@@ -1136,6 +1139,16 @@ func (m *Client) WsReceiver(ctx context.Context) {
 			text, ok := response.Data["text"].(string)
 			if ok && text == "pong" {
 				m.logger.Tracef("WsReceiver response: %#v", response)
+				m.pingChans.Range(func(key, value any) bool {
+					if ch, ok := value.(chan struct{}); ok {
+						select {
+						case ch <- struct{}{}:
+						default:
+						}
+					}
+
+					return true
+				})
 			} else {
 				m.logger.Debugf("WsReceiver response: %#v", response)
 			}
@@ -1738,4 +1751,31 @@ func (m *Client) IsAborted(ctx context.Context) bool {
 		return true
 	}
 	return false
+}
+
+// PingWS sends a WebSocket ping and blocks until the server responds or ctx times out.
+func (m *Client) PingWS(ctx context.Context) error {
+	if m.WsClient == nil || !m.WsConnected {
+		return errors.New("websocket not connected")
+	}
+
+	seq := m.pingSeq.Add(1)
+	ch := make(chan struct{}, 1)
+	m.pingChans.Store(seq, ch)
+	defer func() {
+		m.pingChans.Delete(seq)
+	}()
+
+	data := map[string]any{
+		"seq": seq,
+	}
+
+	m.WsClient.SendMessage("ping", data)
+
+	select {
+	case <-ch:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }

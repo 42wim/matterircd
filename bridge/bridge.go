@@ -77,6 +77,8 @@ type Bridger interface {
 	FormatterConfig() *config.FormatterConfig
 
 	IsChannelMember(channelID string) bool
+
+	Ping(ctx context.Context) error
 }
 
 type ChannelInfo struct {

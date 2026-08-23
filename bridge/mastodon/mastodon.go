@@ -450,3 +450,7 @@ func (m *Mastodon) FormatterConfig() *config.FormatterConfig {
 func (m *Mastodon) GetReplayEvents(ctx context.Context, channelID string, since int64) []*bridge.Event {
 	return []*bridge.Event{}
 }
+
+func (m *Mastodon) Ping(ctx context.Context) error {
+	return nil
+}
