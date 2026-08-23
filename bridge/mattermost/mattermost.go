@@ -186,6 +186,14 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 	return m, mc, nil
 }
 
+func (m *Mattermost) Ping(ctx context.Context) error {
+	if m.mc == nil {
+		return errors.New("client not initialized")
+	}
+
+	return m.mc.PingWS(ctx)
+}
+
 func (m *Mattermost) loginToMattermost(ctx context.Context, onWsConnect func()) (*matterclient.Client, error) {
 	rc := m.cfg.Current()
 

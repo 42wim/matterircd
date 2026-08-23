@@ -1,11 +1,13 @@
 package irckit
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/42wim/matterircd/utils"
 	"github.com/sorcix/irc"
@@ -522,6 +524,10 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 		if len(msg.Params) == 2 {
 			msg.Trailing = msg.Params[1]
 		}
+	}
+
+	if parseCTCP(s, u, query, msg.Trailing) {
+		return nil
 	}
 
 	// strip IRC colors
@@ -1111,4 +1117,83 @@ func irc2markdown(msg string) string {
 	}
 
 	return string(buf)
+}
+
+//nolint:funlen
+func parseCTCP(s Server, u *User, target string, text string) bool {
+	if !strings.HasPrefix(text, "\x01") || !strings.HasSuffix(text, "\x01") {
+		return false
+	}
+
+	content := strings.Trim(text, "\x01")
+	parts := strings.SplitN(content, " ", 2)
+	cmd := strings.ToUpper(parts[0])
+
+	if cmd == "ACTION" {
+		// Allow /me actions to proceed to standard message handling
+		return false
+	}
+
+	// Do not reply to channel-wide CTCP queries
+	if _, exists := s.HasChannel(target); exists {
+		return true
+	}
+
+	// Determine the origin prefix for the CTCP reply
+	var prefix *irc.Prefix
+	if targetUser, exists := s.HasUser(target); exists {
+		prefix = targetUser.Prefix()
+	} else if target == s.Name() {
+		prefix = s.Prefix()
+	} else {
+		prefix = &irc.Prefix{Name: target}
+	}
+
+	switch cmd {
+	case "VERSION":
+		_ = u.Encode(&irc.Message{
+			Prefix:   prefix,
+			Command:  irc.NOTICE,
+			Params:   []string{u.Nick},
+			Trailing: fmt.Sprintf("\x01VERSION %s %s\x01", s.Name(), s.Version()),
+		})
+
+		return true
+
+	case "PING":
+		payload := ""
+		if len(parts) > 1 {
+			payload = " " + parts[1]
+		}
+
+		if u.br != nil {
+			pingCtx, cancel := context.WithTimeout(u.ctx, 3*time.Second)
+			_ = u.br.Ping(pingCtx)
+
+			cancel()
+		}
+
+		_ = u.Encode(&irc.Message{
+			Prefix:   prefix,
+			Command:  irc.NOTICE,
+			Params:   []string{u.Nick},
+			Trailing: fmt.Sprintf("\x01PING%s\x01", payload),
+		})
+
+		return true
+
+	case "TIME":
+		_ = u.Encode(&irc.Message{
+			Prefix:   prefix,
+			Command:  irc.NOTICE,
+			Params:   []string{u.Nick},
+			Trailing: fmt.Sprintf("\x01TIME %s\x01", time.Now().Format(time.RFC1123)),
+		})
+
+		return true
+
+	default:
+		// Silently drop unhandled queries (USERINFO, CLIENTINFO, DCC, etc.)
+		return true
+	}
 }

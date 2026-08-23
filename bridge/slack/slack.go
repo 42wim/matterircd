@@ -1082,3 +1082,7 @@ func (s *Slack) FormatterConfig() *config.FormatterConfig {
 func (s *Slack) GetReplayEvents(ctx context.Context, channelID string, since int64) []*bridge.Event {
 	return []*bridge.Event{}
 }
+
+func (s *Slack) Ping(ctx context.Context) error {
+	return nil
+}
