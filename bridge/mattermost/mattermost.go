@@ -2082,6 +2082,7 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 	customEmoji := rc.Mattermost.Formatter.CustomEmoji
 	enableIRCHexColors := rc.Mattermost.Formatter.EnableIRCHexColors
 	messageAttachmentShortFieldMaxLineLength := rc.Mattermost.MessageAttachmentShortFieldMaxLineLength
+	messageAttachmentOmitFieldTitles := rc.Mattermost.MessageAttachmentOmitFieldTitles
 
 	if messageAttachmentShortFieldMaxLineLength == 0 {
 		messageAttachmentShortFieldMaxLineLength = 100
@@ -2254,13 +2255,14 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 
 		if len(attachment.Fields) > 0 {
 			maxLineLength := messageAttachmentShortFieldMaxLineLength
-			m.formatAttachmentFields(b, attachment.Fields, prefix, prefixChar, useFallback, fallbackText, opts, maxLineLength)
+			omitFieldTitles := messageAttachmentOmitFieldTitles
+			m.formatAttachmentFields(b, attachment.Fields, prefix, prefixChar, useFallback, fallbackText, opts, maxLineLength, omitFieldTitles)
 		}
 	}
 }
 
 //nolint:funlen,gocognit,gocyclo
-func (m *Mattermost) formatAttachmentFields(b *strings.Builder, fields []*model.SlackAttachmentField, prefix string, prefixChar string, useFallback bool, fallbackText string, opts utils.ProcessMessageOpts, maxLineLength int) {
+func (m *Mattermost) formatAttachmentFields(b *strings.Builder, fields []*model.SlackAttachmentField, prefix string, prefixChar string, useFallback bool, fallbackText string, opts utils.ProcessMessageOpts, maxLineLength int, omitFieldTitles bool) {
 	const gutter = 2
 
 	var candidates [3]struct {
@@ -2301,7 +2303,7 @@ func (m *Mattermost) formatAttachmentFields(b *strings.Builder, fields []*model.
 					totalGutters := (groupSize - 1) * gutter
 					targetColWidth = (maxLineLength - totalGutters) / groupSize
 
-					if fieldsFitColWidth(fields[i:i+groupSize], candidates[:groupSize], targetColWidth) {
+					if fieldsFitColWidth(fields[i:i+groupSize], candidates[:groupSize], targetColWidth, omitFieldTitles) {
 						break
 					}
 
@@ -2311,7 +2313,7 @@ func (m *Mattermost) formatAttachmentFields(b *strings.Builder, fields []*model.
 		}
 
 		if groupSize == 1 {
-			m.formatSingleAttachmentField(b, fields[i], prefix, prefixChar, useFallback, fallbackText, opts)
+			m.formatSingleAttachmentField(b, fields[i], prefix, prefixChar, useFallback, fallbackText, opts, omitFieldTitles)
 			i++
 
 			continue
@@ -2321,8 +2323,11 @@ func (m *Mattermost) formatAttachmentFields(b *strings.Builder, fields []*model.
 		for j := range groupSize {
 			field := fields[i+j]
 
-			title := utils.FormatMarkdownAndEmoji(field.Title, true, opts.DisableEmoji, "", "", opts.CustomEmoji)
-			candidates[j].title = title
+			if !omitFieldTitles {
+				title := utils.FormatMarkdownAndEmoji(field.Title, true, opts.DisableEmoji, "", "", opts.CustomEmoji)
+				candidates[j].title = title
+			}
+
 			valStr := candidates[j].rawVal
 
 			valStr = strings.TrimPrefix(valStr, "\n")
@@ -2348,23 +2353,25 @@ func (m *Mattermost) formatAttachmentFields(b *strings.Builder, fields []*model.
 		}
 
 		// Print Field Titles
-		b.WriteString(prefix)
-		b.WriteByte('\x02')
+		if !omitFieldTitles {
+			b.WriteString(prefix)
+			b.WriteByte('\x02')
 
-		for j := range groupSize {
-			b.WriteString(candidates[j].title)
+			for j := range groupSize {
+				b.WriteString(candidates[j].title)
 
-			if j < groupSize-1 {
-				padWidth := targetColWidth - len(candidates[j].title) + gutter
+				if j < groupSize-1 {
+					padWidth := targetColWidth - len(candidates[j].title) + gutter
 
-				for range padWidth {
-					b.WriteByte(' ')
+					for range padWidth {
+						b.WriteByte(' ')
+					}
 				}
 			}
-		}
 
-		b.WriteByte('\x02')
-		b.WriteByte('\n')
+			b.WriteByte('\x02')
+			b.WriteByte('\n')
+		}
 
 		// Calculate max line depth
 		maxLines := 0
@@ -2405,17 +2412,13 @@ func (m *Mattermost) formatAttachmentFields(b *strings.Builder, fields []*model.
 }
 
 // fieldsFitColWidth checks if all candidate fields and their multiline values fit within targetColWidth.
-func fieldsFitColWidth(
-	fields []*model.SlackAttachmentField,
-	candidates []struct {
-		title  string
-		rawVal string
-		lines  []string
-	},
-	targetColWidth int,
-) bool {
+func fieldsFitColWidth(fields []*model.SlackAttachmentField, candidates []struct {
+	title  string
+	rawVal string
+	lines  []string
+}, targetColWidth int, omitFieldTitles bool) bool {
 	for j, field := range fields {
-		if len(field.Title) > targetColWidth {
+		if !omitFieldTitles && len(field.Title) > targetColWidth {
 			return false
 		}
 
@@ -2436,7 +2439,7 @@ func fieldsFitColWidth(
 	return true
 }
 
-func (m *Mattermost) formatSingleAttachmentField(b *strings.Builder, field *model.SlackAttachmentField, prefix string, prefixChar string, useFallback bool, fallbackText string, opts utils.ProcessMessageOpts) {
+func (m *Mattermost) formatSingleAttachmentField(b *strings.Builder, field *model.SlackAttachmentField, prefix string, prefixChar string, useFallback bool, fallbackText string, opts utils.ProcessMessageOpts, omitFieldTitles bool) {
 	var valStr string
 
 	if s, ok := field.Value.(string); ok {
@@ -2451,7 +2454,7 @@ func (m *Mattermost) formatSingleAttachmentField(b *strings.Builder, field *mode
 		valStr = strings.Replace(valStr, blockQuoteCharDefault, prefixChar, 1)
 	}
 
-	if field.Title != "" {
+	if !omitFieldTitles && field.Title != "" {
 		b.WriteString(prefix)
 		b.WriteByte('\x02')
 
@@ -2464,6 +2467,7 @@ func (m *Mattermost) formatSingleAttachmentField(b *strings.Builder, field *mode
 
 	utils.ProcessMessageText(valStr, opts, func(line string) {
 		// Ignore duplicate content when field value is the same as fallback
+		// e.g. https://github.com/jenkinsci/mattermost-plugin/pull/18
 		isDuplicate := useFallback && fallbackText != "" && line == fallbackText
 
 		if !isDuplicate {
