@@ -1166,11 +1166,17 @@ func parseCTCP(s Server, u *User, target string, text string) bool {
 			payload = " " + parts[1]
 		}
 
+		start := time.Now()
 		if u.br != nil {
 			pingCtx, cancel := context.WithTimeout(u.ctx, 3*time.Second)
 			_ = u.br.Ping(pingCtx)
 
 			cancel()
+		}
+
+		// If no client payload was provided, report the upstream bridge RTT
+		if payload == "" {
+			payload = " " + time.Since(start).Round(time.Millisecond).String()
 		}
 
 		_ = u.Encode(&irc.Message{
