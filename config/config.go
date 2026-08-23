@@ -163,6 +163,7 @@ type MattermostConfig struct {
 	HeavySyncThreshold        time.Duration
 
 	MessageAttachmentShortFieldMaxLineLength int
+	MessageAttachmentOmitFieldTitles         bool
 }
 
 type SlackConfig struct {
@@ -376,6 +377,7 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 			HeavySyncThreshold:        c.v.GetDuration("mattermost.HeavySyncThreshold"),
 
 			MessageAttachmentShortFieldMaxLineLength: c.v.GetInt("mattermost.MessageAttachmentShortFieldMaxLineLength"),
+			MessageAttachmentOmitFieldTitles:         c.v.GetBool("mattermost.MessageAttachmentOmitFieldTitles"),
 		},
 
 		Slack: SlackConfig{
