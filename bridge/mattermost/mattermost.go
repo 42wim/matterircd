@@ -1985,8 +1985,8 @@ func (m *Mattermost) formatMessage(ctx context.Context, data *model.Post, eventT
 	}
 
 	// We can't use data.GetPreviewPost() due to a bug so use our own
-	previewText, previewUserID, previewChannelID, replyCount, lastReplyAt := extractPreviewData(data.Metadata)
-	if !(previewText == "" && previewUserID == "" && previewChannelID == "") {
+	previewText, previewUserID, previewChannelID, replyCount, lastReplyAt, previewAttachments := extractPreviewData(data.Metadata)
+	if previewText != "" || len(previewAttachments) > 0 {
 		nick := previewUserID
 		if user := m.GetUser(ctx, previewUserID); user != nil {
 			nick = user.Nick
@@ -1997,7 +1997,7 @@ func (m *Mattermost) formatMessage(ctx context.Context, data *model.Post, eventT
 			channel = ""
 		}
 
-		m.parsePreviewPost(&sbMsg, nick, channel, previewText, replyCount, lastReplyAt)
+		m.parsePreviewPost(&sbMsg, nick, channel, previewText, replyCount, lastReplyAt, previewAttachments)
 	}
 
 	return sbMsg.String()
@@ -2476,11 +2476,12 @@ func (m *Mattermost) formatSingleAttachmentField(b *strings.Builder, field *mode
 }
 
 // XXX: Bug in Mattermost itself and PostEmbed Data interface{}
+// extractPreviewData returns (message, userID, channelID, replyCount, lastReplyAt, attachments)
 //
-//nolint:gocyclo
-func extractPreviewData(metadata *model.PostMetadata) (string, string, string, int64, int64) {
+//nolint:funlen,gocyclo,gocognit
+func extractPreviewData(metadata *model.PostMetadata) (string, string, string, int64, int64, []*model.SlackAttachment) {
 	if metadata == nil {
-		return "", "", "", 0, 0
+		return "", "", "", 0, 0, nil
 	}
 
 	for _, embed := range metadata.Embeds {
@@ -2501,6 +2502,7 @@ func extractPreviewData(metadata *model.PostMetadata) (string, string, string, i
 		var (
 			msg, userID, channelID  string
 			replyCount, lastReplyAt int64
+			attachments             []*model.SlackAttachment
 		)
 
 		if val, ok := postMap["message"].(string); ok {
@@ -2532,14 +2534,24 @@ func extractPreviewData(metadata *model.PostMetadata) (string, string, string, i
 			}
 		}
 
-		return msg, userID, channelID, replyCount, lastReplyAt
+		// Extract attachments if present in props
+		if props, ok := postMap["props"].(map[string]any); ok {
+			if attsRaw, ok := props["attachments"].([]any); ok && len(attsRaw) > 0 {
+				b, err := json.Marshal(attsRaw)
+				if err == nil {
+					_ = json.Unmarshal(b, &attachments)
+				}
+			}
+		}
+
+		return msg, userID, channelID, replyCount, lastReplyAt, attachments
 	}
 
-	return "", "", "", 0, 0
+	return "", "", "", 0, 0, nil
 }
 
 //nolint:funlen
-func (m *Mattermost) parsePreviewPost(b *strings.Builder, user string, channel string, text string, replyCount int64, lastReplyAt int64) {
+func (m *Mattermost) parsePreviewPost(b *strings.Builder, user string, channel string, text string, replyCount int64, lastReplyAt int64, attachments []*model.SlackAttachment) {
 	rc := m.cfg.Current()
 
 	useUnicode := rc.Mattermost.Formatter.Unicode
@@ -2603,10 +2615,13 @@ func (m *Mattermost) parsePreviewPost(b *strings.Builder, user string, channel s
 				b.WriteString(" replies")
 			}
 
-			b.WriteString(", last at ")
-			// Mattermost timestamps are in Unix milliseconds
-			t := time.Unix(lastReplyAt/1000, 0)
-			b.WriteString(t.Format("2006-01-02 15:04:05"))
+			if lastReplyAt > 0 {
+				b.WriteString(", last at ")
+				// Mattermost timestamps are in Unix milliseconds
+				t := time.Unix(lastReplyAt/1000, 0)
+				b.WriteString(t.Format("2006-01-02 15:04:05"))
+			}
+
 			b.WriteByte(')')
 		}
 
@@ -2617,49 +2632,56 @@ func (m *Mattermost) parsePreviewPost(b *strings.Builder, user string, channel s
 
 	text = strings.TrimRight(text, " \t\r\n")
 
-	opts := utils.ProcessMessageOpts{
-		DisableEmoji:       disableEmoji,
-		CustomEmoji:        customEmoji,
-		DisableMarkdown:    disableMarkdown,
-		SyntaxHighlighting: syntaxHighlighting,
-		CodeBlockPrefix:    codeBlockPrefix,
-		CodeBlockSeparator: codeBlockSeparator,
-		BlockquoteChar:     blockquoteChar,
-		InlineCodeChar:     inlineCode,
-	}
-
-	trimmedBlockquoteChar := strings.TrimSpace(blockquoteChar)
-	trimmedCodeBlockPrefix := strings.TrimSpace(codeBlockPrefix)
-
-	var pendingLines []string
-
-	utils.ProcessMessageText(text, opts, func(line string) {
-		line = strings.TrimRight(line, " \t\r")
-		trimmed := strings.TrimSpace(line)
-
-		// Check for empty or style-only lines
-		if trimmed == "" || trimmed == trimmedCodeBlockPrefix || trimmed == trimmedBlockquoteChar {
-			pendingLines = append(pendingLines, line)
-
-			return
+	if text != "" {
+		opts := utils.ProcessMessageOpts{
+			DisableEmoji:       disableEmoji,
+			CustomEmoji:        customEmoji,
+			DisableMarkdown:    disableMarkdown,
+			SyntaxHighlighting: syntaxHighlighting,
+			CodeBlockPrefix:    codeBlockPrefix,
+			CodeBlockSeparator: codeBlockSeparator,
+			BlockquoteChar:     blockquoteChar,
+			InlineCodeChar:     inlineCode,
 		}
 
-		writeHeader()
+		trimmedBlockquoteChar := strings.TrimSpace(blockquoteChar)
+		trimmedCodeBlockPrefix := strings.TrimSpace(codeBlockPrefix)
 
-		for _, pending := range pendingLines {
+		var pendingLines []string
+
+		utils.ProcessMessageText(text, opts, func(line string) {
+			line = strings.TrimRight(line, " \t\r")
+			trimmed := strings.TrimSpace(line)
+
+			// Check for empty or style-only lines
+			if trimmed == "" || trimmed == trimmedCodeBlockPrefix || trimmed == trimmedBlockquoteChar {
+				pendingLines = append(pendingLines, line)
+
+				return
+			}
+
+			writeHeader()
+
+			for _, pending := range pendingLines {
+				b.WriteByte('\n')
+				b.WriteString(prefix)
+				b.WriteString(pending)
+			}
+
+			pendingLines = pendingLines[:0]
+
+			// Mirror original behavior: write newline before subsequent lines,
+			// avoiding a trailing newline at the very end.
 			b.WriteByte('\n')
 			b.WriteString(prefix)
-			b.WriteString(pending)
-		}
+			b.WriteString(line)
+		})
+	}
 
-		pendingLines = pendingLines[:0]
-
-		// Mirror original behavior: write newline before subsequent lines,
-		// avoiding a trailing newline at the very end.
-		b.WriteByte('\n')
-		b.WriteString(prefix)
-		b.WriteString(line)
-	})
+	if len(attachments) > 0 {
+		writeHeader()
+		m.parseMessageAttachments(b, attachments, false, text)
+	}
 }
 
 func (m *Mattermost) postListToEvents(ctx context.Context, postlist interface{}, eventType string, since int64) []*bridge.Event {
