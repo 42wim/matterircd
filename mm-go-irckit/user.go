@@ -263,10 +263,13 @@ func (u *User) Decode() {
 					logger.Tracef("decode buffer goroutine exiting for %s", u.Nick)
 					return
 				}
+
 				if strings.HasPrefix(msg.Trailing, "\x01") || replyRegExp.MatchString(msg.Trailing) || modifyRegExp.MatchString(msg.Trailing) {
 					logger.Trace("flushing buffer because of CTCP, replies to threads, or message modifications")
 					flush()
+
 					u.DecodeCh <- msg
+
 					continue
 				}
 				// are we starting a new buffer ?
