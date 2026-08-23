@@ -1119,7 +1119,7 @@ func irc2markdown(msg string) string {
 	return string(buf)
 }
 
-//nolint:funlen
+//nolint:funlen,gocyclo
 func parseCTCP(s Server, u *User, target string, text string) bool {
 	if !strings.HasPrefix(text, "\x01") || !strings.HasSuffix(text, "\x01") {
 		return false
@@ -1150,16 +1150,6 @@ func parseCTCP(s Server, u *User, target string, text string) bool {
 	}
 
 	switch cmd {
-	case "VERSION":
-		_ = u.Encode(&irc.Message{
-			Prefix:   prefix,
-			Command:  irc.NOTICE,
-			Params:   []string{u.Nick},
-			Trailing: fmt.Sprintf("\x01VERSION %s %s\x01", s.Name(), s.Version()),
-		})
-
-		return true
-
 	case "PING":
 		payload := ""
 		if len(parts) > 1 {
@@ -1167,6 +1157,7 @@ func parseCTCP(s Server, u *User, target string, text string) bool {
 		}
 
 		start := time.Now()
+
 		if u.br != nil {
 			pingCtx, cancel := context.WithTimeout(u.ctx, 3*time.Second)
 			_ = u.br.Ping(pingCtx)
@@ -1174,9 +1165,8 @@ func parseCTCP(s Server, u *User, target string, text string) bool {
 			cancel()
 		}
 
-		// If no client payload was provided, report the upstream bridge RTT
 		if payload == "" {
-			payload = " " + time.Since(start).Round(time.Millisecond).String()
+			payload = fmt.Sprintf(" %d %d", start.Unix(), start.Nanosecond()/1000)
 		}
 
 		_ = u.Encode(&irc.Message{
@@ -1194,6 +1184,46 @@ func parseCTCP(s Server, u *User, target string, text string) bool {
 			Command:  irc.NOTICE,
 			Params:   []string{u.Nick},
 			Trailing: fmt.Sprintf("\x01TIME %s\x01", time.Now().Format(time.RFC1123)),
+		})
+
+		return true
+
+	case "USERINFO":
+		var info string
+
+		if targetUser, exists := s.HasUser(target); exists && targetUser.UserInfo != nil {
+			fullName := strings.TrimSpace(targetUser.FirstName + " " + targetUser.LastName)
+			switch {
+			case fullName != "":
+				info = fullName
+			case targetUser.Real != "":
+				info = targetUser.Real
+			case targetUser.DisplayName != "":
+				info = targetUser.DisplayName
+			default:
+				info = targetUser.Nick
+			}
+		} else if target == s.Name() {
+			info = fmt.Sprintf("%s IRC bridge", s.Name())
+		} else {
+			info = target
+		}
+
+		_ = u.Encode(&irc.Message{
+			Prefix:   prefix,
+			Command:  irc.NOTICE,
+			Params:   []string{u.Nick},
+			Trailing: fmt.Sprintf("\x01USERINFO %s\x01", info),
+		})
+
+		return true
+
+	case "VERSION":
+		_ = u.Encode(&irc.Message{
+			Prefix:   prefix,
+			Command:  irc.NOTICE,
+			Params:   []string{u.Nick},
+			Trailing: fmt.Sprintf("\x01VERSION %s %s\x01", s.Name(), s.Version()),
 		})
 
 		return true
