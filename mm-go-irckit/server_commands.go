@@ -980,16 +980,29 @@ func CmdWhois(s Server, u *User, msg *irc.Message) error {
 			Trailing: other.Real,
 		})
 
-		var chlist string
+		var chlist strings.Builder
+
+		seen := make(map[Channel]struct{})
+		for _, ch := range u.Channels() {
+			if ch.HasUser(other) {
+				seen[ch] = struct{}{}
+				chlist.WriteString(ch.String())
+				chlist.WriteByte(' ')
+			}
+		}
+
 		for _, ch := range other.Channels() {
-			chlist += ch.String() + " "
+			if _, ok := seen[ch]; !ok {
+				chlist.WriteString(ch.String())
+				chlist.WriteByte(' ')
+			}
 		}
 
 		r = append(r, &irc.Message{
 			Prefix:   s.Prefix(),
 			Params:   []string{u.Nick, other.Nick},
 			Command:  irc.RPL_WHOISCHANNELS,
-			Trailing: chlist,
+			Trailing: chlist.String(),
 		})
 
 		status, _ := u.br.StatusUser(u.ctx, other.User)
