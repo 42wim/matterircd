@@ -1011,7 +1011,6 @@ func (m *Mattermost) getCachedPostInfo(ctx context.Context, postID string, preFe
 		msg = utils.EmojiReplaceAliases(msg, rc.Mattermost.Formatter.CustomEmoji)
 	}
 
-
 	opts := utils.SummaryOpts{
 		DisableMarkdown: true,
 		DisableEmoji:    true,
@@ -2261,15 +2260,17 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 	}
 }
 
+type attachmentFieldCandidate struct {
+	title  string
+	rawVal string
+	lines  []string
+}
+
 //nolint:funlen,gocognit,gocyclo
 func (m *Mattermost) formatAttachmentFields(b *strings.Builder, fields []*model.SlackAttachmentField, prefix string, prefixChar string, useFallback bool, fallbackText string, opts utils.ProcessMessageOpts, maxLineLength int, omitFieldTitles bool) {
 	const gutter = 2
 
-	var candidates [3]struct {
-		title  string
-		rawVal string
-		lines  []string
-	}
+	var candidates [3]attachmentFieldCandidate
 
 	for i := 0; i < len(fields); {
 		groupSize := 1
@@ -2412,11 +2413,7 @@ func (m *Mattermost) formatAttachmentFields(b *strings.Builder, fields []*model.
 }
 
 // fieldsFitColWidth checks if all candidate fields and their multiline values fit within targetColWidth.
-func fieldsFitColWidth(fields []*model.SlackAttachmentField, candidates []struct {
-	title  string
-	rawVal string
-	lines  []string
-}, targetColWidth int, omitFieldTitles bool) bool {
+func fieldsFitColWidth(fields []*model.SlackAttachmentField, candidates []attachmentFieldCandidate, targetColWidth int, omitFieldTitles bool) bool {
 	for j, field := range fields {
 		if !omitFieldTitles && len(field.Title) > targetColWidth {
 			return false
