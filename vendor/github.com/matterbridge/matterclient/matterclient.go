@@ -1761,6 +1761,7 @@ func (m *Client) PingWS(ctx context.Context) error {
 
 	seq := m.pingSeq.Add(1)
 	ch := make(chan struct{}, 1)
+
 	m.pingChans.Store(seq, ch)
 	defer func() {
 		m.pingChans.Delete(seq)
