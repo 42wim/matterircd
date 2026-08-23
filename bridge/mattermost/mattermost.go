@@ -1953,7 +1953,7 @@ func (m *Mattermost) formatMessage(ctx context.Context, data *model.Post, eventT
 		}
 		useFallback := len(msg) == 0
 		// https://docs.slack.dev/tools/node-slack-sdk/reference/web-api/interfaces/MessageAttachment/
-		m.parseMessageAttachments(&sbMsg, attachments, useFallback, msg)
+		m.parseMessageAttachments(&sbMsg, attachments, useFallback, msg, "")
 	case data.Type == "custom_matterpoll":
 		pollMsg := parseMatterpollToMsg(attachments, useUnicode)
 		sbMsg.WriteString(msg)
@@ -1964,7 +1964,7 @@ func (m *Mattermost) formatMessage(ctx context.Context, data *model.Post, eventT
 		}
 		useFallback := len(msg) == 0
 		// https://developers.mattermost.com/integrate/reference/message-attachments/
-		m.parseMessageAttachments(&sbMsg, attachments, useFallback, msg)
+		m.parseMessageAttachments(&sbMsg, attachments, useFallback, msg, "")
 	default:
 		sbMsg.WriteString(msg)
 	}
@@ -2064,7 +2064,7 @@ func parseMatterpollToMsg(attachments []*model.SlackAttachment, unicode bool) st
 const blockQuoteCharDefault = utils.BlockQuoteCharDefault
 
 //nolint:funlen,gocognit,gocyclo
-func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*model.SlackAttachment, useFallback bool, rootMsg string) {
+func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*model.SlackAttachment, useFallback bool, rootMsg string, additionalPrefix string) {
 	// If the main message builder already has content, add a newline before our preview
 	if b.Len() > 0 {
 		b.WriteByte('\n')
@@ -2104,25 +2104,25 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 	}
 
 	for _, attachment := range attachments {
-		prefix := "\x02" + prefixChar + "\x0f" + spaceChar
+		newPrefix := additionalPrefix + "\x02" + prefixChar + "\x0f" + spaceChar
 		switch {
 		// https://docs.slack.dev/tools/node-slack-sdk/reference/web-api/interfaces/MessageAttachment/#color
 		case attachment.Color == "danger":
-			prefix = "\x0304" + prefixChar + "\x0f" + spaceChar
+			newPrefix = additionalPrefix + "\x0304" + prefixChar + "\x0f" + spaceChar
 		case attachment.Color == "good":
-			prefix = "\x0303" + prefixChar + "\x0f" + spaceChar
+			newPrefix = additionalPrefix + "\x0303" + prefixChar + "\x0f" + spaceChar
 		case attachment.Color == "warning":
-			prefix = "\x0308" + prefixChar + "\x0f" + spaceChar
+			newPrefix = additionalPrefix + "\x0308" + prefixChar + "\x0f" + spaceChar
 		case strings.HasPrefix(attachment.Color, "#"):
 			hex := strings.TrimPrefix(attachment.Color, "#")
 			if enableIRCHexColors {
 				// https://modern.ircdocs.horse/formatting.html#hex-color
 				// Make sure the hex is uppercase for best compatibility
-				prefix = "\x02\x04" + strings.ToUpper(hex) + prefixChar + "\x0f" + spaceChar
+				newPrefix = additionalPrefix + "\x02\x04" + strings.ToUpper(hex) + prefixChar + "\x0f" + spaceChar
 			} else {
 				// Use the closest standard/extended \x03 code
 				closestMircCode := utils.FindClosestIRCColor(hex)
-				prefix = "\x02\x03" + closestMircCode + prefixChar + "\x0f" + spaceChar
+				newPrefix = additionalPrefix + "\x02\x03" + closestMircCode + prefixChar + "\x0f" + spaceChar
 			}
 		}
 
@@ -2182,7 +2182,7 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 			(attachment.AuthorLink == "" || isDup(attachment.AuthorLink))
 
 		if attachment.AuthorName != "" && !isAuthorDup {
-			b.WriteString(prefix)
+			b.WriteString(newPrefix)
 			authorName := attachment.AuthorName
 			if !disableEmoji {
 				authorName = utils.EmojiReplaceAliases(authorName, rc.Mattermost.Formatter.CustomEmoji)
@@ -2203,7 +2203,7 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 			(attachment.TitleLink == "" || isDup(attachment.TitleLink))
 
 		if attachment.Title != "" && !isTitleDup {
-			b.WriteString(prefix)
+			b.WriteString(newPrefix)
 			b.WriteByte('\x02')
 			title := attachment.Title
 			if !disableEmoji {
@@ -2240,14 +2240,14 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 
 		if attachment.Text != "" && !isTextDup {
 			utils.ProcessMessageText(attachment.Text, opts, func(line string) {
-				b.WriteString(prefix)
+				b.WriteString(newPrefix)
 				b.WriteString(line)
 				b.WriteByte('\n')
 			})
 		}
 
 		if attachment.ImageURL != "" {
-			b.WriteString(prefix)
+			b.WriteString(newPrefix)
 			b.WriteString(attachment.ImageURL)
 			b.WriteByte('\n')
 		}
@@ -2255,7 +2255,7 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 		if len(attachment.Fields) > 0 {
 			maxLineLength := messageAttachmentShortFieldMaxLineLength
 			omitFieldTitles := messageAttachmentOmitFieldTitles
-			m.formatAttachmentFields(b, attachment.Fields, prefix, prefixChar, useFallback, fallbackText, opts, maxLineLength, omitFieldTitles)
+			m.formatAttachmentFields(b, attachment.Fields, newPrefix, prefixChar, useFallback, fallbackText, opts, maxLineLength, omitFieldTitles)
 		}
 	}
 }
@@ -2680,7 +2680,7 @@ func (m *Mattermost) parsePreviewPost(b *strings.Builder, user string, channel s
 
 	if len(attachments) > 0 {
 		writeHeader()
-		m.parseMessageAttachments(b, attachments, false, text)
+		m.parseMessageAttachments(b, attachments, false, text, prefixChar)
 	}
 }
 
