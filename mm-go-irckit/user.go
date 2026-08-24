@@ -294,8 +294,13 @@ func (u *User) Decode() {
 				} else {
 					// make sure we're sending to the same recipient in the buffer
 					if bufferedMsg.Params[0] == msg.Params[0] {
-						// Guard against exceeding Mattermost post limit (16,384 characters)
-						if len(bufferedMsg.Trailing)+len(msg.Trailing)+1 > 16250 {
+						// Guard against exceeding post size limit
+						postLimit := 460
+						if u.br != nil {
+							postLimit = u.br.GetPostSizeLimit()
+						}
+
+						if len(bufferedMsg.Trailing)+len(msg.Trailing)+1 > postLimit-50 {
 							flush()
 
 							bufferedMsg = msg

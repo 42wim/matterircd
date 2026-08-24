@@ -1083,6 +1083,10 @@ func (s *Slack) FormatterConfig() *config.FormatterConfig {
 	return &s.cfg.Current().Slack.Formatter
 }
 
+func (s *Slack) GetPostSizeLimit() int {
+	return 4000
+}
+
 func (s *Slack) GetReplayEvents(ctx context.Context, channelID string, since int64) []*bridge.Event {
 	return []*bridge.Event{}
 }
