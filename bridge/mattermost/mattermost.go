@@ -768,6 +768,25 @@ func (m *Mattermost) GetUser(ctx context.Context, userID string) *bridge.UserInf
 	return m.createUser(m.mc.GetUser(ctx, userID))
 }
 
+func (m *Mattermost) GetUserChannels(ctx context.Context, userID string) ([]string, error) {
+	channels, err := m.mc.GetUserChannels(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]string, 0, len(channels))
+
+	for _, ch := range channels {
+		if ch.Type != model.ChannelTypeOpen {
+			continue
+		}
+
+		result = append(result, ch.Name)
+	}
+
+	return result, nil
+}
+
 func (m *Mattermost) GetUserCount() int {
 	return m.mc.GetUserCount()
 }

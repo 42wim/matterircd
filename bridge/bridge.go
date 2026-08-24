@@ -48,6 +48,7 @@ type Bridger interface {
 	GetChannelUsers(ctx context.Context, channelID string) ([]*UserInfo, error)
 	GetUsers() []*UserInfo
 	GetUser(ctx context.Context, userID string) *UserInfo
+	GetUserChannels(ctx context.Context, userID string) ([]string, error)
 	GetUserCount() int
 	GetMe() *UserInfo
 	GetUserByUsername(ctx context.Context, username string) *UserInfo

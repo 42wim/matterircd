@@ -212,6 +212,10 @@ func (m *Mastodon) GetUser(ctx context.Context, userID string) *bridge.UserInfo 
 	return nil
 }
 
+func (m *Mastodon) GetUserChannels(ctx context.Context, userID string) ([]string, error) {
+	return []string{}, nil
+}
+
 func (m *Mastodon) GetUserCount() int {
 	return 0
 }

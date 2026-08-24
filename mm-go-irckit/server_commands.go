@@ -986,46 +986,80 @@ func CmdWhois(s Server, u *User, msg *irc.Message) error {
 			Trailing: other.Real,
 		})
 
-		var chlist strings.Builder
-
-		seen := make(map[Channel]struct{})
+		seen := make(map[string]struct{})
 		uChannels := make([]string, 0, len(u.channels))
 
 		for _, ch := range u.Channels() {
 			if ch.HasUser(other) {
-				seen[ch] = struct{}{}
-				uChannels = append(uChannels, ch.String())
+				chStr := ch.String()
+				cleanName := strings.TrimPrefix(chStr, "#")
+				seen[cleanName] = struct{}{}
+
+				uChannels = append(uChannels, chStr)
 			}
 		}
 
 		sort.Strings(uChannels)
 
-		for _, chStr := range uChannels {
-			chlist.WriteString(chStr)
-			chlist.WriteByte(' ')
-		}
-
 		var otherChannels []string
 
 		for _, ch := range other.Channels() {
-			if _, ok := seen[ch]; !ok {
-				otherChannels = append(otherChannels, ch.String())
+			chStr := ch.String()
+			cleanName := strings.TrimPrefix(chStr, "#")
+
+			if _, ok := seen[cleanName]; !ok {
+				seen[cleanName] = struct{}{}
+
+				otherChannels = append(otherChannels, chStr)
+			}
+		}
+
+		remoteChannels, err := u.br.GetUserChannels(u.ctx, other.User)
+		if err == nil {
+			for _, name := range remoteChannels {
+				cleanName := strings.TrimPrefix(name, "#")
+				if _, ok := seen[cleanName]; !ok {
+					seen[cleanName] = struct{}{}
+					otherChannels = append(otherChannels, "#"+cleanName)
+				}
 			}
 		}
 
 		sort.Strings(otherChannels)
 
-		for _, chStr := range otherChannels {
-			chlist.WriteString(chStr)
-			chlist.WriteByte(' ')
+		allChannels := make([]string, 0, len(uChannels)+len(otherChannels))
+		allChannels = append(allChannels, uChannels...)
+		allChannels = append(allChannels, otherChannels...)
+
+		const maxTrailingLen = 460
+
+		var line strings.Builder
+		for _, chStr := range allChannels {
+			if line.Len() > 0 && line.Len()+1+len(chStr) > maxTrailingLen {
+				r = append(r, &irc.Message{
+					Prefix:   s.Prefix(),
+					Params:   []string{u.Nick, other.Nick},
+					Command:  irc.RPL_WHOISCHANNELS,
+					Trailing: line.String(),
+				})
+				line.Reset()
+			}
+
+			if line.Len() > 0 {
+				line.WriteByte(' ')
+			}
+
+			line.WriteString(chStr)
 		}
 
-		r = append(r, &irc.Message{
-			Prefix:   s.Prefix(),
-			Params:   []string{u.Nick, other.Nick},
-			Command:  irc.RPL_WHOISCHANNELS,
-			Trailing: chlist.String(),
-		})
+		if line.Len() > 0 {
+			r = append(r, &irc.Message{
+				Prefix:   s.Prefix(),
+				Params:   []string{u.Nick, other.Nick},
+				Command:  irc.RPL_WHOISCHANNELS,
+				Trailing: line.String(),
+			})
+		}
 
 		status, _ := u.br.StatusUser(u.ctx, other.User)
 
