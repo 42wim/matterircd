@@ -453,6 +453,10 @@ func (s *Slack) GetUser(ctx context.Context, userID string) *bridge.UserInfo {
 	return s.createUser(s.getSlackUser(userID))
 }
 
+func (s *Slack) GetUserChannels(ctx context.Context, userID string) ([]string, error) {
+	return []string{}, nil
+}
+
 func (s *Slack) GetUserCount() int {
 	return 0
 }

@@ -334,6 +334,35 @@ func (m *Client) GetUserByUsername(ctx context.Context, username string) *model.
 	return mmuser
 }
 
+func (m *Client) GetUserChannels(ctx context.Context, userID string) ([]*model.Channel, error) {
+	if m.Team == nil || userID == "" {
+		return nil, nil
+	}
+
+	userName := m.GetCachedUserName(userID)
+	retryCount := 0
+
+	for {
+		m.apiLogger.Warnf("GetUserChannels: GetChannelsForTeamForUser: User: %s (%s) #%d", userName, userID, retryCount)
+
+		channels, resp, err := m.Client.GetChannelsForTeamForUser(ctx, m.Team.ID, userID, false, "")
+		if err == nil {
+			return channels, nil
+		}
+
+		shouldRetry, hErr := m.HandleRetry(ctx, "GetUserChannels", err, retryCount, 10, resp)
+		if hErr == nil && shouldRetry {
+			retryCount++
+
+			continue
+		}
+
+		m.logger.Debugf("GetUserChannels failed for %s (%s): %s", userName, userID, err)
+
+		return nil, err
+	}
+}
+
 // GetUserCount returns the total number of cached team users.
 func (m *Client) GetUserCount() int {
 	if m == nil || m.Users == nil {
