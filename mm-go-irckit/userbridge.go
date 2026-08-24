@@ -707,15 +707,14 @@ func (u *User) handleChannelUpdateEvent(e *bridge.ChannelUpdateEvent) {
 		chName := strings.TrimPrefix(ch.String(), "#")
 		chID := u.br.GetChannelID(u.ctx, chName, u.br.GetMe().TeamID)
 
-		// A channel is stale if Mattermost 404s it (returns ""),
-		// OR if the cache still links this old name to the ID that was just renamed!
-		if chID == "" || chID == e.ChannelID {
+		// A channel is only stale for this update if its cached ID matches the updated ChannelID
+		if chID != "" && chID == e.ChannelID {
 			staleChannels = append(staleChannels, ch)
 		}
 	}
 
 	// Just a display name change? exit.
-	if alreadyJoinedNew && len(staleChannels) == 0 {
+	if len(staleChannels) == 0 {
 		return
 	}
 
@@ -732,8 +731,8 @@ func (u *User) handleChannelUpdateEvent(e *bridge.ChannelUpdateEvent) {
 		ch.Unlink()
 	}
 
-	// Join the new channel and bind it to our routing map
-	if !alreadyJoinedNew {
+	// Only join the new channel if we actually parted a stale channel we were in
+	if !alreadyJoinedNew && len(staleChannels) > 0 {
 		newCh := u.Srv.Channel(newIRCChanStr)
 		_ = newCh.Join(u)
 
