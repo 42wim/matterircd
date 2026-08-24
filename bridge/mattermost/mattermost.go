@@ -1783,6 +1783,11 @@ func (m *Mattermost) handleWsActionChannelUpdated(rmsg *model.WebSocketEvent, lo
 	err := json.Unmarshal([]byte(channelStr), &updatedChannel)
 	if err != nil {
 		logger.Errorf("Failed to decode updated channel: %v", err)
+
+		return
+	}
+
+	if updatedChannel.Type == model.ChannelTypeDirect {
 		return
 	}
 
