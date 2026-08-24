@@ -210,10 +210,7 @@ func (u *User) Decode() {
 	}
 	logger.Tracef("using paste buffer timeout: %#v", bufferTimeout)
 	timeout := time.Duration(bufferTimeout) * time.Millisecond
-	continuationTimeout := 200 * time.Millisecond
-	if timeout < continuationTimeout {
-		continuationTimeout = timeout
-	}
+	continuationTimeout := min(timeout, 200*time.Millisecond)
 	t := timer.NewTimer(timeout)
 	t.Stop()
 	var wg sync.WaitGroup
@@ -222,8 +219,10 @@ func (u *User) Decode() {
 	go func(buffer chan *irc.Message) {
 		defer wg.Done()
 
-		var bufferedMsg *irc.Message
-		var bufferDeadline time.Time
+		var (
+			bufferedMsg    *irc.Message
+			bufferDeadline time.Time
+		)
 
 		flush := func() {
 			t.Stop()
@@ -290,15 +289,18 @@ func (u *User) Decode() {
 				if bufferedMsg == nil {
 					bufferedMsg = msg
 					bufferDeadline = time.Now().Add(timeout)
+
 					t.Reset(continuationTimeout)
 				} else {
 					// make sure we're sending to the same recipient in the buffer
 					if bufferedMsg.Params[0] == msg.Params[0] {
 						// Guard against exceeding Mattermost post limit (16,384 characters)
-						if len(bufferedMsg.Trailing)+len(msg.Trailing)+1 > 16384 {
+						if len(bufferedMsg.Trailing)+len(msg.Trailing)+1 > 16250 {
 							flush()
+
 							bufferedMsg = msg
 							bufferDeadline = time.Now().Add(timeout)
+
 							t.Reset(continuationTimeout)
 						} else {
 							bufferedMsg.Trailing += "\n" + msg.Trailing
@@ -307,10 +309,7 @@ func (u *User) Decode() {
 							if remaining <= 0 {
 								flush()
 							} else {
-								resetDuration := continuationTimeout
-								if remaining < resetDuration {
-									resetDuration = remaining
-								}
+								resetDuration := min(continuationTimeout, remaining)
 								t.Reset(resetDuration)
 							}
 						}
@@ -318,6 +317,7 @@ func (u *User) Decode() {
 						flush()
 						bufferedMsg = msg
 						bufferDeadline = time.Now().Add(timeout)
+
 						t.Reset(continuationTimeout)
 					}
 				}
