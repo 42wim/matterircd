@@ -1806,7 +1806,8 @@ func (m *Mattermost) handleWsActionChannelUpdated(rmsg *model.WebSocketEvent, lo
 		return
 	}
 
-	if updatedChannel.Type == model.ChannelTypeDirect {
+	// Ignore DM and Group DM updates
+	if updatedChannel.Type == model.ChannelTypeDirect || updatedChannel.Type == model.ChannelTypeGroup {
 		return
 	}
 
