@@ -694,16 +694,8 @@ func (u *User) handleChannelUpdateEvent(e *bridge.ChannelUpdateEvent) {
 
 	u.RUnlock()
 
-	// If already in the channel, it's just a display name change. Send notice and exit.
+	// If already in the channel, it's just a display name change.
 	if alreadyJoinedNew {
-		noticeMsg := &irc.Message{
-			Prefix:   u.Srv.Prefix(),
-			Command:  irc.NOTICE,
-			Params:   []string{newIRCChanStr},
-			Trailing: fmt.Sprintf("[SERVER NOTICE] Channel updated. Display Name is now: %s", e.DisplayName),
-		}
-		_ = u.Encode(noticeMsg)
-
 		return
 	}
 
