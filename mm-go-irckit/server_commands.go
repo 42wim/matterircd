@@ -283,7 +283,7 @@ func CmdMode(s Server, u *User, msg *irc.Message) error {
 
 	mode := "+"
 	if s.Channel(channel).IsPrivate() {
-		mode = "+pi"
+		mode = "+p"
 	}
 
 	r := []*irc.Message{}
