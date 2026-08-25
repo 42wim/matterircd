@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -270,9 +271,25 @@ func (m *Client) GetChannelID(ctx context.Context, name string, teamID string) s
 func (m *Client) getChannelIDTeam(ctx context.Context, name string, teamID string) string {
 	m.Users.mu.RLock()
 	for _, ch := range m.Users.channelData {
-		if ch.TeamId == teamID && getNormalisedName(ch) == name {
+		if ch.TeamId != teamID && ch.Type != model.ChannelTypeDirect && ch.Type != model.ChannelTypeGroup {
+			continue
+		}
+
+		// Direct match on normalized name or raw channel name
+		if strings.EqualFold(getNormalisedName(ch), name) || strings.EqualFold(ch.Name, name) {
 			m.Users.mu.RUnlock()
+
 			return ch.Id
+		}
+
+		// Renamed Group DM fallback: match by member usernames
+		if ch.Type == model.ChannelTypeGroup {
+			groupName := m.getGroupChannelName(ch.Id)
+			if groupName != "" && strings.EqualFold(groupName, name) {
+				m.Users.mu.RUnlock()
+
+				return ch.Id
+			}
 		}
 	}
 	m.Users.mu.RUnlock()
@@ -337,6 +354,28 @@ func (m *Client) getChannelIDTeam(ctx context.Context, name string, teamID strin
 
 		return ""
 	}
+}
+
+func (m *Client) getGroupChannelName(channelID string) string {
+	usersMap, ok := m.Users.channels[channelID]
+	if !ok || len(usersMap) == 0 {
+		return ""
+	}
+
+	nicks := make([]string, 0, len(usersMap))
+	for userID := range usersMap {
+		if u, exists := m.Users.users[userID]; exists && u.Username != "" {
+			nicks = append(nicks, u.Username)
+		}
+	}
+
+	if len(nicks) == 0 {
+		return ""
+	}
+
+	sort.Strings(nicks)
+
+	return strings.Join(nicks, "-")
 }
 
 func (m *Client) GetChannelName(ctx context.Context, channelID string) string {
