@@ -2101,6 +2101,10 @@ func (u *User) handleMessageThreadContext(channelID, messageID, parentID, event,
 }
 
 func (u *User) handleTyping(e *bridge.TypingEvent) {
+	if !u.cfg.Current().EnableTyping {
+		return
+	}
+
 	// Only send if this specific connected client negotiated message-tags
 	if !u.HasCapability("message-tags") {
 		return
@@ -2137,6 +2141,8 @@ func (u *User) handleTyping(e *bridge.TypingEvent) {
 
 	// Construct and encode TAGMSG
 	rawCommand := fmt.Sprintf("@+typing=active :%s TAGMSG", prefix)
+
+	logger.Tracef("Sending +typing: %s", rawCommand)
 
 	msg := &irc.Message{
 		Command: rawCommand,
