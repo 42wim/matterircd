@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"sort"
 	"strconv"
 	"strings"
@@ -350,7 +351,11 @@ func (m *Client) getChannelIDTeam(ctx context.Context, name string, teamID strin
 			continue
 		}
 
-		m.logger.Errorf("getChannelIDTeam failed for %s: %v", name, err)
+		if mResp != nil && mResp.StatusCode == http.StatusNotFound {
+			m.logger.Warnf("getChannelIDTeam failed for %s: %v", name, err)
+		} else {
+			m.logger.Errorf("getChannelIDTeam failed for %s: %v", name, err)
+		}
 
 		return ""
 	}
