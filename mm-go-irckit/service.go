@@ -1032,11 +1032,21 @@ type summarizeQuery struct {
 }
 
 func (u *User) getSummarizeEvents(target string, query summarizeQuery) (string, []*bridge.Event, error) {
-	// Post / Thread ID (@@...)
-	if postID, ok := strings.CutPrefix(target, "@@"); ok {
-		label := "Thread " + postID
+	target = strings.TrimSpace(target)
 
-		return label, u.br.GetPostThread(u.ctx, postID), nil
+	// Post / Thread ID (@@<id> or bare 26-character post ID)
+	postID, isThread := strings.CutPrefix(target, "@@")
+	if isThread || (len(target) == 26 && !strings.HasPrefix(target, "#") && !strings.HasPrefix(target, "@")) {
+		if !isThread {
+			postID = target
+		}
+
+		events := u.br.GetPostThread(u.ctx, postID)
+		if len(events) == 0 {
+			return "", nil, fmt.Errorf("thread '@@%s' not found", postID)
+		}
+
+		return "Thread " + postID, events, nil
 	}
 
 	// Channel (#...)
@@ -1062,9 +1072,7 @@ func (u *User) getSummarizeEvents(target string, query summarizeQuery) (string, 
 	// Direct Message (user or @user)
 	userName := strings.TrimPrefix(target, "@")
 
-	// Passing empty teamID ("") skips team-scoped channel lookup and resolves the DM channel directly
 	channelID := u.br.GetChannelID(u.ctx, userName, "")
-
 	brchannel, err := u.br.GetChannel(u.ctx, channelID)
 	if err != nil {
 		return "", nil, fmt.Errorf("user '@%s' not found", userName)
