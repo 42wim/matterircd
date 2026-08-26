@@ -720,6 +720,11 @@ func (u *User) handleChannelUpdateEvent(e *bridge.ChannelUpdateEvent) {
 		}
 	}
 
+	// Just a display name change? exit.
+	if len(staleChannels) == 0 {
+		return
+	}
+
 	// Part the stale channels, purge them from our routing map, AND Unlink them!
 	// We MUST do this before joining the new one, so the IRC server forgets the old object completely.
 	for _, ch := range staleChannels {
