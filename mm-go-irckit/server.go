@@ -599,9 +599,10 @@ outerloop:
 
 			if u.Pass != nil {
 				service := "mattermost"
-				if len(u.Pass) == 1 {
+				if len(u.Pass) == 1 && !u.cfg.Slack().Disable {
 					service = "slack"
 				}
+
 				login(u, &User{
 					UserInfo: &bridge.UserInfo{
 						Nick: service,
