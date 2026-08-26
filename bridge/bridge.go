@@ -79,6 +79,8 @@ type Bridger interface {
 
 	IsChannelMember(channelID string) bool
 
+	GetPostSizeLimit() int
+
 	Ping(ctx context.Context) error
 }
 

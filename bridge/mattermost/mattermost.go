@@ -83,6 +83,10 @@ func (m *Mattermost) GetLastSentMsgs() []string {
 	return data
 }
 
+func (m *Mattermost) GetPostSizeLimit() int {
+	return 16383
+}
+
 func (m *Mattermost) GetReplayEvents(ctx context.Context, channelID string, since int64) []*bridge.Event {
 	// TODO: Switch from using GetPostsSince() to GetPostsAfter()
 	// TODO: which also does pagination rather than the 200 post limit.

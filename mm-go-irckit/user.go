@@ -210,6 +210,7 @@ func (u *User) Decode() {
 	}
 	logger.Tracef("using paste buffer timeout: %#v", bufferTimeout)
 	timeout := time.Duration(bufferTimeout) * time.Millisecond
+	continuationTimeout := min(timeout, 200*time.Millisecond)
 	t := timer.NewTimer(timeout)
 	t.Stop()
 	var wg sync.WaitGroup
@@ -218,7 +219,10 @@ func (u *User) Decode() {
 	go func(buffer chan *irc.Message) {
 		defer wg.Done()
 
-		var bufferedMsg *irc.Message
+		var (
+			bufferedMsg    *irc.Message
+			bufferDeadline time.Time
+		)
 
 		flush := func() {
 			t.Stop()
@@ -242,6 +246,7 @@ func (u *User) Decode() {
 			u.DecodeCh <- bufferedMsg
 			// clear buffer
 			bufferedMsg = nil
+			bufferDeadline = time.Time{}
 		}
 
 		for {
@@ -259,32 +264,66 @@ func (u *User) Decode() {
 							logger.Warnf("timed out flushing decode buffer for %s", u.Nick)
 						}
 						bufferedMsg = nil
+						bufferDeadline = time.Time{}
 					}
 					logger.Tracef("decode buffer goroutine exiting for %s", u.Nick)
 					return
 				}
 
-				if strings.HasPrefix(msg.Trailing, "\x01") || replyRegExp.MatchString(msg.Trailing) || modifyRegExp.MatchString(msg.Trailing) {
-					logger.Trace("flushing buffer because of CTCP, replies to threads, or message modifications")
+				if strings.HasPrefix(msg.Trailing, "\x01") || modifyRegExp.MatchString(msg.Trailing) {
+					logger.Trace("flushing buffer because of CTCP or message modifications")
 					flush()
 
 					u.DecodeCh <- msg
 
 					continue
 				}
+
+				// If starting a thread reply, flush any previous message buffer first.
+				if replyRegExp.MatchString(msg.Trailing) {
+					logger.Trace("flushing buffer because of replies to threads")
+					flush()
+				}
+
 				// are we starting a new buffer ?
 				if bufferedMsg == nil {
 					bufferedMsg = msg
-					// start timer now
-					t.Reset(timeout)
+					bufferDeadline = time.Now().Add(timeout)
+
+					t.Reset(continuationTimeout)
 				} else {
 					// make sure we're sending to the same recipient in the buffer
 					if bufferedMsg.Params[0] == msg.Params[0] {
-						bufferedMsg.Trailing += "\n" + msg.Trailing
+						// Guard against exceeding post size limit
+						postLimit := 460
+						if u.br != nil {
+							postLimit = u.br.GetPostSizeLimit()
+						}
+
+						if len(bufferedMsg.Trailing)+len(msg.Trailing)+1 > postLimit-50 {
+							flush()
+
+							bufferedMsg = msg
+							bufferDeadline = time.Now().Add(timeout)
+
+							t.Reset(continuationTimeout)
+						} else {
+							bufferedMsg.Trailing += "\n" + msg.Trailing
+
+							remaining := time.Until(bufferDeadline)
+							if remaining <= 0 {
+								flush()
+							} else {
+								resetDuration := min(continuationTimeout, remaining)
+								t.Reset(resetDuration)
+							}
+						}
 					} else {
 						flush()
 						bufferedMsg = msg
-						t.Reset(timeout)
+						bufferDeadline = time.Now().Add(timeout)
+
+						t.Reset(continuationTimeout)
 					}
 				}
 			case <-t.C:

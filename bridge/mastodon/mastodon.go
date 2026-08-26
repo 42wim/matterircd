@@ -451,6 +451,10 @@ func (m *Mastodon) FormatterConfig() *config.FormatterConfig {
 	return &m.cfg.Current().Mastodon.Formatter
 }
 
+func (m *Mastodon) GetPostSizeLimit() int {
+	return 500
+}
+
 func (m *Mastodon) GetReplayEvents(ctx context.Context, channelID string, since int64) []*bridge.Event {
 	return []*bridge.Event{}
 }
