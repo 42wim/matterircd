@@ -172,6 +172,8 @@ type SlackConfig struct {
 	Bridge    BridgeConfig
 	Formatter FormatterConfig
 
+	Disable bool
+
 	DenyUsers      []string
 	UseDisplayName bool
 	PreferNickname bool
@@ -387,6 +389,8 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 		Slack: SlackConfig{
 			Bridge:    slBridge,
 			Formatter: slFormatter,
+
+			Disable: c.v.GetBool("slack.Disable"),
 
 			DenyUsers:      append([]string(nil), c.v.GetStringSlice("slack.DenyUsers")...),
 			UseDisplayName: c.v.GetBool("slack.UseDisplayName"),
