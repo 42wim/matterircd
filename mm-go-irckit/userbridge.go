@@ -709,8 +709,8 @@ func (u *User) handleChannelUpdateEvent(e *bridge.ChannelUpdateEvent) {
 			continue
 		}
 
-		chName := strings.TrimPrefix(ch.String(), "#")
-		chID := u.br.GetChannelID(u.ctx, chName, u.br.GetMe().TeamID)
+		// Passing ch.String() with "#" signals GetChannelID to skip DM username lookups
+		chID := u.br.GetChannelID(u.ctx, ch.String(), u.br.GetMe().TeamID)
 
 		// A channel is only stale for this update if its cached ID matches the updated ChannelID
 		// Because matterclient already overwrote the old name in cache, GetChannelID

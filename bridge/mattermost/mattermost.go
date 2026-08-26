@@ -587,7 +587,7 @@ func (m *Mattermost) Nick(ctx context.Context, name string) error {
 func (m *Mattermost) GetChannelName(ctx context.Context, channelID string) string {
 	var name string
 
-	if channelID == "" || strings.HasPrefix(channelID, "&") || channelID == m.mc.User.Nickname || channelID == m.mc.User.Username {
+	if channelID == "" || strings.HasPrefix(channelID, "&") || strings.HasPrefix(channelID, "#") || channelID == m.mc.User.Nickname || channelID == m.mc.User.Username {
 		return channelID
 	}
 
@@ -616,9 +616,11 @@ func (m *Mattermost) GetChannelName(ctx context.Context, channelID string) strin
 		if (teamName != "" && teamID != m.mc.Team.ID) || rc.Mattermost.PrefixMainTeam {
 			name = "#" + teamName + "/" + channelName
 		}
+
 		if teamID == m.mc.Team.ID && !rc.Mattermost.PrefixMainTeam {
 			name = "#" + channelName
 		}
+
 		if teamID == "G" {
 			name = "#" + channelName
 		}
@@ -741,6 +743,15 @@ func (m *Mattermost) CreateChannel(ctx context.Context, channelName string, chan
 func (m *Mattermost) GetChannel(ctx context.Context, channelID string) (*bridge.ChannelInfo, error) {
 	if channelID == "" || strings.HasPrefix(channelID, "&") || channelID == m.mc.User.Nickname || channelID == m.mc.User.Username {
 		return nil, errors.New("invalid channel id")
+	}
+
+	if strings.HasPrefix(channelID, "#") {
+		chID := m.GetChannelID(ctx, channelID, m.GetMe().TeamID)
+		if chID == "" {
+			return nil, errors.New("channel not found")
+		}
+
+		channelID = chID
 	}
 
 	mmchannel := m.mc.GetChannel(ctx, channelID)
@@ -1731,11 +1742,18 @@ func (m *Mattermost) GetPostThread(ctx context.Context, postID string) []*bridge
 	return m.postListToEvents(ctx, m.mc.GetPostThread(ctx, postID), "details", 0)
 }
 
-func (m *Mattermost) GetChannelID(ctx context.Context, name, teamID string) string {
+func (m *Mattermost) GetChannelID(ctx context.Context, channelName, teamID string) string {
+	name := strings.TrimPrefix(channelName, "#")
+
 	// Try standard public/private channel lookup
 	id := m.mc.GetChannelID(ctx, name, teamID)
 	if id != "" {
 		return id
+	}
+
+	// Do not run DM user fallbacks for explicit channel lookups
+	if strings.HasPrefix(channelName, "#") {
+		return ""
 	}
 
 	// Fallback: Check if 'name' is a user ID or username for a DM.
