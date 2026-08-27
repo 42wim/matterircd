@@ -426,7 +426,7 @@ func (s *server) handle(u *User) {
 		}
 		go func(msg *irc.Message) {
 			if strings.HasPrefix(msg.Command, "@") && len(msg.Params) > 0 {
-				msg.Command = msg.Params[0]
+				msg.Command = strings.ToUpper(msg.Params[0])
 				msg.Params = msg.Params[1:]
 			}
 
