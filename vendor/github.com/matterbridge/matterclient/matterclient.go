@@ -153,6 +153,9 @@ type Client struct {
 	pingSeq   atomic.Int64
 	pingChans sync.Map
 
+	typingLock     sync.Mutex
+	lastTypingSent map[string]time.Time
+
 	//nolint:containedctx // Tied to the lifecycle of the persistent client session
 	Ctx context.Context
 }
@@ -231,6 +234,8 @@ func New(login string, pass string, team string, server string, mfatoken string)
 		apiLogger:     rootAPILogger.WithFields(logrus.Fields{"prefix": "matterclient: API"}),
 
 		aliveChan: make(chan bool),
+
+		lastTypingSent: make(map[string]time.Time),
 
 		ForceSyncOnReconnect: false,
 		CacheClearCutoff:     15 * time.Minute,
@@ -1779,4 +1784,29 @@ func (m *Client) PingWS(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+// SendTyping broadcasts a user_typing event to Mattermost with a 4-second debounce per channel.
+func (m *Client) SendTyping(channelID, parentID string) error {
+	if m.WsClient == nil || !m.WsConnected {
+		return errors.New("websocket not connected")
+	}
+
+	m.typingLock.Lock()
+	lastSent, exists := m.lastTypingSent[channelID]
+	now := time.Now()
+
+	if exists && now.Sub(lastSent) < 4*time.Second {
+		m.typingLock.Unlock()
+		return nil
+	}
+
+	m.lastTypingSent[channelID] = now
+	m.typingLock.Unlock()
+
+	m.logger.Tracef("matterclient: sending user_typing for channel %s", channelID)
+
+	m.WsClient.UserTyping(channelID, parentID)
+
+	return nil
 }

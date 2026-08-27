@@ -123,6 +123,48 @@ func (m *Client) GetCachedChannelName(channelID string) string {
 	return ""
 }
 
+// GetCachedChannelID returns the channel ID for a channel name and team ID from cache.
+func (m *Client) GetCachedChannelID(channelName, teamID string) string {
+	m.Users.mu.RLock()
+	defer m.Users.mu.RUnlock()
+
+	for _, ch := range m.Users.channelData {
+		if ch.TeamId == teamID && (ch.Name == channelName || getNormalisedName(ch) == channelName) {
+			return ch.Id
+		}
+	}
+
+	return ""
+}
+
+// GetCachedDirectChannelID returns the channel ID for a DM with the given username from cache.
+func (m *Client) GetCachedDirectChannelID(username string) string {
+	m.Users.mu.RLock()
+	defer m.Users.mu.RUnlock()
+
+	var targetUser *model.User
+
+	for _, u := range m.Users.users {
+		if u.Username == username {
+			targetUser = u
+			break
+		}
+	}
+
+	if targetUser == nil {
+		return ""
+	}
+
+	dmName := m.GetDMChannelName(m.User.Id, targetUser.Id)
+	for _, ch := range m.Users.channelData {
+		if ch.Type == model.ChannelTypeDirect && ch.Name == dmName {
+			return ch.Id
+		}
+	}
+
+	return ""
+}
+
 func (m *Client) GetChannel(ctx context.Context, channelID string) *model.Channel {
 	m.Users.mu.RLock()
 	ch, exists := m.Users.channelData[channelID]

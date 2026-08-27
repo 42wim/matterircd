@@ -425,9 +425,14 @@ func (s *server) handle(u *User) {
 			continue
 		}
 		go func(msg *irc.Message) {
+			if strings.HasPrefix(msg.Command, "@") && len(msg.Params) > 0 {
+				msg.Command = msg.Params[0]
+				msg.Params = msg.Params[1:]
+			}
+
 			err := s.commands.Run(s, u, msg)
 			switch msg.Command {
-			case irc.PING, irc.MODE:
+			case irc.PING, irc.MODE, "TAGMSG":
 				logger.Tracef("Executed %#v %#v", msg, err)
 			case irc.WHO, irc.WHOIS:
 				logger.Tracef("Executed %#v %#v", msg, err)

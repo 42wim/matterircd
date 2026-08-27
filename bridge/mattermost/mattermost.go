@@ -198,6 +198,48 @@ func (m *Mattermost) Ping(ctx context.Context) error {
 	return m.mc.PingWS(ctx)
 }
 
+func (m *Mattermost) SendTyping(ctx context.Context, channelName string) {
+	rc := m.cfg.Current()
+	if !rc.EnableTyping || !rc.EnableSendTyping {
+		return
+	}
+
+	if strings.HasPrefix(channelName, "&") {
+		return
+	}
+
+	teamID := ""
+
+	sp := strings.Split(channelName, "/")
+	if len(sp) > 1 {
+		team, _ := m.mc.GetTeamByName(ctx, sp[0])
+		if team == nil {
+			return
+		}
+
+		teamID = team.Id
+		channelName = sp[1]
+	}
+
+	isChannel := strings.HasPrefix(channelName, "#")
+	channelName = strings.TrimPrefix(channelName, "#")
+
+	if teamID == "" {
+		teamID = m.mc.Team.ID
+	}
+
+	channelID := m.mc.GetCachedChannelID(channelName, teamID)
+	if channelID == "" && !isChannel {
+		channelID = m.mc.GetCachedDirectChannelID(channelName)
+	}
+
+	if channelID == "" {
+		return
+	}
+
+	_ = m.mc.SendTyping(channelID, "")
+}
+
 func (m *Mattermost) loginToMattermost(ctx context.Context, onWsConnect func()) (*matterclient.Client, error) {
 	rc := m.cfg.Current()
 

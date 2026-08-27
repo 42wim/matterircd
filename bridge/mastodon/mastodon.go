@@ -462,3 +462,6 @@ func (m *Mastodon) GetReplayEvents(ctx context.Context, channelID string, since 
 func (m *Mastodon) Ping(ctx context.Context) error {
 	return nil
 }
+
+func (m *Mastodon) SendTyping(ctx context.Context, channelName string) {
+}

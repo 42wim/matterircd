@@ -1094,3 +1094,6 @@ func (s *Slack) GetReplayEvents(ctx context.Context, channelID string, since int
 func (s *Slack) Ping(ctx context.Context) error {
 	return nil
 }
+
+func (s *Slack) SendTyping(ctx context.Context, channelName string) {
+}
