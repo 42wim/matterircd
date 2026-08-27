@@ -76,7 +76,8 @@ type GlobalConfig struct {
 
 	PasteBufferTimeout int
 
-	EnableTyping bool
+	EnableTyping     bool
+	EnableSendTyping bool
 }
 
 type BridgeConfig struct {
@@ -330,7 +331,8 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 
 			PasteBufferTimeout: c.v.GetInt("PasteBufferTimeout"),
 
-			EnableTyping: c.v.GetBool("EnableTyping"),
+			EnableTyping:     c.v.GetBool("EnableTyping"),
+			EnableSendTyping: c.v.GetBool("EnableSendTyping"),
 		},
 
 		AI: aiCfg,

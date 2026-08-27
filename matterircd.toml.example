@@ -38,6 +38,11 @@ gops = false
 #Depending on how fast you type 2500 is a good number
 PasteBufferTimeout = 2500
 
+# EXPERIMENTAL: Enable IRCv3 CAP +typing message tags
+#EnableTyping = true
+#EnableSendTyping = true
+
+
 ###################################
 ##### EXPERIMENTAL AI EXAMPLE #####
 ###################################

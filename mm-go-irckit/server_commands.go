@@ -32,6 +32,7 @@ func DefaultCommands() Commands {
 	cmds.Add(Handler{Command: irc.PING, Call: CmdPing})
 	cmds.Add(Handler{Command: irc.PRIVMSG, Call: CmdPrivMsg, MinParams: 1})
 	cmds.Add(Handler{Command: irc.QUIT, Call: CmdQuit})
+	cmds.Add(Handler{Command: "TAGMSG", Call: CmdTagMsg, MinParams: 1, LoggedIn: true})
 	cmds.Add(Handler{Command: irc.TOPIC, Call: CmdTopic, MinParams: 1, LoggedIn: true})
 	cmds.Add(Handler{Command: irc.WHO, Call: CmdWho, MinParams: 1, LoggedIn: true})
 	cmds.Add(Handler{Command: irc.WHOIS, Call: CmdWhois, MinParams: 1, LoggedIn: true})
@@ -861,6 +862,20 @@ func CmdQuit(s Server, u *User, msg *irc.Message) error {
 	s.EncodeMessage(u, irc.ERROR, []string{}, "You will be missed.")
 
 	s.Quit(u, partMsg)
+
+	return nil
+}
+
+func CmdTagMsg(s Server, u *User, msg *irc.Message) error {
+	if len(msg.Params) == 0 {
+		return nil
+	}
+
+	target := msg.Params[0]
+
+	if u.br != nil {
+		u.br.SendTyping(u.ctx, target)
+	}
 
 	return nil
 }
