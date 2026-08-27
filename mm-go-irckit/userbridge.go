@@ -2142,7 +2142,7 @@ func (u *User) handleTyping(e *bridge.TypingEvent) {
 	// Construct and encode TAGMSG
 	rawCommand := fmt.Sprintf("@+typing=active :%s TAGMSG", prefix)
 
-	logger.Tracef("Sending +typing: %s", rawCommand)
+	logger.Tracef("Sending +typing %s: %s: %s", target, nick, rawCommand)
 
 	msg := &irc.Message{
 		Command: rawCommand,

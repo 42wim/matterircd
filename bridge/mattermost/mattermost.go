@@ -222,13 +222,12 @@ func (m *Mattermost) SendTyping(ctx context.Context, channelName string) {
 	}
 
 	isChannel := strings.HasPrefix(channelName, "#")
-	channelName = strings.TrimPrefix(channelName, "#")
 
 	if teamID == "" {
 		teamID = m.mc.Team.ID
 	}
 
-	channelID := m.mc.GetCachedChannelID(channelName, teamID)
+	channelID := m.mc.GetCachedChannelID(strings.TrimPrefix(channelName, "#"), teamID)
 	if channelID == "" && !isChannel {
 		channelID = m.mc.GetCachedDirectChannelID(channelName)
 	}
@@ -236,6 +235,8 @@ func (m *Mattermost) SendTyping(ctx context.Context, channelName string) {
 	if channelID == "" {
 		return
 	}
+
+	logger.Tracef("Sending +typing: %s (%s)", channelName, channelID)
 
 	_ = m.mc.SendTyping(channelID, "")
 }
@@ -1946,11 +1947,6 @@ func (m *Mattermost) handleTypingEvent(ctx context.Context, rmsg *model.WebSocke
 	// Resolve the user
 	userID := m.GetUser(ctx, typingUserID)
 	if userID == nil {
-		return
-	}
-
-	// Ignore our own typing events
-	if userID.Me {
 		return
 	}
 
