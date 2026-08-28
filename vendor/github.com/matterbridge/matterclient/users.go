@@ -39,10 +39,17 @@ func (m *Client) GetNickName(ctx context.Context, userID string) string {
 }
 
 func (m *Client) GetStatus(ctx context.Context, userID string) string {
+	const activeThreshold = 20 * time.Minute
+
 	m.Users.mu.RLock()
+	lastActive := m.Users.lastUserActivity[userID]
 	status, ok := m.Users.statuses[userID]
 	m.Users.mu.RUnlock()
 
+	if lastActive > 0 && time.Since(time.Unix(lastActive, 0)) < activeThreshold {
+		// Recent activity overrides cached/offline status as "online"
+		return "online"
+	}
 	userName := m.GetCachedUserName(userID)
 
 	if !ok {
@@ -64,11 +71,22 @@ func (m *Client) GetStatus(ctx context.Context, userID string) string {
 				continue
 			}
 
+			// Fallback to existing cached status if HTTP API fails completely
+			m.Users.mu.RLock()
+			status = m.Users.statuses[userID]
+			m.Users.mu.RUnlock()
+
 			// If it completely fails, we assume offline and break the loop
-			status = "offline"
+			if status == "" {
+				status = model.StatusOffline
+			}
 
 			break
 		}
+	}
+
+	if status == model.StatusOnline {
+		return status
 	}
 
 	m.Users.mu.RLock()
@@ -105,7 +123,7 @@ func (m *Client) GetStatus(ctx context.Context, userID string) string {
 	}
 
 	if customStatus != "" {
-		if status != "online" && status != "" {
+		if status != model.StatusOnline && status != "" {
 			return status + ": " + customStatus
 		}
 
@@ -404,6 +422,20 @@ func (m *Client) GetUsers() map[string]*model.User {
 	return users
 }
 
+func (c *UsersCache) RecordUserActivity(userID string) {
+	if userID == "" {
+		return
+	}
+
+	c.mu.Lock()
+	if c.lastUserActivity == nil {
+		c.lastUserActivity = make(map[string]int64, 1000)
+	}
+
+	c.lastUserActivity[userID] = time.Now().Unix()
+	c.mu.Unlock()
+}
+
 func (m *Client) SearchUsers(ctx context.Context, search *model.UserSearch) ([]*model.User, error) {
 	retryCount := 0
 	for {
@@ -477,15 +509,16 @@ func (c *UsersCache) SetUserCustomStatus(userID string, rawJSON string) {
 			}
 
 			timeStr := expLocal.Format("15:04")
-			nowDay := now.YearDay()
-			expDay := expLocal.YearDay()
+			nowDate := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+			expDate := time.Date(expLocal.Year(), expLocal.Month(), expLocal.Day(), 0, 0, 0, 0, expLocal.Location())
+			daysDiff := int(expDate.Sub(nowDate).Hours() / 24)
 
 			var dateStr string
 
-			switch {
-			case now.Year() == expLocal.Year() && expDay == nowDay:
+			switch daysDiff {
+			case 0:
 				dateStr = "Today at " + timeStr
-			case now.Year() == expLocal.Year() && expDay == nowDay+1:
+			case 1:
 				dateStr = "Tomorrow at " + timeStr
 			default:
 				dateStr = expLocal.Format("Mon, 02 Jan 15:04")
