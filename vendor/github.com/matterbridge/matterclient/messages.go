@@ -13,15 +13,6 @@ import (
 	"github.com/mattermost/mattermost/server/public/model"
 )
 
-func (m *Client) parseResponse(rmsg *model.WebSocketResponse) {
-	text, ok := rmsg.Data["text"].(string)
-	if ok && text == "pong" {
-		m.logger.Tracef("getting response: %#v", rmsg)
-	} else {
-		m.logger.Debugf("getting response: %#v", rmsg)
-	}
-}
-
 func (m *Client) CreatePost(ctx context.Context, post *model.Post) (*model.Post, error) {
 	if post.UserId == "" && m.User != nil {
 		post.UserId = m.User.Id
@@ -766,6 +757,35 @@ func (m *Client) parseMessage(ctx context.Context, rmsg *Message) {
 	case "group_added":
 		if err := m.UpdateChannels(ctx); err != nil {
 			m.logger.Errorf("failed to update channels: %#v", err)
+		}
+	}
+}
+
+func (m *Client) parseResponse(rmsg *model.WebSocketResponse) {
+	if rmsg == nil || rmsg.Data == nil {
+		return
+	}
+
+	text, ok := rmsg.Data["text"].(string)
+	if ok && text == "pong" {
+		m.logger.Tracef("getting response: %#v", rmsg)
+
+		return
+	}
+
+	m.logger.Debugf("getting response: %#v", rmsg)
+
+	for userID, val := range rmsg.Data {
+		statusStr, isStr := val.(string)
+		if !isStr || statusStr == "" {
+			continue
+		}
+
+		switch statusStr {
+		case model.StatusOnline, model.StatusAway, model.StatusDnd, model.StatusOffline:
+			if len(userID) == 26 {
+				m.SetUserStatus(userID, statusStr)
+			}
 		}
 	}
 }
