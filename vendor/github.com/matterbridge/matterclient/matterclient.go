@@ -87,7 +87,9 @@ type UsersCache struct {
 
 	channelLastViewedAt map[string]int64
 
-	customStatuses map[string]string
+	customStatuses    map[string]string
+	lastUserActivity  map[string]int64
+	statusLastUpdated map[string]int64
 
 	lastUpdated atomic.Int64
 }
@@ -223,6 +225,9 @@ func New(login string, pass string, team string, server string, mfatoken string)
 			joinedChannels: make(map[string]struct{}, 200),
 
 			channelLastViewedAt: make(map[string]int64, 1000),
+
+			lastUserActivity:  make(map[string]int64, 1000),
+			statusLastUpdated: make(map[string]int64, 1000),
 		},
 		lruCache:  cache,
 		postCache: postCache,
@@ -1557,6 +1562,8 @@ func (m *Client) maintainUsersCache(ctx context.Context, event *model.WebSocketE
 			m.Users.lastUpdated.Store(time.Now().Unix())
 		}
 
+		m.Users.RecordUserActivity(post.UserId)
+
 	case model.WebsocketEventPostEdited:
 		var post *model.Post
 
@@ -1684,6 +1691,15 @@ func (m *Client) maintainUsersCache(ctx context.Context, event *model.WebSocketE
 
 		m.SetUserStatus(userID, statusRaw)
 
+	case model.WebsocketEventTyping:
+		userID, _ := event.GetData()["user_id"].(string)
+		if userID == "" && event.GetBroadcast() != nil {
+			userID = event.GetBroadcast().UserId
+		}
+
+		if userID != "" {
+			m.Users.RecordUserActivity(userID)
+		}
 	}
 }
 
