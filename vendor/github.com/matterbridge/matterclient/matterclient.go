@@ -87,8 +87,9 @@ type UsersCache struct {
 
 	channelLastViewedAt map[string]int64
 
-	customStatuses   map[string]string
-	lastUserActivity map[string]int64
+	customStatuses    map[string]string
+	lastUserActivity  map[string]int64
+	statusLastUpdated map[string]int64
 
 	lastUpdated atomic.Int64
 }
@@ -225,7 +226,8 @@ func New(login string, pass string, team string, server string, mfatoken string)
 
 			channelLastViewedAt: make(map[string]int64, 1000),
 
-			lastUserActivity: make(map[string]int64, 1000),
+			lastUserActivity:  make(map[string]int64, 1000),
+			statusLastUpdated: make(map[string]int64, 1000),
 		},
 		lruCache:  cache,
 		postCache: postCache,

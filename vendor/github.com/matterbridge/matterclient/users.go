@@ -39,20 +39,26 @@ func (m *Client) GetNickName(ctx context.Context, userID string) string {
 }
 
 func (m *Client) GetStatus(ctx context.Context, userID string) string {
-	const activeThreshold = 20 * time.Minute
+	const (
+		activeThreshold = 20 * time.Minute
+		statusTTL       = 5 * time.Minute
+	)
 
 	m.Users.mu.RLock()
 	lastActive := m.Users.lastUserActivity[userID]
 	status, ok := m.Users.statuses[userID]
+	lastFetched := m.Users.statusLastUpdated[userID]
 	m.Users.mu.RUnlock()
 
 	if lastActive > 0 && time.Since(time.Unix(lastActive, 0)) < activeThreshold {
 		// Recent activity overrides cached/offline status as "online"
-		return "online"
+		return model.StatusOnline
 	}
-	userName := m.GetCachedUserName(userID)
 
-	if !ok {
+	userName := m.GetCachedUserName(userID)
+	isStale := !ok || (lastFetched > 0 && time.Since(time.Unix(lastFetched, 0)) > statusTTL)
+
+	if isStale {
 		retryCount := 0
 		for {
 			m.apiLogger.Warnf("GetStatus: GetUserStatus: User: %s (%s) #%d", userName, userID, retryCount)
@@ -112,7 +118,7 @@ func (m *Client) GetStatus(ctx context.Context, userID string) string {
 	} else if customStatus != "" {
 		// Re-validate against user props in cache to catch time-expired statuses
 		if user := m.GetUser(ctx, userID); user != nil && user.Props != nil {
-			if rawJSON, ok := user.Props["customStatus"]; ok {
+			if rawJSON, propOk := user.Props["customStatus"]; propOk {
 				m.Users.SetUserCustomStatus(userID, rawJSON)
 
 				m.Users.mu.RLock()
@@ -532,19 +538,25 @@ func (c *UsersCache) SetUserCustomStatus(userID string, rawJSON string) {
 }
 
 func (m *Client) SetUserStatus(userID string, rawStatus string) string {
-	statusStr := "offline"
+	statusStr := model.StatusOffline
 	switch rawStatus {
 	case model.StatusOnline:
-		statusStr = "online"
+		statusStr = model.StatusOnline
 	case model.StatusAway:
-		statusStr = "away"
+		statusStr = model.StatusAway
+	case model.StatusDnd:
+		statusStr = model.StatusDnd
 	}
 
 	m.Users.mu.Lock()
-	defer m.Users.mu.Unlock()
+	if m.Users.statusLastUpdated == nil {
+		m.Users.statusLastUpdated = make(map[string]int64, 1000)
+	}
 
 	m.Users.statuses[userID] = statusStr
+	m.Users.statusLastUpdated[userID] = time.Now().Unix()
 	m.Users.lastUpdated.Store(time.Now().Unix())
+	m.Users.mu.Unlock()
 
 	return statusStr
 }
