@@ -336,7 +336,7 @@ func (m *Client) Login(ctx context.Context) error {
 
 	if m.WsClient != nil {
 		m.logger.Trace("requesting initial user statuses for cache")
-		m.WsClient.GetStatuses()
+		m.WsGetStatuses()
 	}
 
 	if m.OnWsConnect != nil {
