@@ -336,7 +336,7 @@ func (m *Client) Login(ctx context.Context) error {
 
 	if m.WsClient != nil {
 		m.logger.Trace("requesting initial user statuses for cache")
-		m.WsClient.GetStatuses()
+		m.WsGetStatuses()
 	}
 
 	if m.OnWsConnect != nil {
@@ -1774,8 +1774,8 @@ func (m *Client) IsAborted(ctx context.Context) bool {
 	return false
 }
 
-// PingWS sends a WebSocket ping and blocks until the server responds or ctx times out.
-func (m *Client) PingWS(ctx context.Context) error {
+// WsPing sends a WebSocket ping and blocks until the server responds or ctx times out.
+func (m *Client) WsPing(ctx context.Context) error {
 	if m.WsClient == nil || !m.WsConnected {
 		return errors.New("websocket not connected")
 	}
@@ -1802,8 +1802,8 @@ func (m *Client) PingWS(ctx context.Context) error {
 	}
 }
 
-// SendTyping broadcasts a user_typing event to Mattermost with a 4-second debounce per channel.
-func (m *Client) SendTyping(channelID, parentID string) error {
+// WsSendTyping broadcasts a user_typing event to Mattermost with a 4-second debounce per channel.
+func (m *Client) WsSendTyping(channelID, parentID string) error {
 	if m.WsClient == nil || !m.WsConnected {
 		return errors.New("websocket not connected")
 	}

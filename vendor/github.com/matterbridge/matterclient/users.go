@@ -65,7 +65,7 @@ func (m *Client) GetStatus(ctx context.Context, userID string) string {
 
 			res, resp, err := m.Client.GetUserStatus(ctx, userID, "")
 			if err == nil {
-				status = m.SetUserStatus(userID, res.Status)
+				status = m.SetUserStatus(userID, res.Status, res.LastActivityAt/1000)
 
 				break
 			}
@@ -174,7 +174,7 @@ func (m *Client) GetStatuses(ctx context.Context) map[string]string {
 			if err == nil {
 				for _, st := range res {
 					cleanID := strings.Clone(st.UserId)
-					statuses[cleanID] = m.SetUserStatus(cleanID, st.Status)
+					statuses[cleanID] = m.SetUserStatus(cleanID, st.Status, st.LastActivityAt/1000)
 				}
 
 				break // Break the retry loop on success to move to the next batch
@@ -537,7 +537,7 @@ func (c *UsersCache) SetUserCustomStatus(userID string, rawJSON string) {
 	c.customStatuses[userID] = formattedStatus
 }
 
-func (m *Client) SetUserStatus(userID string, rawStatus string) string {
+func (m *Client) SetUserStatus(userID string, rawStatus string, lastActivityAt ...int64) string {
 	statusStr := model.StatusOffline
 	switch rawStatus {
 	case model.StatusOnline:
@@ -546,6 +546,8 @@ func (m *Client) SetUserStatus(userID string, rawStatus string) string {
 		statusStr = model.StatusAway
 	case model.StatusDnd:
 		statusStr = model.StatusDnd
+	case model.StatusOutOfOffice:
+		statusStr = model.StatusOutOfOffice
 	}
 
 	m.Users.mu.Lock()
@@ -555,6 +557,17 @@ func (m *Client) SetUserStatus(userID string, rawStatus string) string {
 
 	m.Users.statuses[userID] = statusStr
 	m.Users.statusLastUpdated[userID] = time.Now().Unix()
+
+	if len(lastActivityAt) > 0 && lastActivityAt[0] > 0 {
+		if m.Users.lastUserActivity == nil {
+			m.Users.lastUserActivity = make(map[string]int64, 1000)
+		}
+
+		if lastActivityAt[0] > m.Users.lastUserActivity[userID] {
+			m.Users.lastUserActivity[userID] = lastActivityAt[0]
+		}
+	}
+
 	m.Users.lastUpdated.Store(time.Now().Unix())
 	m.Users.mu.Unlock()
 
@@ -775,4 +788,26 @@ func (m *Client) UpdateUser(user *model.User) {
 
 	m.Users.users[user.Id] = user
 	m.Users.lastUpdated.Store(time.Now().Unix())
+}
+
+// WsGetStatuses requests statuses for all visible users over the WebSocket.
+func (m *Client) WsGetStatuses() {
+	if m.WsClient != nil && m.WsConnected {
+		m.WsClient.GetStatuses()
+	}
+}
+
+// WsGetStatusesByIds requests statuses for specific user IDs in batches over the WebSocket.
+func (m *Client) WsGetStatusesByIds(userIDs []string) {
+	if m.WsClient == nil || !m.WsConnected || len(userIDs) == 0 {
+		return
+	}
+
+	const batchSize = 500
+
+	for i := 0; i < len(userIDs); i += batchSize {
+		end := min(i+batchSize, len(userIDs))
+
+		m.WsClient.GetStatusesByIds(userIDs[i:end])
+	}
 }
