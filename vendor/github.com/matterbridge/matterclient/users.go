@@ -776,3 +776,28 @@ func (m *Client) UpdateUser(user *model.User) {
 	m.Users.users[user.Id] = user
 	m.Users.lastUpdated.Store(time.Now().Unix())
 }
+
+// WsGetStatuses requests statuses for all visible users over the WebSocket.
+func (m *Client) WsGetStatuses() {
+	if m.WsClient != nil && m.WsConnected {
+		m.WsClient.GetStatuses()
+	}
+}
+
+// WsGetStatusesByIds requests statuses for specific user IDs in batches over the WebSocket.
+func (m *Client) WsGetStatusesByIds(userIDs []string) {
+	if m.WsClient == nil || !m.WsConnected || len(userIDs) == 0 {
+		return
+	}
+
+	const batchSize = 500
+
+	for i := 0; i < len(userIDs); i += batchSize {
+		end := i + batchSize
+		if end > len(userIDs) {
+			end = len(userIDs)
+		}
+
+		m.WsClient.GetStatusesByIds(userIDs[i:end])
+	}
+}

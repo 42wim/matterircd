@@ -195,7 +195,7 @@ func (m *Mattermost) Ping(ctx context.Context) error {
 		return errors.New("client not initialized")
 	}
 
-	return m.mc.PingWS(ctx)
+	return m.mc.WsPing(ctx)
 }
 
 func (m *Mattermost) SendTyping(ctx context.Context, channelName string) {
@@ -238,7 +238,7 @@ func (m *Mattermost) SendTyping(ctx context.Context, channelName string) {
 
 	logger.Tracef("Sending +typing: %s (%s)", channelName, channelID)
 
-	_ = m.mc.SendTyping(channelID, "")
+	_ = m.mc.WsSendTyping(channelID, "")
 }
 
 func (m *Mattermost) loginToMattermost(ctx context.Context, onWsConnect func()) (*matterclient.Client, error) {
