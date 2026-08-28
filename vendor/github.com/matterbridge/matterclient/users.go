@@ -806,10 +806,7 @@ func (m *Client) WsGetStatusesByIds(userIDs []string) {
 	const batchSize = 500
 
 	for i := 0; i < len(userIDs); i += batchSize {
-		end := i + batchSize
-		if end > len(userIDs) {
-			end = len(userIDs)
-		}
+		end := min(i+batchSize, len(userIDs))
 
 		m.WsClient.GetStatusesByIds(userIDs[i:end])
 	}
