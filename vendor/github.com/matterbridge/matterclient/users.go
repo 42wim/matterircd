@@ -140,11 +140,22 @@ func (m *Client) GetStatus(ctx context.Context, userID string) string {
 }
 
 func (m *Client) GetStatuses(ctx context.Context) map[string]string {
+	const activeThreshold = 20 * time.Minute
+
+	now := time.Now()
+
+	m.Users.mu.RLock()
 	statuses := make(map[string]string, len(m.Users.users))
 	var missingIDs []string
 
-	m.Users.mu.RLock()
 	for id := range m.Users.users {
+		lastActive := m.Users.lastUserActivity[id]
+		if lastActive > 0 && now.Sub(time.Unix(lastActive, 0)) < activeThreshold {
+			statuses[id] = model.StatusOnline
+
+			continue
+		}
+
 		if status, ok := m.Users.statuses[id]; ok {
 			statuses[id] = status
 		} else {
@@ -160,10 +171,7 @@ func (m *Client) GetStatuses(ctx context.Context) map[string]string {
 	const batchSize = 5000
 
 	for i := 0; i < len(missingIDs); i += batchSize {
-		end := i + batchSize
-		if end > len(missingIDs) {
-			end = len(missingIDs)
-		}
+		end := min(i+batchSize, len(missingIDs))
 		batch := missingIDs[i:end]
 
 		retryCount := 0
@@ -196,7 +204,7 @@ func (m *Client) GetStatuses(ctx context.Context) map[string]string {
 
 	for _, id := range missingIDs {
 		if _, ok := statuses[id]; !ok {
-			statuses[id] = "offline"
+			statuses[id] = model.StatusOffline
 		}
 	}
 
