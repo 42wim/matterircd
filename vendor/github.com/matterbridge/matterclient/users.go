@@ -798,10 +798,23 @@ func (m *Client) UpdateUser(user *model.User) {
 	m.Users.lastUpdated.Store(time.Now().Unix())
 }
 
-// WsGetStatuses requests statuses for all visible users over the WebSocket.
+// WsGetStatuses requests statuses for all known users in safe batches over the WebSocket.
 func (m *Client) WsGetStatuses() {
-	if m.WsClient != nil && m.WsConnected {
-		m.WsClient.GetStatuses()
+	if m.WsClient == nil || !m.WsConnected {
+		return
+	}
+
+	m.Users.mu.RLock()
+
+	userIDs := make([]string, 0, len(m.Users.users))
+	for id := range m.Users.users {
+		userIDs = append(userIDs, id)
+	}
+
+	m.Users.mu.RUnlock()
+
+	if len(userIDs) > 0 {
+		m.WsGetStatusesByIds(userIDs)
 	}
 }
 
@@ -811,7 +824,7 @@ func (m *Client) WsGetStatusesByIds(userIDs []string) {
 		return
 	}
 
-	const batchSize = 500
+	const batchSize = mattermostPerPageMax
 
 	for i := 0; i < len(userIDs); i += batchSize {
 		end := min(i+batchSize, len(userIDs))
