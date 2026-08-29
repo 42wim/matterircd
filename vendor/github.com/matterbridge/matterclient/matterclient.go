@@ -1343,6 +1343,92 @@ func (m *Client) HandleRetry(ctx context.Context, name string, err error, curren
 	}
 }
 
+// IsAborted checks if the user disconnected, logout was called, or the context died.
+func (m *Client) IsAborted(ctx context.Context) bool {
+	if m.WsQuit {
+		return true
+	}
+
+	if ctx != nil && ctx.Err() != nil {
+		return true
+	}
+
+	return false
+}
+
+func (m *Client) UpdateTeamUsersCache(teamID string, user *model.User) {
+	m.Users.mu.Lock()
+	defer m.Users.mu.Unlock()
+
+	m.Users.users[user.Id] = user
+
+	if teamID != "" {
+		if m.Users.teams == nil {
+			m.Users.teams = make(map[string]map[string]struct{})
+		}
+		if m.Users.teams[teamID] == nil {
+			m.Users.teams[teamID] = make(map[string]struct{})
+		}
+
+		m.Users.teams[teamID][user.Id] = struct{}{}
+	}
+
+	m.Users.lastUpdated.Store(time.Now().Unix())
+}
+
+// WsPing sends a WebSocket ping and blocks until the server responds or ctx times out.
+func (m *Client) WsPing(ctx context.Context) error {
+	if m.WsClient == nil || !m.WsConnected {
+		return errors.New("websocket not connected")
+	}
+
+	seq := m.pingSeq.Add(1)
+	ch := make(chan struct{}, 1)
+
+	m.pingChans.Store(seq, ch)
+	defer func() {
+		m.pingChans.Delete(seq)
+	}()
+
+	data := map[string]any{
+		"seq": seq,
+	}
+
+	m.WsClient.SendMessage("ping", data)
+
+	select {
+	case <-ch:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// WsSendTyping broadcasts a user_typing event to Mattermost with a 4-second debounce per channel.
+func (m *Client) WsSendTyping(channelID, parentID string) error {
+	if m.WsClient == nil || !m.WsConnected {
+		return errors.New("websocket not connected")
+	}
+
+	m.typingLock.Lock()
+	lastSent, exists := m.lastTypingSent[channelID]
+	now := time.Now()
+
+	if exists && now.Sub(lastSent) < 4*time.Second {
+		m.typingLock.Unlock()
+		return nil
+	}
+
+	m.lastTypingSent[channelID] = now
+	m.typingLock.Unlock()
+
+	m.logger.Tracef("matterclient: sending user_typing for channel %s", channelID)
+
+	m.WsClient.UserTyping(channelID, parentID)
+
+	return nil
+}
+
 // Helper function to handle interruptible sleeps
 func (m *Client) sleepWithContext(ctx context.Context, d time.Duration) (bool, error) {
 	select {
@@ -1373,49 +1459,6 @@ func (m *Client) antiIdle(ctx context.Context, channelID string, interval int) {
 			_ = m.UpdateLastViewed(ctx, channelID)
 		}
 	}
-}
-
-func (m *Client) UpdateTeamUsersCache(teamID string, user *model.User) {
-	m.Users.mu.Lock()
-	defer m.Users.mu.Unlock()
-
-	m.Users.users[user.Id] = user
-
-	if teamID != "" {
-		if m.Users.teams == nil {
-			m.Users.teams = make(map[string]map[string]struct{})
-		}
-		if m.Users.teams[teamID] == nil {
-			m.Users.teams[teamID] = make(map[string]struct{})
-		}
-
-		m.Users.teams[teamID][user.Id] = struct{}{}
-	}
-
-	m.Users.lastUpdated.Store(time.Now().Unix())
-}
-
-//nolint:unused
-func (m *Client) syncSingleUser(ctx context.Context, event *model.WebSocketEvent) {
-	userID, ok := event.GetData()["user_id"].(string)
-	if !ok {
-		return
-	}
-
-	userName := m.GetCachedUserName(userID)
-	m.apiLogger.Warnf("syncSingleUser: GetUser: User: %s (%s)", userName, userID)
-
-	user, _, err := m.Client.GetUser(ctx, userID, "")
-	if err != nil {
-		m.logger.Errorf("syncSingleUser failed to get user %s: %v", userID, err)
-		return
-	}
-
-	m.logger.Debugf("dynamically caching updated/new user: %s", user.Username)
-
-	teamID, _ := event.GetData()["team_id"].(string)
-
-	m.UpdateTeamUsersCache(teamID, user)
 }
 
 //nolint:gocognit,gocyclo,funlen
@@ -1763,66 +1806,25 @@ func (m *Client) syncJoinedChannelsCache(event *model.WebSocketEvent) {
 	}
 }
 
-// IsAborted checks if the user disconnected, logout was called, or the context died.
-func (m *Client) IsAborted(ctx context.Context) bool {
-	if m.WsQuit {
-		return true
-	}
-	if ctx != nil && ctx.Err() != nil {
-		return true
-	}
-	return false
-}
-
-// WsPing sends a WebSocket ping and blocks until the server responds or ctx times out.
-func (m *Client) WsPing(ctx context.Context) error {
-	if m.WsClient == nil || !m.WsConnected {
-		return errors.New("websocket not connected")
+//nolint:unused
+func (m *Client) syncSingleUser(ctx context.Context, event *model.WebSocketEvent) {
+	userID, ok := event.GetData()["user_id"].(string)
+	if !ok {
+		return
 	}
 
-	seq := m.pingSeq.Add(1)
-	ch := make(chan struct{}, 1)
+	userName := m.GetCachedUserName(userID)
+	m.apiLogger.Warnf("syncSingleUser: GetUser: User: %s (%s)", userName, userID)
 
-	m.pingChans.Store(seq, ch)
-	defer func() {
-		m.pingChans.Delete(seq)
-	}()
-
-	data := map[string]any{
-		"seq": seq,
+	user, _, err := m.Client.GetUser(ctx, userID, "")
+	if err != nil {
+		m.logger.Errorf("syncSingleUser failed to get user %s: %v", userID, err)
+		return
 	}
 
-	m.WsClient.SendMessage("ping", data)
+	m.logger.Debugf("dynamically caching updated/new user: %s", user.Username)
 
-	select {
-	case <-ch:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
+	teamID, _ := event.GetData()["team_id"].(string)
 
-// WsSendTyping broadcasts a user_typing event to Mattermost with a 4-second debounce per channel.
-func (m *Client) WsSendTyping(channelID, parentID string) error {
-	if m.WsClient == nil || !m.WsConnected {
-		return errors.New("websocket not connected")
-	}
-
-	m.typingLock.Lock()
-	lastSent, exists := m.lastTypingSent[channelID]
-	now := time.Now()
-
-	if exists && now.Sub(lastSent) < 4*time.Second {
-		m.typingLock.Unlock()
-		return nil
-	}
-
-	m.lastTypingSent[channelID] = now
-	m.typingLock.Unlock()
-
-	m.logger.Tracef("matterclient: sending user_typing for channel %s", channelID)
-
-	m.WsClient.UserTyping(channelID, parentID)
-
-	return nil
+	m.UpdateTeamUsersCache(teamID, user)
 }
