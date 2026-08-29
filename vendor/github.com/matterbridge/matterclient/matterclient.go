@@ -364,6 +364,9 @@ func (m *Client) Login(ctx context.Context) error {
 		}
 	}
 
+	//nolint:contextcheck // Use the long-lived background context (bgCtx) here instead of ctx
+	go m.syncPeriodicStatus(bgCtx, 30*time.Minute)
+
 	return nil
 }
 
@@ -1239,30 +1242,6 @@ func (m *Client) Logout(ctx context.Context) error {
 	return nil
 }
 
-// SetLogAPICalls sets the log level of the Mattermost API-call logger.
-// Set to "warn" to log most API request operations (some lifecycle calls are logged at "info").
-// Accepted levels are: 'debug', 'info', 'warn', 'error', 'fatal' and 'panic'.
-func (m *Client) SetLogAPICalls(level string) {
-	l, err := logrus.ParseLevel(level)
-	if err != nil {
-		m.logger.Warnf("Failed to parse specified log-level '%s': %#v", level, err)
-	} else {
-		m.rootAPILogger.SetLevel(l)
-	}
-}
-
-// SetLogLevel tries to parse the specified level and if successful sets
-// the log level accordingly. Accepted levels are: 'debug', 'info', 'warn',
-// 'error', 'fatal' and 'panic'.
-func (m *Client) SetLogLevel(level string) {
-	l, err := logrus.ParseLevel(level)
-	if err != nil {
-		m.logger.Warnf("Failed to parse specified log-level '%s': %#v", level, err)
-	} else {
-		m.rootLogger.SetLevel(l)
-	}
-}
-
 func (m *Client) HandleRatelimit(ctx context.Context, name string, resp *model.Response) error {
 	if resp == nil {
 		return fmt.Errorf("got a nil model response from %s", name)
@@ -1343,36 +1322,107 @@ func (m *Client) HandleRetry(ctx context.Context, name string, err error, curren
 	}
 }
 
-// Helper function to handle interruptible sleeps
-func (m *Client) sleepWithContext(ctx context.Context, d time.Duration) (bool, error) {
-	select {
-	case <-ctx.Done():
-		return false, ctx.Err() // Context canceled during backoff
-	case <-time.After(d):
-		return true, nil
+// IsAborted checks if the user disconnected, logout was called, or the context died.
+func (m *Client) IsAborted(ctx context.Context) bool {
+	if m.WsQuit {
+		return true
+	}
+
+	if ctx != nil && ctx.Err() != nil {
+		return true
+	}
+
+	return false
+}
+
+// SetLogAPICalls sets the log level of the Mattermost API-call logger.
+// Set to "warn" to log most API request operations (some lifecycle calls are logged at "info").
+// Accepted levels are: 'debug', 'info', 'warn', 'error', 'fatal' and 'panic'.
+func (m *Client) SetLogAPICalls(level string) {
+	l, err := logrus.ParseLevel(level)
+	if err != nil {
+		m.logger.Warnf("Failed to parse specified log-level '%s': %#v", level, err)
+	} else {
+		m.rootAPILogger.SetLevel(l)
 	}
 }
 
-func (m *Client) antiIdle(ctx context.Context, channelID string, interval int) {
-	if interval == 0 {
-		interval = 60
+// SetLogLevel tries to parse the specified level and if successful sets
+// the log level accordingly. Accepted levels are: 'debug', 'info', 'warn',
+// 'error', 'fatal' and 'panic'.
+func (m *Client) SetLogLevel(level string) {
+	l, err := logrus.ParseLevel(level)
+	if err != nil {
+		m.logger.Warnf("Failed to parse specified log-level '%s': %#v", level, err)
+	} else {
+		m.rootLogger.SetLevel(l)
+	}
+}
+
+// SyncActiveContextStatuses refreshes statuses for DM peers and users in joined
+// channels, skipping large broadcast channels that exceed 80% of total users.
+//
+//nolint:gocyclo
+func (m *Client) SyncActiveContextStatuses() {
+	if m.WsClient == nil || !m.WsConnected {
+		return
 	}
 
-	m.logger.Debugf("starting antiIdle for %s every %d secs", channelID, interval)
-	ticker := time.NewTicker(time.Second * time.Duration(interval))
+	m.Users.mu.RLock()
 
-	for {
-		select {
-		case <-ctx.Done():
-			m.logger.Debugf("antiIlde: ctx.Done() triggered, exiting for %s", channelID)
+	totalUsers := len(m.Users.users)
+	if totalUsers == 0 {
+		m.Users.mu.RUnlock()
 
-			return
-		case <-ticker.C:
-			m.logger.Tracef("antiIdle %s", channelID)
+		return
+	}
 
-			_ = m.UpdateLastViewed(ctx, channelID)
+	// 80% threshold to filter out Town Square / Off Topic / team-wide channels
+	maxChannelSize := int(float64(totalUsers) * 0.8)
+	if totalUsers > 50 && maxChannelSize < 40 {
+		maxChannelSize = 40
+	}
+
+	seen := make(map[string]struct{}, 200)
+
+	// Collect users from active project / small channels
+	for chanID := range m.Users.joinedChannels {
+		uMap, ok := m.Users.channels[chanID]
+		if !ok || (totalUsers > 50 && len(uMap) >= maxChannelSize) {
+			continue
+		}
+
+		for uID := range uMap {
+			seen[uID] = struct{}{}
 		}
 	}
+
+	// Always collect DM partners
+	myID := ""
+	if m.User != nil {
+		myID = m.User.Id
+	}
+
+	for _, ch := range m.Users.channelData {
+		if ch.Type == model.ChannelTypeDirect {
+			if otherID, ok := m.GetDMOtherUserID(ch.Name, myID); ok && otherID != "" {
+				seen[otherID] = struct{}{}
+			}
+		}
+	}
+
+	m.Users.mu.RUnlock()
+
+	if len(seen) == 0 {
+		return
+	}
+
+	userIDs := make([]string, 0, len(seen))
+	for id := range seen {
+		userIDs = append(userIDs, id)
+	}
+
+	m.WsGetStatusesByIds(userIDs)
 }
 
 func (m *Client) UpdateTeamUsersCache(teamID string, user *model.User) {
@@ -1395,27 +1445,79 @@ func (m *Client) UpdateTeamUsersCache(teamID string, user *model.User) {
 	m.Users.lastUpdated.Store(time.Now().Unix())
 }
 
-//nolint:unused
-func (m *Client) syncSingleUser(ctx context.Context, event *model.WebSocketEvent) {
-	userID, ok := event.GetData()["user_id"].(string)
-	if !ok {
-		return
+// WsPing sends a WebSocket ping and blocks until the server responds or ctx times out.
+func (m *Client) WsPing(ctx context.Context) error {
+	if m.WsClient == nil || !m.WsConnected {
+		return errors.New("websocket not connected")
 	}
 
-	userName := m.GetCachedUserName(userID)
-	m.apiLogger.Warnf("syncSingleUser: GetUser: User: %s (%s)", userName, userID)
+	seq := m.pingSeq.Add(1)
+	ch := make(chan struct{}, 1)
 
-	user, _, err := m.Client.GetUser(ctx, userID, "")
-	if err != nil {
-		m.logger.Errorf("syncSingleUser failed to get user %s: %v", userID, err)
-		return
+	m.pingChans.Store(seq, ch)
+	defer func() {
+		m.pingChans.Delete(seq)
+	}()
+
+	data := map[string]any{
+		"seq": seq,
 	}
 
-	m.logger.Debugf("dynamically caching updated/new user: %s", user.Username)
+	m.WsClient.SendMessage("ping", data)
 
-	teamID, _ := event.GetData()["team_id"].(string)
+	select {
+	case <-ch:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
 
-	m.UpdateTeamUsersCache(teamID, user)
+// WsSendTyping broadcasts a user_typing event to Mattermost with a 4-second debounce per channel.
+func (m *Client) WsSendTyping(channelID, parentID string) error {
+	if m.WsClient == nil || !m.WsConnected {
+		return errors.New("websocket not connected")
+	}
+
+	m.typingLock.Lock()
+	lastSent, exists := m.lastTypingSent[channelID]
+	now := time.Now()
+
+	if exists && now.Sub(lastSent) < 4*time.Second {
+		m.typingLock.Unlock()
+		return nil
+	}
+
+	m.lastTypingSent[channelID] = now
+	m.typingLock.Unlock()
+
+	m.logger.Tracef("matterclient: sending user_typing for channel %s", channelID)
+
+	m.WsClient.UserTyping(channelID, parentID)
+
+	return nil
+}
+
+func (m *Client) antiIdle(ctx context.Context, channelID string, interval int) {
+	if interval == 0 {
+		interval = 60
+	}
+
+	m.logger.Debugf("starting antiIdle for %s every %d secs", channelID, interval)
+	ticker := time.NewTicker(time.Second * time.Duration(interval))
+
+	for {
+		select {
+		case <-ctx.Done():
+			m.logger.Debugf("antiIlde: ctx.Done() triggered, exiting for %s", channelID)
+
+			return
+		case <-ticker.C:
+			m.logger.Tracef("antiIdle %s", channelID)
+
+			_ = m.UpdateLastViewed(ctx, channelID)
+		}
+	}
 }
 
 //nolint:gocognit,gocyclo,funlen
@@ -1703,6 +1805,16 @@ func (m *Client) maintainUsersCache(ctx context.Context, event *model.WebSocketE
 	}
 }
 
+// Helper function to handle interruptible sleeps
+func (m *Client) sleepWithContext(ctx context.Context, d time.Duration) (bool, error) {
+	select {
+	case <-ctx.Done():
+		return false, ctx.Err() // Context canceled during backoff
+	case <-time.After(d):
+		return true, nil
+	}
+}
+
 // syncJoinedChannelsCache synchronously updates the joined channels cache
 // to prevent race conditions before handing off to background processes.
 func (m *Client) syncJoinedChannelsCache(event *model.WebSocketEvent) {
@@ -1763,66 +1875,39 @@ func (m *Client) syncJoinedChannelsCache(event *model.WebSocketEvent) {
 	}
 }
 
-// IsAborted checks if the user disconnected, logout was called, or the context died.
-func (m *Client) IsAborted(ctx context.Context) bool {
-	if m.WsQuit {
-		return true
-	}
-	if ctx != nil && ctx.Err() != nil {
-		return true
-	}
-	return false
-}
+func (m *Client) syncPeriodicStatus(ctx context.Context, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
 
-// WsPing sends a WebSocket ping and blocks until the server responds or ctx times out.
-func (m *Client) WsPing(ctx context.Context) error {
-	if m.WsClient == nil || !m.WsConnected {
-		return errors.New("websocket not connected")
-	}
-
-	seq := m.pingSeq.Add(1)
-	ch := make(chan struct{}, 1)
-
-	m.pingChans.Store(seq, ch)
-	defer func() {
-		m.pingChans.Delete(seq)
-	}()
-
-	data := map[string]any{
-		"seq": seq,
-	}
-
-	m.WsClient.SendMessage("ping", data)
-
-	select {
-	case <-ch:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			m.SyncActiveContextStatuses()
+		}
 	}
 }
 
-// WsSendTyping broadcasts a user_typing event to Mattermost with a 4-second debounce per channel.
-func (m *Client) WsSendTyping(channelID, parentID string) error {
-	if m.WsClient == nil || !m.WsConnected {
-		return errors.New("websocket not connected")
+//nolint:unused
+func (m *Client) syncSingleUser(ctx context.Context, event *model.WebSocketEvent) {
+	userID, ok := event.GetData()["user_id"].(string)
+	if !ok {
+		return
 	}
 
-	m.typingLock.Lock()
-	lastSent, exists := m.lastTypingSent[channelID]
-	now := time.Now()
+	userName := m.GetCachedUserName(userID)
+	m.apiLogger.Warnf("syncSingleUser: GetUser: User: %s (%s)", userName, userID)
 
-	if exists && now.Sub(lastSent) < 4*time.Second {
-		m.typingLock.Unlock()
-		return nil
+	user, _, err := m.Client.GetUser(ctx, userID, "")
+	if err != nil {
+		m.logger.Errorf("syncSingleUser failed to get user %s: %v", userID, err)
+		return
 	}
 
-	m.lastTypingSent[channelID] = now
-	m.typingLock.Unlock()
+	m.logger.Debugf("dynamically caching updated/new user: %s", user.Username)
 
-	m.logger.Tracef("matterclient: sending user_typing for channel %s", channelID)
+	teamID, _ := event.GetData()["team_id"].(string)
 
-	m.WsClient.UserTyping(channelID, parentID)
-
-	return nil
+	m.UpdateTeamUsersCache(teamID, user)
 }
