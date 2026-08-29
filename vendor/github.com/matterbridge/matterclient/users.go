@@ -176,7 +176,11 @@ func (m *Client) GetStatuses(ctx context.Context) map[string]string {
 
 		retryCount := 0
 		for {
-			m.apiLogger.Warnf("GetStatuses: GetUsersStatusesByIds: Batch: %d #%d", len(batch), retryCount)
+			if len(batch) <= 8 {
+				m.apiLogger.Warnf("GetStatuses: GetUsersStatusesByIds: Batch: %d %v #%d", len(batch), batch, retryCount)
+			} else {
+				m.apiLogger.Warnf("GetStatuses: GetUsersStatusesByIds: Batch: %d #%d", len(batch), retryCount)
+			}
 
 			res, resp, err := m.Client.GetUsersStatusesByIds(ctx, batch)
 			if err == nil {
@@ -204,7 +208,7 @@ func (m *Client) GetStatuses(ctx context.Context) map[string]string {
 
 	for _, id := range missingIDs {
 		if _, ok := statuses[id]; !ok {
-			statuses[id] = model.StatusOffline
+			statuses[id] = m.SetUserStatus(id, model.StatusOffline)
 		}
 	}
 

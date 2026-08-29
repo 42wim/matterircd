@@ -316,6 +316,9 @@ func (m *Client) Login(ctx context.Context) error {
 		return err
 	}
 
+	m.logger.Trace("requesting initial user statuses for cache")
+	_ = m.GetStatuses(ctx)
+
 	// Connect websocket using the short-lived Login operation context.
 	// If the login operation is canceled, this will cleanly abort.
 	m.wsConnect(ctx)
@@ -333,11 +336,6 @@ func (m *Client) Login(ctx context.Context) error {
 	// They will run until m.loginCancel() is called during Logout.
 	//nolint:contextcheck
 	go m.WsReceiver(bgCtx)
-
-	if m.WsClient != nil {
-		m.logger.Trace("requesting initial user statuses for cache")
-		m.WsGetStatuses()
-	}
 
 	if m.OnWsConnect != nil {
 		m.logger.Trace("executing OnWsConnect()")
