@@ -1680,15 +1680,20 @@ func (m *Client) maintainUsersCache(ctx context.Context, event *model.WebSocketE
 			m.postCache.Add(post.Id, post)
 		}
 
+		if post != nil && post.UserId != "" && !strings.HasPrefix(post.Type, "system_") {
+			m.Users.RecordUserActivity(post.UserId)
+		}
+
 	case model.WebsocketEventPostDeleted:
+		var post *model.Post
 		var postID string
 
 		if postPtr, ok := event.GetData()["post"].(*model.Post); ok {
+			post = postPtr
 			postID = postPtr.Id
 		} else if postStr, ok := event.GetData()["post"].(string); ok && postStr != "" {
-			var post model.Post
-
-			_ = json.Unmarshal([]byte(postStr), &post)
+			post = &model.Post{}
+			_ = json.Unmarshal([]byte(postStr), post)
 			postID = post.Id
 		} else if id, ok := event.GetData()["post_id"].(string); ok {
 			postID = id
@@ -1696,6 +1701,10 @@ func (m *Client) maintainUsersCache(ctx context.Context, event *model.WebSocketE
 
 		if postID != "" && m.postCache != nil {
 			m.postCache.Remove(postID)
+		}
+
+		if post != nil && post.UserId != "" && !strings.HasPrefix(post.Type, "system_") {
+			m.Users.RecordUserActivity(post.UserId)
 		}
 
 	case model.WebsocketEventChannelCreated, model.WebsocketEventDirectAdded, model.WebsocketEventChannelUpdated:
@@ -1774,6 +1783,16 @@ func (m *Client) maintainUsersCache(ctx context.Context, event *model.WebSocketE
 			// If it doesn't, we can just use the current time to update it locally!
 			m.Users.channelLastViewedAt[channelID] = time.Now().UnixNano() / int64(time.Millisecond)
 			m.Users.mu.Unlock()
+		}
+
+	case model.WebsocketEventReactionAdded:
+		if reactionStr, ok := event.GetData()["reaction"].(string); ok && reactionStr != "" {
+			var reaction model.Reaction
+
+			err := json.Unmarshal([]byte(reactionStr), &reaction)
+			if err == nil && reaction.UserId != "" {
+				m.Users.RecordUserActivity(reaction.UserId)
+			}
 		}
 
 	case model.WebsocketEventStatusChange:
