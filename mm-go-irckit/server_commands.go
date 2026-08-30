@@ -1183,8 +1183,8 @@ func parseCTCP(s Server, u *User, target string, text string) bool {
 		return false
 	}
 
-	// Do not reply to channel-wide CTCP queries
-	if _, exists := s.HasChannel(target); exists {
+	// Drop channel-wide CTCP queries locally (#channel, &messages, etc.)
+	if strings.HasPrefix(target, "#") || strings.HasPrefix(target, "&") {
 		return true
 	}
 
@@ -1278,7 +1278,7 @@ func parseCTCP(s Server, u *User, target string, text string) bool {
 		return true
 
 	default:
-		// Silently drop unhandled queries (USERINFO, CLIENTINFO, DCC, etc.)
+		// Silently drop unhandled queries (CLIENTINFO, DCC, etc.)
 		return true
 	}
 }
