@@ -81,7 +81,7 @@ type Bridger interface {
 
 	GetPostSizeLimit() int
 
-	Ping(ctx context.Context) error
+	Ping(ctx context.Context, proto ...string) error
 
 	SendTyping(ctx context.Context, channelName string)
 }

@@ -1322,6 +1322,23 @@ func (m *Client) HandleRetry(ctx context.Context, name string, err error, curren
 	}
 }
 
+// HttpPing sends an HTTP API GET /api/v4/system/ping request and returns the server status.
+func (m *Client) HttpPing(ctx context.Context) (string, error) {
+	if m.Client == nil {
+		return "", errors.New("client not initialized")
+	}
+
+	m.logger.Trace("HttpPing: sending ping")
+	m.apiLogger.Warn("HttpPing: GetPing")
+
+	status, _, err := m.Client.GetPing(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	return status, nil
+}
+
 // IsAborted checks if the user disconnected, logout was called, or the context died.
 func (m *Client) IsAborted(ctx context.Context) bool {
 	if m.WsQuit {
