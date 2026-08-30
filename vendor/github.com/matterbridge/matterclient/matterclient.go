@@ -1329,12 +1329,15 @@ func (m *Client) HttpPing(ctx context.Context) (string, error) {
 	}
 
 	m.logger.Trace("HttpPing: sending ping")
-	m.apiLogger.Warn("HttpPing: GetPing")
 
 	status, _, err := m.Client.GetPing(ctx)
 	if err != nil {
+		m.apiLogger.Warnf("HttpPing: GetPing: %#v", err)
+
 		return "", err
 	}
+
+	m.apiLogger.Infof("HttpPing: GetPing: %s", status)
 
 	return status, nil
 }
