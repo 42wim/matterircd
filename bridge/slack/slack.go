@@ -1091,7 +1091,7 @@ func (s *Slack) GetReplayEvents(ctx context.Context, channelID string, since int
 	return []*bridge.Event{}
 }
 
-func (s *Slack) Ping(ctx context.Context) error {
+func (s *Slack) Ping(ctx context.Context, proto ...string) error {
 	return nil
 }
 

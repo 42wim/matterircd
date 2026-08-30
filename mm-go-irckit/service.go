@@ -1,6 +1,7 @@
 package irckit
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"regexp"
@@ -454,6 +455,24 @@ func part(u *User, toUser *User, args []string, service string) {
 	}
 }
 
+func ping(u *User, toUser *User, args []string, service string) {
+	pingCtx, cancel := context.WithTimeout(u.ctx, 5*time.Second)
+	defer cancel()
+
+	start := time.Now()
+
+	err := u.br.Ping(pingCtx, "http")
+	if err != nil {
+		u.MsgUser(toUser, fmt.Sprintf("HTTP REST PING failed: %v", err))
+
+		return
+	}
+
+	duration := time.Since(start).Round(time.Millisecond)
+
+	u.MsgUser(toUser, fmt.Sprintf("PONG (HTTP REST): status=OK, latency=%s", duration))
+}
+
 //nolint:funlen,gocognit,gocyclo,cyclop
 func scrollback(u *User, toUser *User, args []string, service string) {
 	if service != "mattermost" {
@@ -689,6 +708,7 @@ var cmds = map[string]Command{
 	"login":            {handler: login, minParams: 2, maxParams: 5},
 	"logout":           {handler: logout, login: true, minParams: 0, maxParams: 0},
 	"part":             {handler: part, login: true, minParams: 1, maxParams: 1},
+	"ping":             {handler: ping, login: true, minParams: 0, maxParams: 0},
 	"replay":           {handler: replay, login: true, minParams: 1, maxParams: 2},
 	"scrollback":       {handler: scrollback, login: true, minParams: 2, maxParams: 2},
 	"search":           {handler: search, login: true, minParams: 1, maxParams: -1},

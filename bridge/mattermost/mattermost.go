@@ -190,12 +190,28 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 	return m, mc, nil
 }
 
-func (m *Mattermost) Ping(ctx context.Context) error {
+func (m *Mattermost) Ping(ctx context.Context, proto ...string) error {
 	if m.mc == nil {
 		return errors.New("client not initialized")
 	}
 
-	return m.mc.WsPing(ctx)
+	protocol := "ws"
+	if len(proto) > 0 && proto[0] != "" {
+		protocol = strings.ToLower(proto[0])
+	}
+
+	switch protocol {
+	case "http", "rest":
+		_, err := m.mc.HttpPing(ctx)
+		if err != nil {
+			return err
+		}
+
+		return nil
+
+	default:
+		return m.mc.WsPing(ctx)
+	}
 }
 
 func (m *Mattermost) SendTyping(ctx context.Context, channelName string) {

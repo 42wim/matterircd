@@ -459,7 +459,7 @@ func (m *Mastodon) GetReplayEvents(ctx context.Context, channelID string, since 
 	return []*bridge.Event{}
 }
 
-func (m *Mastodon) Ping(ctx context.Context) error {
+func (m *Mastodon) Ping(ctx context.Context, proto ...string) error {
 	return nil
 }
 
