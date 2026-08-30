@@ -802,24 +802,13 @@ func (m *Client) UpdateUser(user *model.User) {
 	m.Users.lastUpdated.Store(time.Now().Unix())
 }
 
-// WsGetStatuses requests statuses for all known users in safe batches over the WebSocket.
+// WsGetStatuses requests all user statuses over the WebSocket.
 func (m *Client) WsGetStatuses() {
 	if m.WsClient == nil || !m.WsConnected {
 		return
 	}
 
-	m.Users.mu.RLock()
-
-	userIDs := make([]string, 0, len(m.Users.users))
-	for id := range m.Users.users {
-		userIDs = append(userIDs, id)
-	}
-
-	m.Users.mu.RUnlock()
-
-	if len(userIDs) > 0 {
-		m.WsGetStatusesByIds(userIDs)
-	}
+	m.WsClient.GetStatuses()
 }
 
 // WsGetStatusesByIds requests statuses for specific user IDs in batches over the WebSocket.
@@ -828,11 +817,17 @@ func (m *Client) WsGetStatusesByIds(userIDs []string) {
 		return
 	}
 
-	const batchSize = mattermostPerPageMax
+	m.logger.Debugf("WsGetStatusesByIds: requesting statuses for %d users", len(userIDs))
+
+	// Mattermost SocketMaxMessageSizeKb   = 8 * 1024 // 8KB
+	// 250 user IDs * 29 bytes = ~7.3 KBytes + JSON framing = ~7.5 KBytes
+	const batchSize = 250
 
 	for i := 0; i < len(userIDs); i += batchSize {
 		end := min(i+batchSize, len(userIDs))
+		batch := userIDs[i:end]
 
-		m.WsClient.GetStatusesByIds(userIDs[i:end])
+		m.logger.Tracef("WsGetStatusesByIds: batch %d-%d of %d: %v", i+1, end, len(userIDs), batch)
+		m.WsClient.GetStatusesByIds(batch)
 	}
 }

@@ -766,15 +766,6 @@ func (m *Client) parseResponse(rmsg *model.WebSocketResponse) {
 		return
 	}
 
-	text, ok := rmsg.Data["text"].(string)
-	if ok && text == "pong" {
-		m.logger.Tracef("getting response: %#v", rmsg)
-
-		return
-	}
-
-	m.logger.Debugf("getting response: %#v", rmsg)
-
 	for userID, val := range rmsg.Data {
 		statusStr, isStr := val.(string)
 		if !isStr || statusStr == "" {
