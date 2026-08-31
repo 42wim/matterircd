@@ -649,10 +649,9 @@ func (m *Client) initUser(ctx context.Context) error {
 			}
 
 			idx++
-			select {
-			case <-ctx.Done():
+
+			if ctx.Err() != nil {
 				return ctx.Err()
-			case <-time.After(time.Millisecond * 200):
 			}
 		}
 		if !exists {
