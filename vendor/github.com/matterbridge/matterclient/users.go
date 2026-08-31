@@ -112,17 +112,6 @@ func (m *Client) GetStatus(ctx context.Context, userID string) string {
 		m.Users.mu.RLock()
 		customStatus = m.Users.customStatuses[userID]
 		m.Users.mu.RUnlock()
-	} else if customStatus != "" {
-		// Re-validate against user props in cache to catch time-expired statuses
-		if user := m.GetUser(ctx, userID); user != nil && user.Props != nil {
-			if rawJSON, propOk := user.Props["customStatus"]; propOk {
-				m.Users.SetUserCustomStatus(userID, rawJSON)
-
-				m.Users.mu.RLock()
-				customStatus = m.Users.customStatuses[userID]
-				m.Users.mu.RUnlock()
-			}
-		}
 	}
 
 	if customStatus != "" {
