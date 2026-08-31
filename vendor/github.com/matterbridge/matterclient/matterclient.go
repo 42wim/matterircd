@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/cookiejar"
+	"net/http/httptrace"
 	"net/url"
 	"strconv"
 	"strings"
@@ -160,12 +161,6 @@ type Client struct {
 
 	//nolint:containedctx // Tied to the lifecycle of the persistent client session
 	Ctx context.Context
-}
-
-// UserAgentTransport wraps an existing RoundTripper to inject a User-Agent header
-type UserAgentTransport struct {
-	Transport http.RoundTripper
-	UserAgent string
 }
 
 var Matterircd bool
@@ -414,19 +409,6 @@ func (m *Client) Reconnect(ctx context.Context) {
 	m.logger.Info("reconnect successful")
 }
 
-// RoundTrip executes a single HTTP transaction, adding the User-Agent
-func (t *UserAgentTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	reqCopy := req.Clone(req.Context())
-	reqCopy.Header.Set("User-Agent", t.UserAgent)
-
-	transport := t.Transport
-	if transport == nil {
-		transport = http.DefaultTransport
-	}
-
-	return transport.RoundTrip(reqCopy)
-}
-
 func (m *Client) initClient(ctx context.Context, b *backoff.Backoff) error {
 	uriScheme := schemeHTTPS
 	if m.NoTLS {
@@ -463,10 +445,13 @@ func (m *Client) initClient(ctx context.Context, b *backoff.Backoff) error {
 		DisableCompression: true,
 	}
 
-	// Wrap the base transport to inject the User-Agent
-	m.Client.HTTPClient.Transport = &UserAgentTransport{
-		Transport: baseTransport,
-		UserAgent: m.UserAgent,
+	m.Client.HTTPClient.Transport = baseTransport
+	m.Client.HTTPClient.Timeout = time.Second * time.Duration(m.Timeout)
+
+	if m.UserAgent != "" {
+		m.Client.HTTPHeader = map[string]string{
+			"User-Agent": m.UserAgent,
+		}
 	}
 
 	m.Client.HTTPClient.Timeout = time.Second * time.Duration(m.Timeout)
@@ -511,6 +496,17 @@ func (m *Client) serverAlive(ctx context.Context, b *backoff.Backoff) error {
 		defer b.Reset()
 	}
 
+	var negotiatedProto string
+
+	trace := &httptrace.ClientTrace{
+		TLSHandshakeDone: func(state tls.ConnectionState, err error) {
+			if err == nil {
+				negotiatedProto = state.NegotiatedProtocol
+			}
+		},
+	}
+	traceCtx := httptrace.WithClientTrace(ctx, trace)
+
 	retryCount := 0
 	for {
 		if m.IsAborted(ctx) || ctx.Err() != nil {
@@ -519,11 +515,18 @@ func (m *Client) serverAlive(ctx context.Context, b *backoff.Backoff) error {
 
 		// bogus call to get the serverversion
 		m.apiLogger.Infof("serverAlive: Logout check #%d", retryCount)
-		resp, err := m.Client.Logout(ctx)
+		resp, err := m.Client.Logout(traceCtx)
 
 		// Success condition: No error, and we have a server version
 		if err == nil && resp != nil && resp.ServerVersion != "" {
-			m.logger.Infof("Found version %s", resp.ServerVersion)
+			proto := "HTTP/1.1"
+			if negotiatedProto == "h2" {
+				proto = "HTTP/2.0"
+			} else if negotiatedProto != "" {
+				proto = negotiatedProto
+			}
+
+			m.logger.Infof("Found version %s (protocol: %s)", resp.ServerVersion, proto)
 
 			return nil
 		}
@@ -646,10 +649,9 @@ func (m *Client) initUser(ctx context.Context) error {
 			}
 
 			idx++
-			select {
-			case <-ctx.Done():
+
+			if ctx.Err() != nil {
 				return ctx.Err()
-			case <-time.After(time.Millisecond * 200):
 			}
 		}
 		if !exists {
