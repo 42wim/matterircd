@@ -775,7 +775,7 @@ func (m *Client) parseResponse(rmsg *model.WebSocketResponse) {
 		switch statusStr {
 		case model.StatusOnline, model.StatusAway, model.StatusDnd, model.StatusOutOfOffice, model.StatusOffline:
 			if len(userID) == 26 {
-				m.SetUserStatus(userID, statusStr)
+				m.SetUserStatus(userID, statusStr, false)
 			}
 		}
 	}

@@ -66,7 +66,7 @@ func (m *Client) GetStatus(ctx context.Context, userID string) string {
 
 			res, resp, err := m.Client.GetUserStatus(ctx, userID, "")
 			if err == nil {
-				status = m.SetUserStatus(userID, res.Status, res.LastActivityAt/1000)
+				status = m.SetUserStatus(userID, res.Status, false, res.LastActivityAt/1000)
 
 				break
 			}
@@ -170,10 +170,12 @@ func (m *Client) GetStatuses(ctx context.Context) map[string]string {
 
 			res, resp, err := m.Client.GetUsersStatusesByIds(ctx, batch)
 			if err == nil {
+				m.Users.mu.Lock()
 				for _, st := range res {
 					cleanID := strings.Clone(st.UserId)
-					statuses[cleanID] = m.SetUserStatus(cleanID, st.Status, st.LastActivityAt/1000)
+					statuses[cleanID] = m.SetUserStatus(cleanID, st.Status, true, st.LastActivityAt/1000)
 				}
+				m.Users.mu.Unlock()
 
 				break // Break the retry loop on success to move to the next batch
 			}
@@ -192,11 +194,13 @@ func (m *Client) GetStatuses(ctx context.Context) map[string]string {
 		}
 	}
 
+	m.Users.mu.Lock()
 	for _, id := range missingIDs {
 		if _, ok := statuses[id]; !ok {
-			statuses[id] = m.SetUserStatus(id, model.StatusOffline)
+			statuses[id] = m.SetUserStatus(id, model.StatusOffline, true)
 		}
 	}
+	m.Users.mu.Unlock()
 
 	return statuses
 }
@@ -535,7 +539,7 @@ func (c *UsersCache) SetUserCustomStatus(userID string, rawJSON string) {
 	c.customStatuses[userID] = formattedStatus
 }
 
-func (m *Client) SetUserStatus(userID string, rawStatus string, lastActivityAt ...int64) string {
+func (m *Client) SetUserStatus(userID string, rawStatus string, batchLock bool, lastActivityAt ...int64) string {
 	statusStr := model.StatusOffline
 	switch rawStatus {
 	case model.StatusOnline:
@@ -548,7 +552,11 @@ func (m *Client) SetUserStatus(userID string, rawStatus string, lastActivityAt .
 		statusStr = model.StatusOutOfOffice
 	}
 
-	m.Users.mu.Lock()
+	if !batchLock {
+		m.Users.mu.Lock()
+		defer m.Users.mu.Unlock()
+	}
+
 	if m.Users.statusLastUpdated == nil {
 		m.Users.statusLastUpdated = make(map[string]int64, 1000)
 	}
@@ -567,7 +575,6 @@ func (m *Client) SetUserStatus(userID string, rawStatus string, lastActivityAt .
 	}
 
 	m.Users.lastUpdated.Store(time.Now().Unix())
-	m.Users.mu.Unlock()
 
 	return statusStr
 }
@@ -753,7 +760,7 @@ func (m *Client) UpdateStatus(ctx context.Context, userID string, status string)
 			Status: status,
 		})
 		if err == nil {
-			m.SetUserStatus(userID, status)
+			m.SetUserStatus(userID, status, false)
 
 			return nil
 		}
