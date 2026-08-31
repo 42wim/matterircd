@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/cookiejar"
+	"net/http/httptrace"
 	"net/url"
 	"strconv"
 	"strings"
@@ -495,6 +496,17 @@ func (m *Client) serverAlive(ctx context.Context, b *backoff.Backoff) error {
 		defer b.Reset()
 	}
 
+	var negotiatedProto string
+
+	trace := &httptrace.ClientTrace{
+		TLSHandshakeDone: func(state tls.ConnectionState, err error) {
+			if err == nil {
+				negotiatedProto = state.NegotiatedProtocol
+			}
+		},
+	}
+	traceCtx := httptrace.WithClientTrace(ctx, trace)
+
 	retryCount := 0
 	for {
 		if m.IsAborted(ctx) || ctx.Err() != nil {
@@ -503,11 +515,18 @@ func (m *Client) serverAlive(ctx context.Context, b *backoff.Backoff) error {
 
 		// bogus call to get the serverversion
 		m.apiLogger.Infof("serverAlive: Logout check #%d", retryCount)
-		resp, err := m.Client.Logout(ctx)
+		resp, err := m.Client.Logout(traceCtx)
 
 		// Success condition: No error, and we have a server version
 		if err == nil && resp != nil && resp.ServerVersion != "" {
-			m.logger.Infof("Found version %s", resp.ServerVersion)
+			proto := "HTTP/1.1"
+			if negotiatedProto == "h2" {
+				proto = "HTTP/2.0"
+			} else if negotiatedProto != "" {
+				proto = negotiatedProto
+			}
+
+			m.logger.Infof("Found version %s (protocol: %s)", resp.ServerVersion, proto)
 
 			return nil
 		}
