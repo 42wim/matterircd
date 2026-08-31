@@ -48,6 +48,7 @@ func (m *Client) GetStatus(ctx context.Context, userID string) string {
 	lastActive := m.Users.lastUserActivity[userID]
 	status, ok := m.Users.statuses[userID]
 	lastFetched := m.Users.statusLastUpdated[userID]
+	customStatus, tracked := m.Users.customStatuses[userID]
 	m.Users.mu.RUnlock()
 
 	if lastActive > 0 && time.Since(time.Unix(lastActive, 0)) < activeThreshold {
@@ -94,10 +95,6 @@ func (m *Client) GetStatus(ctx context.Context, userID string) string {
 	if status == model.StatusOnline {
 		return status
 	}
-
-	m.Users.mu.RLock()
-	customStatus, tracked := m.Users.customStatuses[userID]
-	m.Users.mu.RUnlock()
 
 	if !tracked {
 		user := m.GetUser(ctx, userID)
