@@ -162,12 +162,6 @@ type Client struct {
 	Ctx context.Context
 }
 
-// UserAgentTransport wraps an existing RoundTripper to inject a User-Agent header
-type UserAgentTransport struct {
-	Transport http.RoundTripper
-	UserAgent string
-}
-
 var Matterircd bool
 
 const (
@@ -414,19 +408,6 @@ func (m *Client) Reconnect(ctx context.Context) {
 	m.logger.Info("reconnect successful")
 }
 
-// RoundTrip executes a single HTTP transaction, adding the User-Agent
-func (t *UserAgentTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	reqCopy := req.Clone(req.Context())
-	reqCopy.Header.Set("User-Agent", t.UserAgent)
-
-	transport := t.Transport
-	if transport == nil {
-		transport = http.DefaultTransport
-	}
-
-	return transport.RoundTrip(reqCopy)
-}
-
 func (m *Client) initClient(ctx context.Context, b *backoff.Backoff) error {
 	uriScheme := schemeHTTPS
 	if m.NoTLS {
@@ -463,10 +444,13 @@ func (m *Client) initClient(ctx context.Context, b *backoff.Backoff) error {
 		DisableCompression: true,
 	}
 
-	// Wrap the base transport to inject the User-Agent
-	m.Client.HTTPClient.Transport = &UserAgentTransport{
-		Transport: baseTransport,
-		UserAgent: m.UserAgent,
+	m.Client.HTTPClient.Transport = baseTransport
+	m.Client.HTTPClient.Timeout = time.Second * time.Duration(m.Timeout)
+
+	if m.UserAgent != "" {
+		m.Client.HTTPHeader = map[string]string{
+			"User-Agent": m.UserAgent,
+		}
 	}
 
 	m.Client.HTTPClient.Timeout = time.Second * time.Duration(m.Timeout)
