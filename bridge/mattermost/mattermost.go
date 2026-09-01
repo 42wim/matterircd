@@ -1573,7 +1573,9 @@ func (m *Mattermost) handleWsActionChannelCreated(rmsg *model.WebSocketEvent, lo
 			channelID = chPtr.Id
 		} else if chStr, ok := rmsg.GetData()["channel"].(string); ok && chStr != "" {
 			var summary model.Channel
-			if err := json.Unmarshal([]byte(chStr), &summary); err == nil {
+
+			err := json.Unmarshal([]byte(chStr), &summary)
+			if err == nil {
 				channelID = summary.Id
 			}
 		}
