@@ -1568,7 +1568,12 @@ func (m *Mattermost) handleWsActionChannelCreated(rmsg *model.WebSocketEvent, lo
 	logger.Trace("in handleWsActionChannelCreated")
 	channelID, ok := rmsg.GetData()["channel_id"].(string)
 	if !ok || channelID == "" {
-		// Fallback for group_added which might nest the ID inside a channel object payload
+		if broadcast := rmsg.GetBroadcast(); broadcast != nil && broadcast.ChannelId != "" {
+			channelID = broadcast.ChannelId
+		}
+	}
+
+	if channelID == "" {
 		if chPtr, ok := rmsg.GetData()["channel"].(*model.Channel); ok && chPtr != nil {
 			channelID = chPtr.Id
 		} else if chStr, ok := rmsg.GetData()["channel"].(string); ok && chStr != "" {

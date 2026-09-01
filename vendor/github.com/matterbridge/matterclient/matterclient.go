@@ -1971,6 +1971,9 @@ func (m *Client) syncJoinedChannelsCache(event *model.WebSocketEvent) {
 		} else if groupChannelID, ok := event.GetData()["channel_id"].(string); ok && groupChannelID != "" {
 			chID = groupChannelID
 			chType = model.ChannelTypeGroup
+		} else if event.GetBroadcast() != nil && event.GetBroadcast().ChannelId != "" {
+			chID = event.GetBroadcast().ChannelId
+			chType = model.ChannelTypeGroup
 		}
 
 		if chID == "" {

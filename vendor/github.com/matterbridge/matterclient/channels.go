@@ -129,7 +129,7 @@ func (m *Client) GetCachedChannelID(channelName, teamID string) string {
 	defer m.Users.mu.RUnlock()
 
 	for _, ch := range m.Users.channelData {
-		if ch.TeamId == teamID && (ch.Name == channelName || (ch.Type == model.ChannelTypeGroup && m.getNormalisedName(ch) == channelName)) {
+		if (ch.TeamId == teamID || ch.Type == model.ChannelTypeGroup) && (ch.Name == channelName || (ch.Type == model.ChannelTypeGroup && m.getNormalisedName(ch) == channelName)) {
 			return ch.Id
 		}
 	}
