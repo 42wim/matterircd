@@ -129,7 +129,7 @@ func (m *Client) GetCachedChannelID(channelName, teamID string) string {
 	defer m.Users.mu.RUnlock()
 
 	for _, ch := range m.Users.channelData {
-		if ch.TeamId == teamID && (ch.Name == channelName || getNormalisedName(ch) == channelName) {
+		if ch.TeamId == teamID && (ch.Name == channelName || (ch.Type == model.ChannelTypeGroup && getNormalisedName(ch) == channelName)) {
 			return ch.Id
 		}
 	}
@@ -266,7 +266,7 @@ func (m *Client) GetChannels() []*model.Channel {
 	m.Users.mu.RLock()
 	defer m.Users.mu.RUnlock()
 
-	channels := make([]*model.Channel, 0, 200)
+	channels := make([]*model.Channel, 0, len(m.Users.joinedChannels))
 	for id := range m.Users.joinedChannels {
 		if ch, exists := m.Users.channelData[id]; exists {
 			channels = append(channels, ch)
@@ -303,7 +303,7 @@ func (m *Client) GetChannelID(ctx context.Context, name string, teamID string) s
 	defer m.Users.mu.RUnlock()
 
 	for _, ch := range m.Users.channelData {
-		if getNormalisedName(ch) == name {
+		if ch.Name == name || (ch.Type == model.ChannelTypeGroup && getNormalisedName(ch) == name) {
 			return ch.Id
 		}
 	}
@@ -318,15 +318,22 @@ func (m *Client) getChannelIDTeam(ctx context.Context, name string, teamID strin
 			continue
 		}
 
-		// Direct match on normalized name or raw channel name
-		if strings.EqualFold(getNormalisedName(ch), name) || strings.EqualFold(ch.Name, name) {
+		// Check raw channel name first
+		if strings.EqualFold(ch.Name, name) {
 			m.Users.mu.RUnlock()
 
 			return ch.Id
 		}
 
-		// Renamed Group DM fallback: match by member usernames
+		// Check normalized name only if type is group
 		if ch.Type == model.ChannelTypeGroup {
+			if strings.EqualFold(getNormalisedName(ch), name) {
+				m.Users.mu.RUnlock()
+
+				return ch.Id
+			}
+
+			// Renamed Group DM fallback: match by member usernames
 			groupName := m.getGroupChannelName(ch.Id)
 			if groupName != "" && strings.EqualFold(groupName, name) {
 				m.Users.mu.RUnlock()
@@ -655,7 +662,8 @@ func (m *Client) GetMoreChannels() []*model.Channel {
 	m.Users.mu.RLock()
 	defer m.Users.mu.RUnlock()
 
-	channels := make([]*model.Channel, 0, 200)
+	capSize := max(0, len(m.Users.channelData)-len(m.Users.joinedChannels))
+	channels := make([]*model.Channel, 0, capSize)
 	for id, ch := range m.Users.channelData {
 		if _, joined := m.Users.joinedChannels[id]; !joined {
 			channels = append(channels, ch)
@@ -1113,6 +1121,15 @@ func (m *Client) UpdateChannelUsersCacheRemove(channelID string, userID string) 
 }
 
 func (m *Client) UpdateLastViewed(ctx context.Context, channelID string) error {
+	m.Users.mu.RLock()
+	lastViewed := m.Users.channelLastViewedAt[channelID]
+	m.Users.mu.RUnlock()
+
+	// Skip API call if this specific channel was marked viewed within the last 3 seconds
+	if lastViewed > 0 && time.Since(time.UnixMilli(lastViewed)) < 3*time.Second {
+		return nil
+	}
+
 	channelName := m.GetCachedChannelName(channelID)
 	userName := m.GetCachedUserName(m.User.Id)
 
@@ -1125,6 +1142,10 @@ func (m *Client) UpdateLastViewed(ctx context.Context, channelID string) error {
 		m.apiLogger.Infof("UpdateLastViewed: Channel: %s (%s), User: %s (%s) #%d", channelName, channelID, userName, m.User.Id, retryCount)
 		_, resp, err := m.Client.ViewChannel(ctx, m.User.Id, view)
 		if err == nil {
+			m.Users.mu.Lock()
+			m.Users.channelLastViewedAt[channelID] = time.Now().UnixMilli()
+			m.Users.mu.Unlock()
+
 			return nil
 		}
 

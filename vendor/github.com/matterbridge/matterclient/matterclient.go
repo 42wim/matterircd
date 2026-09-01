@@ -1883,7 +1883,7 @@ func (m *Client) maintainUsersCache(ctx context.Context, event *model.WebSocketE
 			break
 		}
 
-		m.SetUserStatus(userID, statusRaw)
+		m.SetUserStatus(userID, statusRaw, false)
 
 	case model.WebsocketEventTyping:
 		userID, _ := event.GetData()["user_id"].(string)
