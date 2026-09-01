@@ -395,7 +395,7 @@ func (m *Mattermost) handleWsMessage(ctx context.Context, quitChan chan struct{}
 				m.handleWsActionUserRemoved(ctx, message.Raw, logger)
 			case model.WebsocketEventUserAdded:
 				m.handleWsActionUserAdded(ctx, message.Raw, logger)
-			case model.WebsocketEventChannelCreated:
+			case model.WebsocketEventChannelCreated, model.WebsocketEventGroupAdded:
 				m.handleWsActionChannelCreated(message.Raw, logger)
 			case model.WebsocketEventChannelDeleted:
 				m.handleWsActionChannelDeleted(message.Raw, logger)
@@ -1567,7 +1567,19 @@ func (m *Mattermost) handleWsActionUserUpdated(rmsg *model.WebSocketEvent, logge
 func (m *Mattermost) handleWsActionChannelCreated(rmsg *model.WebSocketEvent, logger *logrus.Entry) {
 	logger.Trace("in handleWsActionChannelCreated")
 	channelID, ok := rmsg.GetData()["channel_id"].(string)
-	if !ok {
+	if !ok || channelID == "" {
+		// Fallback for group_added which might nest the ID inside a channel object payload
+		if chPtr, ok := rmsg.GetData()["channel"].(*model.Channel); ok && chPtr != nil {
+			channelID = chPtr.Id
+		} else if chStr, ok := rmsg.GetData()["channel"].(string); ok && chStr != "" {
+			var summary model.Channel
+			if err := json.Unmarshal([]byte(chStr), &summary); err == nil {
+				channelID = summary.Id
+			}
+		}
+	}
+
+	if channelID == "" {
 		return
 	}
 
