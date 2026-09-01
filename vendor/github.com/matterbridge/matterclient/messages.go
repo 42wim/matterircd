@@ -136,7 +136,7 @@ func (m *Client) GetFilesInfo(ctx context.Context, fileIDs []string) []*FileInfo
 		uriScheme = schemeHTTP
 	}
 
-	var output []*FileInfo
+	output := make([]*FileInfo, 0, len(fileIDs))
 
 	for _, f := range fileIDs {
 		info := &FileInfo{}
@@ -207,7 +207,7 @@ func (m *Client) GetFileLinks(ctx context.Context, filenames []string) []string 
 		uriScheme = schemeHTTP
 	}
 
-	var output []string
+	output := make([]string, 0, len(filenames))
 
 	for _, f := range filenames {
 		link := m.GetPublicLink(ctx, f)
@@ -261,8 +261,8 @@ func (m *Client) GetPosts(ctx context.Context, channelID string, limit int) *mod
 	}
 
 	finalPostList := &model.PostList{
-		Order: []string{},
-		Posts: make(map[string]*model.Post),
+		Order: make([]string, 0, limit),
+		Posts: make(map[string]*model.Post, limit),
 	}
 
 	channelName := m.GetCachedChannelName(channelID)
@@ -424,7 +424,7 @@ func (m *Client) GetPublicLink(ctx context.Context, filename string) string {
 }
 
 func (m *Client) GetPublicLinks(ctx context.Context, filenames []string) []string {
-	var output []string
+	output := make([]string, 0, len(filenames))
 
 	for _, f := range filenames {
 		link := m.GetPublicLink(ctx, f)
@@ -715,12 +715,13 @@ func (m *Client) parseActionPost(ctx context.Context, rmsg *Message) {
 	}
 
 	// we don't have the user, refresh the userlist
-	if m.GetUser(ctx, data.UserId) == nil {
+	user := m.GetUser(ctx, data.UserId)
+	if user == nil {
 		m.logger.Infof("User '%v' is not known, ignoring message '%#v'", data.UserId, data)
 		return
 	}
 
-	rmsg.Username = m.GetUserName(ctx, data.UserId)
+	rmsg.Username = user.Username
 	rmsg.Channel = m.GetChannelName(ctx, data.ChannelId)
 	rmsg.UserID = data.UserId
 	rmsg.Type = data.Type
@@ -739,7 +740,7 @@ func (m *Client) parseActionPost(ctx context.Context, rmsg *Message) {
 
 	// direct message
 	if rmsg.Raw.GetData()["channel_type"] == "D" {
-		rmsg.Channel = m.GetUser(ctx, data.UserId).Username
+		rmsg.Channel = user.Username
 	}
 
 	rmsg.Text = data.Message
@@ -766,6 +767,7 @@ func (m *Client) parseResponse(rmsg *model.WebSocketResponse) {
 		return
 	}
 
+	m.Users.mu.Lock()
 	for userID, val := range rmsg.Data {
 		statusStr, isStr := val.(string)
 		if !isStr || statusStr == "" {
@@ -775,10 +777,11 @@ func (m *Client) parseResponse(rmsg *model.WebSocketResponse) {
 		switch statusStr {
 		case model.StatusOnline, model.StatusAway, model.StatusDnd, model.StatusOutOfOffice, model.StatusOffline:
 			if len(userID) == 26 {
-				m.SetUserStatus(userID, statusStr, false)
+				m.SetUserStatus(userID, statusStr, true)
 			}
 		}
 	}
+	m.Users.mu.Unlock()
 }
 
 func digestString(s string) string {

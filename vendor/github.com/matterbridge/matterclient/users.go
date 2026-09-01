@@ -711,7 +711,6 @@ func (m *Client) UpdateUserNick(ctx context.Context, nick string) error {
 func (m *Client) UsernamesInChannel(ctx context.Context, channelID string) []string {
 	const batchSize = mattermostPerPageMax
 
-	allusers := m.GetUsers()
 	result := make([]string, 0, batchSize)
 	channelName := m.GetCachedChannelName(channelID)
 
@@ -733,8 +732,15 @@ func (m *Client) UsernamesInChannel(ctx context.Context, channelID string) []str
 		retryCount = 0
 
 		for _, member := range res {
-			if user, ok := allusers[member.UserId]; ok {
+			user := m.GetUser(ctx, member.UserId)
+			if user == nil {
+				continue
+			}
+
+			if user.Nickname != "" {
 				result = append(result, user.Nickname)
+			} else {
+				result = append(result, user.Username)
 			}
 		}
 

@@ -1121,6 +1121,15 @@ func (m *Client) UpdateChannelUsersCacheRemove(channelID string, userID string) 
 }
 
 func (m *Client) UpdateLastViewed(ctx context.Context, channelID string) error {
+	m.Users.mu.RLock()
+	lastViewed := m.Users.channelLastViewedAt[channelID]
+	m.Users.mu.RUnlock()
+
+	// Skip API call if this specific channel was marked viewed within the last 3 seconds
+	if lastViewed > 0 && time.Since(time.UnixMilli(lastViewed)) < 3*time.Second {
+		return nil
+	}
+
 	channelName := m.GetCachedChannelName(channelID)
 	userName := m.GetCachedUserName(m.User.Id)
 
@@ -1133,6 +1142,10 @@ func (m *Client) UpdateLastViewed(ctx context.Context, channelID string) error {
 		m.apiLogger.Infof("UpdateLastViewed: Channel: %s (%s), User: %s (%s) #%d", channelName, channelID, userName, m.User.Id, retryCount)
 		_, resp, err := m.Client.ViewChannel(ctx, m.User.Id, view)
 		if err == nil {
+			m.Users.mu.Lock()
+			m.Users.channelLastViewedAt[channelID] = time.Now().UnixMilli()
+			m.Users.mu.Unlock()
+
 			return nil
 		}
 
