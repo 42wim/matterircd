@@ -117,7 +117,7 @@ func (m *Client) GetCachedChannel(channelID string) *model.Channel {
 // GetCachedChannelName returns the normalised channel name if cached, or empty string.
 func (m *Client) GetCachedChannelName(channelID string) string {
 	if ch := m.GetCachedChannel(channelID); ch != nil {
-		return getNormalisedName(ch)
+		return m.getNormalisedName(ch)
 	}
 
 	return ""
@@ -129,7 +129,7 @@ func (m *Client) GetCachedChannelID(channelName, teamID string) string {
 	defer m.Users.mu.RUnlock()
 
 	for _, ch := range m.Users.channelData {
-		if ch.TeamId == teamID && (ch.Name == channelName || (ch.Type == model.ChannelTypeGroup && getNormalisedName(ch) == channelName)) {
+		if ch.TeamId == teamID && (ch.Name == channelName || (ch.Type == model.ChannelTypeGroup && m.getNormalisedName(ch) == channelName)) {
 			return ch.Id
 		}
 	}
@@ -283,12 +283,18 @@ func (m *Client) GetChannelHeader(ctx context.Context, channelID string) string 
 	return ""
 }
 
-func getNormalisedName(channel *model.Channel) string {
+func (m *Client) getNormalisedName(channel *model.Channel) string {
 	if channel.Type == model.ChannelTypeGroup {
-		res := strings.ReplaceAll(channel.DisplayName, ", ", "-")
-		res = strings.ReplaceAll(res, " ", "_")
+		if channel.DisplayName != "" {
+			res := strings.ReplaceAll(channel.DisplayName, ", ", "-")
+			res = strings.ReplaceAll(res, " ", "_")
 
-		return res
+			return res
+		}
+
+		if groupName := m.getGroupChannelName(channel.Id); groupName != "" {
+			return groupName
+		}
 	}
 
 	return channel.Name
@@ -303,7 +309,7 @@ func (m *Client) GetChannelID(ctx context.Context, name string, teamID string) s
 	defer m.Users.mu.RUnlock()
 
 	for _, ch := range m.Users.channelData {
-		if ch.Name == name || (ch.Type == model.ChannelTypeGroup && getNormalisedName(ch) == name) {
+		if ch.Name == name || (ch.Type == model.ChannelTypeGroup && m.getNormalisedName(ch) == name) {
 			return ch.Id
 		}
 	}
@@ -327,7 +333,7 @@ func (m *Client) getChannelIDTeam(ctx context.Context, name string, teamID strin
 
 		// Check normalized name only if type is group
 		if ch.Type == model.ChannelTypeGroup {
-			if strings.EqualFold(getNormalisedName(ch), name) {
+			if strings.EqualFold(m.getNormalisedName(ch), name) {
 				m.Users.mu.RUnlock()
 
 				return ch.Id
@@ -434,7 +440,7 @@ func (m *Client) getGroupChannelName(channelID string) string {
 
 func (m *Client) GetChannelName(ctx context.Context, channelID string) string {
 	if ch := m.GetChannel(ctx, channelID); ch != nil {
-		return getNormalisedName(ch)
+		return m.getNormalisedName(ch)
 	}
 	return ""
 }

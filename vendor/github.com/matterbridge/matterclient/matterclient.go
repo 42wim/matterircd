@@ -1780,7 +1780,7 @@ func (m *Client) maintainUsersCache(ctx context.Context, event *model.WebSocketE
 			m.Users.RecordUserActivity(post.UserId)
 		}
 
-	case model.WebsocketEventChannelCreated, model.WebsocketEventDirectAdded, model.WebsocketEventChannelUpdated:
+	case model.WebsocketEventChannelCreated, model.WebsocketEventChannelUpdated, model.WebsocketEventDirectAdded, model.WebsocketEventGroupAdded:
 		var channel *model.Channel
 
 		if chPtr, ok := event.GetData()["channel"].(*model.Channel); ok {
@@ -1807,10 +1807,18 @@ func (m *Client) maintainUsersCache(ctx context.Context, event *model.WebSocketE
 		// If we failed to extract a channel, attempt the last resort fallback fetch
 		if channel == nil || channel.Id == "" {
 			if event.EventType() != model.WebsocketEventChannelUpdated {
-				if channelID, ok := event.GetData()["channel_id"].(string); ok && channelID != "" {
-					m.GetChannel(ctx, channelID)
+				channelID, _ := event.GetData()["channel_id"].(string)
+				if channelID == "" && event.GetBroadcast() != nil {
+					channelID = event.GetBroadcast().ChannelId
+				}
+
+				if channelID != "" {
+					channel = m.GetChannel(ctx, channelID)
 				}
 			}
+		}
+
+		if channel == nil || channel.Id == "" {
 			break
 		}
 
@@ -1819,6 +1827,13 @@ func (m *Client) maintainUsersCache(ctx context.Context, event *model.WebSocketE
 		m.Users.channelData[channel.Id] = channel
 		m.Users.mu.Unlock()
 		m.Users.lastUpdated.Store(time.Now().Unix())
+
+		// Pre-fetch members for new Group DMs so getGroupChannelName works immediately
+		if channel.Type == model.ChannelTypeGroup {
+			go func(cID string) {
+				_, _ = m.GetChannelUsers(ctx, cID)
+			}(channel.Id)
+		}
 
 	case model.WebsocketEventChannelDeleted:
 		if channelID, ok := event.GetData()["channel_id"].(string); ok && channelID != "" {
@@ -1934,7 +1949,7 @@ func (m *Client) syncJoinedChannelsCache(event *model.WebSocketEvent) {
 		}
 		m.Users.mu.Unlock()
 
-	case model.WebsocketEventDirectAdded, model.WebsocketEventChannelCreated:
+	case model.WebsocketEventChannelCreated, model.WebsocketEventDirectAdded, model.WebsocketEventGroupAdded:
 		var chID string
 		var chType model.ChannelType
 
@@ -1953,6 +1968,9 @@ func (m *Client) syncJoinedChannelsCache(event *model.WebSocketEvent) {
 				chID = ch.ID
 				chType = ch.Type
 			}
+		} else if groupChannelID, ok := event.GetData()["channel_id"].(string); ok && groupChannelID != "" {
+			chID = groupChannelID
+			chType = model.ChannelTypeGroup
 		}
 
 		if chID == "" {
