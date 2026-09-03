@@ -105,9 +105,6 @@ func (u *User) handleEventChan() {
 				return
 			}
 
-			// Update our in-memory global timestamp on every event
-			u.lastEventTime.Store(time.Now().UnixMilli())
-
 			if logger.Level.String() == "trace" {
 				logger.Tracef("eventchan %s", spew.Sdump(event))
 			}
@@ -117,16 +114,20 @@ func (u *User) handleEventChan() {
 			case *bridge.BannerChangeEvent:
 				u.handleBannerChangeEvent(e)
 			case *bridge.ChannelMessageEvent:
+				u.updateLastEventTime(e.CreateAt)
 				u.handleChannelMessageEvent(e)
 			case *bridge.DirectMessageEvent:
+				u.updateLastEventTime(e.CreateAt)
 				u.handleDirectMessageEvent(e)
 			case *bridge.ChannelTopicEvent:
 				u.handleChannelTopicEvent(e)
 			case *bridge.FileEvent:
 				u.handleFileEvent(e)
 			case *bridge.ChannelAddEvent:
+				u.updateLastEventTime(e.CreateAt)
 				u.handleChannelAddEvent(e)
 			case *bridge.ChannelRemoveEvent:
+				u.updateLastEventTime(e.CreateAt)
 				u.handleChannelRemoveEvent(e)
 			case *bridge.ChannelCreateEvent:
 				u.handleChannelCreateEvent(e)
@@ -144,7 +145,9 @@ func (u *User) handleEventChan() {
 				u.handleTyping(e)
 			case *bridge.LogoutEvent:
 				// Flush immediately on explicit logout
-				u.saveGlobalLastEventTime(u.lastEventTime.Load())
+				if u.lastEventTime.Load() > 0 {
+					u.saveGlobalLastEventTime(u.lastEventTime.Load())
+				}
 
 				return
 			}
@@ -2071,6 +2074,23 @@ func (u *User) getGlobalLastEventTime() int64 {
 	})
 
 	return timestamp
+}
+
+func (u *User) updateLastEventTime(timestamp int64) {
+	if timestamp <= 0 {
+		return
+	}
+
+	for {
+		current := u.lastEventTime.Load()
+		if timestamp <= current {
+			return
+		}
+
+		if u.lastEventTime.CompareAndSwap(current, timestamp) {
+			return
+		}
+	}
 }
 
 func (u *User) handleBannerChangeEvent(e *bridge.BannerChangeEvent) {
