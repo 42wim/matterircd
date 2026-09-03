@@ -713,9 +713,9 @@ var cmds = map[string]Command{
 	"scrollback":       {handler: scrollback, login: true, minParams: 2, maxParams: 2},
 	"search":           {handler: search, login: true, minParams: 1, maxParams: -1},
 	"searchusers":      {handler: searchUsers, login: true, minParams: 1, maxParams: -1},
-	"summarize":        {handler: summarize, login: true, minParams: 1, maxParams: 2},
-	"summary":          {handler: summarize, login: true, minParams: 1, maxParams: 2},
-	"tldr":             {handler: summarize, login: true, minParams: 1, maxParams: 2},
+	"summarize":        {handler: summarize, login: true, minParams: 1, maxParams: 3},
+	"summary":          {handler: summarize, login: true, minParams: 1, maxParams: 3},
+	"tldr":             {handler: summarize, login: true, minParams: 1, maxParams: 3},
 	"updatelastviewed": {handler: updatelastviewed, login: true, minParams: 1, maxParams: 1},
 }
 
@@ -1047,8 +1047,9 @@ func channelCmd(u *User, toUser *User, args []string, service string) {
 }
 
 type summarizeQuery struct {
-	Count int
-	Since int64
+	Count    int
+	Since    int64
+	Thinking string
 }
 
 func (u *User) getSummarizeEvents(target string, query summarizeQuery) (string, []*bridge.Event, error) {
@@ -1108,7 +1109,8 @@ func (u *User) getSummarizeEvents(target string, query summarizeQuery) (string, 
 	return "@" + userName, events, nil
 }
 
-func parseSummarizeLimit(arg string, defaultLimit, maxLimit int) (summarizeQuery, error) {
+//nolint:funlen
+func parseSummarizeLimit(extraArgs []string, defaultLimit, maxLimit int) (summarizeQuery, error) {
 	if maxLimit == 0 {
 		maxLimit = 100
 	}
@@ -1117,33 +1119,78 @@ func parseSummarizeLimit(arg string, defaultLimit, maxLimit int) (summarizeQuery
 		defaultLimit = 30
 	}
 
-	if arg == "" {
-		return summarizeQuery{Count: defaultLimit}, nil
-	}
+	query := summarizeQuery{Count: defaultLimit}
+	hasLimit := false
 
-	// Try parsing as a time duration (e.g. 24h, 30m)
-	d, err := time.ParseDuration(arg)
-	if err == nil {
-		if d <= 0 {
-			return summarizeQuery{}, errors.New("duration must be positive")
+	for _, arg := range extraArgs {
+		if arg == "" {
+			continue
 		}
 
-		return summarizeQuery{
-			Since: time.Now().Add(-d).UnixMilli(),
-		}, nil
+		if mode, ok := parseThinkingMode(arg); ok {
+			if query.Thinking != "" {
+				return summarizeQuery{}, errors.New("thinking mode specified more than once")
+			}
+
+			query.Thinking = mode
+
+			continue
+		}
+
+		// Try parsing as a time duration (e.g. 24h, 30m)
+		d, err := time.ParseDuration(arg)
+		if err == nil {
+			if hasLimit {
+				return summarizeQuery{}, errors.New("limit or duration specified more than once")
+			}
+
+			if d <= 0 {
+				return summarizeQuery{}, errors.New("duration must be positive")
+			}
+
+			query.Since = time.Now().Add(-d).UnixMilli()
+			query.Count = 0
+			hasLimit = true
+
+			continue
+		}
+
+		// Fall back to parsing as an integer count (e.g. 50)
+		val, err := strconv.Atoi(arg)
+		if err != nil || val <= 0 {
+			return summarizeQuery{}, errors.New("invalid option: expected post count (e.g. 50), duration (e.g. 24h), or thinking mode (off, low, medium, high)")
+		}
+
+		if hasLimit {
+			return summarizeQuery{}, errors.New("limit or duration specified more than once")
+		}
+
+		if val > maxLimit {
+			val = maxLimit
+		}
+
+		query.Count = val
+		hasLimit = true
 	}
 
-	// Fall back to parsing as an integer count (e.g. 50)
-	val, err := strconv.Atoi(arg)
-	if err != nil || val <= 0 {
-		return summarizeQuery{}, errors.New("invalid post count limit or duration format. e.g. 50, 24h, 30m")
-	}
+	return query, nil
+}
 
-	if val > maxLimit {
-		val = maxLimit
+func parseThinkingMode(arg string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(arg)) {
+	case "off", "none":
+		return "off", true
+	case "low":
+		return "low", true
+	case "medium", "med":
+		return "medium", true
+	case "high":
+		return "high", true
+	case "auto":
+		return "auto", true
+	default:
+		return "", false
 	}
-
-	return summarizeQuery{Count: val}, nil
 }
 
 //nolint:funlen,gocyclo
@@ -1155,19 +1202,14 @@ func summarize(u *User, toUser *User, args []string, service string) {
 		return
 	}
 
-	if len(args) == 0 || len(args) > 2 {
-		u.MsgUser(toUser, "Usage: SUMMARIZE <#channel | user | @@thread_id> [post_count | duration]")
-		u.MsgUser(toUser, "e.g. SUMMARIZE #dev 50, SUMMARIZE #dev 24h, SUMMARIZE @@q3kz9..., SUMMARIZE someuser 30m")
+	if len(args) == 0 || len(args) > 3 {
+		u.MsgUser(toUser, "Usage: SUMMARIZE <#channel | user | @@thread_id> [post_count | duration] [thinking]")
+		u.MsgUser(toUser, "e.g. SUMMARIZE #dev 50, SUMMARIZE #dev 24h low, SUMMARIZE @@q3kz9... high, SUMMARIZE someuser 30m")
 
 		return
 	}
 
-	limitArg := ""
-	if len(args) == 2 {
-		limitArg = args[1]
-	}
-
-	query, err := parseSummarizeLimit(limitArg, cfg.DefaultPostLimit, cfg.MaxPostLimit)
+	query, err := parseSummarizeLimit(args[1:], cfg.DefaultPostLimit, cfg.MaxPostLimit)
 	if err != nil {
 		u.MsgUser(toUser, err.Error())
 
@@ -1229,7 +1271,7 @@ func summarize(u *User, toUser *User, args []string, service string) {
 		contextLabel, extraInstructions, transcript.String(),
 	)
 
-	summary, err := aiClient.Summarize(u.ctx, prompt)
+	summary, err := aiClient.Summarize(u.ctx, prompt, query.Thinking)
 	if err != nil {
 		u.MsgUser(toUser, fmt.Sprintf("Summarization failed: %v", err))
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"golang.org/x/oauth2"
@@ -22,7 +23,16 @@ type Client struct {
 }
 
 type generateRequest struct {
-	Contents []content `json:"contents"`
+	Contents         []content         `json:"contents"`
+	GenerationConfig *generationConfig `json:"generationConfig,omitempty"`
+}
+
+type generationConfig struct {
+	ThinkingConfig *thinkingConfig `json:"thinkingConfig,omitempty"`
+}
+
+type thinkingConfig struct {
+	ThinkingBudget *int `json:"thinkingBudget,omitempty"`
 }
 
 type content struct {
@@ -38,7 +48,8 @@ type generateResponse struct {
 	Candidates []struct {
 		Content struct {
 			Parts []struct {
-				Text string `json:"text"`
+				Text    string `json:"text"`
+				Thought bool   `json:"thought,omitempty"`
 			} `json:"parts"`
 		} `json:"content"`
 	} `json:"candidates"`
@@ -72,8 +83,8 @@ func NewAIClient(ctx context.Context, saFile, project, location, model string) (
 	}, nil
 }
 
-//nolint:funlen
-func (c *Client) Summarize(ctx context.Context, prompt string) (string, error) {
+//nolint:funlen,gocyclo
+func (c *Client) Summarize(ctx context.Context, prompt string, thinking string) (string, error) {
 	token, err := c.tokenSource.Token()
 	if err != nil {
 		return "", fmt.Errorf("failed to get oauth2 token: %w", err)
@@ -102,6 +113,14 @@ func (c *Client) Summarize(ctx context.Context, prompt string) (string, error) {
 				Parts: []part{{Text: prompt}},
 			},
 		},
+	}
+
+	if budget := resolveThinkingBudget(thinking); budget != nil {
+		reqBody.GenerationConfig = &generationConfig{
+			ThinkingConfig: &thinkingConfig{
+				ThinkingBudget: budget,
+			},
+		}
 	}
 
 	rawJSON, err := json.Marshal(reqBody)
@@ -134,9 +153,46 @@ func (c *Client) Summarize(ctx context.Context, prompt string) (string, error) {
 		return "", fmt.Errorf("gemini error: %s", genResp.Error.Message)
 	}
 
-	if len(genResp.Candidates) > 0 && len(genResp.Candidates[0].Content.Parts) > 0 {
-		return genResp.Candidates[0].Content.Parts[0].Text, nil
+	if len(genResp.Candidates) > 0 {
+		var sb strings.Builder
+
+		for _, p := range genResp.Candidates[0].Content.Parts {
+			if !p.Thought && p.Text != "" {
+				sb.WriteString(p.Text)
+			}
+		}
+
+		if sb.Len() > 0 {
+			return sb.String(), nil
+		}
+
+		if len(genResp.Candidates[0].Content.Parts) > 0 {
+			return genResp.Candidates[0].Content.Parts[len(genResp.Candidates[0].Content.Parts)-1].Text, nil
+		}
 	}
 
 	return "", fmt.Errorf("no summary generated")
+}
+
+func resolveThinkingBudget(mode string) *int {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "off", "none":
+		b := 0
+
+		return &b
+	case "low":
+		b := 1024
+
+		return &b
+	case "medium", "med":
+		b := 4096
+
+		return &b
+	case "high":
+		b := 16384
+
+		return &b
+	default:
+		return nil
+	}
 }
