@@ -40,7 +40,7 @@ PasteBufferTimeout = 2500
 
 # EXPERIMENTAL: Enable IRCv3 CAP +typing message tags
 #EnableTyping = true
-#EnableSendTyping = true
+#DisableSendTyping = true
 
 
 ###################################

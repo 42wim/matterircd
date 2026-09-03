@@ -1066,7 +1066,7 @@ func (u *User) getSummarizeEvents(target string, query summarizeQuery) (string, 
 			return "", nil, fmt.Errorf("thread '@@%s' not found", postID)
 		}
 
-		return "Thread " + postID, events, nil
+		return "thread " + postID, events, nil
 	}
 
 	// Channel (#...)

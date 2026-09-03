@@ -216,7 +216,7 @@ func (m *Mattermost) Ping(ctx context.Context, proto ...string) error {
 
 func (m *Mattermost) SendTyping(ctx context.Context, channelName string) {
 	rc := m.cfg.Current()
-	if !rc.EnableTyping || !rc.EnableSendTyping {
+	if !rc.EnableTyping || rc.DisableSendTyping {
 		return
 	}
 
