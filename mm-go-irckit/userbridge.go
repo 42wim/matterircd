@@ -1226,12 +1226,20 @@ func (u *User) getChannelSince(ctx context.Context, brchannel *bridge.ChannelInf
 	// Fetch locally saved BoltDB last viewed if strategy allows
 	if strategy == "saved" || strategy == "hybrid" {
 		_ = u.lastViewedAtDB.View(func(tx *bolt.Tx) error {
-			b := tx.Bucket([]byte(u.User))
-			if b == nil {
-				return nil
+			var v []byte
+
+			b := tx.Bucket(u.dbBucketName())
+			if b != nil {
+				v = b.Get([]byte(brchannel.ID))
 			}
 
-			v := b.Get([]byte(brchannel.ID))
+			if v == nil {
+				legacyBucket := tx.Bucket([]byte(u.User))
+				if legacyBucket != nil {
+					v = legacyBucket.Get([]byte(brchannel.ID))
+				}
+			}
+
 			if v != nil {
 				val := binary.LittleEndian.Uint64(v)
 				if val <= math.MaxInt64 {
@@ -1805,7 +1813,7 @@ func (u *User) loginTo(protocol string) error {
 	u.MentionKeys = info.MentionKeys
 
 	err = u.lastViewedAtDB.Update(func(tx *bolt.Tx) error {
-		_, err2 := tx.CreateBucketIfNotExists([]byte(u.User))
+		_, err2 := tx.CreateBucketIfNotExists(u.dbBucketName())
 		return err2
 	})
 	if err != nil {
@@ -1981,6 +1989,14 @@ func (u *User) updateLastViewed(channelID string) {
 	}()
 }
 
+func (u *User) dbBucketName() []byte {
+	if u.br != nil && u.br.Protocol() != "" {
+		return []byte(u.br.Protocol() + ":" + u.User)
+	}
+
+	return []byte(u.User)
+}
+
 func (u *User) saveLastViewedAt(channelID string) {
 	if channelID == "" {
 		return
@@ -1991,7 +2007,7 @@ func (u *User) saveLastViewedAt(channelID string) {
 	binary.LittleEndian.PutUint64(currentTime, uint64(time.Now().UnixMilli()))
 
 	err := u.lastViewedAtDB.Update(func(tx *bolt.Tx) error {
-		b, err := tx.CreateBucketIfNotExists([]byte(u.User))
+		b, err := tx.CreateBucketIfNotExists(u.dbBucketName())
 		if err != nil {
 			return err
 		}
@@ -2009,7 +2025,7 @@ func (u *User) saveGlobalLastEventTime(timestamp int64) {
 	}
 
 	_ = u.lastViewedAtDB.Update(func(tx *bolt.Tx) error {
-		b, err := tx.CreateBucketIfNotExists([]byte(u.User))
+		b, err := tx.CreateBucketIfNotExists(u.dbBucketName())
 		if err != nil {
 			return err
 		}
@@ -2028,12 +2044,19 @@ func (u *User) getGlobalLastEventTime() int64 {
 	var timestamp int64
 
 	_ = u.lastViewedAtDB.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(u.User))
-		if b == nil {
-			return nil
+		var v []byte
+
+		b := tx.Bucket(u.dbBucketName())
+		if b != nil {
+			v = b.Get([]byte("__global_last_event__"))
 		}
 
-		v := b.Get([]byte("__global_last_event__"))
+		if v == nil {
+			legacyBucket := tx.Bucket([]byte(u.User))
+			if legacyBucket != nil {
+				v = legacyBucket.Get([]byte("__global_last_event__"))
+			}
+		}
 
 		if v != nil {
 			val := binary.LittleEndian.Uint64(v)
