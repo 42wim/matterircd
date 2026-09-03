@@ -1265,8 +1265,9 @@ func summarize(u *User, toUser *User, args []string, service string) {
 
 	prompt := fmt.Sprintf(
 		"You are an assistant summarizing chat history for an IRC client. "+
-			"Summarize the following %s conversation concisely in short bullet points. "+
-			"%sHighlight decisions, action items, and main points. Do not include markdown tables.\n\n"+
+			"Summarize the following %s conversation. "+
+			"%sHighlight decisions, action items, and main points. Prefix users with '@'. "+
+			"Do not include a title or Markdown tables.\n\n"+
 			"[TRANSCRIPT]\n%s[/TRANSCRIPT]\n",
 		contextLabel, extraInstructions, transcript.String(),
 	)
@@ -1278,7 +1279,10 @@ func summarize(u *User, toUser *User, args []string, service string) {
 		return
 	}
 
-	u.MsgUser(toUser, fmt.Sprintf("\x02\x1d=== Summary for %s ===\x1d\x02", contextLabel))
+	heading := "Summary for " + contextLabel
+	headingLen := 4 + len(heading) + 4
+
+	u.MsgUser(toUser, "=== \x02\x1d"+heading+"\x1d\x02 ===")
 
 	disableEmoji := u.br.FormatterConfig().DisableEmoji
 	disableMarkdown := u.br.FormatterConfig().DisableMarkdown
@@ -1304,5 +1308,5 @@ func summarize(u *User, toUser *User, args []string, service string) {
 		}
 	})
 
-	u.MsgUser(toUser, "\x02\x1d===============================\x1d\x02")
+	u.MsgUser(toUser, strings.Repeat("=", headingLen))
 }
