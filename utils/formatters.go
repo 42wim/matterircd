@@ -430,7 +430,7 @@ func ProcessMessageText(text string, opts ProcessMessageOpts, yield func(line st
 	if inCodeBlock {
 		FormatFullCodeBlock(codeBuilder.String(), lexer, currentIndent, opts, yield)
 	} else if opts.PreserveNewLines == "all" || opts.PreserveNewLines == "" {
-		for j := 0; j < emptyLines; j++ {
+		for range emptyLines {
 			yield("")
 		}
 	}
@@ -876,9 +876,9 @@ func flushEmptyLines(count int, mode string, hasContent bool, yield func(line st
 		}
 
 	case "all":
-		fallthrough
+		fallthrough //nolint:gocritic
 	default:
-		for j := 0; j < count; j++ {
+		for range count {
 			yield("")
 		}
 	}
