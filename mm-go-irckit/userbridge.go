@@ -284,6 +284,7 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 	showContextMulti := u.br.BridgeConfig().ShowContextMulti
 	syntaxHighlighting := u.br.FormatterConfig().SyntaxHighlighting
 	codeBlockSeparator := u.br.FormatterConfig().CodeBlockSeparator
+	preserveNewLines := u.br.FormatterConfig().PreserveNewLines
 
 	text = utils.WrapMessage(text, maxlen)
 	addPrefix := false
@@ -315,6 +316,7 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 		CodeBlockSeparator: codeBlockSeparator,
 		BlockquoteChar:     blockQuoteChar,
 		InlineCodeChar:     inlineCode,
+		PreserveNewLines:   preserveNewLines,
 	}
 
 	emitLine := func(line string) {
@@ -525,6 +527,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 	showContextMulti := u.br.BridgeConfig().ShowContextMulti
 	syntaxHighlighting := u.br.FormatterConfig().SyntaxHighlighting
 	codeBlockSeparator := u.br.FormatterConfig().CodeBlockSeparator
+	preserveNewLines := u.br.FormatterConfig().PreserveNewLines
 
 	text = utils.WrapMessage(text, maxlen)
 	addPrefix := false
@@ -556,6 +559,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		CodeBlockSeparator: codeBlockSeparator,
 		BlockquoteChar:     blockQuoteChar,
 		InlineCodeChar:     inlineCode,
+		PreserveNewLines:   preserveNewLines,
 	}
 
 	emitLine := func(line string) {
@@ -1495,6 +1499,7 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 	blockQuoteChar, codeBlockPrefix := u.getMarkdownBlockCodePrefix()
 	syntaxHighlighting := u.br.FormatterConfig().SyntaxHighlighting
 	codeBlockSeparator := u.br.FormatterConfig().CodeBlockSeparator
+	preserveNewLines := u.br.FormatterConfig().PreserveNewLines
 
 	opts := utils.ProcessMessageOpts{
 		DisableEmoji:       disableEmoji,
@@ -1505,6 +1510,7 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 		CodeBlockSeparator: codeBlockSeparator,
 		BlockquoteChar:     blockQuoteChar,
 		InlineCodeChar:     inlineCode,
+		PreserveNewLines:   preserveNewLines,
 	}
 
 	for _, event := range events {

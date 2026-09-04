@@ -2208,6 +2208,7 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 	disableEmoji := rc.Mattermost.Formatter.DisableEmoji
 	customEmoji := rc.Mattermost.Formatter.CustomEmoji
 	enableIRCHexColors := rc.Mattermost.Formatter.EnableIRCHexColors
+	preserveNewLines := rc.Mattermost.Formatter.PreserveNewLines
 	messageAttachmentShortFieldMaxLineLength := rc.Mattermost.MessageAttachmentShortFieldMaxLineLength
 	messageAttachmentOmitFieldTitles := rc.Mattermost.MessageAttachmentOmitFieldTitles
 
@@ -2364,6 +2365,7 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 			CodeBlockSeparator: codeBlockSeparator,
 			BlockquoteChar:     blockquoteChar,
 			InlineCodeChar:     inlineCode,
+			PreserveNewLines:   preserveNewLines,
 		}
 
 		if attachment.Text != "" && !isTextDup {
@@ -2686,6 +2688,7 @@ func (m *Mattermost) parsePreviewPost(b *strings.Builder, user string, channel s
 	syntaxHighlighting := rc.Mattermost.Formatter.SyntaxHighlighting
 	codeBlockPrefix := rc.Mattermost.Formatter.CodeBlockPrefix
 	codeBlockSeparator := rc.Mattermost.Formatter.CodeBlockSeparator
+	preserveNewLines := rc.Mattermost.Formatter.PreserveNewLines
 	disableMarkdown := rc.Mattermost.Formatter.DisableMarkdown
 	disableEmoji := rc.Mattermost.Formatter.DisableEmoji
 	customEmoji := rc.Mattermost.Formatter.CustomEmoji
@@ -2770,6 +2773,7 @@ func (m *Mattermost) parsePreviewPost(b *strings.Builder, user string, channel s
 			CodeBlockSeparator: codeBlockSeparator,
 			BlockquoteChar:     blockquoteChar,
 			InlineCodeChar:     inlineCode,
+			PreserveNewLines:   preserveNewLines,
 		}
 
 		trimmedBlockquoteChar := strings.TrimSpace(blockquoteChar)

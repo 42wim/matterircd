@@ -28,6 +28,8 @@ type ProcessMessageOpts struct {
 	CodeBlockSeparator string
 	BlockquoteChar     string
 	InlineCodeChar     string
+
+	PreserveNewLines string // "all" (default), "max-one", or "none" / "zero"
 }
 
 // SummaryOpts holds configuration for shortening and summarizing text.
@@ -323,7 +325,8 @@ func ProcessMessageText(text string, opts ProcessMessageOpts, yield func(line st
 
 	var (
 		codeBuilder      strings.Builder
-		emptyLines       = make([]string, 0, 4)
+		emptyLines       int
+		hasContent       bool
 		lastBlockWasCode bool
 		inCodeBlock      bool
 		codeBlockMarker  string
@@ -343,6 +346,7 @@ func ProcessMessageText(text string, opts ProcessMessageOpts, yield func(line st
 			if strings.HasPrefix(trimmed, codeBlockMarker) {
 				inCodeBlock = false
 				lastBlockWasCode = true
+				hasContent = true
 
 				FormatFullCodeBlock(codeBuilder.String(), lexer, currentIndent, opts, yield)
 				codeBuilder.Reset() // Frees builder state for next block
@@ -388,13 +392,11 @@ func ProcessMessageText(text string, opts ProcessMessageOpts, yield func(line st
 				yield(currentIndent + opts.CodeBlockSeparator)
 			} else if !lastBlockWasCode {
 				// Flush empty lines if they weren't between code blocks
-				for _, el := range emptyLines {
-					yield(el)
-				}
+				flushEmptyLines(emptyLines, opts.PreserveNewLines, hasContent, yield)
 			}
 
 			// Reset slice length without freeing memory
-			emptyLines = emptyLines[:0]
+			emptyLines = 0
 
 			codeBuilder.Grow(256)
 
@@ -403,14 +405,12 @@ func ProcessMessageText(text string, opts ProcessMessageOpts, yield func(line st
 
 		if trimmed == "" {
 			// Buffer empty lines
-			emptyLines = append(emptyLines, line)
+			emptyLines++
 		} else {
 			// Normal text line - flush buffered empty lines first
-			for _, el := range emptyLines {
-				yield(el)
-			}
-
-			emptyLines = emptyLines[:0]
+			flushEmptyLines(emptyLines, opts.PreserveNewLines, hasContent, yield)
+			emptyLines = 0
+			hasContent = true
 			lastBlockWasCode = false
 
 			line = FormatMarkdownAndEmoji(
@@ -429,9 +429,9 @@ func ProcessMessageText(text string, opts ProcessMessageOpts, yield func(line st
 	// Flush remaining state if EOF reached
 	if inCodeBlock {
 		FormatFullCodeBlock(codeBuilder.String(), lexer, currentIndent, opts, yield)
-	} else {
-		for _, el := range emptyLines {
-			yield(el)
+	} else if opts.PreserveNewLines == "all" || opts.PreserveNewLines == "" {
+		for range emptyLines {
+			yield("")
 		}
 	}
 }
@@ -859,4 +859,27 @@ func WrapMessage(msg string, maxLen int) string {
 	// Flush whatever remains of the string
 	b.WriteString(msg[lastWrite:])
 	return b.String()
+}
+
+func flushEmptyLines(count int, mode string, hasContent bool, yield func(line string)) {
+	if count == 0 {
+		return
+	}
+
+	switch mode {
+	case "none", "zero":
+		return
+
+	case "max-one":
+		if hasContent {
+			yield("")
+		}
+
+	case "all":
+		fallthrough //nolint:gocritic
+	default:
+		for range count {
+			yield("")
+		}
+	}
 }
