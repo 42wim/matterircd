@@ -321,6 +321,7 @@ func details(u *User, toUser *User, args []string, service string) {
 	blockQuoteChar, codeBlockPrefix := u.getMarkdownBlockCodePrefix()
 	syntaxHighlighting := u.br.FormatterConfig().SyntaxHighlighting
 	codeBlockSeparator := u.br.FormatterConfig().CodeBlockSeparator
+	preserveNewLines := u.br.FormatterConfig().PreserveNewLines
 
 	opts := utils.ProcessMessageOpts{
 		DisableEmoji:       disableEmoji,
@@ -331,6 +332,7 @@ func details(u *User, toUser *User, args []string, service string) {
 		CodeBlockSeparator: codeBlockSeparator,
 		BlockquoteChar:     blockQuoteChar,
 		InlineCodeChar:     inlineCode,
+		PreserveNewLines:   preserveNewLines,
 	}
 
 	for _, event := range events {
@@ -579,6 +581,7 @@ func dispatchHistoricalEvent(u *User, toUser *User, event *bridge.Event, searchC
 	blockQuoteChar, codeBlockPrefix := u.getMarkdownBlockCodePrefix()
 	syntaxHighlighting := u.br.FormatterConfig().SyntaxHighlighting
 	codeBlockSeparator := u.br.FormatterConfig().CodeBlockSeparator
+	preserveNewLines := u.br.FormatterConfig().PreserveNewLines
 
 	opts := utils.ProcessMessageOpts{
 		DisableEmoji:       disableEmoji,
@@ -589,6 +592,7 @@ func dispatchHistoricalEvent(u *User, toUser *User, event *bridge.Event, searchC
 		CodeBlockSeparator: codeBlockSeparator,
 		BlockquoteChar:     blockQuoteChar,
 		InlineCodeChar:     inlineCode,
+		PreserveNewLines:   preserveNewLines,
 	}
 
 	textToProcess := utils.WrapMessage(text, 460)
@@ -1290,6 +1294,7 @@ func summarize(u *User, toUser *User, args []string, service string) {
 	blockQuoteChar, codeBlockPrefix := u.getMarkdownBlockCodePrefix()
 	syntaxHighlighting := u.br.FormatterConfig().SyntaxHighlighting
 	codeBlockSeparator := u.br.FormatterConfig().CodeBlockSeparator
+	preserveNewLines := u.br.FormatterConfig().PreserveNewLines
 
 	opts := utils.ProcessMessageOpts{
 		DisableMarkdown:    disableMarkdown,
@@ -1299,6 +1304,7 @@ func summarize(u *User, toUser *User, args []string, service string) {
 		CodeBlockSeparator: codeBlockSeparator,
 		BlockquoteChar:     blockQuoteChar,
 		InlineCodeChar:     inlineCode,
+		PreserveNewLines:   preserveNewLines,
 	}
 
 	utils.ProcessMessageText(summary, opts, func(line string) {

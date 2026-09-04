@@ -116,6 +116,8 @@ type FormatterConfig struct {
 	Unicode bool
 
 	EnableIRCHexColors bool
+
+	PreserveNewLines string
 }
 
 type MattermostConfig struct {
@@ -273,6 +275,8 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 		Unicode: c.v.GetBool("mattermost.Unicode"),
 
 		EnableIRCHexColors: c.v.GetBool("mattermost.EnableIRCHexColors"),
+
+		PreserveNewLines: c.v.GetString("mattermost.PreserveNewLines"),
 	}
 	slFormatter := FormatterConfig{
 		DisableEmoji: c.v.GetBool("slack.DisableEmoji"),
@@ -291,6 +295,8 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 		Unicode: c.v.GetBool("slack.Unicode"),
 
 		EnableIRCHexColors: c.v.GetBool("slack.EnableIRCHexColors"),
+
+		PreserveNewLines: c.v.GetString("slack.PreserveNewLines"),
 	}
 	mdFormatter := FormatterConfig{
 		DisableEmoji: c.v.GetBool("mastodon.DisableEmoji"),
@@ -309,6 +315,8 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 		Unicode: c.v.GetBool("mastodon.Unicode"),
 
 		EnableIRCHexColors: c.v.GetBool("mastodon.EnableIRCHexColors"),
+
+		PreserveNewLines: c.v.GetString("mastodon.PreserveNewLines"),
 	}
 
 	return &RuntimeConfig{
