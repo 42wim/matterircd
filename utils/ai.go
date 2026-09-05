@@ -96,6 +96,32 @@ type generateResponse struct {
 	} `json:"error,omitempty"`
 }
 
+const (
+	DefaultGeminiModel  = "gemini-3.8-flash"
+	DefaultCopilotModel = "gpt-4o-mini"
+)
+
+// GetModel resolves the AI model to use based on provider, fallback model, and the models map.
+func GetModel(provider, fallbackModel string, models map[string]string) string {
+	p := strings.ToLower(provider)
+	if models != nil {
+		if m, ok := models[p]; ok && m != "" {
+			return m
+		}
+	}
+
+	if fallbackModel != "" {
+		return fallbackModel
+	}
+
+	switch p {
+	case "copilot", "github":
+		return DefaultCopilotModel
+	default:
+		return DefaultGeminiModel
+	}
+}
+
 // NewCopilotClient creates a client targeting the native GitHub Copilot API.
 func NewCopilotClient(token, model string) (*CopilotClient, error) {
 	if token == "" {
@@ -103,7 +129,7 @@ func NewCopilotClient(token, model string) (*CopilotClient, error) {
 	}
 
 	if model == "" {
-		model = "gpt-4o"
+		model = DefaultCopilotModel
 	}
 
 	return &CopilotClient{
@@ -141,7 +167,7 @@ func NewGeminiClient(ctx context.Context, saFile, project, location, model strin
 	}
 
 	if model == "" {
-		model = "gemini-3.8-flash"
+		model = DefaultGeminiModel
 	}
 
 	return &Client{

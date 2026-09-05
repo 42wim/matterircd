@@ -144,7 +144,7 @@ func main() {
 			provider = "gemini"
 		}
 
-		model := aiCfg.GetModel(provider)
+		model := utils.GetModel(provider, aiCfg.Model, aiCfg.Models)
 
 		switch strings.ToLower(provider) {
 		case "copilot", "github":

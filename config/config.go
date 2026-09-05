@@ -31,7 +31,7 @@ type AIConfig struct {
 	Project            string
 	Location           string
 	Model              string            // Fallback model if not specified in Models map
-	Models             map[string]string // Provider-specific models, e.g. { "gemini": "gemini-3.7-flash", "copilot": "gpt-4o" }
+	Models             map[string]string // Provider-specific models, e.g. { "gemini": "gemini-3.8-flash", "copilot": "gpt-4o-mini" }
 	Prompt             string
 	DefaultPostLimit   int
 	MaxPostLimit       int
@@ -432,26 +432,6 @@ func (c *Config) AI() *AIConfig {
 
 func (c *Config) Current() *RuntimeConfig {
 	return c.current.Load()
-}
-
-func (c *AIConfig) GetModel(provider string) string {
-	p := strings.ToLower(provider)
-	if c.Models != nil {
-		if m, ok := c.Models[p]; ok && m != "" {
-			return m
-		}
-	}
-
-	if c.Model != "" {
-		return c.Model
-	}
-
-	switch p {
-	case "copilot", "github":
-		return "gpt-4o-mini"
-	default:
-		return "gemini-3.8-flash"
-	}
 }
 
 func (c *Config) Mattermost() *MattermostConfig {

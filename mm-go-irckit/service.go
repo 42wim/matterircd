@@ -1117,9 +1117,9 @@ func (u *User) getSummarizeEvents(target string, query summarizeQuery) (string, 
 
 func parseProvider(arg string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(arg)) {
-	case "gemini", "google":
+	case "gemini", "google": //nolint:goconst
 		return "gemini", true
-	case "copilot", "github":
+	case "copilot", "github": //nolint:goconst
 		return "copilot", true
 	default:
 		return "", false
@@ -1247,11 +1247,12 @@ func summarize(u *User, toUser *User, args []string, service string) {
 	if provider == "" {
 		provider = cfg.Provider
 	}
+
 	if provider == "" {
 		provider = "gemini"
 	}
 
-	model := cfg.GetModel(provider)
+	model := utils.GetModel(provider, cfg.Model, cfg.Models)
 
 	var aiClient utils.Summarizer
 
