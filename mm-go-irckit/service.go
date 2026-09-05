@@ -1237,7 +1237,7 @@ func summarize(u *User, toUser *User, args []string, service string) {
 			return
 		}
 
-		aiClient, err = utils.NewAIClient(u.ctx, cfg.ServiceAccountFile, cfg.Project, cfg.Location, cfg.Model)
+		aiClient, err = utils.NewGeminiAIClient(u.ctx, cfg.ServiceAccountFile, cfg.Project, cfg.Location, cfg.Model)
 		if err != nil {
 			u.MsgUser(toUser, fmt.Sprintf("Failed to initialize Gemini AI: %v", err))
 

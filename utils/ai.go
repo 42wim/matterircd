@@ -32,6 +32,11 @@ type CopilotClient struct {
 	httpClient *http.Client
 }
 
+type copilotTokenResponse struct {
+	Token     string `json:"token"`
+	ExpiresAt int64  `json:"expires_at"`
+}
+
 type copilotRequest struct {
 	Model       string           `json:"model"`
 	Messages    []copilotMessage `json:"messages"`
@@ -90,8 +95,25 @@ type generateResponse struct {
 	} `json:"error,omitempty"`
 }
 
-// NewAIClient creates a new Gemini AI client authenticated via service account credentials.
-func NewAIClient(ctx context.Context, saFile, project, location, model string) (*Client, error) {
+// NewCopilotClient creates a client targeting the native GitHub Copilot API.
+func NewCopilotClient(token, model string) (*CopilotClient, error) {
+	if token == "" {
+		return nil, fmt.Errorf("github token is required for copilot summarizer")
+	}
+
+	if model == "" {
+		model = "gpt-4o"
+	}
+
+	return &CopilotClient{
+		token:      token,
+		model:      model,
+		httpClient: &http.Client{Timeout: 30 * time.Second},
+	}, nil
+}
+
+// NewGeminiAIClient creates a new Gemini AI client authenticated via service account credentials.
+func NewGeminiAIClient(ctx context.Context, saFile, project, location, model string) (*Client, error) {
 	data, err := os.ReadFile(saFile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read service account file: %w", err)
@@ -112,23 +134,6 @@ func NewAIClient(ctx context.Context, saFile, project, location, model string) (
 		model:       model,
 		tokenSource: jwtCfg.TokenSource(ctx),
 		httpClient:  &http.Client{Timeout: 30 * time.Second},
-	}, nil
-}
-
-// NewCopilotClient creates an OpenAI-compatible client targeting GitHub Models API.
-func NewCopilotClient(token, model string) (*CopilotClient, error) {
-	if token == "" {
-		return nil, fmt.Errorf("github token is required for copilot summarizer")
-	}
-
-	if model == "" {
-		model = "gpt-4o-mini"
-	}
-
-	return &CopilotClient{
-		token:      token,
-		model:      model,
-		httpClient: &http.Client{Timeout: 30 * time.Second},
 	}, nil
 }
 
@@ -224,6 +229,11 @@ func (c *Client) Summarize(ctx context.Context, prompt string, thinking string) 
 }
 
 func (c *CopilotClient) Summarize(ctx context.Context, prompt string, _ string) (string, error) {
+	sessionToken, err := c.getGitHubSessionToken(ctx)
+	if err != nil {
+		return "", err
+	}
+
 	reqBody := copilotRequest{
 		Model: c.model,
 		Messages: []copilotMessage{
@@ -240,15 +250,18 @@ func (c *CopilotClient) Summarize(ctx context.Context, prompt string, _ string) 
 		return "", err
 	}
 
-	url := "https://models.github.ai/inference/chat/completions"
+	url := "https://api.githubcopilot.com/chat/completions"
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(rawJSON))
 	if err != nil {
 		return "", err
 	}
 
-	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Authorization", "Bearer "+sessionToken)
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Editor-Version", "vscode/1.98.0")
+	req.Header.Set("Editor-Plugin-Version", "copilot-chat/0.24.0")
+	req.Header.Set("Copilot-Integration-Id", "vscode-chat")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -272,6 +285,37 @@ func (c *CopilotClient) Summarize(ctx context.Context, prompt string, _ string) 
 	}
 
 	return "", fmt.Errorf("no summary generated")
+}
+
+func (c *CopilotClient) getGitHubSessionToken(ctx context.Context) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/copilot_internal/v2/token", nil)
+	if err != nil {
+		return "", err
+	}
+
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Editor-Version", "vscode/1.98.0")
+	req.Header.Set("Editor-Plugin-Version", "copilot-chat/0.24.0")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("copilot auth request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("copilot auth returned status %s", resp.Status)
+	}
+
+	var tokenResp copilotTokenResponse
+
+	err = json.NewDecoder(resp.Body).Decode(&tokenResp)
+	if err != nil {
+		return "", fmt.Errorf("failed to decode copilot token: %w", err)
+	}
+
+	return tokenResp.Token, nil
 }
 
 func resolveThinkingBudget(mode string) *int {

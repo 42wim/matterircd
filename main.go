@@ -178,7 +178,7 @@ func main() {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 
-			_, err := utils.NewAIClient(ctx, aiCfg.ServiceAccountFile, aiCfg.Project, aiCfg.Location, model)
+			_, err := utils.NewGeminiAIClient(ctx, aiCfg.ServiceAccountFile, aiCfg.Project, aiCfg.Location, model)
 			if err != nil {
 				logger.Errorf("AI summarization setup error: %v", err)
 				break

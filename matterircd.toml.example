@@ -55,7 +55,7 @@ PasteBufferTimeout = 2500
 [ai]
 enabled = true
 #provider = "gemini" # "gemini" (default) or "copilot"
-#token = "ghp_..." # GitHub PAT for Copilot
+#token = "ghu_..." # OAuth tokens for GitHub Apps
 service_account_file = "/etc/matterircd/sa.json"
 project = "myproject-req-10375"
 location = "eu"
