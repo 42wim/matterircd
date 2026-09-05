@@ -717,9 +717,9 @@ var cmds = map[string]Command{
 	"scrollback":       {handler: scrollback, login: true, minParams: 2, maxParams: 2},
 	"search":           {handler: search, login: true, minParams: 1, maxParams: -1},
 	"searchusers":      {handler: searchUsers, login: true, minParams: 1, maxParams: -1},
-	"summarize":        {handler: summarize, login: true, minParams: 1, maxParams: 3},
-	"summary":          {handler: summarize, login: true, minParams: 1, maxParams: 3},
-	"tldr":             {handler: summarize, login: true, minParams: 1, maxParams: 3},
+	"summarize":        {handler: summarize, login: true, minParams: 1, maxParams: 4},
+	"summary":          {handler: summarize, login: true, minParams: 1, maxParams: 4},
+	"tldr":             {handler: summarize, login: true, minParams: 1, maxParams: 4},
 	"updatelastviewed": {handler: updatelastviewed, login: true, minParams: 1, maxParams: 1},
 }
 
@@ -1051,8 +1051,10 @@ func channelCmd(u *User, toUser *User, args []string, service string) {
 }
 
 type summarizeQuery struct {
-	Count    int
-	Since    int64
+	Count int
+	Since int64
+
+	Provider string
 	Thinking string
 }
 
@@ -1113,6 +1115,17 @@ func (u *User) getSummarizeEvents(target string, query summarizeQuery) (string, 
 	return "@" + userName, events, nil
 }
 
+func parseProvider(arg string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(arg)) {
+	case "gemini", "google":
+		return "gemini", true
+	case "copilot", "github":
+		return "copilot", true
+	default:
+		return "", false
+	}
+}
+
 //nolint:funlen
 func parseSummarizeLimit(extraArgs []string, defaultLimit, maxLimit int) (summarizeQuery, error) {
 	if maxLimit == 0 {
@@ -1128,6 +1141,16 @@ func parseSummarizeLimit(extraArgs []string, defaultLimit, maxLimit int) (summar
 
 	for _, arg := range extraArgs {
 		if arg == "" {
+			continue
+		}
+
+		if provider, ok := parseProvider(arg); ok {
+			if query.Provider != "" {
+				return summarizeQuery{}, errors.New("provider specified more than once")
+			}
+
+			query.Provider = provider
+
 			continue
 		}
 
@@ -1162,7 +1185,7 @@ func parseSummarizeLimit(extraArgs []string, defaultLimit, maxLimit int) (summar
 		// Fall back to parsing as an integer count (e.g. 50)
 		val, err := strconv.Atoi(arg)
 		if err != nil || val <= 0 {
-			return summarizeQuery{}, errors.New("invalid option: expected post count (e.g. 50), duration (e.g. 24h), or thinking mode (off, low, medium, high)")
+			return summarizeQuery{}, errors.New("invalid option: expected post count (e.g. 50), duration (e.g. 24h), thinking mode (off, low, medium, high), or provider (gemini, copilot)")
 		}
 
 		if hasLimit {
@@ -1206,9 +1229,9 @@ func summarize(u *User, toUser *User, args []string, service string) {
 		return
 	}
 
-	if len(args) == 0 || len(args) > 3 {
-		u.MsgUser(toUser, "Usage: SUMMARIZE <#channel | user | @@thread_id> [post_count | duration] [thinking]")
-		u.MsgUser(toUser, "e.g. SUMMARIZE #dev 50, SUMMARIZE #dev 24h low, SUMMARIZE @@q3kz9... high, SUMMARIZE someuser 30m")
+	if len(args) == 0 || len(args) > 4 {
+		u.MsgUser(toUser, "Usage: SUMMARIZE <#channel | user | @@thread_id> [post_count | duration] [thinking] [gemini | copilot]")
+		u.MsgUser(toUser, "e.g. SUMMARIZE #dev 50, SUMMARIZE #dev 24h gemini high, SUMMARIZE @@q3kz9... copilot, SUMMARIZE someuser 30m")
 
 		return
 	}
@@ -1220,11 +1243,27 @@ func summarize(u *User, toUser *User, args []string, service string) {
 		return
 	}
 
+	provider := query.Provider
+	if provider == "" {
+		provider = cfg.Provider
+	}
+	if provider == "" {
+		provider = "gemini"
+	}
+
+	model := cfg.GetModel(provider)
+
 	var aiClient utils.Summarizer
 
-	switch strings.ToLower(cfg.Provider) {
+	switch strings.ToLower(provider) {
 	case "copilot", "github":
-		aiClient, err = utils.NewCopilotClient(cfg.Token, cfg.Model)
+		if cfg.Token == "" {
+			u.MsgUser(toUser, "Copilot AI is not configured (missing token).")
+
+			return
+		}
+
+		aiClient, err = utils.NewCopilotClient(cfg.Token, model)
 		if err != nil {
 			u.MsgUser(toUser, fmt.Sprintf("Failed to initialize Copilot AI: %v", err))
 
@@ -1232,12 +1271,12 @@ func summarize(u *User, toUser *User, args []string, service string) {
 		}
 	default:
 		if cfg.ServiceAccountFile == "" {
-			u.MsgUser(toUser, "Gemini AI is not configured (missing service_account_file).")
+			u.MsgUser(toUser, "Gemini AI is not configured (missing service_account_file or project).")
 
 			return
 		}
 
-		aiClient, err = utils.NewGeminiAIClient(u.ctx, cfg.ServiceAccountFile, cfg.Project, cfg.Location, cfg.Model)
+		aiClient, err = utils.NewGeminiClient(u.ctx, cfg.ServiceAccountFile, cfg.Project, cfg.Location, model)
 		if err != nil {
 			u.MsgUser(toUser, fmt.Sprintf("Failed to initialize Gemini AI: %v", err))
 
@@ -1293,6 +1332,26 @@ func summarize(u *User, toUser *User, args []string, service string) {
 			"[TRANSCRIPT]\n%s[/TRANSCRIPT]\n",
 		contextLabel, extraInstructions, transcript.String(),
 	)
+
+	thinking := query.Thinking
+	if thinking == "" {
+		thinking = "none"
+	}
+
+	switch strings.ToLower(provider) {
+	case "copilot", "github":
+		logger.Debugf("AI summarization for %s (provider: %s, model: %s, thinking: %s)", contextLabel, provider, model, thinking)
+	default:
+		region := cfg.Location
+		if region == "" {
+			region = "us"
+		}
+
+		logger.Debugf(
+			"AI summarization for %s (provider: %s, model: %s, thinking: %s, project: %s, region: %s)",
+			contextLabel, provider, model, thinking, cfg.Project, region,
+		)
+	}
 
 	summary, err := aiClient.Summarize(u.ctx, prompt, query.Thinking)
 	if err != nil {

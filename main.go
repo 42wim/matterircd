@@ -144,16 +144,13 @@ func main() {
 			provider = "gemini"
 		}
 
+		model := aiCfg.GetModel(provider)
+
 		switch strings.ToLower(provider) {
 		case "copilot", "github":
 			if aiCfg.Token == "" {
 				logger.Warn("AI summarization enabled, but token is missing")
 				break
-			}
-
-			model := aiCfg.Model
-			if model == "" {
-				model = "gpt-4o-mini"
 			}
 
 			_, err := utils.NewCopilotClient(aiCfg.Token, model)
@@ -162,30 +159,24 @@ func main() {
 				break
 			}
 
-			logger.Infof("AI summarization enabled (provider: %s, model: %s)", provider, model)
+			logger.Infof("AI summarization enabled (default provider: %s, model: %s)", provider, model)
 		default:
-			if aiCfg.ServiceAccountFile == "" || aiCfg.Project == "" {
+			if aiCfg.ServiceAccountFile == "" {
 				logger.Warn("AI summarization enabled, but service_account_file or project is missing")
 				break
 			}
 
-			model := aiCfg.Model
-			if model == "" {
-				model = "gemini-3.8-flash"
-			}
-
-			// Test credential file read during startup
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 
-			_, err := utils.NewGeminiAIClient(ctx, aiCfg.ServiceAccountFile, aiCfg.Project, aiCfg.Location, model)
+			_, err := utils.NewGeminiClient(ctx, aiCfg.ServiceAccountFile, aiCfg.Project, aiCfg.Location, model)
 			if err != nil {
 				logger.Errorf("AI summarization setup error: %v", err)
 				break
 			}
 
 			logger.Infof(
-				"AI summarization enabled (provider: %s, model: %s, project: %s, region: %s)",
+				"AI summarization enabled (default provider: %s, model: %s, project: %s, region: %s)",
 				provider, model, aiCfg.Project, aiCfg.Location,
 			)
 		}

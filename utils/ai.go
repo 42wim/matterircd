@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -112,11 +113,26 @@ func NewCopilotClient(token, model string) (*CopilotClient, error) {
 	}, nil
 }
 
-// NewGeminiAIClient creates a new Gemini AI client authenticated via service account credentials.
-func NewGeminiAIClient(ctx context.Context, saFile, project, location, model string) (*Client, error) {
+// NewGeminiClient creates a new Gemini AI client authenticated via service account credentials.
+func NewGeminiClient(ctx context.Context, saFile, project, location, model string) (*Client, error) {
 	data, err := os.ReadFile(saFile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read service account file: %w", err)
+	}
+
+	if project == "" {
+		var sa struct {
+			ProjectID string `json:"project_id"`
+		}
+
+		err = json.Unmarshal(data, &sa)
+		if err == nil && sa.ProjectID != "" {
+			project = sa.ProjectID
+		}
+	}
+
+	if project == "" {
+		return nil, errors.New("gcp project is not specified and could not be found in service account file")
 	}
 
 	jwtCfg, err := google.JWTConfigFromJSON(data, "https://www.googleapis.com/auth/cloud-platform")

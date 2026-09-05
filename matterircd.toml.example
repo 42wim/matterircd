@@ -54,17 +54,22 @@ PasteBufferTimeout = 2500
 # *** WARNING: Information fed through will more than likely be used to train these models. ***
 [ai]
 enabled = true
-#provider = "gemini" # "gemini" (default) or "copilot"
-#token = "ghu_..." # OAuth tokens for GitHub Apps
-service_account_file = "/etc/matterircd/sa.json"
-project = "myproject-req-10375"
-location = "us"
-model = "gemini-3.8-flash"
+provider = "gemini" # default provider when not specified on IRC - "gemini" (default) or "copilot"
 default_post_limit = 30
 max_post_limit = 100
 # Optional additional instructions appended to the summarizer prompt.
 # prompt = "Pay special attention to code reviews, diffs/patches, and deployment blockers."
 
+# Credentials
+token = "ghu_..." # OAuth tokens for GitHub Apps
+service_account_file = "/etc/matterircd/sa.json"
+project = "myproject-req-10375"
+location = "us"
+
+# Provider-specific models
+[ai.models]
+gemini = "gemini-3.8-flash"
+copilot = "gpt-4o-mini"
 
 ##################################
 ##### MATTERMOST EXAMPLE #########
