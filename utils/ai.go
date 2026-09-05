@@ -183,6 +183,11 @@ func NewGeminiClient(ctx context.Context, saFile, project, location, model strin
 	}, nil
 }
 
+// Project returns the resolved GCP project ID.
+func (c *Client) Project() string {
+	return c.project
+}
+
 //nolint:funlen,gocyclo
 func (c *Client) Summarize(ctx context.Context, prompt string, thinking string) (string, error) {
 	token, err := c.tokenSource.Token()

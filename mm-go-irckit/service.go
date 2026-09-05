@@ -1254,7 +1254,10 @@ func summarize(u *User, toUser *User, args []string, service string) {
 
 	model := utils.GetModel(provider, cfg.Model, cfg.Models)
 
-	var aiClient utils.Summarizer
+	var (
+		aiClient utils.Summarizer
+		project  = cfg.Project
+	)
 
 	switch strings.ToLower(provider) {
 	case utils.AICopilotProvider, utils.AIGitHubProvider:
@@ -1272,17 +1275,20 @@ func summarize(u *User, toUser *User, args []string, service string) {
 		}
 	default:
 		if cfg.ServiceAccountFile == "" {
-			u.MsgUser(toUser, "Gemini AI is not configured (missing service_account_file or project).")
+			u.MsgUser(toUser, "Gemini AI is not configured (missing service_account_file).")
 
 			return
 		}
 
-		aiClient, err = utils.NewGeminiClient(u.ctx, cfg.ServiceAccountFile, cfg.Project, cfg.Location, model)
+		geminiClient, err := utils.NewGeminiClient(u.ctx, cfg.ServiceAccountFile, cfg.Project, cfg.Location, model)
 		if err != nil {
 			u.MsgUser(toUser, fmt.Sprintf("Failed to initialize Gemini AI: %v", err))
 
 			return
 		}
+
+		project = geminiClient.Project()
+		aiClient = geminiClient
 	}
 
 	contextLabel, events, err := u.getSummarizeEvents(args[0], query)
@@ -1350,7 +1356,7 @@ func summarize(u *User, toUser *User, args []string, service string) {
 
 		logger.Debugf(
 			"AI summarization for %s (provider: %s, model: %s, thinking: %s, project: %s, region: %s)",
-			contextLabel, provider, model, thinking, cfg.Project, region,
+			contextLabel, provider, model, thinking, project, region,
 		)
 	}
 
