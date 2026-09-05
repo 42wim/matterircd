@@ -125,7 +125,7 @@ func NewGeminiAIClient(ctx context.Context, saFile, project, location, model str
 	}
 
 	if model == "" {
-		model = "gemini-3.7-flash"
+		model = "gemini-3.8-flash"
 	}
 
 	return &Client{
