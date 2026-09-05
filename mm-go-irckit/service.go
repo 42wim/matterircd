@@ -1115,7 +1115,7 @@ func (u *User) getSummarizeEvents(target string, query summarizeQuery) (string, 
 	return "@" + userName, events, nil
 }
 
-func parseAIProvider(arg string) (string, bool) {
+func parseSummarizeAIProvider(arg string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(arg)) {
 	case utils.AIGeminiProvider, "google":
 		return utils.AIGeminiProvider, true
@@ -1126,7 +1126,7 @@ func parseAIProvider(arg string) (string, bool) {
 	}
 }
 
-func parseAIThinkingMode(arg string) (string, bool) {
+func parseSummarizeAIThinkingMode(arg string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(arg)) {
 	case "off", "none":
 		return "off", true
@@ -1161,7 +1161,7 @@ func parseSummarizeLimit(extraArgs []string, defaultLimit, maxLimit int) (summar
 			continue
 		}
 
-		if provider, ok := parseAIProvider(arg); ok {
+		if provider, ok := parseSummarizeAIProvider(arg); ok {
 			if query.Provider != "" {
 				return summarizeQuery{}, errors.New("provider specified more than once")
 			}
@@ -1171,7 +1171,7 @@ func parseSummarizeLimit(extraArgs []string, defaultLimit, maxLimit int) (summar
 			continue
 		}
 
-		if mode, ok := parseAIThinkingMode(arg); ok {
+		if mode, ok := parseSummarizeAIThinkingMode(arg); ok {
 			if query.Thinking != "" {
 				return summarizeQuery{}, errors.New("thinking mode specified more than once")
 			}
