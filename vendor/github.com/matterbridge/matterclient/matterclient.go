@@ -11,6 +11,7 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptrace"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -1359,6 +1360,8 @@ func (m *Client) IsAborted(ctx context.Context) bool {
 
 // RemoveUserFromTeamChannelsCache removes a user from all cached channels belonging to teamID,
 // cleans up the team user cache, and returns the channel IDs the user was removed from.
+//
+//nolint:gocyclo
 func (m *Client) RemoveUserFromTeamChannelsCache(teamID, userID string) []string {
 	if teamID == "" || userID == "" {
 		return nil
@@ -1394,6 +1397,7 @@ func (m *Client) RemoveUserFromTeamChannelsCache(teamID, userID string) []string
 
 			if _, isMember := userMap[userID]; isMember {
 				delete(userMap, userID)
+
 				removedChannels = append(removedChannels, channelID)
 			}
 		}
@@ -1408,15 +1412,7 @@ func (m *Client) RemoveUserFromTeamChannelsCache(teamID, userID string) []string
 
 			delete(m.Users.joinedChannels, chID)
 
-			alreadyAdded := false
-			for _, id := range removedChannels {
-				if id == chID {
-					alreadyAdded = true
-					break
-				}
-			}
-
-			if !alreadyAdded {
+			if !slices.Contains(removedChannels, chID) {
 				removedChannels = append(removedChannels, chID)
 			}
 		}

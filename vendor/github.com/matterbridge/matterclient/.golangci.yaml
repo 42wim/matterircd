@@ -15,6 +15,7 @@ linters:
     - exhaustive
     - exhaustruct
     - forbidigo
+    - funcorder
     - gochecknoglobals
     - godot
     - godox
