@@ -1357,6 +1357,76 @@ func (m *Client) IsAborted(ctx context.Context) bool {
 	return false
 }
 
+// RemoveUserFromTeamChannelsCache removes a user from all cached channels belonging to teamID,
+// cleans up the team user cache, and returns the channel IDs the user was removed from.
+func (m *Client) RemoveUserFromTeamChannelsCache(teamID, userID string) []string {
+	if teamID == "" || userID == "" {
+		return nil
+	}
+
+	m.RLock()
+	isCurrentUser := m.User != nil && userID == m.User.Id
+	m.RUnlock()
+
+	m.Users.mu.Lock()
+	defer m.Users.mu.Unlock()
+
+	if m.Users.teams != nil {
+		if userMap, exists := m.Users.teams[teamID]; exists {
+			delete(userMap, userID)
+		}
+	}
+
+	var removedChannels []string
+
+	if isCurrentUser && m.Users.joinedChannels != nil {
+		removedChannels = make([]string, 0, len(m.Users.joinedChannels))
+	} else {
+		removedChannels = make([]string, 0, 16)
+	}
+
+	if m.Users.channels != nil {
+		for channelID, userMap := range m.Users.channels {
+			ch, exists := m.Users.channelData[channelID]
+			if !exists || ch == nil || ch.TeamId != teamID {
+				continue
+			}
+
+			if _, isMember := userMap[userID]; isMember {
+				delete(userMap, userID)
+				removedChannels = append(removedChannels, channelID)
+			}
+		}
+	}
+
+	if isCurrentUser && m.Users.joinedChannels != nil {
+		for chID := range m.Users.joinedChannels {
+			ch, exists := m.Users.channelData[chID]
+			if !exists || ch == nil || ch.TeamId != teamID {
+				continue
+			}
+
+			delete(m.Users.joinedChannels, chID)
+
+			alreadyAdded := false
+			for _, id := range removedChannels {
+				if id == chID {
+					alreadyAdded = true
+					break
+				}
+			}
+
+			if !alreadyAdded {
+				removedChannels = append(removedChannels, chID)
+			}
+		}
+	}
+
+	m.Users.lastUpdated.Store(time.Now().Unix())
+
+	return removedChannels
+}
+
 // SetLogAPICalls sets the log level of the Mattermost API-call logger.
 // Set to "warn" to log most API request operations (some lifecycle calls are logged at "info").
 // Accepted levels are: 'debug', 'info', 'warn', 'error', 'fatal' and 'panic'.

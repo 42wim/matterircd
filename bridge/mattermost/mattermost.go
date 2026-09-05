@@ -409,6 +409,8 @@ func (m *Mattermost) handleWsMessage(ctx context.Context, quitChan chan struct{}
 				m.handleStatusChangeEvent(message.Raw, logger)
 			case model.WebsocketEventReactionAdded, model.WebsocketEventReactionRemoved:
 				m.handleReactionEvent(ctx, message.Raw, logger)
+			case model.WebsocketEventLeaveTeam:
+				m.handleWsActionLeaveTeam(ctx, message.Raw, logger)
 			case model.WebsocketEventTyping:
 				m.handleTypingEvent(ctx, message.Raw, logger)
 			}
@@ -1139,6 +1141,59 @@ var (
 	validIRCNickRegExp    = regexp.MustCompile("^[a-zA-Z0-9_]*$")
 	channelMentionsRegExp = regexp.MustCompile(`@(channel|all|here)\W`)
 )
+
+func (m *Mattermost) handleWsActionLeaveTeam(ctx context.Context, rmsg *model.WebSocketEvent, logger *logrus.Entry) {
+	logger.Trace("in handleWsActionLeaveTeam")
+
+	wsData := rmsg.GetData()
+	userID, ok := wsData["user_id"].(string)
+	if !ok || userID == "" {
+		if broadcast := rmsg.GetBroadcast(); broadcast != nil {
+			userID = broadcast.UserId
+		}
+	}
+
+	teamID, ok := wsData["team_id"].(string)
+	if !ok || teamID == "" {
+		if broadcast := rmsg.GetBroadcast(); broadcast != nil {
+			teamID = broadcast.TeamId
+		}
+	}
+
+	if userID == "" || teamID == "" {
+		return
+	}
+
+	user := m.GetUser(ctx, userID)
+	if user == nil {
+		user = &bridge.UserInfo{
+			Nick: userID,
+			User: userID,
+		}
+	}
+
+	channelIDs := m.mc.RemoveUserFromTeamChannelsCache(teamID, userID)
+	if len(channelIDs) == 0 {
+		return
+	}
+
+	for _, chID := range channelIDs {
+		event := &bridge.Event{
+			Type: "channel_remove",
+			Data: &bridge.ChannelRemoveEvent{
+				Remover: &bridge.UserInfo{
+					Nick: systemUser,
+				},
+				Removed: []*bridge.UserInfo{
+					user,
+				},
+				ChannelID: chID,
+			},
+		}
+
+		m.eventChan <- event
+	}
+}
 
 //nolint:funlen,gocognit,gocyclo,cyclop,forcetypeassert
 func (m *Mattermost) handleWsActionPost(ctx context.Context, rmsg *model.WebSocketEvent, logger *logrus.Entry) {
