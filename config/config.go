@@ -26,11 +26,12 @@ var (
 type AIConfig struct {
 	Enabled            bool
 	Provider           string // "gemini" (default) or "copilot"
-	Token              string // GitHub PAT for Copilot
+	Token              string // GitHub token for Copilot
 	ServiceAccountFile string // Gemini / Vertex AI
 	Project            string
 	Location           string
-	Model              string
+	Model              string            // Fallback model if not specified in Models map
+	Models             map[string]string // Provider-specific models, e.g. { "gemini": "gemini-3.8-flash", "copilot": "gpt-4o-mini" }
 	Prompt             string
 	DefaultPostLimit   int
 	MaxPostLimit       int
@@ -205,6 +206,7 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 		Project:            c.v.GetString("ai.project"),
 		Location:           c.v.GetString("ai.location"),
 		Model:              c.v.GetString("ai.model"),
+		Models:             c.v.GetStringMapString("ai.models"),
 		Prompt:             c.v.GetString("ai.prompt"),
 		DefaultPostLimit:   c.v.GetInt("ai.default_post_limit"),
 		MaxPostLimit:       c.v.GetInt("ai.max_post_limit"),

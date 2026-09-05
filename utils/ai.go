@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -95,6 +96,36 @@ type generateResponse struct {
 	} `json:"error,omitempty"`
 }
 
+const (
+	AIGeminiProvider  = "gemini"
+	AICopilotProvider = "copilot"
+	AIGitHubProvider  = "github"
+
+	DefaultGeminiModel  = "gemini-3.8-flash"
+	DefaultCopilotModel = "gpt-4o-mini"
+)
+
+// GetModel resolves the AI model to use based on provider, fallback model, and the models map.
+func GetModel(provider, fallbackModel string, models map[string]string) string {
+	p := strings.ToLower(provider)
+	if models != nil {
+		if m, ok := models[p]; ok && m != "" {
+			return m
+		}
+	}
+
+	if fallbackModel != "" {
+		return fallbackModel
+	}
+
+	switch p {
+	case AICopilotProvider, AIGitHubProvider:
+		return DefaultCopilotModel
+	default:
+		return DefaultGeminiModel
+	}
+}
+
 // NewCopilotClient creates a client targeting the native GitHub Copilot API.
 func NewCopilotClient(token, model string) (*CopilotClient, error) {
 	if token == "" {
@@ -102,7 +133,7 @@ func NewCopilotClient(token, model string) (*CopilotClient, error) {
 	}
 
 	if model == "" {
-		model = "gpt-4o"
+		model = DefaultCopilotModel
 	}
 
 	return &CopilotClient{
@@ -112,11 +143,26 @@ func NewCopilotClient(token, model string) (*CopilotClient, error) {
 	}, nil
 }
 
-// NewGeminiAIClient creates a new Gemini AI client authenticated via service account credentials.
-func NewGeminiAIClient(ctx context.Context, saFile, project, location, model string) (*Client, error) {
+// NewGeminiClient creates a new Gemini AI client authenticated via service account credentials.
+func NewGeminiClient(ctx context.Context, saFile, project, location, model string) (*Client, error) {
 	data, err := os.ReadFile(saFile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read service account file: %w", err)
+	}
+
+	if project == "" {
+		var sa struct {
+			ProjectID string `json:"project_id"`
+		}
+
+		err = json.Unmarshal(data, &sa)
+		if err == nil && sa.ProjectID != "" {
+			project = sa.ProjectID
+		}
+	}
+
+	if project == "" {
+		return nil, errors.New("gcp project is not specified and could not be found in service account file")
 	}
 
 	jwtCfg, err := google.JWTConfigFromJSON(data, "https://www.googleapis.com/auth/cloud-platform")
@@ -125,7 +171,7 @@ func NewGeminiAIClient(ctx context.Context, saFile, project, location, model str
 	}
 
 	if model == "" {
-		model = "gemini-3.8-flash"
+		model = DefaultGeminiModel
 	}
 
 	return &Client{
@@ -135,6 +181,11 @@ func NewGeminiAIClient(ctx context.Context, saFile, project, location, model str
 		tokenSource: jwtCfg.TokenSource(ctx),
 		httpClient:  &http.Client{Timeout: 30 * time.Second},
 	}, nil
+}
+
+// Project returns the resolved GCP project ID.
+func (c *Client) Project() string {
+	return c.project
 }
 
 //nolint:funlen,gocyclo
