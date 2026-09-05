@@ -1200,8 +1200,8 @@ func parseThinkingMode(arg string) (string, bool) {
 //nolint:funlen,gocyclo
 func summarize(u *User, toUser *User, args []string, service string) {
 	cfg := u.cfg.Current().AI
-	if !cfg.Enabled || cfg.ServiceAccountFile == "" {
-		u.MsgUser(toUser, "AI summarization is not enabled or configured.")
+	if !cfg.Enabled {
+		u.MsgUser(toUser, "AI summarization is not enabled.")
 
 		return
 	}
@@ -1220,11 +1220,29 @@ func summarize(u *User, toUser *User, args []string, service string) {
 		return
 	}
 
-	aiClient, err := utils.NewAIClient(u.ctx, cfg.ServiceAccountFile, cfg.Project, cfg.Location, cfg.Model)
-	if err != nil {
-		u.MsgUser(toUser, fmt.Sprintf("Failed to initialize Gemini AI: %v", err))
+	var aiClient utils.Summarizer
 
-		return
+	switch strings.ToLower(cfg.Provider) {
+	case "copilot", "github":
+		aiClient, err = utils.NewCopilotClient(cfg.Token, cfg.Model)
+		if err != nil {
+			u.MsgUser(toUser, fmt.Sprintf("Failed to initialize Copilot AI: %v", err))
+
+			return
+		}
+	default:
+		if cfg.ServiceAccountFile == "" {
+			u.MsgUser(toUser, "Gemini AI is not configured (missing service_account_file).")
+
+			return
+		}
+
+		aiClient, err = utils.NewGeminiAIClient(u.ctx, cfg.ServiceAccountFile, cfg.Project, cfg.Location, cfg.Model)
+		if err != nil {
+			u.MsgUser(toUser, fmt.Sprintf("Failed to initialize Gemini AI: %v", err))
+
+			return
+		}
 	}
 
 	contextLabel, events, err := u.getSummarizeEvents(args[0], query)
