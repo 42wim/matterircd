@@ -25,7 +25,9 @@ var (
 
 type AIConfig struct {
 	Enabled            bool
-	ServiceAccountFile string
+	Provider           string // "gemini" (default) or "copilot"
+	Token              string // GitHub PAT for Copilot
+	ServiceAccountFile string // Gemini / Vertex AI
 	Project            string
 	Location           string
 	Model              string
@@ -197,6 +199,8 @@ type MastodonConfig struct {
 func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 	aiCfg := AIConfig{
 		Enabled:            c.v.GetBool("ai.enabled"),
+		Provider:           c.v.GetString("ai.provider"),
+		Token:              c.v.GetString("ai.token"),
 		ServiceAccountFile: unquoteString(c.v.GetString("ai.service_account_file")),
 		Project:            c.v.GetString("ai.project"),
 		Location:           c.v.GetString("ai.location"),

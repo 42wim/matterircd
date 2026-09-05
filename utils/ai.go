@@ -14,12 +14,44 @@ import (
 	"golang.org/x/oauth2/google"
 )
 
+type Summarizer interface {
+	Summarize(ctx context.Context, prompt string, thinking string) (string, error)
+}
+
 type Client struct {
 	project     string
 	location    string
 	model       string
 	tokenSource oauth2.TokenSource
 	httpClient  *http.Client
+}
+
+type CopilotClient struct {
+	token      string
+	model      string
+	httpClient *http.Client
+}
+
+type copilotRequest struct {
+	Model       string           `json:"model"`
+	Messages    []copilotMessage `json:"messages"`
+	Temperature float64          `json:"temperature"`
+}
+
+type copilotMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+type copilotResponse struct {
+	Choices []struct {
+		Message struct {
+			Content string `json:"content"`
+		} `json:"message"`
+	} `json:"choices"`
+	Error *struct {
+		Message string `json:"message"`
+	} `json:"error,omitempty"`
 }
 
 type generateRequest struct {
@@ -80,6 +112,23 @@ func NewAIClient(ctx context.Context, saFile, project, location, model string) (
 		model:       model,
 		tokenSource: jwtCfg.TokenSource(ctx),
 		httpClient:  &http.Client{Timeout: 30 * time.Second},
+	}, nil
+}
+
+// NewCopilotClient creates an OpenAI-compatible client targeting GitHub Models API.
+func NewCopilotClient(token, model string) (*CopilotClient, error) {
+	if token == "" {
+		return nil, fmt.Errorf("github token is required for copilot summarizer")
+	}
+
+	if model == "" {
+		model = "gpt-4o-mini"
+	}
+
+	return &CopilotClient{
+		token:      token,
+		model:      model,
+		httpClient: &http.Client{Timeout: 30 * time.Second},
 	}, nil
 }
 
@@ -169,6 +218,57 @@ func (c *Client) Summarize(ctx context.Context, prompt string, thinking string) 
 		if len(genResp.Candidates[0].Content.Parts) > 0 {
 			return genResp.Candidates[0].Content.Parts[len(genResp.Candidates[0].Content.Parts)-1].Text, nil
 		}
+	}
+
+	return "", fmt.Errorf("no summary generated")
+}
+
+func (c *CopilotClient) Summarize(ctx context.Context, prompt string, _ string) (string, error) {
+	reqBody := copilotRequest{
+		Model: c.model,
+		Messages: []copilotMessage{
+			{
+				Role:    "user",
+				Content: prompt,
+			},
+		},
+		Temperature: 0.2,
+	}
+
+	rawJSON, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", err
+	}
+
+	url := "https://models.github.ai/inference/chat/completions"
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(rawJSON))
+	if err != nil {
+		return "", err
+	}
+
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("copilot api request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var chatResp copilotResponse
+
+	err = json.NewDecoder(resp.Body).Decode(&chatResp)
+	if err != nil {
+		return "", fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	if chatResp.Error != nil {
+		return "", fmt.Errorf("copilot error: %s", chatResp.Error.Message)
+	}
+
+	if len(chatResp.Choices) > 0 {
+		return strings.TrimSpace(chatResp.Choices[0].Message.Content), nil
 	}
 
 	return "", fmt.Errorf("no summary generated")
