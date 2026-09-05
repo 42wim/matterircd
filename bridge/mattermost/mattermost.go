@@ -1146,6 +1146,7 @@ func (m *Mattermost) handleWsActionLeaveTeam(ctx context.Context, rmsg *model.We
 	logger.Trace("in handleWsActionLeaveTeam")
 
 	wsData := rmsg.GetData()
+
 	userID, ok := wsData["user_id"].(string)
 	if !ok || userID == "" {
 		if broadcast := rmsg.GetBroadcast(); broadcast != nil {
@@ -1179,7 +1180,7 @@ func (m *Mattermost) handleWsActionLeaveTeam(ctx context.Context, rmsg *model.We
 
 	for _, chID := range channelIDs {
 		event := &bridge.Event{
-			Type: "channel_remove",
+			Type: "channel_remove", //nolint:goconst
 			Data: &bridge.ChannelRemoveEvent{
 				Remover: &bridge.UserInfo{
 					Nick: systemUser,
