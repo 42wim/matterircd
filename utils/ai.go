@@ -97,6 +97,10 @@ type generateResponse struct {
 }
 
 const (
+	AIGeminiProvider  = "gemini"
+	AICopilotProvider = "copilot"
+	AIGitHubProvider  = "github"
+
 	DefaultGeminiModel  = "gemini-3.8-flash"
 	DefaultCopilotModel = "gpt-4o-mini"
 )
@@ -115,7 +119,7 @@ func GetModel(provider, fallbackModel string, models map[string]string) string {
 	}
 
 	switch p {
-	case "copilot", "github":
+	case AICopilotProvider, AIGitHubProvider:
 		return DefaultCopilotModel
 	default:
 		return DefaultGeminiModel

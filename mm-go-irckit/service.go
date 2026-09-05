@@ -1117,10 +1117,10 @@ func (u *User) getSummarizeEvents(target string, query summarizeQuery) (string, 
 
 func parseProvider(arg string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(arg)) {
-	case "gemini", "google": //nolint:goconst
-		return "gemini", true
-	case "copilot", "github": //nolint:goconst
-		return "copilot", true
+	case utils.AIGeminiProvider, "google":
+		return utils.AIGeminiProvider, true
+	case utils.AICopilotProvider, utils.AIGitHubProvider:
+		return utils.AICopilotProvider, true
 	default:
 		return "", false
 	}
@@ -1249,7 +1249,7 @@ func summarize(u *User, toUser *User, args []string, service string) {
 	}
 
 	if provider == "" {
-		provider = "gemini"
+		provider = utils.AIGeminiProvider
 	}
 
 	model := utils.GetModel(provider, cfg.Model, cfg.Models)
@@ -1257,7 +1257,7 @@ func summarize(u *User, toUser *User, args []string, service string) {
 	var aiClient utils.Summarizer
 
 	switch strings.ToLower(provider) {
-	case "copilot", "github":
+	case utils.AICopilotProvider, utils.AIGitHubProvider:
 		if cfg.Token == "" {
 			u.MsgUser(toUser, "Copilot AI is not configured (missing token).")
 
@@ -1340,7 +1340,7 @@ func summarize(u *User, toUser *User, args []string, service string) {
 	}
 
 	switch strings.ToLower(provider) {
-	case "copilot", "github":
+	case utils.AICopilotProvider, utils.AIGitHubProvider:
 		logger.Debugf("AI summarization for %s (provider: %s, model: %s, thinking: %s)", contextLabel, provider, model, thinking)
 	default:
 		region := cfg.Location

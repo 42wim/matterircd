@@ -141,13 +141,13 @@ func main() {
 	if aiCfg.Enabled { //nolint:nestif
 		provider := aiCfg.Provider
 		if provider == "" {
-			provider = "gemini"
+			provider = utils.AIGeminiProvider
 		}
 
 		model := utils.GetModel(provider, aiCfg.Model, aiCfg.Models)
 
 		switch strings.ToLower(provider) {
-		case "copilot", "github":
+		case utils.AICopilotProvider, utils.AIGitHubProvider:
 			if aiCfg.Token == "" {
 				logger.Warn("AI summarization enabled, but token is missing")
 				break
