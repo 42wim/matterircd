@@ -617,44 +617,7 @@ func (m *Client) UpdateUsers(ctx context.Context) error {
 
 		m.Users.mu.Lock()
 		for _, u := range list {
-			roles := u.Roles
-			if roles == "system_user" {
-				roles = "system_user"
-			} else if roles == "system_admin system_user" {
-				roles = "system_admin system_user"
-			}
-
-			cachedUser, exists := m.Users.users[u.Id]
-			if !exists { //nolint:nestif
-				m.Users.users[u.Id] = &model.User{
-					Id:        u.Id,
-					Username:  u.Username,
-					FirstName: u.FirstName,
-					LastName:  u.LastName,
-					Nickname:  u.Nickname,
-					Roles:     roles,
-					Props:     u.Props,
-				}
-			} else {
-				if cachedUser.Username != u.Username {
-					cachedUser.Username = u.Username
-				}
-				if cachedUser.FirstName != u.FirstName {
-					cachedUser.FirstName = u.FirstName
-				}
-				if cachedUser.LastName != u.LastName {
-					cachedUser.LastName = u.LastName
-				}
-				if cachedUser.Nickname != u.Nickname {
-					cachedUser.Nickname = u.Nickname
-				}
-				if cachedUser.Roles != roles {
-					cachedUser.Roles = roles
-				}
-				if u.Props != nil {
-					cachedUser.Props = u.Props
-				}
-			}
+			m.UpdateUserSummary(&u, true)
 		}
 		m.Users.lastUpdated.Store(time.Now().Unix())
 		m.Users.mu.Unlock()
@@ -793,12 +756,115 @@ func (m *Client) UpdateTeamUsersCacheRemove(teamID, userID string) {
 	}
 }
 
-func (m *Client) UpdateUser(user *model.User) {
-	m.Users.mu.Lock()
-	defer m.Users.mu.Unlock()
+func (m *Client) UpdateUser(user *model.User, batchLock ...bool) *model.User {
+	if user == nil {
+		return nil
+	}
 
-	m.Users.users[user.Id] = user
-	m.Users.lastUpdated.Store(time.Now().Unix())
+	hasBatchLock := len(batchLock) > 0 && batchLock[0]
+	if !hasBatchLock {
+		m.Users.mu.Lock()
+		defer m.Users.mu.Unlock()
+
+		m.Users.lastUpdated.Store(time.Now().Unix())
+	}
+
+	return m.updateUserLocked(
+		user.Id,
+		user.Username,
+		user.FirstName,
+		user.LastName,
+		user.Nickname,
+		user.Roles,
+		user.Props,
+		user.DeleteAt,
+	)
+}
+
+func (m *Client) UpdateUserSummary(u *UserSummary, batchLock ...bool) *model.User {
+	if u == nil {
+		return nil
+	}
+
+	hasBatchLock := len(batchLock) > 0 && batchLock[0]
+	if !hasBatchLock {
+		m.Users.mu.Lock()
+		defer m.Users.mu.Unlock()
+
+		m.Users.lastUpdated.Store(time.Now().Unix())
+	}
+
+	return m.updateUserLocked(
+		u.Id,
+		u.Username,
+		u.FirstName,
+		u.LastName,
+		u.Nickname,
+		u.Roles,
+		u.Props,
+		-1,
+	)
+}
+
+func (m *Client) updateUserLocked(id, username, firstName, lastName, nickname, roles string, props map[string]string, deleteAt int64) *model.User {
+	switch roles {
+	case "system_user":
+		roles = "system_user"
+	case "system_admin system_user":
+		roles = "system_admin system_user"
+	}
+
+	cachedUser, exists := m.Users.users[id]
+	if !exists {
+		newUserDeleteAt := int64(0)
+		if deleteAt > 0 {
+			newUserDeleteAt = deleteAt
+		}
+
+		cachedUser = &model.User{
+			Id:        id,
+			Username:  username,
+			FirstName: firstName,
+			LastName:  lastName,
+			Nickname:  nickname,
+			Roles:     roles,
+			Props:     props,
+			DeleteAt:  newUserDeleteAt,
+		}
+		m.Users.users[id] = cachedUser
+
+		return cachedUser
+	}
+
+	if cachedUser.Username != username {
+		cachedUser.Username = username
+	}
+
+	if cachedUser.FirstName != firstName {
+		cachedUser.FirstName = firstName
+	}
+
+	if cachedUser.LastName != lastName {
+		cachedUser.LastName = lastName
+	}
+
+	if cachedUser.Nickname != nickname {
+		cachedUser.Nickname = nickname
+	}
+
+	if cachedUser.Roles != roles {
+		cachedUser.Roles = roles
+	}
+
+	if props != nil {
+		cachedUser.Props = props
+	}
+
+	if deleteAt >= 0 && cachedUser.DeleteAt != deleteAt {
+		cachedUser.DeleteAt = deleteAt
+	}
+
+	return cachedUser
 }
 
 // WsGetStatuses requests all user statuses over the WebSocket.

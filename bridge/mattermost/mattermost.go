@@ -1604,16 +1604,45 @@ func (m *Mattermost) handleWsActionUserUpdated(rmsg *model.WebSocketEvent, logge
 	logger.Trace("in handleWsActionUserUpdated")
 	var info model.User
 
-	err := Decode(rmsg.GetData()["user"], &info)
-	if err != nil {
-		logger.Error("decode", err)
+	data := rmsg.GetData()
+
+	userVal, ok := data["user"]
+	if !ok || userVal == nil {
 		return
 	}
+
+	switch v := userVal.(type) {
+	case *model.User:
+		info = *v
+	case string:
+		if v == "" {
+			return
+		}
+
+		err := json.Unmarshal([]byte(v), &info)
+		if err != nil {
+			logger.Errorf("handleWsActionUserUpdated: failed to unmarshal user string: %v", err)
+			return
+		}
+	default:
+		err := Decode(v, &info)
+		if err != nil {
+			logger.Errorf("handleWsActionUserUpdated: decode failed: %v", err)
+			return
+		}
+	}
+
+	if info.Id == "" {
+		return
+	}
+
+	// Update matterclient user cache in-place synchronously
+	cachedUser := m.mc.UpdateUser(&info)
 
 	event := &bridge.Event{
 		Type: "user_updated",
 		Data: &bridge.UserUpdateEvent{
-			User: m.createUser(&info),
+			User: m.createUser(cachedUser),
 		},
 	}
 
