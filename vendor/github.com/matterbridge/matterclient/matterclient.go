@@ -668,46 +668,7 @@ func (m *Client) initUser(ctx context.Context) error {
 		m.Users.teams[team.Id] = make(map[string]struct{}, len(fetchedUsers))
 
 		for _, u := range fetchedUsers {
-			roles := u.Roles
-			if roles == "system_user" {
-				roles = "system_user"
-			} else if roles == "system_admin system_user" {
-				roles = "system_admin system_user"
-			}
-
-			cachedUser, exists := m.Users.users[u.Id]
-			if !exists { //nolint:nestif,dupl
-				cachedUser = &model.User{
-					Id:        u.Id,
-					Username:  u.Username,
-					FirstName: u.FirstName,
-					LastName:  u.LastName,
-					Nickname:  u.Nickname,
-					Roles:     roles,
-					Props:     u.Props,
-				}
-				m.Users.users[u.Id] = cachedUser
-			} else {
-				if cachedUser.Username != u.Username {
-					cachedUser.Username = u.Username
-				}
-				if cachedUser.FirstName != u.FirstName {
-					cachedUser.FirstName = u.FirstName
-				}
-				if cachedUser.LastName != u.LastName {
-					cachedUser.LastName = u.LastName
-				}
-				if cachedUser.Nickname != u.Nickname {
-					cachedUser.Nickname = u.Nickname
-				}
-				if cachedUser.Roles != roles {
-					cachedUser.Roles = roles
-				}
-				if u.Props != nil {
-					cachedUser.Props = u.Props
-				}
-			}
-
+			cachedUser := m.UpdateUserSummary(&u, true)
 			m.Users.teams[team.Id][cachedUser.Id] = struct{}{}
 		}
 		m.Users.lastUpdated.Store(time.Now().Unix())
@@ -1566,7 +1527,7 @@ func (m *Client) UpdateTeamUsersCache(teamID string, user *model.User) {
 	m.Users.mu.Lock()
 	defer m.Users.mu.Unlock()
 
-	m.Users.users[user.Id] = user
+	m.UpdateUser(user, true)
 
 	if teamID != "" {
 		if m.Users.teams == nil {
@@ -1666,21 +1627,27 @@ func (m *Client) maintainUsersCache(ctx context.Context, event *model.WebSocketE
 		var u *model.User
 
 		if userVal, ok := event.GetData()["user"]; ok {
-			if userPtr, isPtr := userVal.(*model.User); isPtr {
-				u = userPtr
-			} else if userStr, isStr := userVal.(string); isStr && userStr != "" {
-				var summary UserSummary
+			switch v := userVal.(type) {
+			case *model.User:
+				u = m.UpdateUser(v)
+			case string:
+				if v != "" {
+					var summary UserSummary
 
-				_ = json.Unmarshal([]byte(userStr), &summary)
-				// Map it back to the required model.User for the cache functions
-				u = &model.User{
-					Id:        summary.Id,
-					Username:  summary.Username,
-					FirstName: summary.FirstName,
-					LastName:  summary.LastName,
-					Nickname:  summary.Nickname,
-					Roles:     summary.Roles,
-					Props:     summary.Props,
+					err := json.Unmarshal([]byte(v), &summary)
+					if err == nil {
+						u = m.UpdateUserSummary(&summary)
+					}
+				}
+			case map[string]any:
+				b, err := json.Marshal(v)
+				if err == nil {
+					var summary UserSummary
+
+					err = json.Unmarshal(b, &summary)
+					if err == nil {
+						u = m.UpdateUserSummary(&summary)
+					}
 				}
 			}
 		} else if userID, ok := event.GetData()["user_id"].(string); ok && userID != "" {
