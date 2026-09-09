@@ -2128,9 +2128,17 @@ func (m *Mattermost) formatMessage(ctx context.Context, data *model.Post, eventT
 	switch {
 	case data.Type == "me":
 		sbMsg.WriteString("\x01ACTION ")
-		sbMsg.WriteString(msg)
-		sbMsg.WriteString(sbSuffix.String())
-		sbMsg.WriteString("\x01")
+
+		if idx := strings.IndexByte(msg, '\n'); idx != -1 {
+			sbMsg.WriteString(msg[:idx])
+			sbMsg.WriteString("\x01")
+			sbMsg.WriteString(msg[idx:])
+			sbMsg.WriteString(sbSuffix.String())
+		} else {
+			sbMsg.WriteString(msg)
+			sbMsg.WriteString(sbSuffix.String())
+			sbMsg.WriteString("\x01")
+		}
 	case data.Type == "slack_attachment":
 		if len(msg) > 0 {
 			sbMsg.WriteString(msg)
