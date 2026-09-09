@@ -231,6 +231,8 @@ LastViewedSaveFile = "matterircd-lastsaved.db"
 # in persistent storage. "server" will use the "LastViewedAt" timestamp Mattermost records server-side.
 # "hybrid" uses both and uses whichever is the latest.
 ReplayStrategy = "hybrid"
+# Exclude channels from replaying history for on connect.
+#ReplayExclude = ["some-channel"]
 # Maximum amount of channel history to fetch/replay on startup.
 # Limits the massive scrollback if a channel is very old. (Default: 744h / 31 days)
 MaxReplayDuration = "744h"
