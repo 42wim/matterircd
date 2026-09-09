@@ -1131,9 +1131,10 @@ func (u *User) addUsersToChannels() {
 
 		// Only announce completion if it was a heavy sync and wasn't aborted
 		if isHeavySync && u.ctx != nil && u.ctx.Err() == nil {
+			duration := time.Since(syncStartTime).Round(time.Second)
+			logger.Infof("channel synchronization completed and history replayed (took %s)", duration)
+
 			if svc, ok := u.Srv.HasUser(u.br.Protocol()); ok {
-				duration := time.Since(syncStartTime).Round(time.Second)
-				logger.Infof("channel synchronization completed and history replayed (took %s)", duration)
 				u.MsgUser(svc, fmt.Sprintf("channel synchronization completed and history replayed (took %s).", duration))
 			}
 		}
@@ -1453,6 +1454,11 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			// Do NOT replay history invisibly, and do NOT update the BoltDB.
 			if !success {
 				logger.Errorf("Giving up on syncing %s. Skipping replay to PRESERVE history for next startup.", channelName)
+
+				if svc, ok := u.Srv.HasUser(u.br.Protocol()); ok {
+					u.MsgUser(svc, fmt.Sprintf("replay failed for %s, use REPLAY service", channelName))
+				}
+
 				continue
 			}
 
