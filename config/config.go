@@ -163,6 +163,7 @@ type MattermostConfig struct {
 	ReplayStrategy       string
 	EnableLazyJoin       bool
 	LazyJoinExclude      []string
+	ReplayExclude        []string
 	ForceSyncOnReconnect bool
 
 	MaxReplayDuration         time.Duration
@@ -391,6 +392,7 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 			ReplayStrategy:       c.v.GetString("mattermost.ReplayStrategy"),
 			EnableLazyJoin:       c.v.GetBool("mattermost.EnableLazyJoin"),
 			LazyJoinExclude:      append([]string(nil), c.v.GetStringSlice("mattermost.LazyJoinExclude")...),
+			ReplayExclude:        append([]string(nil), c.v.GetStringSlice("mattermost.ReplayExclude")...),
 			ForceSyncOnReconnect: c.v.GetBool("mattermost.ForceSyncOnReconnect"),
 
 			MaxReplayDuration:         c.v.GetDuration("mattermost.MaxReplayDuration"),

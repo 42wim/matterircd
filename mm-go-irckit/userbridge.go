@@ -1131,9 +1131,10 @@ func (u *User) addUsersToChannels() {
 
 		// Only announce completion if it was a heavy sync and wasn't aborted
 		if isHeavySync && u.ctx != nil && u.ctx.Err() == nil {
+			duration := time.Since(syncStartTime).Round(time.Second)
+			logger.Infof("channel synchronization completed and history replayed (took %s)", duration)
+
 			if svc, ok := u.Srv.HasUser(u.br.Protocol()); ok {
-				duration := time.Since(syncStartTime).Round(time.Second)
-				logger.Infof("channel synchronization completed and history replayed (took %s)", duration)
 				u.MsgUser(svc, fmt.Sprintf("channel synchronization completed and history replayed (took %s).", duration))
 			}
 		}
@@ -1402,7 +1403,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 
 				// Evaluate dormancy using the ACTUAL Mattermost server activity
 				if brchannel.LastPostAt < cutoff {
-					logger.Debugf("Smart Lazy-join: Skipping dormant public channel %s (LastPost: %v)", brchannel.Name, time.UnixMilli(brchannel.LastPostAt).Format("2006-01-02 15:04:05"))
+					logger.Debugf("Smart Lazy-join: Skipping dormant public channel %s (LastPost: %v)", channelName, time.UnixMilli(brchannel.LastPostAt).Format("2006-01-02 15:04:05"))
 					continue
 				}
 			}
@@ -1410,7 +1411,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			// Replay Window Cap (Applies to ALL channels)
 			if replayCutoff > 0 && since > 0 && since < replayCutoff {
 				logger.Infof("Capping replay history for %s to %s (original since: %s)",
-					brchannel.Name,
+					channelName,
 					replayDuration,
 					time.UnixMilli(since).Format("2006-01-02"),
 				)
@@ -1438,7 +1439,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 						return
 					}
 
-					logger.Warnf("Failed to sync channel %s (attempt %d/3): %v", brchannel.Name, attempts, syncErr)
+					logger.Warnf("Failed to sync channel %s (attempt %d/3): %v", channelName, attempts, syncErr)
 
 					// Wait 5 seconds before retrying, but abort if the bridge is shutting down
 					select {
@@ -1449,14 +1450,23 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 				}
 			}
 
-			// THE SHIELD: If it failed all 3 attempts, abort!
+			// If it failed all 3 attempts, abort!
 			// Do NOT replay history invisibly, and do NOT update the BoltDB.
 			if !success {
-				logger.Errorf("Giving up on syncing %s. Skipping replay to PRESERVE history for next startup.", brchannel.Name)
+				logger.Errorf("Giving up on syncing %s. Skipping replay to PRESERVE history for next startup.", channelName)
+
+				if svc, ok := u.Srv.HasUser(u.br.Protocol()); ok {
+					u.MsgUser(svc, fmt.Sprintf("replay failed for %s, use REPLAY service", channelName))
+				}
+
 				continue
 			}
 
-			u.replayHistory(brchannel, since, sinceStr)
+			if u.isReplayExcluded(brchannel, channelName) {
+				logger.Debugf("Skipping history replay for excluded channel %s (%s)", channelName, brchannel.ID)
+			} else {
+				u.replayHistory(brchannel, since, sinceStr)
+			}
 
 			if u.br.Protocol() == "mattermost" && !u.cfg.Mattermost().DisableAutoView {
 				u.updateLastViewed(brchannel.ID)
@@ -1748,6 +1758,32 @@ func (u *User) mayJoin(channelID string) bool {
 	}
 
 	logger.Tracef("mayjoin default %t ch: %s, ji: %s, je: %s", false, ch.String(), ji, je)
+
+	return false
+}
+
+func (u *User) isReplayExcluded(brchannel *bridge.ChannelInfo, channelName string) bool {
+	if u.br == nil || u.br.Protocol() != "mattermost" {
+		return false
+	}
+
+	re := u.cfg.Mattermost().ReplayExclude
+	if len(re) == 0 {
+		return false
+	}
+
+	targets := [...]string{channelName, brchannel.Name, brchannel.DisplayName}
+
+	for _, target := range targets {
+		if target == "" {
+			continue
+		}
+
+		clean := strings.TrimLeft(target, "#~")
+		if stringInRegexp(clean, re) || stringInRegexp("#"+clean, re) || stringInRegexp("~"+clean, re) {
+			return true
+		}
+	}
 
 	return false
 }
