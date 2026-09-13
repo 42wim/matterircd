@@ -910,13 +910,20 @@ func (u *User) updateUserFromInfo(info *bridge.UserInfo) *User {
 	info.Ghost = true
 
 	if ghost, ok := u.Srv.HasUserID(info.User); ok {
-		if ghost.Nick != info.Nick {
+		newNick := sanitizeNick(info.Nick)
+		if ghost.Nick != newNick {
 			changeMsg := &irc.Message{
 				Prefix:  ghost.Prefix(),
 				Command: irc.NICK,
-				Params:  []string{info.Nick},
+				Params:  []string{newNick},
 			}
 			u.Encode(changeMsg)
+
+			if ghost.UserInfo != nil {
+				ghost.Nick = newNick
+				ghost.Username = info.Username
+				ghost.Roles = info.Roles
+			}
 		}
 		// Do not overwrite existing ghost.UserInfo
 		return ghost

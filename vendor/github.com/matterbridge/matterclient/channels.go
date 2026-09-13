@@ -552,50 +552,13 @@ func (m *Client) GetChannelUsers(ctx context.Context, channelID string) ([]*mode
 	}
 
 	for _, u := range fetchedUsers {
-		cachedUser, exists := m.Users.users[u.Id]
-
-		roles := u.Roles
-		if roles == "system_user" { //nolint:goconst
-			roles = "system_user"
-		} else if roles == "system_admin system_user" { //nolint:goconst
-			roles = "system_admin system_user"
-		}
-
-		if !exists { //nolint:nestif
-			cachedUser = &model.User{
-				Id:        u.Id,
-				Username:  u.Username,
-				FirstName: u.FirstName,
-				LastName:  u.LastName,
-				Nickname:  u.Nickname,
-				Roles:     roles,
-				Props:     u.Props,
-			}
-			m.Users.users[u.Id] = cachedUser
-		} else {
-			if cachedUser.Username != u.Username {
-				cachedUser.Username = u.Username
-			}
-			if cachedUser.FirstName != u.FirstName {
-				cachedUser.FirstName = u.FirstName
-			}
-			if cachedUser.LastName != u.LastName {
-				cachedUser.LastName = u.LastName
-			}
-			if cachedUser.Nickname != u.Nickname {
-				cachedUser.Nickname = u.Nickname
-			}
-			if cachedUser.Roles != roles {
-				cachedUser.Roles = roles
-			}
-			if u.Props != nil {
-				cachedUser.Props = u.Props
-			}
-		}
+		cachedUser := m.UpdateUserSummary(&u, true)
 
 		allUsers = append(allUsers, cachedUser)
 		m.Users.channels[channelID][cachedUser.Id] = struct{}{}
 	}
+
+	m.Users.lastUpdated.Store(time.Now().Unix())
 	m.Users.mu.Unlock()
 
 	return allUsers, nil
@@ -1108,13 +1071,15 @@ func (m *Client) UpdateChannelUsersCache(channelID string, user *model.User) {
 	m.Users.mu.Lock()
 	defer m.Users.mu.Unlock()
 
-	m.Users.users[user.Id] = user
+	m.UpdateUser(user, true)
 
 	if channelID != "" {
 		if m.Users.channels[channelID] != nil {
 			m.Users.channels[channelID][user.Id] = struct{}{}
 		}
 	}
+
+	m.Users.lastUpdated.Store(time.Now().Unix())
 }
 
 func (m *Client) UpdateChannelUsersCacheRemove(channelID string, userID string) {

@@ -1610,6 +1610,8 @@ func (m *Mattermost) handleWsActionUserUpdated(rmsg *model.WebSocketEvent, logge
 		return
 	}
 
+	m.mc.UpdateUser(&info)
+
 	event := &bridge.Event{
 		Type: "user_updated",
 		Data: &bridge.UserUpdateEvent{
