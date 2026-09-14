@@ -29,6 +29,7 @@ type Bridger interface {
 	AddReaction(ctx context.Context, msgID, emoji string) error
 	RemoveReaction(ctx context.Context, msgID, emoji string) error
 
+	IsOnline(status string) bool
 	StatusUser(ctx context.Context, userID string) (string, error)
 	StatusUsers(ctx context.Context) (map[string]string, error)
 	SetStatus(ctx context.Context, status string) error

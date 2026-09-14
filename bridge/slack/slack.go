@@ -268,6 +268,10 @@ func (s *Slack) SetTopic(ctx context.Context, channelID, text string) error {
 	return err
 }
 
+func (s *Slack) IsOnline(status string) bool {
+	return status == "active"
+}
+
 func (s *Slack) StatusUser(ctx context.Context, name string) (string, error) {
 	return "", nil
 }

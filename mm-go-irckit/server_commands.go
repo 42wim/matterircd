@@ -609,7 +609,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 			// If the user is away, DND, offline, or has a custom status, reply with 301 RPL_AWAY
 			// But after reactions as we don't care if we're reacting to an existing message.
 			status, err := u.br.StatusUser(u.ctx, toUser.User)
-			if err == nil && status != "" && status != "online" { //nolint:goconst
+			if err == nil && status != "" && !u.br.IsOnline(status) {
 				status = utils.EmojiReplaceAliases(status, u.br.FormatterConfig().CustomEmoji)
 				_ = s.EncodeMessage(u, irc.RPL_AWAY, []string{u.Nick, toUser.Nick}, status)
 			}
@@ -952,7 +952,7 @@ func CmdWho(s Server, u *User, msg *irc.Message) error {
 	myNick := u.Nick
 	for i, other := range users {
 		status := "H"
-		if statuses[other.User] != "online" {
+		if !u.br.IsOnline(statuses[other.User]) {
 			status = "G"
 		}
 
@@ -1078,7 +1078,7 @@ func CmdWhois(s Server, u *User, msg *irc.Message) error {
 
 		status, _ := u.br.StatusUser(u.ctx, other.User)
 
-		if status != "" && status != "online" {
+		if status != "" && !u.br.IsOnline(status) {
 			r = append(r, &irc.Message{
 				Prefix:   s.Prefix(),
 				Params:   []string{u.Nick, other.Nick},

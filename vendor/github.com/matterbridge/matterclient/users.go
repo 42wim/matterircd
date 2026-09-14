@@ -409,6 +409,14 @@ func (c *UsersCache) GetUserCustomStatus(userID string) string {
 	return c.customStatuses[userID]
 }
 
+// GetUserLastActivity returns the unix timestamp (in seconds) of the user's last activity.
+func (m *Client) GetUserLastActivity(userID string) int64 {
+	m.Users.mu.RLock()
+	defer m.Users.mu.RUnlock()
+
+	return m.Users.lastUserActivity[userID]
+}
+
 func (m *Client) GetUserName(ctx context.Context, userID string) string {
 	if user := m.GetUser(ctx, userID); user != nil {
 		return user.Username
