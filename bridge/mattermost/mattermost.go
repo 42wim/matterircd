@@ -635,7 +635,18 @@ func (m *Mattermost) StatusUser(ctx context.Context, userID string) (string, err
 		return status, nil
 	}
 
-	lastOnline := formatLastOnline(m.mc.GetUserLastActivity(userID))
+	lastActivity := m.mc.GetUserLastActivity(userID)
+	if lastActivity <= 0 {
+		return status, nil
+	}
+
+	// Suppress "Last online" for any non-online status if activity is within the 20-minute threshold
+	diff := max(0, time.Now().Unix()-lastActivity)
+	if diff < 20*60 {
+		return status, nil
+	}
+
+	lastOnline := formatLastOnline(lastActivity)
 	if lastOnline == "" {
 		return status, nil
 	}

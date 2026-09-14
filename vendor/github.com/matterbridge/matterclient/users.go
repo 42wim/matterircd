@@ -51,8 +51,9 @@ func (m *Client) GetStatus(ctx context.Context, userID string) string {
 	customStatus, tracked := m.Users.customStatuses[userID]
 	m.Users.mu.RUnlock()
 
-	if lastActive > 0 && time.Since(time.Unix(lastActive, 0)) < activeThreshold {
-		// Recent activity overrides cached/offline status as "online"
+	// Only let recent activity override if the user is marked offline or not yet tracked;
+	// never override explicit server states like "away", "dnd", or "ooo" (OutOfOffice).
+	if (status == model.StatusOffline || !ok) && lastActive > 0 && time.Since(time.Unix(lastActive, 0)) < activeThreshold {
 		return model.StatusOnline
 	}
 
@@ -135,6 +136,13 @@ func (m *Client) GetStatuses(ctx context.Context) map[string]string {
 	var missingIDs []string
 
 	for id := range m.Users.users {
+		status, ok := m.Users.statuses[id]
+		if ok && status != model.StatusOffline {
+			statuses[id] = status
+
+			continue
+		}
+
 		lastActive := m.Users.lastUserActivity[id]
 		if lastActive > 0 && now.Sub(time.Unix(lastActive, 0)) < activeThreshold {
 			statuses[id] = model.StatusOnline
@@ -142,7 +150,7 @@ func (m *Client) GetStatuses(ctx context.Context) map[string]string {
 			continue
 		}
 
-		if status, ok := m.Users.statuses[id]; ok {
+		if ok {
 			statuses[id] = status
 		} else {
 			missingIDs = append(missingIDs, id)
