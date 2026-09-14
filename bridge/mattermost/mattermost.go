@@ -625,8 +625,38 @@ func (m *Mattermost) SetTopic(ctx context.Context, channelID, text string) error
 	return err
 }
 
+func (m *Mattermost) IsOnline(status string) bool {
+	return status == model.StatusOnline
+}
+
 func (m *Mattermost) StatusUser(ctx context.Context, userID string) (string, error) {
-	return m.mc.GetStatus(ctx, userID), nil
+	status := m.mc.GetStatus(ctx, userID)
+	if status == "" || m.IsOnline(status) {
+		return status, nil
+	}
+
+	lastActivity := m.mc.GetUserLastActivity(userID)
+	if lastActivity <= 0 {
+		return status, nil
+	}
+
+	// Suppress "Last online" for any non-online status if activity is within the 20-minute threshold
+	diff := max(0, time.Now().Unix()-lastActivity)
+	if diff < 20*60 {
+		return status, nil
+	}
+
+	lastOnline := formatLastOnline(lastActivity)
+	if lastOnline == "" {
+		return status, nil
+	}
+
+	prefix, custom, hasCustom := strings.Cut(status, ": ")
+	if hasCustom {
+		return fmt.Sprintf("%s (%s): %s", prefix, lastOnline, custom), nil
+	}
+
+	return fmt.Sprintf("%s (%s)", status, lastOnline), nil
 }
 
 func (m *Mattermost) StatusUsers(ctx context.Context) (map[string]string, error) {
@@ -2628,6 +2658,42 @@ func fieldsFitColWidth(fields []*model.SlackAttachmentField, candidates []attach
 	}
 
 	return true
+}
+
+func formatLastOnline(lastActivity int64) string {
+	if lastActivity <= 0 {
+		return ""
+	}
+
+	diff := max(0, time.Now().Unix()-lastActivity)
+
+	switch {
+	case diff < 45:
+		return "Last online just now"
+	case diff < 3300: // < 55 minutes
+		mins := max(1, (diff+30)/60)
+		if mins == 1 {
+			return "Last online 1 min. ago"
+		}
+
+		return fmt.Sprintf("Last online %d mins. ago", mins)
+	case diff < 84600: // < 23.5 hours
+		hours := (diff + 1800) / 3600
+		if hours == 1 {
+			return "Last online 1 hr. ago"
+		}
+
+		return fmt.Sprintf("Last online %d hr. ago", hours)
+	case diff < 30*86400:
+		days := (diff + 43200) / 86400
+		if days == 1 {
+			return "Last online 1 day ago"
+		}
+
+		return fmt.Sprintf("Last online %d days ago", days)
+	default:
+		return fmt.Sprintf("Last online %s", time.Unix(lastActivity, 0).Format("2006-01-02"))
+	}
 }
 
 func (m *Mattermost) formatSingleAttachmentField(b *strings.Builder, field *model.SlackAttachmentField, prefix string, prefixChar string, useFallback bool, fallbackText string, opts utils.ProcessMessageOpts, omitFieldTitles bool) {
