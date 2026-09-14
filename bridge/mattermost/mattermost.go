@@ -2668,24 +2668,24 @@ func formatLastOnline(lastActivity int64) string {
 	diff := max(0, time.Now().Unix()-lastActivity)
 
 	switch {
-	case diff < 60:
+	case diff < 45:
 		return "Last online just now"
-	case diff < 3600:
-		mins := diff / 60
+	case diff < 3300: // < 55 minutes
+		mins := max(1, (diff+30)/60)
 		if mins == 1 {
 			return "Last online 1 min. ago"
 		}
 
 		return fmt.Sprintf("Last online %d mins. ago", mins)
-	case diff < 86400:
-		hours := diff / 3600
+	case diff < 84600: // < 23.5 hours
+		hours := (diff + 1800) / 3600
 		if hours == 1 {
 			return "Last online 1 hr. ago"
 		}
 
 		return fmt.Sprintf("Last online %d hr. ago", hours)
 	case diff < 30*86400:
-		days := diff / 86400
+		days := (diff + 43200) / 86400
 		if days == 1 {
 			return "Last online 1 day ago"
 		}
