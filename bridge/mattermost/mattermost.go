@@ -1166,7 +1166,7 @@ func (m *Mattermost) handleWsActionLeaveTeam(ctx context.Context, rmsg *model.We
 	}
 
 	user := m.GetUser(ctx, userID)
-	if user == nil {
+	if user == nil || user.Nick == "" {
 		user = &bridge.UserInfo{
 			Nick: userID,
 			User: userID,
@@ -1182,13 +1182,11 @@ func (m *Mattermost) handleWsActionLeaveTeam(ctx context.Context, rmsg *model.We
 		event := &bridge.Event{
 			Type: "channel_remove", //nolint:goconst
 			Data: &bridge.ChannelRemoveEvent{
-				Remover: &bridge.UserInfo{
-					Nick: systemUser,
-				},
 				Removed: []*bridge.UserInfo{
 					user,
 				},
 				ChannelID: chID,
+				Text:      "Left team",
 			},
 		}
 
