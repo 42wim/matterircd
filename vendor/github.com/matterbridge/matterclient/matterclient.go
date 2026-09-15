@@ -104,6 +104,7 @@ type UserSummary struct {
 	Nickname  string            `json:"nickname"`
 	Roles     string            `json:"roles"`
 	Props     map[string]string `json:"props"`
+	Timezone  map[string]string `json:"timezone"`
 }
 
 type Team struct {

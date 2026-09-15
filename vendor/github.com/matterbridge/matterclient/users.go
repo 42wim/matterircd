@@ -794,6 +794,7 @@ func (m *Client) UpdateUser(user *model.User, batchLock ...bool) *model.User {
 		user.Roles,
 		user.Props,
 		user.DeleteAt,
+		user.Timezone,
 	)
 }
 
@@ -819,10 +820,11 @@ func (m *Client) UpdateUserSummary(u *UserSummary, batchLock ...bool) *model.Use
 		u.Roles,
 		u.Props,
 		-1,
+		u.Timezone,
 	)
 }
 
-func (m *Client) updateUserLocked(id, username, firstName, lastName, nickname, roles string, props map[string]string, deleteAt int64) *model.User {
+func (m *Client) updateUserLocked(id, username, firstName, lastName, nickname, roles string, props map[string]string, deleteAt int64, timezone map[string]string) *model.User {
 	switch roles {
 	case "system_user":
 		roles = "system_user"
@@ -846,6 +848,7 @@ func (m *Client) updateUserLocked(id, username, firstName, lastName, nickname, r
 			Roles:     roles,
 			Props:     props,
 			DeleteAt:  newUserDeleteAt,
+			Timezone:  timezone,
 		}
 		m.Users.users[id] = cachedUser
 
@@ -878,6 +881,10 @@ func (m *Client) updateUserLocked(id, username, firstName, lastName, nickname, r
 
 	if deleteAt >= 0 && cachedUser.DeleteAt != deleteAt {
 		cachedUser.DeleteAt = deleteAt
+	}
+
+	if timezone != nil {
+		cachedUser.Timezone = timezone
 	}
 
 	return cachedUser
