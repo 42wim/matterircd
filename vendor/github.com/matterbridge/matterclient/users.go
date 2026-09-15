@@ -40,8 +40,9 @@ func (m *Client) GetNickName(ctx context.Context, userID string) string {
 
 func (m *Client) GetStatus(ctx context.Context, userID string) string {
 	const (
-		activeThreshold = 20 * time.Minute
-		statusTTL       = 5 * time.Minute
+		activeThreshold  = 20 * time.Minute
+		offlineThreshold = 2 * time.Hour
+		statusTTL        = 5 * time.Minute
 	)
 
 	m.Users.mu.RLock()
@@ -91,6 +92,15 @@ func (m *Client) GetStatus(ctx context.Context, userID string) string {
 
 			break
 		}
+
+		m.Users.mu.RLock()
+		lastActive = m.Users.lastUserActivity[userID]
+		m.Users.mu.RUnlock()
+	}
+
+	// Downgrade zombie online sessions with no activity for > offlineThreshold to offline
+	if status == model.StatusOnline && lastActive > 0 && time.Since(time.Unix(lastActive, 0)) > offlineThreshold {
+		status = model.StatusOffline
 	}
 
 	if status == model.StatusOnline {
@@ -127,7 +137,10 @@ func (m *Client) GetStatus(ctx context.Context, userID string) string {
 }
 
 func (m *Client) GetStatuses(ctx context.Context) map[string]string {
-	const activeThreshold = 20 * time.Minute
+	const (
+		activeThreshold  = 20 * time.Minute
+		offlineThreshold = 2 * time.Hour
+	)
 
 	now := time.Now()
 
@@ -137,13 +150,20 @@ func (m *Client) GetStatuses(ctx context.Context) map[string]string {
 
 	for id := range m.Users.users {
 		status, ok := m.Users.statuses[id]
+		lastActive := m.Users.lastUserActivity[id]
+
+		if ok && status == model.StatusOnline && lastActive > 0 && now.Sub(time.Unix(lastActive, 0)) > offlineThreshold {
+			statuses[id] = model.StatusOffline
+
+			continue
+		}
+
 		if ok && status != model.StatusOffline {
 			statuses[id] = status
 
 			continue
 		}
 
-		lastActive := m.Users.lastUserActivity[id]
 		if lastActive > 0 && now.Sub(time.Unix(lastActive, 0)) < activeThreshold {
 			statuses[id] = model.StatusOnline
 
