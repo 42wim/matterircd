@@ -826,6 +826,7 @@ func (m *Client) UpdateUserSummary(u *UserSummary, batchLock ...bool) *model.Use
 	)
 }
 
+//nolint:funlen
 func (m *Client) updateUserLocked(id string, updateAt int64, deleteAt int64, username, firstName, lastName, nickname, roles string, props map[string]string, timezone map[string]string) *model.User {
 	switch roles {
 	case "system_user":
