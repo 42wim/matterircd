@@ -651,6 +651,11 @@ func (m *Mattermost) StatusUser(ctx context.Context, userID string) (string, err
 		return status, nil
 	}
 
+	user := m.mc.GetUser(ctx, userID)
+	if localTime := getUserLocalTime(user); localTime != "" {
+		lastOnline = fmt.Sprintf("%s, local time: %s", lastOnline, localTime)
+	}
+
 	prefix, custom, hasCustom := strings.Cut(status, ": ")
 	if hasCustom {
 		return fmt.Sprintf("%s (%s): %s", prefix, lastOnline, custom), nil
@@ -2733,6 +2738,28 @@ func (m *Mattermost) formatSingleAttachmentField(b *strings.Builder, field *mode
 			b.WriteByte('\n')
 		}
 	})
+}
+
+func getUserLocalTime(user *model.User) string {
+	if user == nil || len(user.Timezone) == 0 {
+		return ""
+	}
+
+	tz := user.Timezone["manualTimezone"]
+	if user.Timezone["useAutomaticTimezone"] == "true" && user.Timezone["automaticTimezone"] != "" {
+		tz = user.Timezone["automaticTimezone"]
+	}
+
+	if tz == "" {
+		return ""
+	}
+
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
+		return ""
+	}
+
+	return time.Now().In(loc).Format("15:04")
 }
 
 // XXX: Bug in Mattermost itself and PostEmbed Data interface{}

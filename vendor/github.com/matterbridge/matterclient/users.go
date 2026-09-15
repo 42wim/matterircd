@@ -787,13 +787,15 @@ func (m *Client) UpdateUser(user *model.User, batchLock ...bool) *model.User {
 
 	return m.updateUserLocked(
 		user.Id,
+		user.UpdateAt,
+		user.DeleteAt,
 		user.Username,
 		user.FirstName,
 		user.LastName,
 		user.Nickname,
 		user.Roles,
 		user.Props,
-		user.DeleteAt,
+		user.Timezone,
 	)
 }
 
@@ -812,17 +814,20 @@ func (m *Client) UpdateUserSummary(u *UserSummary, batchLock ...bool) *model.Use
 
 	return m.updateUserLocked(
 		u.Id,
+		u.UpdateAt,
+		u.DeleteAt,
 		u.Username,
 		u.FirstName,
 		u.LastName,
 		u.Nickname,
 		u.Roles,
 		u.Props,
-		-1,
+		u.Timezone,
 	)
 }
 
-func (m *Client) updateUserLocked(id, username, firstName, lastName, nickname, roles string, props map[string]string, deleteAt int64) *model.User {
+//nolint:funlen
+func (m *Client) updateUserLocked(id string, updateAt int64, deleteAt int64, username, firstName, lastName, nickname, roles string, props map[string]string, timezone map[string]string) *model.User {
 	switch roles {
 	case "system_user":
 		roles = "system_user"
@@ -832,24 +837,29 @@ func (m *Client) updateUserLocked(id, username, firstName, lastName, nickname, r
 
 	cachedUser, exists := m.Users.users[id]
 	if !exists {
-		newUserDeleteAt := int64(0)
-		if deleteAt > 0 {
-			newUserDeleteAt = deleteAt
-		}
-
 		cachedUser = &model.User{
 			Id:        id,
+			UpdateAt:  max(0, updateAt),
+			DeleteAt:  max(0, deleteAt),
 			Username:  username,
 			FirstName: firstName,
 			LastName:  lastName,
 			Nickname:  nickname,
 			Roles:     roles,
 			Props:     props,
-			DeleteAt:  newUserDeleteAt,
+			Timezone:  timezone,
 		}
 		m.Users.users[id] = cachedUser
 
 		return cachedUser
+	}
+
+	if updateAt > 0 && cachedUser.UpdateAt != updateAt {
+		cachedUser.UpdateAt = updateAt
+	}
+
+	if deleteAt >= 0 && cachedUser.DeleteAt != deleteAt {
+		cachedUser.DeleteAt = deleteAt
 	}
 
 	if cachedUser.Username != username {
@@ -876,8 +886,8 @@ func (m *Client) updateUserLocked(id, username, firstName, lastName, nickname, r
 		cachedUser.Props = props
 	}
 
-	if deleteAt >= 0 && cachedUser.DeleteAt != deleteAt {
-		cachedUser.DeleteAt = deleteAt
+	if timezone != nil {
+		cachedUser.Timezone = timezone
 	}
 
 	return cachedUser

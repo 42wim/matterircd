@@ -98,12 +98,15 @@ type UsersCache struct {
 
 type UserSummary struct {
 	Id        string            `json:"id"`
+	UpdateAt  int64             `json:"update_at"`
+	DeleteAt  int64             `json:"delete_at"`
 	Username  string            `json:"username"`
 	FirstName string            `json:"first_name"`
 	LastName  string            `json:"last_name"`
 	Nickname  string            `json:"nickname"`
 	Roles     string            `json:"roles"`
 	Props     map[string]string `json:"props"`
+	Timezone  map[string]string `json:"timezone"`
 }
 
 type Team struct {
@@ -1931,7 +1934,18 @@ func (m *Client) maintainUsersCache(ctx context.Context, event *model.WebSocketE
 			break
 		}
 
-		m.SetUserStatus(userID, statusRaw, false)
+		var lastActivity int64
+
+		if laVal, ok := event.GetData()["last_activity_at"]; ok {
+			switch v := laVal.(type) {
+			case float64:
+				lastActivity = int64(v) / 1000
+			case int64:
+				lastActivity = v / 1000
+			}
+		}
+
+		m.SetUserStatus(userID, statusRaw, false, lastActivity)
 
 	case model.WebsocketEventTyping:
 		userID, _ := event.GetData()["user_id"].(string)
