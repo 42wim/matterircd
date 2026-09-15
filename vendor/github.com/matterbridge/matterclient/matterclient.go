@@ -98,6 +98,8 @@ type UsersCache struct {
 
 type UserSummary struct {
 	Id        string            `json:"id"`
+	UpdateAt  int64             `json:"update_at"`
+	DeleteAt  int64             `json:"delete_at"`
 	Username  string            `json:"username"`
 	FirstName string            `json:"first_name"`
 	LastName  string            `json:"last_name"`
