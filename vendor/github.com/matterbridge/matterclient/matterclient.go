@@ -1934,7 +1934,18 @@ func (m *Client) maintainUsersCache(ctx context.Context, event *model.WebSocketE
 			break
 		}
 
-		m.SetUserStatus(userID, statusRaw, false)
+		var lastActivity int64
+
+		if laVal, ok := event.GetData()["last_activity_at"]; ok {
+			switch v := laVal.(type) {
+			case float64:
+				lastActivity = int64(v) / 1000
+			case int64:
+				lastActivity = v / 1000
+			}
+		}
+
+		m.SetUserStatus(userID, statusRaw, false, lastActivity)
 
 	case model.WebsocketEventTyping:
 		userID, _ := event.GetData()["user_id"].(string)
