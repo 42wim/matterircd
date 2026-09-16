@@ -630,38 +630,48 @@ func (m *Mattermost) IsOnline(status string) bool {
 }
 
 func (m *Mattermost) StatusUser(ctx context.Context, userID string) (string, error) {
+	userName := m.mc.GetCachedUserName(userID)
+	logger.Debugf("StatusUser: User: %s (%s)", userName, userID)
+
 	status := m.mc.GetStatus(ctx, userID)
 	if status == "" || m.IsOnline(status) {
 		return status, nil
 	}
 
+	var lastOnline string
+
 	lastActivity := m.mc.GetUserLastActivity(userID)
-	if lastActivity <= 0 {
-		return status, nil
-	}
-
-	// Suppress "Last online" for any non-online status if activity is within the 20-minute threshold
-	diff := max(0, time.Now().Unix()-lastActivity)
-	if diff < 20*60 {
-		return status, nil
-	}
-
-	lastOnline := formatLastOnline(lastActivity)
-	if lastOnline == "" {
-		return status, nil
+	if lastActivity > 0 {
+		// Suppress "Last online" for any non-online status if activity is within the 20-minute threshold
+		diff := max(0, time.Now().Unix()-lastActivity)
+		if diff >= 20*60 {
+			lastOnline = formatLastOnline(lastActivity)
+		}
 	}
 
 	user := m.mc.GetUser(ctx, userID)
-	if localTime := getUserLocalTime(user); localTime != "" {
-		lastOnline = fmt.Sprintf("%s, local time: %s", lastOnline, localTime)
+
+	localTime := getUserLocalTime(user)
+
+	var details string
+
+	switch {
+	case lastOnline != "" && localTime != "":
+		details = fmt.Sprintf("%s, local time: %s", lastOnline, localTime)
+	case lastOnline != "":
+		details = lastOnline
+	case localTime != "":
+		details = fmt.Sprintf("local time: %s", localTime)
+	default:
+		return status, nil
 	}
 
 	prefix, custom, hasCustom := strings.Cut(status, ": ")
 	if hasCustom {
-		return fmt.Sprintf("%s (%s): %s", prefix, lastOnline, custom), nil
+		return fmt.Sprintf("%s (%s): %s", prefix, details, custom), nil
 	}
 
-	return fmt.Sprintf("%s (%s)", status, lastOnline), nil
+	return fmt.Sprintf("%s (%s)", status, details), nil
 }
 
 func (m *Mattermost) StatusUsers(ctx context.Context) (map[string]string, error) {
