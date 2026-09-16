@@ -417,13 +417,13 @@ func (u *User) handleChannelRemoveEvent(event *bridge.ChannelRemoveEvent) {
 
 	for _, removed := range event.Removed {
 		if removed.Me {
-			ch.Part(u, "")
+			ch.Part(u, event.Text)
 			continue
 		}
 
 		ghost := u.createUserFromInfo(removed)
 
-		ch.Part(ghost, "")
+		ch.Part(ghost, event.Text)
 
 		if event.Remover != nil && removed.Nick != event.Remover.Nick && event.Remover.Nick != systemUser {
 			ch.SpoofMessage(systemUser, "\x1dremoved "+removed.Nick+" from the channel by "+event.Remover.Nick+"\x1d")
