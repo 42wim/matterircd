@@ -1945,7 +1945,11 @@ func (m *Client) maintainUsersCache(ctx context.Context, event *model.WebSocketE
 			}
 		}
 
-		m.SetUserStatus(userID, statusRaw, false, lastActivity)
+		if lastActivity > 0 {
+			m.SetUserStatus(userID, statusRaw, false, lastActivity)
+		} else {
+			m.SetUserStatus(userID, statusRaw, false)
+		}
 
 	case model.WebsocketEventTyping:
 		userID, _ := event.GetData()["user_id"].(string)

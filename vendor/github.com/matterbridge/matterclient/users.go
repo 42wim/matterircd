@@ -59,7 +59,7 @@ func (m *Client) GetStatus(ctx context.Context, userID string) string {
 	}
 
 	userName := m.GetCachedUserName(userID)
-	isStale := !ok || (lastFetched > 0 && time.Since(time.Unix(lastFetched, 0)) > statusTTL)
+	isStale := !ok || lastFetched == 0 || time.Since(time.Unix(lastFetched, 0)) > statusTTL
 
 	if isStale {
 		retryCount := 0
@@ -81,14 +81,20 @@ func (m *Client) GetStatus(ctx context.Context, userID string) string {
 			}
 
 			// Fallback to existing cached status if HTTP API fails completely
-			m.Users.mu.RLock()
-			status = m.Users.statuses[userID]
-			m.Users.mu.RUnlock()
+			m.Users.mu.Lock()
+			if m.Users.statusLastUpdated == nil {
+				m.Users.statusLastUpdated = make(map[string]int64, 1000)
+			}
 
-			// If it completely fails, we assume offline and break the loop
+			m.Users.statusLastUpdated[userID] = time.Now().Unix()
+
+			status = m.Users.statuses[userID]
 			if status == "" {
 				status = model.StatusOffline
+				m.Users.statuses[userID] = status
 			}
+
+			m.Users.mu.Unlock()
 
 			break
 		}
@@ -225,7 +231,7 @@ func (m *Client) GetStatuses(ctx context.Context) map[string]string {
 	m.Users.mu.Lock()
 	for _, id := range missingIDs {
 		if _, ok := statuses[id]; !ok {
-			statuses[id] = m.SetUserStatus(id, model.StatusOffline, true)
+			statuses[id] = m.SetUserStatus(id, model.StatusOffline, true, 0)
 		}
 	}
 	m.Users.mu.Unlock()
@@ -598,7 +604,10 @@ func (m *Client) SetUserStatus(userID string, rawStatus string, batchLock bool, 
 	}
 
 	m.Users.statuses[userID] = statusStr
-	m.Users.statusLastUpdated[userID] = time.Now().Unix()
+
+	if len(lastActivityAt) > 0 {
+		m.Users.statusLastUpdated[userID] = time.Now().Unix()
+	}
 
 	if len(lastActivityAt) > 0 && lastActivityAt[0] > 0 {
 		if m.Users.lastUserActivity == nil {
