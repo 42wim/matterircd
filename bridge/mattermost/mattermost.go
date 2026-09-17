@@ -1552,7 +1552,7 @@ func (m *Mattermost) handleFileEvent(ctx context.Context, channelType string, gh
 }
 
 func (m *Mattermost) wsActionPostJoinLeave(ctx context.Context, data *model.Post, extraProps map[string]interface{}, logger *logrus.Entry) {
-	logger.Debugf("wsActionPostJoinLeave: extraProps: %#v", extraProps)
+	logger.Tracef("wsActionPostJoinLeave: extraProps: %#v", extraProps)
 	switch data.Type {
 	case "system_add_to_channel":
 		if added, ok := extraProps["addedUsername"].(string); ok {
