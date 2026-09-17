@@ -631,12 +631,6 @@ func (m *Mattermost) IsOnline(status string) bool {
 
 func (m *Mattermost) StatusUser(ctx context.Context, userID string) (string, error) {
 	userName := m.mc.GetCachedUserName(userID)
-	logger.Debugf("StatusUser: User: %s (%s)", userName, userID)
-
-	status := m.mc.GetStatus(ctx, userID)
-	if status == "" || m.IsOnline(status) {
-		return status, nil
-	}
 
 	var lastOnline string
 
@@ -647,6 +641,13 @@ func (m *Mattermost) StatusUser(ctx context.Context, userID string) (string, err
 		if diff >= 20*60 {
 			lastOnline = formatLastOnline(lastActivity)
 		}
+	}
+
+	logger.Debugf("StatusUser: User: %s (%s) lastOnline: %s (%d)", userName, userID, formatLastOnline(lastActivity), lastActivity)
+
+	status := m.mc.GetStatus(ctx, userID)
+	if status == "" || m.IsOnline(status) {
+		return status, nil
 	}
 
 	user := m.mc.GetUser(ctx, userID)
