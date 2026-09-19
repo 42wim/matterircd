@@ -2222,7 +2222,7 @@ func (m *Mattermost) formatMessage(ctx context.Context, data *model.Post, eventT
 		sbMsg.WriteString(sbSuffix.String())
 	}
 
-	if len(attachments) > 0 || data.Type == "slack_attachment" {
+	if len(attachments) > 0 && data.Type != "custom_matterpoll" {
 		sbMsg.WriteString(utils.AttachmentMarkerEnd)
 	}
 

@@ -349,7 +349,7 @@ func ProcessMessageText(text string, opts ProcessMessageOpts, yield func(line st
 		trimmed := strings.TrimSpace(line)
 
 		if strings.Contains(line, AttachmentMarkerStart) {
-			line = strings.Replace(line, AttachmentMarkerStart, "", 1)
+			line = strings.ReplaceAll(line, AttachmentMarkerStart, "")
 			inAttachment = true
 			trimmed = strings.TrimSpace(line)
 
@@ -359,11 +359,10 @@ func ProcessMessageText(text string, opts ProcessMessageOpts, yield func(line st
 			}
 		}
 
-		hasEndMarker := false
+		wasInAttachment := inAttachment
 
 		if strings.Contains(line, AttachmentMarkerEnd) {
-			line = strings.Replace(line, AttachmentMarkerEnd, "", 1)
-			hasEndMarker = true
+			line = strings.ReplaceAll(line, AttachmentMarkerEnd, "")
 			inAttachment = false
 			trimmed = strings.TrimSpace(line)
 
@@ -373,7 +372,7 @@ func ProcessMessageText(text string, opts ProcessMessageOpts, yield func(line st
 		}
 
 		// Bypass Markdown/Emoji parsing for lines originating from message attachments
-		if inAttachment || hasEndMarker {
+		if inAttachment || wasInAttachment {
 			if trimmed == "" {
 				emptyLines++
 			} else {
