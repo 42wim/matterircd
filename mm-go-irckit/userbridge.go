@@ -409,7 +409,7 @@ func (u *User) handleChannelAddEvent(event *bridge.ChannelAddEvent) {
 
 			replayDur := u.cfg.Mattermost().JoinReplayDuration
 			if replayDur <= 0 {
-				replayDur = 15 * time.Minute
+				continue
 			}
 
 			since := time.Now().Add(-replayDur).UnixMilli()
