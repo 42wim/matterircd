@@ -314,6 +314,11 @@ func FormatMarkdownAndEmoji(msg string, disableMarkdown bool, disableEmoji bool,
 	return msg
 }
 
+const (
+	AttachmentMarkerStart = "\x00<ATTM\x00"
+	AttachmentMarkerEnd   = "\x00ATTM>\x00"
+)
+
 // ProcessMessageText abstracts the parsing loop, multi-line code handling,
 // and formatting. It uses a zero-allocation callback (yield) to return lines.
 //
@@ -329,6 +334,7 @@ func ProcessMessageText(text string, opts ProcessMessageOpts, yield func(line st
 		hasContent       bool
 		lastBlockWasCode bool
 		inCodeBlock      bool
+		inAttachment     bool
 		codeBlockMarker  string
 		lexer            string
 		currentIndent    string // Tracks leading whitespace for nested blocks
@@ -341,6 +347,45 @@ func ProcessMessageText(text string, opts ProcessMessageOpts, yield func(line st
 		origLine := line // Keep original to preserve \r and precise indentation
 		line = strings.TrimSuffix(line, "\r")
 		trimmed := strings.TrimSpace(line)
+
+		if strings.Contains(line, AttachmentMarkerStart) {
+			line = strings.ReplaceAll(line, AttachmentMarkerStart, "")
+			inAttachment = true
+			trimmed = strings.TrimSpace(line)
+
+			// If the line was solely the marker, strip it completely
+			if trimmed == "" {
+				continue
+			}
+		}
+
+		wasInAttachment := inAttachment
+
+		if strings.Contains(line, AttachmentMarkerEnd) {
+			line = strings.ReplaceAll(line, AttachmentMarkerEnd, "")
+			inAttachment = false
+			trimmed = strings.TrimSpace(line)
+
+			if trimmed == "" {
+				continue
+			}
+		}
+
+		// Bypass Markdown/Emoji parsing for lines originating from message attachments
+		if inAttachment || wasInAttachment {
+			if trimmed == "" {
+				emptyLines++
+			} else {
+				flushEmptyLines(emptyLines, opts.PreserveNewLines, hasContent, yield)
+				emptyLines = 0
+				hasContent = true
+				lastBlockWasCode = false
+
+				yield(line)
+			}
+
+			continue
+		}
 
 		if inCodeBlock { //nolint:nestif
 			if strings.HasPrefix(trimmed, codeBlockMarker) {
