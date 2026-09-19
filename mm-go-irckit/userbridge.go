@@ -393,7 +393,29 @@ func (u *User) handleChannelAddEvent(event *bridge.ChannelAddEvent) {
 
 	for _, added := range event.Added {
 		if added.Me {
-			u.syncChannel(event.ChannelID, u.br.GetChannelName(u.ctx, event.ChannelID))
+			wasInChannel := ch.HasUser(u)
+			channelName := u.br.GetChannelName(u.ctx, event.ChannelID)
+
+			_ = u.syncChannel(event.ChannelID, channelName)
+
+			if wasInChannel || !ch.HasUser(u) {
+				continue
+			}
+
+			brchannel, err := u.br.GetChannel(u.ctx, event.ChannelID)
+			if err != nil || u.isReplayExcluded(brchannel, channelName) {
+				continue
+			}
+
+			replayDur := u.cfg.Mattermost().JoinReplayDuration
+			if replayDur <= 0 {
+				replayDur = 15 * time.Minute
+			}
+
+			since := time.Now().Add(-replayDur).UnixMilli()
+
+			u.replayHistory(brchannel, since, replayDur.String())
+
 			continue
 		}
 
