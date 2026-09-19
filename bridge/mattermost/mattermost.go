@@ -2222,6 +2222,10 @@ func (m *Mattermost) formatMessage(ctx context.Context, data *model.Post, eventT
 		sbMsg.WriteString(sbSuffix.String())
 	}
 
+	if len(attachments) > 0 || data.Type == "slack_attachment" {
+		sbMsg.WriteString(utils.AttachmentMarkerEnd)
+	}
+
 	// We can't use data.GetPreviewPost() due to a bug so use our own
 	previewText, previewUserID, previewChannelID, replyCount, lastReplyAt, previewAttachments := extractPreviewData(data.Metadata)
 	if previewText != "" || len(previewAttachments) > 0 {
@@ -2303,10 +2307,17 @@ const blockQuoteCharDefault = utils.BlockQuoteCharDefault
 
 //nolint:funlen,gocognit,gocyclo
 func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*model.SlackAttachment, useFallback bool, rootMsg string, additionalPrefix string) {
+	if len(attachments) == 0 {
+		return
+	}
+
 	// If the main message builder already has content, add a newline before our preview
 	if b.Len() > 0 {
 		b.WriteByte('\n')
 	}
+
+	b.WriteString(utils.AttachmentMarkerStart)
+	b.WriteByte('\n')
 
 	rc := m.cfg.Current()
 
@@ -2981,6 +2992,7 @@ func (m *Mattermost) parsePreviewPost(b *strings.Builder, user string, channel s
 	if len(attachments) > 0 {
 		writeHeader()
 		m.parseMessageAttachments(b, attachments, false, text, prefixChar)
+		b.WriteString(utils.AttachmentMarkerEnd)
 	}
 }
 
