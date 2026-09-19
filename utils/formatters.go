@@ -315,8 +315,8 @@ func FormatMarkdownAndEmoji(msg string, disableMarkdown bool, disableEmoji bool,
 }
 
 const (
-	AttachmentMarkerStart = "\x00matterircd_att_start\x00"
-	AttachmentMarkerEnd   = "\x00matterircd_att_end\x00"
+	AttachmentMarkerStart = "\x00<ATTM\x00"
+	AttachmentMarkerEnd   = "\x00ATTM>\x00"
 )
 
 // ProcessMessageText abstracts the parsing loop, multi-line code handling,
