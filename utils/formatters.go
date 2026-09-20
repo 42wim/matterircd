@@ -314,6 +314,79 @@ func FormatMarkdownAndEmoji(msg string, disableMarkdown bool, disableEmoji bool,
 	return msg
 }
 
+// Irc2Markdown converts IRC formatting back to Markdown, handling links and text styles.
+//
+//nolint:funlen,gocyclo
+func Irc2Markdown(msg string) string {
+	// https://modern.ircdocs.horse/formatting.html
+	emphasisSupported := map[byte][]byte{
+		'\x02': {'*', '*'}, // Bold      0x02  **   (**text**)
+		'\x1d': {'_'},      // Italics   0x1D  _    (_text_)
+		'\x11': {'`'},      // Monospace 0x11  `    (`text`)
+		'\x0f': {' '},      // Reset     0x0F       (**text\x0f)
+	}
+	emphasisUnsupported := map[byte]string{
+		'\x1f': "", // Underline 0x1f
+		'\x1e': "", // Strikethr 0x1e
+		'\x16': "", // Reverse Color
+	}
+
+	var buf []byte
+
+	var currentEmphasis []byte
+	for _, char := range []byte(msg) {
+		var ok bool
+		var emp []byte
+
+		// Strip or ignore unsuppored IRC formatting / emphasis
+		if _, ok = emphasisUnsupported[char]; ok {
+			continue
+		}
+
+		// Not an IRC formatting / emphasis character so copy as is
+		if emp, ok = emphasisSupported[char]; !ok {
+			buf = append(buf, char)
+			continue
+		}
+
+		// IRC reset so reset formatting
+		if char == '\x0f' {
+			// Close off any current formatting / emphasis
+			for _, c := range currentEmphasis {
+				buf = append(buf, emphasisSupported[c]...)
+			}
+			currentEmphasis = nil
+			continue
+		}
+
+		buf = append(buf, emp...)
+
+		// Closing emphasis, they're in pairs, remove for list of outstanding
+		found := false
+		var newEmphasis []byte
+		for _, c := range currentEmphasis {
+			if !found && c == char {
+				found = true
+				continue
+			}
+			newEmphasis = append(newEmphasis, c)
+		}
+		if found {
+			currentEmphasis = newEmphasis
+			continue
+		}
+
+		currentEmphasis = append([]byte{char}, currentEmphasis...)
+	}
+
+	// Close off any current formatting / emphasis
+	for _, c := range currentEmphasis {
+		buf = append(buf, emphasisSupported[c]...)
+	}
+
+	return string(buf)
+}
+
 const (
 	AttachmentMarkerStart = "\x00<ATTM\x00"
 	AttachmentMarkerEnd   = "\x00ATTM>\x00"
