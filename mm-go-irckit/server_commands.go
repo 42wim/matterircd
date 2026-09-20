@@ -531,10 +531,6 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 		return nil
 	}
 
-	// strip IRC colors
-	msg.Trailing = colorRegExp.ReplaceAllString(msg.Trailing, "")
-	msg.Trailing = hexColorRegExp.ReplaceAllString(msg.Trailing, "")
-
 	// Convert IRC formatting / emphasis to markdown.
 	msg.Trailing = utils.Irc2Markdown(msg.Trailing)
 
@@ -890,7 +886,7 @@ func CmdTopic(s Server, u *User, msg *irc.Message) error {
 	ch := s.Channel(channelname)
 
 	if msg.Trailing != "" {
-		err := u.br.SetTopic(u.ctx, ch.ID(), msg.Trailing)
+		err := u.br.SetTopic(u.ctx, ch.ID(), utils.Irc2Markdown(msg.Trailing))
 		if err != nil {
 			return s.EncodeMessage(u, irc.ERR_CHANOPRIVSNEEDED, msg.Params, err.Error())
 		}

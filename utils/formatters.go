@@ -318,73 +318,296 @@ func FormatMarkdownAndEmoji(msg string, disableMarkdown bool, disableEmoji bool,
 //
 //nolint:funlen,gocyclo
 func Irc2Markdown(msg string) string {
-	// https://modern.ircdocs.horse/formatting.html
-	emphasisSupported := map[byte][]byte{
-		'\x02': {'*', '*'}, // Bold      0x02  **   (**text**)
-		'\x1d': {'_'},      // Italics   0x1D  _    (_text_)
-		'\x11': {'`'},      // Monospace 0x11  `    (`text`)
-		'\x0f': {' '},      // Reset     0x0F       (**text\x0f)
-	}
-	emphasisUnsupported := map[byte]string{
-		'\x1f': "", // Underline 0x1f
-		'\x1e': "", // Strikethr 0x1e
-		'\x16': "", // Reverse Color
+	if !strings.ContainsAny(msg, "\x02\x1d\x1e\x11\x1f\x03\x04\x0f\x16") {
+		return msg
 	}
 
-	var buf []byte
+	if strings.Contains(msg, "\x03") {
+		msg = stripIrcColors(msg)
+	}
+
+	if strings.Contains(msg, "\x04") {
+		msg = stripHexColors(msg)
+	}
+
+	if strings.Contains(msg, "\x1f") {
+		msg = reverseLinks(msg)
+	}
+
+	// https://modern.ircdocs.horse/formatting.html
+	emphasisSupported := map[byte]string{
+		'\x02': "**", // Bold      0x02
+		'\x1d': "_",  // Italics   0x1D
+		'\x1e': "~~", // Strikethr 0x1E
+		'\x11': "`",  // Monospace 0x11
+	}
+
+	emphasisUnsupported := map[byte]struct{}{
+		'\x1f': {}, // Underline 0x1F (stripped if not consumed by reverseLinks)
+		'\x16': {}, // Reverse Color
+	}
+
+	// Fast path exit if only colors/links were present and stripped
+	if !strings.ContainsAny(msg, "\x02\x1d\x11\x0f\x1f\x1e\x16") {
+		return msg
+	}
+
+	var b strings.Builder
 
 	var currentEmphasis []byte
-	for _, char := range []byte(msg) {
-		var ok bool
-		var emp []byte
+
+	b.Grow(len(msg) + 16)
+
+	for i := range len(msg) {
+		char := msg[i]
 
 		// Strip or ignore unsuppored IRC formatting / emphasis
-		if _, ok = emphasisUnsupported[char]; ok {
+		if _, ok := emphasisUnsupported[char]; ok {
 			continue
 		}
 
 		// Not an IRC formatting / emphasis character so copy as is
-		if emp, ok = emphasisSupported[char]; !ok {
-			buf = append(buf, char)
-			continue
-		}
+		if emp, ok := emphasisSupported[char]; !ok {
+			// IRC reset so reset formatting
+			if char == '\x0f' {
+				// Close off any current formatting / emphasis
+				for _, c := range currentEmphasis {
+					b.WriteString(emphasisSupported[c])
+				}
 
-		// IRC reset so reset formatting
-		if char == '\x0f' {
-			// Close off any current formatting / emphasis
-			for _, c := range currentEmphasis {
-				buf = append(buf, emphasisSupported[c]...)
-			}
-			currentEmphasis = nil
-			continue
-		}
+				currentEmphasis = nil
 
-		buf = append(buf, emp...)
-
-		// Closing emphasis, they're in pairs, remove for list of outstanding
-		found := false
-		var newEmphasis []byte
-		for _, c := range currentEmphasis {
-			if !found && c == char {
-				found = true
 				continue
 			}
-			newEmphasis = append(newEmphasis, c)
-		}
-		if found {
-			currentEmphasis = newEmphasis
-			continue
-		}
 
-		currentEmphasis = append([]byte{char}, currentEmphasis...)
+			b.WriteByte(char)
+
+			continue
+		} else {
+			// Supported formatting character
+			b.WriteString(emp)
+
+			var newEmphasis []byte
+
+			// Closing emphasis, they're in pairs, remove for list of outstanding
+			found := false
+			for _, c := range currentEmphasis {
+				if !found && c == char {
+					found = true
+					continue
+				}
+
+				newEmphasis = append(newEmphasis, c)
+			}
+
+			if found {
+				currentEmphasis = newEmphasis
+				continue
+			}
+
+			// Otherwise, open a new emphasis
+			currentEmphasis = append([]byte{char}, currentEmphasis...)
+		}
 	}
 
 	// Close off any current formatting / emphasis
 	for _, c := range currentEmphasis {
-		buf = append(buf, emphasisSupported[c]...)
+		b.WriteString(emphasisSupported[c])
 	}
 
-	return string(buf)
+	return b.String()
+}
+
+// reverseLinks converts IRC formatted links \x1ftext\x1f (url) back to [text](url)
+//
+//nolint:funlen
+func reverseLinks(msg string) string {
+	var b strings.Builder
+
+	start := 0
+	i := 0
+
+	for i < len(msg) {
+		idx := strings.IndexByte(msg[i:], '\x1f')
+		if idx == -1 {
+			break
+		}
+
+		absIdx := i + idx
+
+		closeIdx := strings.IndexByte(msg[absIdx+1:], '\x1f')
+		if closeIdx == -1 {
+			break
+		}
+
+		absCloseIdx := absIdx + 1 + closeIdx
+
+		parenStartOffset := strings.IndexByte(msg[absCloseIdx+1:], '(')
+		if parenStartOffset == -1 {
+			i = absCloseIdx + 1
+
+			continue
+		}
+
+		absParenStart := absCloseIdx + 1 + parenStartOffset
+
+		// Verify only spaces or non-breaking spaces (\u00a0) exist between \x1f and (
+		between := msg[absCloseIdx+1 : absParenStart]
+		isSpace := true
+
+		for _, r := range between {
+			if r != ' ' && r != '\u00a0' {
+				isSpace = false
+
+				break
+			}
+		}
+
+		if !isSpace {
+			i = absCloseIdx + 1
+
+			continue
+		}
+
+		parenEndOffset := strings.IndexByte(msg[absParenStart+1:], ')')
+		if parenEndOffset == -1 {
+			i = absParenStart + 1
+
+			continue
+		}
+
+		absParenEnd := absParenStart + 1 + parenEndOffset
+
+		if start == 0 {
+			b.Grow(len(msg))
+		}
+
+		b.WriteString(msg[start:absIdx])
+
+		text := msg[absIdx+1 : absCloseIdx]
+		url := msg[absParenStart+1 : absParenEnd]
+
+		// Clean up italics from the URL if the IRC client moved them inside the parens
+		url = strings.ReplaceAll(url, "\x1d", "")
+
+		b.WriteString("[")
+		b.WriteString(text)
+		b.WriteString("](")
+		b.WriteString(url)
+		b.WriteString(")")
+
+		start = absParenEnd + 1
+		i = start
+	}
+
+	if start == 0 {
+		return msg
+	}
+
+	b.WriteString(msg[start:])
+
+	return b.String()
+}
+
+// stripIrcColors removes \x03 and following numbers/commas without allocations
+func stripIrcColors(msg string) string {
+	idx := strings.IndexByte(msg, '\x03')
+	if idx == -1 {
+		return msg
+	}
+
+	var b strings.Builder
+
+	b.Grow(len(msg))
+
+	start := 0
+	i := idx
+
+	for i < len(msg) {
+		if msg[i] != '\x03' {
+			i++
+
+			continue
+		}
+
+		b.WriteString(msg[start:i])
+
+		i++
+
+		// Skip up to 2 foreground digits
+		digitCount := 0
+
+		for i < len(msg) && digitCount < 2 && msg[i] >= '0' && msg[i] <= '9' {
+			i++
+
+			digitCount++
+		}
+
+		// Skip comma and up to 2 background digits
+		if i < len(msg) && msg[i] == ',' {
+			i++
+
+			digitCount = 0
+
+			for i < len(msg) && digitCount < 2 && msg[i] >= '0' && msg[i] <= '9' {
+				i++
+
+				digitCount++
+			}
+		}
+
+		start = i
+	}
+
+	b.WriteString(msg[start:])
+
+	return b.String()
+}
+
+// stripHexColors removes \x04RRGGBB hex color codes without allocations
+func stripHexColors(msg string) string {
+	idx := strings.IndexByte(msg, '\x04')
+	if idx == -1 {
+		return msg
+	}
+
+	var b strings.Builder
+
+	b.Grow(len(msg))
+
+	start := 0
+	i := idx
+
+	for i < len(msg) {
+		if msg[i] != '\x04' {
+			i++
+
+			continue
+		}
+
+		b.WriteString(msg[start:i])
+
+		i++
+
+		hexCount := 0
+
+		for i < len(msg) && hexCount < 6 {
+			c := msg[i]
+			if (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F') {
+				i++
+
+				hexCount++
+			} else {
+				break
+			}
+		}
+
+		start = i
+	}
+
+	b.WriteString(msg[start:])
+
+	return b.String()
 }
 
 const (
