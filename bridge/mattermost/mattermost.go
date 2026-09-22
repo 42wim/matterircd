@@ -2155,9 +2155,14 @@ func (m *Mattermost) formatMessage(ctx context.Context, data *model.Post, eventT
 		}
 	}
 
-	if eventType == string(model.WebsocketEventPostEdited) {
+	switch {
+	case eventType == string(model.WebsocketEventPostEdited) && useUnicode:
+		sbSuffix.WriteString(" \x1d(✏️edited)\x1d")
+	case eventType == string(model.WebsocketEventPostEdited):
 		sbSuffix.WriteString(" \x1d(edited)\x1d")
-	} else if eventType == string(model.WebsocketEventPostDeleted) {
+	case eventType == string(model.WebsocketEventPostDeleted) && useUnicode:
+		sbSuffix.WriteString(" \x1d(🗑️deleted)\x1d")
+	case eventType == string(model.WebsocketEventPostDeleted):
 		sbSuffix.WriteString(" \x1d(deleted)\x1d")
 	}
 
