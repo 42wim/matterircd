@@ -166,6 +166,7 @@ type MattermostConfig struct {
 	ReplayExclude        []string
 	ForceSyncOnReconnect bool
 
+	JoinReplayDuration        time.Duration
 	MaxReplayDuration         time.Duration
 	LazyJoinDuration          time.Duration
 	DefaultDMOfflineThreshold time.Duration
@@ -395,6 +396,7 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 			ReplayExclude:        append([]string(nil), c.v.GetStringSlice("mattermost.ReplayExclude")...),
 			ForceSyncOnReconnect: c.v.GetBool("mattermost.ForceSyncOnReconnect"),
 
+			JoinReplayDuration:        c.v.GetDuration("mattermost.JoinReplayDuration"),
 			MaxReplayDuration:         c.v.GetDuration("mattermost.MaxReplayDuration"),
 			LazyJoinDuration:          c.v.GetDuration("mattermost.LazyJoinDuration"),
 			DefaultDMOfflineThreshold: c.v.GetDuration("mattermost.DefaultDMOfflineThreshold"),
@@ -456,6 +458,8 @@ func Load(cfgfile string, flags *pflag.FlagSet) (*Config, error) {
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_", "-", "_"))
 	// use environment variables
 	v.AutomaticEnv()
+
+	v.SetDefault("mattermost.JoinReplayDuration", "15m")
 
 	c := &Config{
 		v: v,
