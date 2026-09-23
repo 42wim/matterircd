@@ -1691,7 +1691,12 @@ func (m *Client) maintainUsersCache(ctx context.Context, event *model.WebSocketE
 			m.Users.mu.RUnlock()
 
 			if tracked {
-				m.Users.SetUserCustomStatus(u.Id, u.Props["customStatus"])
+				var tzLoc *time.Location
+				if m.User != nil {
+					tzLoc = m.User.GetTimezoneLocation()
+				}
+
+				m.Users.SetUserCustomStatus(u.Id, u.Props["customStatus"], tzLoc)
 			}
 		}
 

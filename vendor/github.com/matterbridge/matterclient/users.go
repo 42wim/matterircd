@@ -123,8 +123,13 @@ func (m *Client) GetStatus(ctx context.Context, userID string) string {
 			}
 		}
 
+		var tzLoc *time.Location
+		if m.User != nil {
+			tzLoc = m.User.GetTimezoneLocation()
+		}
+
 		// Parse & store in cache (permanently marks user as tracked)
-		m.Users.SetUserCustomStatus(userID, rawJSON)
+		m.Users.SetUserCustomStatus(userID, rawJSON, tzLoc)
 
 		m.Users.mu.RLock()
 		customStatus = m.Users.customStatuses[userID]
@@ -509,7 +514,7 @@ func (m *Client) SearchUsers(ctx context.Context, search *model.UserSearch) ([]*
 	}
 }
 
-func (c *UsersCache) SetUserCustomStatus(userID string, rawJSON string) {
+func (c *UsersCache) SetUserCustomStatus(userID string, rawJSON string, tzLoc ...*time.Location) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -549,8 +554,13 @@ func (c *UsersCache) SetUserCustomStatus(userID string, rawJSON string) {
 	if status.ExpiresAt != "" {
 		expiry, parseErr := time.Parse(time.RFC3339, status.ExpiresAt)
 		if parseErr == nil {
-			now := time.Now().Local()
-			expLocal := expiry.Local()
+			location := time.Local
+			if len(tzLoc) > 0 && tzLoc[0] != nil {
+				location = tzLoc[0]
+			}
+
+			now := time.Now().In(location)
+			expLocal := expiry.In(location)
 
 			if !expLocal.After(now) {
 				c.customStatuses[userID] = ""
@@ -559,8 +569,8 @@ func (c *UsersCache) SetUserCustomStatus(userID string, rawJSON string) {
 			}
 
 			timeStr := expLocal.Format("15:04")
-			nowDate := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-			expDate := time.Date(expLocal.Year(), expLocal.Month(), expLocal.Day(), 0, 0, 0, 0, expLocal.Location())
+			nowDate := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, location)
+			expDate := time.Date(expLocal.Year(), expLocal.Month(), expLocal.Day(), 0, 0, 0, 0, location)
 			daysDiff := int(expDate.Sub(nowDate).Hours() / 24)
 
 			var dateStr string
