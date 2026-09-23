@@ -514,6 +514,7 @@ func (m *Client) SearchUsers(ctx context.Context, search *model.UserSearch) ([]*
 	}
 }
 
+//nolint:funlen,gocyclo,gocognit
 func (c *UsersCache) SetUserCustomStatus(userID string, rawJSON string, tzLoc ...*time.Location) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -582,6 +583,22 @@ func (c *UsersCache) SetUserCustomStatus(userID string, rawJSON string, tzLoc ..
 				dateStr = "Tomorrow at " + timeStr
 			default:
 				dateStr = expLocal.Format("Mon, 02 Jan 15:04")
+			}
+
+			var userLoc *time.Location
+
+			if targetUser := c.users[userID]; targetUser != nil && len(targetUser.Timezone) > 0 {
+				if targetUser.Timezone["automaticTimezone"] != "" || targetUser.Timezone["manualTimezone"] != "" {
+					userLoc = targetUser.GetTimezoneLocation()
+				}
+			}
+
+			if userLoc != nil {
+				userTimeStr := expiry.In(userLoc).Format("15:04")
+
+				if userTimeStr != timeStr {
+					dateStr += ", local time: " + userTimeStr
+				}
 			}
 
 			formattedStatus += " (Until " + dateStr + ")"
