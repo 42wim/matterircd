@@ -50,7 +50,24 @@ func (m *Client) GetStatus(ctx context.Context, userID string) string {
 	status, ok := m.Users.statuses[userID]
 	lastFetched := m.Users.statusLastUpdated[userID]
 	customStatus, tracked := m.Users.customStatuses[userID]
+	customExpiresAt := m.Users.customStatusExpiresAt[userID]
 	m.Users.mu.RUnlock()
+
+	if customStatus != "" && customExpiresAt > 0 && time.Now().Unix() >= customExpiresAt {
+		m.Users.mu.Lock()
+
+		customStatus = m.Users.customStatuses[userID]
+		customExpiresAt = m.Users.customStatusExpiresAt[userID]
+
+		if customStatus != "" && customExpiresAt > 0 && time.Now().Unix() >= customExpiresAt {
+			m.Users.customStatuses[userID] = ""
+			delete(m.Users.customStatusExpiresAt, userID)
+
+			customStatus = ""
+		}
+
+		m.Users.mu.Unlock()
+	}
 
 	// Only let recent activity override if the user is marked offline or not yet tracked;
 	// never override explicit server states like "away", "dnd", or "ooo" (OutOfOffice).
@@ -443,9 +460,29 @@ func (m *Client) GetUserCount() int {
 
 func (c *UsersCache) GetUserCustomStatus(userID string) string {
 	c.mu.RLock()
-	defer c.mu.RUnlock()
+	customStatus := c.customStatuses[userID]
+	customExpiresAt := c.customStatusExpiresAt[userID]
+	c.mu.RUnlock()
 
-	return c.customStatuses[userID]
+	if customStatus != "" && customExpiresAt > 0 && time.Now().Unix() >= customExpiresAt {
+		c.mu.Lock()
+
+		customStatus = c.customStatuses[userID]
+		customExpiresAt = c.customStatusExpiresAt[userID]
+
+		if customStatus != "" && customExpiresAt > 0 && time.Now().Unix() >= customExpiresAt {
+			c.customStatuses[userID] = ""
+			delete(c.customStatusExpiresAt, userID)
+
+			c.mu.Unlock()
+
+			return ""
+		}
+
+		c.mu.Unlock()
+	}
+
+	return customStatus
 }
 
 // GetUserLastActivity returns the unix timestamp (in seconds) of the user's last activity.
@@ -514,7 +551,7 @@ func (m *Client) SearchUsers(ctx context.Context, search *model.UserSearch) ([]*
 	}
 }
 
-//nolint:funlen,gocyclo,gocognit
+//nolint:funlen,gocyclo
 func (c *UsersCache) SetUserCustomStatus(userID string, rawJSON string, tzLoc ...*time.Location) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -523,8 +560,14 @@ func (c *UsersCache) SetUserCustomStatus(userID string, rawJSON string, tzLoc ..
 		c.customStatuses = make(map[string]string)
 	}
 
+	if c.customStatusExpiresAt == nil {
+		c.customStatusExpiresAt = make(map[string]int64, 1000)
+	}
+
 	if rawJSON == "" || rawJSON == "{}" || rawJSON == "null" {
 		c.customStatuses[userID] = ""
+		delete(c.customStatusExpiresAt, userID)
+
 		return
 	}
 
@@ -533,6 +576,8 @@ func (c *UsersCache) SetUserCustomStatus(userID string, rawJSON string, tzLoc ..
 	err := json.Unmarshal([]byte(rawJSON), &status)
 	if err != nil {
 		c.customStatuses[userID] = ""
+		delete(c.customStatusExpiresAt, userID)
+
 		return
 	}
 
@@ -549,63 +594,75 @@ func (c *UsersCache) SetUserCustomStatus(userID string, rawJSON string, tzLoc ..
 
 	if formattedStatus == "" {
 		c.customStatuses[userID] = ""
+		delete(c.customStatusExpiresAt, userID)
+
 		return
 	}
 
-	if status.ExpiresAt != "" {
-		expiry, parseErr := time.Parse(time.RFC3339, status.ExpiresAt)
-		if parseErr == nil {
-			location := time.Local
-			if len(tzLoc) > 0 && tzLoc[0] != nil {
-				location = tzLoc[0]
-			}
+	if status.ExpiresAt == "" {
+		delete(c.customStatusExpiresAt, userID)
+		c.customStatuses[userID] = formattedStatus
 
-			now := time.Now().In(location)
-			expLocal := expiry.In(location)
+		return
+	}
 
-			if !expLocal.After(now) {
-				c.customStatuses[userID] = ""
+	expiry, parseErr := time.Parse(time.RFC3339, status.ExpiresAt)
+	if parseErr != nil {
+		delete(c.customStatusExpiresAt, userID)
+		c.customStatuses[userID] = formattedStatus
 
-				return
-			}
+		return
+	}
 
-			timeStr := expLocal.Format("15:04")
-			nowDate := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, location)
-			expDate := time.Date(expLocal.Year(), expLocal.Month(), expLocal.Day(), 0, 0, 0, 0, location)
-			daysDiff := int(expDate.Sub(nowDate).Hours() / 24)
+	location := time.Local
+	if len(tzLoc) > 0 && tzLoc[0] != nil {
+		location = tzLoc[0]
+	}
 
-			var dateStr string
+	now := time.Now().In(location)
+	expLocal := expiry.In(location)
 
-			switch daysDiff {
-			case 0:
-				dateStr = "Today at " + timeStr
-			case 1:
-				dateStr = "Tomorrow at " + timeStr
-			default:
-				dateStr = expLocal.Format("Mon, 02 Jan 15:04")
-			}
+	if !expLocal.After(now) {
+		c.customStatuses[userID] = ""
+		delete(c.customStatusExpiresAt, userID)
 
-			var userLoc *time.Location
+		return
+	}
 
-			if targetUser := c.users[userID]; targetUser != nil && len(targetUser.Timezone) > 0 {
-				if targetUser.Timezone["automaticTimezone"] != "" || targetUser.Timezone["manualTimezone"] != "" {
-					userLoc = targetUser.GetTimezoneLocation()
-				}
-			}
+	timeStr := expLocal.Format("15:04")
+	nowDate := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, location)
+	expDate := time.Date(expLocal.Year(), expLocal.Month(), expLocal.Day(), 0, 0, 0, 0, location)
+	daysDiff := int(expDate.Sub(nowDate).Hours() / 24)
 
-			if userLoc != nil {
-				userTimeStr := expiry.In(userLoc).Format("15:04")
+	var dateStr string
 
-				if userTimeStr != timeStr {
-					dateStr += ", local time: " + userTimeStr
-				}
-			}
+	switch daysDiff {
+	case 0:
+		dateStr = "Today at " + timeStr
+	case 1:
+		dateStr = "Tomorrow at " + timeStr
+	default:
+		dateStr = expLocal.Format("Mon, 02 Jan 15:04")
+	}
 
-			formattedStatus += " (Until " + dateStr + ")"
+	var userLoc *time.Location
+
+	if targetUser := c.users[userID]; targetUser != nil && len(targetUser.Timezone) > 0 {
+		if targetUser.Timezone["automaticTimezone"] != "" || targetUser.Timezone["manualTimezone"] != "" {
+			userLoc = targetUser.GetTimezoneLocation()
 		}
 	}
 
-	c.customStatuses[userID] = formattedStatus
+	if userLoc != nil {
+		userTimeStr := expiry.In(userLoc).Format("15:04")
+
+		if userTimeStr != timeStr {
+			dateStr += ", local time: " + userTimeStr
+		}
+	}
+
+	c.customStatusExpiresAt[userID] = expiry.Unix()
+	c.customStatuses[userID] = formattedStatus + " (Until " + dateStr + ")"
 }
 
 func (m *Client) SetUserStatus(userID string, rawStatus string, batchLock bool, lastActivityAt ...int64) string {
