@@ -55,11 +55,18 @@ func (m *Client) GetStatus(ctx context.Context, userID string) string {
 
 	if customStatus != "" && customExpiresAt > 0 && time.Now().Unix() >= customExpiresAt {
 		m.Users.mu.Lock()
-		m.Users.customStatuses[userID] = ""
-		delete(m.Users.customStatusExpiresAt, userID)
-		m.Users.mu.Unlock()
 
-		customStatus = ""
+		customStatus = m.Users.customStatuses[userID]
+		customExpiresAt = m.Users.customStatusExpiresAt[userID]
+
+		if customStatus != "" && customExpiresAt > 0 && time.Now().Unix() >= customExpiresAt {
+			m.Users.customStatuses[userID] = ""
+			delete(m.Users.customStatusExpiresAt, userID)
+
+			customStatus = ""
+		}
+
+		m.Users.mu.Unlock()
 	}
 
 	// Only let recent activity override if the user is marked offline or not yet tracked;
@@ -459,11 +466,20 @@ func (c *UsersCache) GetUserCustomStatus(userID string) string {
 
 	if customStatus != "" && customExpiresAt > 0 && time.Now().Unix() >= customExpiresAt {
 		c.mu.Lock()
-		c.customStatuses[userID] = ""
-		delete(c.customStatusExpiresAt, userID)
-		c.mu.Unlock()
 
-		return ""
+		customStatus = c.customStatuses[userID]
+		customExpiresAt = c.customStatusExpiresAt[userID]
+
+		if customStatus != "" && customExpiresAt > 0 && time.Now().Unix() >= customExpiresAt {
+			c.customStatuses[userID] = ""
+			delete(c.customStatusExpiresAt, userID)
+
+			c.mu.Unlock()
+
+			return ""
+		}
+
+		c.mu.Unlock()
 	}
 
 	return customStatus
@@ -535,7 +551,7 @@ func (m *Client) SearchUsers(ctx context.Context, search *model.UserSearch) ([]*
 	}
 }
 
-//nolint:funlen,gocyclo,gocognit
+//nolint:funlen,gocyclo
 func (c *UsersCache) SetUserCustomStatus(userID string, rawJSON string, tzLoc ...*time.Location) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -630,6 +646,7 @@ func (c *UsersCache) SetUserCustomStatus(userID string, rawJSON string, tzLoc ..
 	}
 
 	var userLoc *time.Location
+
 	if targetUser := c.users[userID]; targetUser != nil && len(targetUser.Timezone) > 0 {
 		if targetUser.Timezone["automaticTimezone"] != "" || targetUser.Timezone["manualTimezone"] != "" {
 			userLoc = targetUser.GetTimezoneLocation()
