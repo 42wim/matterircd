@@ -552,7 +552,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 			return nil
 		}
 
-		if threadMsgChannel(u, msg, ch.ID()) {
+		if threadMsgChannel(s, u, msg, ch.ID()) {
 			return nil
 		}
 
@@ -610,7 +610,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 				_ = s.EncodeMessage(u, irc.RPL_AWAY, []string{u.Nick, toUser.Nick}, status)
 			}
 
-			if threadMsgUser(u, msg, toUser.User) {
+			if threadMsgUser(s, u, msg, toUser.User) {
 				logger.Trace("matched threadMsgUser")
 				return nil
 			}
@@ -806,7 +806,7 @@ func parseThreadID(u *User, msg *irc.Message, channelID string) (string, string)
 	return "", ""
 }
 
-func threadMsgChannelUser(u *User, msg *irc.Message, channelID string, toUser bool) bool {
+func threadMsgChannelUser(s Server, u *User, msg *irc.Message, channelID string, toUser bool) bool {
 	threadID, text := parseThreadID(u, msg, channelID)
 	if threadID == "" {
 		return false
@@ -820,7 +820,15 @@ func threadMsgChannelUser(u *User, msg *irc.Message, channelID string, toUser bo
 		msgID, err = u.br.MsgChannelThread(u.ctx, channelID, threadID, text)
 	}
 	if err != nil {
-		u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+text+" could not be sent "+err.Error())
+		fromUser, ok := s.HasUser(u.br.Protocol())
+		if !ok {
+			fromUser = u
+		}
+
+		u.MsgSpoofUser(fromUser, msg.Params[0], "could not reply to thread "+threadID+" ("+err.Error()+"), sending as regular message")
+
+		msg.Trailing = text
+
 		return false
 	}
 
@@ -841,13 +849,13 @@ func threadMsgChannelUser(u *User, msg *irc.Message, channelID string, toUser bo
 	return true
 }
 
-func threadMsgChannel(u *User, msg *irc.Message, channelID string) bool {
+func threadMsgChannel(s Server, u *User, msg *irc.Message, channelID string) bool {
 	logger.Trace("entering threadMsgChannel")
-	return threadMsgChannelUser(u, msg, channelID, false)
+	return threadMsgChannelUser(s, u, msg, channelID, false)
 }
 
-func threadMsgUser(u *User, msg *irc.Message, toUser string) bool {
-	return threadMsgChannelUser(u, msg, toUser, true)
+func threadMsgUser(s Server, u *User, msg *irc.Message, toUser string) bool {
+	return threadMsgChannelUser(s, u, msg, toUser, true)
 }
 
 // CmdQuit is a handler for the /QUIT command.
