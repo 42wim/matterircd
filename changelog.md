@@ -1,3 +1,52 @@
+# v0.33.0
+
+## New features
+
+- mattermost: Add EXPERIMENTAL sending of IRCv3 +typing message tags (#850, #851)
+  - Make sending of +typing events default with the option switched to disable if needed (#865)
+- mattermost: Add support for AI thinking modes for the summarising service (#866)
+- mattermost: Add support for GitHub Copilot for EXPERIMENTAL AI summarizing of posts/threads/channels (#871)
+  - Allow overriding AI provider for EXPERIMENTAL summarizing of posts/threads/channels (#872)
+
+## Enhancement
+
+- general: Add PING command to allow measuring HTTP REST API (in addition to WebSocket with CTCP) (#858)
+- general: Make stored last seen events per protocol in preparation for adding Matrix support (and other protocols) (#863)
+- general: Add automatically replaying of last few posts when added to channel (#887)
+- irc: Add support for customising how to preserve new/empty lines (#870)
+- irc: Add option to exclude specific set of channels from replaying of history on connect / initial join (#878)
+- irc: Apply IRC-to-Markdown conversion for TOPICs users update (#888)
+- mattermost: Update user status on user activity and add status TTL to reduce chances of stale user statuses (#852)
+- mattermost: Include Websocket Event PostEdited, PostDeleted, ReactionAdded for user activity (#855)
+- mattermost: Handle users leaving team (leave_team / WebsocketEventLeaveTeam) (#873)
+- mattermost: Set PART reason when user has left or is removed from team in Mattermost (#879)
+  - Fix PART with reason when user leaves team (#882)
+- mattermost: Show user status last online on offline/away/DND/OoO (#880)
+- mattermost: Show timezone of user in away status when user not online (#881)
+- mattermost: Log user last online and last activity (#885)
+- mattermost: Add unicode for edited or deleted posts (#889)
+- mattermost: Add showing pinned or unpinned posts (#893)
+- slack: Add option to disable trying initial login to Slack when a single PASS arg is provided (#849)
+
+## Bugfix
+
+- general: Only update last events timestamp for content-bearing events; fix to use events' timestamp rather than time.Now() (#864)
+- irc: Fix handling of CTCP to allow to self (#857)
+- irc: Fix CTCP /me / ACTION for multilines - only first would be an action (#877)
+- mattermost: Fix summarize to use post/thread ID by default (#848)
+- mattermost: Fix parsing of WebSocket response to handle user statuses (#853)
+- mattermost: Ensure user statuses are more up-to-date / reduce chances of stale user statuses (#854)
+- mattermost: Swap out initial syncing of user statuses from using the WebSocket GetStatuses to the HTTP API to ensure correctness (#856)
+- mattermost: Fix Mattermost Group DMs support (#861, #862)
+- mattermost: Fix duplicate NICKs when a user changes their username/nick (#875)
+- mattermost: Set online users not seen for a certain period of time offline; Fix so local time is not tied to last online (#883)
+- mattermost: Fix issue with stale and incorrect user last online (#884)
+- mattermost: Fix double-processing for message attachments (#886)
+- mattermost: Fix custom status until to use the correct timezone location (#890)
+- mattermost: Fix to honor custom status expiry time (#891)
+- mattermost: Fix to surface errors in same window when replying to deleted message threads/posts (#892)
+- mattermost: Fix truncating of edited, deleted, pinned, unpinned for code blocks (#894)
+
 # v0.32.0
 
 ## New features
