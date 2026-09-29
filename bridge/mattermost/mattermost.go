@@ -2155,11 +2155,22 @@ func (m *Mattermost) formatMessage(ctx context.Context, data *model.Post, eventT
 		}
 	}
 
+	isPostEdited := eventType == string(model.WebsocketEventPostEdited)
+	isEdited := isPostEdited && data.EditAt > 0 && data.EditAt == data.UpdateAt
+
 	switch {
-	case eventType == string(model.WebsocketEventPostEdited) && useUnicode:
+	case isEdited && useUnicode:
 		sbSuffix.WriteString(" \x1d(✏️edited)\x1d")
-	case eventType == string(model.WebsocketEventPostEdited):
+	case isEdited:
 		sbSuffix.WriteString(" \x1d(edited)\x1d")
+	case isPostEdited && data.IsPinned && useUnicode:
+		sbSuffix.WriteString(" \x1d(📌pinned)\x1d")
+	case isPostEdited && data.IsPinned:
+		sbSuffix.WriteString(" \x1d(pinned)\x1d")
+	case isPostEdited && useUnicode:
+		sbSuffix.WriteString(" \x1d(📌unpinned)\x1d")
+	case isPostEdited:
+		sbSuffix.WriteString(" \x1d(unpinned)\x1d")
 	case eventType == string(model.WebsocketEventPostDeleted) && useUnicode:
 		sbSuffix.WriteString(" \x1d(🗑️deleted)\x1d")
 	case eventType == string(model.WebsocketEventPostDeleted):
