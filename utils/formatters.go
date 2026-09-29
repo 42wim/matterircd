@@ -691,6 +691,21 @@ func ProcessMessageText(text string, opts ProcessMessageOpts, yield func(line st
 
 				FormatFullCodeBlock(codeBuilder.String(), lexer, currentIndent, opts, yield)
 				codeBuilder.Reset() // Frees builder state for next block
+
+				trailing := strings.TrimSpace(strings.TrimPrefix(trimmed, codeBlockMarker))
+				if trailing != "" {
+					lastBlockWasCode = false
+					trailing = FormatMarkdownAndEmoji(
+						trailing,
+						opts.DisableMarkdown,
+						opts.DisableEmoji,
+						opts.BlockquoteChar,
+						opts.InlineCodeChar,
+						opts.CustomEmoji,
+					)
+
+					yield(trailing)
+				}
 			} else {
 				if codeBuilder.Len() > 0 {
 					codeBuilder.WriteByte('\n')
