@@ -2156,7 +2156,10 @@ func (m *Mattermost) formatMessage(ctx context.Context, data *model.Post, eventT
 	}
 
 	isPostEdited := eventType == string(model.WebsocketEventPostEdited)
-	isEdited := isPostEdited && data.EditAt > 0 && data.EditAt == data.UpdateAt
+	timeDelta := data.UpdateAt - data.EditAt
+	isEdited := isPostEdited && data.EditAt > 0 && timeDelta >= 0 && timeDelta < 5000
+	isUnpinned := isPostEdited && !data.IsPinned && data.EditAt == 0
+	isUpdated := isPostEdited && !data.IsPinned && !isEdited && data.EditAt > 0
 
 	switch {
 	case isEdited && useUnicode:
@@ -2167,10 +2170,14 @@ func (m *Mattermost) formatMessage(ctx context.Context, data *model.Post, eventT
 		sbSuffix.WriteString(" \x1d(📌pinned)\x1d")
 	case isPostEdited && data.IsPinned:
 		sbSuffix.WriteString(" \x1d(pinned)\x1d")
-	case isPostEdited && useUnicode:
+	case isUnpinned && useUnicode:
 		sbSuffix.WriteString(" \x1d(📌unpinned)\x1d")
-	case isPostEdited:
+	case isUnpinned:
 		sbSuffix.WriteString(" \x1d(unpinned)\x1d")
+	case isUpdated && useUnicode:
+		sbSuffix.WriteString(" \x1d(🔄updated)\x1d")
+	case isUpdated:
+		sbSuffix.WriteString(" \x1d(updated)\x1d")
 	case eventType == string(model.WebsocketEventPostDeleted) && useUnicode:
 		sbSuffix.WriteString(" \x1d(🗑️deleted)\x1d")
 	case eventType == string(model.WebsocketEventPostDeleted):
