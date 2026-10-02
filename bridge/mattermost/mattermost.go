@@ -224,6 +224,19 @@ func (m *Mattermost) SendTyping(ctx context.Context, channelName string) {
 		return
 	}
 
+	if pID, ok := strings.CutPrefix(channelName, "@@"); ok {
+		post, err := m.mc.GetPost(ctx, pID)
+		if err != nil || post == nil {
+			return
+		}
+
+		logger.Tracef("Sending +typing: %s (%s, parent: %s)", channelName, post.ChannelId, pID)
+
+		_ = m.mc.WsSendTyping(post.ChannelId, pID)
+
+		return
+	}
+
 	teamID := ""
 
 	sp := strings.Split(channelName, "/")
