@@ -259,9 +259,14 @@ func (m *Mattermost) SendTyping(ctx context.Context, channelName string) {
 			return
 		}
 
-		logger.Tracef("Sending +typing: %s (%s, parent: %s)", channelName, post.ChannelId, pID)
+		parentID := pID
+		if post.RootId != "" {
+			parentID = post.RootId
+		}
 
-		_ = m.mc.WsSendTyping(post.ChannelId, pID)
+		logger.Tracef("Sending +typing: %s (%s, parent: %s)", channelName, post.ChannelId, parentID)
+
+		_ = m.mc.WsSendTyping(post.ChannelId, parentID)
 
 		return
 	}
