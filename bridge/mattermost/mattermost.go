@@ -250,6 +250,10 @@ func (m *Mattermost) SendTyping(ctx context.Context, channelName string) {
 	}
 
 	if pID, ok := strings.CutPrefix(channelName, "@@"); ok {
+		if !model.IsValidId(pID) {
+			return
+		}
+
 		post, err := m.mc.GetPost(ctx, pID)
 		if err != nil || post == nil {
 			return
