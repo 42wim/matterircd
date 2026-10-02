@@ -233,7 +233,11 @@ func (m *Mattermost) SendTyping(ctx context.Context, channelName string) {
 		lastVal, _ = m.lastTypingSent.LoadOrStore(channelName, new(atomic.Int64))
 	}
 
-	lastPtr := lastVal.(*atomic.Int64)
+	lastPtr, ok := lastVal.(*atomic.Int64)
+	if !ok {
+		return
+	}
+
 	now := time.Now().Unix()
 	last := lastPtr.Load()
 
