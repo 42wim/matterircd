@@ -11,6 +11,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/42wim/matterircd/bridge"
@@ -46,6 +48,8 @@ type Mattermost struct {
 	wsCancel context.CancelFunc
 
 	lastBannerText string
+
+	lastTypingSent sync.Map
 }
 
 type CachedPost struct {
@@ -221,6 +225,23 @@ func (m *Mattermost) SendTyping(ctx context.Context, channelName string) {
 	}
 
 	if strings.HasPrefix(channelName, "&") {
+		return
+	}
+
+	lastVal, ok := m.lastTypingSent.Load(channelName)
+	if !ok {
+		lastVal, _ = m.lastTypingSent.LoadOrStore(channelName, new(atomic.Int64))
+	}
+
+	lastPtr := lastVal.(*atomic.Int64)
+	now := time.Now().Unix()
+	last := lastPtr.Load()
+
+	if now-last < 4 {
+		return
+	}
+
+	if !lastPtr.CompareAndSwap(last, now) {
 		return
 	}
 
