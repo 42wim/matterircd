@@ -1597,7 +1597,11 @@ func (m *Client) WsSendTyping(channelID, parentID string) error {
 	m.lastTypingSent[channelID] = now
 	m.typingLock.Unlock()
 
-	m.logger.Tracef("WsSendTyping: sending user_typing for channel %s", channelID)
+	if parentID != "" {
+		m.logger.Tracef("WsSendTyping: sending user_typing for channel %s (parent %s)", channelID, parentID)
+	} else {
+		m.logger.Tracef("WsSendTyping: sending user_typing for channel %s", channelID)
+	}
 
 	m.WsClient.UserTyping(channelID, parentID)
 
