@@ -2158,6 +2158,8 @@ func (m *Mattermost) handleTypingEvent(ctx context.Context, rmsg *model.WebSocke
 		}
 	}
 
+	parentID, _ := rmsg.GetData()["parent_id"].(string)
+
 	// Send it down the internal event channel
 	m.eventChan <- &bridge.Event{
 		Type: "typing",
@@ -2166,6 +2168,7 @@ func (m *Mattermost) handleTypingEvent(ctx context.Context, rmsg *model.WebSocke
 			ChannelType: channelType,
 			Receiver:    receiver,
 			Sender:      sender,
+			ParentID:    parentID,
 		},
 	}
 }

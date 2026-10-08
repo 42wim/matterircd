@@ -2254,7 +2254,13 @@ func (u *User) handleTyping(e *bridge.TypingEvent) {
 	}
 
 	// Construct and encode TAGMSG
-	rawCommand := fmt.Sprintf("@+typing=active :%s TAGMSG", prefix)
+	var rawCommand string
+
+	if e.ParentID != "" {
+		rawCommand = fmt.Sprintf("@+typing=active;+draft/thread=@@%s :%s TAGMSG", e.ParentID, prefix)
+	} else {
+		rawCommand = fmt.Sprintf("@+typing=active :%s TAGMSG", prefix)
+	}
 
 	logger.Tracef("Sending +typing %s: %s: %s", target, nick, rawCommand)
 
