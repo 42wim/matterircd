@@ -232,6 +232,7 @@ type TypingEvent struct {
 	ChannelType string
 	Receiver    *UserInfo
 	Sender      *UserInfo
+	ParentID    string
 }
 
 type LogoutEvent struct{}
