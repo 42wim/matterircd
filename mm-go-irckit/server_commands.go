@@ -879,9 +879,9 @@ func resolveThreadTarget(s Server, u *User, channelName, threadID string) string
 	if len(cleanID) == 3 {
 		var channelID string
 
-		if s.HasChannel(channelName) {
-			channelID = s.Channel(channelName).ID()
-		} else if toUser := s.User(channelName); toUser != nil {
+		if ch, ok := s.HasChannel(channelName); ok {
+			channelID = ch.ID()
+		} else if toUser, ok := s.HasUser(channelName); ok {
 			channelID = toUser.User
 		}
 
