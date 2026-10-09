@@ -897,12 +897,12 @@ func resolveThreadTarget(s Server, u *User, channelName, threadID string) string
 		return "@@" + postID
 	}
 
-	if len(cleanID) == 26 {
-		return "@@" + strings.ToLower(cleanID)
-	}
-
 	if strings.HasPrefix(cleanID, "$") {
 		return "@@" + cleanID
+	}
+
+	if len(cleanID) == 26 {
+		return "@@" + strings.ToLower(cleanID)
 	}
 
 	return ""

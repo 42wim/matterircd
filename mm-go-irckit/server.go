@@ -425,7 +425,7 @@ func parseThreadTag(tagStr string) string {
 
 		key, val, found := strings.Cut(tag, "=")
 		if found && (strings.EqualFold(key, "+draft/thread") || strings.EqualFold(key, "+thread")) {
-			return strings.ToLower(val)
+			return val
 		}
 	}
 
