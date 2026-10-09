@@ -870,6 +870,34 @@ func CmdQuit(s Server, u *User, msg *irc.Message) error {
 	return nil
 }
 
+func resolveThreadTarget(s Server, u *User, channelName, threadID string) string {
+	if !strings.HasPrefix(threadID, "@@") {
+		return channelName
+	}
+
+	if len(threadID) != 5 {
+		return threadID
+	}
+
+	var channelID string
+
+	ch := s.Channel(channelName)
+	if ch != nil {
+		channelID = ch.ID()
+	}
+
+	postID := u.getPostIDFromHex(channelID, threadID[2:])
+	if postID == "" {
+		logger.Tracef("resolveThreadTarget: failed to resolve %s in channel %s (%s)", threadID, channelName, channelID)
+
+		return ""
+	}
+
+	logger.Tracef("resolveThreadTarget: resolved %s in channel %s (%s) to post %s", threadID, channelName, channelID, postID)
+
+	return "@@" + postID
+}
+
 func CmdTagMsg(s Server, u *User, msg *irc.Message) error {
 	if len(msg.Params) == 0 {
 		return nil
@@ -877,12 +905,14 @@ func CmdTagMsg(s Server, u *User, msg *irc.Message) error {
 
 	target := msg.Params[0]
 
-	// Resolve 3-character hex thread IDs (e.g. @@0af) back to the 26-char post ID
-	if strings.HasPrefix(target, "@@") && len(target) == 5 {
-		postID := u.getPostIDFromHex(target[2:])
-		if postID != "" {
-			target = "@@" + postID
-		}
+	if len(msg.Params) > 1 {
+		target = resolveThreadTarget(s, u, target, msg.Params[1])
+	} else if strings.HasPrefix(target, "@@") && len(target) == 5 {
+		target = resolveThreadTarget(s, u, "", target)
+	}
+
+	if target == "" {
+		return nil
 	}
 
 	if u.br != nil {

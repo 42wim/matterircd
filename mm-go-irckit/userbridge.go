@@ -9,8 +9,8 @@ import (
 	"math/rand"
 	"net"
 	"sort"
-	"strings"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -1926,7 +1926,7 @@ func (u *User) getMsgCounterHex(channelID, postID string) string {
 	return fmt.Sprintf("%03x", currentcount)
 }
 
-func (u *User) getPostIDFromHex(hexID string) string {
+func (u *User) getPostIDFromHex(channelID, hexID string) string {
 	val, err := strconv.ParseInt(hexID, 16, 0)
 	if err != nil {
 		return ""
@@ -1935,9 +1935,17 @@ func (u *User) getPostIDFromHex(hexID string) string {
 	u.msgMapMutex.Lock()
 	defer u.msgMapMutex.Unlock()
 
+	if channelID != "" {
+		if indexMap, ok := u.msgMapIndex[channelID]; ok {
+			return indexMap[int(val)]
+		}
+
+		return ""
+	}
+
+	// Fallback if channelID is not available (e.g. dedicated @@003 query buffer)
 	for _, indexMap := range u.msgMapIndex {
-		postID, ok := indexMap[int(val)]
-		if ok {
+		if postID, ok := indexMap[int(val)]; ok {
 			return postID
 		}
 	}
