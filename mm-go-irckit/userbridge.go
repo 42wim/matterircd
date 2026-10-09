@@ -10,6 +10,7 @@ import (
 	"net"
 	"sort"
 	"strings"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -1923,6 +1924,25 @@ func (u *User) getMsgCounterHex(channelID, postID string) string {
 	currentcount := u.getOrCreateMsgCounterLocked(channelID, postID, 0)
 
 	return fmt.Sprintf("%03x", currentcount)
+}
+
+func (u *User) getPostIDFromHex(hexID string) string {
+	val, err := strconv.ParseInt(hexID, 16, 0)
+	if err != nil {
+		return ""
+	}
+
+	u.msgMapMutex.Lock()
+	defer u.msgMapMutex.Unlock()
+
+	for _, indexMap := range u.msgMapIndex {
+		postID, ok := indexMap[int(val)]
+		if ok {
+			return postID
+		}
+	}
+
+	return ""
 }
 
 func (u *User) increaseMsgCounter(channelID string, skip int) int {

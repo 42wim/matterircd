@@ -877,6 +877,14 @@ func CmdTagMsg(s Server, u *User, msg *irc.Message) error {
 
 	target := msg.Params[0]
 
+	// Resolve 3-character hex thread IDs (e.g. @@0af) back to the 26-char post ID
+	if strings.HasPrefix(target, "@@") && len(target) == 5 {
+		postID := u.getPostIDFromHex(target[2:])
+		if postID != "" {
+			target = "@@" + postID
+		}
+	}
+
 	if u.br != nil {
 		u.br.SendTyping(u.ctx, target)
 	}
