@@ -2257,7 +2257,7 @@ func (u *User) handleTyping(e *bridge.TypingEvent) {
 	var rawCommand string
 
 	if e.ParentID != "" {
-		rawCommand = fmt.Sprintf("@+typing=active;+draft/thread=@@%s :%s TAGMSG", e.ParentID, prefix)
+		rawCommand = fmt.Sprintf("@+typing=active;+draft/thread=%s :%s TAGMSG", e.ParentID, prefix)
 	} else {
 		rawCommand = fmt.Sprintf("@+typing=active :%s TAGMSG", prefix)
 	}
