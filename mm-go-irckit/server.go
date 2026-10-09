@@ -416,6 +416,22 @@ func (s *server) Handle(u *User) {
 	s.handle(u)
 }
 
+func parseThreadTag(tagStr string) string {
+	tagStr = strings.TrimPrefix(tagStr, "@")
+
+	for len(tagStr) > 0 {
+		tag, rest, _ := strings.Cut(tagStr, ";")
+		tagStr = rest
+
+		key, val, found := strings.Cut(tag, "=")
+		if found && (key == "+draft/thread" || key == "+thread") {
+			return val
+		}
+	}
+
+	return ""
+}
+
 func (s *server) handle(u *User) {
 	var partMsg string
 	defer s.Quit(u, partMsg)
@@ -426,8 +442,13 @@ func (s *server) handle(u *User) {
 		}
 		go func(msg *irc.Message) {
 			if strings.HasPrefix(msg.Command, "@") && len(msg.Params) > 0 {
+				threadID := parseThreadTag(msg.Command)
 				msg.Command = strings.ToUpper(msg.Params[0])
 				msg.Params = msg.Params[1:]
+
+				if threadID != "" && msg.Command == "TAGMSG" && len(msg.Params) == 1 {
+					msg.Params = append(msg.Params, threadID)
+				}
 			}
 
 			err := s.commands.Run(s, u, msg)
