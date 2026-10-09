@@ -1916,6 +1916,15 @@ func (u *User) logoutFrom(protocol string) error {
 	return nil
 }
 
+func (u *User) getMsgCounterHex(channelID, postID string) string {
+	u.msgMapMutex.Lock()
+	defer u.msgMapMutex.Unlock()
+
+	currentcount := u.getOrCreateMsgCounterLocked(channelID, postID, 0)
+
+	return fmt.Sprintf("%03x", currentcount)
+}
+
 func (u *User) increaseMsgCounter(channelID string, skip int) int {
 	u.msgCounterMutex.Lock()
 	defer u.msgCounterMutex.Unlock()
@@ -2015,34 +2024,33 @@ func (u *User) prefixContext(channelID, messageID, parentID, event string) strin
 
 	var (
 		currentcount, parentcount int
-		ok                        bool
 	)
 
-	if _, ok = u.msgMap[channelID]; !ok {
+	if parentID == "" {
+		currentcount := u.getOrCreateMsgCounterLocked(channelID, messageID, 0)
+
+		return fmt.Sprintf("[%03x]", currentcount)
+	}
+
+	parentcount = u.getOrCreateMsgCounterLocked(channelID, parentID, 0)
+	currentcount = u.getOrCreateMsgCounterLocked(channelID, messageID, parentcount)
+
+	return fmt.Sprintf("[%s%03x,%03x]", prefixChar, parentcount, currentcount)
+}
+
+func (u *User) getOrCreateMsgCounterLocked(channelID, postID string, skip int) int {
+	if _, ok := u.msgMap[channelID]; !ok {
 		u.msgMap[channelID] = make(map[string]int)
 	}
 
-	if parentID != "" {
-		if _, ok = u.msgMap[channelID][parentID]; !ok {
-			u.msgMap[channelID][parentID] = u.increaseMsgCounter(channelID, parentcount)
-		}
-
-		parentcount = u.msgMap[channelID][parentID]
-		u.updateMsgMapIndex(channelID, parentcount, parentID)
+	if _, ok := u.msgMap[channelID][postID]; !ok {
+		u.msgMap[channelID][postID] = u.increaseMsgCounter(channelID, skip)
 	}
 
-	if _, ok = u.msgMap[channelID][messageID]; !ok {
-		u.msgMap[channelID][messageID] = u.increaseMsgCounter(channelID, parentcount)
-	}
+	currentcount := u.msgMap[channelID][postID]
+	u.updateMsgMapIndex(channelID, currentcount, postID)
 
-	currentcount = u.msgMap[channelID][messageID]
-	u.updateMsgMapIndex(channelID, currentcount, messageID)
-
-	if parentID != "" {
-		return fmt.Sprintf("[%s%03x,%03x]", prefixChar, parentcount, currentcount)
-	}
-
-	return fmt.Sprintf("[%03x]", currentcount)
+	return currentcount
 }
 
 func (u *User) updateLastViewed(channelID string) {
@@ -2256,8 +2264,13 @@ func (u *User) handleTyping(e *bridge.TypingEvent) {
 	// Construct and encode TAGMSG
 	var rawCommand string
 
-	if e.ParentID != "" {
-		rawCommand = fmt.Sprintf("@+typing=active;+draft/thread=%s :%s TAGMSG", e.ParentID, prefix)
+	parentID := e.ParentID
+	if parentID != "" {
+		if u.br.BridgeConfig().ThreadContext != "mattermost" && u.br.BridgeConfig().ThreadContext != "mattermost+post" {
+			parentID = u.getMsgCounterHex(e.ChannelID, parentID)
+		}
+
+		rawCommand = fmt.Sprintf("@+typing=active;+draft/thread=%s :%s TAGMSG", parentID, prefix)
 	} else {
 		rawCommand = fmt.Sprintf("@+typing=active :%s TAGMSG", prefix)
 	}
