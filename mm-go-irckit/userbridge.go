@@ -1927,27 +1927,20 @@ func (u *User) getMsgCounterHex(channelID, postID string) string {
 }
 
 func (u *User) getPostIDFromHex(channelID, hexID string) string {
+	if channelID == "" {
+		return ""
+	}
+
 	val, err := strconv.ParseInt(hexID, 16, 0)
 	if err != nil {
 		return ""
 	}
 
-	u.msgMapMutex.Lock()
-	defer u.msgMapMutex.Unlock()
+	u.msgMapIndexMutex.RLock()
+	defer u.msgMapIndexMutex.RUnlock()
 
-	if channelID != "" {
-		if indexMap, ok := u.msgMapIndex[channelID]; ok {
-			return indexMap[int(val)]
-		}
-
-		return ""
-	}
-
-	// Fallback if channelID is not available (e.g. dedicated @@003 query buffer)
-	for _, indexMap := range u.msgMapIndex {
-		if postID, ok := indexMap[int(val)]; ok {
-			return postID
-		}
+	if indexMap, ok := u.msgMapIndex[channelID]; ok {
+		return indexMap[int(val)]
 	}
 
 	return ""
