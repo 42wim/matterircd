@@ -879,9 +879,10 @@ func resolveThreadTarget(s Server, u *User, channelName, threadID string) string
 	if len(cleanID) == 3 {
 		var channelID string
 
-		ch := s.Channel(channelName)
-		if ch != nil {
-			channelID = ch.ID()
+		if s.HasChannel(channelName) {
+			channelID = s.Channel(channelName).ID()
+		} else if toUser := s.User(channelName); toUser != nil {
+			channelID = toUser.User
 		}
 
 		postID := u.getPostIDFromHex(channelID, cleanID)
@@ -896,7 +897,11 @@ func resolveThreadTarget(s Server, u *User, channelName, threadID string) string
 		return "@@" + postID
 	}
 
-	if len(cleanID) == 26 || strings.HasPrefix(cleanID, "$") {
+	if len(cleanID) == 26 {
+		return "@@" + strings.ToLower(cleanID)
+	}
+
+	if strings.HasPrefix(cleanID, "$") {
 		return "@@" + cleanID
 	}
 

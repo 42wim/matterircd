@@ -424,8 +424,8 @@ func parseThreadTag(tagStr string) string {
 		tagStr = rest
 
 		key, val, found := strings.Cut(tag, "=")
-		if found && (key == "+draft/thread" || key == "+thread") {
-			return val
+		if found && (strings.EqualFold(key, "+draft/thread") || strings.EqualFold(key, "+thread")) {
+			return strings.ToLower(val)
 		}
 	}
 
@@ -443,10 +443,11 @@ func (s *server) handle(u *User) {
 		go func(msg *irc.Message) {
 			if strings.HasPrefix(msg.Command, "@") && len(msg.Params) > 0 {
 				threadID := parseThreadTag(msg.Command)
+
 				msg.Command = strings.ToUpper(msg.Params[0])
 				msg.Params = msg.Params[1:]
 
-				if threadID != "" && msg.Command == "TAGMSG" && len(msg.Params) == 1 {
+				if threadID != "" && msg.Command == "TAGMSG" && len(msg.Params) == 1 { //nolint:goconst
 					msg.Params = append(msg.Params, threadID)
 				}
 			}
