@@ -365,6 +365,10 @@ func (s *Slack) GetChannelUsers(ctx context.Context, channelID string) ([]*bridg
 	return users, nil
 }
 
+func (s *Slack) GetDMChannelID(ctx context.Context, userID string) (string, error) {
+	return "", nil
+}
+
 func (s *Slack) GetDMChannelName(userID1 string, userID2 string) string {
 	return ""
 }

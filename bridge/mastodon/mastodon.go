@@ -166,6 +166,10 @@ func (m *Mastodon) GetChannelUsers(ctx context.Context, channelID string) ([]*br
 	return nil, nil
 }
 
+func (m *Mastodon) GetDMChannelID(ctx context.Context, userID string) (string, error) {
+	return "", nil
+}
+
 func (m *Mastodon) GetDMChannelName(userID1 string, userID2 string) string {
 	return ""
 }

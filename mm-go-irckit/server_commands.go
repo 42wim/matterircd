@@ -877,15 +877,27 @@ func resolveThreadTarget(s Server, u *User, channelName, threadID string) string
 	}
 
 	if len(cleanID) == 3 {
-		var channelID string
+		var channelID, fallbackID string
 
 		if ch, ok := s.HasChannel(channelName); ok {
 			channelID = ch.ID()
 		} else if toUser, ok := s.HasUser(channelName); ok {
 			channelID = toUser.User
+			fallbackID = toUser.User
+
+			if u.br != nil {
+				dmChannelID, err := u.br.GetDMChannelID(u.ctx, toUser.User)
+				if err == nil && dmChannelID != "" {
+					channelID = dmChannelID
+				}
+			}
 		}
 
 		postID := u.getPostIDFromHex(channelID, cleanID)
+		if postID == "" && fallbackID != "" && fallbackID != channelID {
+			postID = u.getPostIDFromHex(fallbackID, cleanID)
+		}
+
 		if postID == "" {
 			logger.Tracef("resolveThreadTarget: failed to resolve %s in channel %s (%s)", threadID, channelName, channelID)
 
