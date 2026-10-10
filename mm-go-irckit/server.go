@@ -310,6 +310,17 @@ func (s *server) Connect(u *User) error {
 	err := s.handshake(u)
 	if err != nil {
 		u.Close()
+
+		// The handshake started Decode(), which blocks on handing over a message that
+		// nobody is going to read anymore. Keep draining until Decode() closes the channel.
+		if u.DecodeCh != nil {
+			go func() {
+				for range u.DecodeCh {
+					// discard
+				}
+			}()
+		}
+
 		return err
 	}
 	go s.handle(u)
@@ -330,12 +341,21 @@ func (s *server) Quit(u *User, message string) {
 		u.cancel()
 	}
 
+	// Don't hold eventLoopMutex while logging out: the logout hands an event to the event
+	// loop, and that loop is started while holding the mutex.
 	u.eventLoopMutex.Lock()
-	if u.br != nil {
-		_ = u.br.Logout(u.ctx)
-		u.br = nil
-	}
+	br := u.br
 	u.eventLoopMutex.Unlock()
+
+	if br != nil {
+		_ = br.Logout(u.ctx)
+
+		u.eventLoopMutex.Lock()
+		if u.br == br {
+			u.br = nil
+		}
+		u.eventLoopMutex.Unlock()
+	}
 
 	for _, ch := range u.Channels() {
 		ch.Part(u, message)
@@ -441,6 +461,9 @@ func (s *server) handle(u *User) {
 			continue
 		}
 		go func(msg *irc.Message) {
+			// A bug in a handler must not take the whole process (all users) down.
+			defer recoverPanic("irc command handler")
+
 			if strings.HasPrefix(msg.Command, "@") && len(msg.Params) > 0 {
 				threadID := parseThreadTag(msg.Command)
 

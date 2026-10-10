@@ -1,14 +1,64 @@
 package irckit
 
 import (
+	"context"
 	"regexp"
+	"runtime/debug"
 	"strings"
+	"sync"
+	"time"
 )
+
+// recoverPanic must be deferred directly (defer recoverPanic("what")) at the
+// start of every goroutine that handles client or server input. An unrecovered
+// panic in any goroutine terminates the whole process and so disconnects every
+// connected user.
+func recoverPanic(what string) {
+	if r := recover(); r != nil {
+		logger.Errorf("recovered from panic in %s: %v\n%s", what, r, debug.Stack())
+	}
+}
+
+// sleepContext sleeps for d. It returns false as soon as ctx is done.
+func sleepContext(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+
+	select {
+	case <-t.C:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+// regexpCache holds the compiled regular expressions of the configuration
+// (pattern -> *regexp.Regexp, nil for patterns that don't compile).
+var regexpCache sync.Map
+
+// compileCached compiles pattern only once, it's used on the hot path of every
+// incoming message. Patterns come from the configuration file and aren't
+// validated, so an invalid one is logged once and never matches.
+func compileCached(pattern string) *regexp.Regexp {
+	if v, ok := regexpCache.Load(pattern); ok {
+		re, _ := v.(*regexp.Regexp)
+		return re
+	}
+
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		logger.Errorf("ignoring invalid regular expression %q: %v", pattern, err)
+		re = nil
+	}
+
+	regexpCache.Store(pattern, re)
+
+	return re
+}
 
 func stringInRegexp(a string, list []string) bool {
 	for _, entry := range list {
-		re := regexp.MustCompile(entry)
-		if re.MatchString(a) {
+		if re := compileCached(entry); re != nil && re.MatchString(a) {
 			return true
 		}
 	}

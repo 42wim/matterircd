@@ -34,8 +34,14 @@ func logout(u *User, toUser *User, args []string, service string) {
 	u.inprogress.Store(true)
 	defer u.inprogress.Store(false)
 
-	_ = u.br.Logout(u.ctx)
-	u.logoutFrom(u.br.Protocol())
+	br := u.br
+	if br == nil {
+		return
+	}
+
+	// logoutFrom logs out of the bridge, doing that here as well would make the
+	// second Logout wait for an event loop that already ended.
+	u.logoutFrom(br.Protocol())
 }
 
 func login(u *User, toUser *User, args []string, service string) {
@@ -724,6 +730,9 @@ var cmds = map[string]Command{
 }
 
 func (u *User) handleServiceBot(service string, toUser *User, msg string) {
+	// A bridge that is logged out halfway through a command shouldn't take the daemon down.
+	defer recoverPanic("service bot command")
+
 	// func (u *User) handleMMServiceBot(toUser *User, msg string) {
 	commands, err := parseCommandString(msg)
 	if err != nil {
@@ -731,7 +740,15 @@ func (u *User) handleServiceBot(service string, toUser *User, msg string) {
 		return
 	}
 
-	cmd, ok := cmds[strings.ToLower(commands[0])]
+	// An empty command (e.g. only quotes) parses without an error.
+	var (
+		cmd Command
+		ok  bool
+	)
+	if len(commands) > 0 {
+		cmd, ok = cmds[strings.ToLower(commands[0])]
+	}
+
 	if !ok {
 		keys := make([]string, 0)
 		for k := range cmds {
