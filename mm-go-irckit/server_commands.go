@@ -901,17 +901,19 @@ func getTargetChannelID(s Server, u *User, channelName string) string {
 		return ch.ID()
 	}
 
-	if toUser, ok := s.HasUser(channelName); ok {
-		if u.br != nil {
-			if dmChannelID := u.br.GetDMChannelID(u.ctx, toUser.User); dmChannelID != "" {
-				return dmChannelID
-			}
-		}
-
-		return toUser.User
+	toUser, ok := s.HasUser(channelName)
+	if !ok {
+		return ""
 	}
 
-	return ""
+	if u.br != nil {
+		dmChannelID := u.br.GetDMChannelID(u.ctx, toUser.User)
+		if dmChannelID != "" {
+			return dmChannelID
+		}
+	}
+
+	return toUser.User
 }
 
 func resolveThreadTarget(s Server, u *User, channelName, threadID string) string {
