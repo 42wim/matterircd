@@ -53,8 +53,9 @@ type Mattermost struct {
 }
 
 type CachedPost struct {
-	RootID   string
-	ReplyMsg string
+	RootID     string
+	ParentUser *bridge.UserInfo
+	ReplyMsg   string
 }
 
 var logger *logrus.Entry
@@ -775,10 +776,10 @@ func (m *Mattermost) GetChannelName(ctx context.Context, channelID string) strin
 		channel := m.mc.GetChannel(ctx, channelID)
 		if channel == nil {
 			logger.Warnf("Could not resolve missing channel name for %s", channelID)
+		} else {
+			channelName = m.mc.GetChannelName(ctx, channelID)
 		}
 	}
-
-	channelName = m.mc.GetChannelName(ctx, channelID)
 
 	// return DM channels immediately
 	if m.mc.IsDMChannelName(channelName) {
@@ -1156,7 +1157,7 @@ func (m *Mattermost) wsActionPostSkip(ctx context.Context, data *model.Post, rms
 	if data.RootId != "" {
 		msgID = data.RootId
 		if !rc.Mattermost.HideReplies {
-			cachedRoot, err := m.getCachedPostInfo(ctx, data.RootId, nil, shortenMsgLen, "@", useUnicode, logger)
+			cachedRoot, err := m.getCachedPostInfo(ctx, data.RootId, shortenMsgLen, "@", useUnicode, logger)
 			if err == nil {
 				sbSuffix.WriteString(cachedRoot.ReplyMsg)
 			}
@@ -1190,8 +1191,7 @@ var markdownReplacer = strings.NewReplacer(
 	"~~~", "`",
 )
 
-//nolint:funlen,unparam
-func (m *Mattermost) getCachedPostInfo(ctx context.Context, postID string, preFetchedPost *model.Post, newLen int, uncounted string, unicode bool, logger *logrus.Entry) (CachedPost, error) {
+func (m *Mattermost) getCachedPostInfo(ctx context.Context, postID string, newLen int, uncounted string, unicode bool, logger *logrus.Entry) (CachedPost, error) {
 	rc := m.cfg.Current()
 
 	// Search and use cached reply if it exists.
@@ -1201,16 +1201,9 @@ func (m *Mattermost) getCachedPostInfo(ctx context.Context, postID string, preFe
 		return cp, nil
 	}
 
-	var post *model.Post
-	var err error
-
-	if preFetchedPost != nil {
-		post = preFetchedPost
-	} else {
-		post, err = m.mc.GetPost(ctx, postID)
-		if err != nil {
-			return CachedPost{}, err
-		}
+	post, err := m.mc.GetPost(ctx, postID)
+	if err != nil {
+		return CachedPost{}, err
 	}
 
 	msg := post.Message
@@ -1252,7 +1245,8 @@ func (m *Mattermost) getCachedPostInfo(ctx context.Context, postID string, preFe
 	parentMessage := utils.FormatAndShortenSummary(msg, opts)
 
 	cp := CachedPost{
-		RootID: post.RootId,
+		RootID:     post.RootId,
+		ParentUser: parentUser,
 		// Fast native string concatenation
 		ReplyMsg: " (re @" + parentUser.Nick + ": " + parentMessage + ")",
 	}
@@ -1346,20 +1340,6 @@ func (m *Mattermost) handleWsActionPost(ctx context.Context, rmsg *model.WebSock
 	}
 
 	rc := m.cfg.Current()
-
-	useUnicode := rc.Mattermost.Formatter.Unicode
-
-	var sbSuffix strings.Builder
-	sbSuffix.Grow(rc.Mattermost.ShortenRepliesTo + 32)
-
-	if !rc.Mattermost.HideReplies && data.RootId != "" {
-		cachedRoot, err := m.getCachedPostInfo(ctx, data.RootId, nil, rc.Mattermost.ShortenRepliesTo, "@", useUnicode, logger)
-		if err != nil {
-			logger.Errorf("Unable to get parent post for %#v", data) //nolint:govet
-		} else {
-			sbSuffix.WriteString(cachedRoot.ReplyMsg)
-		}
-	}
 
 	// create new "ghost" user
 	ghost := m.GetUser(ctx, data.UserId)
@@ -1875,8 +1855,10 @@ func (m *Mattermost) handleReactionEvent(ctx context.Context, rmsg *model.WebSoc
 
 	parentID := reaction.PostId
 	// Fetch the post being reacted to (hits cache if already seen)
-	cachedPost, err := m.getCachedPostInfo(ctx, reaction.PostId, nil, rc.Mattermost.ShortenRepliesTo, "@", rc.Mattermost.Formatter.Unicode, logger)
+	cachedPost, err := m.getCachedPostInfo(ctx, reaction.PostId, rc.Mattermost.ShortenRepliesTo, "@", rc.Mattermost.Formatter.Unicode, logger)
 	if err == nil {
+		parentUser = cachedPost.ParentUser
+
 		if cachedPost.RootID != "" {
 			parentID = cachedPost.RootID
 		}
@@ -1964,8 +1946,7 @@ func (m *Mattermost) SearchPosts(ctx context.Context, search string) []*bridge.E
 	return m.postListToEvents(ctx, m.mc.SearchPosts(ctx, search), "search", 0)
 }
 
-func (m *Mattermost) GetFilesInfo(ctx context.Context, fileIDs []string) []*bridge.File {
-	mcFiles := m.mc.GetFilesInfo(ctx, fileIDs)
+func convertFilesInfo(mcFiles []*matterclient.FileInfo) []*bridge.File {
 	files := make([]*bridge.File, 0, len(mcFiles))
 
 	for _, f := range mcFiles {
@@ -1979,23 +1960,16 @@ func (m *Mattermost) GetFilesInfo(ctx context.Context, fileIDs []string) []*brid
 	return files
 }
 
+func (m *Mattermost) GetFilesInfo(ctx context.Context, fileIDs []string) []*bridge.File {
+	return convertFilesInfo(m.mc.GetFilesInfo(ctx, fileIDs))
+}
+
 func (m *Mattermost) GetFilesInfoFromPost(ctx context.Context, p *model.Post) []*bridge.File {
 	if p == nil || len(p.FileIds) == 0 {
 		return nil
 	}
 
-	mcFiles := m.mc.GetFilesInfoFromPost(ctx, p)
-	files := make([]*bridge.File, 0, len(mcFiles))
-
-	for _, f := range mcFiles {
-		files = append(files, &bridge.File{
-			Name: f.Name,
-			Size: f.Size,
-			URL:  f.URL,
-		})
-	}
-
-	return files
+	return convertFilesInfo(m.mc.GetFilesInfoFromPost(ctx, p))
 }
 
 func (m *Mattermost) GetPosts(ctx context.Context, channelID string, limit int) []*bridge.Event {
@@ -2230,7 +2204,7 @@ func (m *Mattermost) formatMessage(ctx context.Context, data *model.Post, eventT
 	sbSuffix.Grow(rc.Mattermost.ShortenRepliesTo + 32)
 
 	if !rc.Mattermost.HideReplies && data.RootId != "" {
-		cachedRoot, err := m.getCachedPostInfo(ctx, data.RootId, nil, rc.Mattermost.ShortenRepliesTo, "@", useUnicode, logger)
+		cachedRoot, err := m.getCachedPostInfo(ctx, data.RootId, rc.Mattermost.ShortenRepliesTo, "@", useUnicode, logger)
 		if err != nil {
 			logger.Errorf("Unable to get parent post for %#v", data)
 		} else {
