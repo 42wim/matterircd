@@ -7,7 +7,7 @@ on:
 jobs:
   lint:
     name: golangci-lint
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -48,7 +48,7 @@ jobs:
     strategy:
       matrix:
         go-version: [1.26]
-        platform: [ubuntu-latest]
+        platform: [ubuntu-26.04]
     runs-on: ${{ matrix.platform }}
     steps:
     - name: Checkout code
