@@ -53,8 +53,9 @@ type Mattermost struct {
 }
 
 type CachedPost struct {
-	RootID   string
-	ReplyMsg string
+	RootID     string
+	ParentUser *bridge.UserInfo
+	ReplyMsg   string
 }
 
 var logger *logrus.Entry
@@ -1156,7 +1157,7 @@ func (m *Mattermost) wsActionPostSkip(ctx context.Context, data *model.Post, rms
 	if data.RootId != "" {
 		msgID = data.RootId
 		if !rc.Mattermost.HideReplies {
-			cachedRoot, err := m.getCachedPostInfo(ctx, data.RootId, nil, shortenMsgLen, "@", useUnicode, logger)
+			cachedRoot, err := m.getCachedPostInfo(ctx, data.RootId, shortenMsgLen, "@", useUnicode, logger)
 			if err == nil {
 				sbSuffix.WriteString(cachedRoot.ReplyMsg)
 			}
@@ -1191,7 +1192,7 @@ var markdownReplacer = strings.NewReplacer(
 )
 
 //nolint:funlen,unparam
-func (m *Mattermost) getCachedPostInfo(ctx context.Context, postID string, preFetchedPost *model.Post, newLen int, uncounted string, unicode bool, logger *logrus.Entry) (CachedPost, error) {
+func (m *Mattermost) getCachedPostInfo(ctx context.Context, postID string, newLen int, uncounted string, unicode bool, logger *logrus.Entry) (CachedPost, error) {
 	rc := m.cfg.Current()
 
 	// Search and use cached reply if it exists.
@@ -1204,13 +1205,9 @@ func (m *Mattermost) getCachedPostInfo(ctx context.Context, postID string, preFe
 	var post *model.Post
 	var err error
 
-	if preFetchedPost != nil {
-		post = preFetchedPost
-	} else {
-		post, err = m.mc.GetPost(ctx, postID)
-		if err != nil {
-			return CachedPost{}, err
-		}
+	post, err = m.mc.GetPost(ctx, postID)
+	if err != nil {
+		return CachedPost{}, err
 	}
 
 	msg := post.Message
@@ -1252,7 +1249,8 @@ func (m *Mattermost) getCachedPostInfo(ctx context.Context, postID string, preFe
 	parentMessage := utils.FormatAndShortenSummary(msg, opts)
 
 	cp := CachedPost{
-		RootID: post.RootId,
+		RootID:     post.RootId,
+		ParentUser: parentUser,
 		// Fast native string concatenation
 		ReplyMsg: " (re @" + parentUser.Nick + ": " + parentMessage + ")",
 	}
@@ -1861,10 +1859,11 @@ func (m *Mattermost) handleReactionEvent(ctx context.Context, rmsg *model.WebSoc
 
 	parentID := reaction.PostId
 	// Fetch the post being reacted to (hits cache if already seen)
-	cachedPost, err := m.getCachedPostInfo(ctx, reaction.PostId, nil, rc.Mattermost.ShortenRepliesTo, "@", rc.Mattermost.Formatter.Unicode, logger)
+	cachedPost, err := m.getCachedPostInfo(ctx, reaction.PostId, rc.Mattermost.ShortenRepliesTo, "@", rc.Mattermost.Formatter.Unicode, logger)
 	if err == nil {
 		if cachedPost.RootID != "" {
 			parentID = cachedPost.RootID
+			parentUser = cachedPost.ParentUser
 		}
 
 		if !rc.Mattermost.HideReplies {
@@ -2208,7 +2207,7 @@ func (m *Mattermost) formatMessage(ctx context.Context, data *model.Post, eventT
 	sbSuffix.Grow(rc.Mattermost.ShortenRepliesTo + 32)
 
 	if !rc.Mattermost.HideReplies && data.RootId != "" {
-		cachedRoot, err := m.getCachedPostInfo(ctx, data.RootId, nil, rc.Mattermost.ShortenRepliesTo, "@", useUnicode, logger)
+		cachedRoot, err := m.getCachedPostInfo(ctx, data.RootId, rc.Mattermost.ShortenRepliesTo, "@", useUnicode, logger)
 		if err != nil {
 			logger.Errorf("Unable to get parent post for %#v", data)
 		} else {
