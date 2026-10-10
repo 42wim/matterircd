@@ -47,7 +47,7 @@ jobs:
   test-build-upload:
     strategy:
       matrix:
-        go-version: [1.26]
+        go-version: [1.26, 1.27]
         platform: [ubuntu-26.04]
     runs-on: ${{ matrix.platform }}
     steps:
