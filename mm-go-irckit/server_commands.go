@@ -892,6 +892,31 @@ func getTargetChannelIDs(s Server, u *User, channelName string) (string, string)
 	return dmChannelID, toUser.User
 }
 
+func resolveDMThread(u *User, toUser *User, hexID string) (string, string) {
+	channelID := toUser.User
+
+	postID := u.getPostIDFromHex(channelID, hexID)
+	if postID != "" {
+		return postID, channelID
+	}
+
+	if u.br == nil {
+		return "", channelID
+	}
+
+	dmChannelID, err := u.br.GetDMChannelID(u.ctx, toUser.User)
+	if err != nil || dmChannelID == "" || dmChannelID == channelID {
+		return "", channelID
+	}
+
+	postID = u.getPostIDFromHex(dmChannelID, hexID)
+	if postID != "" {
+		return postID, dmChannelID
+	}
+
+	return "", channelID
+}
+
 func resolveThreadTarget(s Server, u *User, channelName, threadID string) string {
 	cleanID := strings.TrimPrefix(threadID, "@@")
 	if cleanID == "" {
@@ -899,12 +924,13 @@ func resolveThreadTarget(s Server, u *User, channelName, threadID string) string
 	}
 
 	if len(cleanID) == 3 {
-		channelID, fallbackID := getTargetChannelIDs(s, u, channelName)
+		var channelID, postID string
 
-		postID := u.getPostIDFromHex(channelID, cleanID)
-		if postID == "" && fallbackID != "" {
-			channelID = fallbackID
+		if ch, ok := s.HasChannel(channelName); ok {
+			channelID = ch.ID()
 			postID = u.getPostIDFromHex(channelID, cleanID)
+		} else if toUser, ok := s.HasUser(channelName); ok {
+			postID, channelID = resolveDMThread(u, toUser, cleanID)
 		}
 
 		if postID == "" {
