@@ -775,10 +775,10 @@ func (m *Mattermost) GetChannelName(ctx context.Context, channelID string) strin
 		channel := m.mc.GetChannel(ctx, channelID)
 		if channel == nil {
 			logger.Warnf("Could not resolve missing channel name for %s", channelID)
+		} else {
+			channelName = channel.Name
 		}
 	}
-
-	channelName = m.mc.GetChannelName(ctx, channelID)
 
 	// return DM channels immediately
 	if m.mc.IsDMChannelName(channelName) {
@@ -1346,20 +1346,6 @@ func (m *Mattermost) handleWsActionPost(ctx context.Context, rmsg *model.WebSock
 	}
 
 	rc := m.cfg.Current()
-
-	useUnicode := rc.Mattermost.Formatter.Unicode
-
-	var sbSuffix strings.Builder
-	sbSuffix.Grow(rc.Mattermost.ShortenRepliesTo + 32)
-
-	if !rc.Mattermost.HideReplies && data.RootId != "" {
-		cachedRoot, err := m.getCachedPostInfo(ctx, data.RootId, nil, rc.Mattermost.ShortenRepliesTo, "@", useUnicode, logger)
-		if err != nil {
-			logger.Errorf("Unable to get parent post for %#v", data) //nolint:govet
-		} else {
-			sbSuffix.WriteString(cachedRoot.ReplyMsg)
-		}
-	}
 
 	// create new "ghost" user
 	ghost := m.GetUser(ctx, data.UserId)
@@ -1984,18 +1970,7 @@ func (m *Mattermost) GetFilesInfoFromPost(ctx context.Context, p *model.Post) []
 		return nil
 	}
 
-	mcFiles := m.mc.GetFilesInfoFromPost(ctx, p)
-	files := make([]*bridge.File, 0, len(mcFiles))
-
-	for _, f := range mcFiles {
-		files = append(files, &bridge.File{
-			Name: f.Name,
-			Size: f.Size,
-			URL:  f.URL,
-		})
-	}
-
-	return files
+	return m.GetFilesInfo(ctx, p.FileIds)
 }
 
 func (m *Mattermost) GetPosts(ctx context.Context, channelID string, limit int) []*bridge.Event {
