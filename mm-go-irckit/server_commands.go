@@ -896,6 +896,9 @@ func resolveThreadTarget(s Server, u *User, channelName, threadID string) string
 		postID := u.getPostIDFromHex(channelID, cleanID)
 		if postID == "" && fallbackID != "" && fallbackID != channelID {
 			postID = u.getPostIDFromHex(fallbackID, cleanID)
+			if postID != "" {
+				channelID = fallbackID
+			}
 		}
 
 		if postID == "" {
