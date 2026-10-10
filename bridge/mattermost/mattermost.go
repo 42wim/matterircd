@@ -1202,10 +1202,7 @@ func (m *Mattermost) getCachedPostInfo(ctx context.Context, postID string, newLe
 		return cp, nil
 	}
 
-	var post *model.Post
-	var err error
-
-	post, err = m.mc.GetPost(ctx, postID)
+	post, err := m.mc.GetPost(ctx, postID)
 	if err != nil {
 		return CachedPost{}, err
 	}
@@ -1861,9 +1858,10 @@ func (m *Mattermost) handleReactionEvent(ctx context.Context, rmsg *model.WebSoc
 	// Fetch the post being reacted to (hits cache if already seen)
 	cachedPost, err := m.getCachedPostInfo(ctx, reaction.PostId, rc.Mattermost.ShortenRepliesTo, "@", rc.Mattermost.Formatter.Unicode, logger)
 	if err == nil {
+		parentUser = cachedPost.ParentUser
+
 		if cachedPost.RootID != "" {
 			parentID = cachedPost.RootID
-			parentUser = cachedPost.ParentUser
 		}
 
 		if !rc.Mattermost.HideReplies {
