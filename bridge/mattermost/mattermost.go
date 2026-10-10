@@ -1191,7 +1191,6 @@ var markdownReplacer = strings.NewReplacer(
 	"~~~", "`",
 )
 
-//nolint:funlen,unparam
 func (m *Mattermost) getCachedPostInfo(ctx context.Context, postID string, newLen int, uncounted string, unicode bool, logger *logrus.Entry) (CachedPost, error) {
 	rc := m.cfg.Current()
 
