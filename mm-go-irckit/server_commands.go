@@ -870,28 +870,6 @@ func CmdQuit(s Server, u *User, msg *irc.Message) error {
 	return nil
 }
 
-func getTargetChannelIDs(s Server, u *User, channelName string) (string, string) {
-	if ch, ok := s.HasChannel(channelName); ok {
-		return ch.ID(), ""
-	}
-
-	toUser, ok := s.HasUser(channelName)
-	if !ok {
-		return "", ""
-	}
-
-	if u.br == nil {
-		return toUser.User, ""
-	}
-
-	dmChannelID, err := u.br.GetDMChannelID(u.ctx, toUser.User)
-	if err != nil || dmChannelID == "" || dmChannelID == toUser.User {
-		return toUser.User, ""
-	}
-
-	return dmChannelID, toUser.User
-}
-
 func resolveDMThread(u *User, toUser *User, hexID string) (string, string) {
 	channelID := toUser.User
 
