@@ -87,6 +87,15 @@ func (m *Mattermost) GetLastSentMsgs() []string {
 	return data
 }
 
+func (m *Mattermost) GetPostChannelID(ctx context.Context, postID string) string {
+	post, err := m.mc.GetPost(ctx, postID)
+	if err == nil && post != nil {
+		return post.ChannelId
+	}
+
+	return ""
+}
+
 func (m *Mattermost) GetPostSizeLimit() int {
 	return 16383
 }
@@ -813,9 +822,15 @@ func (m *Mattermost) GetChannelUsers(ctx context.Context, channelID string) ([]*
 }
 
 func (m *Mattermost) GetDMChannelID(ctx context.Context, userID string) string {
-	channelID, err := m.getDMChannelID(ctx, userID)
-	if err != nil {
-		return ""
+	if channelID, ok := m.dmChannelCache.Get(userID); ok {
+		return channelID
+	}
+
+	dmName := m.mc.GetDMChannelName(m.mc.User.Id, userID)
+
+	channelID := m.GetChannelID(ctx, dmName, "")
+	if channelID != "" {
+		m.dmChannelCache.Add(userID, channelID)
 	}
 
 	return channelID
@@ -1237,7 +1252,7 @@ func (m *Mattermost) getCachedPostInfo(ctx context.Context, postID string, preFe
 	parentMessage := utils.FormatAndShortenSummary(msg, opts)
 
 	cp := CachedPost{
-		RootID:   post.RootId,
+		RootID: post.RootId,
 		// Fast native string concatenation
 		ReplyMsg: " (re @" + parentUser.Nick + ": " + parentMessage + ")",
 	}

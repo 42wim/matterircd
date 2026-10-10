@@ -66,6 +66,8 @@ type Bridger interface {
 
 	GetPostsSince(ctx context.Context, channelID string, since int64) []*Event
 	GetPosts(ctx context.Context, channelID string, limit int) []*Event
+	GetPostChannelID(ctx context.Context, postID string) string
+	GetPostSizeLimit() int
 	GetPostThread(ctx context.Context, postID string) []*Event
 	GetReplayEvents(ctx context.Context, channelID string, since int64) []*Event
 	SearchPosts(ctx context.Context, search string) []*Event
@@ -80,8 +82,6 @@ type Bridger interface {
 	FormatterConfig() *config.FormatterConfig
 
 	IsChannelMember(channelID string) bool
-
-	GetPostSizeLimit() int
 
 	Ping(ctx context.Context, proto ...string) error
 

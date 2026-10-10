@@ -459,6 +459,10 @@ func (m *Mastodon) FormatterConfig() *config.FormatterConfig {
 	return &m.cfg.Current().Mastodon.Formatter
 }
 
+func (m *Mastodon) GetPostChannelID(ctx context.Context, postID string) string {
+	return ""
+}
+
 func (m *Mastodon) GetPostSizeLimit() int {
 	return 500
 }

@@ -1091,6 +1091,10 @@ func (s *Slack) FormatterConfig() *config.FormatterConfig {
 	return &s.cfg.Current().Slack.Formatter
 }
 
+func (s *Slack) GetPostChannelID(ctx context.Context, postID string) string {
+	return ""
+}
+
 func (s *Slack) GetPostSizeLimit() int {
 	return 4000
 }

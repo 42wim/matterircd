@@ -896,6 +896,24 @@ func resolveDMThread(u *User, toUser *User, hexID string) (string, string) {
 	return "", toUser.User
 }
 
+func getTargetChannelID(s Server, u *User, channelName string) string {
+	if ch, ok := s.HasChannel(channelName); ok {
+		return ch.ID()
+	}
+
+	if toUser, ok := s.HasUser(channelName); ok {
+		if u.br != nil {
+			if dmChannelID := u.br.GetDMChannelID(u.ctx, toUser.User); dmChannelID != "" {
+				return dmChannelID
+			}
+		}
+
+		return toUser.User
+	}
+
+	return ""
+}
+
 func resolveThreadTarget(s Server, u *User, channelName, threadID string) string {
 	cleanID := strings.TrimPrefix(threadID, "@@")
 	if cleanID == "" {
@@ -924,9 +942,21 @@ func resolveThreadTarget(s Server, u *User, channelName, threadID string) string
 	}
 
 	if u.br != nil {
-		if postID := u.br.NormalizePostID(cleanID); postID != "" {
+		postID := u.br.NormalizePostID(cleanID)
+		if postID == "" {
+			return ""
+		}
+
+		if channelName == "" {
 			return "@@" + postID
 		}
+
+		targetChannelID := getTargetChannelID(s, u, channelName)
+		if targetChannelID != "" && u.br.GetPostChannelID(u.ctx, postID) == targetChannelID {
+			return "@@" + postID
+		}
+
+		logger.Tracef("resolveThreadTarget: post %s does not belong to channel %s (%s)", threadID, channelName, targetChannelID)
 	}
 
 	return ""
