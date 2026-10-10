@@ -467,5 +467,9 @@ func (m *Mastodon) Ping(ctx context.Context, proto ...string) error {
 	return nil
 }
 
+func (m *Mastodon) NormalizePostID(msgID string) string {
+	return msgID
+}
+
 func (m *Mastodon) SendTyping(ctx context.Context, channelName string) {
 }

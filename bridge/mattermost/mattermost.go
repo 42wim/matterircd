@@ -194,6 +194,15 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 	return m, mc, nil
 }
 
+func (m *Mattermost) NormalizePostID(msgID string) string {
+	msgID = strings.ToLower(msgID)
+	if model.IsValidId(msgID) {
+		return msgID
+	}
+
+	return ""
+}
+
 func (m *Mattermost) Ping(ctx context.Context, proto ...string) error {
 	if m.mc == nil {
 		return errors.New("client not initialized")

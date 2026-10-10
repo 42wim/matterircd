@@ -1099,5 +1099,9 @@ func (s *Slack) Ping(ctx context.Context, proto ...string) error {
 	return nil
 }
 
+func (s *Slack) NormalizePostID(msgID string) string {
+	return msgID
+}
+
 func (s *Slack) SendTyping(ctx context.Context, channelName string) {
 }

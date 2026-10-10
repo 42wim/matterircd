@@ -897,13 +897,10 @@ func resolveThreadTarget(s Server, u *User, channelName, threadID string) string
 		return "@@" + postID
 	}
 
-	// Matrix event IDs start with "$" (e.g. $event_id).
-	if strings.HasPrefix(cleanID, "$") {
-		return "@@" + cleanID
-	}
-
-	if len(cleanID) == 26 {
-		return "@@" + strings.ToLower(cleanID)
+	if u.br != nil {
+		if postID := u.br.NormalizePostID(cleanID); postID != "" {
+			return "@@" + postID
+		}
 	}
 
 	return ""

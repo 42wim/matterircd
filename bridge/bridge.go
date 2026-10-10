@@ -84,6 +84,7 @@ type Bridger interface {
 
 	Ping(ctx context.Context, proto ...string) error
 
+	NormalizePostID(msgID string) string
 	SendTyping(ctx context.Context, channelName string)
 }
 
