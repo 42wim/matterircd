@@ -417,7 +417,7 @@ func (m *Mattermost) loginToMattermost(ctx context.Context, onWsConnect func()) 
 	quitChan := make(chan struct{})
 	m.quitChan = append(m.quitChan, quitChan)
 
-	// The workers end with Logout, or when the context of the login is cancelled.
+	// The workers end with Logout, or when the context of the login is canceled.
 	m.wsCtx, m.wsCancel = context.WithCancel(ctx)
 
 	// Start a pool of 10 concurrent workers
@@ -458,7 +458,7 @@ func (m *Mattermost) handleWsMessage(ctx context.Context, quitChan chan struct{}
 // processWsMessage handles a single websocket event. A panic only costs us that
 // one event, it must not take the whole process (and every other user) down.
 //
-//nolint:cyclop,funlen,gocognit,gocyclo
+//nolint:cyclop,funlen,gocyclo
 func (m *Mattermost) processWsMessage(ctx context.Context, message *matterclient.Message, logger *logrus.Entry) {
 	defer recoverPanic("websocket event handler")
 
@@ -661,7 +661,7 @@ func (m *Mattermost) logout(ctx context.Context) {
 }
 
 // logoutContext returns the context for the request that invalidates the session. The
-// context of the user is already cancelled when they disconnected, which would make the
+// context of the user is already canceled when they disconnected, which would make the
 // request fail right away and leave the session alive on the server. So only keep its
 // values, and bound the request ourselves.
 func logoutContext(ctx context.Context, timeoutSeconds int) (context.Context, context.CancelFunc) {
@@ -1950,6 +1950,7 @@ func (m *Mattermost) handleReactionEvent(ctx context.Context, rmsg *model.WebSoc
 	var event *bridge.Event
 
 	channelType := ""
+
 	channelID := broadcastOf(rmsg).ChannelId
 	if channelID == "" {
 		return

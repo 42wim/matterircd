@@ -132,8 +132,8 @@ func (u *User) handleEventChan(eventChan <-chan *bridge.Event) {
 
 // handleEvent processes a single event, it returns true when the event loop has to stop.
 //
-//nolint:gocyclo
-func (u *User) handleEvent(event *bridge.Event) (stop bool) {
+//nolint:funlen,gocyclo
+func (u *User) handleEvent(event *bridge.Event) bool {
 	// A panic while handling one event (e.g. because the user logged out in the
 	// middle of it) must neither take the process down nor stop the event loop.
 	defer recoverPanic("event handler")

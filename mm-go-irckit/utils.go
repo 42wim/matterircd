@@ -48,6 +48,7 @@ func compileCached(pattern string) *regexp.Regexp {
 	re, err := regexp.Compile(pattern)
 	if err != nil {
 		logger.Errorf("ignoring invalid regular expression %q: %v", pattern, err)
+
 		re = nil
 	}
 

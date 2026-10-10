@@ -41,7 +41,7 @@ func logout(u *User, toUser *User, args []string, service string) {
 
 	// logoutFrom logs out of the bridge, doing that here as well would make the
 	// second Logout wait for an event loop that already ended.
-	u.logoutFrom(br.Protocol())
+	_ = u.logoutFrom(br.Protocol())
 }
 
 func login(u *User, toUser *User, args []string, service string) {

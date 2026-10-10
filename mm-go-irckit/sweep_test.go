@@ -31,13 +31,8 @@ func newRealUser(t *testing.T, srv Server, name string) (*User, *fakeConn) {
 
 // newAliasedChannel returns a channel that the server knows by its id and its name,
 // like the ones that Server.Channel returns.
-func newAliasedChannel(srv Server, id, name string) Channel {
-	ch := NewChannel(srv, id, name, "mattermost", nil)
-
-	s, ok := srv.(*server)
-	if !ok {
-		panic("not a *server")
-	}
+func newAliasedChannel(s *server, id, name string) Channel {
+	ch := NewChannel(s, id, name, testService, nil)
 
 	s.Lock()
 	s.channels[id] = ch
@@ -45,6 +40,34 @@ func newAliasedChannel(srv Server, id, name string) Channel {
 	s.Unlock()
 
 	return ch
+}
+
+func newTestServer(t *testing.T) *server {
+	t.Helper()
+
+	s, ok := NewServer("test").(*server)
+	if !ok {
+		t.Fatal("not a *server")
+	}
+
+	return s
+}
+
+func mustJoin(t *testing.T, ch Channel, users ...*User) {
+	t.Helper()
+
+	for _, u := range users {
+		noError(t, ch.Join(u), "join "+u.Nick)
+	}
+}
+
+func isCanceled(u *User) bool {
+	select {
+	case <-u.ctx.Done():
+		return true
+	default:
+		return false
+	}
 }
 
 func hasChannel(u *User, ch Channel) bool {
@@ -77,10 +100,7 @@ func TestPartNotifiesRealUsers(t *testing.T) {
 	bob, bobConn := newRealUser(t, srv, "bob")
 	ghost := newGhost("ghost")
 
-	for _, u := range []*User{alice, bob, ghost} {
-		assert.NoError(t, ch.Join(u))
-	}
-
+	mustJoin(t, ch, alice, bob, ghost)
 	assert.Equal(t, 3, ch.Len())
 
 	ch.Part(alice, "bye")
@@ -89,11 +109,11 @@ func TestPartNotifiesRealUsers(t *testing.T) {
 	assert.False(t, ch.HasUser(alice))
 	assert.False(t, hasChannel(alice, ch))
 
-	for who, conn := range map[string]*fakeConn{"alice": aliceConn, "bob": bobConn} {
+	for i, conn := range []*fakeConn{aliceConn, bobConn} {
 		parts := commandsOf(conn.sent(), irc.PART)
-		if assert.Len(t, parts, 1, who) {
-			assert.Equal(t, "alice", parts[0].Prefix.Name, who)
-			assert.Equal(t, "bye", parts[0].Trailing, who)
+		if assert.Len(t, parts, 1, "connection %d", i) {
+			assert.Equal(t, alice.Nick, parts[0].Name, "connection %d", i)
+			assert.Equal(t, "bye", parts[0].Trailing, "connection %d", i)
 		}
 	}
 
@@ -113,42 +133,41 @@ func TestChannelMessagesReachRealUsers(t *testing.T) {
 	bob, bobConn := newRealUser(t, srv, "bob")
 	ghost := newGhost("ghost")
 
-	for _, u := range []*User{alice, bob, ghost} {
-		assert.NoError(t, ch.Join(u))
-	}
+	mustJoin(t, ch, alice, bob, ghost)
 
-	// only Join() itself and the names list are interesting here, not what came before
-	topicBefore := len(bobConn.sent())
+	// what came with joining isn't interesting here
+	conns := []*fakeConn{aliceConn, bobConn}
+	before := make([]int, len(conns))
+
+	for i, conn := range conns {
+		before[i] = len(conn.sent())
+	}
 
 	ch.Topic(ghost, "a new topic")
 	ch.SpoofMessage("someone", "hello\nworld")
 	ch.SpoofNotice("someone", "notice")
 	ch.Message(alice, "from alice")
 
-	for who, conn := range map[string]*fakeConn{"alice": aliceConn, "bob": bobConn} {
-		sent := conn.sent()
-		if who == "bob" {
-			sent = sent[topicBefore:]
-		}
+	for i, conn := range conns {
+		sent := conn.sent()[before[i]:]
 
-		assert.Len(t, commandsOf(sent, irc.TOPIC), 1, who)
-		assert.Len(t, commandsOf(sent, irc.NOTICE), 1, who)
+		assert.Len(t, commandsOf(sent, irc.TOPIC), 1, "connection %d", i)
+		assert.Len(t, commandsOf(sent, irc.NOTICE), 1, "connection %d", i)
 
 		var texts []string
+
 		for _, m := range commandsOf(sent, irc.PRIVMSG) {
 			texts = append(texts, m.Trailing)
 		}
 
-		assert.Equal(t, []string{"hello", "world", "from alice"}, texts, who)
+		assert.Equal(t, []string{"hello", "world", "from alice"}, texts, "connection %d", i)
 	}
 }
 
 // Nothing is left behind when the last real user is gone: the channels that only
 // have ghosts left are evicted and forgotten, channels with somebody in it are not.
 func TestSweepEvictsChannelsWithoutRealUsers(t *testing.T) {
-	srv := NewServer("test")
-	s, ok := srv.(*server)
-	assert.True(t, ok)
+	srv := newTestServer(t)
 
 	alice, _ := newRealUser(t, srv, "alice")
 	g1, g2, g3 := newGhost("g1"), newGhost("g2"), newGhost("g3")
@@ -160,24 +179,21 @@ func TestSweepEvictsChannelsWithoutRealUsers(t *testing.T) {
 	abandoned := newAliasedChannel(srv, "id-abandoned", "#abandoned")
 	empty := newAliasedChannel(srv, "id-empty", "#empty")
 
-	for _, u := range []*User{alice, g1, g2} {
-		assert.NoError(t, shared.Join(u))
-	}
-
-	for _, u := range []*User{g1, g3} {
-		assert.NoError(t, abandoned.Join(u))
-	}
+	mustJoin(t, shared, alice, g1, g2)
+	mustJoin(t, abandoned, g1, g3)
 
 	assert.True(t, hasChannel(g1, abandoned))
 	assert.True(t, hasChannel(g3, abandoned))
 
-	s.sweep(newGhost("quitter"))
+	srv.sweep(newGhost("quitter"))
 
 	// channels with a real user stay as they were
 	_, found := srv.HasChannel("id-shared")
 	assert.True(t, found)
+
 	_, found = srv.HasChannel("#shared")
 	assert.True(t, found)
+
 	assert.Equal(t, 3, shared.Len())
 	assert.True(t, hasChannel(g1, shared))
 
@@ -193,18 +209,18 @@ func TestSweepEvictsChannelsWithoutRealUsers(t *testing.T) {
 	assert.False(t, hasChannel(g3, abandoned))
 
 	// the ghost that is nowhere anymore is released, the other two still are in use
-	assert.Len(t, srv.(*server).users, 3, "alice, g1 and g2")
-	assert.Error(t, g3.ctx.Err(), "the context of an orphaned ghost has to be released")
-	assert.NoError(t, g1.ctx.Err())
+	assert.Len(t, srv.users, 3, "alice, g1 and g2")
+	assert.True(t, isCanceled(g3), "the context of an orphaned ghost has to be released")
+	assert.False(t, isCanceled(g1))
 
 	// all of it a second time changes nothing
-	s.sweep(newGhost("quitter"))
+	srv.sweep(newGhost("quitter"))
 	assert.Equal(t, 3, shared.Len())
 }
 
 // The server forgets everything about a user that quits.
 func TestQuitEvictsEverythingWhenTheLastRealUserLeaves(t *testing.T) {
-	srv := NewServer("test")
+	srv := newTestServer(t)
 
 	alice, _ := newRealUser(t, srv, "alice")
 	assert.True(t, srv.Add(alice))
@@ -216,17 +232,14 @@ func TestQuitEvictsEverythingWhenTheLastRealUserLeaves(t *testing.T) {
 
 	srv.BatchAdd(ghosts)
 
-	var chans []Channel
+	chans := make([]Channel, 0, 2)
 
 	for _, name := range []string{"#one", "#two"} {
 		ch := newAliasedChannel(srv, "id-"+name, name)
 		chans = append(chans, ch)
 
-		assert.NoError(t, ch.Join(alice))
-
-		for _, g := range ghosts {
-			assert.NoError(t, ch.Join(g))
-		}
+		mustJoin(t, ch, alice)
+		mustJoin(t, ch, ghosts...)
 	}
 
 	srv.Quit(alice, "bye")
@@ -257,13 +270,10 @@ func TestCmdPartEvictsGhosts(t *testing.T) {
 	ghosts := []*User{newGhost("g1"), newGhost("g2")}
 
 	ch := srv.Channel("#room")
-	assert.NoError(t, ch.Join(alice))
+	mustJoin(t, ch, alice)
+	mustJoin(t, ch, ghosts...)
 
-	for _, g := range ghosts {
-		assert.NoError(t, ch.Join(g))
-	}
-
-	assert.NoError(t, CmdPart(srv, alice, &irc.Message{Command: irc.PART, Params: []string{"#room"}}))
+	noError(t, CmdPart(srv, alice, &irc.Message{Command: irc.PART, Params: []string{"#room"}}), "PART")
 
 	assert.Equal(t, 0, ch.Len())
 	assert.Len(t, commandsOf(aliceConn.sent(), irc.PART), 1)
@@ -287,7 +297,7 @@ func TestEvictingGhostsDoesNotAllocatePerGhost(t *testing.T) {
 		members = append(members, newGhost(fmt.Sprintf("ghost%d", i)))
 	}
 
-	assert.NoError(t, ch.BatchJoin(members))
+	noError(t, ch.BatchJoin(members), "BatchJoin")
 	assert.Equal(t, ghosts, ch.Len())
 
 	var before, after runtime.MemStats
@@ -311,8 +321,7 @@ func TestEvictIfOnlyGhostsKeepsRealUsers(t *testing.T) {
 	alice, _ := newRealUser(t, srv, "alice")
 	ghost := newGhost("ghost")
 
-	assert.NoError(t, ch.Join(alice))
-	assert.NoError(t, ch.Join(ghost))
+	mustJoin(t, ch, alice, ghost)
 
 	assert.False(t, evictIfOnlyGhosts(ch))
 	assert.Equal(t, 2, ch.Len())

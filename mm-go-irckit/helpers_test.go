@@ -3,6 +3,7 @@ package irckit
 import (
 	"context"
 	"io"
+	"os"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -17,11 +18,25 @@ import (
 	"github.com/42wim/matterircd/config"
 )
 
-func init() {
+// testService is the protocol of fakeBridge, and the name of its service bot.
+const testService = "mattermost"
+
+func TestMain(m *testing.M) {
 	// main() normally installs the logger.
 	l := logrus.New()
 	l.SetOutput(io.Discard)
 	logger = logrus.NewEntry(l)
+
+	os.Exit(m.Run())
+}
+
+// noError stops the test right away, what comes after only makes sense without the error.
+func noError(t *testing.T, err error, what string) {
+	t.Helper()
+
+	if err != nil {
+		t.Fatalf("%s: %v", what, err)
+	}
 }
 
 // fakeConn is an in-memory Conn. Decode returns the scripted messages and then
@@ -61,6 +76,7 @@ func (c *fakeConn) Encode(m *irc.Message) error {
 	c.mu.Lock()
 	c.out = append(c.out, &cp)
 	c.mu.Unlock()
+
 	return nil
 }
 
@@ -112,6 +128,7 @@ type fakeBridge struct {
 
 func (b *fakeBridge) Logout(ctx context.Context) error {
 	b.logouts.Add(1)
+
 	if b.logoutHook != nil {
 		b.logoutHook(ctx)
 	}
@@ -119,7 +136,7 @@ func (b *fakeBridge) Logout(ctx context.Context) error {
 	return nil
 }
 
-func (b *fakeBridge) Protocol() string { return "mattermost" }
+func (b *fakeBridge) Protocol() string { return testService }
 
 func (b *fakeBridge) BridgeConfig() *config.BridgeConfig {
 	return &config.BridgeConfig{PartFake: true}
@@ -199,6 +216,7 @@ func within(t *testing.T, d time.Duration, what string, fn func()) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
+
 		fn()
 	}()
 

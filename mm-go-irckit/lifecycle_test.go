@@ -2,13 +2,15 @@ package irckit
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
 
+	bolt "go.etcd.io/bbolt"
+
 	"github.com/sorcix/irc"
 	"github.com/stretchr/testify/assert"
-	bolt "go.etcd.io/bbolt"
 
 	"github.com/42wim/matterircd/bridge"
 )
@@ -46,13 +48,18 @@ func (c *scriptedCommands) Run(_ Server, _ *User, msg *irc.Message) error {
 // A panic in a command handler is confined to that one message.
 func TestHandleSurvivesPanickingCommand(t *testing.T) {
 	cmds := &scriptedCommands{seen: make(chan string, 4)}
-	srv := ServerConfig{Commands: cmds}.Server().(*server)
+
+	srv, ok := ServerConfig{Commands: cmds}.Server().(*server)
+	if !ok {
+		t.Fatal("not a *server")
+	}
 
 	u, _ := newTestUser(t, srv)
 
 	go srv.handle(u)
 
 	u.DecodeCh <- irc.ParseMessage("BOOM")
+
 	u.DecodeCh <- irc.ParseMessage("PING 1")
 
 	select {
@@ -79,7 +86,10 @@ func TestConnectHandshakeFailureReleasesDecode(t *testing.T) {
 	}
 
 	err := srv.Connect(u)
-	assert.ErrorIs(t, err, ErrHandshakeFailed)
+	if !errors.Is(err, ErrHandshakeFailed) {
+		t.Fatalf("Connect() = %v, want %v", err, ErrHandshakeFailed)
+	}
+
 	assert.True(t, fc.isClosed())
 
 	// Decode() ends by quitting the user, which cancels its context.
@@ -124,14 +134,14 @@ func TestLogoutCommandLogsOutOnce(t *testing.T) {
 	}
 	u.br = fb
 
-	within(t, 5*time.Second, "logout", func() { logout(u, serviceUser("mattermost"), nil, "mattermost") })
+	within(t, 5*time.Second, "logout", func() { logout(u, serviceUser(), nil, testService) })
 
 	assert.EqualValues(t, 1, fb.logouts.Load())
 	assert.Nil(t, u.br)
 	assert.False(t, u.inprogress.Load())
 
 	// logging out when we're not logged in is not an error
-	assert.NotPanics(t, func() { logout(u, serviceUser("mattermost"), nil, "mattermost") })
+	assert.NotPanics(t, func() { logout(u, serviceUser(), nil, testService) })
 }
 
 func TestLoginToUnknownProtocol(t *testing.T) {
@@ -151,17 +161,27 @@ func TestCloseGhostUser(t *testing.T) {
 	})
 }
 
+// runEventLoop runs the event loop of u in the background, the returned channel is
+// closed when it ends.
+func runEventLoop(u *User, events <-chan *bridge.Event) <-chan struct{} {
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+
+		u.handleEventChan(events)
+	}()
+
+	return done
+}
+
 func TestEventLoopStopsOnLogoutEvent(t *testing.T) {
 	u, _ := newTestUser(t, NewServer("test"))
 	events := make(chan *bridge.Event)
 
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		u.handleEventChan(events)
-	}()
+	done := runEventLoop(u, events)
 
-	events <- &bridge.Event{Type: "logout", Data: &bridge.LogoutEvent{}}
+	events <- &bridge.Event{Data: &bridge.LogoutEvent{}}
 
 	select {
 	case <-done:
@@ -177,11 +197,7 @@ func TestEventLoopStopsWhenUserDisconnects(t *testing.T) {
 	u.lastViewedAtDB = testDB(t)
 	u.lastEventTime.Store(1234567)
 
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		u.handleEventChan(make(chan *bridge.Event))
-	}()
+	done := runEventLoop(u, make(chan *bridge.Event))
 
 	u.cancel()
 
@@ -201,15 +217,13 @@ func TestEventLoopSurvivesPanickingEvent(t *testing.T) {
 	u, _ := newTestUser(t, NewServer("test"))
 	events := make(chan *bridge.Event)
 
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		u.handleEventChan(events)
-	}()
+	done := runEventLoop(u, events)
 
 	events <- &bridge.Event{Type: "channel_topic", Data: &bridge.ChannelTopicEvent{ChannelID: "c", UserID: "u", Text: "topic"}}
+
 	events <- nil
-	events <- &bridge.Event{Type: "logout", Data: &bridge.LogoutEvent{}}
+
+	events <- &bridge.Event{Data: &bridge.LogoutEvent{}}
 
 	select {
 	case <-done:

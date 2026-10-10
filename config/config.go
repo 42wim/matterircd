@@ -513,7 +513,7 @@ func (c *Config) publishRuntimeConfig() error {
 // The returned function unregisters the hook again. A hook keeps everything it
 // references alive, so hooks of things with a limited lifetime (like a login
 // session) must be unregistered when that lifetime ends.
-func (c *Config) RegisterReloadHook(hook func(rc *RuntimeConfig)) (unregister func()) {
+func (c *Config) RegisterReloadHook(hook func(rc *RuntimeConfig)) func() {
 	c.hooksMu.Lock()
 	defer c.hooksMu.Unlock()
 

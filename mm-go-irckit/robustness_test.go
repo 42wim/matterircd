@@ -11,8 +11,9 @@ import (
 	"github.com/42wim/matterircd/bridge"
 )
 
-func serviceUser(nick string) *User {
-	return &User{UserInfo: &bridge.UserInfo{Nick: nick, User: nick, Host: "service", Ghost: true}}
+// serviceUser is the bot that a service message is sent to.
+func serviceUser() *User {
+	return &User{UserInfo: &bridge.UserInfo{Nick: testService, User: testService, Host: serviceName, Ghost: true}}
 }
 
 // A message to the login service that only consists of quotes parses into zero
@@ -22,7 +23,7 @@ func TestHandleServiceBotEmptyCommand(t *testing.T) {
 		u, fc := newTestUser(t, NewServer("test"))
 
 		assert.NotPanics(t, func() {
-			u.handleServiceBot("mattermost", serviceUser("mattermost"), msg)
+			u.handleServiceBot(testService, serviceUser(), msg)
 		}, msg)
 
 		// we get the usage hint instead of silence
@@ -36,7 +37,7 @@ func TestHandleServiceBotEmptyCommand(t *testing.T) {
 func TestHandleServiceBotUnbalancedQuotes(t *testing.T) {
 	u, fc := newTestUser(t, NewServer("test"))
 
-	u.handleServiceBot("mattermost", serviceUser("mattermost"), `login "foo`)
+	u.handleServiceBot(testService, serviceUser(), `login "foo`)
 
 	out := fc.sent()
 	if assert.Len(t, out, 1) {
@@ -52,7 +53,7 @@ func TestHandleServiceBotRecoversFromPanic(t *testing.T) {
 	u.br = &fakeBridge{}
 
 	assert.NotPanics(t, func() {
-		u.handleServiceBot("mattermost", serviceUser("mattermost"), "lastsent")
+		u.handleServiceBot(testService, serviceUser(), "lastsent")
 	})
 }
 
@@ -65,10 +66,11 @@ func TestKickRequiresChannelAndNick(t *testing.T) {
 	u.br = &fakeBridge{}
 
 	var err error
+
 	assert.NotPanics(t, func() {
 		err = cmds.Run(srv, u, &irc.Message{Command: irc.KICK, Params: []string{"#channel"}})
 	})
-	assert.NoError(t, err)
+	noError(t, err, "KICK without a nick")
 
 	out := fc.sent()
 	if assert.Len(t, out, 1) {
@@ -85,6 +87,7 @@ func TestDecodePrivmsgWithoutParams(t *testing.T) {
 	go u.Decode()
 
 	var got []string
+
 	for range 3 {
 		m := recvMsg(t, u.DecodeCh)
 		got = append(got, m.Command+" "+strings.Join(m.Params, ",")+" "+m.Trailing)
@@ -107,6 +110,7 @@ func TestDecodePrivmsgWithoutParams(t *testing.T) {
 func TestDecodePasteBufferJoinsLines(t *testing.T) {
 	u, fc := newTestUser(t, nil)
 	u.br = &fakeBridge{}
+
 	fc.feed("PRIVMSG a :one", "PRIVMSG a :two", "PRIVMSG b :three")
 
 	go u.Decode()
@@ -150,6 +154,7 @@ func setLastViewedDelay(t *testing.T, d time.Duration) {
 
 	old := lastViewedMaxDelay
 	lastViewedMaxDelay = d
+
 	t.Cleanup(func() { lastViewedMaxDelay = old })
 }
 

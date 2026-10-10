@@ -22,11 +22,21 @@ func newReloadableConfig(t *testing.T) *Config {
 		t.Fatalf("unable to load default config: %v", err)
 	}
 
-	if err := os.WriteFile(path, []byte("Debug = true\n"), 0o600); err != nil {
+	err = os.WriteFile(path, []byte("Debug = true\n"), 0o600)
+	if err != nil {
 		t.Fatalf("unable to write config file: %v", err)
 	}
 
 	return cfg
+}
+
+func mustReload(t *testing.T, cfg *Config) {
+	t.Helper()
+
+	err := cfg.Reload()
+	if err != nil {
+		t.Fatalf("unable to reload config: %v", err)
+	}
 }
 
 func TestReloadHooks(t *testing.T) {
@@ -41,7 +51,7 @@ func TestReloadHooks(t *testing.T) {
 	})
 	unregisterSecond := cfg.RegisterReloadHook(func(*RuntimeConfig) { second++ })
 
-	assert.NoError(t, cfg.Reload())
+	mustReload(t, cfg)
 	assert.Equal(t, 1, first)
 	assert.Equal(t, 1, second)
 
@@ -49,7 +59,7 @@ func TestReloadHooks(t *testing.T) {
 	unregisterSecond()
 	unregisterSecond()
 
-	assert.NoError(t, cfg.Reload())
+	mustReload(t, cfg)
 	assert.Equal(t, 2, first)
 	assert.Equal(t, 1, second)
 }
@@ -85,8 +95,8 @@ func TestReloadHookUnregistersDuringReload(t *testing.T) {
 		unregister()
 	})
 
-	assert.NoError(t, cfg.Reload())
-	assert.NoError(t, cfg.Reload())
+	mustReload(t, cfg)
+	mustReload(t, cfg)
 	assert.Equal(t, 1, calls)
 }
 
@@ -97,21 +107,17 @@ func TestReloadHooksConcurrent(t *testing.T) {
 	var wg sync.WaitGroup
 
 	for range 8 {
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-
+		wg.Go(func() {
 			for range 50 {
 				unregister := cfg.RegisterReloadHook(func(*RuntimeConfig) {})
 				unregister()
 			}
-		}()
+		})
 	}
 
 	// reloads are never run concurrently with each other
 	for range 5 {
-		assert.NoError(t, cfg.Reload())
+		mustReload(t, cfg)
 	}
 
 	wg.Wait()

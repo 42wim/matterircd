@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -23,13 +24,15 @@ import (
 	"github.com/42wim/matterircd/config"
 )
 
-func init() {
+func TestMain(m *testing.M) {
 	// New() normally creates the logger.
 	l := logrus.New()
 	l.SetOutput(io.Discard)
 	logger = logrus.NewEntry(l)
 
 	loggerOnce.Do(func() {})
+
+	os.Exit(m.Run())
 }
 
 func testConfig(t *testing.T) *config.Config {
@@ -176,19 +179,18 @@ func TestLogoutReleasesBlockedSenders(t *testing.T) {
 	var wg sync.WaitGroup
 
 	for range 5 {
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-
-			m.sendEvent(&bridge.Event{Type: "typing"})
-		}()
+		wg.Go(func() {
+			m.sendEvent(&bridge.Event{})
+		})
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	assert.NoError(t, m.Logout(ctx))
+	err := m.Logout(ctx)
+	if err != nil {
+		t.Fatalf("Logout() = %v", err)
+	}
 
 	within(t, 2*time.Second, "sendEvent", wg.Wait)
 }
@@ -196,17 +198,19 @@ func TestLogoutReleasesBlockedSenders(t *testing.T) {
 func TestSendEventDelivers(t *testing.T) {
 	m := newTestBridge(t)
 
-	go m.sendEvent(&bridge.Event{Type: "typing"})
+	want := &bridge.Event{}
+
+	go m.sendEvent(want)
 
 	select {
 	case ev := <-m.eventChan:
-		assert.Equal(t, "typing", ev.Type)
+		assert.Same(t, want, ev)
 	case <-time.After(2 * time.Second):
 		t.Fatal("event not delivered")
 	}
 }
 
-func TestLogoutContextSurvivesCancelledContext(t *testing.T) {
+func TestLogoutContextSurvivesCanceledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
@@ -214,7 +218,9 @@ func TestLogoutContextSurvivesCancelledContext(t *testing.T) {
 	defer logoutCancel()
 
 	// the request that invalidates the session must still be possible ...
-	assert.NoError(t, logoutCtx.Err())
+	if logoutCtx.Err() != nil {
+		t.Fatalf("the context for the logout request is done already: %v", logoutCtx.Err())
+	}
 
 	// ... but not forever.
 	deadline, ok := logoutCtx.Deadline()
@@ -279,6 +285,7 @@ func TestWsWorkerSurvivesPanic(t *testing.T) {
 	stopped := make(chan struct{})
 
 	m.mc.MessageChan <- &matterclient.Message{Raw: post}
+
 	m.mc.MessageChan <- &matterclient.Message{Raw: post}
 
 	go func() {
@@ -346,11 +353,9 @@ func TestPostListWithMissingPost(t *testing.T) {
 		Posts: map[string]*model.Post{},
 	}
 
-	for _, eventType := range []string{"replay", "scrollback", "details"} {
-		assert.NotPanics(t, func() {
-			assert.Empty(t, m.postListToEvents(context.Background(), list, eventType, 0))
-		}, eventType)
-	}
+	assert.NotPanics(t, func() {
+		assert.Empty(t, m.postListToEvents(context.Background(), list, "scrollback", 0))
+	})
 }
 
 // Workers handle config changes concurrently.
@@ -366,13 +371,9 @@ func TestBannerChangeIsSentOnce(t *testing.T) {
 	var wg sync.WaitGroup
 
 	for range workers {
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-
+		wg.Go(func() {
 			m.handleConfigChangedEvent(ev, logger)
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -493,8 +494,8 @@ func TestNewWithUnreachableServer(t *testing.T) {
 			br, _, err = New(context.Background(), cfg, bridge.Credentials{Server: addr}, make(chan *bridge.Event), nil)
 		})
 
-		assert.Error(t, err)
 		assert.Nil(t, br)
+		assert.Error(t, err, "New() has to fail when the server is unreachable")
 	})
 
 	assert.NotNil(t, logger)

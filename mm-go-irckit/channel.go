@@ -200,7 +200,7 @@ func (ch *channel) Part(u *User, text string) {
 	u.Encode(msg) //nolint:errcheck
 
 	for _, to := range users {
-		to.Encode(msg)
+		to.Encode(msg) //nolint:errcheck
 	}
 }
 
@@ -326,7 +326,7 @@ func (ch *channel) Topic(from Prefixer, text string) {
 
 	// only send topic messages to real users
 	for _, to := range users {
-		to.Encode(msg)
+		to.Encode(msg) //nolint:errcheck
 	}
 }
 
@@ -483,7 +483,7 @@ func (ch *channel) Join(u *User) error {
 
 	// only send join messages to real users
 	for _, to := range ch.realUsers() {
-		to.Encode(msg)
+		to.Encode(msg) //nolint:errcheck
 	}
 
 	ch.SendNamesResponse(u)
@@ -520,6 +520,7 @@ func (ch *channel) realUsers() []*User {
 	defer ch.mu.RUnlock()
 
 	var users []*User
+
 	for _, u := range ch.usersIdx {
 		if !u.Ghost {
 			users = append(users, u)

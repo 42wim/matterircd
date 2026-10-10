@@ -394,14 +394,22 @@ func (u *User) Decode() {
 
 // incomingLogLine describes a message from the client for the log, without the credentials in it.
 func incomingLogLine(msg *irc.Message) string {
+	const (
+		serviceSlack      = "slack"
+		serviceMattermost = "mattermost"
+		serviceMastodon   = "mastodon"
+		loginCommand      = "login"
+	)
+
 	dmsg := "<- " + msg.String()
 
 	switch {
-	case msg.Command == irc.PRIVMSG && len(msg.Params) > 0 && (msg.Params[0] == "slack" || msg.Params[0] == "mattermost" || msg.Params[0] == "mastodon"):
+	case msg.Command == irc.PRIVMSG && len(msg.Params) > 0 &&
+		(msg.Params[0] == serviceSlack || msg.Params[0] == serviceMattermost || msg.Params[0] == serviceMastodon):
 		// Don't log sensitive information
 		trail := strings.Split(msg.Trailing, " ")
-		if (msg.Trailing != "" && trail[0] == "login") || (len(msg.Params) > 1 && msg.Params[1] == "login") {
-			dmsg = "<- PRIVMSG " + msg.Params[0] + " :login [redacted]"
+		if (msg.Trailing != "" && trail[0] == loginCommand) || (len(msg.Params) > 1 && msg.Params[1] == loginCommand) {
+			dmsg = "<- PRIVMSG " + msg.Params[0] + " :" + loginCommand + " [redacted]"
 		}
 	case msg.Command == irc.PASS:
 		dmsg = "<- PASS [redacted]"
