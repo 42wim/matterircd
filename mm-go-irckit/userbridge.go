@@ -2183,7 +2183,7 @@ func (u *User) updateLastViewed(channelID string) {
 }
 
 func (u *User) dbBucketName() []byte {
-	if br := u.br; br != nil && br.Protocol() != "" {
+	if br := u.currentBridge(); br != nil && br.Protocol() != "" {
 		return []byte(br.Protocol() + ":" + u.User)
 	}
 

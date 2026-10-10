@@ -309,7 +309,7 @@ func (u *User) Decode() {
 					if bufferedMsg.Params[0] == msg.Params[0] {
 						// Guard against exceeding post size limit
 						postLimit := 460
-						if br := u.br; br != nil {
+						if br := u.currentBridge(); br != nil {
 							postLimit = br.GetPostSizeLimit()
 						}
 

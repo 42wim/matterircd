@@ -543,8 +543,8 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 		}
 
 		// no messages when we're not logged in (anymore)
-		if u.br == nil {
-			logger.Tracef("u.br was nil, ignored message")
+		if u.currentBridge() == nil {
+			logger.Tracef("bridge was nil, ignored message")
 			return nil
 		}
 
