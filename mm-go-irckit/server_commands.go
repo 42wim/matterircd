@@ -871,28 +871,29 @@ func CmdQuit(s Server, u *User, msg *irc.Message) error {
 }
 
 func resolveDMThread(u *User, toUser *User, hexID string) (string, string) {
-	channelID := toUser.User
+	var dmChannelID string
 
-	postID := u.getPostIDFromHex(channelID, hexID)
+	if u.br != nil {
+		dmChannelID = u.br.GetDMChannelID(u.ctx, toUser.User)
+	}
+
+	if dmChannelID != "" {
+		postID := u.getPostIDFromHex(dmChannelID, hexID)
+		if postID != "" {
+			return postID, dmChannelID
+		}
+	}
+
+	postID := u.getPostIDFromHex(toUser.User, hexID)
 	if postID != "" {
-		return postID, channelID
+		return postID, toUser.User
 	}
 
-	if u.br == nil {
-		return "", channelID
+	if dmChannelID != "" {
+		return "", dmChannelID
 	}
 
-	dmChannelID := u.br.GetDMChannelID(u.ctx, toUser.User)
-	if dmChannelID == "" || dmChannelID == channelID {
-		return "", channelID
-	}
-
-	postID = u.getPostIDFromHex(dmChannelID, hexID)
-	if postID != "" {
-		return postID, dmChannelID
-	}
-
-	return "", channelID
+	return "", toUser.User
 }
 
 func resolveThreadTarget(s Server, u *User, channelName, threadID string) string {

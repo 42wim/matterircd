@@ -813,11 +813,12 @@ func (m *Mattermost) GetChannelUsers(ctx context.Context, channelID string) ([]*
 }
 
 func (m *Mattermost) GetDMChannelID(ctx context.Context, userID string) string {
-	if channelID, ok := m.dmChannelCache.Get(userID); ok {
-		return channelID
+	channelID, err := m.getDMChannelID(ctx, userID)
+	if err != nil {
+		return ""
 	}
 
-	return ""
+	return channelID
 }
 
 func (m *Mattermost) GetDMChannelName(userID1 string, userID2 string) string {
