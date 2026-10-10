@@ -166,6 +166,10 @@ func (m *Mastodon) GetChannelUsers(ctx context.Context, channelID string) ([]*br
 	return nil, nil
 }
 
+func (m *Mastodon) GetDMChannelID(ctx context.Context, userID string) string {
+	return ""
+}
+
 func (m *Mastodon) GetDMChannelName(userID1 string, userID2 string) string {
 	return ""
 }
@@ -455,6 +459,10 @@ func (m *Mastodon) FormatterConfig() *config.FormatterConfig {
 	return &m.cfg.Current().Mastodon.Formatter
 }
 
+func (m *Mastodon) GetPostChannelID(ctx context.Context, postID string) string {
+	return ""
+}
+
 func (m *Mastodon) GetPostSizeLimit() int {
 	return 500
 }
@@ -465,6 +473,10 @@ func (m *Mastodon) GetReplayEvents(ctx context.Context, channelID string, since 
 
 func (m *Mastodon) Ping(ctx context.Context, proto ...string) error {
 	return nil
+}
+
+func (m *Mastodon) NormalizePostID(msgID string) string {
+	return msgID
 }
 
 func (m *Mastodon) SendTyping(ctx context.Context, channelName string) {

@@ -87,6 +87,15 @@ func (m *Mattermost) GetLastSentMsgs() []string {
 	return data
 }
 
+func (m *Mattermost) GetPostChannelID(ctx context.Context, postID string) string {
+	post, err := m.mc.GetPost(ctx, postID)
+	if err == nil && post != nil {
+		return post.ChannelId
+	}
+
+	return ""
+}
+
 func (m *Mattermost) GetPostSizeLimit() int {
 	return 16383
 }
@@ -192,6 +201,15 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 	m.instanceTag = string(b)
 
 	return m, mc, nil
+}
+
+func (m *Mattermost) NormalizePostID(msgID string) string {
+	msgID = strings.ToLower(msgID)
+	if model.IsValidId(msgID) {
+		return msgID
+	}
+
+	return ""
 }
 
 func (m *Mattermost) Ping(ctx context.Context, proto ...string) error {
@@ -803,6 +821,21 @@ func (m *Mattermost) GetChannelUsers(ctx context.Context, channelID string) ([]*
 	return users, nil
 }
 
+func (m *Mattermost) GetDMChannelID(ctx context.Context, userID string) string {
+	if channelID, ok := m.dmChannelCache.Get(userID); ok {
+		return channelID
+	}
+
+	dmName := m.mc.GetDMChannelName(m.mc.User.Id, userID)
+
+	channelID := m.GetChannelID(ctx, dmName, "")
+	if channelID != "" {
+		m.dmChannelCache.Add(userID, channelID)
+	}
+
+	return channelID
+}
+
 func (m *Mattermost) GetDMChannelName(userID1 string, userID2 string) string {
 	return m.mc.GetDMChannelName(userID1, userID2)
 }
@@ -1219,7 +1252,7 @@ func (m *Mattermost) getCachedPostInfo(ctx context.Context, postID string, preFe
 	parentMessage := utils.FormatAndShortenSummary(msg, opts)
 
 	cp := CachedPost{
-		RootID:   post.RootId,
+		RootID: post.RootId,
 		// Fast native string concatenation
 		ReplyMsg: " (re @" + parentUser.Nick + ": " + parentMessage + ")",
 	}

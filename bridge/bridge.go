@@ -55,6 +55,7 @@ type Bridger interface {
 	GetUserByUsername(ctx context.Context, username string) *UserInfo
 	SearchUsers(ctx context.Context, query string) ([]*UserInfo, error)
 
+	GetDMChannelID(ctx context.Context, userID string) string
 	GetDMChannelName(userID1 string, userID2 string) string
 	GetDMUser(ctx context.Context, channelName string) *UserInfo
 	GetDMUserIDs(channelName string) (string, string, bool)
@@ -65,6 +66,8 @@ type Bridger interface {
 
 	GetPostsSince(ctx context.Context, channelID string, since int64) []*Event
 	GetPosts(ctx context.Context, channelID string, limit int) []*Event
+	GetPostChannelID(ctx context.Context, postID string) string
+	GetPostSizeLimit() int
 	GetPostThread(ctx context.Context, postID string) []*Event
 	GetReplayEvents(ctx context.Context, channelID string, since int64) []*Event
 	SearchPosts(ctx context.Context, search string) []*Event
@@ -80,10 +83,9 @@ type Bridger interface {
 
 	IsChannelMember(channelID string) bool
 
-	GetPostSizeLimit() int
-
 	Ping(ctx context.Context, proto ...string) error
 
+	NormalizePostID(msgID string) string
 	SendTyping(ctx context.Context, channelName string)
 }
 

@@ -870,12 +870,116 @@ func CmdQuit(s Server, u *User, msg *irc.Message) error {
 	return nil
 }
 
+func resolveDMThread(u *User, toUser *User, hexID string) (string, string) {
+	var dmChannelID string
+
+	if u.br != nil {
+		dmChannelID = u.br.GetDMChannelID(u.ctx, toUser.User)
+	}
+
+	if dmChannelID != "" {
+		postID := u.getPostIDFromHex(dmChannelID, hexID)
+		if postID != "" {
+			return postID, dmChannelID
+		}
+	}
+
+	postID := u.getPostIDFromHex(toUser.User, hexID)
+	if postID != "" {
+		return postID, toUser.User
+	}
+
+	if dmChannelID != "" {
+		return "", dmChannelID
+	}
+
+	return "", toUser.User
+}
+
+func getTargetChannelID(s Server, u *User, channelName string) string {
+	if ch, ok := s.HasChannel(channelName); ok {
+		return ch.ID()
+	}
+
+	toUser, ok := s.HasUser(channelName)
+	if !ok {
+		return ""
+	}
+
+	if u.br != nil {
+		dmChannelID := u.br.GetDMChannelID(u.ctx, toUser.User)
+		if dmChannelID != "" {
+			return dmChannelID
+		}
+	}
+
+	return toUser.User
+}
+
+func resolveThreadTarget(s Server, u *User, channelName, threadID string) string {
+	cleanID := strings.TrimPrefix(threadID, "@@")
+	if cleanID == "" {
+		return channelName
+	}
+
+	if len(cleanID) == 3 {
+		var channelID, postID string
+
+		if ch, ok := s.HasChannel(channelName); ok {
+			channelID = ch.ID()
+			postID = u.getPostIDFromHex(channelID, cleanID)
+		} else if toUser, ok := s.HasUser(channelName); ok {
+			postID, channelID = resolveDMThread(u, toUser, cleanID)
+		}
+
+		if postID == "" {
+			logger.Tracef("resolveThreadTarget: failed to resolve %s in channel %s (%s)", threadID, channelName, channelID)
+
+			return ""
+		}
+
+		logger.Tracef("resolveThreadTarget: resolved %s in channel %s (%s) to post %s", threadID, channelName, channelID, postID)
+
+		return "@@" + postID
+	}
+
+	if u.br != nil {
+		postID := u.br.NormalizePostID(cleanID)
+		if postID == "" {
+			return ""
+		}
+
+		if channelName == "" {
+			return "@@" + postID
+		}
+
+		targetChannelID := getTargetChannelID(s, u, channelName)
+		if targetChannelID != "" && u.br.GetPostChannelID(u.ctx, postID) == targetChannelID {
+			return "@@" + postID
+		}
+
+		logger.Tracef("resolveThreadTarget: post %s does not belong to channel %s (%s)", threadID, channelName, targetChannelID)
+	}
+
+	return ""
+}
+
 func CmdTagMsg(s Server, u *User, msg *irc.Message) error {
 	if len(msg.Params) == 0 {
 		return nil
 	}
 
 	target := msg.Params[0]
+
+	if len(msg.Params) > 1 {
+		target = resolveThreadTarget(s, u, target, msg.Params[1])
+	} else if strings.HasPrefix(target, "@@") {
+		target = resolveThreadTarget(s, u, "", target)
+	}
+
+	if target == "" {
+		return nil
+	}
 
 	if u.br != nil {
 		u.br.SendTyping(u.ctx, target)

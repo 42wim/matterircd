@@ -365,6 +365,10 @@ func (s *Slack) GetChannelUsers(ctx context.Context, channelID string) ([]*bridg
 	return users, nil
 }
 
+func (s *Slack) GetDMChannelID(ctx context.Context, userID string) string {
+	return ""
+}
+
 func (s *Slack) GetDMChannelName(userID1 string, userID2 string) string {
 	return ""
 }
@@ -1087,6 +1091,10 @@ func (s *Slack) FormatterConfig() *config.FormatterConfig {
 	return &s.cfg.Current().Slack.Formatter
 }
 
+func (s *Slack) GetPostChannelID(ctx context.Context, postID string) string {
+	return ""
+}
+
 func (s *Slack) GetPostSizeLimit() int {
 	return 4000
 }
@@ -1097,6 +1105,10 @@ func (s *Slack) GetReplayEvents(ctx context.Context, channelID string, since int
 
 func (s *Slack) Ping(ctx context.Context, proto ...string) error {
 	return nil
+}
+
+func (s *Slack) NormalizePostID(msgID string) string {
+	return msgID
 }
 
 func (s *Slack) SendTyping(ctx context.Context, channelName string) {
