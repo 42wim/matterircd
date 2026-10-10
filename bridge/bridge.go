@@ -55,7 +55,7 @@ type Bridger interface {
 	GetUserByUsername(ctx context.Context, username string) *UserInfo
 	SearchUsers(ctx context.Context, query string) ([]*UserInfo, error)
 
-	GetDMChannelID(ctx context.Context, userID string) (string, error)
+	GetDMChannelID(ctx context.Context, userID string) string
 	GetDMChannelName(userID1 string, userID2 string) string
 	GetDMUser(ctx context.Context, channelName string) *UserInfo
 	GetDMUserIDs(channelName string) (string, string, bool)

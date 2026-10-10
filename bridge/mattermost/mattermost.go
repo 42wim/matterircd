@@ -581,7 +581,7 @@ func (m *Mattermost) MsgUser(ctx context.Context, userID, text string) (string, 
 }
 
 func (m *Mattermost) MsgUserThread(ctx context.Context, userID, parentID, text string) (string, error) {
-	channelID, err := m.GetDMChannelID(ctx, userID)
+	channelID, err := m.getDMChannelID(ctx, userID)
 	if err != nil {
 		return "", err
 	}
@@ -810,6 +810,14 @@ func (m *Mattermost) GetChannelUsers(ctx context.Context, channelID string) ([]*
 	}
 
 	return users, nil
+}
+
+func (m *Mattermost) GetDMChannelID(ctx context.Context, userID string) string {
+	if channelID, ok := m.dmChannelCache.Get(userID); ok {
+		return channelID
+	}
+
+	return ""
 }
 
 func (m *Mattermost) GetDMChannelName(userID1 string, userID2 string) string {
@@ -1928,7 +1936,7 @@ func (m *Mattermost) UpdateLastViewed(ctx context.Context, channelID string) {
 }
 
 func (m *Mattermost) UpdateLastViewedUser(ctx context.Context, userID string) error {
-	channelID, err := m.GetDMChannelID(ctx, userID)
+	channelID, err := m.getDMChannelID(ctx, userID)
 	if err != nil {
 		return err
 	}
@@ -2182,7 +2190,7 @@ func (m *Mattermost) handleTypingEvent(ctx context.Context, rmsg *model.WebSocke
 	}
 }
 
-func (m *Mattermost) GetDMChannelID(ctx context.Context, userID string) (string, error) {
+func (m *Mattermost) getDMChannelID(ctx context.Context, userID string) (string, error) {
 	if channelID, ok := m.dmChannelCache.Get(userID); ok {
 		return channelID, nil
 	}

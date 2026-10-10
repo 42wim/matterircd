@@ -882,8 +882,8 @@ func resolveDMThread(u *User, toUser *User, hexID string) (string, string) {
 		return "", channelID
 	}
 
-	dmChannelID, err := u.br.GetDMChannelID(u.ctx, toUser.User)
-	if err != nil || dmChannelID == "" || dmChannelID == channelID {
+	dmChannelID := u.br.GetDMChannelID(u.ctx, toUser.User)
+	if dmChannelID == "" || dmChannelID == channelID {
 		return "", channelID
 	}
 
