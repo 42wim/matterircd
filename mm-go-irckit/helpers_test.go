@@ -55,8 +55,11 @@ func (c *fakeConn) Close() error {
 }
 
 func (c *fakeConn) Encode(m *irc.Message) error {
+	// a real connection writes the message right away, the caller may reuse it afterwards
+	cp := *m
+
 	c.mu.Lock()
-	c.out = append(c.out, m)
+	c.out = append(c.out, &cp)
 	c.mu.Unlock()
 	return nil
 }
@@ -117,6 +120,10 @@ func (b *fakeBridge) Logout(ctx context.Context) error {
 }
 
 func (b *fakeBridge) Protocol() string { return "mattermost" }
+
+func (b *fakeBridge) BridgeConfig() *config.BridgeConfig {
+	return &config.BridgeConfig{PartFake: true}
+}
 
 func (b *fakeBridge) Connected() bool { return true }
 

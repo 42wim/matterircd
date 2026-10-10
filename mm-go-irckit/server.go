@@ -694,21 +694,15 @@ func (s *server) sweep(u *User) {
 	}
 	s.RUnlock()
 
-	for ch := range uniqueChannels {
-		realUsers := 0
-		for _, other := range ch.Users() {
-			if !other.Ghost {
-				realUsers++
-			}
-		}
+	var emptied []Channel
 
-		if realUsers == 0 {
-			for _, other := range ch.Users() {
-				ch.Part(other, "")
-			}
-			s.UnlinkChannel(ch)
+	for ch := range uniqueChannels {
+		if evictIfOnlyGhosts(ch) {
+			emptied = append(emptied, ch)
 		}
 	}
+
+	s.unlinkChannels(emptied)
 
 	// Global Server Registry & Pointer Sweep
 	s.Lock()
@@ -732,12 +726,29 @@ func (s *server) sweep(u *User) {
 	// Ghost Sweeper
 	s.RLock()
 	activeGhosts := make(map[*User]struct{})
+	seen := make(map[Channel]struct{}, len(s.channels)/2+1)
+	markActive := func(usr *User) {
+		// Deterministic check: No TCP connection + not the service bot = Ghost
+		if usr.Conn == nil && usr.Host != serviceName {
+			activeGhosts[usr] = struct{}{}
+		}
+	}
+
+	// every channel is in the map under its id and its name, look at it once
 	for _, ch := range s.channels {
+		if _, dupe := seen[ch]; dupe {
+			continue
+		}
+
+		seen[ch] = struct{}{}
+
+		if c, ok := ch.(*channel); ok {
+			c.eachUser(markActive)
+			continue
+		}
+
 		for _, usr := range ch.Users() {
-			// Deterministic check: No TCP connection + not the service bot = Ghost
-			if usr.Conn == nil && usr.Host != serviceName {
-				activeGhosts[usr] = struct{}{}
-			}
+			markActive(usr)
 		}
 	}
 
@@ -765,6 +776,27 @@ func (s *server) sweep(u *User) {
 		}
 		s.Unlock()
 	}
+}
+
+// unlinkChannels unlinks the channels from the server's storage, like UnlinkChannel does
+// for a single one, but with a single pass over the storage instead of one for each channel.
+func (s *server) unlinkChannels(chs []Channel) {
+	if len(chs) == 0 {
+		return
+	}
+
+	unlink := make(map[Channel]struct{}, len(chs))
+	for _, ch := range chs {
+		unlink[ch] = struct{}{}
+	}
+
+	s.Lock()
+	for k, v := range s.channels {
+		if _, ok := unlink[v]; ok {
+			delete(s.channels, k)
+		}
+	}
+	s.Unlock()
 }
 
 func (s *server) ChannelCount() int {

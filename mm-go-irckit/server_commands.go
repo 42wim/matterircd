@@ -478,8 +478,10 @@ func CmdPart(s Server, u *User, msg *irc.Message) error {
 			}
 		}
 		// part all other (ghost)users on the channel
-		for _, k := range ch.Users() {
-			ch.Part(k, "")
+		if !evictIfOnlyGhosts(ch) {
+			for _, k := range ch.Users() {
+				ch.Part(k, "")
+			}
 		}
 	}
 
