@@ -3,21 +3,10 @@ package irckit
 import (
 	"context"
 	"regexp"
-	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
 )
-
-// recoverPanic must be deferred directly (defer recoverPanic("what")) at the
-// start of every goroutine that handles client or server input. An unrecovered
-// panic in any goroutine terminates the whole process and so disconnects every
-// connected user.
-func recoverPanic(what string) {
-	if r := recover(); r != nil {
-		logger.Errorf("recovered from panic in %s: %v\n%s", what, r, debug.Stack())
-	}
-}
 
 // sleepContext sleeps for d. It returns false as soon as ctx is done.
 func sleepContext(ctx context.Context, d time.Duration) bool {

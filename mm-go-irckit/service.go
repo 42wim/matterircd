@@ -730,9 +730,6 @@ var cmds = map[string]Command{
 }
 
 func (u *User) handleServiceBot(service string, toUser *User, msg string) {
-	// A bridge that is logged out halfway through a command shouldn't take the daemon down.
-	defer recoverPanic("service bot command")
-
 	// func (u *User) handleMMServiceBot(toUser *User, msg string) {
 	commands, err := parseCommandString(msg)
 	if err != nil {

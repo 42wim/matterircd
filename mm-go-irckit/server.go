@@ -461,9 +461,6 @@ func (s *server) handle(u *User) {
 			continue
 		}
 		go func(msg *irc.Message) {
-			// A bug in a handler must not take the whole process (all users) down.
-			defer recoverPanic("irc command handler")
-
 			if strings.HasPrefix(msg.Command, "@") && len(msg.Params) > 0 {
 				threadID := parseThreadTag(msg.Command)
 

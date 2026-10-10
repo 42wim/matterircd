@@ -94,8 +94,7 @@ func NewUserBridge(c net.Conn, srv Server, cfg *config.Config, db *bolt.DB) *Use
 	return u
 }
 
-// handleEventChan processes the events of the bridge until the bridge logs out
-// or the user disconnects.
+// handleEventChan processes the events of the bridge until the bridge logs out.
 func (u *User) handleEventChan(eventChan <-chan *bridge.Event) {
 	// Flush to disk every 2 minutes to prevent I/O bottlenecks
 	flushTicker := time.NewTicker(2 * time.Minute)
@@ -122,22 +121,14 @@ func (u *User) handleEventChan(eventChan <-chan *bridge.Event) {
 		case <-flushTicker.C:
 			// Periodically flush the timestamp to BoltDB
 			u.saveGlobalLastEventTime(u.lastEventTime.Load())
-
-		case <-u.ctx.Done():
-			// The user is gone, nobody will send us a LogoutEvent anymore.
-			return
 		}
 	}
 }
 
 // handleEvent processes a single event, it returns true when the event loop has to stop.
 //
-//nolint:funlen,gocyclo
+//nolint:gocyclo
 func (u *User) handleEvent(event *bridge.Event) bool {
-	// A panic while handling one event (e.g. because the user logged out in the
-	// middle of it) must neither take the process down nor stop the event loop.
-	defer recoverPanic("event handler")
-
 	if event == nil {
 		return false
 	}
@@ -1013,9 +1004,6 @@ func (u *User) addUsersToChannel(users []*User, channel string, channelID string
 }
 
 func (u *User) addUsersToChannels() {
-	// The bridge can be logged out at any moment, which makes u.br nil.
-	defer recoverPanic("addUsersToChannels")
-
 	if !sleepContext(u.ctx, time.Millisecond*500) {
 		return
 	}
@@ -1172,8 +1160,6 @@ func (u *User) addUsersToChannels() {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			defer recoverPanic("addUserToChannelWorker")
-
 			u.addUserToChannelWorker(channels, throttle, workerLogger)
 		}()
 	}
@@ -1188,8 +1174,6 @@ func (u *User) addUsersToChannels() {
 
 	// clean up tickers/timers after workers have finished
 	go func() {
-		defer recoverPanic("addUsersToChannels cleanup")
-
 		wg.Wait()
 		throttle.Stop()
 
@@ -2184,8 +2168,6 @@ func (u *User) updateLastViewed(channelID string) {
 	delay := time.Duration(rand.Int63n(int64(lastViewedMaxDelay))) //nolint:gosec
 
 	go func() {
-		defer recoverPanic("updateLastViewed")
-
 		if !sleepContext(u.ctx, delay) {
 			return
 		}

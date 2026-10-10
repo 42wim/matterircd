@@ -8,7 +8,6 @@ import (
 	"math/rand"
 	"net/http"
 	"regexp"
-	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
@@ -72,9 +71,6 @@ var (
 	logger     *logrus.Entry
 	loggerOnce sync.Once
 )
-
-// logoutEventTimeout is how long Logout waits for the event loop to pick up the logout event.
-var logoutEventTimeout = 5 * time.Second
 
 func (m *Mattermost) Config() any {
 	return &m.cfg.Current().Mattermost
@@ -143,7 +139,13 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 	})
 
 	ourlog := logger.Logger
-	ourlog.SetLevel(bridgeLogLevel(rc))
+	if rc.Debug {
+		ourlog.SetLevel(logrus.DebugLevel)
+	}
+
+	if rc.Trace {
+		ourlog.SetLevel(logrus.TraceLevel)
+	}
 
 	if !rc.Mattermost.IgnoreServerVersion {
 		ver := getServerVersion(ctx, cfg, cred)
@@ -170,7 +172,14 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 
 	// Helper closure to set bridge levels
 	setBridgeLogLevels := func(rc *config.RuntimeConfig) {
-		ourlog.SetLevel(bridgeLogLevel(rc))
+		switch {
+		case rc.Trace:
+			ourlog.SetLevel(logrus.TraceLevel)
+		case rc.Debug:
+			ourlog.SetLevel(logrus.DebugLevel)
+		default:
+			ourlog.SetLevel(logrus.InfoLevel)
+		}
 
 		// Configure matterclient base logger
 		mc.SetLogLevel("info")
@@ -214,14 +223,6 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 	return m, mc, nil
 }
 
-// recoverPanic keeps a panic in a goroutine of ours from taking the whole process down.
-// It has to be deferred directly: defer recoverPanic("what").
-func recoverPanic(what string) {
-	if r := recover(); r != nil {
-		logger.Errorf("recovered from panic in %s: %v\n%s", what, r, debug.Stack())
-	}
-}
-
 // broadcastOf returns the broadcast of the event, the server doesn't always send one.
 func broadcastOf(rmsg *model.WebSocketEvent) *model.WebsocketBroadcast {
 	if b := rmsg.GetBroadcast(); b != nil {
@@ -229,17 +230,6 @@ func broadcastOf(rmsg *model.WebSocketEvent) *model.WebsocketBroadcast {
 	}
 
 	return &model.WebsocketBroadcast{}
-}
-
-func bridgeLogLevel(rc *config.RuntimeConfig) logrus.Level {
-	switch {
-	case rc.Trace:
-		return logrus.TraceLevel
-	case rc.Debug:
-		return logrus.DebugLevel
-	default:
-		return logrus.InfoLevel
-	}
 }
 
 func (m *Mattermost) NormalizePostID(msgID string) string {
@@ -438,6 +428,7 @@ func (m *Mattermost) loginToMattermost(ctx context.Context, onWsConnect func()) 
 	return mc, nil
 }
 
+//nolint:cyclop,funlen,gocognit,gocyclo
 func (m *Mattermost) handleWsMessage(ctx context.Context, quitChan chan struct{}, logger *logrus.Entry) {
 	for {
 		logger.Trace("in handleWsMessage")
@@ -450,92 +441,78 @@ func (m *Mattermost) handleWsMessage(ctx context.Context, quitChan chan struct{}
 			logger.Trace("exiting handleWsMessage, context done")
 			return
 		case message := <-m.mc.MessageChan:
-			m.processWsMessage(ctx, message, logger)
-		}
-	}
-}
+			eventType := message.Raw.EventType()
 
-// processWsMessage handles a single websocket event. A panic only costs us that
-// one event, it must not take the whole process (and every other user) down.
-//
-//nolint:cyclop,funlen,gocyclo
-func (m *Mattermost) processWsMessage(ctx context.Context, message *matterclient.Message, logger *logrus.Entry) {
-	defer recoverPanic("websocket event handler")
+			if logger.Logger.IsLevelEnabled(logrus.DebugLevel) { //nolint:nestif
+				userInfo := ""
+				data := message.Raw.GetData()
 
-	if message == nil || message.Raw == nil {
-		return
-	}
+				if userPtr, ok := data["user"].(*model.User); ok {
+					if userPtr.Username != "" {
+						userInfo = " [User: " + userPtr.Username + " (ID: " + userPtr.Id + ")]"
+					}
+				} else if userStr, ok := data["user"].(string); ok && userStr != "" {
+					var summary model.User
 
-	eventType := message.Raw.EventType()
+					_ = json.Unmarshal([]byte(userStr), &summary)
+					if summary.Username != "" {
+						userInfo = " [User: " + summary.Username + " (ID: " + summary.Id + ")]"
+					}
+				} else if userID, ok := data["user_id"].(string); ok && userID != "" {
+					userInfo = " [UserID: " + userID + "]"
+				}
 
-	if logger.Logger.IsLevelEnabled(logrus.DebugLevel) { //nolint:nestif
-		userInfo := ""
-		data := message.Raw.GetData()
+				switch eventType {
+				case model.WebsocketEventTyping, model.WebsocketEventUserUpdated:
+					logger.Tracef("WsRecvr%s: %#v", userInfo, message.Raw)
+				case model.WebsocketEventMultipleChannelsViewed:
+					logger.Tracef("WsRecvr%s: %#v", userInfo, message.Raw)
+				case model.WebsocketEventPreferencesChanged, model.WebsocketEventSidebarCategoryUpdated:
+					logger.Tracef("WsRecvr%s: %#v", userInfo, message.Raw)
+				default:
+					logger.Debugf("WsRcvr%s: %#v", userInfo, message.Raw)
+				}
 
-		if userPtr, ok := data["user"].(*model.User); ok {
-			if userPtr.Username != "" {
-				userInfo = " [User: " + userPtr.Username + " (ID: " + userPtr.Id + ")]"
+				if logger.Logger.IsLevelEnabled(logrus.TraceLevel) {
+					logger.Tracef("%s %s", userInfo, spew.Sdump(message))
+				}
 			}
-		} else if userStr, ok := data["user"].(string); ok && userStr != "" {
-			var summary model.User
 
-			_ = json.Unmarshal([]byte(userStr), &summary)
-			if summary.Username != "" {
-				userInfo = " [User: " + summary.Username + " (ID: " + summary.Id + ")]"
+			switch eventType {
+			case model.WebsocketEventConfigChanged:
+				m.handleConfigChangedEvent(message.Raw, logger)
+			case model.WebsocketEventPosted:
+				m.handleWsActionPost(ctx, message.Raw, logger)
+			case model.WebsocketEventPostEdited:
+				m.handleWsActionPost(ctx, message.Raw, logger)
+			case model.WebsocketEventPostDeleted:
+				m.handleWsActionPost(ctx, message.Raw, logger)
+			case model.WebsocketEventEphemeralMessage:
+				m.handleWsActionPost(ctx, message.Raw, logger)
+			case model.WebsocketEventUserRemoved:
+				m.handleWsActionUserRemoved(ctx, message.Raw, logger)
+			case model.WebsocketEventUserAdded:
+				m.handleWsActionUserAdded(ctx, message.Raw, logger)
+			case model.WebsocketEventChannelCreated, model.WebsocketEventGroupAdded:
+				m.handleWsActionChannelCreated(message.Raw, logger)
+			case model.WebsocketEventChannelDeleted:
+				m.handleWsActionChannelDeleted(message.Raw, logger)
+			case model.WebsocketEventChannelRestored:
+				m.handleWsActionChannelCreated(message.Raw, logger)
+			case model.WebsocketEventChannelUpdated:
+				m.handleWsActionChannelUpdated(message.Raw, logger)
+			case model.WebsocketEventUserUpdated:
+				m.handleWsActionUserUpdated(message.Raw, logger)
+			case model.WebsocketEventStatusChange:
+				m.handleStatusChangeEvent(message.Raw, logger)
+			case model.WebsocketEventReactionAdded, model.WebsocketEventReactionRemoved:
+				m.handleReactionEvent(ctx, message.Raw, logger)
+			case model.WebsocketEventLeaveTeam:
+				m.handleWsActionLeaveTeam(ctx, message.Raw, logger)
+			case model.WebsocketEventTyping:
+				m.handleTypingEvent(ctx, message.Raw, logger)
 			}
-		} else if userID, ok := data["user_id"].(string); ok && userID != "" {
-			userInfo = " [UserID: " + userID + "]"
 		}
-
-		switch eventType {
-		case model.WebsocketEventTyping, model.WebsocketEventUserUpdated:
-			logger.Tracef("WsRecvr%s: %#v", userInfo, message.Raw)
-		case model.WebsocketEventMultipleChannelsViewed:
-			logger.Tracef("WsRecvr%s: %#v", userInfo, message.Raw)
-		case model.WebsocketEventPreferencesChanged, model.WebsocketEventSidebarCategoryUpdated:
-			logger.Tracef("WsRecvr%s: %#v", userInfo, message.Raw)
-		default:
-			logger.Debugf("WsRcvr%s: %#v", userInfo, message.Raw)
-		}
-
-		if logger.Logger.IsLevelEnabled(logrus.TraceLevel) {
-			logger.Tracef("%s %s", userInfo, spew.Sdump(message))
-		}
-	}
-
-	switch eventType {
-	case model.WebsocketEventConfigChanged:
-		m.handleConfigChangedEvent(message.Raw, logger)
-	case model.WebsocketEventPosted:
-		m.handleWsActionPost(ctx, message.Raw, logger)
-	case model.WebsocketEventPostEdited:
-		m.handleWsActionPost(ctx, message.Raw, logger)
-	case model.WebsocketEventPostDeleted:
-		m.handleWsActionPost(ctx, message.Raw, logger)
-	case model.WebsocketEventEphemeralMessage:
-		m.handleWsActionPost(ctx, message.Raw, logger)
-	case model.WebsocketEventUserRemoved:
-		m.handleWsActionUserRemoved(ctx, message.Raw, logger)
-	case model.WebsocketEventUserAdded:
-		m.handleWsActionUserAdded(ctx, message.Raw, logger)
-	case model.WebsocketEventChannelCreated, model.WebsocketEventGroupAdded:
-		m.handleWsActionChannelCreated(message.Raw, logger)
-	case model.WebsocketEventChannelDeleted:
-		m.handleWsActionChannelDeleted(message.Raw, logger)
-	case model.WebsocketEventChannelRestored:
-		m.handleWsActionChannelCreated(message.Raw, logger)
-	case model.WebsocketEventChannelUpdated:
-		m.handleWsActionChannelUpdated(message.Raw, logger)
-	case model.WebsocketEventUserUpdated:
-		m.handleWsActionUserUpdated(message.Raw, logger)
-	case model.WebsocketEventStatusChange:
-		m.handleStatusChangeEvent(message.Raw, logger)
-	case model.WebsocketEventReactionAdded, model.WebsocketEventReactionRemoved:
-		m.handleReactionEvent(ctx, message.Raw, logger)
-	case model.WebsocketEventLeaveTeam:
-		m.handleWsActionLeaveTeam(ctx, message.Raw, logger)
-	case model.WebsocketEventTyping:
-		m.handleTypingEvent(ctx, message.Raw, logger)
 	}
 }
 
@@ -629,7 +606,10 @@ func (m *Mattermost) logout(ctx context.Context) {
 		m.unregisterReloadHook()
 	}
 
-	m.sendLogoutEvent(ctx)
+	m.eventChan <- &bridge.Event{
+		Type: "logout",
+		Data: &bridge.LogoutEvent{},
+	}
 
 	// Release everything that is still trying to hand over an event, and stop the workers.
 	if m.done != nil {
@@ -680,19 +660,6 @@ func (m *Mattermost) sendEvent(ev *bridge.Event) {
 	select {
 	case m.eventChan <- ev:
 	case <-m.done:
-	}
-}
-
-// sendLogoutEvent tells the event loop that we're done. The loop is gone already
-// when the user disconnected, so don't wait for it forever.
-func (m *Mattermost) sendLogoutEvent(ctx context.Context) {
-	timer := time.NewTimer(logoutEventTimeout)
-	defer timer.Stop()
-
-	select {
-	case m.eventChan <- &bridge.Event{Type: "logout", Data: &bridge.LogoutEvent{}}:
-	case <-ctx.Done():
-	case <-timer.C:
 	}
 }
 
