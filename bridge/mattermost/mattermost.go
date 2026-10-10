@@ -776,7 +776,7 @@ func (m *Mattermost) GetChannelName(ctx context.Context, channelID string) strin
 		if channel == nil {
 			logger.Warnf("Could not resolve missing channel name for %s", channelID)
 		} else {
-			channelName = channel.Name
+			channelName = m.mc.GetChannelName(ctx, channelID)
 		}
 	}
 
@@ -1950,8 +1950,7 @@ func (m *Mattermost) SearchPosts(ctx context.Context, search string) []*bridge.E
 	return m.postListToEvents(ctx, m.mc.SearchPosts(ctx, search), "search", 0)
 }
 
-func (m *Mattermost) GetFilesInfo(ctx context.Context, fileIDs []string) []*bridge.File {
-	mcFiles := m.mc.GetFilesInfo(ctx, fileIDs)
+func convertFilesInfo(mcFiles []*matterclient.FileInfo) []*bridge.File {
 	files := make([]*bridge.File, 0, len(mcFiles))
 
 	for _, f := range mcFiles {
@@ -1965,12 +1964,16 @@ func (m *Mattermost) GetFilesInfo(ctx context.Context, fileIDs []string) []*brid
 	return files
 }
 
+func (m *Mattermost) GetFilesInfo(ctx context.Context, fileIDs []string) []*bridge.File {
+	return convertFilesInfo(m.mc.GetFilesInfo(ctx, fileIDs))
+}
+
 func (m *Mattermost) GetFilesInfoFromPost(ctx context.Context, p *model.Post) []*bridge.File {
 	if p == nil || len(p.FileIds) == 0 {
 		return nil
 	}
 
-	return m.GetFilesInfo(ctx, p.FileIds)
+	return convertFilesInfo(m.mc.GetFilesInfoFromPost(ctx, p))
 }
 
 func (m *Mattermost) GetPosts(ctx context.Context, channelID string, limit int) []*bridge.Event {
