@@ -870,6 +870,28 @@ func CmdQuit(s Server, u *User, msg *irc.Message) error {
 	return nil
 }
 
+func getTargetChannelIDs(s Server, u *User, channelName string) (string, string) {
+	if ch, ok := s.HasChannel(channelName); ok {
+		return ch.ID(), ""
+	}
+
+	toUser, ok := s.HasUser(channelName)
+	if !ok {
+		return "", ""
+	}
+
+	if u.br == nil {
+		return toUser.User, ""
+	}
+
+	dmChannelID, err := u.br.GetDMChannelID(u.ctx, toUser.User)
+	if err != nil || dmChannelID == "" || dmChannelID == toUser.User {
+		return toUser.User, ""
+	}
+
+	return dmChannelID, toUser.User
+}
+
 func resolveThreadTarget(s Server, u *User, channelName, threadID string) string {
 	cleanID := strings.TrimPrefix(threadID, "@@")
 	if cleanID == "" {
@@ -877,28 +899,12 @@ func resolveThreadTarget(s Server, u *User, channelName, threadID string) string
 	}
 
 	if len(cleanID) == 3 {
-		var channelID, fallbackID string
-
-		if ch, ok := s.HasChannel(channelName); ok {
-			channelID = ch.ID()
-		} else if toUser, ok := s.HasUser(channelName); ok {
-			channelID = toUser.User
-			fallbackID = toUser.User
-
-			if u.br != nil {
-				dmChannelID, err := u.br.GetDMChannelID(u.ctx, toUser.User)
-				if err == nil && dmChannelID != "" {
-					channelID = dmChannelID
-				}
-			}
-		}
+		channelID, fallbackID := getTargetChannelIDs(s, u, channelName)
 
 		postID := u.getPostIDFromHex(channelID, cleanID)
-		if postID == "" && fallbackID != "" && fallbackID != channelID {
-			postID = u.getPostIDFromHex(fallbackID, cleanID)
-			if postID != "" {
-				channelID = fallbackID
-			}
+		if postID == "" && fallbackID != "" {
+			channelID = fallbackID
+			postID = u.getPostIDFromHex(channelID, cleanID)
 		}
 
 		if postID == "" {
