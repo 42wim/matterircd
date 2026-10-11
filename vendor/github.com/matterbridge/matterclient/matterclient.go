@@ -1064,6 +1064,7 @@ func (m *Client) WsReceiver(ctx context.Context) {
 	m.logger.Debug("starting WsReceiver")
 
 	ticker := time.NewTicker(time.Second * 10)
+	defer ticker.Stop()
 
 	for {
 		select {
@@ -1642,6 +1643,14 @@ func (m *Client) WsSendTyping(channelID, parentID string) error {
 		return nil
 	}
 
+	if len(m.lastTypingSent) > 1024 {
+		for id, t := range m.lastTypingSent {
+			if now.Sub(t) >= 4*time.Second {
+				delete(m.lastTypingSent, id)
+			}
+		}
+	}
+
 	m.lastTypingSent[channelID] = now
 	m.typingLock.Unlock()
 
@@ -1661,6 +1670,7 @@ func (m *Client) antiIdle(ctx context.Context, channelID string, interval int) {
 
 	m.logger.Debugf("starting antiIdle for %s every %d secs", channelID, interval)
 	ticker := time.NewTicker(time.Second * time.Duration(interval))
+	defer ticker.Stop()
 
 	for {
 		select {
