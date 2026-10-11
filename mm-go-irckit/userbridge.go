@@ -1927,15 +1927,18 @@ func (u *User) loginTo(protocol string) error {
 	u.br = br
 	u.eventLoopMutex.Unlock()
 
-	// abandons the new bridge, it will never be used.
+	// abandons the new bridge, it will never be used. Same order as logoutFrom: addUsersToChannels
+	// may have started the event loop already, it has to be done before the bridge is dropped.
 	abort := func(err error) error {
+		_ = br.Logout(u.ctx)
+
+		u.stopEventLoop()
+
 		u.eventLoopMutex.Lock()
 		if u.br == br {
 			u.br = nil
 		}
 		u.eventLoopMutex.Unlock()
-
-		_ = br.Logout(u.ctx)
 
 		return err
 	}
@@ -2151,6 +2154,7 @@ func (u *User) currentBridge() bridge.Bridger {
 
 // stopEventLoop ends the event loop, if there is one, and waits for it to finish the event it is
 // handling: that uses the bridge, which the caller is about to drop. No new loop is started after this.
+// Callers that come in while the loop is still stopping wait for it as well, later ones return at once.
 func (u *User) stopEventLoop() {
 	u.eventLoopMutex.Lock()
 	stop, done := u.eventLoopStop, u.eventLoopDone
@@ -2168,6 +2172,12 @@ func (u *User) stopEventLoop() {
 
 	select {
 	case <-done:
+		// Only forget the loop once it is gone, and not a newer one.
+		u.eventLoopMutex.Lock()
+		if u.eventLoopDone == done {
+			u.eventLoopStop, u.eventLoopDone = nil, nil
+		}
+		u.eventLoopMutex.Unlock()
 	case <-timer.C:
 		logger.Warn("the event loop did not stop in time")
 	}
