@@ -611,8 +611,8 @@ func stripHexColors(msg string) string {
 }
 
 const (
-	AttachmentMarkerStart = "\x00<ATTM\x00"
-	AttachmentMarkerEnd   = "\x00ATTM>\x00"
+	AttachmentMarkerStart = "\x00<ATTM>\x00"
+	AttachmentMarkerEnd   = "\x00</ATTM>\x00"
 )
 
 // ProcessMessageText abstracts the parsing loop, multi-line code handling,
