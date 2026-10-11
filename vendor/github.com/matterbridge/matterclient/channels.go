@@ -116,7 +116,11 @@ func (m *Client) GetCachedChannel(channelID string) *model.Channel {
 
 // GetCachedChannelName returns the normalised channel name if cached, or empty string.
 func (m *Client) GetCachedChannelName(channelID string) string {
-	if ch := m.GetCachedChannel(channelID); ch != nil {
+	// getNormalisedName reads the users/channels caches, which are modified concurrently.
+	m.Users.mu.RLock()
+	defer m.Users.mu.RUnlock()
+
+	if ch := m.Users.channelData[channelID]; ch != nil {
 		return m.getNormalisedName(ch)
 	}
 
@@ -440,6 +444,9 @@ func (m *Client) getGroupChannelName(channelID string) string {
 
 func (m *Client) GetChannelName(ctx context.Context, channelID string) string {
 	if ch := m.GetChannel(ctx, channelID); ch != nil {
+		m.Users.mu.RLock()
+		defer m.Users.mu.RUnlock()
+
 		return m.getNormalisedName(ch)
 	}
 	return ""
