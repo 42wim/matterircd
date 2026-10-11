@@ -174,9 +174,15 @@ func (s *Slack) Logout(ctx context.Context) error {
 
 	logger.Info("logout succeeded")
 
-	s.eventChan <- &bridge.Event{
-		Type: "logout",
-		Data: &bridge.LogoutEvent{},
+	// The event loop may never have started, or it ended already when the user disconnected
+	// (ctx is canceled then), so don't wait for it forever.
+	timer := time.NewTimer(time.Second)
+	defer timer.Stop()
+
+	select {
+	case s.eventChan <- &bridge.Event{Type: "logout", Data: &bridge.LogoutEvent{}}:
+	case <-ctx.Done():
+	case <-timer.C:
 	}
 
 	s.connected = false
