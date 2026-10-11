@@ -606,10 +606,7 @@ func (m *Mattermost) logout(ctx context.Context) {
 		m.unregisterReloadHook()
 	}
 
-	m.eventChan <- &bridge.Event{
-		Type: "logout",
-		Data: &bridge.LogoutEvent{},
-	}
+	m.sendLogoutEvent(ctx)
 
 	// Release everything that is still trying to hand over an event, and stop the workers.
 	if m.done != nil {
@@ -638,6 +635,19 @@ func (m *Mattermost) logout(ctx context.Context) {
 	_ = m.mc.Logout(logoutCtx)
 
 	logger.Info("logout succeeded")
+}
+
+// sendLogoutEvent tells the event loop that we're done. The loop may never have started, or
+// it ended already when the user disconnected (ctx is canceled then), so don't wait for it forever.
+func (m *Mattermost) sendLogoutEvent(ctx context.Context) {
+	timer := time.NewTimer(time.Second)
+	defer timer.Stop()
+
+	select {
+	case m.eventChan <- &bridge.Event{Type: "logout", Data: &bridge.LogoutEvent{}}:
+	case <-ctx.Done():
+	case <-timer.C:
+	}
 }
 
 // logoutContext returns the context for the request that invalidates the session. The

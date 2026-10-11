@@ -34,7 +34,7 @@ func logout(u *User, toUser *User, args []string, service string) {
 	u.inprogress.Store(true)
 	defer u.inprogress.Store(false)
 
-	br := u.br
+	br := u.currentBridge()
 	if br == nil {
 		return
 	}

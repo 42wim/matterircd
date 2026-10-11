@@ -94,7 +94,7 @@ func NewUserBridge(c net.Conn, srv Server, cfg *config.Config, db *bolt.DB) *Use
 	return u
 }
 
-//nolint:gocyclo
+//nolint:funlen,gocyclo
 func (u *User) handleEventChan(eventChan <-chan *bridge.Event) {
 	// Flush to disk every 2 minutes to prevent I/O bottlenecks
 	flushTicker := time.NewTicker(2 * time.Minute)
@@ -157,6 +157,12 @@ func (u *User) handleEventChan(eventChan <-chan *bridge.Event) {
 		case <-flushTicker.C:
 			// Periodically flush the timestamp to BoltDB
 			u.saveGlobalLastEventTime(u.lastEventTime.Load())
+
+		case <-u.ctx.Done():
+			// The user disconnected, the logout event may never reach us
+			u.saveGlobalLastEventTime(u.lastEventTime.Load())
+
+			return
 		}
 	}
 }
