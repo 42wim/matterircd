@@ -749,6 +749,7 @@ func (m *Matrix) createUser(userID id.UserID) *bridge.UserInfo {
 
 	// Drop the homeserver/host part if it's a user on the same homeserver as us.
 	nick := localpart + "@" + homeserver
+
 	_, myHomeserver, err := m.mc.UserID.Parse()
 	if err == nil && homeserver == myHomeserver {
 		nick = localpart
