@@ -585,7 +585,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 	// or a user
 	if toUser, exists := s.HasUser(query); exists {
 		switch {
-		case query == "mattermost" || query == "slack" || query == "mastodon": //nolint:goconst
+		case query == "mattermost" || query == "slack" || query == "mastodon" || query == "matrix": //nolint:goconst
 			go u.handleServiceBot(query, toUser, msg.Trailing)
 			msg.Trailing = "<redacted>"
 		case toUser.Ghost, toUser.Me:
@@ -648,7 +648,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 	return s.EncodeMessage(u, irc.ERR_NOSUCHNICK, msg.Params, "No such nick/channel")
 }
 
-var parseReactionToMsgRegExp = regexp.MustCompile(`^\@\@([0-9a-f]{3}|[0-9a-z]{26})\s+([\-\+]):(\S+):\s*$`)
+var parseReactionToMsgRegExp = regexp.MustCompile(`^\@\@([0-9a-f]{3}|[0-9a-z]{26}|\$[0-9A-Za-z\-_\.]{43})\s+([\-\+]):(\S+):\s*$`)
 
 func parseReactionToMsg(u *User, msg *irc.Message, channelID string) bool {
 	matches := parseReactionToMsgRegExp.FindStringSubmatch(msg.Trailing)
@@ -692,7 +692,7 @@ func parseReactionToMsg(u *User, msg *irc.Message, channelID string) bool {
 	return true
 }
 
-var parseModifyMsgRegExp = regexp.MustCompile(`^s(\/(?:[0-9a-f]{3}|[0-9a-z]{26}|!!)?\/)(.*)`)
+var parseModifyMsgRegExp = regexp.MustCompile(`^s(\/(?:!!|[0-9a-f]{3}|[0-9a-z]{26}|\$[0-9A-Za-z\-_\.]{43})?\/)(.*)`)
 
 func parseModifyMsg(u *User, msg *irc.Message, channelID string) bool {
 	matches := parseModifyMsgRegExp.FindStringSubmatch(msg.Trailing)
@@ -766,7 +766,7 @@ func parseModifyMsg(u *User, msg *irc.Message, channelID string) bool {
 	return true
 }
 
-var parseThreadIDRegExp = regexp.MustCompile(`(?s)^\@\@(?:(!!|[0-9a-f]{3}|[0-9a-z]{26})\s)(.*)`)
+var parseThreadIDRegExp = regexp.MustCompile(`(?s)^\@\@(?:(!!|[0-9a-f]{3}|[0-9a-z]{26}|\$[0-9A-Za-z\-_\.]{43})\s)(.*)`)
 
 func parseThreadID(u *User, msg *irc.Message, channelID string) (string, string) {
 	matches := parseThreadIDRegExp.FindStringSubmatch(msg.Trailing)
@@ -806,6 +806,10 @@ func parseThreadID(u *User, msg *irc.Message, channelID string) (string, string)
 			return u.msgMapIndex[channelID][int(id)], matches[2]
 		}
 	case len(matches[1]) == 26:
+		return matches[1], matches[2]
+	// Matrix's Event ID format:
+	//   https://spec.matrix.org/latest/appendices/#common-identifier-format
+	case len(matches[1]) == 44:
 		return matches[1], matches[2]
 	default:
 		logger.Errorf("parseThreadID: could not parse reply ID %q", matches[1])

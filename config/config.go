@@ -64,6 +64,7 @@ type RuntimeConfig struct {
 	Mattermost MattermostConfig
 	Slack      SlackConfig
 	Mastodon   MastodonConfig
+	Matrix     MatrixConfig
 }
 
 type GlobalConfig struct {
@@ -193,6 +194,14 @@ type SlackConfig struct {
 	PreferNickname bool
 }
 
+type MatrixConfig struct {
+	Bridge    BridgeConfig
+	Formatter FormatterConfig
+
+	HideReplies      bool
+	ShortenRepliesTo int
+}
+
 type MastodonConfig struct {
 	Bridge    BridgeConfig
 	Formatter FormatterConfig
@@ -272,6 +281,24 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 		ThreadContext:    c.v.GetString("mastodon.ThreadContext"),
 	}
 
+	mxBridge := BridgeConfig{
+		Restrict: append([]string(nil), c.v.GetStringSlice("matrix.Restrict")...),
+
+		JoinOnly:    append([]string(nil), c.v.GetStringSlice("matrix.JoinOnly")...),
+		JoinExclude: append([]string(nil), c.v.GetStringSlice("matrix.JoinExclude")...),
+		JoinInclude: append([]string(nil), c.v.GetStringSlice("matrix.JoinInclude")...),
+		JoinDM:      c.v.GetBool("matrix.JoinDM"),
+
+		ShowJoinPart:   c.v.GetBool("matrix.ShowJoinPart"),
+		ShowOnlyJoined: c.v.GetBool("matrix.ShowOnlyJoined"),
+		PartFake:       c.v.GetBool("matrix.PartFake"),
+
+		PrefixContext:    c.v.GetBool("matrix.PrefixContext"),
+		SuffixContext:    c.v.GetBool("matrix.SuffixContext"),
+		ShowContextMulti: c.v.GetBool("matrix.ShowContextMulti"),
+		ThreadContext:    c.v.GetString("matrix.ThreadContext"),
+	}
+
 	mmFormatter := FormatterConfig{
 		DisableEmoji: c.v.GetBool("mattermost.DisableEmoji"),
 		CustomEmoji:  parseCustomEmoji(c.v.GetStringSlice("mattermost.CustomEmoji")),
@@ -331,6 +358,26 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 		EnableIRCHexColors: c.v.GetBool("mastodon.EnableIRCHexColors"),
 
 		PreserveNewLines: c.v.GetString("mastodon.PreserveNewLines"),
+	}
+	mxFormatter := FormatterConfig{
+		DisableEmoji: c.v.GetBool("matrix.DisableEmoji"),
+		CustomEmoji:  parseCustomEmoji(c.v.GetStringSlice("matrix.CustomEmoji")),
+
+		DisableMarkdown:           c.v.GetBool("matrix.DisableMarkdown"),
+		DisableMarkdownBlockQuote: c.v.GetBool("matrix.DisableMarkdownBlockQuote"),
+		MarkdownBlockQuoteChar:    unquoteString(c.v.GetString("matrix.MarkdownBlockQuoteChar")),
+		MarkdownInlineCode:        unquoteString(c.v.GetString("matrix.MarkdownInlineCode")),
+
+		DisableCodeBlockPrefix: c.v.GetBool("matrix.DisableCodeBlockPrefix"),
+		CodeBlockPrefix:        unquoteString(c.v.GetString("matrix.CodeBlockPrefix")),
+		CodeBlockSeparator:     unquoteString(c.v.GetString("matrix.CodeBlockSeparator")),
+		SyntaxHighlighting:     c.v.GetString("matrix.SyntaxHighlighting"),
+
+		Unicode: c.v.GetBool("matrix.Unicode"),
+
+		EnableIRCHexColors: c.v.GetBool("matrix.EnableIRCHexColors"),
+
+		PreserveNewLines: c.v.GetString("matrix.PreserveNewLines"),
 	}
 
 	return &RuntimeConfig{
@@ -423,6 +470,14 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 			PreferNickname: c.v.GetBool("slack.PreferNickname"),
 		},
 
+		Matrix: MatrixConfig{
+			Bridge:    mxBridge,
+			Formatter: mxFormatter,
+
+			HideReplies:      c.v.GetBool("matrix.HideReplies"),
+			ShortenRepliesTo: c.v.GetInt("matrix.ShortenRepliesTo"),
+		},
+
 		Mastodon: MastodonConfig{
 			Bridge:    mdBridge,
 			Formatter: mdFormatter,
@@ -450,6 +505,10 @@ func (c *Config) Mattermost() *MattermostConfig {
 
 func (c *Config) Slack() *SlackConfig {
 	return &c.Current().Slack
+}
+
+func (c *Config) Matrix() *MatrixConfig {
+	return &c.Current().Matrix
 }
 
 func (c *Config) Mastodon() *MastodonConfig {
