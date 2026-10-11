@@ -1012,7 +1012,7 @@ func (m *Client) WsGetStatuses() {
 		return
 	}
 
-	m.WsClient.GetStatuses()
+	_ = wsSafely(func() { m.WsClient.GetStatuses() })
 }
 
 // WsGetStatusesByIds requests statuses for specific user IDs in batches over the WebSocket.
@@ -1032,6 +1032,7 @@ func (m *Client) WsGetStatusesByIds(userIDs []string) {
 		batch := userIDs[i:end]
 
 		m.logger.Tracef("WsGetStatusesByIds: batch %d-%d of %d: %v", i+1, end, len(userIDs), batch)
-		m.WsClient.GetStatusesByIds(batch)
+
+		_ = wsSafely(func() { m.WsClient.GetStatusesByIds(batch) })
 	}
 }
