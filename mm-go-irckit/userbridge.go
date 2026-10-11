@@ -40,6 +40,8 @@ type UserBridge struct {
 
 	eventLoopMutex   sync.Mutex
 	eventLoopStarted bool
+	eventLoopStop    context.CancelFunc
+	eventLoopDone    chan struct{}
 
 	lastEventTime  atomic.Int64
 	lastViewedAtDB *bolt.DB
@@ -94,14 +96,15 @@ func NewUserBridge(c net.Conn, srv Server, cfg *config.Config, db *bolt.DB) *Use
 	return u
 }
 
-func (u *User) handleEventChan() {
+//nolint:funlen,gocyclo
+func (u *User) handleEventChan(ctx context.Context, eventChan <-chan *bridge.Event) {
 	// Flush to disk every 2 minutes to prevent I/O bottlenecks
 	flushTicker := time.NewTicker(2 * time.Minute)
 	defer flushTicker.Stop()
 
 	for {
 		select {
-		case event, ok := <-u.eventChan:
+		case event, ok := <-eventChan:
 			if !ok {
 				return
 			}
@@ -156,6 +159,12 @@ func (u *User) handleEventChan() {
 		case <-flushTicker.C:
 			// Periodically flush the timestamp to BoltDB
 			u.saveGlobalLastEventTime(u.lastEventTime.Load())
+
+		case <-ctx.Done():
+			// We're told to stop (the user disconnected or logged out), the logout event may not reach us
+			u.saveGlobalLastEventTime(u.lastEventTime.Load())
+
+			return
 		}
 	}
 }
@@ -986,11 +995,18 @@ func (u *User) addUsersToChannel(users []*User, channel string, channelID string
 }
 
 func (u *User) addUsersToChannels() {
-	time.Sleep(time.Millisecond * 500)
+	if !sleepContext(u.ctx, time.Millisecond*500) {
+		return
+	}
+
 	// wait until the bridge is ready
-	for u.br == nil {
+	for u.currentBridge() == nil {
 		logger.Debug("bridge not ready yet, sleeping")
-		time.Sleep(time.Millisecond * 500)
+
+		// don't wait forever for a user that is gone
+		if !sleepContext(u.ctx, time.Millisecond*500) {
+			return
+		}
 	}
 
 	syncStartTime := time.Now()
@@ -1164,19 +1180,33 @@ func (u *User) addUsersToChannels() {
 			duration := time.Since(syncStartTime).Round(time.Second)
 			logger.Infof("channel synchronization completed and history replayed (took %s)", duration)
 
-			if svc, ok := u.Srv.HasUser(u.br.Protocol()); ok {
-				u.MsgUser(svc, fmt.Sprintf("channel synchronization completed and history replayed (took %s).", duration))
+			// We could have logged out in the meantime.
+			if br := u.currentBridge(); br != nil {
+				if svc, ok := u.Srv.HasUser(br.Protocol()); ok {
+					u.MsgUser(svc, fmt.Sprintf("channel synchronization completed and history replayed (took %s).", duration))
+				}
 			}
 		}
 	}()
 
 	// Prevent leaking goroutines on internal bridge reconnects
 	// by ensuring we only launch one event loop per session.
+	// Nobody would ever stop a loop for a bridge that is gone already.
 	u.eventLoopMutex.Lock()
-	if !u.eventLoopStarted {
+	if !u.eventLoopStarted && u.br != nil && u.ctx.Err() == nil {
 		u.eventLoopStarted = true
+
+		ctx, stop := context.WithCancel(u.ctx)
+		done := make(chan struct{})
+		u.eventLoopStop, u.eventLoopDone = stop, done
+
 		// we did all the initialization, now listen for events
-		go u.handleEventChan()
+		go func(eventChan <-chan *bridge.Event) {
+			defer close(done)
+			defer stop()
+
+			u.handleEventChan(ctx, eventChan)
+		}(u.eventChan)
 	}
 	u.eventLoopMutex.Unlock()
 }
@@ -1851,23 +1881,27 @@ func (u *User) isValidServer(server, protocol string) bool {
 }
 
 func (u *User) loginTo(protocol string) error {
-	var err error
+	var (
+		br  bridge.Bridger
+		err error
+	)
 
-	// Reset the event loop tracker in case this User struct is recycled
+	// Reset the event loop tracker in case this User struct is recycled.
+	// The new channel has to be in place before the bridge starts: it calls
+	// addUsersToChannels, which hands the channel to the event loop.
 	u.eventLoopMutex.Lock()
 	u.eventLoopStarted = false
+	u.eventChan = make(chan *bridge.Event)
+	eventChan := u.eventChan
 	u.eventLoopMutex.Unlock()
 
 	switch protocol {
 	case "mastodon":
-		u.eventChan = make(chan *bridge.Event)
-		u.br, err = mastodon.New(u.cfg, u.Credentials, u.eventChan, u.addUsersToChannels)
+		br, err = mastodon.New(u.cfg, u.Credentials, eventChan, u.addUsersToChannels)
 	case "slack":
-		u.eventChan = make(chan *bridge.Event)
-		u.br, err = slack.New(u.cfg, u.Credentials, u.eventChan, u.addUsersToChannels)
+		br, err = slack.New(u.cfg, u.Credentials, eventChan, u.addUsersToChannels)
 	case "mattermost":
-		u.eventChan = make(chan *bridge.Event)
-		u.br, _, err = mattermost.New(u.ctx, u.cfg, u.Credentials, u.eventChan, u.addUsersToChannels)
+		br, _, err = mattermost.New(u.ctx, u.cfg, u.Credentials, eventChan, u.addUsersToChannels)
 	}
 	if err != nil {
 		u.eventLoopMutex.Lock()
@@ -1877,12 +1911,44 @@ func (u *User) loginTo(protocol string) error {
 		return err
 	}
 
-	status, _ := u.br.StatusUser(u.ctx, u.br.GetMe().User)
+	// Only publish the bridge when the user is still connected. Otherwise Quit has
+	// run already, it has never seen this bridge and nobody else would log it out.
+	u.eventLoopMutex.Lock()
+	if br == nil || u.ctx.Err() != nil {
+		u.eventLoopMutex.Unlock()
+
+		if br != nil {
+			_ = br.Logout(u.ctx)
+		}
+
+		return errors.New("login aborted: user disconnected")
+	}
+
+	u.br = br
+	u.eventLoopMutex.Unlock()
+
+	// abandons the new bridge, it will never be used. Same order as logoutFrom: addUsersToChannels
+	// may have started the event loop already, it has to be done before the bridge is dropped.
+	abort := func(err error) error {
+		_ = br.Logout(u.ctx)
+
+		u.stopEventLoop()
+
+		u.eventLoopMutex.Lock()
+		if u.br == br {
+			u.br = nil
+		}
+		u.eventLoopMutex.Unlock()
+
+		return err
+	}
+
+	status, _ := br.StatusUser(u.ctx, br.GetMe().User)
 	if status == "away" {
 		u.Srv.EncodeMessage(u, irc.RPL_NOWAWAY, []string{u.Nick}, "You have been marked as being away")
 	}
 
-	info := u.br.GetMe()
+	info := br.GetMe()
 	u.Me = true
 	u.User = info.User
 	u.MentionKeys = info.MentionKeys
@@ -1892,11 +1958,7 @@ func (u *User) loginTo(protocol string) error {
 		return err2
 	})
 	if err != nil {
-		u.eventLoopMutex.Lock()
-		u.br = nil
-		u.eventLoopMutex.Unlock()
-
-		return err
+		return abort(err)
 	}
 
 	return nil
@@ -1906,12 +1968,20 @@ func (u *User) loginTo(protocol string) error {
 func (u *User) logoutFrom(protocol string) error {
 	logger.Debug("logging out from", protocol)
 
-	u.eventLoopMutex.Lock()
-	if u.br != nil {
-		_ = u.br.Logout(u.ctx)
-		u.br = nil
+	// Don't hold eventLoopMutex while logging out: the logout hands an event to the
+	// event loop, and that loop is started while holding the mutex.
+	br := u.currentBridge()
+	if br != nil {
+		_ = br.Logout(u.ctx)
+
+		u.stopEventLoop()
+
+		u.eventLoopMutex.Lock()
+		if u.br == br {
+			u.br = nil
+		}
+		u.eventLoopMutex.Unlock()
 	}
-	u.eventLoopMutex.Unlock()
 
 	u.Srv.Logout(u)
 	return nil
@@ -2074,7 +2144,53 @@ func (u *User) getOrCreateMsgCounterLocked(channelID, postID string, skip int) i
 	return currentcount
 }
 
+// currentBridge returns the bridge we're logged in to, nil when we're not.
+func (u *User) currentBridge() bridge.Bridger {
+	u.eventLoopMutex.Lock()
+	defer u.eventLoopMutex.Unlock()
+
+	return u.br
+}
+
+// stopEventLoop ends the event loop, if there is one, and waits for it to finish the event it is
+// handling: that uses the bridge, which the caller is about to drop. No new loop is started after this.
+// Callers that come in while the loop is still stopping wait for it as well, later ones return at once.
+func (u *User) stopEventLoop() {
+	u.eventLoopMutex.Lock()
+	stop, done := u.eventLoopStop, u.eventLoopDone
+	u.eventLoopStarted = true
+	u.eventLoopMutex.Unlock()
+
+	if stop == nil {
+		return
+	}
+
+	stop()
+
+	timer := time.NewTimer(writeTimeout)
+	defer timer.Stop()
+
+	select {
+	case <-done:
+		// Only forget the loop once it is gone, and not a newer one.
+		u.eventLoopMutex.Lock()
+		if u.eventLoopDone == done {
+			u.eventLoopStop, u.eventLoopDone = nil, nil
+		}
+		u.eventLoopMutex.Unlock()
+	case <-timer.C:
+		logger.Warn("the event loop did not stop in time")
+	}
+}
+
+// lastViewedMaxDelay is the maximum random delay before the server is told that a channel has been read.
+var lastViewedMaxDelay = 3 * time.Second
+
 func (u *User) updateLastViewed(channelID string) {
+	if u.currentBridge() == nil {
+		return
+	}
+
 	u.updateCounterMutex.Lock()
 	defer u.updateCounterMutex.Unlock()
 	if t, ok := u.updateCounter[channelID]; ok {
@@ -2085,16 +2201,27 @@ func (u *User) updateLastViewed(channelID string) {
 
 	u.updateCounter[channelID] = time.Now()
 
+	// spread the updates over time
+	delay := time.Duration(rand.Int63n(int64(lastViewedMaxDelay))) //nolint:gosec
+
 	go func() {
-		r := rand.New(rand.NewSource(time.Now().UnixNano())) //nolint:gosec
-		time.Sleep(time.Duration(r.Intn(3000)) * time.Millisecond)
-		u.br.UpdateLastViewed(u.ctx, channelID)
+		if !sleepContext(u.ctx, delay) {
+			return
+		}
+
+		// We could have logged out while waiting.
+		br := u.currentBridge()
+		if br == nil {
+			return
+		}
+
+		br.UpdateLastViewed(u.ctx, channelID)
 	}()
 }
 
 func (u *User) dbBucketName() []byte {
-	if u.br != nil && u.br.Protocol() != "" {
-		return []byte(u.br.Protocol() + ":" + u.User)
+	if br := u.currentBridge(); br != nil && br.Protocol() != "" {
+		return []byte(br.Protocol() + ":" + u.User)
 	}
 
 	return []byte(u.User)

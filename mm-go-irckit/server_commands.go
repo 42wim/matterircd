@@ -21,7 +21,7 @@ func DefaultCommands() Commands {
 	cmds.Add(Handler{Command: irc.ISON, Call: CmdIson})
 	cmds.Add(Handler{Command: irc.INVITE, Call: CmdInvite, LoggedIn: true, MinParams: 2})
 	cmds.Add(Handler{Command: irc.JOIN, Call: CmdJoin, MinParams: 1, LoggedIn: true})
-	cmds.Add(Handler{Command: irc.KICK, Call: CmdKick, MinParams: 1, LoggedIn: true})
+	cmds.Add(Handler{Command: irc.KICK, Call: CmdKick, MinParams: 2, LoggedIn: true})
 	cmds.Add(Handler{Command: irc.LIST, Call: CmdList, LoggedIn: true})
 	cmds.Add(Handler{Command: irc.LUSERS, Call: CmdLusers})
 	cmds.Add(Handler{Command: irc.MODE, Call: CmdMode, MinParams: 1, LoggedIn: true})
@@ -478,8 +478,10 @@ func CmdPart(s Server, u *User, msg *irc.Message) error {
 			}
 		}
 		// part all other (ghost)users on the channel
-		for _, k := range ch.Users() {
-			ch.Part(k, "")
+		if !evictIfOnlyGhosts(ch) {
+			for _, k := range ch.Users() {
+				ch.Part(k, "")
+			}
 		}
 	}
 
@@ -537,6 +539,12 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 	// are we sending to a channel
 	if ch, exists := s.HasChannel(query); exists {
 		if ch.ID() == "&messages" || ch.ID() == "&users" {
+			return nil
+		}
+
+		// no messages when we're not logged in (anymore)
+		if u.currentBridge() == nil {
+			logger.Tracef("bridge was nil, ignored message")
 			return nil
 		}
 

@@ -13,6 +13,7 @@ import (
 	"github.com/42wim/matterircd/bridge"
 	"github.com/42wim/matterircd/config"
 	"github.com/desertbit/timer"
+	"github.com/sirupsen/logrus"
 	"github.com/sorcix/irc"
 )
 
@@ -85,9 +86,16 @@ func (u *User) Prefix() *irc.Prefix {
 }
 
 func (u *User) Close() error {
-	for ch := range u.channels {
+	// Channels() copies under the lock, Part modifies u.channels.
+	for _, ch := range u.Channels() {
 		ch.Part(u, defaultCloseMsg)
 	}
+
+	// ghosts don't have a connection
+	if u.Conn == nil {
+		return nil
+	}
+
 	return u.Conn.Close()
 }
 
@@ -168,16 +176,19 @@ func (u *User) Encode(msgs ...*irc.Message) (err error) {
 			continue
 		}
 
-		switch msg.Command {
-		case irc.PONG, irc.TOPIC:
-			logger.Tracef("-> %q", msg.String())
-		case irc.RPL_ENDOFBANLIST, irc.RPL_NAMREPLY, irc.RPL_WHOREPLY:
-			logger.Tracef("-> %q", msg.String())
-		default:
-			if strings.Contains(strings.ToLower(msg.Command), "+typing=") {
+		// msg.String() allocates, skip it when nobody reads the log.
+		if logger.Logger.IsLevelEnabled(logrus.DebugLevel) {
+			switch msg.Command {
+			case irc.PONG, irc.TOPIC:
 				logger.Tracef("-> %q", msg.String())
-			} else {
-				logger.Debugf("-> %q", msg.String())
+			case irc.RPL_ENDOFBANLIST, irc.RPL_NAMREPLY, irc.RPL_WHOREPLY:
+				logger.Tracef("-> %q", msg.String())
+			default:
+				if strings.Contains(strings.ToLower(msg.Command), "+typing=") {
+					logger.Tracef("-> %q", msg.String())
+				} else {
+					logger.Debugf("-> %q", msg.String())
+				}
 			}
 		}
 
@@ -270,8 +281,10 @@ func (u *User) Decode() {
 					return
 				}
 
-				if strings.HasPrefix(msg.Trailing, "\x01") || modifyRegExp.MatchString(msg.Trailing) {
-					logger.Trace("flushing buffer because of CTCP or message modifications")
+				// Without a target (e.g. "PRIVMSG :text") there is nothing to compare, the
+				// command handler will reject it. Never buffer those.
+				if len(msg.Params) == 0 || strings.HasPrefix(msg.Trailing, "\x01") || modifyRegExp.MatchString(msg.Trailing) {
+					logger.Trace("flushing buffer because of CTCP, message modifications or a missing target")
 					flush()
 
 					u.DecodeCh <- msg
@@ -296,8 +309,8 @@ func (u *User) Decode() {
 					if bufferedMsg.Params[0] == msg.Params[0] {
 						// Guard against exceeding post size limit
 						postLimit := 460
-						if u.br != nil {
-							postLimit = u.br.GetPostSizeLimit()
+						if br := u.currentBridge(); br != nil {
+							postLimit = br.GetPostSizeLimit()
 						}
 
 						if len(bufferedMsg.Trailing)+len(msg.Trailing)+1 > postLimit-50 {
@@ -350,15 +363,10 @@ func (u *User) Decode() {
 			continue
 		}
 
-		dmsg := "<- " + msg.String()
-		if msg.Command == irc.PRIVMSG && msg.Params != nil && (msg.Params[0] == "slack" || msg.Params[0] == "mattermost") {
-			// Don't log sensitive information
-			trail := strings.Split(msg.Trailing, " ")
-			if (msg.Trailing != "" && trail[0] == "login") || (len(msg.Params) > 1 && msg.Params[1] == "login") {
-				dmsg = "<- PRIVMSG " + msg.Params[0] + " :login [redacted]"
-			}
-		} else if msg.Command == irc.PASS {
-			dmsg = "<- PASS [redacted]"
+		// Don't spend time formatting every incoming message when nobody reads the log.
+		dmsg := ""
+		if logger.Logger.IsLevelEnabled(logrus.DebugLevel) {
+			dmsg = incomingLogLine(msg)
 		}
 
 		// PRIVMSG can be buffered
@@ -382,6 +390,32 @@ func (u *User) Decode() {
 	if u.DecodeCh != nil {
 		close(u.DecodeCh)
 	}
+}
+
+// incomingLogLine describes a message from the client for the log, without the credentials in it.
+func incomingLogLine(msg *irc.Message) string {
+	const (
+		serviceSlack      = "slack"
+		serviceMattermost = "mattermost"
+		serviceMastodon   = "mastodon"
+		loginCommand      = "login"
+	)
+
+	dmsg := "<- " + msg.String()
+
+	switch {
+	case msg.Command == irc.PRIVMSG && len(msg.Params) > 0 &&
+		(msg.Params[0] == serviceSlack || msg.Params[0] == serviceMattermost || msg.Params[0] == serviceMastodon):
+		// Don't log sensitive information
+		trail := strings.Split(msg.Trailing, " ")
+		if (msg.Trailing != "" && trail[0] == loginCommand) || (len(msg.Params) > 1 && msg.Params[1] == loginCommand) {
+			dmsg = "<- PRIVMSG " + msg.Params[0] + " :" + loginCommand + " [redacted]"
+		}
+	case msg.Command == irc.PASS:
+		dmsg = "<- PASS [redacted]"
+	}
+
+	return dmsg
 }
 
 func (u *User) HasCapability(capability string) bool {

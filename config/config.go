@@ -42,8 +42,14 @@ type Config struct {
 
 	v *viper.Viper
 
-	reloadHooks []func(rc *RuntimeConfig)
-	hooksMu     sync.RWMutex
+	reloadHooks    []reloadHook
+	nextReloadHook uint64
+	hooksMu        sync.RWMutex
+}
+
+type reloadHook struct {
+	id uint64
+	fn func(rc *RuntimeConfig)
 }
 
 // RuntimeConfig is immutable.
@@ -503,10 +509,36 @@ func (c *Config) publishRuntimeConfig() error {
 }
 
 // RegisterReloadHook allows other packages to execute logic when the config file changes.
-func (c *Config) RegisterReloadHook(hook func(rc *RuntimeConfig)) {
+//
+// The returned function unregisters the hook again. A hook keeps everything it
+// references alive, so hooks of things with a limited lifetime (like a login
+// session) must be unregistered when that lifetime ends.
+func (c *Config) RegisterReloadHook(hook func(rc *RuntimeConfig)) func() {
 	c.hooksMu.Lock()
 	defer c.hooksMu.Unlock()
-	c.reloadHooks = append(c.reloadHooks, hook)
+
+	id := c.nextReloadHook
+	c.nextReloadHook++
+	c.reloadHooks = append(c.reloadHooks, reloadHook{id: id, fn: hook})
+
+	var once sync.Once
+
+	return func() {
+		once.Do(func() {
+			c.hooksMu.Lock()
+			defer c.hooksMu.Unlock()
+
+			// Build a new slice, Reload might be running a snapshot of the old one.
+			hooks := make([]reloadHook, 0, len(c.reloadHooks))
+			for _, h := range c.reloadHooks {
+				if h.id != id {
+					hooks = append(hooks, h)
+				}
+			}
+
+			c.reloadHooks = hooks
+		})
+	}
 }
 
 // Reload re-reads the config file, updates the atomic pointer, and triggers hooks.
@@ -527,13 +559,17 @@ func (c *Config) Reload() error {
 		logger.Info("configuration reloaded")
 	}
 
-	// Successfully reloaded, trigger all registered hooks safely
+	// Successfully reloaded, trigger all registered hooks safely.
+	// Run them from a snapshot without holding the lock: a hook is allowed to
+	// (un)register hooks itself.
 	c.hooksMu.RLock()
-	rc := c.Current()
-	for _, hook := range c.reloadHooks {
-		hook(rc)
-	}
+	hooks := c.reloadHooks
 	c.hooksMu.RUnlock()
+
+	rc := c.Current()
+	for _, hook := range hooks {
+		hook.fn(rc)
+	}
 
 	return nil
 }

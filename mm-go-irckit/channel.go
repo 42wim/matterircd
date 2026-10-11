@@ -139,7 +139,7 @@ func (ch *channel) Message(from *User, text string) {
 		EmptyTrailing: true,
 	}
 
-	users := ch.Users()
+	users := ch.realUsers()
 
 	for {
 		line, rest, found := strings.Cut(text, "\n")
@@ -182,9 +182,14 @@ func (ch *channel) Part(u *User, text string) {
 	}
 
 	delete(ch.usersIdx, u.ID())
-	users := make([]*User, 0, len(ch.usersIdx))
+
+	// Only real users see the part. Don't copy all the ghosts (a channel can have
+	// thousands) just to skip them again, that adds up when everybody leaves.
+	var users []*User
 	for _, to := range ch.usersIdx {
-		users = append(users, to)
+		if !to.Ghost {
+			users = append(users, to)
+		}
 	}
 	ch.mu.Unlock()
 
@@ -195,10 +200,61 @@ func (ch *channel) Part(u *User, text string) {
 	u.Encode(msg) //nolint:errcheck
 
 	for _, to := range users {
-		if !to.Ghost {
-			to.Encode(msg)
+		to.Encode(msg) //nolint:errcheck
+	}
+}
+
+// evictIfOnlyGhosts removes everybody from the channel if there is no real user in it,
+// and reports whether it did. Ghosts don't see anything, so nobody is told about it. This
+// is what parting the ghosts one by one does, without copying all the other ghosts of
+// the channel for every single one of them.
+func (ch *channel) evictIfOnlyGhosts() bool {
+	ch.mu.Lock()
+
+	if len(ch.usersIdx) == 0 {
+		ch.mu.Unlock()
+		return true
+	}
+
+	for _, u := range ch.usersIdx {
+		if !u.Ghost {
+			ch.mu.Unlock()
+			return false
 		}
 	}
+
+	evicted := ch.usersIdx
+	ch.usersIdx = make(map[string]*User)
+	ch.mu.Unlock()
+
+	for _, u := range evicted {
+		u.Lock()
+		delete(u.channels, ch)
+		u.Unlock()
+	}
+
+	return true
+}
+
+// evictIfOnlyGhosts removes everybody from the channel if there is no real user in it,
+// and reports whether it did.
+func evictIfOnlyGhosts(ch Channel) bool {
+	if c, ok := ch.(*channel); ok {
+		return c.evictIfOnlyGhosts()
+	}
+
+	users := ch.Users()
+	for _, u := range users {
+		if !u.Ghost {
+			return false
+		}
+	}
+
+	for _, u := range users {
+		ch.Part(u, "")
+	}
+
+	return true
 }
 
 // Unlink will disassociate the Channel from the Server.
@@ -259,18 +315,18 @@ func (ch *channel) Topic(from Prefixer, text string) {
 		Trailing: ch.topic,
 	}
 
-	users := make([]*User, 0, len(ch.usersIdx))
+	var users []*User
 	for _, u := range ch.usersIdx {
-		users = append(users, u)
+		if !u.Ghost {
+			users = append(users, u)
+		}
 	}
 
 	ch.mu.Unlock()
 
-	// only send join messages to real users
+	// only send topic messages to real users
 	for _, to := range users {
-		if !to.Ghost {
-			to.Encode(msg)
-		}
+		to.Encode(msg) //nolint:errcheck
 	}
 }
 
@@ -425,14 +481,9 @@ func (ch *channel) Join(u *User) error {
 		Params:  []string{ch.name},
 	}
 
-	// send regular users a notification of the join
-	users := ch.Users()
-
-	for _, to := range users {
-		// only send join messages to real users
-		if !to.Ghost {
-			to.Encode(msg)
-		}
+	// only send join messages to real users
+	for _, to := range ch.realUsers() {
+		to.Encode(msg) //nolint:errcheck
 	}
 
 	ch.SendNamesResponse(u)
@@ -459,6 +510,35 @@ func (ch *channel) Users() []*User {
 	}
 
 	return users
+}
+
+// realUsers returns the users who are in the channel and have a connection. Ghosts never
+// see anything, and a channel can have thousands of them, so for everything that is
+// sent to the channel (for every single message) don't copy them just to skip them again.
+func (ch *channel) realUsers() []*User {
+	ch.mu.RLock()
+	defer ch.mu.RUnlock()
+
+	var users []*User
+
+	for _, u := range ch.usersIdx {
+		if !u.Ghost {
+			users = append(users, u)
+		}
+	}
+
+	return users
+}
+
+// eachUser calls fn for every user in the channel, without copying them like Users()
+// does. fn runs with the channel locked, so it must not call back into the channel.
+func (ch *channel) eachUser(fn func(*User)) {
+	ch.mu.RLock()
+	defer ch.mu.RUnlock()
+
+	for _, u := range ch.usersIdx {
+		fn(u)
+	}
 }
 
 // Names returns a sorted slice of Nick strings of users who are in the channel.
@@ -507,7 +587,7 @@ func (ch *channel) Spoof(from string, text string, cmd string, maxlen ...int) {
 		EmptyTrailing: true,
 	}
 
-	users := ch.Users()
+	users := ch.realUsers()
 
 	for {
 		line, rest, found := strings.Cut(text, "\n")

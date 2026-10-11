@@ -34,8 +34,16 @@ type Mattermost struct {
 	credentials bridge.Credentials
 	quitChan    []chan struct{}
 	eventChan   chan *bridge.Event
-	connected   bool
+	connected   atomic.Bool
 	instanceTag string
+
+	// done is closed on logout. Nobody reads eventChan anymore after that, so it
+	// releases everything that is still trying to hand over an event.
+	done       chan struct{}
+	logoutOnce sync.Once
+
+	// unregisterReloadHook removes the hook that New registered on the config.
+	unregisterReloadHook func()
 
 	dmChannelCache   *lru.Cache[string, string]
 	msgParentCache   *lru.Cache[string, CachedPost]
@@ -47,6 +55,7 @@ type Mattermost struct {
 	wsCtx    context.Context
 	wsCancel context.CancelFunc
 
+	bannerMu       sync.Mutex
 	lastBannerText string
 
 	lastTypingSent sync.Map
@@ -58,7 +67,10 @@ type CachedPost struct {
 	ReplyMsg   string
 }
 
-var logger *logrus.Entry
+var (
+	logger     *logrus.Entry
+	loggerOnce sync.Once
+)
 
 func (m *Mattermost) Config() any {
 	return &m.cfg.Current().Mattermost
@@ -73,7 +85,7 @@ func (m *Mattermost) FormatterConfig() *config.FormatterConfig {
 }
 
 func (m *Mattermost) Connected() bool {
-	return m.connected
+	return m.connected.Load()
 }
 
 func (m *Mattermost) GetLastSentMsgs() []string {
@@ -113,8 +125,30 @@ func (m *Mattermost) GetReplayEvents(ctx context.Context, channelID string, sinc
 func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Event, onWsConnect func()) (bridge.Bridger, *matterclient.Client, error) {
 	rc := cfg.Current()
 
+	// All users share one logger. Creating (and assigning) a new one on every login
+	// races with everything that is logging at that moment, and it has to exist
+	// before anything below logs, or the first failure would panic on a nil logger.
+	loggerOnce.Do(func() {
+		l := logrus.New()
+		l.SetFormatter(&prefixed.TextFormatter{
+			PrefixPadding: 18,
+			DisableColors: false,
+			FullTimestamp: true,
+		})
+		logger = l.WithFields(logrus.Fields{"prefix": "bridge/mattermost"})
+	})
+
+	ourlog := logger.Logger
+	if rc.Debug {
+		ourlog.SetLevel(logrus.DebugLevel)
+	}
+
+	if rc.Trace {
+		ourlog.SetLevel(logrus.TraceLevel)
+	}
+
 	if !rc.Mattermost.IgnoreServerVersion {
-		ver := getServerVersion(cfg, cred)
+		ver := getServerVersion(ctx, cfg, cred)
 		if !isSupportedVersion(ver) {
 			return nil, nil, fmt.Errorf("mattermost version %s not supported", ver)
 		}
@@ -124,26 +158,12 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 		credentials: cred,
 		eventChan:   eventChan,
 		cfg:         cfg,
+		done:        make(chan struct{}),
 	}
 
 	m.dmChannelCache, _ = lru.New[string, string](128)
 	m.msgParentCache, _ = lru.New[string, CachedPost](128)
 	m.msgLastSentCache, _ = lru.New[string, string](128)
-
-	ourlog := logrus.New()
-	ourlog.SetFormatter(&prefixed.TextFormatter{
-		PrefixPadding: 18,
-		DisableColors: false,
-		FullTimestamp: true,
-	})
-	logger = ourlog.WithFields(logrus.Fields{"prefix": "bridge/mattermost"})
-	if rc.Debug {
-		ourlog.SetLevel(logrus.DebugLevel)
-	}
-
-	if rc.Trace {
-		ourlog.SetLevel(logrus.TraceLevel)
-	}
 
 	mc, err := m.loginToMattermost(ctx, onWsConnect)
 	if err != nil {
@@ -184,13 +204,12 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 	// Set initial log level
 	setBridgeLogLevels(rc)
 
-	// Register hook to update live on reloads
-	cfg.RegisterReloadHook(func(newRC *config.RuntimeConfig) {
-		setBridgeLogLevels(newRC)
-	})
+	// Register hook to update live on reloads. The hook keeps this client alive for as
+	// long as it is registered, so Logout has to remove it again.
+	m.unregisterReloadHook = cfg.RegisterReloadHook(setBridgeLogLevels)
 
 	m.mc = mc
-	m.connected = true
+	m.connected.Store(true)
 
 	// Create a unique matterircd instance tag so we don't relay messages sent from it.
 	charset := []byte("abcdefghijklmnopqrstuvwxyz")
@@ -202,6 +221,15 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 	m.instanceTag = string(b)
 
 	return m, mc, nil
+}
+
+// broadcastOf returns the broadcast of the event, the server doesn't always send one.
+func broadcastOf(rmsg *model.WebSocketEvent) *model.WebsocketBroadcast {
+	if b := rmsg.GetBroadcast(); b != nil {
+		return b
+	}
+
+	return &model.WebsocketBroadcast{}
 }
 
 func (m *Mattermost) NormalizePostID(msgID string) string {
@@ -379,7 +407,8 @@ func (m *Mattermost) loginToMattermost(ctx context.Context, onWsConnect func()) 
 	quitChan := make(chan struct{})
 	m.quitChan = append(m.quitChan, quitChan)
 
-	m.wsCtx, m.wsCancel = context.WithCancel(context.Background())
+	// The workers end with Logout, or when the context of the login is canceled.
+	m.wsCtx, m.wsCancel = context.WithCancel(ctx)
 
 	// Start a pool of 10 concurrent workers
 	for i := range 10 {
@@ -407,6 +436,9 @@ func (m *Mattermost) handleWsMessage(ctx context.Context, quitChan chan struct{}
 		select {
 		case <-quitChan:
 			logger.Trace("exiting handleWsMessage")
+			return
+		case <-ctx.Done():
+			logger.Trace("exiting handleWsMessage, context done")
 			return
 		case message := <-m.mc.MessageChan:
 			eventType := message.Raw.EventType()
@@ -559,15 +591,26 @@ func (m *Mattermost) UpdateChannels(ctx context.Context) error {
 	return m.mc.UpdateChannels(ctx)
 }
 
+// Logout is safe to call more than once, only the first call does something.
 func (m *Mattermost) Logout(ctx context.Context) error {
-	if m.mc.WsClient != nil {
-		_ = m.mc.Logout(ctx)
-		logger.Info("logout succeeded")
+	m.logoutOnce.Do(func() { m.logout(ctx) })
+
+	return nil
+}
+
+func (m *Mattermost) logout(ctx context.Context) {
+	m.connected.Store(false)
+
+	// The hook keeps this client (and with it everything we cached) alive.
+	if m.unregisterReloadHook != nil {
+		m.unregisterReloadHook()
 	}
 
-	m.eventChan <- &bridge.Event{
-		Type: "logout",
-		Data: &bridge.LogoutEvent{},
+	m.sendLogoutEvent(ctx)
+
+	// Release everything that is still trying to hand over an event, and stop the workers.
+	if m.done != nil {
+		close(m.done)
 	}
 
 	m.mc.WsQuit = true
@@ -581,9 +624,53 @@ func (m *Mattermost) Logout(ctx context.Context) error {
 	}
 
 	m.quitChan = nil
-	m.connected = false
 
-	return nil
+	if m.mc.WsClient == nil {
+		return
+	}
+
+	logoutCtx, cancel := logoutContext(ctx, m.mc.Timeout)
+	defer cancel()
+
+	_ = m.mc.Logout(logoutCtx)
+
+	logger.Info("logout succeeded")
+}
+
+// sendLogoutEvent tells the event loop that we're done. The loop may never have started, or
+// it ended already when the user disconnected (ctx is canceled then), so don't wait for it forever.
+func (m *Mattermost) sendLogoutEvent(ctx context.Context) {
+	timer := time.NewTimer(time.Second)
+	defer timer.Stop()
+
+	select {
+	case m.eventChan <- &bridge.Event{Type: "logout", Data: &bridge.LogoutEvent{}}:
+	case <-ctx.Done():
+	case <-timer.C:
+	}
+}
+
+// logoutContext returns the context for the request that invalidates the session. The
+// context of the user is already canceled when they disconnected, which would make the
+// request fail right away and leave the session alive on the server. So only keep its
+// values, and bound the request ourselves.
+func logoutContext(ctx context.Context, timeoutSeconds int) (context.Context, context.CancelFunc) {
+	timeout := time.Duration(timeoutSeconds) * time.Second
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+
+	return context.WithTimeout(context.WithoutCancel(ctx), timeout)
+}
+
+// sendEvent hands the event over to the event loop. The event loop stops reading
+// after it received the logout event, so give up when we're logged out instead
+// of blocking the caller (and with it a websocket worker) forever.
+func (m *Mattermost) sendEvent(ev *bridge.Event) {
+	select {
+	case m.eventChan <- ev:
+	case <-m.done:
+	}
 }
 
 func (m *Mattermost) MsgUser(ctx context.Context, userID, text string) (string, error) {
@@ -1146,8 +1233,9 @@ func (m *Mattermost) wsActionPostSkip(ctx context.Context, data *model.Post, rms
 	channel := m.GetChannelName(ctx, data.ChannelId)
 
 	if m.mc.IsDMChannelName(channel) {
-		receiver := m.GetDMUser(ctx, channel)
-		channel = receiver.Username
+		if receiver := m.GetDMUser(ctx, channel); receiver != nil {
+			channel = receiver.Username
+		}
 	}
 
 	msgID := data.Id
@@ -1310,7 +1398,7 @@ func (m *Mattermost) handleWsActionLeaveTeam(ctx context.Context, rmsg *model.We
 			},
 		}
 
-		m.eventChan <- event
+		m.sendEvent(event)
 	}
 }
 
@@ -1402,7 +1490,7 @@ func (m *Mattermost) handleWsActionPost(ctx context.Context, rmsg *model.WebSock
 			Type: "direct_message",
 			Data: d,
 		}
-		m.eventChan <- event
+		m.sendEvent(event)
 	}
 
 	switch data.Type {
@@ -1442,7 +1530,7 @@ func (m *Mattermost) handleWsActionPost(ctx context.Context, rmsg *model.WebSock
 			},
 		}
 
-		m.eventChan <- event
+		m.sendEvent(event)
 		return
 
 	default:
@@ -1472,7 +1560,7 @@ func (m *Mattermost) handleWsActionPost(ctx context.Context, rmsg *model.WebSock
 			},
 		}
 
-		m.eventChan <- event
+		m.sendEvent(event)
 		return
 	}
 
@@ -1523,7 +1611,7 @@ func (m *Mattermost) handleWsActionPost(ctx context.Context, rmsg *model.WebSock
 		}
 
 		event.Data = d
-		m.eventChan <- event
+		m.sendEvent(event)
 
 	default:
 		messageType := ""
@@ -1546,7 +1634,7 @@ func (m *Mattermost) handleWsActionPost(ctx context.Context, rmsg *model.WebSock
 			},
 		}
 
-		m.eventChan <- event
+		m.sendEvent(event)
 	}
 
 	if len(data.FileIds) > 0 {
@@ -1604,9 +1692,9 @@ func (m *Mattermost) handleFileEvent(ctx context.Context, channelType string, gh
 			return
 		}
 
-		m.eventChan <- event
+		m.sendEvent(event)
 	default:
-		m.eventChan <- event
+		m.sendEvent(event)
 	}
 
 	logger.Debugf("handleFileEvent: user %s sent %d files %#v", ghost.Nick, len(fileEvent.Files), data.FileIds)
@@ -1629,7 +1717,7 @@ func (m *Mattermost) wsActionPostJoinLeave(ctx context.Context, data *model.Post
 					},
 				}
 
-				m.eventChan <- event
+				m.sendEvent(event)
 			}
 		}
 	case "system_remove_from_channel":
@@ -1644,7 +1732,7 @@ func (m *Mattermost) wsActionPostJoinLeave(ctx context.Context, data *model.Post
 				},
 			}
 
-			m.eventChan <- event
+			m.sendEvent(event)
 		}
 	}
 }
@@ -1653,6 +1741,12 @@ func (m *Mattermost) handleWsActionUserAdded(ctx context.Context, rmsg *model.We
 	logger.Trace("in handleWsActionUserAdded")
 	userID, ok := rmsg.GetData()["user_id"].(string)
 	if !ok {
+		return
+	}
+
+	// the server doesn't always send a broadcast, and an event for no channel is useless
+	channelID := broadcastOf(rmsg).ChannelId
+	if channelID == "" {
 		return
 	}
 
@@ -1665,18 +1759,18 @@ func (m *Mattermost) handleWsActionUserAdded(ctx context.Context, rmsg *model.We
 			Adder: &bridge.UserInfo{
 				Nick: systemUser,
 			},
-			ChannelID: rmsg.GetBroadcast().ChannelId,
+			ChannelID: channelID,
 		},
 	}
 
-	m.eventChan <- event
+	m.sendEvent(event)
 }
 
 func (m *Mattermost) handleWsActionUserRemoved(ctx context.Context, rmsg *model.WebSocketEvent, logger *logrus.Entry) {
 	wsData := rmsg.GetData()
 	userID, ok := wsData["user_id"].(string)
 	if !ok {
-		userID = rmsg.GetBroadcast().UserId
+		userID = broadcastOf(rmsg).UserId
 	}
 
 	removerID, ok := wsData["remover_id"].(string)
@@ -1687,7 +1781,11 @@ func (m *Mattermost) handleWsActionUserRemoved(ctx context.Context, rmsg *model.
 
 	channelID, ok := wsData["channel_id"].(string)
 	if !ok {
-		channelID = rmsg.GetBroadcast().ChannelId
+		channelID = broadcastOf(rmsg).ChannelId
+	}
+
+	if channelID == "" {
+		return
 	}
 
 	event := &bridge.Event{
@@ -1701,7 +1799,7 @@ func (m *Mattermost) handleWsActionUserRemoved(ctx context.Context, rmsg *model.
 		},
 	}
 
-	m.eventChan <- event
+	m.sendEvent(event)
 }
 
 func (m *Mattermost) handleWsActionUserUpdated(rmsg *model.WebSocketEvent, logger *logrus.Entry) {
@@ -1723,7 +1821,7 @@ func (m *Mattermost) handleWsActionUserUpdated(rmsg *model.WebSocketEvent, logge
 		},
 	}
 
-	m.eventChan <- event
+	m.sendEvent(event)
 }
 
 func (m *Mattermost) handleWsActionChannelCreated(rmsg *model.WebSocketEvent, logger *logrus.Entry) {
@@ -1759,7 +1857,7 @@ func (m *Mattermost) handleWsActionChannelCreated(rmsg *model.WebSocketEvent, lo
 		},
 	}
 
-	m.eventChan <- event
+	m.sendEvent(event)
 }
 
 func (m *Mattermost) handleWsActionChannelDeleted(rmsg *model.WebSocketEvent, logger *logrus.Entry) {
@@ -1776,7 +1874,7 @@ func (m *Mattermost) handleWsActionChannelDeleted(rmsg *model.WebSocketEvent, lo
 		},
 	}
 
-	m.eventChan <- event
+	m.sendEvent(event)
 }
 
 func (m *Mattermost) handleStatusChangeEvent(rmsg *model.WebSocketEvent, logger *logrus.Entry) {
@@ -1797,7 +1895,7 @@ func (m *Mattermost) handleStatusChangeEvent(rmsg *model.WebSocketEvent, logger 
 		},
 	}
 
-	m.eventChan <- event
+	m.sendEvent(event)
 }
 
 //nolint:funlen
@@ -1829,7 +1927,12 @@ func (m *Mattermost) handleReactionEvent(ctx context.Context, rmsg *model.WebSoc
 	var event *bridge.Event
 
 	channelType := ""
-	channelID := rmsg.GetBroadcast().ChannelId
+
+	channelID := broadcastOf(rmsg).ChannelId
+	if channelID == "" {
+		return
+	}
+
 	name := m.GetChannelName(ctx, channelID)
 	if m.mc.IsDMChannelName(name) {
 		channelType = "D"
@@ -1903,7 +2006,7 @@ func (m *Mattermost) handleReactionEvent(ctx context.Context, rmsg *model.WebSoc
 		}
 	}
 
-	m.eventChan <- event
+	m.sendEvent(event)
 }
 
 func (m *Mattermost) GetTeamName(ctx context.Context, teamID string) string {
@@ -2067,14 +2170,14 @@ func (m *Mattermost) handleWsActionChannelUpdated(rmsg *model.WebSocketEvent, lo
 		return
 	}
 
-	m.eventChan <- &bridge.Event{
+	m.sendEvent(&bridge.Event{
 		Type: "channel_update",
 		Data: &bridge.ChannelUpdateEvent{
 			ChannelID:   updatedChannel.Id,
 			Name:        updatedChannel.Name,
 			DisplayName: updatedChannel.DisplayName,
 		},
-	}
+	})
 }
 
 func (m *Mattermost) handleConfigChangedEvent(rmsg *model.WebSocketEvent, logger *logrus.Entry) {
@@ -2100,20 +2203,27 @@ func (m *Mattermost) handleConfigChangedEvent(rmsg *model.WebSocketEvent, logger
 	}
 
 	// Trigger only if enabled and actually changed
-	if bannerEnabled && bannerText != "" {
-		if m.lastBannerText != bannerText {
-			m.lastBannerText = bannerText
+	// The workers run concurrently, don't hold the lock while handing the event over.
+	m.bannerMu.Lock()
 
-			m.eventChan <- &bridge.Event{
-				Type: "banner_change",
-				Data: &bridge.BannerChangeEvent{
-					Text: bannerText,
-				},
-			}
-		}
+	changed := false
+	if bannerEnabled && bannerText != "" {
+		changed = m.lastBannerText != bannerText
+		m.lastBannerText = bannerText
 	} else {
 		// Banner disabled or cleared
 		m.lastBannerText = ""
+	}
+
+	m.bannerMu.Unlock()
+
+	if changed {
+		m.sendEvent(&bridge.Event{
+			Type: "banner_change",
+			Data: &bridge.BannerChangeEvent{
+				Text: bannerText,
+			},
+		})
 	}
 }
 
@@ -2123,14 +2233,14 @@ func (m *Mattermost) handleTypingEvent(ctx context.Context, rmsg *model.WebSocke
 	typingUserID, ok := rmsg.GetData()["user_id"].(string)
 	if !ok || typingUserID == "" {
 		// Fallback depending on MM version
-		typingUserID = rmsg.GetBroadcast().UserId
+		typingUserID = broadcastOf(rmsg).UserId
 	}
 
 	if typingUserID == "" {
 		return
 	}
 
-	channelID := rmsg.GetBroadcast().ChannelId
+	channelID := broadcastOf(rmsg).ChannelId
 	if channelID == "" {
 		return
 	}
@@ -2168,7 +2278,7 @@ func (m *Mattermost) handleTypingEvent(ctx context.Context, rmsg *model.WebSocke
 	parentID, _ := rmsg.GetData()["parent_id"].(string)
 
 	// Send it down the internal event channel
-	m.eventChan <- &bridge.Event{
+	m.sendEvent(&bridge.Event{
 		Type: "typing",
 		Data: &bridge.TypingEvent{
 			ChannelID:   channelID,
@@ -2177,7 +2287,7 @@ func (m *Mattermost) handleTypingEvent(ctx context.Context, rmsg *model.WebSocke
 			Sender:      sender,
 			ParentID:    parentID,
 		},
-	}
+	})
 }
 
 func (m *Mattermost) getDMChannelID(ctx context.Context, userID string) (string, error) {
@@ -3103,6 +3213,9 @@ func (m *Mattermost) postListToEvents(ctx context.Context, postlist interface{},
 	// traverse the order in reverse
 	for i := len(mmPostList.Order) - 1; i >= 0; i-- {
 		p := mmPostList.Posts[mmPostList.Order[i]]
+		if p == nil {
+			continue
+		}
 
 		// GetPostsSince will return older messages with reaction
 		// changes since LastViewedAt. This will be confusing as
@@ -3200,13 +3313,19 @@ func (m *Mattermost) postToEvent(ctx context.Context, p *model.Post, eventType s
 		}
 
 		if isDM {
+			receiver := m.GetDMUser(ctx, channelName)
+			if receiver == nil {
+				logger.Errorf("dm: couldn't resolve the other user of %q", channelName)
+				return nil
+			}
+
 			return &bridge.Event{
 				Type: "direct_message",
 				Data: &bridge.DirectMessageEvent{
 					Text:      formattedMsg,
 					ChannelID: p.ChannelId,
 					Sender:    sender,
-					Receiver:  m.GetDMUser(ctx, channelName),
+					Receiver:  receiver,
 					Files:     files,
 					MessageID: msgID,
 					ParentID:  parentID,
@@ -3231,13 +3350,30 @@ func (m *Mattermost) postToEvent(ctx context.Context, p *model.Post, eventType s
 	}
 }
 
-func getServerVersion(cfg *config.Config, cred bridge.Credentials) string {
+func getServerVersion(ctx context.Context, cfg *config.Config, cred bridge.Credentials) string {
+	rc := cfg.Current()
+
 	proto := "https"
-	if cfg.Current().Mattermost.Insecure {
+	if rc.Mattermost.Insecure {
 		proto = "http"
 	}
 
-	resp, err := http.Get(proto + "://" + cred.Server)
+	// Without a timeout a server that doesn't answer blocks the login forever.
+	timeout := time.Duration(rc.ClientTimeout) * time.Second
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, proto+"://"+cred.Server, nil)
+	if err != nil {
+		logger.Errorf("Failed to get mattermost version: %s", err)
+		return ""
+	}
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		logger.Errorf("Failed to get mattermost version: %s", err)
 		return ""
