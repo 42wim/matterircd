@@ -40,6 +40,8 @@ type UserBridge struct {
 
 	eventLoopMutex   sync.Mutex
 	eventLoopStarted bool
+	eventLoopStop    context.CancelFunc
+	eventLoopDone    chan struct{}
 
 	lastEventTime  atomic.Int64
 	lastViewedAtDB *bolt.DB
@@ -95,7 +97,7 @@ func NewUserBridge(c net.Conn, srv Server, cfg *config.Config, db *bolt.DB) *Use
 }
 
 //nolint:funlen,gocyclo
-func (u *User) handleEventChan(eventChan <-chan *bridge.Event) {
+func (u *User) handleEventChan(ctx context.Context, eventChan <-chan *bridge.Event) {
 	// Flush to disk every 2 minutes to prevent I/O bottlenecks
 	flushTicker := time.NewTicker(2 * time.Minute)
 	defer flushTicker.Stop()
@@ -158,8 +160,8 @@ func (u *User) handleEventChan(eventChan <-chan *bridge.Event) {
 			// Periodically flush the timestamp to BoltDB
 			u.saveGlobalLastEventTime(u.lastEventTime.Load())
 
-		case <-u.ctx.Done():
-			// The user disconnected, the logout event may never reach us
+		case <-ctx.Done():
+			// We're told to stop (the user disconnected or logged out), the logout event may not reach us
 			u.saveGlobalLastEventTime(u.lastEventTime.Load())
 
 			return
@@ -1193,8 +1195,18 @@ func (u *User) addUsersToChannels() {
 	u.eventLoopMutex.Lock()
 	if !u.eventLoopStarted && u.br != nil && u.ctx.Err() == nil {
 		u.eventLoopStarted = true
+
+		ctx, stop := context.WithCancel(u.ctx)
+		done := make(chan struct{})
+		u.eventLoopStop, u.eventLoopDone = stop, done
+
 		// we did all the initialization, now listen for events
-		go u.handleEventChan(u.eventChan)
+		go func(eventChan <-chan *bridge.Event) {
+			defer close(done)
+			defer stop()
+
+			u.handleEventChan(ctx, eventChan)
+		}(u.eventChan)
 	}
 	u.eventLoopMutex.Unlock()
 }
@@ -1959,6 +1971,8 @@ func (u *User) logoutFrom(protocol string) error {
 	if br != nil {
 		_ = br.Logout(u.ctx)
 
+		u.stopEventLoop()
+
 		u.eventLoopMutex.Lock()
 		if u.br == br {
 			u.br = nil
@@ -2133,6 +2147,30 @@ func (u *User) currentBridge() bridge.Bridger {
 	defer u.eventLoopMutex.Unlock()
 
 	return u.br
+}
+
+// stopEventLoop ends the event loop, if there is one, and waits for it to finish the event it is
+// handling: that uses the bridge, which the caller is about to drop. No new loop is started after this.
+func (u *User) stopEventLoop() {
+	u.eventLoopMutex.Lock()
+	stop, done := u.eventLoopStop, u.eventLoopDone
+	u.eventLoopStarted = true
+	u.eventLoopMutex.Unlock()
+
+	if stop == nil {
+		return
+	}
+
+	stop()
+
+	timer := time.NewTimer(writeTimeout)
+	defer timer.Stop()
+
+	select {
+	case <-done:
+	case <-timer.C:
+		logger.Warn("the event loop did not stop in time")
+	}
 }
 
 // lastViewedMaxDelay is the maximum random delay before the server is told that a channel has been read.
