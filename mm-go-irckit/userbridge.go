@@ -94,18 +94,11 @@ func NewUserBridge(c net.Conn, srv Server, cfg *config.Config, db *bolt.DB) *Use
 	return u
 }
 
-// handleEventChan processes the events of the bridge until the bridge logs out.
+//nolint:gocyclo
 func (u *User) handleEventChan(eventChan <-chan *bridge.Event) {
 	// Flush to disk every 2 minutes to prevent I/O bottlenecks
 	flushTicker := time.NewTicker(2 * time.Minute)
 	defer flushTicker.Stop()
-
-	// Flush immediately on logout and disconnect
-	defer func() {
-		if t := u.lastEventTime.Load(); t > 0 {
-			u.saveGlobalLastEventTime(t)
-		}
-	}()
 
 	for {
 		select {
@@ -114,7 +107,50 @@ func (u *User) handleEventChan(eventChan <-chan *bridge.Event) {
 				return
 			}
 
-			if u.handleEvent(event) {
+			if logger.Level.String() == "trace" {
+				logger.Tracef("eventchan %s", spew.Sdump(event))
+			}
+
+			// Process the event
+			switch e := event.Data.(type) {
+			case *bridge.BannerChangeEvent:
+				u.handleBannerChangeEvent(e)
+			case *bridge.ChannelMessageEvent:
+				u.updateLastEventTime(e.CreateAt)
+				u.handleChannelMessageEvent(e)
+			case *bridge.DirectMessageEvent:
+				u.updateLastEventTime(e.CreateAt)
+				u.handleDirectMessageEvent(e)
+			case *bridge.ChannelTopicEvent:
+				u.handleChannelTopicEvent(e)
+			case *bridge.FileEvent:
+				u.handleFileEvent(e)
+			case *bridge.ChannelAddEvent:
+				u.updateLastEventTime(e.CreateAt)
+				u.handleChannelAddEvent(e)
+			case *bridge.ChannelRemoveEvent:
+				u.updateLastEventTime(e.CreateAt)
+				u.handleChannelRemoveEvent(e)
+			case *bridge.ChannelCreateEvent:
+				u.handleChannelCreateEvent(e)
+			case *bridge.ChannelDeleteEvent:
+				u.handleChannelDeleteEvent(e)
+			case *bridge.ChannelUpdateEvent:
+				u.handleChannelUpdateEvent(e)
+			case *bridge.UserUpdateEvent:
+				u.handleUserUpdateEvent(e)
+			case *bridge.StatusChangeEvent:
+				u.handleStatusChangeEvent(e)
+			case *bridge.ReactionAddEvent, *bridge.ReactionRemoveEvent:
+				u.handleReactionEvent(e)
+			case *bridge.TypingEvent:
+				u.handleTyping(e)
+			case *bridge.LogoutEvent:
+				// Flush immediately on explicit logout
+				if u.lastEventTime.Load() > 0 {
+					u.saveGlobalLastEventTime(u.lastEventTime.Load())
+				}
+
 				return
 			}
 
@@ -123,59 +159,6 @@ func (u *User) handleEventChan(eventChan <-chan *bridge.Event) {
 			u.saveGlobalLastEventTime(u.lastEventTime.Load())
 		}
 	}
-}
-
-// handleEvent processes a single event, it returns true when the event loop has to stop.
-//
-//nolint:gocyclo
-func (u *User) handleEvent(event *bridge.Event) bool {
-	if event == nil {
-		return false
-	}
-
-	if logger.Level.String() == "trace" {
-		logger.Tracef("eventchan %s", spew.Sdump(event))
-	}
-
-	// Process the event
-	switch e := event.Data.(type) {
-	case *bridge.BannerChangeEvent:
-		u.handleBannerChangeEvent(e)
-	case *bridge.ChannelMessageEvent:
-		u.updateLastEventTime(e.CreateAt)
-		u.handleChannelMessageEvent(e)
-	case *bridge.DirectMessageEvent:
-		u.updateLastEventTime(e.CreateAt)
-		u.handleDirectMessageEvent(e)
-	case *bridge.ChannelTopicEvent:
-		u.handleChannelTopicEvent(e)
-	case *bridge.FileEvent:
-		u.handleFileEvent(e)
-	case *bridge.ChannelAddEvent:
-		u.updateLastEventTime(e.CreateAt)
-		u.handleChannelAddEvent(e)
-	case *bridge.ChannelRemoveEvent:
-		u.updateLastEventTime(e.CreateAt)
-		u.handleChannelRemoveEvent(e)
-	case *bridge.ChannelCreateEvent:
-		u.handleChannelCreateEvent(e)
-	case *bridge.ChannelDeleteEvent:
-		u.handleChannelDeleteEvent(e)
-	case *bridge.ChannelUpdateEvent:
-		u.handleChannelUpdateEvent(e)
-	case *bridge.UserUpdateEvent:
-		u.handleUserUpdateEvent(e)
-	case *bridge.StatusChangeEvent:
-		u.handleStatusChangeEvent(e)
-	case *bridge.ReactionAddEvent, *bridge.ReactionRemoveEvent:
-		u.handleReactionEvent(e)
-	case *bridge.TypingEvent:
-		u.handleTyping(e)
-	case *bridge.LogoutEvent:
-		return true
-	}
-
-	return false
 }
 
 func (u *User) handleChannelTopicEvent(event *bridge.ChannelTopicEvent) {
