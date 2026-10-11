@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -21,6 +22,8 @@ import (
 )
 
 type Matrix struct {
+	sync.RWMutex
+
 	mc          *mautrix.Client
 	credentials bridge.Credentials
 	eventChan   chan *bridge.Event
@@ -35,7 +38,6 @@ type Matrix struct {
 	dmChannels map[id.RoomID][]id.UserID
 	channels   map[id.RoomID]*Channel
 	users      map[id.UserID]*User
-	sync.RWMutex
 
 	msgParentCache   *lru.Cache[id.EventID, string]
 	msgLastSentCache *lru.Cache[string, string]
@@ -113,13 +115,7 @@ func (m *Matrix) syncCallback(_ context.Context, resp *mautrix.RespSync, _ strin
 	return true
 }
 
-func (m *Matrix) handleMatrix(onConnect func()) {
-	syncer, ok := m.mc.Syncer.(*mautrix.DefaultSyncer)
-	if !ok {
-		logger.Error("matrix: unexpected syncer type")
-		return
-	}
-
+func (m *Matrix) registerHandlers(syncer *mautrix.DefaultSyncer) {
 	syncer.OnEventType(event.EventMessage, m.handleMessageEvent)
 	syncer.OnEventType(event.EventReaction, m.handleReactionEvent)
 	syncer.OnEventType(event.StateMember, m.handleMember)
@@ -130,10 +126,21 @@ func (m *Matrix) handleMatrix(onConnect func()) {
 		logger.Tracef("handleMatrix ev %s", spew.Sdump(ev))
 	})
 	syncer.OnSync(m.syncCallback)
+}
+
+func (m *Matrix) handleMatrix(onConnect func()) {
+	syncer, ok := m.mc.Syncer.(*mautrix.DefaultSyncer)
+	if !ok {
+		logger.Error("matrix: unexpected syncer type")
+		return
+	}
+
+	m.registerHandlers(syncer)
 
 	go func() {
 		for m.ctx.Err() == nil {
-			if err := m.mc.SyncWithContext(m.ctx); err != nil && m.ctx.Err() == nil {
+			err := m.mc.SyncWithContext(m.ctx)
+			if err != nil && m.ctx.Err() == nil {
 				logger.Errorf("matrix: Sync() returned %s", err)
 
 				select {
@@ -228,13 +235,7 @@ func (m *Matrix) handleDM(_ context.Context, ev *event.Event) {
 }
 
 func containsUser(users []id.UserID, userID id.UserID) bool {
-	for _, u := range users {
-		if u == userID {
-			return true
-		}
-	}
-
-	return false
+	return slices.Contains(users, userID)
 }
 
 func (m *Matrix) getOrCreateChannelLocked(roomID id.RoomID) *Channel {
@@ -590,7 +591,7 @@ func (m *Matrix) IsOnline(status string) bool {
 }
 
 func (m *Matrix) Protocol() string {
-	return "matrix" //nolint:goconst
+	return "matrix"
 }
 
 func (m *Matrix) Kick(ctx context.Context, channelID, username string) error {
@@ -638,10 +639,12 @@ func (m *Matrix) GetUsers() []*bridge.UserInfo {
 	var users []*bridge.UserInfo
 
 	m.RLock()
+
 	userIDs := make([]id.UserID, 0, len(m.users))
 	for userID := range m.users {
 		userIDs = append(userIDs, userID)
 	}
+
 	m.RUnlock()
 
 	logger.Debugf("GetUsers %d", len(userIDs))
@@ -736,15 +739,18 @@ func (m *Matrix) createUser(userID id.UserID) *bridge.UserInfo {
 	}
 
 	m.RLock()
+
 	displayName := localpart + "@" + homeserver
 	if user, ok := m.users[userID]; ok && user.MemberEventContent != nil && user.Displayname != "" {
 		displayName = user.Displayname
 	}
+
 	m.RUnlock()
 
 	// Drop the homeserver/host part if it's a user on the same homeserver as us.
 	nick := localpart + "@" + homeserver
-	if _, myHomeserver, err2 := m.mc.UserID.Parse(); err2 == nil && homeserver == myHomeserver {
+	_, myHomeserver, err := m.mc.UserID.Parse()
+	if err == nil && homeserver == myHomeserver {
 		nick = localpart
 	}
 
@@ -761,38 +767,44 @@ func (m *Matrix) createUser(userID id.UserID) *bridge.UserInfo {
 
 func (m *Matrix) addParentMsg(ctx context.Context, roomID id.RoomID, parentID id.EventID, msg string, newLen int, uncounted string, unicode bool) (string, error) {
 	// Search and use cached reply if it exists.
-	// None found, so we'll need to create one and save it for future uses.
 	replyMessage, ok := m.msgParentCache.Get(parentID)
-	if !ok {
-		resp, err := m.mc.GetEvent(ctx, roomID, parentID)
-		// Retry once on failure.
-		if err != nil {
-			resp, err = m.mc.GetEvent(ctx, roomID, parentID)
-		}
-
-		if err != nil {
-			return msg, err
-		}
-
-		body := ""
-		if val, ok2 := resp.Content.Raw["body"].(string); ok2 {
-			body = val
-		}
-
-		nick := resp.Sender.String()
-		if parentUser := m.GetUser(ctx, resp.Sender.String()); parentUser != nil {
-			nick = parentUser.Nick
-		}
-
-		replyMessage = fmt.Sprintf(" (re @%s: %s)", nick, maybeShorten(body, newLen, uncounted, unicode))
-		logger.Debugf("Created reply for parent post %s:%s", parentID.String(), replyMessage)
-
-		m.msgParentCache.Add(parentID, replyMessage)
-	} else {
+	if ok {
 		logger.Debugf("Found saved reply for parent post %s, using:%s", parentID, replyMessage)
+
+		return strings.TrimRight(msg, "\n") + replyMessage, nil
 	}
 
+	// None found, so we'll need to create one and save it for future uses.
+	replyMessage, err := m.createParentReply(ctx, roomID, parentID, newLen, uncounted, unicode)
+	if err != nil {
+		return msg, err
+	}
+
+	logger.Debugf("Created reply for parent post %s:%s", parentID.String(), replyMessage)
+	m.msgParentCache.Add(parentID, replyMessage)
+
 	return strings.TrimRight(msg, "\n") + replyMessage, nil
+}
+
+func (m *Matrix) createParentReply(ctx context.Context, roomID id.RoomID, parentID id.EventID, newLen int, uncounted string, unicode bool) (string, error) {
+	resp, err := m.mc.GetEvent(ctx, roomID, parentID)
+	// Retry once on failure.
+	if err != nil {
+		resp, err = m.mc.GetEvent(ctx, roomID, parentID)
+	}
+
+	if err != nil {
+		return "", err
+	}
+
+	body, _ := resp.Content.Raw["body"].(string)
+
+	nick := resp.Sender.String()
+	if parentUser := m.GetUser(ctx, resp.Sender.String()); parentUser != nil {
+		nick = parentUser.Nick
+	}
+
+	return fmt.Sprintf(" (re @%s: %s)", nick, maybeShorten(body, newLen, uncounted, unicode)), nil
 }
 
 // maybeShorten returns a prefix of msg that is approximately newLen
@@ -810,7 +822,7 @@ func maybeShorten(msg string, newLen int, uncounted string, unicode bool) string
 
 	newMsg := ""
 
-	for _, word := range strings.Split(strings.ReplaceAll(msg, "\n", " "), " ") {
+	for word := range strings.SplitSeq(strings.ReplaceAll(msg, "\n", " "), " ") {
 		if newMsg == "" {
 			newMsg = word
 			continue

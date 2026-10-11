@@ -8,11 +8,14 @@ import (
 )
 
 type User struct {
-	ID id.UserID
 	*event.MemberEventContent
+
+	ID id.UserID
 }
 
 type Channel struct {
+	sync.RWMutex
+
 	ID         id.RoomID
 	Alias      id.RoomAlias
 	AltAliases []id.RoomAlias
@@ -20,5 +23,4 @@ type Channel struct {
 	IsDirect   bool
 	Encrypted  bool
 	Topic      string
-	sync.RWMutex
 }

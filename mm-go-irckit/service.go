@@ -44,13 +44,18 @@ func logout(u *User, toUser *User, args []string, service string) {
 	_ = u.logoutFrom(br.Protocol())
 }
 
+const (
+	serviceMatrix = "matrix"
+	helpArg       = "help"
+)
+
 func login(u *User, toUser *User, args []string, service string) {
 	if u.inprogress.Load() {
 		u.MsgUser(toUser, "login or logout in progress. Please wait")
 		return
 	}
 
-	if service == "matrix" {
+	if service == serviceMatrix {
 		var err error
 
 		wMsg := "Matrix support is very much experimental and a work in progress. Use at your own risk."
@@ -66,7 +71,7 @@ func login(u *User, toUser *User, args []string, service string) {
 			u.Credentials.Token = args[len(args)-1]
 		}
 
-		if u.Credentials.Token == "help" {
+		if u.Credentials.Token == helpArg {
 			u.MsgUser(toUser, "need LOGIN <server> <login> <pass> or LOGIN <token>")
 			return
 		}
@@ -88,13 +93,14 @@ func login(u *User, toUser *User, args []string, service string) {
 		u.inprogress.Store(true)
 		defer u.inprogress.Store(false)
 
-		err = u.loginTo("matrix")
+		err = u.loginTo(serviceMatrix)
 		if err != nil {
 			u.MsgUser(toUser, err.Error())
 			return
 		}
 
 		u.MsgUser(toUser, "login OK")
+
 		if u.Credentials.Token != "" {
 			u.MsgUser(toUser, "token used: "+u.Credentials.Token)
 		}
@@ -136,7 +142,7 @@ func login(u *User, toUser *User, args []string, service string) {
 			u.Credentials.Token = args[len(args)-1]
 		}
 
-		if u.Credentials.Token == "help" {
+		if u.Credentials.Token == helpArg {
 			u.MsgUser(toUser, "need LOGIN <team> <login> <pass> or LOGIN <token>")
 			return
 		}
@@ -174,6 +180,7 @@ func login(u *User, toUser *User, args []string, service string) {
 		}
 
 		u.MsgUser(toUser, "login OK")
+
 		if u.Credentials.Token != "" {
 			u.MsgUser(toUser, "token used: "+u.Credentials.Token)
 		}
@@ -436,7 +443,7 @@ func search(u *User, toUser *User, args []string, service string) {
 		}
 	}
 
-	if len(args) == 0 || args[0] == "help" {
+	if len(args) == 0 || args[0] == helpArg {
 		u.MsgUser(toUser, "need SEARCH <limit> <text>")
 		u.MsgUser(toUser, "e.g. SEARCH 10 matterircd")
 		return

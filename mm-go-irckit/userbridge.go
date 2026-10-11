@@ -92,7 +92,7 @@ func NewUserBridge(c net.Conn, srv Server, cfg *config.Config, db *bolt.DB) *Use
 	// used for login
 	u.createService("mattermost", "loginservice")
 	u.createService("slack", "loginservice")
-	u.createService("matrix", "loginservice")
+	u.createService(serviceMatrix, "loginservice")
 	u.createService("mastodon", "loginservice")
 	u.createService("matterircd", "systemservice")
 	return u
@@ -1860,7 +1860,7 @@ func (u *User) isValidServer(server, protocol string) bool {
 	case "slack":
 		restrict = u.cfg.Slack().Bridge.Restrict
 
-	case "matrix":
+	case serviceMatrix:
 		restrict = u.cfg.Matrix().Bridge.Restrict
 
 	case "mastodon":
@@ -1903,7 +1903,7 @@ func (u *User) loginTo(protocol string) error {
 	switch protocol {
 	case "mastodon":
 		br, err = mastodon.New(u.cfg, u.Credentials, eventChan, u.addUsersToChannels)
-	case "matrix":
+	case serviceMatrix:
 		br, _, err = matrix.New(u.ctx, u.cfg, u.Credentials, eventChan, u.addUsersToChannels)
 	case "slack":
 		br, err = slack.New(u.cfg, u.Credentials, eventChan, u.addUsersToChannels)
@@ -2107,7 +2107,7 @@ func (u *User) prefixContext(channelID, messageID, parentID, event string) strin
 		prefixChar = "↪"
 	}
 
-	if u.br.BridgeConfig().ThreadContext == "mattermost" || u.br.BridgeConfig().ThreadContext == "mattermost+post" || u.br.BridgeConfig().ThreadContext == "matrix" {
+	if u.br.BridgeConfig().ThreadContext == "mattermost" || u.br.BridgeConfig().ThreadContext == "mattermost+post" || u.br.BridgeConfig().ThreadContext == serviceMatrix {
 		if parentID == "" {
 			return "[@@" + messageID + "]"
 		}
