@@ -26,6 +26,7 @@ type Channel struct {
 	sync.RWMutex
 
 	ID         id.RoomID
+	Name       string
 	Alias      id.RoomAlias
 	AltAliases []id.RoomAlias
 	Members    map[id.UserID]*User
@@ -54,10 +55,10 @@ type Reaction struct {
 	Direct   bool
 }
 
-// Handler receives events from the client. All methods are called from the
-// sync goroutine and must not block for long.
+// Handler receives events from the client. All methods, including Ready, are
+// called from the sync goroutine and must not block for long.
 type Handler interface {
-	// Ready is called once, after the initial sync completed.
+	// Ready is called once, after the events of the initial sync were processed.
 	Ready()
 	OnMessage(msg *Message)
 	OnReaction(r *Reaction)

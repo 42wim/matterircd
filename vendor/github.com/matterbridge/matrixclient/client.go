@@ -5,16 +5,19 @@ package matrixclient
 import (
 	"context"
 	"errors"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	logger "github.com/sirupsen/logrus"
 	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
+
+	prefixed "github.com/matterbridge/logrus-prefixed-formatter"
+	"github.com/sirupsen/logrus"
 )
 
 // Client is a logged in Matrix client keeping track of rooms and users.
@@ -27,16 +30,38 @@ type Client struct {
 	ctx    context.Context //nolint:containedctx
 	cancel context.CancelFunc
 
-	firstSync atomic.Bool
 	connected atomic.Bool
+
+	logger        *logrus.Entry
+	rootLogger    *logrus.Logger
+	apiLogger     *logrus.Entry
+	rootAPILogger *logrus.Logger
 
 	channels   map[id.RoomID]*Channel
 	dmChannels map[id.RoomID][]id.UserID
+	directData map[id.UserID][]id.RoomID // last known m.direct account data
 	users      map[id.UserID]*User
 }
 
 // New logs in and starts syncing. Handler.Ready is called after the initial sync.
 func New(ctx context.Context, cred Credentials, h Handler) (*Client, error) {
+	// Logger for the rest of matrixclient
+	rootLogger := logrus.New()
+	rootLogger.SetFormatter(&prefixed.TextFormatter{
+		PrefixPadding: 13,
+		DisableColors: false,
+		FullTimestamp: true,
+	})
+	// Logger for Matrix API calls
+	rootAPILogger := logrus.New()
+	rootAPILogger.SetFormatter(&prefixed.TextFormatter{
+		PrefixPadding: 18,
+		DisableColors: false,
+		FullTimestamp: true,
+	})
+	// Default to higher than "warn" to not log anything
+	rootAPILogger.SetLevel(logrus.ErrorLevel)
+
 	mc, err := mautrix.NewClient(cred.Server, "", "")
 	if err != nil {
 		return nil, err
@@ -53,10 +78,17 @@ func New(ctx context.Context, cred Credentials, h Handler) (*Client, error) {
 	}
 
 	c := &Client{
-		mc:         mc,
-		handler:    h,
+		mc:      mc,
+		handler: h,
+
+		rootLogger:    rootLogger,
+		logger:        rootLogger.WithFields(logrus.Fields{"prefix": "matrixclient"}),
+		rootAPILogger: rootAPILogger,
+		apiLogger:     rootAPILogger.WithFields(logrus.Fields{"prefix": "matrixclient: API"}),
+
 		channels:   make(map[id.RoomID]*Channel),
 		dmChannels: make(map[id.RoomID][]id.UserID),
+		directData: make(map[id.UserID][]id.RoomID),
 		users:      make(map[id.UserID]*User),
 	}
 	c.ctx, c.cancel = context.WithCancel(ctx)
@@ -68,8 +100,11 @@ func New(ctx context.Context, cred Credentials, h Handler) (*Client, error) {
 
 	c.register(syncer)
 
+	// Ready is called from the sync goroutine, after the events of the first
+	// sync response were processed, so handler calls stay serialized.
+	mc.Syncer = &readySyncer{DefaultSyncer: syncer, ready: h.Ready}
+
 	go c.syncLoop()
-	go c.waitReady()
 
 	c.connected.Store(true)
 
@@ -83,11 +118,6 @@ func (c *Client) register(s *mautrix.DefaultSyncer) {
 	s.OnEventType(event.StateRoomName, c.handleRoomName)
 	s.OnEventType(event.AccountDataDirectChats, c.handleDM)
 	s.OnEventType(event.StateCanonicalAlias, c.handleCanonicalAlias)
-	s.OnSync(func(_ context.Context, _ *mautrix.RespSync, _ string) bool {
-		c.firstSync.Store(true)
-
-		return true
-	})
 }
 
 func (c *Client) syncLoop() {
@@ -97,7 +127,7 @@ func (c *Client) syncLoop() {
 			continue
 		}
 
-		logger.Errorf("matrixclient: sync: %s", err)
+		c.apiLogger.Errorf("sync: %s", err)
 
 		select {
 		case <-c.ctx.Done():
@@ -106,22 +136,21 @@ func (c *Client) syncLoop() {
 	}
 }
 
-// waitReady waits for the first sync response, and gives its events a moment
-// to be processed before reporting ready.
-func (c *Client) waitReady() {
-	for !c.firstSync.Load() {
-		select {
-		case <-c.ctx.Done():
-			return
-		case <-time.After(250 * time.Millisecond):
-		}
+// readySyncer calls ready once, after the first sync response was processed.
+type readySyncer struct {
+	*mautrix.DefaultSyncer
+
+	once  sync.Once
+	ready func()
+}
+
+func (r *readySyncer) ProcessResponse(ctx context.Context, res *mautrix.RespSync, since string) error {
+	err := r.DefaultSyncer.ProcessResponse(ctx, res, since)
+	if err == nil {
+		r.once.Do(r.ready)
 	}
 
-	select {
-	case <-c.ctx.Done():
-	case <-time.After(time.Second):
-		c.handler.Ready()
-	}
+	return err
 }
 
 // Logout stops syncing.
@@ -185,11 +214,16 @@ func (c *Client) Rooms() []RoomInfo {
 	for roomID, ch := range c.channels {
 		ch.RLock()
 
-		alias, direct, members := ch.Alias, ch.IsDirect, len(ch.Members)
+		name, alias, direct, members := ch.Name, ch.Alias, ch.IsDirect, len(ch.Members)
 
 		ch.RUnlock()
 
-		if direct && alias == "" {
+		// A canonical alias is preferred over the room name.
+		if alias == "" {
+			alias = id.RoomAlias(name)
+		}
+
+		if alias == "" {
 			alias = id.RoomAlias(roomID)
 		}
 
@@ -197,7 +231,11 @@ func (c *Client) Rooms() []RoomInfo {
 			continue
 		}
 
-		rooms = append(rooms, RoomInfo{ID: roomID, Name: strings.Replace(string(alias), ":", "/", 1), IsDirect: direct})
+		rooms = append(rooms, RoomInfo{
+			ID:       roomID,
+			Name:     strings.Replace(string(alias), ":", "/", 1),
+			IsDirect: direct,
+		})
 	}
 
 	return rooms
@@ -284,7 +322,24 @@ func (c *Client) SendDirect(ctx context.Context, userID id.UserID, parentID id.E
 		roomID = resp.RoomID
 
 		c.Lock()
-		c.dmChannels[roomID] = []id.UserID{userID}
+		direct := maps.Clone(c.directData)
+		c.Unlock()
+
+		if direct == nil {
+			direct = make(map[id.UserID][]id.RoomID)
+		}
+
+		direct[userID] = append(slices.Clone(direct[userID]), roomID)
+
+		// m.direct is not set by the homeserver, persist it ourselves.
+		err = c.mc.SetAccountData(ctx, event.AccountDataDirectChats.Type, direct)
+		if err != nil {
+			c.logger.Errorf("failed to persist m.direct for %s: %s", roomID, err)
+		}
+
+		c.Lock()
+		c.directData[userID] = direct[userID]
+		c.addDirectLocked(roomID, userID, nil)
 		c.Unlock()
 	}
 

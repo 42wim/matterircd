@@ -116,6 +116,9 @@ github.com/magiconair/properties
 # github.com/matterbridge/logrus-prefixed-formatter v0.5.3-0.20200523233437-d971309a77ba
 ## explicit
 github.com/matterbridge/logrus-prefixed-formatter
+# github.com/matterbridge/matrixclient v0.0.0-20261011201826-1240a08a5861
+## explicit; go 1.26.0
+github.com/matterbridge/matrixclient
 # github.com/matterbridge/matterclient v0.0.0-20261011093741-eb07b18c8249
 ## explicit; go 1.25.0
 github.com/matterbridge/matterclient
@@ -195,8 +198,8 @@ github.com/sagikazarmark/locafero
 # github.com/sagikazarmark/slog-shim v0.1.0
 ## explicit; go 1.20
 github.com/sagikazarmark/slog-shim
-# github.com/sirupsen/logrus v1.9.3
-## explicit; go 1.13
+# github.com/sirupsen/logrus v1.9.4
+## explicit; go 1.17
 github.com/sirupsen/logrus
 # github.com/slack-go/slack v0.23.1
 ## explicit; go 1.25
@@ -305,6 +308,8 @@ go.uber.org/atomic
 # go.uber.org/multierr v1.9.0
 ## explicit; go 1.19
 go.uber.org/multierr
+# go.yaml.in/yaml/v3 v3.0.5
+## explicit; go 1.16
 # golang.org/x/crypto v0.57.0
 ## explicit; go 1.26.0
 golang.org/x/crypto/bcrypt

@@ -4,53 +4,38 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
-	"sync"
 	"sync/atomic"
-	"time"
 
-	"maunium.net/go/mautrix"
-	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
 
 	"github.com/42wim/matterircd/bridge"
 	"github.com/42wim/matterircd/config"
-	"github.com/davecgh/go-spew/spew"
 	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/matterbridge/matrixclient"
 	logger "github.com/sirupsen/logrus"
 )
 
 type Matrix struct {
-	sync.RWMutex
-
-	mc          *mautrix.Client
-	credentials bridge.Credentials
-	eventChan   chan *bridge.Event
-	cfg         *config.Config
+	mc        *matrixclient.Client
+	eventChan chan *bridge.Event
+	cfg       *config.Config
+	onConnect func()
 
 	connected atomic.Bool
-	firstSync atomic.Bool
 
-	ctx    context.Context //nolint:containedctx
-	cancel context.CancelFunc
-
-	dmChannels map[id.RoomID][]id.UserID
-	channels   map[id.RoomID]*Channel
-	users      map[id.UserID]*User
+	ctx context.Context //nolint:containedctx
 
 	msgParentCache   *lru.Cache[id.EventID, string]
 	msgLastSentCache *lru.Cache[string, string]
 }
 
-func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Event, onConnect func()) (bridge.Bridger, *mautrix.Client, error) {
+func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Event, onConnect func()) (bridge.Bridger, *matrixclient.Client, error) {
 	m := &Matrix{
-		credentials: cred,
-		eventChan:   eventChan,
-		cfg:         cfg,
-		channels:    make(map[id.RoomID]*Channel),
-		dmChannels:  make(map[id.RoomID][]id.UserID),
-		users:       make(map[id.UserID]*User),
+		eventChan: eventChan,
+		cfg:       cfg,
+		onConnect: onConnect,
+		ctx:       ctx,
 	}
 	m.msgParentCache, _ = lru.New[id.EventID, string](100)
 	m.msgLastSentCache, _ = lru.New[string, string](10)
@@ -68,36 +53,28 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 	setLogLevel(cfg.Current())
 	cfg.RegisterReloadHook(setLogLevel)
 
-	mc, err := mautrix.NewClient(cred.Server, "", "")
-	if err != nil {
-		return nil, nil, err
-	}
-
 	if cred.Token != "" && cred.Login == "" {
 		return nil, nil, errors.New("matrix: login with an access token is not supported, use LOGIN <server> <login> <pass>")
 	}
 
-	_, err = mc.Login(ctx, &mautrix.ReqLogin{
-		Type: mautrix.AuthTypePassword,
-		Identifier: mautrix.UserIdentifier{
-			Type: mautrix.IdentifierTypeUser,
-			User: cred.Login,
-		},
-		Password:         cred.Pass,
-		StoreCredentials: true,
-	})
+	mc, err := matrixclient.New(ctx, matrixclient.Credentials{
+		Server: cred.Server,
+		Login:  cred.Login,
+		Pass:   cred.Pass,
+	}, m)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	m.mc = mc
-	m.ctx, m.cancel = context.WithCancel(ctx)
-
-	m.handleMatrix(onConnect)
-
 	m.connected.Store(true)
 
 	return m, mc, nil
+}
+
+// Ready implements matrixclient.Handler.
+func (m *Matrix) Ready() {
+	go m.onConnect()
 }
 
 func (m *Matrix) sendEvent(ev *bridge.Event) {
@@ -107,281 +84,36 @@ func (m *Matrix) sendEvent(ev *bridge.Event) {
 	}
 }
 
-func (m *Matrix) syncCallback(_ context.Context, resp *mautrix.RespSync, _ string) bool {
-	logger.Tracef("syncCallback %s", spew.Sdump(resp))
-
-	m.firstSync.Store(true)
-
-	return true
-}
-
-func (m *Matrix) registerHandlers(syncer *mautrix.DefaultSyncer) {
-	syncer.OnEventType(event.EventMessage, m.handleMessageEvent)
-	syncer.OnEventType(event.EventReaction, m.handleReactionEvent)
-	syncer.OnEventType(event.StateMember, m.handleMember)
-	syncer.OnEventType(event.StateRoomName, m.handleRoomName)
-	syncer.OnEventType(event.AccountDataDirectChats, m.handleDM)
-	syncer.OnEventType(event.StateCanonicalAlias, m.handleCanonicalAlias)
-	syncer.OnEvent(func(_ context.Context, ev *event.Event) {
-		logger.Tracef("handleMatrix ev %s", spew.Sdump(ev))
-	})
-	syncer.OnSync(m.syncCallback)
-}
-
-func (m *Matrix) handleMatrix(onConnect func()) {
-	syncer, ok := m.mc.Syncer.(*mautrix.DefaultSyncer)
-	if !ok {
-		logger.Error("matrix: unexpected syncer type")
+// OnMessage implements matrixclient.Handler.
+func (m *Matrix) OnMessage(msg *matrixclient.Message) {
+	ghost := m.createUser(msg.Sender)
+	if ghost == nil {
 		return
 	}
 
-	m.registerHandlers(syncer)
-
-	go func() {
-		for m.ctx.Err() == nil {
-			err := m.mc.SyncWithContext(m.ctx)
-			if err != nil && m.ctx.Err() == nil {
-				logger.Errorf("matrix: Sync() returned %s", err)
-
-				select {
-				case <-m.ctx.Done():
-				case <-time.After(5 * time.Second):
-				}
-			}
-		}
-	}()
-
-	go func() {
-		// Wait for the initial sync to complete.
-		for !m.firstSync.Load() {
-			logger.Trace("syncing..")
-
-			select {
-			case <-m.ctx.Done():
-				return
-			case <-time.After(time.Second):
-			}
-		}
-
-		// The syncer callbacks run after OnSync, so wait for the number of events
-		// on the buffered eventChan to remain stable before concluding the sync
-		// is complete.
-		current := len(m.eventChan)
-		count := 0
-
-		for count < 3 {
-			select {
-			case <-m.ctx.Done():
-				return
-			case <-time.After(time.Second):
-			}
-
-			if current == len(m.eventChan) {
-				count++
-			} else {
-				count = 0
-			}
-
-			current = len(m.eventChan)
-		}
-
-		logger.Trace("sync complete ", len(m.eventChan))
-
-		onConnect()
-	}()
-}
-
-func (m *Matrix) handleDM(_ context.Context, ev *event.Event) {
-	directChats := ev.Content.AsDirectChats()
-	if directChats == nil {
-		return
-	}
-
-	m.Lock()
-	defer m.Unlock()
-
-	for userID, rooms := range *directChats {
-		logger.Tracef("direct chat %#v", rooms)
-
-		for _, roomID := range rooms {
-			if _, ok := m.channels[roomID]; !ok {
-				m.channels[roomID] = &Channel{
-					ID:      roomID,
-					Members: make(map[id.UserID]*User),
-				}
-			}
-
-			u := &User{
-				ID:                 userID,
-				MemberEventContent: &event.MemberEventContent{},
-			}
-
-			m.users[userID] = u
-
-			m.channels[roomID].Lock()
-			m.channels[roomID].IsDirect = true
-
-			if !containsUser(m.dmChannels[roomID], userID) {
-				m.dmChannels[roomID] = append(m.dmChannels[roomID], userID)
-			}
-
-			if _, ok := m.channels[roomID].Members[userID]; !ok {
-				m.channels[roomID].Members[userID] = u
-			}
-
-			m.channels[roomID].Unlock()
-		}
-	}
-}
-
-func containsUser(users []id.UserID, userID id.UserID) bool {
-	return slices.Contains(users, userID)
-}
-
-func (m *Matrix) getOrCreateChannelLocked(roomID id.RoomID) *Channel {
-	ch, ok := m.channels[roomID]
-	if !ok {
-		ch = &Channel{
-			ID:      roomID,
-			Members: make(map[id.UserID]*User),
-		}
-		m.channels[roomID] = ch
-	}
-
-	return ch
-}
-
-func (m *Matrix) handleMember(_ context.Context, ev *event.Event) {
-	member := ev.Content.AsMember()
-	if member == nil || ev.StateKey == nil {
-		return
-	}
-
-	m.Lock()
-	defer m.Unlock()
-
-	if _, ok := m.users[ev.Sender]; !ok {
-		m.users[ev.Sender] = &User{
-			ID:                 ev.Sender,
-			MemberEventContent: member,
-		}
-	}
-
-	if !member.IsDirect {
-		return
-	}
-
-	logger.Trace("found direct member ", *ev.StateKey)
-
-	userID := id.UserID(*ev.StateKey)
-	ch := m.getOrCreateChannelLocked(ev.RoomID)
-
-	m.users[userID] = &User{
-		ID:                 userID,
-		MemberEventContent: member,
-	}
-
-	ch.Lock()
-	ch.IsDirect = true
-	ch.Members[userID] = m.users[userID]
-	ch.Unlock()
-
-	if !containsUser(m.dmChannels[ev.RoomID], userID) {
-		m.dmChannels[ev.RoomID] = append(m.dmChannels[ev.RoomID], userID)
-	}
-}
-
-func (m *Matrix) handleRoomName(_ context.Context, ev *event.Event) {
-	name := ev.Content.AsRoomName()
-	if name == nil {
-		return
-	}
-
-	m.Lock()
-	defer m.Unlock()
-
-	ch := m.getOrCreateChannelLocked(ev.RoomID)
-
-	ch.Lock()
-	defer ch.Unlock()
-
-	// A canonical alias is preferred over the room name.
-	if ch.Alias == "" {
-		ch.Alias = id.RoomAlias("#" + strings.ReplaceAll(name.Name, " ", ""))
-	}
-}
-
-func (m *Matrix) handleCanonicalAlias(_ context.Context, ev *event.Event) {
-	logger.Trace("running handleCanonicalAlias for ", ev)
-
-	alias := ev.Content.AsCanonicalAlias()
-	if alias == nil {
-		return
-	}
-
-	m.Lock()
-	defer m.Unlock()
-
-	ch := m.getOrCreateChannelLocked(ev.RoomID)
-
-	ch.Lock()
-	ch.Alias = alias.Alias
-	ch.AltAliases = alias.AltAliases
-	ch.Unlock()
-}
-
-func (m *Matrix) isDMRoom(roomID id.RoomID) bool {
-	m.RLock()
-	defer m.RUnlock()
-
-	_, ok := m.dmChannels[roomID]
-
-	return ok
-}
-
-func (m *Matrix) handleMessageEvent(ctx context.Context, ev *event.Event) {
-	logger.Tracef("handleMessageEvent ev %s", spew.Sdump(ev))
-
-	ghost := m.createUser(ev.Sender)
-	if ghost == nil || ghost.Me {
-		logger.Trace("handleMessageEvent ghost.Me")
-		return
-	}
-
-	msgEventContent := ev.Content.AsMessage()
-	if msgEventContent == nil {
-		logger.Warnf("handleMessageEvent unsupported event type %s", ev.Type.String())
-		return
-	}
-
-	text := msgEventContent.Body
-
-	var parentID id.EventID
-	if msgEventContent.RelatesTo != nil {
-		parentID = msgEventContent.RelatesTo.EventID
-	}
+	text := msg.Text
 
 	mxCfg := m.cfg.Matrix()
-	if !mxCfg.HideReplies && parentID != "" {
-		message, err := m.addParentMsg(ctx, ev.RoomID, parentID, text, mxCfg.ShortenRepliesTo, "@", mxCfg.Formatter.Unicode)
+	if !mxCfg.HideReplies && msg.ParentID != "" {
+		message, err := m.addParentMsg(m.ctx, msg.RoomID, msg.ParentID, text, mxCfg.ShortenRepliesTo, "@", mxCfg.Formatter.Unicode)
 		if err != nil {
-			logger.Errorf("Unable to get parent post for %#v: %s", ev, err)
+			logger.Errorf("Unable to get parent post for %s: %s", msg.EventID, err)
 		}
 
 		text = message
 	}
 
-	if m.isDMRoom(ev.RoomID) {
+	if msg.Direct {
 		m.sendEvent(&bridge.Event{
 			Type: "direct_message",
 			Data: &bridge.DirectMessageEvent{
 				Text:      text,
-				ChannelID: ev.RoomID.String(),
+				ChannelID: msg.RoomID.String(),
 				Sender:    ghost,
 				Receiver:  m.GetMe(),
-				MessageID: string(ev.ID),
-				ParentID:  parentID.String(),
-				CreateAt:  ev.Timestamp,
+				MessageID: string(msg.EventID),
+				ParentID:  msg.ParentID.String(),
+				CreateAt:  msg.Timestamp,
 			},
 		})
 
@@ -392,61 +124,50 @@ func (m *Matrix) handleMessageEvent(ctx context.Context, ev *event.Event) {
 		Type: "channel_message",
 		Data: &bridge.ChannelMessageEvent{
 			Text:        text,
-			ChannelID:   ev.RoomID.String(),
+			ChannelID:   msg.RoomID.String(),
 			Sender:      ghost,
 			ChannelType: "P",
-			MessageID:   string(ev.ID),
-			ParentID:    parentID.String(),
-			CreateAt:    ev.Timestamp,
+			MessageID:   string(msg.EventID),
+			ParentID:    msg.ParentID.String(),
+			CreateAt:    msg.Timestamp,
 		},
 	})
 }
 
-func (m *Matrix) handleReactionEvent(ctx context.Context, ev *event.Event) {
-	logger.Tracef("handleReactionEvent ev %s", spew.Sdump(ev))
-
-	ghost := m.createUser(ev.Sender)
-	if ghost == nil || ghost.Me {
-		logger.Trace("handleReactionEvent ghost.Me")
+// OnReaction implements matrixclient.Handler.
+func (m *Matrix) OnReaction(r *matrixclient.Reaction) {
+	ghost := m.createUser(r.Sender)
+	if ghost == nil {
 		return
 	}
-
-	reactionEventContent := ev.Content.AsReaction()
-	if reactionEventContent == nil {
-		logger.Warnf("handleReactionEvent unsupported event type %s", ev.Type.String())
-		return
-	}
-
-	reaction := reactionEventContent.RelatesTo.Key
-	parentID := reactionEventContent.RelatesTo.EventID
 
 	var text string
 
 	mxCfg := m.cfg.Matrix()
 	if !mxCfg.HideReplies {
-		message, err := m.addParentMsg(ctx, ev.RoomID, parentID, text, mxCfg.ShortenRepliesTo, "@", mxCfg.Formatter.Unicode)
+		message, err := m.addParentMsg(m.ctx, r.RoomID, r.ParentID, text, mxCfg.ShortenRepliesTo, "@", mxCfg.Formatter.Unicode)
 		if err != nil {
-			logger.Errorf("Unable to get parent post for %#v: %s", ev, err)
+			logger.Errorf("Unable to get parent post for %s: %s", r.ParentID, err)
 		}
 
 		text = message
 	}
 
 	channelType := ""
-	if m.isDMRoom(ev.RoomID) {
+	if r.Direct {
 		channelType = "D"
 	}
 
 	m.sendEvent(&bridge.Event{
 		Type: "reaction_add",
 		Data: &bridge.ReactionAddEvent{
-			ChannelID:   ev.RoomID.String(),
-			MessageID:   string(parentID),
+			ChannelID:   r.RoomID.String(),
+			MessageID:   string(r.ParentID),
 			Sender:      ghost,
-			Reaction:    reaction,
+			Reaction:    r.Key,
 			ChannelType: channelType,
 			Message:     text,
-			ParentID:    parentID.String(),
+			ParentID:    r.ParentID.String(),
 		},
 	})
 }
@@ -456,21 +177,22 @@ func (m *Matrix) Invite(ctx context.Context, channelID, username string) error {
 }
 
 func (m *Matrix) IsChannelMember(channelID string) bool {
-	m.RLock()
-	defer m.RUnlock()
+	for _, r := range m.mc.Rooms() {
+		if r.ID.String() == channelID {
+			return true
+		}
+	}
 
-	_, ok := m.channels[id.RoomID(channelID)]
-
-	return ok
+	return m.mc.IsDirect(id.RoomID(channelID))
 }
 
 func (m *Matrix) Join(ctx context.Context, channelName string) (string, string, error) {
-	resp, err := m.mc.JoinRoom(ctx, channelName, nil)
+	roomID, err := m.mc.Join(ctx, channelName)
 	if err != nil {
 		return "", "", err
 	}
 
-	return resp.RoomID.String(), "", nil
+	return roomID.String(), "", nil
 }
 
 func (m *Matrix) List(ctx context.Context) (map[string]string, error) {
@@ -487,7 +209,7 @@ func (m *Matrix) UpdateChannels(ctx context.Context) error {
 
 func (m *Matrix) Logout(ctx context.Context) error {
 	m.connected.Store(false)
-	m.cancel()
+	m.mc.Logout()
 
 	return nil
 }
@@ -499,40 +221,24 @@ func (m *Matrix) MsgUser(ctx context.Context, userID, text string) (string, erro
 func (m *Matrix) MsgUserThread(ctx context.Context, userID, parentID, text string) (string, error) {
 	logger.Debugf("sending message '%s' '%s' '%s'", userID, parentID, text)
 
-	invites := []id.UserID{id.UserID(userID)}
-
-	var roomID id.RoomID
-
-	m.RLock()
-
-	for rID, users := range m.dmChannels {
-		if len(users) == 1 && users[0] == id.UserID(userID) {
-			roomID = rID
-			break
-		}
+	eventID, err := m.mc.SendDirect(ctx, id.UserID(userID), id.EventID(parentID), text)
+	if err != nil {
+		logger.Error("msguserthread sending message: error ", err)
+		return "", err
 	}
 
-	m.RUnlock()
+	return m.recordSent(ctx, "", eventID, text), nil
+}
 
-	if roomID == "" {
-		resp, err := m.mc.CreateRoom(ctx, &mautrix.ReqCreateRoom{
-			Preset:   "trusted_private_chat",
-			Invite:   invites,
-			IsDirect: true,
-		})
-		if err != nil {
-			logger.Error("msguserthread sending message: error ", err)
-			return "", err
-		}
-
-		m.Lock()
-		m.dmChannels[resp.RoomID] = invites
-		m.Unlock()
-
-		roomID = resp.RoomID
+func (m *Matrix) recordSent(ctx context.Context, channelID string, eventID id.EventID, text string) string {
+	name := channelID
+	if channelID != "" {
+		name = m.GetChannelName(ctx, channelID)
 	}
 
-	return m.MsgChannelThread(ctx, roomID.String(), parentID, text)
+	m.msgLastSentCache.Add(eventID.String(), fmt.Sprintf("%s: %s", name, text))
+
+	return eventID.String()
 }
 
 func (m *Matrix) MsgChannel(ctx context.Context, channelID, text string) (string, error) {
@@ -542,28 +248,12 @@ func (m *Matrix) MsgChannel(ctx context.Context, channelID, text string) (string
 func (m *Matrix) MsgChannelThread(ctx context.Context, channelID, parentID, text string) (string, error) {
 	logger.Debugf("msgchannelthread: sending message thread '%s' '%s' '%s'", channelID, parentID, text)
 
-	content := event.MessageEventContent{
-		MsgType: event.MsgText,
-		Body:    text,
-	}
-
-	if parentID != "" {
-		content.RelatesTo = &event.RelatesTo{
-			Type:    event.RelThread,
-			EventID: id.EventID(parentID),
-		}
-	}
-
-	resp, err := m.mc.SendMessageEvent(ctx, id.RoomID(channelID), event.EventMessage, &content)
+	eventID, err := m.mc.Send(ctx, id.RoomID(channelID), id.EventID(parentID), text)
 	if err != nil {
 		return "", err
 	}
 
-	logger.Trace("msgchannelthread: resp ", resp)
-
-	m.msgLastSentCache.Add(resp.EventID.String(), fmt.Sprintf("%s: %s", m.GetChannelName(ctx, channelID), text))
-
-	return resp.EventID.String(), nil
+	return m.recordSent(ctx, channelID, eventID, text), nil
 }
 
 func (m *Matrix) ModifyPost(ctx context.Context, msgID, text string) error {
@@ -619,14 +309,14 @@ func (m *Matrix) GetChannelName(ctx context.Context, channelID string) string {
 func (m *Matrix) GetChannelUsers(ctx context.Context, channelID string) ([]*bridge.UserInfo, error) {
 	var users []*bridge.UserInfo
 
-	resp, err := m.mc.JoinedMembers(ctx, id.RoomID(channelID))
+	ids, err := m.mc.JoinedMembers(ctx, id.RoomID(channelID))
 	if err != nil {
 		return nil, err
 	}
 
-	logger.Debugf("GetChannelUsers %s %d", channelID, len(resp.Joined))
+	logger.Debugf("GetChannelUsers %s %d", channelID, len(ids))
 
-	for userID := range resp.Joined {
+	for _, userID := range ids {
 		if u := m.createUser(userID); u != nil {
 			users = append(users, u)
 		}
@@ -638,14 +328,7 @@ func (m *Matrix) GetChannelUsers(ctx context.Context, channelID string) ([]*brid
 func (m *Matrix) GetUsers() []*bridge.UserInfo {
 	var users []*bridge.UserInfo
 
-	m.RLock()
-
-	userIDs := make([]id.UserID, 0, len(m.users))
-	for userID := range m.users {
-		userIDs = append(userIDs, userID)
-	}
-
-	m.RUnlock()
+	userIDs := m.mc.KnownUsers()
 
 	logger.Debugf("GetUsers %d", len(userIDs))
 
@@ -661,35 +344,15 @@ func (m *Matrix) GetUsers() []*bridge.UserInfo {
 func (m *Matrix) GetChannels() []*bridge.ChannelInfo {
 	var channels []*bridge.ChannelInfo
 
-	m.RLock()
-	defer m.RUnlock()
-
-	for roomID, channel := range m.channels {
-		channel.RLock()
-
-		alias := channel.Alias
-		if channel.IsDirect && alias == "" {
-			alias = id.RoomAlias(roomID.String())
-		}
-
-		isDirect := channel.IsDirect
-		members := len(channel.Members)
-
-		channel.RUnlock()
-
-		// if we only have 1 user this is a DM, not a real channel
-		if isDirect && members == 1 {
-			continue
-		}
-
+	for _, room := range m.mc.Rooms() {
 		channels = append(channels, &bridge.ChannelInfo{
-			Name:    strings.Replace(alias.String(), ":", "/", 1),
-			ID:      roomID.String(),
-			DM:      isDirect,
+			Name:    room.Name,
+			ID:      room.ID.String(),
+			DM:      room.IsDirect,
 			Private: false,
 		})
 
-		logger.Debugf("GetChannels %s (%s)", alias.String(), roomID.String())
+		logger.Debugf("GetChannels %s (%s)", room.Name, room.ID.String())
 	}
 
 	return channels
@@ -718,14 +381,11 @@ func (m *Matrix) GetUserChannels(ctx context.Context, userID string) ([]string, 
 }
 
 func (m *Matrix) GetUserCount() int {
-	m.RLock()
-	defer m.RUnlock()
-
-	return len(m.users)
+	return len(m.mc.KnownUsers())
 }
 
 func (m *Matrix) GetMe() *bridge.UserInfo {
-	return m.createUser(m.mc.UserID)
+	return m.createUser(m.mc.UserID())
 }
 
 func (m *Matrix) GetUserByUsername(ctx context.Context, username string) *bridge.UserInfo {
@@ -738,19 +398,15 @@ func (m *Matrix) createUser(userID id.UserID) *bridge.UserInfo {
 		return nil
 	}
 
-	m.RLock()
-
-	displayName := localpart + "@" + homeserver
-	if user, ok := m.users[userID]; ok && user.MemberEventContent != nil && user.Displayname != "" {
-		displayName = user.Displayname
+	displayName := m.mc.DisplayName(userID)
+	if displayName == "" {
+		displayName = localpart + "@" + homeserver
 	}
-
-	m.RUnlock()
 
 	// Drop the homeserver/host part if it's a user on the same homeserver as us.
 	nick := localpart + "@" + homeserver
 
-	_, myHomeserver, err := m.mc.UserID.Parse()
+	_, myHomeserver, err := m.mc.UserID().Parse()
 	if err == nil && homeserver == myHomeserver {
 		nick = localpart
 	}
@@ -761,7 +417,7 @@ func (m *Matrix) createUser(userID id.UserID) *bridge.UserInfo {
 		Real:     displayName,
 		Host:     homeserver,
 		Ghost:    true,
-		Me:       userID == m.mc.UserID,
+		Me:       userID == m.mc.UserID(),
 		Username: nick,
 	}
 }
@@ -788,11 +444,7 @@ func (m *Matrix) addParentMsg(ctx context.Context, roomID id.RoomID, parentID id
 }
 
 func (m *Matrix) createParentReply(ctx context.Context, roomID id.RoomID, parentID id.EventID, newLen int, uncounted string, unicode bool) (string, error) {
-	resp, err := m.mc.GetEvent(ctx, roomID, parentID)
-	// Retry once on failure.
-	if err != nil {
-		resp, err = m.mc.GetEvent(ctx, roomID, parentID)
-	}
+	resp, err := m.mc.Event(ctx, roomID, parentID)
 
 	if err != nil {
 		return "", err
@@ -920,16 +572,7 @@ func (m *Matrix) CreateChannel(ctx context.Context, channelName string, channelT
 }
 
 func (m *Matrix) GetDMChannelID(ctx context.Context, userID string) string {
-	m.RLock()
-	defer m.RUnlock()
-
-	for roomID, users := range m.dmChannels {
-		if len(users) == 1 && users[0] == id.UserID(userID) {
-			return roomID.String()
-		}
-	}
-
-	return ""
+	return m.mc.DirectRoom(id.UserID(userID)).String()
 }
 
 func (m *Matrix) GetDMChannelName(userID1 string, userID2 string) string {
@@ -937,10 +580,7 @@ func (m *Matrix) GetDMChannelName(userID1 string, userID2 string) string {
 }
 
 func (m *Matrix) GetDMUser(ctx context.Context, channelName string) *bridge.UserInfo {
-	m.RLock()
-	users := m.dmChannels[id.RoomID(channelName)]
-	m.RUnlock()
-
+	users := m.mc.DirectUsers(id.RoomID(channelName))
 	if len(users) != 1 {
 		return nil
 	}
@@ -957,7 +597,7 @@ func (m *Matrix) GetDMOtherUserID(channelName, myUserID string) (string, bool) {
 }
 
 func (m *Matrix) IsDMChannelName(channelName string) bool {
-	return m.isDMRoom(id.RoomID(channelName))
+	return m.mc.IsDirect(id.RoomID(channelName))
 }
 
 func (m *Matrix) Connected() bool {

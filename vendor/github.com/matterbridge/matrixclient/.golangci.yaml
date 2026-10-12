@@ -1,0 +1,116 @@
+version: "2"
+run:
+  issues-exit-code: 1
+  tests: true
+linters:
+  default: all
+  disable:
+    - asasalint
+    - cyclop
+    - decorder
+    - depguard
+    - err113
+    - errname
+    - errorlint
+    - exhaustive
+    - exhaustruct
+    - forbidigo
+    - funcorder
+    - gochecknoglobals
+    - godot
+    - godox
+    - goheader
+    - gomoddirectives
+    - gomodguard
+    - gosmopolitan
+    - grouper
+    - importas
+    - ireturn
+    - lll
+    - maintidx
+    - makezero
+    - mnd
+    - nlreturn
+    - noctx
+    - paralleltest
+    - perfsprint
+    - prealloc
+    - promlinter
+    - revive
+    - tagalign
+    - tagliatelle
+    - testpackage
+    - thelper
+    - tparallel
+    - varnamelen
+    - wrapcheck
+    - wsl
+    - zerologlint
+  settings:
+    dupl:
+      threshold: 150
+    errcheck:
+      check-type-assertions: false
+      check-blank: false
+    goconst:
+      min-len: 3
+      min-occurrences: 3
+    gocritic:
+      enabled-checks:
+        - boolExprSimplify
+        - builtinShadow
+        - commentedOutImport
+        - emptyFallthrough
+        - importShadow
+        - indexAlloc
+        - methodExprCall
+        - nestingReduce
+        - ptrToRefParam
+        - typeUnparen
+        - unnecessaryBlock
+        - yodaStyleExpr
+    gocyclo:
+      min-complexity: 15
+    lll:
+      line-length: 150
+      tab-width: 1
+    misspell:
+      locale: US
+    nakedret:
+      max-func-lines: 0
+    prealloc:
+      simple: true
+      range-loops: true
+      for-loops: false
+    unparam:
+      check-exported: false
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+issues:
+  max-same-issues: 0
+formatters:
+  enable:
+    - gofmt
+    - gofumpt
+    - goimports
+  settings:
+    gofmt:
+      simplify: true
+    goimports:
+      local-prefixes:
+        - github.com
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

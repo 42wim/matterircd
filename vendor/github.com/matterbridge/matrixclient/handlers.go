@@ -19,9 +19,18 @@ func (c *Client) channelLocked(roomID id.RoomID) *Channel {
 	return ch
 }
 
+// addDirectLocked marks roomID as direct with userID. A nil member keeps any
+// cached profile of the user.
 func (c *Client) addDirectLocked(roomID id.RoomID, userID id.UserID, member *event.MemberEventContent) {
-	u := &User{ID: userID, MemberEventContent: member}
-	c.users[userID] = u
+	u, ok := c.users[userID]
+	if !ok {
+		u = &User{ID: userID}
+		c.users[userID] = u
+	}
+
+	if member != nil {
+		u.MemberEventContent = member
+	}
 
 	ch := c.channelLocked(roomID)
 
@@ -35,6 +44,7 @@ func (c *Client) addDirectLocked(roomID id.RoomID, userID id.UserID, member *eve
 	}
 }
 
+// handleDM rebuilds the direct room state, m.direct is a full snapshot.
 func (c *Client) handleDM(_ context.Context, ev *event.Event) {
 	chats := ev.Content.AsDirectChats()
 	if chats == nil {
@@ -44,9 +54,22 @@ func (c *Client) handleDM(_ context.Context, ev *event.Event) {
 	c.Lock()
 	defer c.Unlock()
 
+	for roomID := range c.dmChannels {
+		if ch, ok := c.channels[roomID]; ok {
+			ch.Lock()
+			ch.IsDirect = false
+			ch.Unlock()
+		}
+	}
+
+	c.dmChannels = make(map[id.RoomID][]id.UserID)
+	c.directData = make(map[id.UserID][]id.RoomID, len(*chats))
+
 	for userID, rooms := range *chats {
+		c.directData[userID] = slices.Clone(rooms)
+
 		for _, roomID := range rooms {
-			c.addDirectLocked(roomID, userID, &event.MemberEventContent{})
+			c.addDirectLocked(roomID, userID, nil)
 		}
 	}
 }
@@ -57,15 +80,32 @@ func (c *Client) handleMember(_ context.Context, ev *event.Event) {
 		return
 	}
 
+	targetID := id.UserID(*ev.StateKey)
+
 	c.Lock()
 	defer c.Unlock()
 
-	if _, ok := c.users[ev.Sender]; !ok {
-		c.users[ev.Sender] = &User{ID: ev.Sender, MemberEventContent: member}
+	u, ok := c.users[targetID]
+	if !ok {
+		u = &User{ID: targetID}
+		c.users[targetID] = u
 	}
 
+	u.MemberEventContent = member
+
+	ch := c.channelLocked(ev.RoomID)
+
+	ch.Lock()
+	switch member.Membership {
+	case event.MembershipJoin, event.MembershipInvite:
+		ch.Members[targetID] = u
+	default:
+		delete(ch.Members, targetID)
+	}
+	ch.Unlock()
+
 	if member.IsDirect {
-		c.addDirectLocked(ev.RoomID, id.UserID(*ev.StateKey), member)
+		c.addDirectLocked(ev.RoomID, targetID, member)
 	}
 }
 
@@ -83,9 +123,9 @@ func (c *Client) handleRoomName(_ context.Context, ev *event.Event) {
 	ch.Lock()
 	defer ch.Unlock()
 
-	// A canonical alias is preferred over the room name.
-	if ch.Alias == "" {
-		ch.Alias = id.RoomAlias("#" + strings.ReplaceAll(name.Name, " ", ""))
+	ch.Name = ""
+	if name.Name != "" {
+		ch.Name = "#" + strings.ReplaceAll(name.Name, " ", "")
 	}
 }
 
@@ -136,7 +176,7 @@ func (c *Client) handleReaction(_ context.Context, ev *event.Event) {
 	}
 
 	content := ev.Content.AsReaction()
-	if content == nil {
+	if content == nil || content.RelatesTo.EventID == "" {
 		return
 	}
 
