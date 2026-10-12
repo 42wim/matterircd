@@ -11,9 +11,25 @@ import (
 
 	"github.com/42wim/matterircd/bridge"
 	"github.com/42wim/matterircd/config"
+	"github.com/42wim/matterircd/utils"
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/matterbridge/matrixclient"
 	logger "github.com/sirupsen/logrus"
+)
+
+const (
+	blockquoteCharNonUnicode = "|"
+	blockquoteCharUnicode    = "▕"
+
+	lastSentSummaryLen = 90
+)
+
+// markdownReplacer combines multi-line messages into a single line, making
+// code blocks single code/monospace.
+var markdownReplacer = strings.NewReplacer(
+	"\n", " ",
+	"```", "`",
+	"~~~", "`",
 )
 
 type Matrix struct {
@@ -236,7 +252,8 @@ func (m *Matrix) recordSent(ctx context.Context, channelID string, eventID id.Ev
 		name = m.GetChannelName(ctx, channelID)
 	}
 
-	m.msgLastSentCache.Add(eventID.String(), fmt.Sprintf("%s: %s", name, text))
+	summary := m.formatSummary(text, lastSentSummaryLen, "@", m.cfg.Matrix().Formatter.Unicode)
+	m.msgLastSentCache.Add(eventID.String(), name+": "+summary)
 
 	return eventID.String()
 }
@@ -457,53 +474,7 @@ func (m *Matrix) createParentReply(ctx context.Context, roomID id.RoomID, parent
 		nick = parentUser.Nick
 	}
 
-	return fmt.Sprintf(" (re @%s: %s)", nick, maybeShorten(body, newLen, uncounted, unicode)), nil
-}
-
-// maybeShorten returns a prefix of msg that is approximately newLen
-// characters long, followed by "...".  Words that start with uncounted
-// are included in the result but are not reckoned against newLen.
-func maybeShorten(msg string, newLen int, uncounted string, unicode bool) string {
-	if newLen == 0 || len(msg) < newLen {
-		return msg
-	}
-
-	ellipsis := "..."
-	if unicode {
-		ellipsis = "…"
-	}
-
-	newMsg := ""
-
-	for word := range strings.SplitSeq(strings.ReplaceAll(msg, "\n", " "), " ") {
-		if newMsg == "" {
-			newMsg = word
-			continue
-		}
-
-		if len(newMsg) < newLen {
-			skipped := false
-
-			if uncounted != "" && strings.HasPrefix(word, uncounted) {
-				newLen += len(word) + 1
-				skipped = true
-			}
-
-			// Truncate very long words, but only if they were not skipped, on the
-			// assumption that such words are important enough to be preserved whole.
-			if !skipped && len(word) > newLen {
-				word = fmt.Sprintf("%s[%s]", word[0:(newLen*2/3)], ellipsis)
-			}
-
-			newMsg = fmt.Sprintf("%s %s", newMsg, word)
-
-			continue
-		}
-
-		break
-	}
-
-	return fmt.Sprintf("%s %s", newMsg, ellipsis)
+	return " (re @" + nick + ": " + m.formatSummary(body, newLen, uncounted, unicode) + ")", nil
 }
 
 func (m *Matrix) GetTeamName(ctx context.Context, teamID string) string {
@@ -645,4 +616,35 @@ func (m *Matrix) NormalizePostID(msgID string) string {
 }
 
 func (m *Matrix) SendTyping(ctx context.Context, channelName string) {
+}
+
+// formatSummary renders msg like the Mattermost bridge does for replies: markdown
+// to IRC formatting, emoji aliases replaced, then shortened to maxLen.
+func (m *Matrix) formatSummary(msg string, maxLen int, uncounted string, unicode bool) string {
+	fc := m.cfg.Matrix().Formatter
+
+	if !fc.DisableMarkdown {
+		msg = markdownReplacer.Replace(msg)
+
+		blockquoteChar := blockquoteCharNonUnicode
+		if unicode {
+			blockquoteChar = blockquoteCharUnicode
+		}
+
+		msg = utils.Markdown2irc(msg, blockquoteChar, fc.MarkdownInlineCode)
+	} else {
+		msg = strings.ReplaceAll(msg, "\n", " ")
+	}
+
+	if !fc.DisableEmoji {
+		msg = utils.EmojiReplaceAliases(msg, fc.CustomEmoji)
+	}
+
+	return utils.FormatAndShortenSummary(msg, utils.SummaryOpts{
+		DisableMarkdown: true,
+		DisableEmoji:    true,
+		MaxLength:       maxLen,
+		UncountedPrefix: uncounted,
+		Unicode:         unicode,
+	})
 }
