@@ -111,7 +111,7 @@ func (m *Matrix) OnMessage(msg *matrixclient.Message) {
 
 	mxCfg := m.cfg.Matrix()
 	if !mxCfg.HideReplies && msg.ParentID != "" {
-		message, err := m.addParentMsg(m.ctx, msg.RoomID, msg.ParentID, text, mxCfg.ShortenRepliesTo, "@", mxCfg.Formatter.Unicode)
+		message, err := m.addParentMsg(m.ctx, msg.RoomID, msg.ParentID, text, mxCfg.ShortenRepliesTo, "@")
 		if err != nil {
 			logger.Errorf("Unable to get parent post for %s: %s", msg.EventID, err)
 		}
@@ -161,7 +161,7 @@ func (m *Matrix) OnReaction(r *matrixclient.Reaction) {
 
 	mxCfg := m.cfg.Matrix()
 	if !mxCfg.HideReplies {
-		message, err := m.addParentMsg(m.ctx, r.RoomID, r.ParentID, text, mxCfg.ShortenRepliesTo, "@", mxCfg.Formatter.Unicode)
+		message, err := m.addParentMsg(m.ctx, r.RoomID, r.ParentID, text, mxCfg.ShortenRepliesTo, "@")
 		if err != nil {
 			logger.Errorf("Unable to get parent post for %s: %s", r.ParentID, err)
 		}
@@ -252,7 +252,7 @@ func (m *Matrix) recordSent(ctx context.Context, channelID string, eventID id.Ev
 		name = m.GetChannelName(ctx, channelID)
 	}
 
-	summary := m.formatSummary(text, lastSentSummaryLen, "@", m.cfg.Matrix().Formatter.Unicode)
+	summary := m.formatSummary(text, lastSentSummaryLen, "@")
 	m.msgLastSentCache.Add(eventID.String(), name+": "+summary)
 
 	return eventID.String()
@@ -439,7 +439,7 @@ func (m *Matrix) createUser(userID id.UserID) *bridge.UserInfo {
 	}
 }
 
-func (m *Matrix) addParentMsg(ctx context.Context, roomID id.RoomID, parentID id.EventID, msg string, newLen int, uncounted string, unicode bool) (string, error) {
+func (m *Matrix) addParentMsg(ctx context.Context, roomID id.RoomID, parentID id.EventID, msg string, newLen int, uncounted string) (string, error) {
 	// Search and use cached reply if it exists.
 	replyMessage, ok := m.msgParentCache.Get(parentID)
 	if ok {
@@ -449,7 +449,7 @@ func (m *Matrix) addParentMsg(ctx context.Context, roomID id.RoomID, parentID id
 	}
 
 	// None found, so we'll need to create one and save it for future uses.
-	replyMessage, err := m.createParentReply(ctx, roomID, parentID, newLen, uncounted, unicode)
+	replyMessage, err := m.createParentReply(ctx, roomID, parentID, newLen, uncounted)
 	if err != nil {
 		return msg, err
 	}
@@ -460,7 +460,7 @@ func (m *Matrix) addParentMsg(ctx context.Context, roomID id.RoomID, parentID id
 	return strings.TrimRight(msg, "\n") + replyMessage, nil
 }
 
-func (m *Matrix) createParentReply(ctx context.Context, roomID id.RoomID, parentID id.EventID, newLen int, uncounted string, unicode bool) (string, error) {
+func (m *Matrix) createParentReply(ctx context.Context, roomID id.RoomID, parentID id.EventID, newLen int, uncounted string) (string, error) {
 	resp, err := m.mc.Event(ctx, roomID, parentID)
 
 	if err != nil {
@@ -474,7 +474,7 @@ func (m *Matrix) createParentReply(ctx context.Context, roomID id.RoomID, parent
 		nick = parentUser.Nick
 	}
 
-	return " (re @" + nick + ": " + m.formatSummary(body, newLen, uncounted, unicode) + ")", nil
+	return " (re @" + nick + ": " + m.formatSummary(body, newLen, uncounted) + ")", nil
 }
 
 func (m *Matrix) GetTeamName(ctx context.Context, teamID string) string {
@@ -620,8 +620,10 @@ func (m *Matrix) SendTyping(ctx context.Context, channelName string) {
 
 // formatSummary renders msg like the Mattermost bridge does for replies: markdown
 // to IRC formatting, emoji aliases replaced, then shortened to maxLen.
-func (m *Matrix) formatSummary(msg string, maxLen int, uncounted string, unicode bool) string {
-	fc := m.cfg.Matrix().Formatter
+func (m *Matrix) formatSummary(msg string, maxLen int, uncounted string) string {
+	// Single config snapshot so a reload cannot change settings mid-format.
+	fc := &m.cfg.Matrix().Formatter
+	unicode := fc.Unicode
 
 	if !fc.DisableMarkdown {
 		msg = markdownReplacer.Replace(msg)

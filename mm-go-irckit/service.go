@@ -59,31 +59,32 @@ func loginMatrix(u *User, toUser *User, args []string) {
 		return
 	}
 
-	if len(args) == 1 {
-		u.Credentials.Token = args[len(args)-1]
-	}
-
-	if u.Credentials.Token == helpArg {
+	if len(args) == 1 && args[0] == helpArg {
 		u.MsgUser(toUser, "need LOGIN <server> <login> <pass> or LOGIN <token>")
 		return
 	}
 
-	if len(args) == 3 {
+	// Atomically claim the login so concurrent logins cannot both proceed.
+	if !u.inprogress.CompareAndSwap(false, true) {
+		u.MsgUser(toUser, "login or logout in progress. Please wait")
+		return
+	}
+	defer u.inprogress.Store(false)
+
+	if br := u.currentBridge(); br != nil && br.Connected() {
+		u.MsgUser(toUser, "already logged in to matrix. Please log out first")
+		return
+	}
+
+	if len(args) == 1 {
+		u.Credentials = bridge.Credentials{Token: args[0]}
+	} else {
 		u.Credentials = bridge.Credentials{
 			Server: args[0],
 			Login:  args[1],
 			Pass:   args[2],
 		}
 	}
-
-	if u.br != nil && u.br.Connected() {
-		u.MsgUser(toUser, "already logged in to matrix. Please log out first")
-
-		return
-	}
-
-	u.inprogress.Store(true)
-	defer u.inprogress.Store(false)
 
 	err := u.loginTo(serviceMatrix)
 	if err != nil {
