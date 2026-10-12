@@ -462,7 +462,6 @@ func (m *Matrix) addParentMsg(ctx context.Context, roomID id.RoomID, parentID id
 
 func (m *Matrix) createParentReply(ctx context.Context, roomID id.RoomID, parentID id.EventID, newLen int, uncounted string) (string, error) {
 	resp, err := m.mc.Event(ctx, roomID, parentID)
-
 	if err != nil {
 		return "", err
 	}
