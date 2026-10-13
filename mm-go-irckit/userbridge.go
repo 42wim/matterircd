@@ -780,15 +780,19 @@ func (u *User) handleChannelUpdateEvent(e *bridge.ChannelUpdateEvent) {
 	// Only join the new channel if we actually parted a stale channel we were in
 	if len(staleChannels) > 0 {
 		newCh := u.Srv.Channel(newIRCChanStr)
-		_ = newCh.Join(u)
 
 		u.Lock()
 		if u.channels == nil {
 			u.channels = make(map[Channel]struct{})
 		}
 
+		_, alreadyInMap := u.channels[newCh]
 		u.channels[newCh] = struct{}{}
 		u.Unlock()
+
+		if !alreadyInMap {
+			_ = newCh.Join(u)
+		}
 
 		noticeMsg := &irc.Message{
 			Prefix:   u.Srv.Prefix(),
