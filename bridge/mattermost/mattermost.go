@@ -2325,7 +2325,7 @@ func (m *Mattermost) formatMessage(ctx context.Context, data *model.Post, eventT
 	isPostEdited := eventType == string(model.WebsocketEventPostEdited)
 	timeDelta := data.UpdateAt - data.EditAt
 	isEdited := isPostEdited && data.EditAt > 0 && timeDelta >= 0 && timeDelta < 5000
-	isUnpinned := isPostEdited && !data.IsPinned && data.EditAt == 0 && data.Props["remove_link_preview"] == nil
+	isUnpinned := isPostEdited && !data.IsPinned && data.EditAt == 0 && data.GetProps()["remove_link_preview"] == nil
 	isUpdated := isPostEdited && !data.IsPinned && !isEdited && !isUnpinned
 
 	switch {
