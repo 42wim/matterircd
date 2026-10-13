@@ -782,14 +782,6 @@ func (u *User) handleChannelUpdateEvent(e *bridge.ChannelUpdateEvent) {
 		newCh := u.Srv.Channel(newIRCChanStr)
 		_ = newCh.Join(u)
 
-		u.Lock()
-		if u.channels == nil {
-			u.channels = make(map[Channel]struct{})
-		}
-
-		u.channels[newCh] = struct{}{}
-		u.Unlock()
-
 		noticeMsg := &irc.Message{
 			Prefix:   u.Srv.Prefix(),
 			Command:  irc.NOTICE,

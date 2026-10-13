@@ -83,6 +83,7 @@ type channel struct {
 	private bool
 
 	mu       sync.RWMutex
+	joinMu   sync.Mutex
 	topic    string
 	usersIdx map[string]*User
 }
@@ -446,6 +447,9 @@ func (ch *channel) Join(u *User) error {
 	if u.ID() == "" {
 		return nil
 	}
+
+	ch.joinMu.Lock()
+	defer ch.joinMu.Unlock()
 
 	ch.mu.Lock()
 	if ch.usersIdx == nil {
