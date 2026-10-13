@@ -485,14 +485,9 @@ func (ch *channel) Join(u *User) error {
 		Params:  []string{ch.name},
 	}
 
-	// send regular users a notification of the join
-	users := ch.Users()
-
-	for _, to := range users {
-		// only send join messages to real users
-		if !to.Ghost {
-			to.Encode(msg)
-		}
+	// only send join messages to real users
+	for _, to := range ch.realUsers() {
+		to.Encode(msg) //nolint:errcheck
 	}
 
 	ch.SendNamesResponse(u)
