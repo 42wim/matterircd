@@ -206,6 +206,15 @@ var (
 	modifyRegExp = regexp.MustCompile(`^s/(?:[0-9a-z]{26}|[0-9a-f]{3}|!!)?/`)
 )
 
+// threadPrefix returns the thread ("@@id ") that text is a reply to, or an empty string.
+func threadPrefix(text string) string {
+	if !strings.HasPrefix(text, "@@") {
+		return ""
+	}
+
+	return replyRegExp.FindString(text)
+}
+
 // Decode will receive and return a decoded message, or an error.
 // nolint:funlen,gocognit,gocyclo
 func (u *User) Decode() {
@@ -229,10 +238,19 @@ func (u *User) Decode() {
 	go func(buffer chan *irc.Message) {
 		defer wg.Done()
 
-		var bufferedMsg *irc.Message
+		var (
+			bufferedMsg *irc.Message
+			// When the last line was added to the buffer.
+			lastLine time.Time
+			// Set when a message was sent because it had been held for the full timeout: the recipient
+			// and the thread of it. A paste that is still going carries on in that thread.
+			resumeTarget, resumeReply string
+		)
 
 		flush := func() {
 			t.Stop()
+
+			resumeTarget, resumeReply = "", ""
 			if bufferedMsg == nil {
 				return
 			}
@@ -253,6 +271,16 @@ func (u *User) Decode() {
 			u.DecodeCh <- bufferedMsg
 			// clear buffer
 			bufferedMsg = nil
+		}
+
+		// The timer is not restarted by the lines added to the message, it is the limit
+		// for how long a message is held, however many lines it consists of.
+		startBuffer := func(msg *irc.Message) {
+			resumeTarget, resumeReply = "", ""
+			bufferedMsg = msg
+			lastLine = time.Now()
+
+			t.Reset(timeout)
 		}
 
 		for {
@@ -301,9 +329,14 @@ func (u *User) Decode() {
 
 				// are we starting a new buffer ?
 				if bufferedMsg == nil {
-					bufferedMsg = msg
-					// start timer now
-					t.Reset(timeout)
+					// A paste that is still going after its message was sent for having been held for
+					// the full timeout (the line follows less than that after the previous one) carries
+					// on in the thread of that message, instead of ending up in the channel.
+					if resumeReply != "" && resumeTarget == msg.Params[0] && time.Since(lastLine) < timeout {
+						msg.Trailing = resumeReply + msg.Trailing
+					}
+
+					startBuffer(msg)
 				} else {
 					// make sure we're sending to the same recipient in the buffer
 					if bufferedMsg.Params[0] == msg.Params[0] {
@@ -314,36 +347,33 @@ func (u *User) Decode() {
 						}
 
 						if len(bufferedMsg.Trailing)+len(msg.Trailing)+1 > postLimit-50 {
-							var replyPrefix string
-
-							if strings.HasPrefix(bufferedMsg.Trailing, "@@") {
-								replyPrefix = replyRegExp.FindString(bufferedMsg.Trailing)
-							}
+							replyPrefix := threadPrefix(bufferedMsg.Trailing)
 
 							flush()
 
-							if replyPrefix != "" {
-								msg.Trailing = replyPrefix + msg.Trailing
-							}
+							msg.Trailing = replyPrefix + msg.Trailing
 
-							bufferedMsg = msg
-
-							t.Reset(timeout)
+							startBuffer(msg)
 						} else {
 							bufferedMsg.Trailing += "\n" + msg.Trailing
-
-							t.Reset(timeout)
+							lastLine = time.Now()
 						}
 					} else {
 						flush()
 
-						bufferedMsg = msg
-						// start timer now
-						t.Reset(timeout)
+						startBuffer(msg)
 					}
 				}
 			case <-t.C:
+				// The message has been held for as long as it is allowed to.
+				var target, reply string
+				if bufferedMsg != nil {
+					target, reply = bufferedMsg.Params[0], threadPrefix(bufferedMsg.Trailing)
+				}
+
 				flush()
+
+				resumeTarget, resumeReply = target, reply
 			}
 		}
 	}(buffer)
