@@ -277,14 +277,15 @@ func (u *User) Decode() {
 
 				// Without a target (e.g. "PRIVMSG :text") there is nothing to compare, the
 				// command handler will reject it. Never buffer those.
-				// The same goes for commands (CTCP, message modifications and reactions): they
-				// are not text to post, so they must not get merged with the lines around them
-				// or wait for the timer.
+				// The same goes for commands (CTCP, message modifications, reactions and the
+				// messages to the service bots): they are not text to post, so they must not
+				// get merged with the lines around them or wait for the timer.
 				if len(msg.Params) == 0 ||
+					isServiceBot(msg.Params[0]) ||
 					strings.HasPrefix(msg.Trailing, "\x01") ||
 					modifyRegExp.MatchString(msg.Trailing) ||
 					(strings.HasPrefix(msg.Trailing, "@@") && parseReactionToMsgRegExp.MatchString(msg.Trailing)) {
-					logger.Trace("flushing buffer because of CTCP, message modifications, reactions or a missing target")
+					logger.Trace("flushing buffer because of CTCP, message modifications, reactions, service bots or a missing target")
 					flush()
 
 					u.DecodeCh <- msg
@@ -394,20 +395,25 @@ func (u *User) Decode() {
 	}
 }
 
+const (
+	serviceSlack      = "slack"
+	serviceMattermost = "mattermost"
+	serviceMastodon   = "mastodon"
+)
+
+// isServiceBot tells if nick is one of the service bots (the ones to login to and to send commands to).
+func isServiceBot(nick string) bool {
+	return nick == serviceSlack || nick == serviceMattermost || nick == serviceMastodon
+}
+
 // incomingLogLine describes a message from the client for the log, without the credentials in it.
 func incomingLogLine(msg *irc.Message) string {
-	const (
-		serviceSlack      = "slack"
-		serviceMattermost = "mattermost"
-		serviceMastodon   = "mastodon"
-		loginCommand      = "login"
-	)
+	const loginCommand = "login"
 
 	dmsg := "<- " + msg.String()
 
 	switch {
-	case msg.Command == irc.PRIVMSG && len(msg.Params) > 0 &&
-		(msg.Params[0] == serviceSlack || msg.Params[0] == serviceMattermost || msg.Params[0] == serviceMastodon):
+	case msg.Command == irc.PRIVMSG && len(msg.Params) > 0 && isServiceBot(msg.Params[0]):
 		// Don't log sensitive information
 		trail := strings.Split(msg.Trailing, " ")
 		if (msg.Trailing != "" && trail[0] == loginCommand) || (len(msg.Params) > 1 && msg.Params[1] == loginCommand) {
