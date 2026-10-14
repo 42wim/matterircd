@@ -474,7 +474,10 @@ func (s *server) handle(u *User) {
 			}
 		}
 
-		var targetLock *sync.Mutex
+		var (
+			prev <-chan struct{}
+			next chan struct{}
+		)
 
 		if msg.Command == irc.PRIVMSG && len(msg.Params) > 0 {
 			var target string
@@ -486,14 +489,17 @@ func (s *server) handle(u *User) {
 			}
 
 			if target != "" {
-				targetLock = u.getMsgChanLock(target)
-				targetLock.Lock()
+				prev, next = u.getMsgChanLock(target)
 			}
 		}
 
-		go func(msg *irc.Message, targetLock *sync.Mutex) {
-			if targetLock != nil {
-				defer targetLock.Unlock()
+		go func(msg *irc.Message, prev <-chan struct{}, next chan struct{}) {
+			if next != nil {
+				defer close(next)
+
+				if prev != nil {
+					<-prev
+				}
 			}
 
 			err := s.commands.Run(s, u, msg)
@@ -512,7 +518,7 @@ func (s *server) handle(u *User) {
 				logger.Errorf("handler error for %s: %s", u.ID(), errMsg)
 				s.EncodeMessage(u, irc.PRIVMSG, []string{u.Nick}, errMsg) //nolint:errcheck
 			}
-		}(msg, targetLock)
+		}(msg, prev, next)
 	}
 }
 
