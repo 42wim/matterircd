@@ -419,7 +419,11 @@ func (u *User) Decode() {
 
 		// PRIVMSG can be buffered. QUIT and PART go through the buffer as well, so that what is
 		// held in it is sent before them (and not canceled by them).
-		switch msg.Command {
+		command := msg.Command
+		if strings.HasPrefix(command, "@") && len(msg.Params) > 0 {
+			command = strings.ToUpper(msg.Params[0])
+		}
+		switch command {
 		case irc.PRIVMSG, irc.QUIT, irc.PART:
 			logger.Debugf("B: %#v", dmsg)
 			buffer <- msg
