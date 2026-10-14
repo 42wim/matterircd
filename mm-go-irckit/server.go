@@ -510,7 +510,7 @@ func (s *server) handle(u *User) {
 			if len(msg.Params) > 0 {
 				var targets []string
 
-				for _, chName := range strings.Split(msg.Params[0], ",") {
+				for chName := range strings.SplitSeq(msg.Params[0], ",") {
 					if ch, ok := s.HasChannel(chName); ok {
 						targets = append(targets, ch.ID())
 					}
