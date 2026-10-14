@@ -2477,7 +2477,7 @@ func (u *User) isRequestedChannel(channelName string) bool {
 	return ok
 }
 
-// waitMsgChanLocks waits until the messages that are queued up now (see getMsgChanLock) have been
+// waitMsgChanLocks waits until the messages that are queued up now (see getMsgChanLocks) have been
 // handled, for at most timeout.
 func (u *UserBridge) waitMsgChanLocks(timeout time.Duration) {
 	u.msgChanLockMutex.Lock()
@@ -2546,13 +2546,4 @@ func (u *UserBridge) getMsgChanLocks(targets ...string) ([]<-chan struct{}, chan
 	}
 
 	return prevs, next
-}
-
-func (u *UserBridge) getMsgChanLock(target string) (<-chan struct{}, chan struct{}) {
-	prevs, next := u.getMsgChanLocks(target)
-	if len(prevs) > 0 {
-		return prevs[0], next
-	}
-
-	return nil, next
 }
