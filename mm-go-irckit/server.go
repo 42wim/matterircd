@@ -333,6 +333,17 @@ func (s *server) Quit(u *User, message string) {
 		activeClients.Add(-1)
 	})
 
+	// Only the first Quit (the QUIT command, the connection closing or handle() returning, whichever
+	// comes first) waits and cleans up. The others return at once instead of passing the context
+	// check below at the same time, while that first one is still waiting.
+	if !u.quitting.CompareAndSwap(false, true) {
+		return
+	}
+
+	// Messages that are still on their way (the one that was held in the paste buffer when the
+	// user quit, for example) would get aborted by the cancel below. Give them time to be sent.
+	u.waitMsgChanLocks(5 * time.Second)
+
 	if u.ctx != nil && u.ctx.Err() != nil {
 		return
 	}
@@ -475,29 +486,47 @@ func (s *server) handle(u *User) {
 		}
 
 		var (
-			prev <-chan struct{}
-			next chan struct{}
+			prevs []<-chan struct{}
+			next  chan struct{}
 		)
 
-		if msg.Command == irc.PRIVMSG && len(msg.Params) > 0 {
-			var target string
+		switch msg.Command {
+		case irc.PRIVMSG:
+			if len(msg.Params) > 0 {
+				var target string
 
-			if ch, ok := s.HasChannel(msg.Params[0]); ok {
-				target = ch.ID()
-			} else if toUser, ok := s.HasUser(msg.Params[0]); ok {
-				target = toUser.User
+				if ch, ok := s.HasChannel(msg.Params[0]); ok {
+					target = ch.ID()
+				} else if toUser, ok := s.HasUser(msg.Params[0]); ok {
+					target = toUser.User
+				}
+
+				if target != "" {
+					prevs, next = u.getMsgChanLocks(target)
+				}
 			}
 
-			if target != "" {
-				prev, next = u.getMsgChanLock(target)
+		case irc.PART:
+			if len(msg.Params) > 0 {
+				var targets []string
+
+				for chName := range strings.SplitSeq(msg.Params[0], ",") {
+					if ch, ok := s.HasChannel(chName); ok {
+						targets = append(targets, ch.ID())
+					}
+				}
+
+				if len(targets) > 0 {
+					prevs, next = u.getMsgChanLocks(targets...)
+				}
 			}
 		}
 
-		go func(msg *irc.Message, prev <-chan struct{}, next chan struct{}) {
+		go func(msg *irc.Message, prevs []<-chan struct{}, next chan struct{}) {
 			if next != nil {
 				defer close(next)
 
-				if prev != nil {
+				for _, prev := range prevs {
 					<-prev
 				}
 			}
@@ -518,7 +547,7 @@ func (s *server) handle(u *User) {
 				logger.Errorf("handler error for %s: %s", u.ID(), errMsg)
 				s.EncodeMessage(u, irc.PRIVMSG, []string{u.Nick}, errMsg) //nolint:errcheck
 			}
-		}(msg, prev, next)
+		}(msg, prevs, next)
 	}
 }
 

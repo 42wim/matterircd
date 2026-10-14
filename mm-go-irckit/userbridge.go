@@ -37,6 +37,7 @@ type UserBridge struct {
 	inprogress  atomic.Bool
 	eventChan   chan *bridge.Event
 	away        atomic.Bool
+	quitting    atomic.Bool
 
 	eventLoopMutex   sync.Mutex
 	eventLoopStarted bool
@@ -2476,13 +2477,73 @@ func (u *User) isRequestedChannel(channelName string) bool {
 	return ok
 }
 
-func (u *UserBridge) getMsgChanLock(target string) (<-chan struct{}, chan struct{}) {
+// waitMsgChanLocks waits until the messages that are queued up now (see getMsgChanLocks) have been
+// handled, for at most timeout.
+func (u *UserBridge) waitMsgChanLocks(timeout time.Duration) {
+	u.msgChanLockMutex.Lock()
+
+	tails := make([]<-chan struct{}, 0, len(u.msgChanLocks))
+	for _, c := range u.msgChanLocks {
+		tails = append(tails, c)
+	}
+
+	u.msgChanLockMutex.Unlock()
+
+	if len(tails) == 0 {
+		return
+	}
+
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+
+	for _, c := range tails {
+		select {
+		case <-c:
+		case <-deadline.C:
+			return
+		}
+	}
+}
+
+func (u *UserBridge) getMsgChanLocks(targets ...string) ([]<-chan struct{}, chan struct{}) {
+	if len(targets) == 0 {
+		return nil, nil
+	}
+
 	u.msgChanLockMutex.Lock()
 	defer u.msgChanLockMutex.Unlock()
 
-	prev := u.msgChanLocks[target]
-	next := make(chan struct{})
-	u.msgChanLocks[target] = next
+	var prevs []<-chan struct{}
 
-	return prev, next
+	next := make(chan struct{})
+
+	if len(targets) == 1 {
+		target := targets[0]
+
+		if prev := u.msgChanLocks[target]; prev != nil {
+			prevs = []<-chan struct{}{prev}
+		}
+
+		u.msgChanLocks[target] = next
+
+		return prevs, next
+	}
+
+	seen := make(map[string]struct{}, len(targets))
+
+	for _, target := range targets {
+		if _, ok := seen[target]; ok {
+			continue
+		}
+
+		seen[target] = struct{}{}
+
+		if prev := u.msgChanLocks[target]; prev != nil {
+			prevs = append(prevs, prev)
+		}
+
+		u.msgChanLocks[target] = next
+	}
+
+	return prevs, next
 }

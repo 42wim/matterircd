@@ -305,17 +305,20 @@ func (u *User) Decode() {
 					return
 				}
 
+				// Only PRIVMSGs get merged. QUIT and PART are in the buffer to go after the
+				// message that is held, they must not wait for the timer.
 				// Without a target (e.g. "PRIVMSG :text") there is nothing to compare, the
 				// command handler will reject it. Never buffer those.
 				// The same goes for commands (CTCP, message modifications, reactions and the
 				// messages to the service bots): they are not text to post, so they must not
 				// get merged with the lines around them or wait for the timer.
-				if len(msg.Params) == 0 ||
+				if msg.Command != irc.PRIVMSG ||
+					len(msg.Params) == 0 ||
 					isServiceBot(msg.Params[0]) ||
 					strings.HasPrefix(msg.Trailing, "\x01") ||
 					modifyRegExp.MatchString(msg.Trailing) ||
 					(strings.HasPrefix(msg.Trailing, "@@") && parseReactionToMsgRegExp.MatchString(msg.Trailing)) {
-					logger.Trace("flushing buffer because of CTCP, message modifications, reactions, service bots or a missing target")
+					logger.Trace("flushing buffer because of QUIT, PART, CTCP, message modifications, reactions, service bots or a missing target")
 					flush()
 
 					u.DecodeCh <- msg
@@ -386,6 +389,16 @@ func (u *User) Decode() {
 			close(buffer)
 			wg.Wait()
 
+			// The message that was held has been handed over by now, but handle() may not have
+			// queued it yet and Quit has to wait for it. handle() only takes this empty message
+			// when it is done with the previous one.
+			if u.DecodeCh != nil {
+				select {
+				case u.DecodeCh <- nil:
+				case <-time.After(1 * time.Second):
+				}
+			}
+
 			isEOF := errors.Is(err, io.EOF) || err.Error() == "EOF"
 			isClosed := errors.Is(err, net.ErrClosed) || strings.Contains(err.Error(), "use of closed network connection")
 			if !isEOF && !isClosed {
@@ -404,9 +417,15 @@ func (u *User) Decode() {
 			dmsg = incomingLogLine(msg)
 		}
 
-		// PRIVMSG can be buffered
-		switch msg.Command {
-		case irc.PRIVMSG:
+		// PRIVMSG can be buffered. QUIT and PART go through the buffer as well, so that what is
+		// held in it is sent before them (and not canceled by them).
+		command := msg.Command
+		if strings.HasPrefix(command, "@") && len(msg.Params) > 0 {
+			command = strings.ToUpper(msg.Params[0])
+		}
+
+		switch command {
+		case irc.PRIVMSG, irc.QUIT, irc.PART:
 			logger.Debugf("B: %#v", dmsg)
 			buffer <- msg
 		case irc.PING, irc.MODE:

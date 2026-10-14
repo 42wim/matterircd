@@ -47,6 +47,8 @@ gops = false
 # Reactions (@@id +:emoji:), message modifications (s/id/text), CTCP (like
 # /me) and messages to the mattermost, slack and mastodon service bots are
 # never concatenated, they are sent right away.
+# A message that is being kept when you /part its channel, /quit or get
+# disconnected is sent right away as well, so it doesn't get lost.
 # Minimum 100, a lower value (like the default 0) is raised to 100.
 # Depending on how fast you type 2500 is a good number
 PasteBufferTimeout = 2500
