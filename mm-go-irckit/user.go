@@ -202,7 +202,7 @@ func (u *User) Encode(msgs ...*irc.Message) (err error) {
 }
 
 var (
-	replyRegExp  = regexp.MustCompile(`\@\@(?:[0-9a-z]{26}|[0-9a-f]{3}|!!)\s`)
+	replyRegExp  = regexp.MustCompile(`^\@\@(?:[0-9a-z]{26}|[0-9a-f]{3}|!!)\s`)
 	modifyRegExp = regexp.MustCompile(`^s/(?:[0-9a-z]{26}|[0-9a-f]{3}|!!)?/`)
 )
 
@@ -221,7 +221,6 @@ func (u *User) Decode() {
 	}
 	logger.Tracef("using paste buffer timeout: %#v", bufferTimeout)
 	timeout := time.Duration(bufferTimeout) * time.Millisecond
-	continuationTimeout := min(timeout, 200*time.Millisecond)
 	t := timer.NewTimer(timeout)
 	t.Stop()
 	var wg sync.WaitGroup
@@ -230,10 +229,7 @@ func (u *User) Decode() {
 	go func(buffer chan *irc.Message) {
 		defer wg.Done()
 
-		var (
-			bufferedMsg    *irc.Message
-			bufferDeadline time.Time
-		)
+		var bufferedMsg *irc.Message
 
 		flush := func() {
 			t.Stop()
@@ -257,7 +253,6 @@ func (u *User) Decode() {
 			u.DecodeCh <- bufferedMsg
 			// clear buffer
 			bufferedMsg = nil
-			bufferDeadline = time.Time{}
 		}
 
 		for {
@@ -275,7 +270,6 @@ func (u *User) Decode() {
 							logger.Warnf("timed out flushing decode buffer for %s", u.Nick)
 						}
 						bufferedMsg = nil
-						bufferDeadline = time.Time{}
 					}
 					logger.Tracef("decode buffer goroutine exiting for %s", u.Nick)
 					return
@@ -301,9 +295,8 @@ func (u *User) Decode() {
 				// are we starting a new buffer ?
 				if bufferedMsg == nil {
 					bufferedMsg = msg
-					bufferDeadline = time.Now().Add(timeout)
-
-					t.Reset(continuationTimeout)
+					// start timer now
+					t.Reset(timeout)
 				} else {
 					// make sure we're sending to the same recipient in the buffer
 					if bufferedMsg.Params[0] == msg.Params[0] {
@@ -314,29 +307,26 @@ func (u *User) Decode() {
 						}
 
 						if len(bufferedMsg.Trailing)+len(msg.Trailing)+1 > postLimit-50 {
+							replyPrefix := replyRegExp.FindString(bufferedMsg.Trailing)
+
 							flush()
 
-							bufferedMsg = msg
-							bufferDeadline = time.Now().Add(timeout)
+							if replyPrefix != "" {
+								msg.Trailing = replyPrefix + msg.Trailing
+							}
 
-							t.Reset(continuationTimeout)
+							bufferedMsg = msg
+
+							t.Reset(timeout)
 						} else {
 							bufferedMsg.Trailing += "\n" + msg.Trailing
-
-							remaining := time.Until(bufferDeadline)
-							if remaining <= 0 {
-								flush()
-							} else {
-								resetDuration := min(continuationTimeout, remaining)
-								t.Reset(resetDuration)
-							}
 						}
 					} else {
 						flush()
-						bufferedMsg = msg
-						bufferDeadline = time.Now().Add(timeout)
 
-						t.Reset(continuationTimeout)
+						bufferedMsg = msg
+
+						t.Reset(timeout)
 					}
 				}
 			case <-t.C:
