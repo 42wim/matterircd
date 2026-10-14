@@ -202,7 +202,7 @@ func (u *User) Encode(msgs ...*irc.Message) (err error) {
 }
 
 var (
-	replyRegExp  = regexp.MustCompile(`^\@\@(?:[0-9a-z]{26}|[0-9a-f]{3}|!!)\s`)
+	replyRegExp  = regexp.MustCompile(`\@\@(?:[0-9a-z]{26}|[0-9a-f]{3}|!!)\s`)
 	modifyRegExp = regexp.MustCompile(`^s/(?:[0-9a-z]{26}|[0-9a-f]{3}|!!)?/`)
 )
 
@@ -287,7 +287,7 @@ func (u *User) Decode() {
 				}
 
 				// If starting a thread reply, flush any previous message buffer first.
-				if replyRegExp.MatchString(msg.Trailing) {
+				if strings.HasPrefix(msg.Trailing, "@@") && replyRegExp.MatchString(msg.Trailing) {
 					logger.Trace("flushing buffer because of replies to threads")
 					flush()
 				}
@@ -307,7 +307,10 @@ func (u *User) Decode() {
 						}
 
 						if len(bufferedMsg.Trailing)+len(msg.Trailing)+1 > postLimit-50 {
-							replyPrefix := replyRegExp.FindString(bufferedMsg.Trailing)
+							var replyPrefix string
+							if strings.HasPrefix(bufferedMsg.Trailing, "@@") {
+								replyPrefix = replyRegExp.FindString(bufferedMsg.Trailing)
+							}
 
 							flush()
 
@@ -320,12 +323,14 @@ func (u *User) Decode() {
 							t.Reset(timeout)
 						} else {
 							bufferedMsg.Trailing += "\n" + msg.Trailing
+
+							t.Reset(timeout)
 						}
 					} else {
 						flush()
 
 						bufferedMsg = msg
-
+						// start timer now
 						t.Reset(timeout)
 					}
 				}
