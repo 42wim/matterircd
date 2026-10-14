@@ -462,16 +462,28 @@ func (s *server) handle(u *User) {
 			// Ignore empty messages
 			continue
 		}
-		go func(msg *irc.Message) {
-			if strings.HasPrefix(msg.Command, "@") && len(msg.Params) > 0 {
-				threadID := parseThreadTag(msg.Command)
 
-				msg.Command = strings.ToUpper(msg.Params[0])
-				msg.Params = msg.Params[1:]
+		if strings.HasPrefix(msg.Command, "@") && len(msg.Params) > 0 {
+			threadID := parseThreadTag(msg.Command)
 
-				if threadID != "" && msg.Command == "TAGMSG" && len(msg.Params) == 1 { //nolint:goconst
-					msg.Params = append(msg.Params, threadID)
-				}
+			msg.Command = strings.ToUpper(msg.Params[0])
+			msg.Params = msg.Params[1:]
+
+			if threadID != "" && msg.Command == "TAGMSG" && len(msg.Params) == 1 { //nolint:goconst
+				msg.Params = append(msg.Params, threadID)
+			}
+		}
+
+		var targetLock *sync.Mutex
+
+		if msg.Command == irc.PRIVMSG && len(msg.Params) > 0 {
+			targetLock = u.getMsgChanLock(msg.Params[0])
+			targetLock.Lock()
+		}
+
+		go func(msg *irc.Message, targetLock *sync.Mutex) {
+			if targetLock != nil {
+				defer targetLock.Unlock()
 			}
 
 			err := s.commands.Run(s, u, msg)
@@ -490,7 +502,7 @@ func (s *server) handle(u *User) {
 				logger.Errorf("handler error for %s: %s", u.ID(), errMsg)
 				s.EncodeMessage(u, irc.PRIVMSG, []string{u.Nick}, errMsg) //nolint:errcheck
 			}
-		}(msg)
+		}(msg, targetLock)
 	}
 }
 
