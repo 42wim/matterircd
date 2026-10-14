@@ -202,7 +202,7 @@ func (u *User) Encode(msgs ...*irc.Message) (err error) {
 }
 
 var (
-	replyRegExp  = regexp.MustCompile(`\@\@(?:[0-9a-z]{26}|[0-9a-f]{3}|!!)\s`)
+	replyRegExp  = regexp.MustCompile(`^\@\@(?:[0-9a-z]{26}|[0-9a-f]{3}|!!)\s`)
 	modifyRegExp = regexp.MustCompile(`^s/(?:[0-9a-z]{26}|[0-9a-f]{3}|!!)?/`)
 )
 
@@ -308,6 +308,7 @@ func (u *User) Decode() {
 
 						if len(bufferedMsg.Trailing)+len(msg.Trailing)+1 > postLimit-50 {
 							var replyPrefix string
+
 							if strings.HasPrefix(bufferedMsg.Trailing, "@@") {
 								replyPrefix = replyRegExp.FindString(bufferedMsg.Trailing)
 							}
