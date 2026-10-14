@@ -277,8 +277,14 @@ func (u *User) Decode() {
 
 				// Without a target (e.g. "PRIVMSG :text") there is nothing to compare, the
 				// command handler will reject it. Never buffer those.
-				if len(msg.Params) == 0 || strings.HasPrefix(msg.Trailing, "\x01") || modifyRegExp.MatchString(msg.Trailing) {
-					logger.Trace("flushing buffer because of CTCP, message modifications or a missing target")
+				// The same goes for commands (CTCP, message modifications and reactions): they
+				// are not text to post, so they must not get merged with the lines around them
+				// or wait for the timer.
+				if len(msg.Params) == 0 ||
+					strings.HasPrefix(msg.Trailing, "\x01") ||
+					modifyRegExp.MatchString(msg.Trailing) ||
+					(strings.HasPrefix(msg.Trailing, "@@") && parseReactionToMsgRegExp.MatchString(msg.Trailing)) {
+					logger.Trace("flushing buffer because of CTCP, message modifications, reactions or a missing target")
 					flush()
 
 					u.DecodeCh <- msg
