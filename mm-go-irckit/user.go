@@ -423,6 +423,7 @@ func (u *User) Decode() {
 		if strings.HasPrefix(command, "@") && len(msg.Params) > 0 {
 			command = strings.ToUpper(msg.Params[0])
 		}
+
 		switch command {
 		case irc.PRIVMSG, irc.QUIT, irc.PART:
 			logger.Debugf("B: %#v", dmsg)
