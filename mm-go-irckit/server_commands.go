@@ -548,10 +548,6 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 			return nil
 		}
 
-		targetLock := u.getMsgChanLock(ch.ID())
-		targetLock.Lock()
-		defer targetLock.Unlock()
-
 		if parseReactionToMsg(u, msg, ch.ID()) {
 			return nil
 		}
@@ -585,7 +581,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 	// or a user
 	if toUser, exists := s.HasUser(query); exists {
 		switch {
-		case query == "mattermost" || query == "slack" || query == "mastodon": //nolint:goconst
+		case isServiceBot(query):
 			go u.handleServiceBot(query, toUser, msg.Trailing)
 			msg.Trailing = "<redacted>"
 		case toUser.Ghost, toUser.Me:
@@ -595,10 +591,6 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 				logger.Tracef("u.br was nil, ignored message")
 				return nil
 			}
-
-			targetLock := u.getMsgChanLock(toUser.User)
-			targetLock.Lock()
-			defer targetLock.Unlock()
 
 			if parseReactionToMsg(u, msg, toUser.User) {
 				logger.Trace("matched parseReactionToMsg")
