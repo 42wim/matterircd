@@ -239,7 +239,8 @@ func (u *User) Decode() {
 		defer wg.Done()
 
 		var (
-			bufferedMsg *irc.Message
+			bufferedMsg    *irc.Message
+			bufferDeadline time.Time
 			// When the last line was added to the buffer.
 			lastLine time.Time
 			// Set when a message was sent because it had been held for the full timeout: the recipient
@@ -279,6 +280,7 @@ func (u *User) Decode() {
 			resumeTarget, resumeReply = "", ""
 			bufferedMsg = msg
 			lastLine = time.Now()
+			bufferDeadline = lastLine.Add(timeout)
 
 			t.Reset(timeout)
 		}
@@ -346,7 +348,7 @@ func (u *User) Decode() {
 							postLimit = br.GetPostSizeLimit()
 						}
 
-						if len(bufferedMsg.Trailing)+len(msg.Trailing)+1 > postLimit-50 {
+						if len(bufferedMsg.Trailing)+len(msg.Trailing)+1 > postLimit-50 || time.Until(bufferDeadline) <= 0 {
 							replyPrefix := threadPrefix(bufferedMsg.Trailing)
 
 							flush()
