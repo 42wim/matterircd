@@ -37,6 +37,7 @@ type UserBridge struct {
 	inprogress  atomic.Bool
 	eventChan   chan *bridge.Event
 	away        atomic.Bool
+	quitting    atomic.Bool
 
 	eventLoopMutex   sync.Mutex
 	eventLoopStarted bool

@@ -333,13 +333,20 @@ func (s *server) Quit(u *User, message string) {
 		activeClients.Add(-1)
 	})
 
-	if u.ctx != nil && u.ctx.Err() != nil {
+	// Only the first Quit (the QUIT command, the connection closing or handle() returning, whichever
+	// comes first) waits and cleans up. The others return at once instead of passing the context
+	// check below at the same time, while that first one is still waiting.
+	if !u.quitting.CompareAndSwap(false, true) {
 		return
 	}
 
 	// Messages that are still on their way (the one that was held in the paste buffer when the
 	// user quit, for example) would get aborted by the cancel below. Give them time to be sent.
 	u.waitMsgChanLocks(5 * time.Second)
+
+	if u.ctx != nil && u.ctx.Err() != nil {
+		return
+	}
 
 	if u.cancel != nil {
 		u.cancel()
