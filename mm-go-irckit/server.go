@@ -333,13 +333,13 @@ func (s *server) Quit(u *User, message string) {
 		activeClients.Add(-1)
 	})
 
-	// Messages that are still on their way (the one that was held in the paste buffer when the
-	// user quit, for example) would get aborted by the cancel below. Give them time to be sent.
-	u.waitMsgChanLocks(5 * time.Second)
-
 	if u.ctx != nil && u.ctx.Err() != nil {
 		return
 	}
+
+	// Messages that are still on their way (the one that was held in the paste buffer when the
+	// user quit, for example) would get aborted by the cancel below. Give them time to be sent.
+	u.waitMsgChanLocks(5 * time.Second)
 
 	if u.cancel != nil {
 		u.cancel()
