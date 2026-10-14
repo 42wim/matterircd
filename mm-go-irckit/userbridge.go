@@ -2505,13 +2505,54 @@ func (u *UserBridge) waitMsgChanLocks(timeout time.Duration) {
 	}
 }
 
-func (u *UserBridge) getMsgChanLock(target string) (<-chan struct{}, chan struct{}) {
+func (u *UserBridge) getMsgChanLocks(targets ...string) ([]<-chan struct{}, chan struct{}) {
+	if len(targets) == 0 {
+		return nil, nil
+	}
+
 	u.msgChanLockMutex.Lock()
 	defer u.msgChanLockMutex.Unlock()
 
-	prev := u.msgChanLocks[target]
-	next := make(chan struct{})
-	u.msgChanLocks[target] = next
+	var prevs []<-chan struct{}
 
-	return prev, next
+	next := make(chan struct{})
+
+	if len(targets) == 1 {
+		target := targets[0]
+
+		if prev := u.msgChanLocks[target]; prev != nil {
+			prevs = []<-chan struct{}{prev}
+		}
+
+		u.msgChanLocks[target] = next
+
+		return prevs, next
+	}
+
+	seen := make(map[string]struct{}, len(targets))
+
+	for _, target := range targets {
+		if _, ok := seen[target]; ok {
+			continue
+		}
+
+		seen[target] = struct{}{}
+
+		if prev := u.msgChanLocks[target]; prev != nil {
+			prevs = append(prevs, prev)
+		}
+
+		u.msgChanLocks[target] = next
+	}
+
+	return prevs, next
+}
+
+func (u *UserBridge) getMsgChanLock(target string) (<-chan struct{}, chan struct{}) {
+	prevs, next := u.getMsgChanLocks(target)
+	if len(prevs) > 0 {
+		return prevs[0], next
+	}
+
+	return nil, next
 }
