@@ -462,15 +462,43 @@ func (s *server) handle(u *User) {
 			// Ignore empty messages
 			continue
 		}
-		go func(msg *irc.Message) {
-			if strings.HasPrefix(msg.Command, "@") && len(msg.Params) > 0 {
-				threadID := parseThreadTag(msg.Command)
 
-				msg.Command = strings.ToUpper(msg.Params[0])
-				msg.Params = msg.Params[1:]
+		if strings.HasPrefix(msg.Command, "@") && len(msg.Params) > 0 {
+			threadID := parseThreadTag(msg.Command)
 
-				if threadID != "" && msg.Command == "TAGMSG" && len(msg.Params) == 1 { //nolint:goconst
-					msg.Params = append(msg.Params, threadID)
+			msg.Command = strings.ToUpper(msg.Params[0])
+			msg.Params = msg.Params[1:]
+
+			if threadID != "" && msg.Command == "TAGMSG" && len(msg.Params) == 1 { //nolint:goconst
+				msg.Params = append(msg.Params, threadID)
+			}
+		}
+
+		var (
+			prev <-chan struct{}
+			next chan struct{}
+		)
+
+		if msg.Command == irc.PRIVMSG && len(msg.Params) > 0 {
+			var target string
+
+			if ch, ok := s.HasChannel(msg.Params[0]); ok {
+				target = ch.ID()
+			} else if toUser, ok := s.HasUser(msg.Params[0]); ok {
+				target = toUser.User
+			}
+
+			if target != "" {
+				prev, next = u.getMsgChanLock(target)
+			}
+		}
+
+		go func(msg *irc.Message, prev <-chan struct{}, next chan struct{}) {
+			if next != nil {
+				defer close(next)
+
+				if prev != nil {
+					<-prev
 				}
 			}
 
@@ -490,7 +518,7 @@ func (s *server) handle(u *User) {
 				logger.Errorf("handler error for %s: %s", u.ID(), errMsg)
 				s.EncodeMessage(u, irc.PRIVMSG, []string{u.Nick}, errMsg) //nolint:errcheck
 			}
-		}(msg)
+		}(msg, prev, next)
 	}
 }
 
