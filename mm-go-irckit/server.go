@@ -477,8 +477,18 @@ func (s *server) handle(u *User) {
 		var targetLock *sync.Mutex
 
 		if msg.Command == irc.PRIVMSG && len(msg.Params) > 0 {
-			targetLock = u.getMsgChanLock(msg.Params[0])
-			targetLock.Lock()
+			var target string
+
+			if ch, ok := s.HasChannel(msg.Params[0]); ok {
+				target = ch.ID()
+			} else if toUser, ok := s.HasUser(msg.Params[0]); ok {
+				target = toUser.User
+			}
+
+			if target != "" {
+				targetLock = u.getMsgChanLock(target)
+				targetLock.Lock()
+			}
 		}
 
 		go func(msg *irc.Message, targetLock *sync.Mutex) {
