@@ -457,23 +457,29 @@ func parseThreadTag(tagStr string) string {
 func (s *server) handle(u *User) {
 	var partMsg string
 	defer s.Quit(u, partMsg)
+
+	// Every message is handled in its own goroutine, but PRIVMSGs to the same target keep the order
+	// they came in (e.g. the parts of a long paste, or a reaction to a message that was just sent).
+	var order msgOrder
+
 	for msg := range u.DecodeCh {
 		if msg == nil {
 			// Ignore empty messages
 			continue
 		}
-		go func(msg *irc.Message) {
-			if strings.HasPrefix(msg.Command, "@") && len(msg.Params) > 0 {
-				threadID := parseThreadTag(msg.Command)
 
-				msg.Command = strings.ToUpper(msg.Params[0])
-				msg.Params = msg.Params[1:]
+		if strings.HasPrefix(msg.Command, "@") && len(msg.Params) > 0 {
+			threadID := parseThreadTag(msg.Command)
 
-				if threadID != "" && msg.Command == "TAGMSG" && len(msg.Params) == 1 { //nolint:goconst
-					msg.Params = append(msg.Params, threadID)
-				}
+			msg.Command = strings.ToUpper(msg.Params[0])
+			msg.Params = msg.Params[1:]
+
+			if threadID != "" && msg.Command == "TAGMSG" && len(msg.Params) == 1 { //nolint:goconst
+				msg.Params = append(msg.Params, threadID)
 			}
+		}
 
+		order.run(msg, func(msg *irc.Message) {
 			err := s.commands.Run(s, u, msg)
 			switch msg.Command {
 			case irc.PING, irc.MODE, "TAGMSG":
@@ -490,8 +496,53 @@ func (s *server) handle(u *User) {
 				logger.Errorf("handler error for %s: %s", u.ID(), errMsg)
 				s.EncodeMessage(u, irc.PRIVMSG, []string{u.Nick}, errMsg) //nolint:errcheck
 			}
-		}(msg)
+		})
 	}
+}
+
+// msgOrder runs message handlers concurrently, except for PRIVMSGs to the same target: those wait for
+// the ones received before them, so they are handled in the order they were received.
+type msgOrder struct {
+	mu   sync.Mutex
+	last map[string]chan struct{} // per target, closed when its most recent PRIVMSG has been handled
+}
+
+// run calls handler in a new goroutine. It has to be called in the order the messages were received.
+func (o *msgOrder) run(msg *irc.Message, handler func(*irc.Message)) {
+	if msg.Command != irc.PRIVMSG || len(msg.Params) == 0 {
+		go handler(msg)
+
+		return
+	}
+
+	target := ID(msg.Params[0])
+	done := make(chan struct{})
+
+	o.mu.Lock()
+	if o.last == nil {
+		o.last = make(map[string]chan struct{})
+	}
+	prev := o.last[target]
+	o.last[target] = done
+	o.mu.Unlock()
+
+	go func() {
+		defer func() {
+			o.mu.Lock()
+			if o.last[target] == done {
+				delete(o.last, target)
+			}
+			o.mu.Unlock()
+
+			close(done)
+		}()
+
+		if prev != nil {
+			<-prev
+		}
+
+		handler(msg)
+	}()
 }
 
 func (s *server) BatchAdd(users []*User) {
