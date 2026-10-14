@@ -2476,6 +2476,34 @@ func (u *User) isRequestedChannel(channelName string) bool {
 	return ok
 }
 
+// waitMsgChanLocks waits until the messages that are queued up now (see getMsgChanLock) have been
+// handled, for at most timeout.
+func (u *UserBridge) waitMsgChanLocks(timeout time.Duration) {
+	u.msgChanLockMutex.Lock()
+
+	tails := make([]<-chan struct{}, 0, len(u.msgChanLocks))
+	for _, c := range u.msgChanLocks {
+		tails = append(tails, c)
+	}
+
+	u.msgChanLockMutex.Unlock()
+
+	if len(tails) == 0 {
+		return
+	}
+
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+
+	for _, c := range tails {
+		select {
+		case <-c:
+		case <-deadline.C:
+			return
+		}
+	}
+}
+
 func (u *UserBridge) getMsgChanLock(target string) (<-chan struct{}, chan struct{}) {
 	u.msgChanLockMutex.Lock()
 	defer u.msgChanLockMutex.Unlock()

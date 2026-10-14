@@ -333,6 +333,10 @@ func (s *server) Quit(u *User, message string) {
 		activeClients.Add(-1)
 	})
 
+	// Messages that are still on their way (the one that was held in the paste buffer when the
+	// user quit, for example) would get aborted by the cancel below. Give them time to be sent.
+	u.waitMsgChanLocks(5 * time.Second)
+
 	if u.ctx != nil && u.ctx.Err() != nil {
 		return
 	}
@@ -479,7 +483,7 @@ func (s *server) handle(u *User) {
 			next chan struct{}
 		)
 
-		if msg.Command == irc.PRIVMSG && len(msg.Params) > 0 {
+		if (msg.Command == irc.PRIVMSG || msg.Command == irc.PART) && len(msg.Params) > 0 {
 			var target string
 
 			if ch, ok := s.HasChannel(msg.Params[0]); ok {
