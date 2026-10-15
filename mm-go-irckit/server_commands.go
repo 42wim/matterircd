@@ -744,7 +744,7 @@ func parseModifyMsg(u *User, msg *irc.Message, channelID string) bool {
 
 		return false
 	}
-	
+
 	err := u.br.ModifyPost(u.ctx, msgID, text)
 	if err != nil {
 		// probably a wrong id, just put it through as normally
