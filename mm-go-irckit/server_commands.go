@@ -722,6 +722,8 @@ func parseModifyMsg(u *User, msg *irc.Message, channelID string) bool {
 		id, err := strconv.ParseInt(strings.ReplaceAll(matches[1], "/", ""), 16, 0)
 		if err != nil {
 			logger.Errorf("couldn't parseint %s: %s", matches[1], err)
+
+			break
 		}
 
 		u.msgMapIndexMutex.RLock()
@@ -734,10 +736,14 @@ func parseModifyMsg(u *User, msg *irc.Message, channelID string) bool {
 
 	if msgID == "" {
 		if useLast {
-			u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+text+" could not be modified: no previous message found to modify")
+			if text == "" {
+				u.MsgSpoofUser(u, u.br.Protocol(), "could not delete: no previous message found")
+			} else {
+				u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+text+" could not be modified: no previous message found to modify")
+			}
 			return true
 		}
-
+		
 		return false
 	}
 
