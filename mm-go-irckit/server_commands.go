@@ -566,9 +566,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 			return err2
 		}
 
-		u.msgLastMutex.Lock()
-		u.msgLast[ch.ID()] = [2]string{msgID, ""}
-		u.msgLastMutex.Unlock()
+		u.setMsgLast(ch.ID(), msgID, "")
 		u.saveLastViewedAt(ch.ID())
 
 		if u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext {
@@ -621,9 +619,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 				return err2
 			}
 
-			u.msgLastMutex.Lock()
-			u.msgLast[toUser.User] = [2]string{msgID, ""}
-			u.msgLastMutex.Unlock()
+			u.setMsgLast(toUser.User, msgID, "")
 			u.saveLastViewedAt(u.br.GetChannelID(u.ctx, toUser.User, ""))
 
 			if u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext {
@@ -703,7 +699,8 @@ func parseModifyMsg(u *User, msg *irc.Message, channelID string) bool {
 	}
 
 	msgID := ""
-	// s// and s/!!/ refer to the last message we sent, they can never be a
+	// s// and s/!!/ refer to the last message we sent (or the one before it
+	// when the last one got deleted), they can never be a
 	// literal message, so they must never be put through as one.
 	useLast := matches[1] == "//" || matches[1] == "/!!/"
 
@@ -756,16 +753,12 @@ func parseModifyMsg(u *User, msg *irc.Message, channelID string) bool {
 		return true
 	}
 
-	u.msgLastMutex.Lock()
 	if text == "" {
-		// The message is deleted, don't let s// or s/!!/ point to it anymore.
-		if msgLast, ok := u.msgLast[channelID]; ok && msgLast[0] == msgID {
-			delete(u.msgLast, channelID)
-		}
+		// The message is deleted, s// and s/!!/ go back to the one sent before it.
+		u.forgetMsgLast(channelID, msgID)
 	} else if !useLast {
-		u.msgLast[channelID] = [2]string{msgID, ""}
+		u.setMsgLast(channelID, msgID, "")
 	}
-	u.msgLastMutex.Unlock()
 
 	u.saveLastViewedAt(channelID)
 
@@ -846,9 +839,7 @@ func threadMsgChannelUser(s Server, u *User, msg *irc.Message, channelID string,
 		return false
 	}
 
-	u.msgLastMutex.Lock()
-	defer u.msgLastMutex.Unlock()
-	u.msgLast[channelID] = [2]string{msgID, threadID}
+	u.setMsgLast(channelID, msgID, threadID)
 
 	if !toUser {
 		u.saveLastViewedAt(channelID)

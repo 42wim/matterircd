@@ -54,7 +54,10 @@ type UserBridge struct {
 	msgCounter      map[string]int
 
 	msgLastMutex sync.RWMutex
-	msgLast      map[string][2]string
+	// msgLast and msgPrev hold the last and the one before last message we sent
+	// per channel as {msgID, threadID}. msgPrev takes over when msgLast gets deleted.
+	msgLast map[string][2]string
+	msgPrev map[string][2]string
 
 	msgMapMutex      sync.RWMutex
 	msgMap           map[string]map[string]int
@@ -80,6 +83,7 @@ func NewUserBridge(c net.Conn, srv Server, cfg *config.Config, db *bolt.DB) *Use
 
 	u.msgChanLocks = make(map[string]chan struct{})
 	u.msgLast = make(map[string][2]string)
+	u.msgPrev = make(map[string][2]string)
 	u.msgMap = make(map[string]map[string]int)
 	u.msgMapIndex = make(map[string]map[int]string)
 	u.msgCounter = make(map[string]int)
@@ -2218,6 +2222,44 @@ func (u *User) dbBucketName() []byte {
 	}
 
 	return []byte(u.User)
+}
+
+// setMsgLast records msgID as the last message we sent in channelID, the one that was
+// last before becomes the previous one.
+func (u *User) setMsgLast(channelID, msgID, threadID string) {
+	u.msgLastMutex.Lock()
+	defer u.msgLastMutex.Unlock()
+
+	if last, ok := u.msgLast[channelID]; ok && last[0] != msgID {
+		u.msgPrev[channelID] = last
+	}
+
+	u.msgLast[channelID] = [2]string{msgID, threadID}
+}
+
+// forgetMsgLast drops a deleted message from the last messages we sent in channelID.
+// When it was the last one, the previous one becomes the last one again.
+func (u *User) forgetMsgLast(channelID, msgID string) {
+	u.msgLastMutex.Lock()
+	defer u.msgLastMutex.Unlock()
+
+	if prev, ok := u.msgPrev[channelID]; ok && prev[0] == msgID {
+		delete(u.msgPrev, channelID)
+	}
+
+	last, ok := u.msgLast[channelID]
+	if !ok || last[0] != msgID {
+		return
+	}
+
+	if prev, ok := u.msgPrev[channelID]; ok {
+		u.msgLast[channelID] = prev
+		delete(u.msgPrev, channelID)
+
+		return
+	}
+
+	delete(u.msgLast, channelID)
 }
 
 func (u *User) saveLastViewedAt(channelID string) {
