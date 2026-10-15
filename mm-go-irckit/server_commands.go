@@ -719,21 +719,15 @@ func parseModifyMsg(u *User, msg *irc.Message, channelID string) bool {
 		msgID = strings.ReplaceAll(matches[1], "/", "")
 	// matterircd message/thread ID (e.g. '004' and 'a12')
 	case len(matches[1]) == 5:
-		id, err := strconv.ParseInt(strings.ReplaceAll(matches[1], "/", ""), 16, 0)
-		if err != nil {
-			logger.Errorf("couldn't parseint %s: %s", matches[1], err)
-
-			break
+		if id, err := strconv.ParseInt(strings.ReplaceAll(matches[1], "/", ""), 16, 0); err == nil {
+			u.msgMapIndexMutex.RLock()
+			if postID, ok := u.msgMapIndex[channelID][int(id)]; ok {
+				msgID = postID
+			}
+			u.msgMapIndexMutex.RUnlock()
 		}
-
-		u.msgMapIndexMutex.RLock()
-		if _, ok := u.msgMapIndex[channelID][int(id)]; ok {
-			msgID = u.msgMapIndex[channelID][int(id)]
-		}
-
-		u.msgMapIndexMutex.RUnlock()
 	}
-
+		
 	if msgID == "" {
 		if useLast {
 			if text == "" {
