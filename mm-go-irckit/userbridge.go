@@ -2230,8 +2230,16 @@ func (u *User) setMsgLast(channelID, msgID, threadID string) {
 	u.msgLastMutex.Lock()
 	defer u.msgLastMutex.Unlock()
 
-	if last, ok := u.msgLast[channelID]; ok && last[0] != msgID {
-		u.msgPrev[channelID] = last
+	if u.msgPrev == nil {
+		u.msgPrev = make(map[string][2]string)
+	}
+
+	if last, ok := u.msgLast[channelID]; ok {
+		if last[0] != msgID {
+			u.msgPrev[channelID] = last
+		} else if threadID == "" {
+			threadID = last[1] // Preserve thread context on re-edits
+		}
 	}
 
 	u.msgLast[channelID] = [2]string{msgID, threadID}
