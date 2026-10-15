@@ -703,22 +703,22 @@ func parseModifyMsg(u *User, msg *irc.Message, channelID string) bool {
 	}
 
 	msgID := ""
+	// s// and s/!!/ refer to the last message we sent, they can never be a
+	// literal message, so they must never be put through as one.
+	useLast := matches[1] == "//" || matches[1] == "/!!/"
 
 	switch {
 	// last message from user. Also support '!!' like shell's history
 	// substitution for previous command.
-	case matches[1] == "//" || matches[1] == "/!!/":
+	case useLast:
 		u.msgLastMutex.RLock()
-		defer u.msgLastMutex.RUnlock()
 		if msgLast, ok := u.msgLast[channelID]; ok {
 			msgID = msgLast[0]
 		}
+		u.msgLastMutex.RUnlock()
 	// Mattermost message/thread ID (e.g. 'cfrakpwix7y8pgzux6ta76pm9c')
 	case len(matches[1]) == 28:
 		msgID = strings.ReplaceAll(matches[1], "/", "")
-		u.msgLastMutex.Lock()
-		defer u.msgLastMutex.Unlock()
-		u.msgLast[channelID] = [2]string{msgID, ""}
 	// matterircd message/thread ID (e.g. '004' and 'a12')
 	case len(matches[1]) == 5:
 		id, err := strconv.ParseInt(strings.ReplaceAll(matches[1], "/", ""), 16, 0)
@@ -727,33 +727,45 @@ func parseModifyMsg(u *User, msg *irc.Message, channelID string) bool {
 		}
 
 		u.msgMapIndexMutex.RLock()
-		defer u.msgMapIndexMutex.RUnlock()
-
 		if _, ok := u.msgMapIndex[channelID][int(id)]; ok {
 			msgID = u.msgMapIndex[channelID][int(id)]
-
-			u.msgLastMutex.Lock()
-			defer u.msgLastMutex.Unlock()
-
-			u.msgLast[channelID] = [2]string{msgID, ""}
 		}
+		u.msgMapIndexMutex.RUnlock()
 	}
 
 	if msgID == "" {
+		if useLast {
+			u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+text+" could not be modified: no previous message found to modify")
+			return true
+		}
+
 		return false
 	}
 
 	err := u.br.ModifyPost(u.ctx, msgID, text)
 	if err != nil {
 		// probably a wrong id, just put it through as normally
-		if strings.Contains(err.Error(), "permissions") {
+		if !useLast && strings.Contains(err.Error(), "permissions") {
 			logger.Trace("parseModifyMsg triggered permissions error")
 			return false
 		}
 		u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+text+" could not be modified "+err.Error())
-	} else {
-		u.saveLastViewedAt(channelID)
+
+		return true
 	}
+
+	u.msgLastMutex.Lock()
+	if text == "" {
+		// The message is deleted, don't let s// or s/!!/ point to it anymore.
+		if msgLast, ok := u.msgLast[channelID]; ok && msgLast[0] == msgID {
+			delete(u.msgLast, channelID)
+		}
+	} else if !useLast {
+		u.msgLast[channelID] = [2]string{msgID, ""}
+	}
+	u.msgLastMutex.Unlock()
+
+	u.saveLastViewedAt(channelID)
 
 	return true
 }
