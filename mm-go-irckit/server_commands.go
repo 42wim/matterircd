@@ -715,6 +715,7 @@ func parseModifyMsg(u *User, msg *irc.Message, channelID string) bool {
 		if msgLast, ok := u.msgLast[channelID]; ok {
 			msgID = msgLast[0]
 		}
+
 		u.msgLastMutex.RUnlock()
 	// Mattermost message/thread ID (e.g. 'cfrakpwix7y8pgzux6ta76pm9c')
 	case len(matches[1]) == 28:
@@ -730,6 +731,7 @@ func parseModifyMsg(u *User, msg *irc.Message, channelID string) bool {
 		if _, ok := u.msgMapIndex[channelID][int(id)]; ok {
 			msgID = u.msgMapIndex[channelID][int(id)]
 		}
+
 		u.msgMapIndexMutex.RUnlock()
 	}
 
