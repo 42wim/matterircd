@@ -94,6 +94,11 @@ type UsersCache struct {
 	lastUserActivity      map[string]int64
 	statusLastUpdated     map[string]int64
 
+	timezones map[string]map[string]string
+
+	// publicChannelsSynced holds the teams of which all the public channels have been cached.
+	publicChannelsSynced map[string]struct{}
+
 	lastUpdated atomic.Int64
 }
 
@@ -619,7 +624,7 @@ func (m *Client) initUser(ctx context.Context) error {
 
 		m.logger.Tracef("fetching users for team %s (cache expired or missing)", team.Name)
 
-		fetchedUsers := make([]UserSummary, 0, batchSize)
+		teamUsers := make(map[string]struct{}, batchSize)
 
 		idx := 0
 		pageRetryCount := 0
@@ -646,15 +651,16 @@ func (m *Client) initUser(ctx context.Context) error {
 			}
 			pageRetryCount = 0
 
-			var list []UserSummary
-			if jsonErr := json.NewDecoder(resp.Body).Decode(&list); jsonErr != nil {
-				resp.Body.Close()
-				return jsonErr
-			}
+			count, jsonErr := m.updateUsersFromJSON(resp.Body, func(u *model.User) {
+				teamUsers[u.Id] = struct{}{}
+			})
 			resp.Body.Close()
 
-			fetchedUsers = append(fetchedUsers, list...)
-			if len(list) < batchSize {
+			if jsonErr != nil {
+				return jsonErr
+			}
+
+			if count < batchSize {
 				break
 			}
 
@@ -665,21 +671,17 @@ func (m *Client) initUser(ctx context.Context) error {
 			}
 		}
 		if !exists {
-			m.logger.Debugf("found %d users in team %s", len(fetchedUsers), team.Name)
+			m.logger.Debugf("found %d users in team %s", len(teamUsers), team.Name)
 		} else {
-			m.logger.Debugf("found %d users in team %s (cache expired)", len(fetchedUsers), team.Name)
+			m.logger.Debugf("found %d users in team %s (cache expired)", len(teamUsers), team.Name)
 		}
 
 		m.Users.mu.Lock()
 		if m.Users.teams == nil {
 			m.Users.teams = make(map[string]map[string]struct{})
 		}
-		m.Users.teams[team.Id] = make(map[string]struct{}, len(fetchedUsers))
 
-		for _, u := range fetchedUsers {
-			cachedUser := m.UpdateUserSummary(&u, true)
-			m.Users.teams[team.Id][cachedUser.Id] = struct{}{}
-		}
+		m.Users.teams[team.Id] = teamUsers
 		m.Users.lastUpdated.Store(time.Now().Unix())
 		m.Users.mu.Unlock()
 
