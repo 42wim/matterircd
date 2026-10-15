@@ -719,15 +719,18 @@ func parseModifyMsg(u *User, msg *irc.Message, channelID string) bool {
 		msgID = strings.ReplaceAll(matches[1], "/", "")
 	// matterircd message/thread ID (e.g. '004' and 'a12')
 	case len(matches[1]) == 5:
-		if id, err := strconv.ParseInt(strings.ReplaceAll(matches[1], "/", ""), 16, 0); err == nil {
+		id, err := strconv.ParseInt(strings.ReplaceAll(matches[1], "/", ""), 16, 0)
+		if err == nil {
 			u.msgMapIndexMutex.RLock()
+
 			if postID, ok := u.msgMapIndex[channelID][int(id)]; ok {
 				msgID = postID
 			}
+
 			u.msgMapIndexMutex.RUnlock()
 		}
 	}
-		
+
 	if msgID == "" {
 		if useLast {
 			if text == "" {
@@ -735,12 +738,13 @@ func parseModifyMsg(u *User, msg *irc.Message, channelID string) bool {
 			} else {
 				u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+text+" could not be modified: no previous message found to modify")
 			}
+
 			return true
 		}
-		
+
 		return false
 	}
-
+	
 	err := u.br.ModifyPost(u.ctx, msgID, text)
 	if err != nil {
 		// probably a wrong id, just put it through as normally
