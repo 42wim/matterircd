@@ -508,7 +508,8 @@ func (m *Client) GetChannelUsers(ctx context.Context, channelID string) ([]*mode
 	m.Users.mu.RUnlock()
 
 	const batchSize = mattermostPerPageMax
-	fetchedUsers := make([]UserSummary, 0, batchSize)
+
+	allUsers := make([]*model.User, 0, batchSize)
 
 	channelName := m.GetCachedChannelName(channelID)
 	idx := 0
@@ -536,33 +537,28 @@ func (m *Client) GetChannelUsers(ctx context.Context, channelID string) ([]*mode
 		}
 		retryCount = 0
 
-		var list []UserSummary
-		if jsonErr := json.NewDecoder(resp.Body).Decode(&list); jsonErr != nil {
-			resp.Body.Close()
-			return nil, jsonErr
-		}
+		count, jsonErr := m.updateUsersFromJSON(resp.Body, func(u *model.User) {
+			allUsers = append(allUsers, u)
+		})
 		resp.Body.Close()
 
-		fetchedUsers = append(fetchedUsers, list...)
+		if jsonErr != nil {
+			return nil, jsonErr
+		}
 
-		if len(list) < batchSize {
+		if count < batchSize {
 			break
 		}
 		idx++
 	}
 
-	allUsers := make([]*model.User, 0, len(fetchedUsers))
-
 	m.Users.mu.Lock()
 	if m.Users.channels[channelID] == nil {
-		m.Users.channels[channelID] = make(map[string]struct{}, len(fetchedUsers))
+		m.Users.channels[channelID] = make(map[string]struct{}, len(allUsers))
 	}
 
-	for _, u := range fetchedUsers {
-		cachedUser := m.UpdateUserSummary(&u, true)
-
-		allUsers = append(allUsers, cachedUser)
-		m.Users.channels[channelID][cachedUser.Id] = struct{}{}
+	for _, u := range allUsers {
+		m.Users.channels[channelID][u.Id] = struct{}{}
 	}
 
 	m.Users.lastUpdated.Store(time.Now().Unix())
@@ -799,8 +795,6 @@ func (m *Client) PatchChannel(ctx context.Context, channelID string, patch *mode
 
 //nolint:funlen,gocognit,gocyclo
 func (m *Client) UpdateChannelsTeam(ctx context.Context, teamID string) error {
-	const batchSize = mattermostPerPageMax
-
 	var joinedSummaries []ChannelSummary
 
 	retryCount := 0
@@ -825,92 +819,21 @@ func (m *Client) UpdateChannelsTeam(ctx context.Context, teamID string) error {
 			return err
 		}
 
-		if err := json.NewDecoder(resp.Body).Decode(&joinedSummaries); err != nil {
-			resp.Body.Close()
-			return err
-		}
+		_, jsonErr := decodeJSONArray(resp.Body, func(c *ChannelSummary) {
+			joinedSummaries = append(joinedSummaries, *c)
+		})
 		resp.Body.Close()
+
+		if jsonErr != nil {
+			return jsonErr
+		}
+
 		break
-	}
-
-	// Fetch public channels using an inline function to allow for an early return
-	publicSummaries, err := func() ([]ChannelSummary, error) {
-		m.Users.mu.RLock()
-		hasCache := len(m.Users.channelData) > 0
-		m.Users.mu.RUnlock()
-
-		// Skip the heavy public channel crawl if we have a cache and aren't forcing a sync.
-		// We rely on WebSocket events to keep public channels updated organically.
-		if hasCache && !m.ForceSyncOnReconnect {
-			m.logger.Debug("UpdateChannelsTeam: skipping public channel fetch (using cache)")
-			return nil, nil // Early return!
-		}
-
-		m.logger.Trace("UpdateChannelsTeam: fetching public channels (cache empty or ForceSyncOnReconnect enabled)")
-
-		summaries := make([]ChannelSummary, 0, batchSize)
-		var list []ChannelSummary
-
-		idx := 0
-		retryCount := 0
-		for {
-			if m.IsAborted(ctx) {
-				return nil, errors.New("login aborted")
-			}
-			query := "/teams/" + teamID + "/channels?page=" + strconv.Itoa(idx) + "&per_page=" + strconv.Itoa(batchSize)
-			m.apiLogger.Warnf("UpdateChannelsTeam: DoAPIGet: query %s #%d", query, retryCount)
-			resp, err := m.Client.DoAPIGet(ctx, query, "")
-			if err != nil {
-				var mResp *model.Response
-				if resp != nil {
-					mResp = model.BuildResponse(resp)
-				}
-				shouldRetry, hErr := m.HandleRetry(ctx, "GetPublicChannelsForTeam", err, retryCount, 10, mResp)
-				if hErr == nil && shouldRetry {
-					retryCount++
-					continue
-				}
-				return nil, err
-			}
-			retryCount = 0
-
-			list = list[:0]
-			if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
-				resp.Body.Close()
-				return nil, err
-			}
-			resp.Body.Close()
-
-			summaries = append(summaries, list...)
-
-			if len(list) < batchSize {
-				break
-			}
-			idx++
-		}
-		return summaries, nil
-	}()
-	if err != nil {
-		return err
-	}
-
-	// Helper to intern highly repetitive channel types
-	internType := func(t string) model.ChannelType {
-		switch t {
-		case "O":
-			return model.ChannelTypeOpen
-		case "P":
-			return model.ChannelTypePrivate
-		case "D":
-			return model.ChannelTypeDirect
-		}
-		return model.ChannelType(t)
 	}
 
 	m.Users.mu.Lock()
 	if m.Users.channelData == nil {
-		totalChannels := len(joinedSummaries) + len(publicSummaries)
-		m.Users.channelData = make(map[string]*model.Channel, totalChannels)
+		m.Users.channelData = make(map[string]*model.Channel, len(joinedSummaries))
 		m.Users.joinedChannels = make(map[string]struct{}, len(joinedSummaries))
 	} else {
 		for chanID := range m.Users.joinedChannels {
@@ -920,97 +843,25 @@ func (m *Client) UpdateChannelsTeam(ctx context.Context, teamID string) error {
 		}
 	}
 
-	for _, ch := range joinedSummaries {
-		cached, exists := m.Users.channelData[ch.Id]
-		if !exists { //nolint:nestif
-			cached = &model.Channel{
-				Id:          ch.Id,
-				UpdateAt:    ch.UpdateAt,
-				DeleteAt:    ch.DeleteAt,
-				TeamId:      teamID,
-				Type:        internType(ch.Type),
-				DisplayName: ch.DisplayName,
-				Name:        ch.Name,
-				Header:      ch.Header,
-				Purpose:     ch.Purpose,
-				LastPostAt:  ch.LastPostAt,
-				CreatorId:   ch.CreatorId,
-			}
-			m.Users.channelData[cached.Id] = cached
-		} else {
-			if cached.DisplayName != ch.DisplayName {
-				cached.DisplayName = ch.DisplayName
-			}
-			if cached.Name != ch.Name {
-				cached.Name = ch.Name
-			}
-			if cached.Header != ch.Header {
-				cached.Header = ch.Header
-			}
-			if cached.Purpose != ch.Purpose {
-				cached.Purpose = ch.Purpose
-			}
-			if cached.UpdateAt < ch.UpdateAt {
-				cached.UpdateAt = ch.UpdateAt
-			}
-			if cached.DeleteAt != ch.DeleteAt {
-				cached.DeleteAt = ch.DeleteAt
-			}
-			if cached.LastPostAt < ch.LastPostAt {
-				cached.LastPostAt = ch.LastPostAt
-			}
-			if newType := internType(ch.Type); cached.Type != newType {
-				cached.Type = newType
-			}
-		}
-		m.Users.joinedChannels[cached.Id] = struct{}{}
+	for i := range joinedSummaries {
+		m.Users.joinedChannels[m.Users.cacheChannelLocked(teamID, &joinedSummaries[i]).Id] = struct{}{}
 	}
 
-	for _, ch := range publicSummaries {
-		cached, exists := m.Users.channelData[ch.Id]
-		if !exists { //nolint:nestif
-			cached = &model.Channel{
-				Id:          ch.Id,
-				UpdateAt:    ch.UpdateAt,
-				DeleteAt:    ch.DeleteAt,
-				TeamId:      teamID,
-				Type:        internType(ch.Type),
-				DisplayName: ch.DisplayName,
-				Name:        ch.Name,
-				Header:      ch.Header,
-				Purpose:     ch.Purpose,
-				CreatorId:   ch.CreatorId,
-				LastPostAt:  ch.LastPostAt,
-			}
-			m.Users.channelData[cached.Id] = cached
-		} else {
-			if cached.DisplayName != ch.DisplayName {
-				cached.DisplayName = ch.DisplayName
-			}
-			if cached.Name != ch.Name {
-				cached.Name = ch.Name
-			}
-			if cached.Header != ch.Header {
-				cached.Header = ch.Header
-			}
-			if cached.Purpose != ch.Purpose {
-				cached.Purpose = ch.Purpose
-			}
-			if cached.UpdateAt < ch.UpdateAt {
-				cached.UpdateAt = ch.UpdateAt
-			}
-			if cached.DeleteAt != ch.DeleteAt {
-				cached.DeleteAt = ch.DeleteAt
-			}
-			if cached.LastPostAt < ch.LastPostAt {
-				cached.LastPostAt = ch.LastPostAt
-			}
-			if newType := internType(ch.Type); cached.Type != newType {
-				cached.Type = newType
-			}
+	_, hasCache := m.Users.publicChannelsSynced[teamID]
+	m.Users.mu.Unlock()
+
+	// Skip the heavy public channel crawl if we have a cache and aren't forcing a sync.
+	// We rely on WebSocket events to keep public channels updated organically.
+	if hasCache && !m.ForceSyncOnReconnect {
+		m.logger.Debug("UpdateChannelsTeam: skipping public channel fetch (using cache)")
+	} else {
+		m.logger.Trace("UpdateChannelsTeam: fetching public channels (cache empty or ForceSyncOnReconnect enabled)")
+
+		err := m.updatePublicChannels(ctx, teamID)
+		if err != nil {
+			return err
 		}
 	}
-	m.Users.mu.Unlock()
 
 	m.Users.lastUpdated.Store(time.Now().Unix())
 
@@ -1021,6 +872,151 @@ func (m *Client) UpdateChannelsTeam(ctx context.Context, teamID string) error {
 	m.Unlock()
 
 	return nil
+}
+
+// updatePublicChannels caches the public channels of the team one page at a time. Every page is decoded into the same
+// slice, and cached before the next page is fetched, so only a page of channels is held on to besides the cache itself.
+// The team is only marked as synced once its last page is cached, so a crawl that fails part way is retried.
+//
+//nolint:funlen
+func (m *Client) updatePublicChannels(ctx context.Context, teamID string) error {
+	const batchSize = mattermostPerPageMax
+
+	page := make([]ChannelSummary, 0, batchSize)
+
+	idx := 0
+	retryCount := 0
+
+	for {
+		if m.IsAborted(ctx) {
+			return errors.New("login aborted")
+		}
+
+		query := "/teams/" + teamID + "/channels?page=" + strconv.Itoa(idx) + "&per_page=" + strconv.Itoa(batchSize)
+		m.apiLogger.Warnf("UpdateChannelsTeam: DoAPIGet: query %s #%d", query, retryCount)
+
+		resp, err := m.Client.DoAPIGet(ctx, query, "")
+		if err != nil {
+			var mResp *model.Response
+			if resp != nil {
+				mResp = model.BuildResponse(resp)
+			}
+
+			shouldRetry, hErr := m.HandleRetry(ctx, "GetPublicChannelsForTeam", err, retryCount, 10, mResp)
+			if hErr == nil && shouldRetry {
+				retryCount++
+
+				continue
+			}
+
+			return err
+		}
+
+		retryCount = 0
+
+		page = page[:0]
+
+		count, jsonErr := decodeJSONArray(resp.Body, func(c *ChannelSummary) {
+			page = append(page, *c)
+		})
+		resp.Body.Close()
+
+		if jsonErr != nil {
+			return jsonErr
+		}
+
+		m.Users.mu.Lock()
+		for i := range page {
+			m.Users.cacheChannelLocked(teamID, &page[i])
+		}
+
+		if count < batchSize {
+			if m.Users.publicChannelsSynced == nil {
+				m.Users.publicChannelsSynced = make(map[string]struct{})
+			}
+
+			m.Users.publicChannelsSynced[teamID] = struct{}{}
+		}
+		m.Users.mu.Unlock()
+
+		if count < batchSize {
+			return nil
+		}
+
+		idx++
+	}
+}
+
+// internChannelType returns the constant for the highly repetitive channel types, instead of a copy of the string.
+func internChannelType(t string) model.ChannelType {
+	switch t {
+	case "O":
+		return model.ChannelTypeOpen
+	case "P":
+		return model.ChannelTypePrivate
+	case "D":
+		return model.ChannelTypeDirect
+	}
+
+	return model.ChannelType(t)
+}
+
+// cacheChannelLocked adds the channel to the channels of the team in the cache, or brings the cached channel up to date
+// if there already is one, and returns it. The users cache has to be locked.
+func (c *UsersCache) cacheChannelLocked(teamID string, ch *ChannelSummary) *model.Channel {
+	cached, exists := c.channelData[ch.Id]
+	if !exists {
+		cached = &model.Channel{
+			Id:          ch.Id,
+			UpdateAt:    ch.UpdateAt,
+			DeleteAt:    ch.DeleteAt,
+			TeamId:      teamID,
+			Type:        internChannelType(ch.Type),
+			DisplayName: ch.DisplayName,
+			Name:        ch.Name,
+			Header:      ch.Header,
+			Purpose:     ch.Purpose,
+			LastPostAt:  ch.LastPostAt,
+			CreatorId:   c.userIDKey(ch.CreatorId),
+		}
+		c.channelData[cached.Id] = cached
+
+		return cached
+	}
+
+	if cached.DisplayName != ch.DisplayName {
+		cached.DisplayName = ch.DisplayName
+	}
+
+	if cached.Name != ch.Name {
+		cached.Name = ch.Name
+	}
+
+	if cached.Header != ch.Header {
+		cached.Header = ch.Header
+	}
+
+	if cached.Purpose != ch.Purpose {
+		cached.Purpose = ch.Purpose
+	}
+
+	if cached.UpdateAt < ch.UpdateAt {
+		cached.UpdateAt = ch.UpdateAt
+	}
+
+	if cached.DeleteAt != ch.DeleteAt {
+		cached.DeleteAt = ch.DeleteAt
+	}
+
+	if cached.LastPostAt < ch.LastPostAt {
+		cached.LastPostAt = ch.LastPostAt
+	}
+
+	if newType := internChannelType(ch.Type); cached.Type != newType {
+		cached.Type = newType
+	}
+
+	return cached
 }
 
 func (m *Client) UpdateChannels(ctx context.Context) error {
