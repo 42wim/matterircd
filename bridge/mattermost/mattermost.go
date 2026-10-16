@@ -1332,6 +1332,10 @@ func (m *Mattermost) getCachedPostInfo(ctx context.Context, postID string, newLe
 	parentUser := m.GetUser(ctx, post.UserId)
 	parentMessage := utils.FormatAndShortenSummary(msg, opts)
 
+	if rc.Mattermost.DisableDefaultMentions {
+		parentMessage = utils.SanitizeDefaultMentions(parentMessage, unicode)
+	}
+
 	cp := CachedPost{
 		RootID:     post.RootId,
 		ParentUser: parentUser,
