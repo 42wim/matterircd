@@ -1065,7 +1065,11 @@ func (u *User) addUsersToChannels() {
 	var joinChannels []*bridge.ChannelInfo
 	for _, brchannel := range u.br.GetChannels() {
 		lastPost := time.UnixMilli(brchannel.LastPostAt)
-		if brchannel.DM && !u.br.BridgeConfig().JoinDM {
+
+		// In Mattermost, both 1-on-1 DMs and Group DMs have no TeamID
+		isAnyDM := brchannel.DM || (u.br.Protocol() == "mattermost" && brchannel.TeamID == "")
+
+		if isAnyDM && !u.br.BridgeConfig().JoinDM {
 			// Skip channels with no activity or older than 1 year (~365 days)
 			if brchannel.LastPostAt == 0 || time.Since(lastPost) > 365*24*time.Hour {
 				continue
@@ -1118,7 +1122,7 @@ func (u *User) addUsersToChannels() {
 		}
 
 		// If the channel is explicitly excluded in matterircd.toml, drop it now.
-		if !brchannel.DM && !u.mayJoin(brchannel.ID) {
+		if !isAnyDM && !u.mayJoin(brchannel.ID) {
 			logger.Debugf("Skipping channel %s due to JoinExclude/JoinOnly configuration (LastPost: %v)", brchannel.Name, lastPost)
 
 			continue
@@ -1409,7 +1413,8 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			}
 
 			since, sinceStr, inDB := u.getChannelSince(u.ctx, brchannel, replayCutoff)
-			isDM := u.br.IsDMChannelName(brchannel.Name)
+			isDM := brchannel.DM || u.br.IsDMChannelName(brchannel.Name)
+			isGM := !isDM && u.br.Protocol() == "mattermost" && brchannel.TeamID == ""
 
 			// Determine if this channel is explicitly whitelisted to bypass LazyJoin
 			channelName := brchannel.Name
@@ -1428,6 +1433,11 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			isWhitelisted := isConfigWhitelisted || isRequested
 			if lazyJoin && isWhitelisted {
 				logger.Debugf("Whitelisted channel from LazyJoin: %s", channelName)
+			}
+
+			// If JoinDM is disabled and this GM is not whitelisted, skip joining it on boot
+			if !u.br.BridgeConfig().JoinDM && isGM && !isWhitelisted {
+				continue
 			}
 
 			// Dormancy Filter for Public Channels
