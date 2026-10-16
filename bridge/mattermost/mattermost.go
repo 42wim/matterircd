@@ -1356,7 +1356,7 @@ func (m *Mattermost) formatParentReply(reply string) string {
 		return reply
 	}
 
-	return defaultMentionContextRegExp.ReplaceAllString(reply, "@\u200b$1")
+	return defaultMentionContextRegExp.ReplaceAllString(reply, "@\x02$1\x02")
 }
 
 func (m *Mattermost) handleWsActionLeaveTeam(ctx context.Context, rmsg *model.WebSocketEvent, logger *logrus.Entry) {
