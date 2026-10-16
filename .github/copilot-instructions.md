@@ -1,22 +1,26 @@
 # Copilot Instructions
 
-## Go Version & Style
+## Environment & Formatting
 
-- Go 1.26+.
-- Follow standard `gofmt` / `goimports` formatting.
-- Ensure `golangci-lint` wsl_v5 and noinlineerr compliant.
+- Target: Go 1.26+.
+- Use hard tabs for indentation and adhere strictly to standard `gofmt` / `goimports`.
+- Enforce `golangci-lint` compliance:
+  - `noinlineerr`: Never inline error assignment with checking (do not use `if err := ...; err != nil`). Always assign `err` on its own line first.
+  - `wsl_v5`: Maintain proper statement separation, particularly whitespace preceding variable assignments and blocks.
 
-## Implementation rules
+## Diff Hygiene & Scope
 
-- Read the package you are editing and follow its existing patterns for naming, options, error handling, comments, and tests.
-- Keep public APIs backward compatible unless the task explicitly requires a breaking change.
-- Prefer idiomatic Go and the repository's established patterns over inventing new abstractions.
-- Prefer minimal, surgical changes. Avoid requesting speculative flexibility, broad refactors, or unrelated cleanup when the diff can stay focused on the goal.
-- Write comments only for intent, invariants, and non-obvious constraints. Do not add comments that restate the code.
-- Preserve existing code comments where it makes sense and still valid reducing the diff or changeset so it is easier to review.
-- Do not use excessive defensive over-engineering to minimize and reduce the diff or changeset so it is easier to review.
-- Do not add or remove new lines to existing code that is not changing to reduce the diff or changeset so it is easier to review.
-- Aim for zero-allocation (or single allocation) for memory allocation and memory usage optimizations.
-- Prevent time-of-check to time-of-use (TOCTOU) races.
-- Prefer json.Unmarshal() over json.NewDecoder(strings.NewReader()) patterns.
+- Keep changes minimal, surgical, and scoped strictly to the task.
+- Do not add, remove, or modify blank lines or whitespace in untouched lines.
+- Preserve existing comments unless they are invalidated by the change.
+- Never introduce speculative flexibility, broad refactoring, or unrelated cleanups.
+- Avoid defensive over-engineering (e.g., unnecessary nil-guards, redundant abstractions, or deep interface wrapping) where standard repository flow suffices.
+- Keep public APIs backward compatible unless breaking changes are explicitly requested.
 
+## Idioms & Performance
+
+- Zero-allocation mindset: Aim for zero (or single) allocations in hot paths and slice/buffer handling.
+- Concurrency safety: Prevent time-of-check to time-of-use (TOCTOU) race conditions on shared state and filesystem operations.
+- Serialization: Prefer `json.Unmarshal([]byte)` over `json.NewDecoder(strings.NewReader())`.
+- Comments: Document only intent, invariants, and non-obvious constraints. Never re-state what the code obviously does.
+- Consistency: Match the existing package's conventions for naming, options, error handling, and signatures.
