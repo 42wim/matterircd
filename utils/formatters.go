@@ -1239,3 +1239,55 @@ func flushEmptyLines(count int, mode string, hasContent bool, yield func(line st
 		}
 	}
 }
+
+// SanitizeDefaultMentions defangs @channel, @all, and @here mentions using bold toggles
+// to prevent unwanted highlights in IRC clients.
+func SanitizeDefaultMentions(text string) string {
+	if !strings.Contains(text, "@channel") && !strings.Contains(text, "@all") && !strings.Contains(text, "@here") {
+		return text
+	}
+
+	var (
+		sb   strings.Builder
+		last int
+	)
+
+	for i := 0; i < len(text); {
+		if text[i] == '@' {
+			var matchedLen int
+
+			if strings.HasPrefix(text[i+1:], "channel") && checkWordBoundaryEnd(text, i+8) {
+				matchedLen = 7
+			} else if strings.HasPrefix(text[i+1:], "here") && checkWordBoundaryEnd(text, i+5) {
+				matchedLen = 4
+			} else if strings.HasPrefix(text[i+1:], "all") && checkWordBoundaryEnd(text, i+4) {
+				matchedLen = 3
+			}
+
+			if matchedLen > 0 {
+				if last == 0 {
+					sb.Grow(len(text) + 16)
+				}
+
+				sb.WriteString(text[last:i])
+				sb.WriteString("@\x02\x02")
+				sb.WriteString(text[i+1 : i+1+matchedLen])
+
+				i += 1 + matchedLen
+				last = i
+
+				continue
+			}
+		}
+
+		i++
+	}
+
+	if last == 0 {
+		return text
+	}
+
+	sb.WriteString(text[last:])
+
+	return sb.String()
+}
