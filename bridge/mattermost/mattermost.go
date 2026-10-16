@@ -1413,42 +1413,38 @@ func matchesDefaultMention(text string, start int) bool {
 }
 
 func skipIRCFormattingCodes(text string, pos int) int {
-	if pos >= len(text) {
-		return pos
-	}
-
-	switch text[pos] {
-	case '\x02', '\x0f', '\x11', '\x16', '\x1d', '\x1e', '\x1f':
-		return pos + 1
-	case '\x03':
-		pos++
-		for digits := 0; pos < len(text) && digits < 2 && text[pos] >= '0' && text[pos] <= '9'; digits++ {
+	for pos < len(text) {
+		switch text[pos] {
+		case '\x02', '\x0f', '\x11', '\x16', '\x1d', '\x1e', '\x1f':
 			pos++
-		}
-		if pos < len(text) && text[pos] == ',' {
+		case '\x03':
 			pos++
 			for digits := 0; pos < len(text) && digits < 2 && text[pos] >= '0' && text[pos] <= '9'; digits++ {
 				pos++
 			}
-		}
-
-		return pos
-	case '\x04':
-		pos++
-		for digits := 0; pos < len(text) && digits < 6 && isASCIIHexDigit(text[pos]); digits++ {
-			pos++
-		}
-		if pos < len(text) && text[pos] == ',' {
+			if pos < len(text) && text[pos] == ',' {
+				pos++
+				for digits := 0; pos < len(text) && digits < 2 && text[pos] >= '0' && text[pos] <= '9'; digits++ {
+					pos++
+				}
+			}
+		case '\x04':
 			pos++
 			for digits := 0; pos < len(text) && digits < 6 && isASCIIHexDigit(text[pos]); digits++ {
 				pos++
 			}
+			if pos < len(text) && text[pos] == ',' {
+				pos++
+				for digits := 0; pos < len(text) && digits < 6 && isASCIIHexDigit(text[pos]); digits++ {
+					pos++
+				}
+			}
+		default:
+			return pos
 		}
-
-		return pos
-	default:
-		return pos
 	}
+
+	return pos
 }
 
 func isASCIIWordChar(char byte) bool {
