@@ -1332,6 +1332,10 @@ func (m *Mattermost) getCachedPostInfo(ctx context.Context, postID string, newLe
 	parentUser := m.GetUser(ctx, post.UserId)
 	parentMessage := utils.FormatAndShortenSummary(msg, opts)
 
+	if rc.Mattermost.DisableDefaultMentions {
+		parentMessage = m.sanitizeMentions(parentMessage)
+	}
+
 	cp := CachedPost{
 		RootID:     post.RootId,
 		ParentUser: parentUser,
@@ -1346,9 +1350,18 @@ func (m *Mattermost) getCachedPostInfo(ctx context.Context, postID string, newLe
 }
 
 var (
-	validIRCNickRegExp    = regexp.MustCompile("^[a-zA-Z0-9_]*$")
-	channelMentionsRegExp = regexp.MustCompile(`@(channel|all|here)\W`)
+	validIRCNickRegExp          = regexp.MustCompile("^[a-zA-Z0-9_]*$")
+	channelMentionsRegExp       = regexp.MustCompile(`@(channel|all|here)\W`)
+	defaultMentionContextRegExp = regexp.MustCompile(`@(channel|all|here)\b`)
 )
+
+func (m *Mattermost) sanitizeMentions(text string) string {
+	if !m.cfg.Current().Mattermost.DisableDefaultMentions {
+		return text
+	}
+
+	return defaultMentionContextRegExp.ReplaceAllString(text, "@\x02\x02$1")
+}
 
 func (m *Mattermost) handleWsActionLeaveTeam(ctx context.Context, rmsg *model.WebSocketEvent, logger *logrus.Entry) {
 	logger.Trace("in handleWsActionLeaveTeam")
