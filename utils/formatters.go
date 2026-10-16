@@ -1240,11 +1240,17 @@ func flushEmptyLines(count int, mode string, hasContent bool, yield func(line st
 	}
 }
 
-// SanitizeDefaultMentions defangs @channel, @all, and @here mentions using bold toggles
-// to prevent unwanted highlights in IRC clients.
-func SanitizeDefaultMentions(text string) string {
+// SanitizeDefaultMentions defangs @channel, @all, and @here mentions to prevent
+// unwanted highlights in IRC clients. When unicode is enabled, it inserts a
+// Zero-Width Non-Joiner (ZWNJ) after the '@'. When disabled, it inserts a hyphen.
+func SanitizeDefaultMentions(text string, unicode bool) string {
 	if !strings.Contains(text, "@channel") && !strings.Contains(text, "@all") && !strings.Contains(text, "@here") {
 		return text
+	}
+
+	separator := "@-"
+	if unicode {
+		separator = "@\u200c"
 	}
 
 	var (
@@ -1270,7 +1276,7 @@ func SanitizeDefaultMentions(text string) string {
 				}
 
 				sb.WriteString(text[last:i])
-				sb.WriteString("@\x02\x02")
+				sb.WriteString(separator)
 				sb.WriteString(text[i+1 : i+1+matchedLen])
 
 				i += 1 + matchedLen
