@@ -1247,7 +1247,7 @@ func (m *Mattermost) wsActionPostSkip(ctx context.Context, data *model.Post, rms
 		if !rc.Mattermost.HideReplies {
 			cachedRoot, err := m.getCachedPostInfo(ctx, data.RootId, shortenMsgLen, "@", useUnicode, logger)
 			if err == nil {
-				sbSuffix.WriteString(cachedRoot.ReplyMsg)
+				sbSuffix.WriteString(m.formatParentReply(cachedRoot.ReplyMsg))
 			}
 		}
 	}
@@ -1346,9 +1346,18 @@ func (m *Mattermost) getCachedPostInfo(ctx context.Context, postID string, newLe
 }
 
 var (
-	validIRCNickRegExp    = regexp.MustCompile("^[a-zA-Z0-9_]*$")
-	channelMentionsRegExp = regexp.MustCompile(`@(channel|all|here)\W`)
+	validIRCNickRegExp          = regexp.MustCompile("^[a-zA-Z0-9_]*$")
+	channelMentionsRegExp       = regexp.MustCompile(`@(channel|all|here)\W`)
+	defaultMentionContextRegExp = regexp.MustCompile(`@(channel|all|here)\b`)
 )
+
+func (m *Mattermost) formatParentReply(reply string) string {
+	if !m.cfg.Current().Mattermost.DisableDefaultMentions {
+		return reply
+	}
+
+	return defaultMentionContextRegExp.ReplaceAllString(reply, "@\u200b$1")
+}
 
 func (m *Mattermost) handleWsActionLeaveTeam(ctx context.Context, rmsg *model.WebSocketEvent, logger *logrus.Entry) {
 	logger.Trace("in handleWsActionLeaveTeam")
@@ -1967,7 +1976,7 @@ func (m *Mattermost) handleReactionEvent(ctx context.Context, rmsg *model.WebSoc
 		}
 
 		if !rc.Mattermost.HideReplies {
-			sbSuffix.WriteString(cachedPost.ReplyMsg)
+			sbSuffix.WriteString(m.formatParentReply(cachedPost.ReplyMsg))
 		}
 	} else {
 		logger.Errorf("Unable to get post info for reaction %#v: %v", reaction, err)
@@ -2318,7 +2327,7 @@ func (m *Mattermost) formatMessage(ctx context.Context, data *model.Post, eventT
 		if err != nil {
 			logger.Errorf("Unable to get parent post for %#v", data)
 		} else {
-			sbSuffix.WriteString(cachedRoot.ReplyMsg)
+			sbSuffix.WriteString(m.formatParentReply(cachedRoot.ReplyMsg))
 		}
 	}
 
