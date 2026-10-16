@@ -257,9 +257,8 @@ MaxReplayDuration = "744h"
 # If EnableLazyJoin=true, channels without activity within this duration are skipped.
 # (Default: 504h / 21 days)
 #LazyJoinDuration = "504h"
-# If Smart DM Join is active, but the bridge has no record of your last sync,
-# it will join any DM active within this fallback window. (Default: 24h)
-#DefaultDMOfflineThreshold = "24h"
+# DefaultDMOfflineThreshold is no longer used; JoinDM controls startup joining
+# for both direct and group messages regardless of their recent activity.
 # Force a full synchronization of channel users on reconnect if offline for more than 15 minutes.
 # By default, this is disabled to ensure lightning-fast reconnects, relying on dynamic nicklist updates.
 #ForceSyncOnReconnect = false

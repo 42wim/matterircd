@@ -1013,7 +1013,6 @@ func (u *User) addUsersToChannels() {
 		syncThresh = 15 * time.Minute
 	}
 	u.eventLoopMutex.Lock()
-	lastSyncThreshold := u.lastSync
 	isHeavySync := !u.eventLoopStarted || time.Since(u.lastSync) > syncThresh
 	u.eventLoopMutex.Unlock()
 
@@ -1066,55 +1065,7 @@ func (u *User) addUsersToChannels() {
 	for _, brchannel := range u.br.GetChannels() {
 		lastPost := time.UnixMilli(brchannel.LastPostAt)
 		if brchannel.DM && !u.br.BridgeConfig().JoinDM {
-			// Skip channels with no activity or older than 1 year (~365 days)
-			if brchannel.LastPostAt == 0 || time.Since(lastPost) > 365*24*time.Hour {
-				continue
-			}
-
-			threshold := lastSyncThreshold
-			if threshold.IsZero() {
-				dmThresh := u.cfg.Mattermost().DefaultDMOfflineThreshold
-				if dmThresh == 0 {
-					dmThresh = 24 * time.Hour
-				}
-
-				threshold = time.Now().Add(-dmThresh)
-			}
-
-			formatChannelDesc := func() string {
-				if mUser := u.br.GetDMUser(u.ctx, brchannel.Name); mUser != nil {
-					return fmt.Sprintf("DM with %s (%s)", mUser.Nick, mUser.User)
-				}
-
-				if u.br.IsDMChannelName(brchannel.Name) {
-					if otherUserID, ok := u.br.GetDMOtherUserID(brchannel.Name, u.User); ok {
-						return fmt.Sprintf("DM with UNKNOWN (%s)", otherUserID)
-					}
-				}
-
-				if brchannel.DisplayName != "" {
-					return fmt.Sprintf("GM with %s (%s)", brchannel.DisplayName, brchannel.Name)
-				}
-
-				return brchannel.Name
-			}
-
-			// If the channel has been dormant since before our threshold, safely skip it
-			if lastPost.Before(threshold) {
-				if logger.Logger.IsLevelEnabled(logrus.TraceLevel) {
-					logger.Tracef("Skipping dormant %s (LastPost: %v, Threshold: %v)", formatChannelDesc(), lastPost, threshold)
-				} else {
-					logger.Debugf("Skipping dormant %s (LastPost: %v)", formatChannelDesc(), lastPost)
-				}
-
-				continue
-			}
-
-			if logger.Logger.IsLevelEnabled(logrus.TraceLevel) {
-				logger.Tracef("SmartJoin: Joining %s due to recent offline activity (LastPost: %v, Threshold: %v)", formatChannelDesc(), lastPost, threshold)
-			} else {
-				logger.Debugf("SmartJoin: Joining %s due to recent offline activity (LastPost: %v)", formatChannelDesc(), lastPost)
-			}
+			continue
 		}
 
 		// If the channel is explicitly excluded in matterircd.toml, drop it now.
@@ -1431,10 +1382,9 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			}
 
 			// Dormancy Filter for Public Channels
-			// DMs bypass this because they are already strictly filtered by
-			// DefaultDMOfflineThreshold upstream in addUsersToChannels().
+			// Direct and group DMs are controlled by JoinDM instead.
 			// Explicitly whitelisted channels bypass this!
-			if lazyJoin && !isDM && !isWhitelisted {
+			if lazyJoin && !brchannel.DM && !isWhitelisted {
 				// Strategy "saved": require prior presence in local BoltDB
 				if strategy == "saved" && !inDB {
 					continue
