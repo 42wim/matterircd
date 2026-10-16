@@ -1069,7 +1069,7 @@ func (u *User) addUsersToChannels() {
 		// In Mattermost, both 1-on-1 DMs and Group DMs have no TeamID
 		isAnyDM := brchannel.DM || (u.br.Protocol() == "mattermost" && brchannel.TeamID == "")
 
-		if isAnyDM && !u.br.BridgeConfig().JoinDM {
+		if isAnyDM && !u.br.BridgeConfig().JoinDM { //nolint:nestif
 			// Skip channels with no activity or older than 1 year (~365 days)
 			if brchannel.LastPostAt == 0 || time.Since(lastPost) > 365*24*time.Hour {
 				continue
