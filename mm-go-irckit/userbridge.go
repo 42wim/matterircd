@@ -409,6 +409,19 @@ func (u *User) handleChannelAddEvent(event *bridge.ChannelAddEvent) {
 	for _, added := range event.Added {
 		if added.Me {
 			wasInChannel := ch.HasUser(u)
+
+			brchannel, err := u.br.GetChannel(u.ctx, event.ChannelID)
+			if err != nil {
+				logger.Error(err)
+
+				continue
+			}
+
+			// Membership notifications must not bypass smart DM joining.
+			if brchannel.DM && !u.br.BridgeConfig().JoinDM && !wasInChannel {
+				return
+			}
+
 			channelName := u.br.GetChannelName(u.ctx, event.ChannelID)
 
 			_ = u.syncChannel(event.ChannelID, channelName)
@@ -417,8 +430,7 @@ func (u *User) handleChannelAddEvent(event *bridge.ChannelAddEvent) {
 				continue
 			}
 
-			brchannel, err := u.br.GetChannel(u.ctx, event.ChannelID)
-			if err != nil || u.isReplayExcluded(brchannel, channelName) {
+			if u.isReplayExcluded(brchannel, channelName) {
 				continue
 			}
 
@@ -702,6 +714,18 @@ func (u *User) handleFileEvent(event *bridge.FileEvent) {
 }
 
 func (u *User) handleChannelCreateEvent(event *bridge.ChannelCreateEvent) {
+	brchannel, err := u.br.GetChannel(u.ctx, event.ChannelID)
+	if err != nil {
+		logger.Error(err)
+
+		return
+	}
+
+	// Group-added notifications are channel-create events, not message activity.
+	if brchannel.DM && !u.br.BridgeConfig().JoinDM && !u.Srv.Channel(event.ChannelID).HasUser(u) {
+		return
+	}
+
 	logger.Debugf("ACTION_CHANNEL_CREATED syncing channel %s (%s)", u.br.GetChannelName(u.ctx, event.ChannelID), event.ChannelID)
 
 	u.syncChannel(event.ChannelID, u.br.GetChannelName(u.ctx, event.ChannelID))
