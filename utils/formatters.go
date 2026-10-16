@@ -1239,3 +1239,69 @@ func flushEmptyLines(count int, mode string, hasContent bool, yield func(line st
 		}
 	}
 }
+
+func matchDefaultMention(text string, start int) int {
+	switch {
+	case strings.HasPrefix(text[start:], "channel") && checkWordBoundaryEnd(text, start+7):
+		return 7
+	case strings.HasPrefix(text[start:], "here") && checkWordBoundaryEnd(text, start+4):
+		return 4
+	case strings.HasPrefix(text[start:], "all") && checkWordBoundaryEnd(text, start+3):
+		return 3
+	default:
+		return 0
+	}
+}
+
+// SanitizeDefaultMentions defangs @channel, @all, and @here mentions to prevent
+// unwanted highlights in IRC clients. When unicode is enabled, it inserts a
+// Zero-Width Non-Joiner (ZWNJ) after the '@'. When disabled, it inserts a hyphen.
+func SanitizeDefaultMentions(text string, unicode bool) string {
+	if !strings.Contains(text, "@channel") && !strings.Contains(text, "@all") && !strings.Contains(text, "@here") {
+		return text
+	}
+
+	separator := "@-"
+	if unicode {
+		separator = "@\u200c"
+	}
+
+	var (
+		sb   strings.Builder
+		last int
+	)
+
+	for i := 0; i < len(text); {
+		if text[i] != '@' {
+			i++
+
+			continue
+		}
+
+		matchedLen := matchDefaultMention(text, i+1)
+		if matchedLen == 0 {
+			i++
+
+			continue
+		}
+
+		if last == 0 {
+			sb.Grow(len(text) + 16)
+		}
+
+		sb.WriteString(text[last:i])
+		sb.WriteString(separator)
+		sb.WriteString(text[i+1 : i+1+matchedLen])
+
+		i += 1 + matchedLen
+		last = i
+	}
+
+	if last == 0 {
+		return text
+	}
+
+	sb.WriteString(text[last:])
+
+	return sb.String()
+}

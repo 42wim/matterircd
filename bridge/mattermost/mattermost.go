@@ -1247,7 +1247,7 @@ func (m *Mattermost) wsActionPostSkip(ctx context.Context, data *model.Post, rms
 		if !rc.Mattermost.HideReplies {
 			cachedRoot, err := m.getCachedPostInfo(ctx, data.RootId, shortenMsgLen, "@", useUnicode, logger)
 			if err == nil {
-				sbSuffix.WriteString(m.formatParentReply(cachedRoot.ReplyMsg))
+				sbSuffix.WriteString(cachedRoot.ReplyMsg)
 			}
 		}
 	}
@@ -1332,6 +1332,10 @@ func (m *Mattermost) getCachedPostInfo(ctx context.Context, postID string, newLe
 	parentUser := m.GetUser(ctx, post.UserId)
 	parentMessage := utils.FormatAndShortenSummary(msg, opts)
 
+	if rc.Mattermost.DisableDefaultMentions {
+		parentMessage = utils.SanitizeDefaultMentions(parentMessage, unicode)
+	}
+
 	cp := CachedPost{
 		RootID:     post.RootId,
 		ParentUser: parentUser,
@@ -1349,116 +1353,6 @@ var (
 	validIRCNickRegExp    = regexp.MustCompile("^[a-zA-Z0-9_]*$")
 	channelMentionsRegExp = regexp.MustCompile(`@(channel|all|here)\W`)
 )
-
-func (m *Mattermost) formatParentReply(reply string) string {
-	if !m.cfg.Current().Mattermost.DisableDefaultMentions {
-		return reply
-	}
-
-	var (
-		sb   strings.Builder
-		last int
-	)
-
-	for i := 0; i < len(reply); i++ {
-		if reply[i] != '@' || !matchesDefaultMention(reply, i+1) {
-			continue
-		}
-
-		if last == 0 {
-			sb.Grow(len(reply) + 16)
-		}
-
-		sb.WriteString(reply[last : i+1])
-		sb.WriteString("@\u200c")
-		last = i + 1
-	}
-
-	if last == 0 {
-		return reply
-	}
-
-	sb.WriteString(reply[last:])
-
-	return sb.String()
-}
-
-func matchesDefaultMention(text string, start int) bool {
-	for _, mention := range [...]string{"channel", "all", "here"} {
-		pos := start
-		matched := true
-
-		for i := 0; i < len(mention); i++ {
-			pos = skipIRCFormattingCodes(text, pos)
-			if pos >= len(text) || text[pos] != mention[i] {
-				matched = false
-
-				break
-			}
-
-			pos++
-		}
-
-		if !matched {
-			continue
-		}
-
-		pos = skipIRCFormattingCodes(text, pos)
-		if pos == len(text) || !isASCIIWordChar(text[pos]) {
-			return true
-		}
-	}
-
-	return false
-}
-
-func skipIRCFormattingCodes(text string, pos int) int {
-	for pos < len(text) {
-		switch text[pos] {
-		case '\x02', '\x0f', '\x11', '\x16', '\x1d', '\x1e', '\x1f':
-			pos++
-		case '\x03':
-			pos++
-			for digits := 0; pos < len(text) && digits < 2 && text[pos] >= '0' && text[pos] <= '9'; digits++ {
-				pos++
-			}
-			if pos < len(text) && text[pos] == ',' {
-				pos++
-				for digits := 0; pos < len(text) && digits < 2 && text[pos] >= '0' && text[pos] <= '9'; digits++ {
-					pos++
-				}
-			}
-		case '\x04':
-			pos++
-			for digits := 0; pos < len(text) && digits < 6 && isASCIIHexDigit(text[pos]); digits++ {
-				pos++
-			}
-			if pos < len(text) && text[pos] == ',' {
-				pos++
-				for digits := 0; pos < len(text) && digits < 6 && isASCIIHexDigit(text[pos]); digits++ {
-					pos++
-				}
-			}
-		default:
-			return pos
-		}
-	}
-
-	return pos
-}
-
-func isASCIIWordChar(char byte) bool {
-	return char >= 'a' && char <= 'z' ||
-		char >= 'A' && char <= 'Z' ||
-		char >= '0' && char <= '9' ||
-		char == '_'
-}
-
-func isASCIIHexDigit(char byte) bool {
-	return char >= '0' && char <= '9' ||
-		char >= 'a' && char <= 'f' ||
-		char >= 'A' && char <= 'F'
-}
 
 func (m *Mattermost) handleWsActionLeaveTeam(ctx context.Context, rmsg *model.WebSocketEvent, logger *logrus.Entry) {
 	logger.Trace("in handleWsActionLeaveTeam")
@@ -2077,7 +1971,7 @@ func (m *Mattermost) handleReactionEvent(ctx context.Context, rmsg *model.WebSoc
 		}
 
 		if !rc.Mattermost.HideReplies {
-			sbSuffix.WriteString(m.formatParentReply(cachedPost.ReplyMsg))
+			sbSuffix.WriteString(cachedPost.ReplyMsg)
 		}
 	} else {
 		logger.Errorf("Unable to get post info for reaction %#v: %v", reaction, err)
@@ -2428,7 +2322,7 @@ func (m *Mattermost) formatMessage(ctx context.Context, data *model.Post, eventT
 		if err != nil {
 			logger.Errorf("Unable to get parent post for %#v", data)
 		} else {
-			sbSuffix.WriteString(m.formatParentReply(cachedRoot.ReplyMsg))
+			sbSuffix.WriteString(cachedRoot.ReplyMsg)
 		}
 	}
 
