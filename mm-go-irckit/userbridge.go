@@ -1413,12 +1413,12 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			}
 
 			since, sinceStr, inDB := u.getChannelSince(u.ctx, brchannel, replayCutoff)
-			isDM := brchannel.DM || u.br.IsDMChannelName(brchannel.Name)
-			isGM := !isDM && u.br.Protocol() == "mattermost" && brchannel.TeamID == ""
+			isDM := u.br.IsDMChannelName(brchannel.Name)
+			isGM := !isDM && brchannel.DM
 
 			// Determine if this channel is explicitly whitelisted to bypass LazyJoin
 			channelName := brchannel.Name
-			if brchannel.TeamID != u.br.GetMe().TeamID || (u.br.Protocol() == "mattermost" && u.cfg.Mattermost().PrefixMainTeam) {
+			if brchannel.TeamID != "" && (brchannel.TeamID != u.br.GetMe().TeamID || (u.br.Protocol() == "mattermost" && u.cfg.Mattermost().PrefixMainTeam)) {
 				channelName = u.br.GetTeamName(u.ctx, brchannel.TeamID) + "/" + brchannel.Name
 			}
 
@@ -1626,7 +1626,7 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 		if showReplayHdr && (text != "" || len(files) > 0) {
 			dateStr := ts.Format("2006-01-02 15:04:05")
 			target := "matterircd"
-			if brchannel.DM {
+			if u.br.IsDMChannelName(brchannel.Name) {
 				target = nick
 			}
 			spoof(target, fmt.Sprintf("\x02Replaying msgs since %s\x02 \x1d(%s)\x1d", dateStr, logSince))
@@ -1752,9 +1752,17 @@ func (u *User) syncChannel(id string, name string) error {
 	disableMarkdown := u.br.FormatterConfig().DisableMarkdown
 	inlineCode := u.br.FormatterConfig().MarkdownInlineCode
 
+	isDMOrGM := u.br.IsDMChannelName(name)
+	if !isDMOrGM {
+		brchannel, err := u.br.GetChannel(u.ctx, id)
+		if err == nil && brchannel != nil {
+			isDMOrGM = brchannel.DM
+		}
+	}
+
 	// add myself ONLY if I am actually a member
 	ch := srv.Channel(id)
-	if u.br.IsChannelMember(id) && !ch.HasUser(u) && u.mayJoin(id) {
+	if u.br.IsChannelMember(id) && !ch.HasUser(u) && (isDMOrGM || u.mayJoin(id)) {
 		logger.Tracef("syncChannel adding myself to %s (id: %s)", name, id)
 		ch.Join(u)
 		svc, _ := srv.HasUser(u.br.Protocol())
