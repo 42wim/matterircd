@@ -115,9 +115,9 @@ func (m *Client) GetStatus(ctx context.Context, userID string) string {
 		m.Users.mu.RUnlock()
 	}
 
-	// Only let recent activity override if the user is marked offline or not yet tracked;
+	// Only let recent activity override if the user is marked offline;
 	// never override explicit server states like "away", "dnd", or "ooo" (OutOfOffice).
-	if (status == model.StatusOffline || !ok) && lastActive > 0 && time.Since(time.Unix(lastActive, 0)) < activeThreshold {
+	if status == model.StatusOffline && lastActive > 0 && time.Since(time.Unix(lastActive, 0)) < activeThreshold {
 		status = model.StatusOnline
 	}
 
