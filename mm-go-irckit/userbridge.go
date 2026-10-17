@@ -481,13 +481,13 @@ func (u *User) getMessageChannel(channelID string, sender *bridge.UserInfo) Chan
 		}
 	}
 
+	// if we are already in the channel, route message directly to it
+	if ch.HasUser(u) {
+		return ch
+	}
+
 	// check if we mayjoin this channel
 	if u.mayJoin(channelID) {
-		// if we are on it, just return it
-		if ch.HasUser(u) {
-			return ch
-		}
-
 		// otherwise first sync it
 		u.syncChannel(channelID, u.br.GetChannelName(u.ctx, channelID))
 
@@ -1065,7 +1065,11 @@ func (u *User) addUsersToChannels() {
 	var joinChannels []*bridge.ChannelInfo
 	for _, brchannel := range u.br.GetChannels() {
 		lastPost := time.UnixMilli(brchannel.LastPostAt)
-		if brchannel.DM && !u.br.BridgeConfig().JoinDM {
+
+		// In Mattermost, both 1-on-1 DMs and Group DMs have no TeamID
+		isAnyDM := brchannel.DM || (u.br.Protocol() == "mattermost" && brchannel.TeamID == "")
+
+		if isAnyDM && !u.br.BridgeConfig().JoinDM { //nolint:nestif
 			// Skip channels with no activity or older than 1 year (~365 days)
 			if brchannel.LastPostAt == 0 || time.Since(lastPost) > 365*24*time.Hour {
 				continue
@@ -1118,7 +1122,7 @@ func (u *User) addUsersToChannels() {
 		}
 
 		// If the channel is explicitly excluded in matterircd.toml, drop it now.
-		if !brchannel.DM && !u.mayJoin(brchannel.ID) {
+		if !isAnyDM && !u.mayJoin(brchannel.ID) {
 			logger.Debugf("Skipping channel %s due to JoinExclude/JoinOnly configuration (LastPost: %v)", brchannel.Name, lastPost)
 
 			continue
@@ -1408,12 +1412,21 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			case <-throttle.C:
 			}
 
+			if u.ctx.Err() != nil || u.br == nil {
+				return
+			}
+
 			since, sinceStr, inDB := u.getChannelSince(u.ctx, brchannel, replayCutoff)
 			isDM := u.br.IsDMChannelName(brchannel.Name)
+			isGM := !isDM && brchannel.DM
 
 			// Determine if this channel is explicitly whitelisted to bypass LazyJoin
 			channelName := brchannel.Name
-			if brchannel.TeamID != u.br.GetMe().TeamID || (u.br.Protocol() == "mattermost" && u.cfg.Mattermost().PrefixMainTeam) {
+			if isGM {
+				if name := u.br.GetChannelName(u.ctx, brchannel.ID); name != "" {
+					channelName = strings.TrimPrefix(name, "#")
+				}
+			} else if brchannel.TeamID != "" && (brchannel.TeamID != u.br.GetMe().TeamID || (u.br.Protocol() == "mattermost" && u.cfg.Mattermost().PrefixMainTeam)) {
 				channelName = u.br.GetTeamName(u.ctx, brchannel.TeamID) + "/" + brchannel.Name
 			}
 
@@ -1430,11 +1443,27 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 				logger.Debugf("Whitelisted channel from LazyJoin: %s", channelName)
 			}
 
+			jo := u.br.BridgeConfig().JoinOnly
+			ji := u.br.BridgeConfig().JoinInclude
+
+			var isJoinListMatched bool
+			if len(jo) > 0 {
+				isJoinListMatched = stringInRegexp(channelName, jo) || stringInRegexp("#"+channelName, jo)
+			} else if len(ji) > 0 {
+				isJoinListMatched = stringInRegexp(channelName, ji) || stringInRegexp("#"+channelName, ji)
+			}
+
+			// If JoinDM is disabled and this GM is not whitelisted or explicitly in join-lists, skip joining it on boot
+			// unless the IRC user has already joined it (e.g. via live traffic or prior to a reconnect).
+			if !u.br.BridgeConfig().JoinDM && isGM && !isWhitelisted && !isJoinListMatched && !u.Srv.Channel(brchannel.ID).HasUser(u) {
+				continue
+			}
+
 			// Dormancy Filter for Public Channels
-			// DMs bypass this because they are already strictly filtered by
+			// 1-on-1 DMs and Group DMs bypass this because they are already filtered by
 			// DefaultDMOfflineThreshold upstream in addUsersToChannels().
 			// Explicitly whitelisted channels bypass this!
-			if lazyJoin && !isDM && !isWhitelisted {
+			if lazyJoin && !brchannel.DM && !isWhitelisted { //nolint:nestif
 				// Strategy "saved": require prior presence in local BoltDB
 				if strategy == "saved" && !inDB {
 					continue
@@ -1519,6 +1548,11 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 				continue
 			}
 
+			// If mayJoin rejected joining the channel, abort replay so messages aren't spoofed into an empty buffer
+			if !isDM && !u.Srv.Channel(brchannel.ID).HasUser(u) {
+				continue
+			}
+
 			if u.isReplayExcluded(brchannel, channelName) {
 				logger.Debugf("Skipping history replay for excluded channel %s (%s)", channelName, brchannel.ID)
 			} else {
@@ -1537,7 +1571,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 //
 //nolint:funlen,gocognit,gocyclo
 func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSince string) {
-	if since == 0 {
+	if since == 0 || u.ctx.Err() != nil || u.br == nil {
 		return
 	}
 
@@ -1616,7 +1650,7 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 		if showReplayHdr && (text != "" || len(files) > 0) {
 			dateStr := ts.Format("2006-01-02 15:04:05")
 			target := "matterircd"
-			if brchannel.DM {
+			if u.br.IsDMChannelName(brchannel.Name) {
 				target = nick
 			}
 			spoof(target, fmt.Sprintf("\x02Replaying msgs since %s\x02 \x1d(%s)\x1d", dateStr, logSince))
@@ -1742,7 +1776,7 @@ func (u *User) syncChannel(id string, name string) error {
 	disableMarkdown := u.br.FormatterConfig().DisableMarkdown
 	inlineCode := u.br.FormatterConfig().MarkdownInlineCode
 
-	// add myself ONLY if I am actually a member
+	// add myself ONLY if I am actually a member and permitted by join rules
 	ch := srv.Channel(id)
 	if u.br.IsChannelMember(id) && !ch.HasUser(u) && u.mayJoin(id) {
 		logger.Tracef("syncChannel adding myself to %s (id: %s)", name, id)
