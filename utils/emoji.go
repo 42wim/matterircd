@@ -84,7 +84,10 @@ var GetEmojiMap = sync.OnceValue(func() map[string]string {
 		}
 
 		// Regional flags (e.g. "mx" -> "flag_mx" and "flag-mx")
-		if len(name) == 2 {
+		if len(name) == 2 && len(unicodeVal) == 8 &&
+			unicodeVal[:3] == "\xf0\x9f\x87" && unicodeVal[4:7] == "\xf0\x9f\x87" &&
+			unicodeVal[3] >= 0xA6 && unicodeVal[3] <= 0xBF &&
+			unicodeVal[7] >= 0xA6 && unicodeVal[7] <= 0xBF {
 			register("flag_"+name, unicodeVal, supportsSkinTone)
 			register("flag-"+name, unicodeVal, supportsSkinTone)
 		} else if rest, ok := strings.CutPrefix(name, "flag_"); ok {
@@ -132,8 +135,8 @@ var GetEmojiMap = sync.OnceValue(func() map[string]string {
 		for _, alias := range e.Aliases {
 			registerWithVariants(alias, e.Emoji, e.SkinTones)
 
-			// Also support "flag-mexico" or "flag_mexico" if tagged as a flag
-			if slices.Contains(e.Tags, "flag") && !strings.HasPrefix(alias, "flag") {
+			// Also support "flag-mexico" or "flag_mexico" for flag aliases
+			if e.Category == "Flags" && !strings.HasPrefix(alias, "flag") {
 				registerWithVariants("flag_"+alias, e.Emoji, false)
 				registerWithVariants("flag-"+alias, e.Emoji, false)
 			}
