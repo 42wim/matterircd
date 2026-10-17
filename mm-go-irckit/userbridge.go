@@ -1454,7 +1454,8 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			}
 
 			// If JoinDM is disabled and this GM is not whitelisted or explicitly in join-lists, skip joining it on boot
-			if !u.br.BridgeConfig().JoinDM && isGM && !isWhitelisted && !isJoinListMatched {
+			// unless the IRC user has already joined it (e.g. via live traffic or prior to a reconnect).
+			if !u.br.BridgeConfig().JoinDM && isGM && !isWhitelisted && !isJoinListMatched && !u.Srv.Channel(brchannel.ID).HasUser(u) {
 				continue
 			}
 
@@ -1548,8 +1549,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			}
 
 			// If mayJoin rejected joining the channel, abort replay so messages aren't spoofed into an empty buffer
-			ch := u.Srv.Channel(brchannel.ID)
-			if !isDM && !ch.HasUser(u) {
+			if !isDM && !u.Srv.Channel(brchannel.ID).HasUser(u) {
 				continue
 			}
 
