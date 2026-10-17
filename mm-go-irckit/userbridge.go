@@ -481,13 +481,13 @@ func (u *User) getMessageChannel(channelID string, sender *bridge.UserInfo) Chan
 		}
 	}
 
-	// check if we mayjoin this channel
-	if u.mayJoin(channelID) {
-		// if we are on it, just return it
-		if ch.HasUser(u) {
-			return ch
-		}
+	// if we are already in the channel, route message directly to it
+	if ch.HasUser(u) {
+		return ch
+	}
 
+	// check if we are eligible to join this channel
+	if u.canJoinChannel(channelID) {
 		// otherwise first sync it
 		u.syncChannel(channelID, u.br.GetChannelName(u.ctx, channelID))
 
@@ -1422,7 +1422,11 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 
 			// Determine if this channel is explicitly whitelisted to bypass LazyJoin
 			channelName := brchannel.Name
-			if brchannel.TeamID != "" && (brchannel.TeamID != u.br.GetMe().TeamID || (u.br.Protocol() == "mattermost" && u.cfg.Mattermost().PrefixMainTeam)) {
+			if isGM {
+				if name := u.br.GetChannelName(u.ctx, brchannel.ID); name != "" {
+					channelName = name
+				}
+			} else if brchannel.TeamID != "" && (brchannel.TeamID != u.br.GetMe().TeamID || (u.br.Protocol() == "mattermost" && u.cfg.Mattermost().PrefixMainTeam)) {
 				channelName = u.br.GetTeamName(u.ctx, brchannel.TeamID) + "/" + brchannel.Name
 			}
 
@@ -1439,8 +1443,18 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 				logger.Debugf("Whitelisted channel from LazyJoin: %s", channelName)
 			}
 
-			// If JoinDM is disabled and this GM is not whitelisted, skip joining it on boot
-			if !u.br.BridgeConfig().JoinDM && isGM && !isWhitelisted {
+			jo := u.br.BridgeConfig().JoinOnly
+			ji := u.br.BridgeConfig().JoinInclude
+
+			var isJoinListMatched bool
+			if len(jo) > 0 {
+				isJoinListMatched = stringInRegexp(channelName, jo) || stringInRegexp("#"+channelName, jo)
+			} else if len(ji) > 0 {
+				isJoinListMatched = stringInRegexp(channelName, ji) || stringInRegexp("#"+channelName, ji)
+			}
+
+			// If JoinDM is disabled and this GM is not whitelisted or explicitly in join-lists, skip joining it on boot
+			if !u.br.BridgeConfig().JoinDM && isGM && !isWhitelisted && !isJoinListMatched {
 				continue
 			}
 
@@ -1727,6 +1741,19 @@ func (u *User) MsgSpoofUser(sender *User, rcvuser string, text string, maxlen ..
 	}
 }
 
+func (u *User) canJoinChannel(channelID string) bool {
+	if u.mayJoin(channelID) {
+		return true
+	}
+
+	brchannel, err := u.br.GetChannel(u.ctx, channelID)
+	if err == nil && brchannel != nil {
+		return brchannel.DM
+	}
+
+	return false
+}
+
 func (u *User) syncChannel(id string, name string) error {
 	if u.ctx.Err() != nil {
 		return u.ctx.Err()
@@ -1756,17 +1783,9 @@ func (u *User) syncChannel(id string, name string) error {
 	disableMarkdown := u.br.FormatterConfig().DisableMarkdown
 	inlineCode := u.br.FormatterConfig().MarkdownInlineCode
 
-	isDMOrGM := u.br.IsDMChannelName(strings.TrimPrefix(name, "#"))
-	if !isDMOrGM {
-		brchannel, err := u.br.GetChannel(u.ctx, id)
-		if err == nil && brchannel != nil {
-			isDMOrGM = brchannel.DM
-		}
-	}
-
-	// add myself ONLY if I am actually a member
+	// add myself ONLY if I am actually a member and permitted to join
 	ch := srv.Channel(id)
-	if u.br.IsChannelMember(id) && !ch.HasUser(u) && (isDMOrGM || u.mayJoin(id)) {
+	if u.br.IsChannelMember(id) && !ch.HasUser(u) && u.canJoinChannel(id) {
 		logger.Tracef("syncChannel adding myself to %s (id: %s)", name, id)
 		ch.Join(u)
 		svc, _ := srv.HasUser(u.br.Protocol())
