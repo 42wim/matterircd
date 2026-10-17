@@ -806,6 +806,11 @@ func (m *Mattermost) StatusUser(ctx context.Context, userID string) (string, err
 	user := m.mc.GetUser(ctx, userID)
 
 	localTime := getUserLocalTime(user)
+	prefix, custom, hasCustom := strings.Cut(status, ": ")
+
+	if prefix == model.StatusOnline {
+		lastOnline = ""
+	}
 
 	var details string
 
@@ -820,7 +825,6 @@ func (m *Mattermost) StatusUser(ctx context.Context, userID string) (string, err
 		return status, nil
 	}
 
-	prefix, custom, hasCustom := strings.Cut(status, ": ")
 	if hasCustom {
 		return fmt.Sprintf("%s (%s): %s", prefix, details, custom), nil
 	}

@@ -126,10 +126,6 @@ func (m *Client) GetStatus(ctx context.Context, userID string) string {
 		status = model.StatusOffline
 	}
 
-	if status == model.StatusOnline {
-		return status
-	}
-
 	if !tracked {
 		user := m.GetUser(ctx, userID)
 
@@ -154,7 +150,7 @@ func (m *Client) GetStatus(ctx context.Context, userID string) string {
 	}
 
 	if customStatus != "" {
-		if status != model.StatusOnline && status != "" {
+		if status != "" {
 			return status + ": " + customStatus
 		}
 
@@ -594,7 +590,7 @@ func (c *UsersCache) SetUserCustomStatus(userID string, rawJSON string, tzLoc ..
 	}
 
 	expiry, parseErr := time.Parse(time.RFC3339, status.ExpiresAt)
-	if parseErr != nil {
+	if parseErr != nil || expiry.IsZero() || expiry.Unix() <= 0 {
 		delete(c.customStatusExpiresAt, userID)
 		c.customStatuses[userID] = formattedStatus
 
