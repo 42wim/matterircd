@@ -51,8 +51,6 @@ func (m *Client) GetStatus(ctx context.Context, userID string) string {
 	lastFetched := m.Users.statusLastUpdated[userID]
 	customStatus, tracked := m.Users.customStatuses[userID]
 	customExpiresAt := m.Users.customStatusExpiresAt[userID]
-	cachedUser := m.Users.users[userID]
-	isBot := cachedUser != nil && cachedUser.IsBot
 	m.Users.mu.RUnlock()
 
 	if customStatus != "" && customExpiresAt > 0 && time.Now().Unix() >= customExpiresAt {
@@ -114,6 +112,22 @@ func (m *Client) GetStatus(ctx context.Context, userID string) string {
 
 		m.Users.mu.RLock()
 		lastActive = m.Users.lastUserActivity[userID]
+		m.Users.mu.RUnlock()
+	}
+
+	m.Users.mu.RLock()
+	cachedUser := m.Users.users[userID]
+	isBot := cachedUser != nil && cachedUser.IsBot
+	m.Users.mu.RUnlock()
+
+	if cachedUser == nil {
+		m.GetUser(ctx, userID)
+		m.Users.mu.RLock()
+		cachedUser = m.Users.users[userID]
+		isBot = cachedUser != nil && cachedUser.IsBot
+		if lastActive == 0 {
+			lastActive = m.Users.lastUserActivity[userID]
+		}
 		m.Users.mu.RUnlock()
 	}
 
@@ -1004,7 +1018,7 @@ func (c *UsersCache) userIDKey(userID string) string {
 	return userID
 }
 
-//nolint:funlen
+//nolint:funlen,gocyclo
 func (m *Client) updateUserLocked(id string, updateAt int64, deleteAt int64, username, firstName, lastName, nickname, roles string, props map[string]string, timezone map[string]string, isBot ...bool) *model.User {
 	switch roles {
 	case "system_user":

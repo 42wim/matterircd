@@ -1220,12 +1220,17 @@ func CmdWhois(s Server, u *User, msg *irc.Message) error {
 		}
 
 		otherUser := u.br.GetUser(u.ctx, other.User)
-		if otherUser != nil && (strings.Contains(otherUser.Roles, "bot") || isServiceBot(other.Nick)) {
+		if isServiceBot(other.Nick) || (otherUser != nil && strings.Contains(otherUser.Roles, "bot")) {
+			trailing := "is a bot on Mattermost"
+			if u.br.Protocol() != "" && u.br.Protocol() != "mattermost" {
+				trailing = "is a bot on " + u.br.Protocol()
+			}
+
 			r = append(r, &irc.Message{
 				Prefix:   s.Prefix(),
 				Params:   []string{u.Nick, other.Nick},
 				Command:  RPL_WHOISBOT,
-				Trailing: "is a bot on Mattermost",
+				Trailing: trailing,
 			})
 		}
 
