@@ -337,6 +337,17 @@ func (s *server) Quit(u *User, message string) {
 		activeClients.Add(-1)
 	})
 
+	// Only the first Quit (the QUIT command, the connection closing or handle() returning, whichever
+	// comes first) waits and cleans up. The others return at once instead of passing the context
+	// check below at the same time, while that first one is still waiting.
+	if !u.quitting.CompareAndSwap(false, true) {
+		return
+	}
+
+	// Messages that are still on their way (the one that was held in the paste buffer when the
+	// user quit, for example) would get aborted by the cancel below. Give them time to be sent.
+	u.waitMsgChanLocks(5 * time.Second)
+
 	if u.ctx != nil && u.ctx.Err() != nil {
 		return
 	}
@@ -466,15 +477,61 @@ func (s *server) handle(u *User) {
 			// Ignore empty messages
 			continue
 		}
-		go func(msg *irc.Message) {
-			if strings.HasPrefix(msg.Command, "@") && len(msg.Params) > 0 {
-				threadID := parseThreadTag(msg.Command)
 
-				msg.Command = strings.ToUpper(msg.Params[0])
-				msg.Params = msg.Params[1:]
+		if strings.HasPrefix(msg.Command, "@") && len(msg.Params) > 0 {
+			threadID := parseThreadTag(msg.Command)
 
-				if threadID != "" && msg.Command == "TAGMSG" && len(msg.Params) == 1 { //nolint:goconst
-					msg.Params = append(msg.Params, threadID)
+			msg.Command = strings.ToUpper(msg.Params[0])
+			msg.Params = msg.Params[1:]
+
+			if threadID != "" && msg.Command == "TAGMSG" && len(msg.Params) == 1 { //nolint:goconst
+				msg.Params = append(msg.Params, threadID)
+			}
+		}
+
+		var (
+			prevs []<-chan struct{}
+			next  chan struct{}
+		)
+
+		switch msg.Command {
+		case irc.PRIVMSG:
+			if len(msg.Params) > 0 {
+				var target string
+
+				if ch, ok := s.HasChannel(msg.Params[0]); ok {
+					target = ch.ID()
+				} else if toUser, ok := s.HasUser(msg.Params[0]); ok {
+					target = toUser.User
+				}
+
+				if target != "" {
+					prevs, next = u.getMsgChanLocks(target)
+				}
+			}
+
+		case irc.PART:
+			if len(msg.Params) > 0 {
+				var targets []string
+
+				for chName := range strings.SplitSeq(msg.Params[0], ",") {
+					if ch, ok := s.HasChannel(chName); ok {
+						targets = append(targets, ch.ID())
+					}
+				}
+
+				if len(targets) > 0 {
+					prevs, next = u.getMsgChanLocks(targets...)
+				}
+			}
+		}
+
+		go func(msg *irc.Message, prevs []<-chan struct{}, next chan struct{}) {
+			if next != nil {
+				defer close(next)
+
+				for _, prev := range prevs {
+					<-prev
 				}
 			}
 
@@ -494,7 +551,7 @@ func (s *server) handle(u *User) {
 				logger.Errorf("handler error for %s: %s", u.ID(), errMsg)
 				s.EncodeMessage(u, irc.PRIVMSG, []string{u.Nick}, errMsg) //nolint:errcheck
 			}
-		}(msg)
+		}(msg, prevs, next)
 	}
 }
 

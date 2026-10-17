@@ -202,9 +202,18 @@ func (u *User) Encode(msgs ...*irc.Message) (err error) {
 }
 
 var (
-	replyRegExp  = regexp.MustCompile(`\@\@(?:!!|[0-9a-z]{26}|[0-9a-f]{3}|\$[0-9A-Za-z\-_\.]{43})\s`)
+	replyRegExp  = regexp.MustCompile(`^\@\@(?:!!|[0-9a-z]{26}|[0-9a-f]{3}|\$[0-9A-Za-z\-_\.]{43})\s`)
 	modifyRegExp = regexp.MustCompile(`^s/(?:!!|[0-9a-z]{26}|[0-9a-f]{3}|\$[0-9A-Za-z\-_\.]{43})?/`)
 )
+
+// threadPrefix returns the thread ("@@id ") that text is a reply to, or an empty string.
+func threadPrefix(text string) string {
+	if !strings.HasPrefix(text, "@@") {
+		return ""
+	}
+
+	return replyRegExp.FindString(text)
+}
 
 // Decode will receive and return a decoded message, or an error.
 // nolint:funlen,gocognit,gocyclo
@@ -221,7 +230,6 @@ func (u *User) Decode() {
 	}
 	logger.Tracef("using paste buffer timeout: %#v", bufferTimeout)
 	timeout := time.Duration(bufferTimeout) * time.Millisecond
-	continuationTimeout := min(timeout, 200*time.Millisecond)
 	t := timer.NewTimer(timeout)
 	t.Stop()
 	var wg sync.WaitGroup
@@ -233,10 +241,17 @@ func (u *User) Decode() {
 		var (
 			bufferedMsg    *irc.Message
 			bufferDeadline time.Time
+			// When the last line was added to the buffer.
+			lastLine time.Time
+			// Set when a message was sent because it had been held for the full timeout: the recipient
+			// and the thread of it. A paste that is still going carries on in that thread.
+			resumeTarget, resumeReply string
 		)
 
 		flush := func() {
 			t.Stop()
+
+			resumeTarget, resumeReply = "", ""
 			if bufferedMsg == nil {
 				return
 			}
@@ -257,7 +272,17 @@ func (u *User) Decode() {
 			u.DecodeCh <- bufferedMsg
 			// clear buffer
 			bufferedMsg = nil
-			bufferDeadline = time.Time{}
+		}
+
+		// The timer is not restarted by the lines added to the message, it is the limit
+		// for how long a message is held, however many lines it consists of.
+		startBuffer := func(msg *irc.Message) {
+			resumeTarget, resumeReply = "", ""
+			bufferedMsg = msg
+			lastLine = time.Now()
+			bufferDeadline = lastLine.Add(timeout)
+
+			t.Reset(timeout)
 		}
 
 		for {
@@ -275,16 +300,25 @@ func (u *User) Decode() {
 							logger.Warnf("timed out flushing decode buffer for %s", u.Nick)
 						}
 						bufferedMsg = nil
-						bufferDeadline = time.Time{}
 					}
 					logger.Tracef("decode buffer goroutine exiting for %s", u.Nick)
 					return
 				}
 
+				// Only PRIVMSGs get merged. QUIT and PART are in the buffer to go after the
+				// message that is held, they must not wait for the timer.
 				// Without a target (e.g. "PRIVMSG :text") there is nothing to compare, the
 				// command handler will reject it. Never buffer those.
-				if len(msg.Params) == 0 || strings.HasPrefix(msg.Trailing, "\x01") || modifyRegExp.MatchString(msg.Trailing) {
-					logger.Trace("flushing buffer because of CTCP, message modifications or a missing target")
+				// The same goes for commands (CTCP, message modifications, reactions and the
+				// messages to the service bots): they are not text to post, so they must not
+				// get merged with the lines around them or wait for the timer.
+				if msg.Command != irc.PRIVMSG ||
+					len(msg.Params) == 0 ||
+					isServiceBot(msg.Params[0]) ||
+					strings.HasPrefix(msg.Trailing, "\x01") ||
+					modifyRegExp.MatchString(msg.Trailing) ||
+					(strings.HasPrefix(msg.Trailing, "@@") && parseReactionToMsgRegExp.MatchString(msg.Trailing)) {
+					logger.Trace("flushing buffer because of QUIT, PART, CTCP, message modifications, reactions, service bots or a missing target")
 					flush()
 
 					u.DecodeCh <- msg
@@ -293,17 +327,21 @@ func (u *User) Decode() {
 				}
 
 				// If starting a thread reply, flush any previous message buffer first.
-				if replyRegExp.MatchString(msg.Trailing) {
+				if strings.HasPrefix(msg.Trailing, "@@") && replyRegExp.MatchString(msg.Trailing) {
 					logger.Trace("flushing buffer because of replies to threads")
 					flush()
 				}
 
 				// are we starting a new buffer ?
 				if bufferedMsg == nil {
-					bufferedMsg = msg
-					bufferDeadline = time.Now().Add(timeout)
+					// A paste that is still going after its message was sent for having been held for
+					// the full timeout (the line follows less than that after the previous one) carries
+					// on in the thread of that message, instead of ending up in the channel.
+					if resumeReply != "" && resumeTarget == msg.Params[0] && time.Since(lastLine) < timeout {
+						msg.Trailing = resumeReply + msg.Trailing
+					}
 
-					t.Reset(continuationTimeout)
+					startBuffer(msg)
 				} else {
 					// make sure we're sending to the same recipient in the buffer
 					if bufferedMsg.Params[0] == msg.Params[0] {
@@ -313,34 +351,34 @@ func (u *User) Decode() {
 							postLimit = br.GetPostSizeLimit()
 						}
 
-						if len(bufferedMsg.Trailing)+len(msg.Trailing)+1 > postLimit-50 {
+						if len(bufferedMsg.Trailing)+len(msg.Trailing)+1 > postLimit-50 || time.Until(bufferDeadline) <= 0 {
+							replyPrefix := threadPrefix(bufferedMsg.Trailing)
+
 							flush()
 
-							bufferedMsg = msg
-							bufferDeadline = time.Now().Add(timeout)
+							msg.Trailing = replyPrefix + msg.Trailing
 
-							t.Reset(continuationTimeout)
+							startBuffer(msg)
 						} else {
 							bufferedMsg.Trailing += "\n" + msg.Trailing
-
-							remaining := time.Until(bufferDeadline)
-							if remaining <= 0 {
-								flush()
-							} else {
-								resetDuration := min(continuationTimeout, remaining)
-								t.Reset(resetDuration)
-							}
+							lastLine = time.Now()
 						}
 					} else {
 						flush()
-						bufferedMsg = msg
-						bufferDeadline = time.Now().Add(timeout)
 
-						t.Reset(continuationTimeout)
+						startBuffer(msg)
 					}
 				}
 			case <-t.C:
+				// The message has been held for as long as it is allowed to.
+				var target, reply string
+				if bufferedMsg != nil {
+					target, reply = bufferedMsg.Params[0], threadPrefix(bufferedMsg.Trailing)
+				}
+
 				flush()
+
+				resumeTarget, resumeReply = target, reply
 			}
 		}
 	}(buffer)
@@ -350,6 +388,16 @@ func (u *User) Decode() {
 		if err != nil {
 			close(buffer)
 			wg.Wait()
+
+			// The message that was held has been handed over by now, but handle() may not have
+			// queued it yet and Quit has to wait for it. handle() only takes this empty message
+			// when it is done with the previous one.
+			if u.DecodeCh != nil {
+				select {
+				case u.DecodeCh <- nil:
+				case <-time.After(1 * time.Second):
+				}
+			}
 
 			isEOF := errors.Is(err, io.EOF) || err.Error() == "EOF"
 			isClosed := errors.Is(err, net.ErrClosed) || strings.Contains(err.Error(), "use of closed network connection")
@@ -369,9 +417,15 @@ func (u *User) Decode() {
 			dmsg = incomingLogLine(msg)
 		}
 
-		// PRIVMSG can be buffered
-		switch msg.Command {
-		case irc.PRIVMSG:
+		// PRIVMSG can be buffered. QUIT and PART go through the buffer as well, so that what is
+		// held in it is sent before them (and not canceled by them).
+		command := msg.Command
+		if strings.HasPrefix(command, "@") && len(msg.Params) > 0 {
+			command = strings.ToUpper(msg.Params[0])
+		}
+
+		switch command {
+		case irc.PRIVMSG, irc.QUIT, irc.PART:
 			logger.Debugf("B: %#v", dmsg)
 			buffer <- msg
 		case irc.PING, irc.MODE:
@@ -392,20 +446,26 @@ func (u *User) Decode() {
 	}
 }
 
+const (
+	serviceSlack      = "slack"
+	serviceMattermost = "mattermost"
+	serviceMastodon   = "mastodon"
+	serviceMatrix     = "matrix"
+)
+
+// isServiceBot tells if nick is one of the service bots (the ones to login to and to send commands to).
+func isServiceBot(nick string) bool {
+	return nick == serviceSlack || nick == serviceMattermost || nick == serviceMastodon || nick == serviceMatrix
+}
+
 // incomingLogLine describes a message from the client for the log, without the credentials in it.
 func incomingLogLine(msg *irc.Message) string {
-	const (
-		serviceSlack      = "slack"
-		serviceMattermost = "mattermost"
-		serviceMastodon   = "mastodon"
-		loginCommand      = "login"
-	)
+	const loginCommand = "login"
 
 	dmsg := "<- " + msg.String()
 
 	switch {
-	case msg.Command == irc.PRIVMSG && len(msg.Params) > 0 &&
-		(msg.Params[0] == serviceSlack || msg.Params[0] == serviceMattermost || msg.Params[0] == serviceMastodon):
+	case msg.Command == irc.PRIVMSG && len(msg.Params) > 0 && isServiceBot(msg.Params[0]):
 		// Don't log sensitive information
 		trail := strings.Split(msg.Trailing, " ")
 		if (msg.Trailing != "" && trail[0] == loginCommand) || (len(msg.Params) > 1 && msg.Params[1] == loginCommand) {

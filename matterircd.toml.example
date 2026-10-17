@@ -29,13 +29,28 @@ gops = false
 # Override client timeout (in seconds)
 #ClientTimeout = 10
 
-#PasteBufferTimeout specifies the amount of time in milliseconds that
-#messages get kept in matterircd internal buffer before being sent to
-#mattermost or slack.
-#Messages that will be received in this time will be concatenated together
-#So this can be used to paste stuff like ansi-art or code.
-#Default 0 (is disabled)
-#Depending on how fast you type 2500 is a good number
+# PasteBufferTimeout specifies the amount of time in milliseconds that
+# messages get kept in matterircd internal buffer before being sent to
+# mattermost or slack.
+# Lines for the same channel or user that are received while a message is
+# being kept are concatenated to it, so this can be used to paste stuff like
+# ansi-art or code (also in a thread).
+# This is a hard limit: a message is sent at the latest this time after its
+# first line was received, however many lines follow. This also means that
+# every message, even a single line, is delayed by this time.
+# To get a paste as a single message this must be longer than the paste takes.
+# A longer paste is sent as multiple messages (as is one that would be too big
+# for a single post). A line that follows the previous one by less than this
+# time is seen as part of the same paste, so a paste in a thread stays in that
+# thread.
+# A line starting with a thread id (@@id) always starts a new message.
+# Reactions (@@id +:emoji:), message modifications (s/id/text), CTCP (like
+# /me) and messages to the mattermost, slack and mastodon service bots are
+# never concatenated, they are sent right away.
+# A message that is being kept when you /part its channel, /quit or get
+# disconnected is sent right away as well, so it doesn't get lost.
+# Minimum 100, a lower value (like the default 0) is raised to 100.
+# Depending on how fast you type 2500 is a good number
 PasteBufferTimeout = 2500
 
 # EXPERIMENTAL: Enable IRCv3 CAP +typing message tags

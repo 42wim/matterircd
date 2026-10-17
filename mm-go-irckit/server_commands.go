@@ -548,10 +548,6 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 			return nil
 		}
 
-		targetLock := u.getMsgChanLock(ch.ID())
-		targetLock.Lock()
-		defer targetLock.Unlock()
-
 		if parseReactionToMsg(u, msg, ch.ID()) {
 			return nil
 		}
@@ -570,9 +566,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 			return err2
 		}
 
-		u.msgLastMutex.Lock()
-		u.msgLast[ch.ID()] = [2]string{msgID, ""}
-		u.msgLastMutex.Unlock()
+		u.setMsgLast(ch.ID(), msgID, "")
 		u.saveLastViewedAt(ch.ID())
 
 		if u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext {
@@ -585,7 +579,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 	// or a user
 	if toUser, exists := s.HasUser(query); exists {
 		switch {
-		case query == "mattermost" || query == "slack" || query == "mastodon" || query == serviceMatrix: //nolint:goconst
+		case isServiceBot(query):
 			go u.handleServiceBot(query, toUser, msg.Trailing)
 			msg.Trailing = "<redacted>"
 		case toUser.Ghost, toUser.Me:
@@ -595,10 +589,6 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 				logger.Tracef("u.br was nil, ignored message")
 				return nil
 			}
-
-			targetLock := u.getMsgChanLock(toUser.User)
-			targetLock.Lock()
-			defer targetLock.Unlock()
 
 			if parseReactionToMsg(u, msg, toUser.User) {
 				logger.Trace("matched parseReactionToMsg")
@@ -629,9 +619,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 				return err2
 			}
 
-			u.msgLastMutex.Lock()
-			u.msgLast[toUser.User] = [2]string{msgID, ""}
-			u.msgLastMutex.Unlock()
+			u.setMsgLast(toUser.User, msgID, "")
 			u.saveLastViewedAt(u.br.GetChannelID(u.ctx, toUser.User, ""))
 
 			if u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext {
@@ -711,57 +699,72 @@ func parseModifyMsg(u *User, msg *irc.Message, channelID string) bool {
 	}
 
 	msgID := ""
+	// s// and s/!!/ refer to the last message we sent (or the one before it
+	// when the last one got deleted), they can never be a
+	// literal message, so they must never be put through as one.
+	useLast := matches[1] == "//" || matches[1] == "/!!/"
 
 	switch {
 	// last message from user. Also support '!!' like shell's history
 	// substitution for previous command.
-	case matches[1] == "//" || matches[1] == "/!!/":
+	case useLast:
 		u.msgLastMutex.RLock()
-		defer u.msgLastMutex.RUnlock()
 		if msgLast, ok := u.msgLast[channelID]; ok {
 			msgID = msgLast[0]
 		}
+
+		u.msgLastMutex.RUnlock()
 	// Mattermost message/thread ID (e.g. 'cfrakpwix7y8pgzux6ta76pm9c')
 	case len(matches[1]) == 28:
 		msgID = strings.ReplaceAll(matches[1], "/", "")
-		u.msgLastMutex.Lock()
-		defer u.msgLastMutex.Unlock()
-		u.msgLast[channelID] = [2]string{msgID, ""}
 	// matterircd message/thread ID (e.g. '004' and 'a12')
 	case len(matches[1]) == 5:
 		id, err := strconv.ParseInt(strings.ReplaceAll(matches[1], "/", ""), 16, 0)
-		if err != nil {
-			logger.Errorf("couldn't parseint %s: %s", matches[1], err)
-		}
+		if err == nil {
+			u.msgMapIndexMutex.RLock()
 
-		u.msgMapIndexMutex.RLock()
-		defer u.msgMapIndexMutex.RUnlock()
+			if postID, ok := u.msgMapIndex[channelID][int(id)]; ok {
+				msgID = postID
+			}
 
-		if _, ok := u.msgMapIndex[channelID][int(id)]; ok {
-			msgID = u.msgMapIndex[channelID][int(id)]
-
-			u.msgLastMutex.Lock()
-			defer u.msgLastMutex.Unlock()
-
-			u.msgLast[channelID] = [2]string{msgID, ""}
+			u.msgMapIndexMutex.RUnlock()
 		}
 	}
 
 	if msgID == "" {
+		if useLast {
+			if text == "" {
+				u.MsgSpoofUser(u, u.br.Protocol(), "could not delete: no previous message found")
+			} else {
+				u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+text+" could not be modified: no previous message found to modify")
+			}
+
+			return true
+		}
+
 		return false
 	}
 
 	err := u.br.ModifyPost(u.ctx, msgID, text)
 	if err != nil {
 		// probably a wrong id, just put it through as normally
-		if strings.Contains(err.Error(), "permissions") {
+		if !useLast && strings.Contains(err.Error(), "permissions") {
 			logger.Trace("parseModifyMsg triggered permissions error")
 			return false
 		}
 		u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+text+" could not be modified "+err.Error())
-	} else {
-		u.saveLastViewedAt(channelID)
+
+		return true
 	}
+
+	if text == "" {
+		// The message is deleted, s// and s/!!/ go back to the one sent before it.
+		u.forgetMsgLast(channelID, msgID)
+	} else if !useLast {
+		u.setMsgLast(channelID, msgID, "")
+	}
+
+	u.saveLastViewedAt(channelID)
 
 	return true
 }
@@ -844,9 +847,7 @@ func threadMsgChannelUser(s Server, u *User, msg *irc.Message, channelID string,
 		return false
 	}
 
-	u.msgLastMutex.Lock()
-	defer u.msgLastMutex.Unlock()
-	u.msgLast[channelID] = [2]string{msgID, threadID}
+	u.setMsgLast(channelID, msgID, threadID)
 
 	if !toUser {
 		u.saveLastViewedAt(channelID)

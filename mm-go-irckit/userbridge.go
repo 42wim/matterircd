@@ -38,6 +38,7 @@ type UserBridge struct {
 	inprogress  atomic.Bool
 	eventChan   chan *bridge.Event
 	away        atomic.Bool
+	quitting    atomic.Bool
 
 	eventLoopMutex   sync.Mutex
 	eventLoopStarted bool
@@ -48,13 +49,16 @@ type UserBridge struct {
 	lastViewedAtDB *bolt.DB
 
 	msgChanLockMutex sync.Mutex
-	msgChanLocks     map[string]*sync.Mutex
+	msgChanLocks     map[string]chan struct{}
 
 	msgCounterMutex sync.RWMutex
 	msgCounter      map[string]int
 
 	msgLastMutex sync.RWMutex
-	msgLast      map[string][2]string
+	// msgLast and msgPrev hold the last and the one before last message we sent
+	// per channel as {msgID, threadID}. msgPrev takes over when msgLast gets deleted.
+	msgLast map[string][2]string
+	msgPrev map[string][2]string
 
 	msgMapMutex      sync.RWMutex
 	msgMap           map[string]map[string]int
@@ -78,8 +82,9 @@ func NewUserBridge(c net.Conn, srv Server, cfg *config.Config, db *bolt.DB) *Use
 	u.cfg = cfg
 	u.lastViewedAtDB = db
 
-	u.msgChanLocks = make(map[string]*sync.Mutex)
+	u.msgChanLocks = make(map[string]chan struct{})
 	u.msgLast = make(map[string][2]string)
+	u.msgPrev = make(map[string][2]string)
 	u.msgMap = make(map[string]map[string]int)
 	u.msgMapIndex = make(map[string]map[int]string)
 	u.msgCounter = make(map[string]int)
@@ -478,13 +483,13 @@ func (u *User) getMessageChannel(channelID string, sender *bridge.UserInfo) Chan
 		}
 	}
 
+	// if we are already in the channel, route message directly to it
+	if ch.HasUser(u) {
+		return ch
+	}
+
 	// check if we mayjoin this channel
 	if u.mayJoin(channelID) {
-		// if we are on it, just return it
-		if ch.HasUser(u) {
-			return ch
-		}
-
 		// otherwise first sync it
 		u.syncChannel(channelID, u.br.GetChannelName(u.ctx, channelID))
 
@@ -784,14 +789,6 @@ func (u *User) handleChannelUpdateEvent(e *bridge.ChannelUpdateEvent) {
 		newCh := u.Srv.Channel(newIRCChanStr)
 		_ = newCh.Join(u)
 
-		u.Lock()
-		if u.channels == nil {
-			u.channels = make(map[Channel]struct{})
-		}
-
-		u.channels[newCh] = struct{}{}
-		u.Unlock()
-
 		noticeMsg := &irc.Message{
 			Prefix:   u.Srv.Prefix(),
 			Command:  irc.NOTICE,
@@ -1070,7 +1067,11 @@ func (u *User) addUsersToChannels() {
 	var joinChannels []*bridge.ChannelInfo
 	for _, brchannel := range u.br.GetChannels() {
 		lastPost := time.UnixMilli(brchannel.LastPostAt)
-		if brchannel.DM && !u.br.BridgeConfig().JoinDM {
+
+		// In Mattermost, both 1-on-1 DMs and Group DMs have no TeamID
+		isAnyDM := brchannel.DM || (u.br.Protocol() == "mattermost" && brchannel.TeamID == "")
+
+		if isAnyDM && !u.br.BridgeConfig().JoinDM { //nolint:nestif
 			// Skip channels with no activity or older than 1 year (~365 days)
 			if brchannel.LastPostAt == 0 || time.Since(lastPost) > 365*24*time.Hour {
 				continue
@@ -1123,7 +1124,7 @@ func (u *User) addUsersToChannels() {
 		}
 
 		// If the channel is explicitly excluded in matterircd.toml, drop it now.
-		if !brchannel.DM && !u.mayJoin(brchannel.ID) {
+		if !isAnyDM && !u.mayJoin(brchannel.ID) {
 			logger.Debugf("Skipping channel %s due to JoinExclude/JoinOnly configuration (LastPost: %v)", brchannel.Name, lastPost)
 
 			continue
@@ -1413,12 +1414,21 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			case <-throttle.C:
 			}
 
+			if u.ctx.Err() != nil || u.br == nil {
+				return
+			}
+
 			since, sinceStr, inDB := u.getChannelSince(u.ctx, brchannel, replayCutoff)
 			isDM := u.br.IsDMChannelName(brchannel.Name)
+			isGM := !isDM && brchannel.DM
 
 			// Determine if this channel is explicitly whitelisted to bypass LazyJoin
 			channelName := brchannel.Name
-			if brchannel.TeamID != u.br.GetMe().TeamID || (u.br.Protocol() == "mattermost" && u.cfg.Mattermost().PrefixMainTeam) {
+			if isGM {
+				if name := u.br.GetChannelName(u.ctx, brchannel.ID); name != "" {
+					channelName = strings.TrimPrefix(name, "#")
+				}
+			} else if brchannel.TeamID != "" && (brchannel.TeamID != u.br.GetMe().TeamID || (u.br.Protocol() == "mattermost" && u.cfg.Mattermost().PrefixMainTeam)) {
 				channelName = u.br.GetTeamName(u.ctx, brchannel.TeamID) + "/" + brchannel.Name
 			}
 
@@ -1435,11 +1445,27 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 				logger.Debugf("Whitelisted channel from LazyJoin: %s", channelName)
 			}
 
+			jo := u.br.BridgeConfig().JoinOnly
+			ji := u.br.BridgeConfig().JoinInclude
+
+			var isJoinListMatched bool
+			if len(jo) > 0 {
+				isJoinListMatched = stringInRegexp(channelName, jo) || stringInRegexp("#"+channelName, jo)
+			} else if len(ji) > 0 {
+				isJoinListMatched = stringInRegexp(channelName, ji) || stringInRegexp("#"+channelName, ji)
+			}
+
+			// If JoinDM is disabled and this GM is not whitelisted or explicitly in join-lists, skip joining it on boot
+			// unless the IRC user has already joined it (e.g. via live traffic or prior to a reconnect).
+			if !u.br.BridgeConfig().JoinDM && isGM && !isWhitelisted && !isJoinListMatched && !u.Srv.Channel(brchannel.ID).HasUser(u) {
+				continue
+			}
+
 			// Dormancy Filter for Public Channels
-			// DMs bypass this because they are already strictly filtered by
+			// 1-on-1 DMs and Group DMs bypass this because they are already filtered by
 			// DefaultDMOfflineThreshold upstream in addUsersToChannels().
 			// Explicitly whitelisted channels bypass this!
-			if lazyJoin && !isDM && !isWhitelisted {
+			if lazyJoin && !brchannel.DM && !isWhitelisted { //nolint:nestif
 				// Strategy "saved": require prior presence in local BoltDB
 				if strategy == "saved" && !inDB {
 					continue
@@ -1524,6 +1550,11 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 				continue
 			}
 
+			// If mayJoin rejected joining the channel, abort replay so messages aren't spoofed into an empty buffer
+			if !isDM && !u.Srv.Channel(brchannel.ID).HasUser(u) {
+				continue
+			}
+
 			if u.isReplayExcluded(brchannel, channelName) {
 				logger.Debugf("Skipping history replay for excluded channel %s (%s)", channelName, brchannel.ID)
 			} else {
@@ -1542,7 +1573,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 //
 //nolint:funlen,gocognit,gocyclo
 func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSince string) {
-	if since == 0 {
+	if since == 0 || u.ctx.Err() != nil || u.br == nil {
 		return
 	}
 
@@ -1621,7 +1652,7 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 		if showReplayHdr && (text != "" || len(files) > 0) {
 			dateStr := ts.Format("2006-01-02 15:04:05")
 			target := "matterircd"
-			if brchannel.DM {
+			if u.br.IsDMChannelName(brchannel.Name) {
 				target = nick
 			}
 			spoof(target, fmt.Sprintf("\x02Replaying msgs since %s\x02 \x1d(%s)\x1d", dateStr, logSince))
@@ -1747,7 +1778,7 @@ func (u *User) syncChannel(id string, name string) error {
 	disableMarkdown := u.br.FormatterConfig().DisableMarkdown
 	inlineCode := u.br.FormatterConfig().MarkdownInlineCode
 
-	// add myself ONLY if I am actually a member
+	// add myself ONLY if I am actually a member and permitted by join rules
 	ch := srv.Channel(id)
 	if u.br.IsChannelMember(id) && !ch.HasUser(u) && u.mayJoin(id) {
 		logger.Tracef("syncChannel adding myself to %s (id: %s)", name, id)
@@ -2234,6 +2265,52 @@ func (u *User) dbBucketName() []byte {
 	return []byte(u.User)
 }
 
+// setMsgLast records msgID as the last message we sent in channelID, the one that was
+// last before becomes the previous one.
+func (u *User) setMsgLast(channelID, msgID, threadID string) {
+	u.msgLastMutex.Lock()
+	defer u.msgLastMutex.Unlock()
+
+	if u.msgPrev == nil {
+		u.msgPrev = make(map[string][2]string)
+	}
+
+	if last, ok := u.msgLast[channelID]; ok {
+		if last[0] != msgID {
+			u.msgPrev[channelID] = last
+		} else if threadID == "" {
+			threadID = last[1] // Preserve thread context on re-edits
+		}
+	}
+
+	u.msgLast[channelID] = [2]string{msgID, threadID}
+}
+
+// forgetMsgLast drops a deleted message from the last messages we sent in channelID.
+// When it was the last one, the previous one becomes the last one again.
+func (u *User) forgetMsgLast(channelID, msgID string) {
+	u.msgLastMutex.Lock()
+	defer u.msgLastMutex.Unlock()
+
+	if prev, ok := u.msgPrev[channelID]; ok && prev[0] == msgID {
+		delete(u.msgPrev, channelID)
+	}
+
+	last, ok := u.msgLast[channelID]
+	if !ok || last[0] != msgID {
+		return
+	}
+
+	if prev, ok := u.msgPrev[channelID]; ok {
+		u.msgLast[channelID] = prev
+		delete(u.msgPrev, channelID)
+
+		return
+	}
+
+	delete(u.msgLast, channelID)
+}
+
 func (u *User) saveLastViewedAt(channelID string) {
 	if channelID == "" {
 		return
@@ -2491,15 +2568,73 @@ func (u *User) isRequestedChannel(channelName string) bool {
 	return ok
 }
 
-func (u *UserBridge) getMsgChanLock(target string) *sync.Mutex {
+// waitMsgChanLocks waits until the messages that are queued up now (see getMsgChanLocks) have been
+// handled, for at most timeout.
+func (u *UserBridge) waitMsgChanLocks(timeout time.Duration) {
+	u.msgChanLockMutex.Lock()
+
+	tails := make([]<-chan struct{}, 0, len(u.msgChanLocks))
+	for _, c := range u.msgChanLocks {
+		tails = append(tails, c)
+	}
+
+	u.msgChanLockMutex.Unlock()
+
+	if len(tails) == 0 {
+		return
+	}
+
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+
+	for _, c := range tails {
+		select {
+		case <-c:
+		case <-deadline.C:
+			return
+		}
+	}
+}
+
+func (u *UserBridge) getMsgChanLocks(targets ...string) ([]<-chan struct{}, chan struct{}) {
+	if len(targets) == 0 {
+		return nil, nil
+	}
+
 	u.msgChanLockMutex.Lock()
 	defer u.msgChanLockMutex.Unlock()
 
-	lock, ok := u.msgChanLocks[target]
-	if !ok {
-		lock = &sync.Mutex{}
-		u.msgChanLocks[target] = lock
+	var prevs []<-chan struct{}
+
+	next := make(chan struct{})
+
+	if len(targets) == 1 {
+		target := targets[0]
+
+		if prev := u.msgChanLocks[target]; prev != nil {
+			prevs = []<-chan struct{}{prev}
+		}
+
+		u.msgChanLocks[target] = next
+
+		return prevs, next
 	}
 
-	return lock
+	seen := make(map[string]struct{}, len(targets))
+
+	for _, target := range targets {
+		if _, ok := seen[target]; ok {
+			continue
+		}
+
+		seen[target] = struct{}{}
+
+		if prev := u.msgChanLocks[target]; prev != nil {
+			prevs = append(prevs, prev)
+		}
+
+		u.msgChanLocks[target] = next
+	}
+
+	return prevs, next
 }

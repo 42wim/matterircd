@@ -44,10 +44,7 @@ func logout(u *User, toUser *User, args []string, service string) {
 	_ = u.logoutFrom(br.Protocol())
 }
 
-const (
-	serviceMatrix = "matrix"
-	helpArg       = "help"
-)
+const helpArg = "help"
 
 func loginMatrix(u *User, toUser *User, args []string) {
 	wMsg := "Matrix support is very much experimental and a work in progress. Use at your own risk."
@@ -322,6 +319,19 @@ func replay(u *User, toUser *User, args []string, service string) {
 	if err != nil {
 		u.MsgUser(toUser, channelName+" not found")
 		return
+	}
+
+	if !u.br.IsDMChannelName(brchannel.Name) && !u.Srv.Channel(brchannel.ID).HasUser(u) {
+		if !u.br.IsChannelMember(brchannel.ID) {
+			u.MsgUser(toUser, "not a member of "+channelName)
+			return
+		}
+
+		err = u.syncChannel(brchannel.ID, "#"+channelName)
+		if err != nil || !u.Srv.Channel(brchannel.ID).HasUser(u) {
+			u.MsgUser(toUser, "failed to join "+channelName)
+			return
+		}
 	}
 
 	// If no custom duration was provided, fall back to our configured strategy
