@@ -118,6 +118,7 @@ func (m *Client) GetStatus(ctx context.Context, userID string) string {
 	m.Users.mu.RLock()
 	cachedUser := m.Users.users[userID]
 	isBot := cachedUser != nil && cachedUser.IsBot
+
 	m.Users.mu.RUnlock()
 
 	if cachedUser == nil {
@@ -125,9 +126,11 @@ func (m *Client) GetStatus(ctx context.Context, userID string) string {
 		m.Users.mu.RLock()
 		cachedUser = m.Users.users[userID]
 		isBot = cachedUser != nil && cachedUser.IsBot
+
 		if lastActive == 0 {
 			lastActive = m.Users.lastUserActivity[userID]
 		}
+
 		m.Users.mu.RUnlock()
 	}
 
