@@ -486,8 +486,8 @@ func (u *User) getMessageChannel(channelID string, sender *bridge.UserInfo) Chan
 		return ch
 	}
 
-	// check if we are eligible to join this channel
-	if u.canJoinChannel(channelID) {
+	// check if we mayjoin this channel
+	if u.mayJoin(channelID) {
 		// otherwise first sync it
 		u.syncChannel(channelID, u.br.GetChannelName(u.ctx, channelID))
 
@@ -1424,7 +1424,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			channelName := brchannel.Name
 			if isGM {
 				if name := u.br.GetChannelName(u.ctx, brchannel.ID); name != "" {
-					channelName = name
+					channelName = strings.TrimPrefix(name, "#")
 				}
 			} else if brchannel.TeamID != "" && (brchannel.TeamID != u.br.GetMe().TeamID || (u.br.Protocol() == "mattermost" && u.cfg.Mattermost().PrefixMainTeam)) {
 				channelName = u.br.GetTeamName(u.ctx, brchannel.TeamID) + "/" + brchannel.Name
@@ -1544,6 +1544,12 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 					u.MsgUser(svc, fmt.Sprintf("replay failed for %s, use REPLAY service", channelName))
 				}
 
+				continue
+			}
+
+			// If mayJoin rejected joining the channel, abort replay so messages aren't spoofed into an empty buffer
+			ch := u.Srv.Channel(brchannel.ID)
+			if !isDM && !ch.HasUser(u) {
 				continue
 			}
 
@@ -1741,19 +1747,6 @@ func (u *User) MsgSpoofUser(sender *User, rcvuser string, text string, maxlen ..
 	}
 }
 
-func (u *User) canJoinChannel(channelID string) bool {
-	if u.mayJoin(channelID) {
-		return true
-	}
-
-	brchannel, err := u.br.GetChannel(u.ctx, channelID)
-	if err == nil && brchannel != nil {
-		return brchannel.DM
-	}
-
-	return false
-}
-
 func (u *User) syncChannel(id string, name string) error {
 	if u.ctx.Err() != nil {
 		return u.ctx.Err()
@@ -1783,9 +1776,9 @@ func (u *User) syncChannel(id string, name string) error {
 	disableMarkdown := u.br.FormatterConfig().DisableMarkdown
 	inlineCode := u.br.FormatterConfig().MarkdownInlineCode
 
-	// add myself ONLY if I am actually a member and permitted to join
+	// add myself ONLY if I am actually a member and permitted by join rules
 	ch := srv.Channel(id)
-	if u.br.IsChannelMember(id) && !ch.HasUser(u) && u.canJoinChannel(id) {
+	if u.br.IsChannelMember(id) && !ch.HasUser(u) && u.mayJoin(id) {
 		logger.Tracef("syncChannel adding myself to %s (id: %s)", name, id)
 		ch.Join(u)
 		svc, _ := srv.HasUser(u.br.Protocol())
