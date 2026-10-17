@@ -184,6 +184,18 @@ docker run -p 6667:6667 42wim/matterircd:latest --bind 0.0.0.0:6667
 
 Now you can connect with your IRC client to port 6667 on your docker host.
 
+### Matrix user commands
+
+(EXPERIMENTAL, work in progress)
+
+Login
+
+```
+/msg matrix login <server> <login> <pass>
+```
+
+Settings are in the `[matrix]` section in [matterircd.toml.example](https://github.com/42wim/matterircd/blob/master/matterircd.toml.example)
+
 ### Mastodon user commands
 
 (still WIP)

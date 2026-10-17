@@ -337,6 +337,19 @@ PrefixContext = false
 
 
 #############################
+##### MATRIX EXAMPLE ########
+#############################
+# EXPERIMENTAL. Connect to matterircd and /msg matrix login <server> <login> <pass>
+[matrix]
+#Show the parent message in threaded replies/reactions
+#HideReplies = false
+#ShortenRepliesTo = 0
+#Threads are shown using Matrix event IDs
+#ThreadContext = "matrix"
+#PrefixContext = false
+
+
+#############################
 ##### MASTODON EXAMPLE ######
 #############################
 [mastodon]

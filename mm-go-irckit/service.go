@@ -44,9 +44,67 @@ func logout(u *User, toUser *User, args []string, service string) {
 	_ = u.logoutFrom(br.Protocol())
 }
 
+const helpArg = "help"
+
+func loginMatrix(u *User, toUser *User, args []string) {
+	wMsg := "Matrix support is very much experimental and a work in progress. Use at your own risk."
+	u.MsgUser(toUser, "WARNING: "+wMsg)
+	logger.Warn(wMsg)
+
+	if len(args) != 1 && len(args) != 3 {
+		u.MsgUser(toUser, "need LOGIN <server> <login> <pass> or LOGIN <token>")
+		return
+	}
+
+	if len(args) == 1 && args[0] == helpArg {
+		u.MsgUser(toUser, "need LOGIN <server> <login> <pass> or LOGIN <token>")
+		return
+	}
+
+	// Atomically claim the login so concurrent logins cannot both proceed.
+	if !u.inprogress.CompareAndSwap(false, true) {
+		u.MsgUser(toUser, "login or logout in progress. Please wait")
+		return
+	}
+	defer u.inprogress.Store(false)
+
+	if br := u.currentBridge(); br != nil && br.Connected() {
+		u.MsgUser(toUser, "already logged in to matrix. Please log out first")
+		return
+	}
+
+	if len(args) == 1 {
+		u.Credentials = bridge.Credentials{Token: args[0]}
+	} else {
+		u.Credentials = bridge.Credentials{
+			Server: args[0],
+			Login:  args[1],
+			Pass:   args[2],
+		}
+	}
+
+	err := u.loginTo(serviceMatrix)
+	if err != nil {
+		u.MsgUser(toUser, err.Error())
+		return
+	}
+
+	u.MsgUser(toUser, "login OK")
+
+	if u.Credentials.Token != "" {
+		u.MsgUser(toUser, "token used: "+u.Credentials.Token)
+	}
+}
+
 func login(u *User, toUser *User, args []string, service string) {
 	if u.inprogress.Load() {
 		u.MsgUser(toUser, "login or logout in progress. Please wait")
+		return
+	}
+
+	if service == serviceMatrix {
+		loginMatrix(u, toUser, args)
+
 		return
 	}
 
@@ -84,7 +142,7 @@ func login(u *User, toUser *User, args []string, service string) {
 			u.Credentials.Token = args[len(args)-1]
 		}
 
-		if u.Credentials.Token == "help" {
+		if u.Credentials.Token == helpArg {
 			u.MsgUser(toUser, "need LOGIN <team> <login> <pass> or LOGIN <token>")
 			return
 		}
@@ -122,6 +180,7 @@ func login(u *User, toUser *User, args []string, service string) {
 		}
 
 		u.MsgUser(toUser, "login OK")
+
 		if u.Credentials.Token != "" {
 			u.MsgUser(toUser, "token used: "+u.Credentials.Token)
 		}
@@ -397,7 +456,7 @@ func search(u *User, toUser *User, args []string, service string) {
 		}
 	}
 
-	if len(args) == 0 || args[0] == "help" {
+	if len(args) == 0 || args[0] == helpArg {
 		u.MsgUser(toUser, "need SEARCH <limit> <text>")
 		u.MsgUser(toUser, "e.g. SEARCH 10 matterircd")
 		return

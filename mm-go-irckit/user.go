@@ -202,8 +202,8 @@ func (u *User) Encode(msgs ...*irc.Message) (err error) {
 }
 
 var (
-	replyRegExp  = regexp.MustCompile(`^\@\@(?:[0-9a-z]{26}|[0-9a-f]{3}|!!)\s`)
-	modifyRegExp = regexp.MustCompile(`^s/(?:[0-9a-z]{26}|[0-9a-f]{3}|!!)?/`)
+	replyRegExp  = regexp.MustCompile(`^\@\@(?:!!|[0-9a-z]{26}|[0-9a-f]{3}|\$[0-9A-Za-z\-_\.]{43})\s`)
+	modifyRegExp = regexp.MustCompile(`^s/(?:!!|[0-9a-z]{26}|[0-9a-f]{3}|\$[0-9A-Za-z\-_\.]{43})?/`)
 )
 
 // threadPrefix returns the thread ("@@id ") that text is a reply to, or an empty string.
@@ -450,11 +450,12 @@ const (
 	serviceSlack      = "slack"
 	serviceMattermost = "mattermost"
 	serviceMastodon   = "mastodon"
+	serviceMatrix     = "matrix"
 )
 
 // isServiceBot tells if nick is one of the service bots (the ones to login to and to send commands to).
 func isServiceBot(nick string) bool {
-	return nick == serviceSlack || nick == serviceMattermost || nick == serviceMastodon
+	return nick == serviceSlack || nick == serviceMattermost || nick == serviceMastodon || nick == serviceMatrix
 }
 
 // incomingLogLine describes a message from the client for the log, without the credentials in it.
