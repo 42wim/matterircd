@@ -1412,6 +1412,10 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			case <-throttle.C:
 			}
 
+			if u.ctx.Err() != nil || u.br == nil {
+				return
+			}
+
 			since, sinceStr, inDB := u.getChannelSince(u.ctx, brchannel, replayCutoff)
 			isDM := u.br.IsDMChannelName(brchannel.Name)
 			isGM := !isDM && brchannel.DM
@@ -1441,10 +1445,10 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			}
 
 			// Dormancy Filter for Public Channels
-			// DMs bypass this because they are already strictly filtered by
+			// 1-on-1 DMs and Group DMs bypass this because they are already filtered by
 			// DefaultDMOfflineThreshold upstream in addUsersToChannels().
 			// Explicitly whitelisted channels bypass this!
-			if lazyJoin && !isDM && !isWhitelisted {
+			if lazyJoin && !brchannel.DM && !isWhitelisted {
 				// Strategy "saved": require prior presence in local BoltDB
 				if strategy == "saved" && !inDB {
 					continue
@@ -1752,7 +1756,7 @@ func (u *User) syncChannel(id string, name string) error {
 	disableMarkdown := u.br.FormatterConfig().DisableMarkdown
 	inlineCode := u.br.FormatterConfig().MarkdownInlineCode
 
-	isDMOrGM := u.br.IsDMChannelName(name)
+	isDMOrGM := u.br.IsDMChannelName(strings.TrimPrefix(name, "#"))
 	if !isDMOrGM {
 		brchannel, err := u.br.GetChannel(u.ctx, id)
 		if err == nil && brchannel != nil {
