@@ -808,8 +808,8 @@ func (m *Mattermost) StatusUser(ctx context.Context, userID string) (string, err
 	localTime := getUserLocalTime(user)
 	prefix, custom, hasCustom := strings.Cut(status, ": ")
 
-	if prefix == model.StatusOnline {
-		lastOnline = ""
+	if prefix == model.StatusOnline && lastOnline != "" {
+		lastOnline = formatLastOnline(lastActivity, true)
 	}
 
 	var details string
@@ -2889,39 +2889,44 @@ func fieldsFitColWidth(fields []*model.SlackAttachmentField, candidates []attach
 	return true
 }
 
-func formatLastOnline(lastActivity int64) string {
+func formatLastOnline(lastActivity int64, isOnline ...bool) string {
 	if lastActivity <= 0 {
 		return ""
+	}
+
+	label := "Last online"
+	if len(isOnline) > 0 && isOnline[0] {
+		label = "Last activity"
 	}
 
 	diff := max(0, time.Now().Unix()-lastActivity)
 
 	switch {
 	case diff < 45:
-		return "Last online just now"
+		return label + " just now"
 	case diff < 3300: // < 55 minutes
 		mins := max(1, (diff+30)/60)
 		if mins == 1 {
-			return "Last online 1 min. ago"
+			return label + " 1 min. ago"
 		}
 
-		return fmt.Sprintf("Last online %d mins. ago", mins)
+		return fmt.Sprintf("%s %d mins. ago", label, mins)
 	case diff < 84600: // < 23.5 hours
 		hours := (diff + 1800) / 3600
 		if hours == 1 {
-			return "Last online 1 hr. ago"
+			return label + " 1 hr. ago"
 		}
 
-		return fmt.Sprintf("Last online %d hr. ago", hours)
+		return fmt.Sprintf("%s %d hr. ago", label, hours)
 	case diff < 30*86400:
 		days := (diff + 43200) / 86400
 		if days == 1 {
-			return "Last online 1 day ago"
+			return label + " 1 day ago"
 		}
 
-		return fmt.Sprintf("Last online %d days ago", days)
+		return fmt.Sprintf("%s %d days ago", label, days)
 	default:
-		return fmt.Sprintf("Last online %s", time.Unix(lastActivity, 0).Format("2006-01-02"))
+		return fmt.Sprintf("%s %s", label, time.Unix(lastActivity, 0).Format("2006-01-02"))
 	}
 }
 
