@@ -822,6 +822,10 @@ func (m *Mattermost) StatusUser(ctx context.Context, userID string) (string, err
 	case localTime != "":
 		details = fmt.Sprintf("local time: %s", localTime)
 	default:
+		if hasCustom {
+			return fmt.Sprintf("%s: %s", prefix, custom), nil
+		}
+
 		return status, nil
 	}
 

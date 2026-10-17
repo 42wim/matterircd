@@ -72,7 +72,7 @@ func (m *Client) GetStatus(ctx context.Context, userID string) string {
 	// Only let recent activity override if the user is marked offline or not yet tracked;
 	// never override explicit server states like "away", "dnd", or "ooo" (OutOfOffice).
 	if (status == model.StatusOffline || !ok) && lastActive > 0 && time.Since(time.Unix(lastActive, 0)) < activeThreshold {
-		return model.StatusOnline
+		status = model.StatusOnline
 	}
 
 	userName := m.GetCachedUserName(userID)
