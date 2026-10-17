@@ -83,6 +83,17 @@ var GetEmojiMap = sync.OnceValue(func() map[string]string {
 			register(strings.ReplaceAll(name, "-", "_"), unicodeVal, supportsSkinTone)
 		}
 
+		// Regional flags (e.g. "mx" -> "flag_mx" and "flag-mx")
+		if len(name) == 2 && len(unicodeVal) == 8 &&
+			unicodeVal[:3] == "\xf0\x9f\x87" && unicodeVal[4:7] == "\xf0\x9f\x87" &&
+			unicodeVal[3] >= 0xA6 && unicodeVal[3] <= 0xBF &&
+			unicodeVal[7] >= 0xA6 && unicodeVal[7] <= 0xBF {
+			register("flag_"+name, unicodeVal, supportsSkinTone)
+			register("flag-"+name, unicodeVal, supportsSkinTone)
+		} else if rest, ok := strings.CutPrefix(name, "flag_"); ok {
+			register("flag-"+rest, unicodeVal, supportsSkinTone)
+		}
+
 		// Gender inversions (e.g. bowing_man -> man_bowing, male_artist -> man_artist)
 		if rest, ok := strings.CutSuffix(name, "_man"); ok {
 			register("man_"+rest, unicodeVal, supportsSkinTone)
@@ -104,8 +115,30 @@ var GetEmojiMap = sync.OnceValue(func() map[string]string {
 			continue
 		}
 
+		// Check if e.Emoji consists of two 4-byte UTF-8 sequences (8 bytes total)
+		// Regional Indicator Symbols (U+1F1E6..U+1F1FF) in UTF-8: [0xF0, 0x9F, 0x87, 0xA6..0xBF]
+		if len(e.Emoji) == 8 &&
+			e.Emoji[0] == 0xF0 && e.Emoji[1] == 0x9F && e.Emoji[2] == 0x87 &&
+			e.Emoji[4] == 0xF0 && e.Emoji[5] == 0x9F && e.Emoji[6] == 0x87 {
+			c1 := 'a' + (e.Emoji[3] - 0xA6)
+			c2 := 'a' + (e.Emoji[7] - 0xA6)
+
+			if c1 >= 'a' && c1 <= 'z' && c2 >= 'a' && c2 <= 'z' {
+				code := string([]byte{c1, c2})
+
+				// registerWithVariants automatically creates flag_<code> and flag-<code>
+				registerWithVariants(code, e.Emoji, false)
+			}
+		}
+
 		for _, alias := range e.Aliases {
 			registerWithVariants(alias, e.Emoji, e.SkinTones)
+
+			// Also support "flag-mexico" or "flag_mexico" for flag aliases
+			if e.Category == "Flags" && !strings.HasPrefix(alias, "flag") {
+				registerWithVariants("flag_"+alias, e.Emoji, false)
+				registerWithVariants("flag-"+alias, e.Emoji, false)
+			}
 		}
 
 		// In addition to emoji aliases, include emoji tags
