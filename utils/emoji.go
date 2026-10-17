@@ -120,7 +120,6 @@ var GetEmojiMap = sync.OnceValue(func() map[string]string {
 		if len(e.Emoji) == 8 &&
 			e.Emoji[0] == 0xF0 && e.Emoji[1] == 0x9F && e.Emoji[2] == 0x87 &&
 			e.Emoji[4] == 0xF0 && e.Emoji[5] == 0x9F && e.Emoji[6] == 0x87 {
-
 			c1 := 'a' + (e.Emoji[3] - 0xA6)
 			c2 := 'a' + (e.Emoji[7] - 0xA6)
 
