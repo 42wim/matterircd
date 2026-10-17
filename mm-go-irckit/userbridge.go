@@ -1448,7 +1448,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			// 1-on-1 DMs and Group DMs bypass this because they are already filtered by
 			// DefaultDMOfflineThreshold upstream in addUsersToChannels().
 			// Explicitly whitelisted channels bypass this!
-			if lazyJoin && !brchannel.DM && !isWhitelisted {  //nolint:nestif
+			if lazyJoin && !brchannel.DM && !isWhitelisted { //nolint:nestif
 				// Strategy "saved": require prior presence in local BoltDB
 				if strategy == "saved" && !inDB {
 					continue
@@ -1551,7 +1551,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 //
 //nolint:funlen,gocognit,gocyclo
 func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSince string) {
-	if since == 0 {
+	if since == 0 || u.ctx.Err() != nil || u.br == nil {
 		return
 	}
 
