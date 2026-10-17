@@ -262,6 +262,19 @@ func replay(u *User, toUser *User, args []string, service string) {
 		return
 	}
 
+	if !u.br.IsDMChannelName(brchannel.Name) && !u.Srv.Channel(brchannel.ID).HasUser(u) {
+		if !u.br.IsChannelMember(brchannel.ID) {
+			u.MsgUser(toUser, "not a member of "+channelName)
+			return
+		}
+
+		err = u.syncChannel(brchannel.ID, "#"+channelName)
+		if err != nil || !u.Srv.Channel(brchannel.ID).HasUser(u) {
+			u.MsgUser(toUser, "failed to join "+channelName)
+			return
+		}
+	}
+
 	// If no custom duration was provided, fall back to our configured strategy
 	if since == 0 {
 		// Cap manual unbounded replays just like the startup worker
