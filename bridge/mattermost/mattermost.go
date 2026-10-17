@@ -779,7 +779,15 @@ func (m *Mattermost) SetTopic(ctx context.Context, channelID, text string) error
 }
 
 func (m *Mattermost) IsOnline(status string) bool {
-	return status == model.StatusOnline
+	// A user is classified as online if their presence is "online" (with or without
+	// display details like activity or local time).
+	// Custom statuses (indicated by "): " or ": ") are excluded so that handlers
+	// preserve intentional custom-status notifications (RPL_AWAY).
+	if status == model.StatusOnline {
+		return true
+	}
+
+	return strings.HasPrefix(status, model.StatusOnline+" (") && !strings.Contains(status, "): ")
 }
 
 func (m *Mattermost) StatusUser(ctx context.Context, userID string) (string, error) {

@@ -1195,13 +1195,22 @@ func CmdWhois(s Server, u *User, msg *irc.Message) error {
 
 		status, _ := u.br.StatusUser(u.ctx, other.User)
 
-		if status != "" && !u.br.IsOnline(status) {
-			r = append(r, &irc.Message{
-				Prefix:   s.Prefix(),
-				Params:   []string{u.Nick, other.Nick},
-				Command:  irc.RPL_AWAY,
-				Trailing: utils.EmojiReplaceAliases(status, u.br.FormatterConfig().CustomEmoji),
-			})
+		if status != "" {
+			if !u.br.IsOnline(status) {
+				r = append(r, &irc.Message{
+					Prefix:   s.Prefix(),
+					Params:   []string{u.Nick, other.Nick},
+					Command:  irc.RPL_AWAY,
+					Trailing: utils.EmojiReplaceAliases(status, u.br.FormatterConfig().CustomEmoji),
+				})
+			} else if status != "online" {
+				r = append(r, &irc.Message{
+					Prefix:   s.Prefix(),
+					Params:   []string{u.Nick, other.Nick},
+					Command:  "320", // RPL_WHOISSPECIAL
+					Trailing: utils.EmojiReplaceAliases(status, u.br.FormatterConfig().CustomEmoji),
+				})
+			}
 		}
 
 		r = append(r, &irc.Message{
