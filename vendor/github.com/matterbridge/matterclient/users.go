@@ -582,7 +582,7 @@ func (c *UsersCache) SetUserCustomStatus(userID string, rawJSON string, tzLoc ..
 		return
 	}
 
-	if status.ExpiresAt == "" {
+	if status.Duration == "dont_clear" || status.ExpiresAt == "" || status.ExpiresAt == "0001-01-01T00:00:00Z" {
 		delete(c.customStatusExpiresAt, userID)
 		c.customStatuses[userID] = formattedStatus
 
@@ -590,9 +590,9 @@ func (c *UsersCache) SetUserCustomStatus(userID string, rawJSON string, tzLoc ..
 	}
 
 	expiry, parseErr := time.Parse(time.RFC3339, status.ExpiresAt)
-	if parseErr != nil || expiry.IsZero() || expiry.Unix() <= 0 {
+	if parseErr != nil {
+		c.customStatuses[userID] = ""
 		delete(c.customStatusExpiresAt, userID)
-		c.customStatuses[userID] = formattedStatus
 
 		return
 	}

@@ -785,32 +785,28 @@ func (m *Mattermost) IsOnline(status string) bool {
 func (m *Mattermost) StatusUser(ctx context.Context, userID string) (string, error) {
 	userName := m.mc.GetCachedUserName(userID)
 
+	status := m.mc.GetStatus(ctx, userID)
+	if status == "" {
+		return status, nil
+	}
+
+	user := m.mc.GetUser(ctx, userID)
+	localTime := getUserLocalTime(user)
+	prefix, custom, hasCustom := strings.Cut(status, ": ")
+
 	var lastOnline string
 
 	lastActivity := m.mc.GetUserLastActivity(userID)
 	if lastActivity > 0 {
-		// Suppress "Last online" for any non-online status if activity is within the 20-minute threshold
 		diff := max(0, time.Now().Unix()-lastActivity)
-		if diff >= 20*60 {
+		if prefix == model.StatusOnline {
+			lastOnline = formatLastOnline(lastActivity, true)
+		} else if diff >= 20*60 {
 			lastOnline = formatLastOnline(lastActivity)
 		}
 	}
 
 	logger.Debugf("StatusUser: User: %s (%s) lastOnline: %s (%d)", userName, userID, formatLastOnline(lastActivity), lastActivity)
-
-	status := m.mc.GetStatus(ctx, userID)
-	if status == "" || m.IsOnline(status) {
-		return status, nil
-	}
-
-	user := m.mc.GetUser(ctx, userID)
-
-	localTime := getUserLocalTime(user)
-	prefix, custom, hasCustom := strings.Cut(status, ": ")
-
-	if prefix == model.StatusOnline && lastOnline != "" {
-		lastOnline = formatLastOnline(lastActivity, true)
-	}
 
 	var details string
 
