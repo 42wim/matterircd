@@ -113,6 +113,7 @@ type UserSummary struct {
 	Roles     string            `json:"roles"`
 	Props     map[string]string `json:"props"`
 	Timezone  map[string]string `json:"timezone"`
+	IsBot     bool              `json:"is_bot"`
 }
 
 type Team struct {

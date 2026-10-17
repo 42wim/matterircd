@@ -1105,6 +1105,12 @@ func CmdWho(s Server, u *User, msg *irc.Message) error {
 	return u.Encode(r...)
 }
 
+// sorcix/irc doesn't support these yet
+const (
+	RPL_WHOISBOT     = "335"
+	RPL_WHOISSPECIAL = "320"
+)
+
 // CmdWhois is a handler for the /WHOIS command.
 func CmdWhois(s Server, u *User, msg *irc.Message) error {
 	who := msg.Params[0]
@@ -1207,10 +1213,20 @@ func CmdWhois(s Server, u *User, msg *irc.Message) error {
 				r = append(r, &irc.Message{
 					Prefix:   s.Prefix(),
 					Params:   []string{u.Nick, other.Nick},
-					Command:  "320", // RPL_WHOISSPECIAL
+					Command:  RPL_WHOISSPECIAL,
 					Trailing: utils.EmojiReplaceAliases(status, u.br.FormatterConfig().CustomEmoji),
 				})
 			}
+		}
+
+		otherUser := u.br.GetUser(u.ctx, other.User)
+		if otherUser != nil && (strings.Contains(otherUser.Roles, "bot") || isServiceBot(other.Nick)) {
+			r = append(r, &irc.Message{
+				Prefix:   s.Prefix(),
+				Params:   []string{u.Nick, other.Nick},
+				Command:  RPL_WHOISBOT,
+				Trailing: "is a bot on Mattermost",
+			})
 		}
 
 		r = append(r, &irc.Message{

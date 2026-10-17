@@ -51,6 +51,8 @@ func (m *Client) GetStatus(ctx context.Context, userID string) string {
 	lastFetched := m.Users.statusLastUpdated[userID]
 	customStatus, tracked := m.Users.customStatuses[userID]
 	customExpiresAt := m.Users.customStatusExpiresAt[userID]
+	cachedUser := m.Users.users[userID]
+	isBot := cachedUser != nil && cachedUser.IsBot
 	m.Users.mu.RUnlock()
 
 	if customStatus != "" && customExpiresAt > 0 && time.Now().Unix() >= customExpiresAt {
@@ -117,12 +119,14 @@ func (m *Client) GetStatus(ctx context.Context, userID string) string {
 
 	// Only let recent activity override if the user is marked offline;
 	// never override explicit server states like "away", "dnd", or "ooo" (OutOfOffice).
-	if status == model.StatusOffline && lastActive > 0 && time.Since(time.Unix(lastActive, 0)) < activeThreshold {
+	if isBot {
+		status = model.StatusOnline
+	} else if status == model.StatusOffline && lastActive > 0 && time.Since(time.Unix(lastActive, 0)) < activeThreshold {
 		status = model.StatusOnline
 	}
 
-	// Downgrade zombie online sessions with no activity for > offlineThreshold to offline
-	if status == model.StatusOnline && lastActive > 0 && time.Since(time.Unix(lastActive, 0)) > offlineThreshold {
+	// Downgrade zombie online sessions with no activity for > offlineThreshold to offline (bots exempt)
+	if !isBot && status == model.StatusOnline && lastActive > 0 && time.Since(time.Unix(lastActive, 0)) > offlineThreshold {
 		status = model.StatusOffline
 	}
 
@@ -173,6 +177,12 @@ func (m *Client) GetStatuses(ctx context.Context) map[string]string {
 	var missingIDs []string
 
 	for id := range m.Users.users {
+		if m.Users.users[id].IsBot {
+			statuses[id] = model.StatusOnline
+
+			continue
+		}
+
 		status, ok := m.Users.statuses[id]
 		lastActive := m.Users.lastUserActivity[id]
 
@@ -904,6 +914,7 @@ func (m *Client) UpdateUser(user *model.User, batchLock ...bool) *model.User {
 		user.Roles,
 		user.Props,
 		user.Timezone,
+		user.IsBot,
 	)
 }
 
@@ -931,6 +942,7 @@ func (m *Client) UpdateUserSummary(u *UserSummary, batchLock ...bool) *model.Use
 		u.Roles,
 		u.Props,
 		u.Timezone,
+		u.IsBot,
 	)
 }
 
@@ -993,13 +1005,15 @@ func (c *UsersCache) userIDKey(userID string) string {
 }
 
 //nolint:funlen
-func (m *Client) updateUserLocked(id string, updateAt int64, deleteAt int64, username, firstName, lastName, nickname, roles string, props map[string]string, timezone map[string]string) *model.User {
+func (m *Client) updateUserLocked(id string, updateAt int64, deleteAt int64, username, firstName, lastName, nickname, roles string, props map[string]string, timezone map[string]string, isBot ...bool) *model.User {
 	switch roles {
 	case "system_user":
 		roles = "system_user"
 	case "system_admin system_user":
 		roles = "system_admin system_user"
 	}
+
+	bot := len(isBot) > 0 && isBot[0]
 
 	cachedUser, exists := m.Users.users[id]
 	if !exists {
@@ -1014,10 +1028,15 @@ func (m *Client) updateUserLocked(id string, updateAt int64, deleteAt int64, use
 			Roles:     roles,
 			Props:     props,
 			Timezone:  timezone,
+			IsBot:     bot,
 		}
 		m.Users.users[id] = cachedUser
 
 		return cachedUser
+	}
+
+	if bot != cachedUser.IsBot {
+		cachedUser.IsBot = bot
 	}
 
 	if updateAt > 0 && cachedUser.UpdateAt != updateAt {
