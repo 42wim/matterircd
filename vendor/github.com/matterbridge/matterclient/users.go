@@ -121,9 +121,11 @@ func (m *Client) GetStatus(ctx context.Context, userID string) string {
 		m.Users.mu.RUnlock()
 	}
 
-	// Downgrade zombie online sessions with no activity for > offlineThreshold to offline
-	if status == model.StatusOnline && lastActive > 0 && time.Since(time.Unix(lastActive, 0)) > offlineThreshold {
-		status = model.StatusOffline
+	// Re-verify recent activity after any cache refresh:
+	// only let recent activity override if marked offline or not yet tracked;
+	// never override explicit server states like "away", "dnd", or "ooo".
+	if (status == model.StatusOffline || !ok) && lastActive > 0 && time.Since(time.Unix(lastActive, 0)) < activeThreshold {
+		status = model.StatusOnline
 	}
 
 	if !tracked {
