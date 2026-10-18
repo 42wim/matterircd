@@ -190,7 +190,7 @@ func (m *Client) GetStatuses(ctx context.Context) map[string]string {
 	var missingIDs []string
 
 	for id := range m.Users.users {
-		if m.IsBot(id) {
+		if m.IsBot(id, true) {
 			statuses[id] = model.StatusOnline
 
 			continue
@@ -519,9 +519,12 @@ func (m *Client) GetUsers() map[string]*model.User {
 }
 
 // IsBot reports whether the cached user is a bot account safely under the cache lock.
-func (m *Client) IsBot(userID string) bool {
-	m.Users.mu.RLock()
-	defer m.Users.mu.RUnlock()
+func (m *Client) IsBot(userID string, batchLock ...bool) bool {
+	hasBatchLock := len(batchLock) > 0 && batchLock[0]
+	if !hasBatchLock {
+		m.Users.mu.RLock()
+		defer m.Users.mu.RUnlock()
+	}
 
 	u := m.Users.users[userID]
 	if u == nil {
