@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/mattermost/mattermost/server/public/model"
@@ -115,14 +116,38 @@ func (m *Client) GetStatus(ctx context.Context, userID string) string {
 		m.Users.mu.RUnlock()
 	}
 
+	isBot := m.IsBot(userID)
+	if m.GetCachedUser(userID) == nil {
+		m.GetUser(ctx, userID)
+		isBot = m.IsBot(userID)
+
+		m.Users.mu.RLock()
+
+		if lastActive == 0 {
+			lastActive = m.Users.lastUserActivity[userID]
+		}
+
+		m.Users.mu.RUnlock()
+	}
+
 	// Only let recent activity override if the user is marked offline;
 	// never override explicit server states like "away", "dnd", or "ooo" (OutOfOffice).
-	if status == model.StatusOffline && lastActive > 0 && time.Since(time.Unix(lastActive, 0)) < activeThreshold {
+	if isBot {
+		status = model.StatusOffline
+
+		m.Users.mu.RLock()
+
+		if u := m.Users.users[userID]; u != nil && u.DeleteAt == 0 {
+			status = model.StatusOnline
+		}
+
+		m.Users.mu.RUnlock()
+	} else if status == model.StatusOffline && lastActive > 0 && time.Since(time.Unix(lastActive, 0)) < activeThreshold {
 		status = model.StatusOnline
 	}
 
-	// Downgrade zombie online sessions with no activity for > offlineThreshold to offline
-	if status == model.StatusOnline && lastActive > 0 && time.Since(time.Unix(lastActive, 0)) > offlineThreshold {
+	// Downgrade zombie online sessions with no activity for > offlineThreshold to offline (bots exempt)
+	if !isBot && status == model.StatusOnline && lastActive > 0 && time.Since(time.Unix(lastActive, 0)) > offlineThreshold {
 		status = model.StatusOffline
 	}
 
@@ -172,7 +197,17 @@ func (m *Client) GetStatuses(ctx context.Context) map[string]string {
 	statuses := make(map[string]string, len(m.Users.users))
 	var missingIDs []string
 
-	for id := range m.Users.users {
+	for id, u := range m.Users.users {
+		if m.IsBot(id, true) {
+			if u != nil && u.DeleteAt == 0 {
+				statuses[id] = model.StatusOnline
+			} else {
+				statuses[id] = model.StatusOffline
+			}
+
+			continue
+		}
+
 		status, ok := m.Users.statuses[id]
 		lastActive := m.Users.lastUserActivity[id]
 
@@ -493,6 +528,22 @@ func (m *Client) GetUsers() map[string]*model.User {
 	}
 
 	return users
+}
+
+// IsBot reports whether the cached user is a bot account safely under the cache lock.
+func (m *Client) IsBot(userID string, batchLock ...bool) bool {
+	hasBatchLock := len(batchLock) > 0 && batchLock[0]
+	if !hasBatchLock {
+		m.Users.mu.RLock()
+		defer m.Users.mu.RUnlock()
+	}
+
+	u := m.Users.users[userID]
+	if u == nil {
+		return false
+	}
+
+	return u.IsBot || u.AuthService == "bot" || strings.Contains(u.Roles, "bot")
 }
 
 func (c *UsersCache) RecordUserActivity(userID string) {
@@ -904,6 +955,7 @@ func (m *Client) UpdateUser(user *model.User, batchLock ...bool) *model.User {
 		user.Roles,
 		user.Props,
 		user.Timezone,
+		user.IsBot,
 	)
 }
 
@@ -931,6 +983,7 @@ func (m *Client) UpdateUserSummary(u *UserSummary, batchLock ...bool) *model.Use
 		u.Roles,
 		u.Props,
 		u.Timezone,
+		u.IsBot,
 	)
 }
 
@@ -992,14 +1045,16 @@ func (c *UsersCache) userIDKey(userID string) string {
 	return userID
 }
 
-//nolint:funlen
-func (m *Client) updateUserLocked(id string, updateAt int64, deleteAt int64, username, firstName, lastName, nickname, roles string, props map[string]string, timezone map[string]string) *model.User {
+//nolint:funlen,gocyclo
+func (m *Client) updateUserLocked(id string, updateAt int64, deleteAt int64, username, firstName, lastName, nickname, roles string, props map[string]string, timezone map[string]string, isBot ...bool) *model.User {
 	switch roles {
 	case "system_user":
 		roles = "system_user"
 	case "system_admin system_user":
 		roles = "system_admin system_user"
 	}
+
+	bot := len(isBot) > 0 && isBot[0]
 
 	cachedUser, exists := m.Users.users[id]
 	if !exists {
@@ -1014,10 +1069,15 @@ func (m *Client) updateUserLocked(id string, updateAt int64, deleteAt int64, use
 			Roles:     roles,
 			Props:     props,
 			Timezone:  timezone,
+			IsBot:     bot,
 		}
 		m.Users.users[id] = cachedUser
 
 		return cachedUser
+	}
+
+	if bot != cachedUser.IsBot {
+		cachedUser.IsBot = bot
 	}
 
 	if updateAt > 0 && cachedUser.UpdateAt != updateAt {

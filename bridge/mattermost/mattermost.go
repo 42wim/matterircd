@@ -802,9 +802,10 @@ func (m *Mattermost) StatusUser(ctx context.Context, userID string) (string, err
 	localTime := getUserLocalTime(user)
 	prefix, custom, hasCustom := strings.Cut(status, ": ")
 
+	lastActivity := m.mc.GetUserLastActivity(userID)
+
 	var lastOnline string
 
-	lastActivity := m.mc.GetUserLastActivity(userID)
 	if lastActivity > 0 {
 		diff := max(0, time.Now().Unix()-lastActivity)
 		if prefix == model.StatusOnline {
@@ -1148,12 +1149,17 @@ func (m *Mattermost) createUser(mmuser *model.User) *bridge.UserInfo {
 		}
 	}
 
+	roles := mmuser.Roles
+	if m.mc.IsBot(mmuser.Id) {
+		roles += " bot"
+	}
+
 	info := &bridge.UserInfo{
 		Nick:        nick,
 		User:        mmuser.Id,
 		Real:        realName,
 		Host:        m.credentials.Server,
-		Roles:       mmuser.Roles,
+		Roles:       roles,
 		Ghost:       true,
 		Me:          me,
 		TeamID:      teamID,
