@@ -799,21 +799,16 @@ func (m *Mattermost) StatusUser(ctx context.Context, userID string) (string, err
 	}
 
 	user := m.mc.GetUser(ctx, userID)
-	isBot := m.mc.IsBot(userID)
-
 	localTime := getUserLocalTime(user)
 	prefix, custom, hasCustom := strings.Cut(status, ": ")
 
-	if isBot {
-		prefix = model.StatusOnline
-		if hasCustom {
-			status = model.StatusOnline + ": " + custom
-		} else {
-			status = model.StatusOnline
+	lastActivity := m.mc.GetUserLastActivity(userID)
+	if user != nil && user.LastActivityAt > 0 {
+		userActSec := user.LastActivityAt / 1000
+		if userActSec > lastActivity {
+			lastActivity = userActSec
 		}
 	}
-
-	lastActivity := m.mc.GetUserLastActivity(userID)
 
 	var lastOnline string
 
