@@ -134,8 +134,8 @@ func (m *Client) GetStatus(ctx context.Context, userID string) string {
 		status = model.StatusOnline
 	}
 
-	// Downgrade zombie online sessions with no activity for > offlineThreshold to offline
-	if status == model.StatusOnline && lastActive > 0 && time.Since(time.Unix(lastActive, 0)) > offlineThreshold {
+	// Downgrade zombie online sessions with no activity for > offlineThreshold to offline (bots exempt)
+	if !m.IsBot(userID) && status == model.StatusOnline && lastActive > 0 && time.Since(time.Unix(lastActive, 0)) > offlineThreshold {
 		status = model.StatusOffline
 	}
 
@@ -189,7 +189,7 @@ func (m *Client) GetStatuses(ctx context.Context) map[string]string {
 		status, ok := m.Users.statuses[id]
 		lastActive := m.Users.lastUserActivity[id]
 
-		if ok && status == model.StatusOnline && lastActive > 0 && now.Sub(time.Unix(lastActive, 0)) > offlineThreshold {
+		if !m.IsBot(id, true) && ok && status == model.StatusOnline && lastActive > 0 && now.Sub(time.Unix(lastActive, 0)) > offlineThreshold {
 			statuses[id] = model.StatusOffline
 
 			continue
