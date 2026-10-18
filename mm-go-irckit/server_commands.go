@@ -506,8 +506,7 @@ var hexColorRegExp = regexp.MustCompile(`\x04[0-9a-fA-F]{6}`)
 
 // isBareThreadID checks if a message consists solely of an unadorned thread ID
 // without any message body, preventing accidental sends from creating root posts.
-// Supports Mattermost, Slack (mapped 3-hex and raw timestamps), Matrix ($ IDs),
-// Mastodon (snowflake IDs), and !! history expansion.
+// Supports !! (history), 3-hex IDs, 26-char Mattermost IDs, and Matrix ($) IDs.
 func isBareThreadID(msg string) bool {
 	if !strings.HasPrefix(msg, "@@") {
 		return false
@@ -515,7 +514,8 @@ func isBareThreadID(msg string) bool {
 
 	trimmed := strings.TrimSpace(msg)
 
-	if strings.ContainsAny(trimmed, " \t") {
+	// A message with whitespace or newlines contains message text (or is a multiline paste buffer)
+	if strings.ContainsAny(trimmed, " \t\r\n") {
 		return false
 	}
 
@@ -525,11 +525,16 @@ func isBareThreadID(msg string) bool {
 		return true
 	}
 
-	if len(id) < 3 || len(id) > 26 {
+	var validChars string
+
+	switch len(id) {
+	case 3:
+		validChars = "0123456789abcdef"
+	case 26:
+		validChars = "0123456789abcdefghijklmnopqrstuvwxyz"
+	default:
 		return false
 	}
-
-	const validChars = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-_"
 
 	for i := range len(id) {
 		if strings.IndexByte(validChars, id[i]) == -1 {
@@ -569,23 +574,27 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 		return nil
 	}
 
+	// Convert IRC formatting / emphasis to markdown.
+	msg.Trailing = utils.Irc2Markdown(msg.Trailing)
+
 	if isBareThreadID(msg.Trailing) {
 		trimmed := strings.TrimSpace(msg.Trailing)
 
 		logger.Debugf("Dropping bare thread ID without message text from %s: %s", u.Nick, trimmed)
 
-		fromUser, ok := s.HasUser(u.br.Protocol())
-		if !ok {
-			fromUser = u
+		fromUser := u
+
+		br := u.currentBridge()
+		if br != nil {
+			if svc, ok := s.HasUser(br.Protocol()); ok {
+				fromUser = svc
+			}
 		}
 
 		u.MsgSpoofUser(fromUser, query, "Dropped bare thread ID without message text: "+trimmed)
 
 		return nil
 	}
-
-	// Convert IRC formatting / emphasis to markdown.
-	msg.Trailing = utils.Irc2Markdown(msg.Trailing)
 
 	// are we sending to a channel
 	if ch, exists := s.HasChannel(query); exists {
