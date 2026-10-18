@@ -799,7 +799,7 @@ func (m *Mattermost) StatusUser(ctx context.Context, userID string) (string, err
 	}
 
 	user := m.mc.GetUser(ctx, userID)
-	isBot := user != nil && (user.IsBot || user.AuthService == "bot" || strings.Contains(user.Roles, "bot"))
+	isBot := m.mc.IsBot(userID)
 
 	localTime := getUserLocalTime(user)
 	prefix, custom, hasCustom := strings.Cut(status, ": ")
@@ -1161,7 +1161,7 @@ func (m *Mattermost) createUser(mmuser *model.User) *bridge.UserInfo {
 	}
 
 	roles := mmuser.Roles
-	if mmuser.IsBot || mmuser.AuthService == "bot" {
+	if m.mc.IsBot(mmuser.Id) {
 		roles += " bot"
 	}
 

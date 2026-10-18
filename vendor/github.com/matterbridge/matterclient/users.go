@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/mattermost/mattermost/server/public/model"
@@ -115,22 +116,15 @@ func (m *Client) GetStatus(ctx context.Context, userID string) string {
 		m.Users.mu.RUnlock()
 	}
 
-	m.Users.mu.RLock()
-	cachedUser := m.Users.users[userID]
-	isBot := cachedUser != nil && cachedUser.IsBot
-
-	m.Users.mu.RUnlock()
-
-	if cachedUser == nil {
+	isBot := m.IsBot(userID)
+	if m.GetCachedUser(userID) == nil {
 		m.GetUser(ctx, userID)
-		m.Users.mu.RLock()
-		cachedUser = m.Users.users[userID]
-		isBot = cachedUser != nil && cachedUser.IsBot
+		isBot = m.IsBot(userID)
 
+		m.Users.mu.RLock()
 		if lastActive == 0 {
 			lastActive = m.Users.lastUserActivity[userID]
 		}
-
 		m.Users.mu.RUnlock()
 	}
 
@@ -520,6 +514,19 @@ func (m *Client) GetUsers() map[string]*model.User {
 	}
 
 	return users
+}
+
+// IsBot reports whether the cached user is a bot account safely under the cache lock.
+func (m *Client) IsBot(userID string) bool {
+	m.Users.mu.RLock()
+	defer m.Users.mu.RUnlock()
+
+	u := m.Users.users[userID]
+	if u == nil {
+		return false
+	}
+
+	return u.IsBot || u.AuthService == "bot" || strings.Contains(u.Roles, "bot")
 }
 
 func (c *UsersCache) RecordUserActivity(userID string) {
