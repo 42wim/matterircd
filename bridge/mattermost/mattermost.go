@@ -803,12 +803,6 @@ func (m *Mattermost) StatusUser(ctx context.Context, userID string) (string, err
 	prefix, custom, hasCustom := strings.Cut(status, ": ")
 
 	lastActivity := m.mc.GetUserLastActivity(userID)
-	if user != nil && user.LastActivityAt > 0 {
-		userActSec := user.LastActivityAt / 1000
-		if userActSec > lastActivity {
-			lastActivity = userActSec
-		}
-	}
 
 	var lastOnline string
 
