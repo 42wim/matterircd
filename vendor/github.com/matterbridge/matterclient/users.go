@@ -116,10 +116,8 @@ func (m *Client) GetStatus(ctx context.Context, userID string) string {
 		m.Users.mu.RUnlock()
 	}
 
-	isBot := m.IsBot(userID)
 	if m.GetCachedUser(userID) == nil {
 		m.GetUser(ctx, userID)
-		isBot = m.IsBot(userID)
 
 		m.Users.mu.RLock()
 
@@ -132,22 +130,12 @@ func (m *Client) GetStatus(ctx context.Context, userID string) string {
 
 	// Only let recent activity override if the user is marked offline;
 	// never override explicit server states like "away", "dnd", or "ooo" (OutOfOffice).
-	if isBot {
-		status = model.StatusOffline
-
-		m.Users.mu.RLock()
-
-		if u := m.Users.users[userID]; u != nil && u.DeleteAt == 0 {
-			status = model.StatusOnline
-		}
-
-		m.Users.mu.RUnlock()
-	} else if status == model.StatusOffline && lastActive > 0 && time.Since(time.Unix(lastActive, 0)) < activeThreshold {
+	if status == model.StatusOffline && lastActive > 0 && time.Since(time.Unix(lastActive, 0)) < activeThreshold {
 		status = model.StatusOnline
 	}
 
-	// Downgrade zombie online sessions with no activity for > offlineThreshold to offline (bots exempt)
-	if !isBot && status == model.StatusOnline && lastActive > 0 && time.Since(time.Unix(lastActive, 0)) > offlineThreshold {
+	// Downgrade zombie online sessions with no activity for > offlineThreshold to offline
+	if status == model.StatusOnline && lastActive > 0 && time.Since(time.Unix(lastActive, 0)) > offlineThreshold {
 		status = model.StatusOffline
 	}
 
@@ -197,17 +185,7 @@ func (m *Client) GetStatuses(ctx context.Context) map[string]string {
 	statuses := make(map[string]string, len(m.Users.users))
 	var missingIDs []string
 
-	for id, u := range m.Users.users {
-		if m.IsBot(id, true) {
-			if u != nil && u.DeleteAt == 0 {
-				statuses[id] = model.StatusOnline
-			} else {
-				statuses[id] = model.StatusOffline
-			}
-
-			continue
-		}
-
+	for id := range m.Users.users {
 		status, ok := m.Users.statuses[id]
 		lastActive := m.Users.lastUserActivity[id]
 
