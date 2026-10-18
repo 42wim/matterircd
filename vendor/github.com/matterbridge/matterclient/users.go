@@ -133,7 +133,15 @@ func (m *Client) GetStatus(ctx context.Context, userID string) string {
 	// Only let recent activity override if the user is marked offline;
 	// never override explicit server states like "away", "dnd", or "ooo" (OutOfOffice).
 	if isBot {
-		status = model.StatusOnline
+		status = model.StatusOffline
+
+		m.Users.mu.RLock()
+
+		if u := m.Users.users[userID]; u != nil && u.DeleteAt == 0 {
+			status = model.StatusOnline
+		}
+
+		m.Users.mu.RUnlock()
 	} else if status == model.StatusOffline && lastActive > 0 && time.Since(time.Unix(lastActive, 0)) < activeThreshold {
 		status = model.StatusOnline
 	}
@@ -189,9 +197,13 @@ func (m *Client) GetStatuses(ctx context.Context) map[string]string {
 	statuses := make(map[string]string, len(m.Users.users))
 	var missingIDs []string
 
-	for id := range m.Users.users {
+	for id, u := range m.Users.users {
 		if m.IsBot(id, true) {
-			statuses[id] = model.StatusOnline
+			if u != nil && u.DeleteAt == 0 {
+				statuses[id] = model.StatusOnline
+			} else {
+				statuses[id] = model.StatusOffline
+			}
 
 			continue
 		}
