@@ -103,18 +103,17 @@ type UsersCache struct {
 }
 
 type UserSummary struct {
-	Id             string            `json:"id"`
-	UpdateAt       int64             `json:"update_at"`
-	DeleteAt       int64             `json:"delete_at"`
-	Username       string            `json:"username"`
-	FirstName      string            `json:"first_name"`
-	LastName       string            `json:"last_name"`
-	Nickname       string            `json:"nickname"`
-	Roles          string            `json:"roles"`
-	Props          map[string]string `json:"props"`
-	Timezone       map[string]string `json:"timezone"`
-	IsBot          bool              `json:"is_bot"`
-	LastActivityAt int64             `json:"last_activity_at"`
+	Id        string            `json:"id"`
+	UpdateAt  int64             `json:"update_at"`
+	DeleteAt  int64             `json:"delete_at"`
+	Username  string            `json:"username"`
+	FirstName string            `json:"first_name"`
+	LastName  string            `json:"last_name"`
+	Nickname  string            `json:"nickname"`
+	Roles     string            `json:"roles"`
+	Props     map[string]string `json:"props"`
+	Timezone  map[string]string `json:"timezone"`
+	IsBot     bool              `json:"is_bot"`
 }
 
 type Team struct {
