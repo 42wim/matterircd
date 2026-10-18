@@ -1081,6 +1081,7 @@ func (m *Client) updateUserLocked(id string, updateAt int64, deleteAt int64, use
 
 		if rawActivity > 0 {
 			actSec := rawActivity / 1000
+
 			if m.Users.lastUserActivity == nil {
 				m.Users.lastUserActivity = make(map[string]int64, 1000)
 			}
@@ -1101,6 +1102,7 @@ func (m *Client) updateUserLocked(id string, updateAt int64, deleteAt int64, use
 
 	if rawActivity > 0 {
 		actSec := rawActivity / 1000
+
 		if m.Users.lastUserActivity == nil {
 			m.Users.lastUserActivity = make(map[string]int64, 1000)
 		}
