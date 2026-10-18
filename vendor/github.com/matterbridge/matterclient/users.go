@@ -956,6 +956,7 @@ func (m *Client) UpdateUser(user *model.User, batchLock ...bool) *model.User {
 		user.Props,
 		user.Timezone,
 		user.IsBot,
+		user.LastActivityAt,
 	)
 }
 
@@ -984,6 +985,7 @@ func (m *Client) UpdateUserSummary(u *UserSummary, batchLock ...bool) *model.Use
 		u.Props,
 		u.Timezone,
 		u.IsBot,
+		u.LastActivityAt,
 	)
 }
 
@@ -1046,7 +1048,7 @@ func (c *UsersCache) userIDKey(userID string) string {
 }
 
 //nolint:funlen,gocyclo
-func (m *Client) updateUserLocked(id string, updateAt int64, deleteAt int64, username, firstName, lastName, nickname, roles string, props map[string]string, timezone map[string]string, isBot ...bool) *model.User {
+func (m *Client) updateUserLocked(id string, updateAt int64, deleteAt int64, username, firstName, lastName, nickname, roles string, props map[string]string, timezone map[string]string, isBot bool, lastActivityAt ...int64) *model.User {
 	switch roles {
 	case "system_user":
 		roles = "system_user"
@@ -1054,30 +1056,58 @@ func (m *Client) updateUserLocked(id string, updateAt int64, deleteAt int64, use
 		roles = "system_admin system_user"
 	}
 
-	bot := len(isBot) > 0 && isBot[0]
+	var rawActivity int64
+	if len(lastActivityAt) > 0 {
+		rawActivity = lastActivityAt[0]
+	}
 
 	cachedUser, exists := m.Users.users[id]
 	if !exists {
 		cachedUser = &model.User{
-			Id:        id,
-			UpdateAt:  max(0, updateAt),
-			DeleteAt:  max(0, deleteAt),
-			Username:  username,
-			FirstName: firstName,
-			LastName:  lastName,
-			Nickname:  nickname,
-			Roles:     roles,
-			Props:     props,
-			Timezone:  timezone,
-			IsBot:     bot,
+			Id:             id,
+			UpdateAt:       max(0, updateAt),
+			DeleteAt:       max(0, deleteAt),
+			Username:       username,
+			FirstName:      firstName,
+			LastName:       lastName,
+			Nickname:       nickname,
+			Roles:          roles,
+			Props:          props,
+			Timezone:       timezone,
+			IsBot:          isBot,
+			LastActivityAt: max(0, rawActivity),
 		}
 		m.Users.users[id] = cachedUser
+
+		if rawActivity > 0 {
+			actSec := rawActivity / 1000
+			if m.Users.lastUserActivity == nil {
+				m.Users.lastUserActivity = make(map[string]int64, 1000)
+			}
+
+			if actSec > m.Users.lastUserActivity[id] {
+				m.Users.lastUserActivity[id] = actSec
+			}
+		}
 
 		return cachedUser
 	}
 
-	if bot != cachedUser.IsBot {
-		cachedUser.IsBot = bot
+	if isBot != cachedUser.IsBot {
+		cachedUser.IsBot = isBot
+	}
+
+	cachedUser.LastActivityAt = max(cachedUser.LastActivityAt, rawActivity)
+
+	if rawActivity > 0 {
+		actSec := rawActivity / 1000
+		if m.Users.lastUserActivity == nil {
+			m.Users.lastUserActivity = make(map[string]int64, 1000)
+		}
+
+		if actSec > m.Users.lastUserActivity[id] {
+			m.Users.lastUserActivity[id] = actSec
+		}
 	}
 
 	if updateAt > 0 && cachedUser.UpdateAt != updateAt {
