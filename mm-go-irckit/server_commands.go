@@ -504,6 +504,42 @@ var colorRegExp = regexp.MustCompile(`\x03([019]?[0-9](,[019]?[0-9])?)?`)
 // Hex Color - https://modern.ircdocs.horse/formatting.html#hex-color
 var hexColorRegExp = regexp.MustCompile(`\x04[0-9a-fA-F]{6}`)
 
+// isBareThreadID checks if a message consists solely of an unadorned thread ID
+// without any message body, preventing accidental sends from creating root posts.
+// Supports Mattermost, Slack (mapped 3-hex and raw timestamps), Matrix ($ IDs),
+// Mastodon (snowflake IDs), and !! history expansion.
+func isBareThreadID(msg string) bool {
+	if !strings.HasPrefix(msg, "@@") {
+		return false
+	}
+
+	trimmed := strings.TrimSpace(msg)
+
+	if strings.ContainsAny(trimmed, " \t") {
+		return false
+	}
+
+	id := trimmed[2:]
+
+	if id == "!!" || (len(id) > 1 && id[0] == '$') {
+		return true
+	}
+
+	if len(id) < 3 || len(id) > 26 {
+		return false
+	}
+
+	const validChars = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-_"
+
+	for i := range len(id) {
+		if strings.IndexByte(validChars, id[i]) == -1 {
+			return false
+		}
+	}
+
+	return true
+}
+
 // CmdPrivMsg is a handler for the /PRIVMSG command.
 func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 	var err error
@@ -530,6 +566,21 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 	}
 
 	if parseCTCP(s, u, query, msg.Trailing) {
+		return nil
+	}
+
+	if isBareThreadID(msg.Trailing) {
+		trimmed := strings.TrimSpace(msg.Trailing)
+
+		logger.Debugf("Dropping bare thread ID without message text from %s: %s", u.Nick, trimmed)
+
+		fromUser, ok := s.HasUser(u.br.Protocol())
+		if !ok {
+			fromUser = u
+		}
+
+		u.MsgSpoofUser(fromUser, query, "Dropped bare thread ID without message text: "+trimmed)
+
 		return nil
 	}
 
