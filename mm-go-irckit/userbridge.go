@@ -2325,6 +2325,7 @@ func (u *User) saveLastViewedAt(channelID string, ts ...int64) {
 		}
 
 		var existingTime int64
+
 		if v := b.Get([]byte(channelID)); v != nil {
 			val := binary.LittleEndian.Uint64(v)
 			if val <= math.MaxInt64 {
@@ -2332,12 +2333,10 @@ func (u *User) saveLastViewedAt(channelID string, ts ...int64) {
 			}
 		}
 
-		targetTime := newTime
-		if existingTime > targetTime {
-			targetTime = existingTime
-		}
+		targetTime := max(newTime, existingTime)
 
 		currentTime := make([]byte, 8)
+		//nolint:gosec // targetTime is positive (post-1970)
 		binary.LittleEndian.PutUint64(currentTime, uint64(targetTime))
 
 		return b.Put([]byte(channelID), currentTime)
