@@ -1773,9 +1773,6 @@ func (m *Mattermost) wsActionPostJoinLeave(ctx context.Context, data *model.Post
 				Added: []*bridge.UserInfo{
 					m.GetUser(ctx, data.UserId),
 				},
-				Adder: &bridge.UserInfo{
-					Nick: systemUser,
-				},
 				ChannelID: data.ChannelId,
 				CreateAt:  data.CreateAt,
 			},
@@ -3290,7 +3287,7 @@ func (m *Mattermost) postListToEvents(ctx context.Context, postlist interface{},
 		// relaying messages/logs so let's skip these.
 		//
 		// See https://github.com/mattermost/mattermost/issues/13846 and https://github.com/anneschuth/claude-threads/pull/66
-		if eventType == "replay" && (p.DeleteAt > p.CreateAt || p.CreateAt <= since) {
+		if eventType == "replay" && (p.DeleteAt > p.CreateAt || p.CreateAt < since) {
 			continue
 		} else if eventType != "details" && eventType != "replay" && p.DeleteAt > p.CreateAt {
 			continue

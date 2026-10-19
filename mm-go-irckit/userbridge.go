@@ -2313,19 +2313,32 @@ func (u *User) saveLastViewedAt(channelID string, ts ...int64) {
 		return
 	}
 
-	ms := time.Now().UnixMilli()
-	if len(ts) > 0 && ts[0] >= ms {
-		ms = ts[0] + 1
+	newTime := time.Now().UnixMilli()
+	if len(ts) > 0 && ts[0] > 0 {
+		newTime = ts[0]
 	}
-
-	currentTime := make([]byte, 8)
-	binary.LittleEndian.PutUint64(currentTime, uint64(ms))
 
 	err := u.lastViewedAtDB.Update(func(tx *bolt.Tx) error {
 		b, err := tx.CreateBucketIfNotExists(u.dbBucketName())
 		if err != nil {
 			return err
 		}
+
+		var existingTime int64
+		if v := b.Get([]byte(channelID)); v != nil {
+			val := binary.LittleEndian.Uint64(v)
+			if val <= math.MaxInt64 {
+				existingTime = int64(val)
+			}
+		}
+
+		targetTime := newTime
+		if existingTime > targetTime {
+			targetTime = existingTime
+		}
+
+		currentTime := make([]byte, 8)
+		binary.LittleEndian.PutUint64(currentTime, uint64(targetTime))
 
 		return b.Put([]byte(channelID), currentTime)
 	})
