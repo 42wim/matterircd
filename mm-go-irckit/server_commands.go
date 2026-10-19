@@ -1171,6 +1171,20 @@ const (
 	RPL_WHOISSPECIAL = "320"
 )
 
+func sanitizeIRCTrailing(s string) string {
+	if !strings.ContainsAny(s, "\r\n\x00") {
+		return s
+	}
+
+	return strings.Map(func(r rune) rune {
+		if r == '\r' || r == '\n' || r == '\x00' {
+			return ' '
+		}
+
+		return r
+	}, s)
+}
+
 // CmdWhois is a handler for the /WHOIS command.
 func CmdWhois(s Server, u *User, msg *irc.Message) error {
 	who := msg.Params[0]
@@ -1287,7 +1301,7 @@ func CmdWhois(s Server, u *User, msg *irc.Message) error {
 					Prefix:   s.Prefix(),
 					Params:   []string{u.Nick, other.Nick},
 					Command:  RPL_WHOISSPECIAL,
-					Trailing: "email: " + otherUser.Email,
+					Trailing: "email: " + sanitizeIRCTrailing(otherUser.Email),
 				})
 			}
 
@@ -1296,16 +1310,7 @@ func CmdWhois(s Server, u *User, msg *irc.Message) error {
 					Prefix:   s.Prefix(),
 					Params:   []string{u.Nick, other.Nick},
 					Command:  RPL_WHOISSPECIAL,
-					Trailing: "position: " + otherUser.Position,
-				})
-			}
-
-			if otherUser.Photo != "" {
-				r = append(r, &irc.Message{
-					Prefix:   s.Prefix(),
-					Params:   []string{u.Nick, other.Nick},
-					Command:  RPL_WHOISSPECIAL,
-					Trailing: "photo: " + otherUser.Photo,
+					Trailing: "position: " + sanitizeIRCTrailing(otherUser.Position),
 				})
 			}
 		}
@@ -1323,6 +1328,17 @@ func CmdWhois(s Server, u *User, msg *irc.Message) error {
 				Command:  RPL_WHOISBOT,
 				Trailing: "is a bot (🤖) on " + protocol,
 			})
+		}
+
+		if otherUser != nil && strings.Contains(otherUser.Roles, "bot") {
+			if otherUser.Photo != "" {
+				r = append(r, &irc.Message{
+					Prefix:   s.Prefix(),
+					Params:   []string{u.Nick, other.Nick},
+					Command:  RPL_WHOISSPECIAL,
+					Trailing: "photo: " + otherUser.Photo,
+				})
+			}
 		}
 
 		r = append(r, &irc.Message{
