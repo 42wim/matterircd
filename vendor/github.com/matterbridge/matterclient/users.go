@@ -927,9 +927,11 @@ func (m *Client) UpdateUser(user *model.User, batchLock ...bool) *model.User {
 		user.UpdateAt,
 		user.DeleteAt,
 		user.Username,
+		user.Email,
 		user.FirstName,
 		user.LastName,
 		user.Nickname,
+		user.Position,
 		user.Roles,
 		user.Props,
 		user.Timezone,
@@ -956,9 +958,11 @@ func (m *Client) UpdateUserSummary(u *UserSummary, batchLock ...bool) *model.Use
 		u.UpdateAt,
 		u.DeleteAt,
 		u.Username,
+		u.Email,
 		u.FirstName,
 		u.LastName,
 		u.Nickname,
+		u.Position,
 		u.Roles,
 		u.Props,
 		u.Timezone,
@@ -1026,7 +1030,7 @@ func (c *UsersCache) userIDKey(userID string) string {
 }
 
 //nolint:funlen,gocyclo
-func (m *Client) updateUserLocked(id string, updateAt int64, deleteAt int64, username, firstName, lastName, nickname, roles string, props map[string]string, timezone map[string]string, isBot bool, lastActivityAt ...int64) *model.User {
+func (m *Client) updateUserLocked(id string, updateAt int64, deleteAt int64, username, email, firstName, lastName, nickname, position, roles string, props map[string]string, timezone map[string]string, isBot bool, lastActivityAt ...int64) *model.User {
 	switch roles {
 	case "system_user":
 		roles = "system_user"
@@ -1046,9 +1050,11 @@ func (m *Client) updateUserLocked(id string, updateAt int64, deleteAt int64, use
 			UpdateAt:       max(0, updateAt),
 			DeleteAt:       max(0, deleteAt),
 			Username:       username,
+			Email:          email,
 			FirstName:      firstName,
 			LastName:       lastName,
 			Nickname:       nickname,
+			Position:       position,
 			Roles:          roles,
 			Props:          props,
 			Timezone:       timezone,
@@ -1102,6 +1108,10 @@ func (m *Client) updateUserLocked(id string, updateAt int64, deleteAt int64, use
 		cachedUser.Username = username
 	}
 
+	if cachedUser.Email != email {
+		cachedUser.Email = email
+	}
+
 	if cachedUser.FirstName != firstName {
 		cachedUser.FirstName = firstName
 	}
@@ -1112,6 +1122,10 @@ func (m *Client) updateUserLocked(id string, updateAt int64, deleteAt int64, use
 
 	if cachedUser.Nickname != nickname {
 		cachedUser.Nickname = nickname
+	}
+
+	if cachedUser.Position != position {
+		cachedUser.Position = position
 	}
 
 	if cachedUser.Roles != roles {
