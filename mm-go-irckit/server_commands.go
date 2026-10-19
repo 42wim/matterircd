@@ -1273,26 +1273,6 @@ func CmdWhois(s Server, u *User, msg *irc.Message) error {
 			})
 		}
 
-		status, _ := u.br.StatusUser(u.ctx, other.User)
-
-		if status != "" {
-			if !u.br.IsOnline(status) {
-				r = append(r, &irc.Message{
-					Prefix:   s.Prefix(),
-					Params:   []string{u.Nick, other.Nick},
-					Command:  irc.RPL_AWAY,
-					Trailing: utils.EmojiReplaceAliases(status, u.br.FormatterConfig().CustomEmoji),
-				})
-			} else if status != "online" {
-				r = append(r, &irc.Message{
-					Prefix:   s.Prefix(),
-					Params:   []string{u.Nick, other.Nick},
-					Command:  RPL_WHOISSPECIAL,
-					Trailing: utils.EmojiReplaceAliases(status, u.br.FormatterConfig().CustomEmoji),
-				})
-			}
-		}
-
 		otherUser := u.br.GetUser(u.ctx, other.User)
 
 		if otherUser != nil && !strings.Contains(otherUser.Roles, "bot") {
@@ -1315,6 +1295,35 @@ func CmdWhois(s Server, u *User, msg *irc.Message) error {
 			}
 		}
 
+		if otherUser != nil && otherUser.Photo != "" {
+			r = append(r, &irc.Message{
+				Prefix:   s.Prefix(),
+				Params:   []string{u.Nick, other.Nick},
+				Command:  RPL_WHOISSPECIAL,
+				Trailing: "photo: " + otherUser.Photo,
+			})
+		}
+
+		status, _ := u.br.StatusUser(u.ctx, other.User)
+
+		if status != "" {
+			if !u.br.IsOnline(status) {
+				r = append(r, &irc.Message{
+					Prefix:   s.Prefix(),
+					Params:   []string{u.Nick, other.Nick},
+					Command:  irc.RPL_AWAY,
+					Trailing: utils.EmojiReplaceAliases(status, u.br.FormatterConfig().CustomEmoji),
+				})
+			} else if status != "online" {
+				r = append(r, &irc.Message{
+					Prefix:   s.Prefix(),
+					Params:   []string{u.Nick, other.Nick},
+					Command:  RPL_WHOISSPECIAL,
+					Trailing: utils.EmojiReplaceAliases(status, u.br.FormatterConfig().CustomEmoji),
+				})
+			}
+		}
+
 		if isServiceBot(other.Nick) || (otherUser != nil && strings.Contains(otherUser.Roles, "bot")) {
 			protocol := "Mattermost"
 
@@ -1327,15 +1336,6 @@ func CmdWhois(s Server, u *User, msg *irc.Message) error {
 				Params:   []string{u.Nick, other.Nick},
 				Command:  RPL_WHOISBOT,
 				Trailing: "is a bot (🤖) on " + protocol,
-			})
-		}
-
-		if otherUser != nil && otherUser.Photo != "" {
-			r = append(r, &irc.Message{
-				Prefix:   s.Prefix(),
-				Params:   []string{u.Nick, other.Nick},
-				Command:  RPL_WHOISSPECIAL,
-				Trailing: "photo: " + otherUser.Photo,
 			})
 		}
 
