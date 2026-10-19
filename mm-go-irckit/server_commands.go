@@ -1330,15 +1330,13 @@ func CmdWhois(s Server, u *User, msg *irc.Message) error {
 			})
 		}
 
-		if otherUser != nil && strings.Contains(otherUser.Roles, "bot") {
-			if otherUser.Photo != "" {
-				r = append(r, &irc.Message{
-					Prefix:   s.Prefix(),
-					Params:   []string{u.Nick, other.Nick},
-					Command:  RPL_WHOISSPECIAL,
-					Trailing: "photo: " + otherUser.Photo,
-				})
-			}
+		if otherUser != nil && otherUser.Photo != "" {
+			r = append(r, &irc.Message{
+				Prefix:   s.Prefix(),
+				Params:   []string{u.Nick, other.Nick},
+				Command:  RPL_WHOISSPECIAL,
+				Trailing: "photo: " + otherUser.Photo,
+			})
 		}
 
 		r = append(r, &irc.Message{
