@@ -400,7 +400,8 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 	if u.br.Protocol() == "mattermost" && !u.cfg.Mattermost().DisableAutoView {
 		u.updateLastViewed(event.ChannelID)
 	}
-	u.saveLastViewedAt(event.ChannelID)
+
+	u.saveLastViewedAt(event.ChannelID, event.CreateAt)
 }
 
 func (u *User) handleChannelAddEvent(event *bridge.ChannelAddEvent) {
@@ -446,7 +447,8 @@ func (u *User) handleChannelAddEvent(event *bridge.ChannelAddEvent) {
 	if u.br.Protocol() == "mattermost" && !u.cfg.Mattermost().DisableAutoView {
 		u.updateLastViewed(event.ChannelID)
 	}
-	u.saveLastViewedAt(event.ChannelID)
+
+	u.saveLastViewedAt(event.ChannelID, event.CreateAt)
 }
 
 func (u *User) handleChannelRemoveEvent(event *bridge.ChannelRemoveEvent) {
@@ -466,7 +468,8 @@ func (u *User) handleChannelRemoveEvent(event *bridge.ChannelRemoveEvent) {
 			ch.SpoofMessage(systemUser, "\x1dremoved "+removed.Nick+" from the channel by "+event.Remover.Nick+"\x1d")
 		}
 	}
-	u.saveLastViewedAt(event.ChannelID)
+
+	u.saveLastViewedAt(event.ChannelID, event.CreateAt)
 }
 
 func (u *User) getMessageChannel(channelID string, sender *bridge.UserInfo) Channel {
@@ -653,7 +656,8 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 	if u.br.Protocol() == "mattermost" && !u.cfg.Mattermost().DisableAutoView {
 		u.updateLastViewed(event.ChannelID)
 	}
-	u.saveLastViewedAt(event.ChannelID)
+
+	u.saveLastViewedAt(event.ChannelID, event.CreateAt)
 }
 
 func (u *User) handleFileEvent(event *bridge.FileEvent) {
@@ -2304,14 +2308,18 @@ func (u *User) forgetMsgLast(channelID, msgID string) {
 	delete(u.msgLast, channelID)
 }
 
-func (u *User) saveLastViewedAt(channelID string) {
+func (u *User) saveLastViewedAt(channelID string, ts ...int64) {
 	if channelID == "" {
 		return
 	}
 
+	ms := time.Now().UnixMilli()
+	if len(ts) > 0 && ts[0] >= ms {
+		ms = ts[0] + 1
+	}
+
 	currentTime := make([]byte, 8)
-	//nolint:gosec // time.Now().UnixMilli() is positive (post-1970)
-	binary.LittleEndian.PutUint64(currentTime, uint64(time.Now().UnixMilli()))
+	binary.LittleEndian.PutUint64(currentTime, uint64(ms))
 
 	err := u.lastViewedAtDB.Update(func(tx *bolt.Tx) error {
 		b, err := tx.CreateBucketIfNotExists(u.dbBucketName())
