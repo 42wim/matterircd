@@ -2315,9 +2315,7 @@ func (u *User) saveLastViewedAt(channelID string, ts ...int64) {
 
 	newTime := time.Now().UnixMilli()
 	if len(ts) > 0 && ts[0] > 0 {
-		// Advance by 1ms when saving a post timestamp to ensure the boundary post
-		// is excluded by strict inequality (< since) on subsequent replays.
-		newTime = ts[0] + 1
+		newTime = ts[0]
 	}
 
 	err := u.lastViewedAtDB.Update(func(tx *bolt.Tx) error {
