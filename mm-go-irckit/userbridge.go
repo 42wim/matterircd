@@ -2326,7 +2326,20 @@ func (u *User) saveLastViewedAt(channelID string, ts ...int64) {
 
 		var existingTime int64
 
-		if v := b.Get([]byte(channelID)); v != nil {
+		var v []byte
+
+		if b != nil {
+			v = b.Get([]byte(channelID))
+		}
+
+		if v == nil {
+			legacyBucket := tx.Bucket([]byte(u.User))
+			if legacyBucket != nil {
+				v = legacyBucket.Get([]byte(channelID))
+			}
+		}
+
+		if v != nil {
 			val := binary.LittleEndian.Uint64(v)
 			if val <= math.MaxInt64 {
 				existingTime = int64(val)
