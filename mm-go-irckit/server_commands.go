@@ -1280,6 +1280,36 @@ func CmdWhois(s Server, u *User, msg *irc.Message) error {
 		}
 
 		otherUser := u.br.GetUser(u.ctx, other.User)
+
+		if otherUser != nil && !strings.Contains(otherUser.Roles, "bot") {
+			if otherUser.Email != "" {
+				r = append(r, &irc.Message{
+					Prefix:   s.Prefix(),
+					Params:   []string{u.Nick, other.Nick},
+					Command:  RPL_WHOISSPECIAL,
+					Trailing: "email: " + otherUser.Email,
+				})
+			}
+
+			if otherUser.Position != "" {
+				r = append(r, &irc.Message{
+					Prefix:   s.Prefix(),
+					Params:   []string{u.Nick, other.Nick},
+					Command:  RPL_WHOISSPECIAL,
+					Trailing: "position: " + otherUser.Position,
+				})
+			}
+
+			if otherUser.Photo != "" {
+				r = append(r, &irc.Message{
+					Prefix:   s.Prefix(),
+					Params:   []string{u.Nick, other.Nick},
+					Command:  RPL_WHOISSPECIAL,
+					Trailing: "photo: " + otherUser.Photo,
+				})
+			}
+		}
+
 		if isServiceBot(other.Nick) || (otherUser != nil && strings.Contains(otherUser.Roles, "bot")) {
 			protocol := "Mattermost"
 

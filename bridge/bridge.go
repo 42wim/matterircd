@@ -114,6 +114,9 @@ type UserInfo struct {
 	TeamID      string
 	FirstName   string
 	LastName    string
+	Email       string
+	Position    string
+	Photo       string
 	MentionKeys []string
 }
 

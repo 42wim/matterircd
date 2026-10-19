@@ -107,6 +107,7 @@ type UserSummary struct {
 	UpdateAt       int64             `json:"update_at"`
 	DeleteAt       int64             `json:"delete_at"`
 	Username       string            `json:"username"`
+	Email          string            `json:"email"`
 	FirstName      string            `json:"first_name"`
 	LastName       string            `json:"last_name"`
 	Nickname       string            `json:"nickname"`
@@ -115,6 +116,7 @@ type UserSummary struct {
 	Timezone       map[string]string `json:"timezone"`
 	IsBot          bool              `json:"is_bot"`
 	LastActivityAt int64             `json:"last_activity_at"`
+	Position       string            `json:"position"`
 }
 
 type Team struct {

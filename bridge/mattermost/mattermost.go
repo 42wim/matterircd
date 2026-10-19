@@ -1154,6 +1154,11 @@ func (m *Mattermost) createUser(mmuser *model.User) *bridge.UserInfo {
 		roles += " bot"
 	}
 
+	photoURL := ""
+	if m.mc != nil && m.mc.Client != nil && m.mc.Client.URL != "" && mmuser.Id != "" {
+		photoURL = m.mc.Client.URL + "/api/v4/users/" + mmuser.Id + "/image"
+	}
+
 	info := &bridge.UserInfo{
 		Nick:        nick,
 		User:        mmuser.Id,
@@ -1166,6 +1171,9 @@ func (m *Mattermost) createUser(mmuser *model.User) *bridge.UserInfo {
 		Username:    mmuser.Username,
 		FirstName:   mmuser.FirstName,
 		LastName:    mmuser.LastName,
+		Email:       mmuser.Email,
+		Position:    mmuser.Position,
+		Photo:       photoURL,
 		MentionKeys: mentionKeys,
 	}
 
