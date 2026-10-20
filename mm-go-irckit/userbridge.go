@@ -437,7 +437,9 @@ func (u *User) handleChannelAddEvent(event *bridge.ChannelAddEvent) {
 
 		ghost := u.createUserFromInfo(added)
 
-		ch.Join(ghost)
+		if !ch.HasUser(ghost) {
+			_ = ch.Join(ghost)
+		}
 
 		if event.Adder != nil && added.Nick != event.Adder.Nick && event.Adder.Nick != systemUser {
 			ch.SpoofMessage(systemUser, "\x1dadded "+added.Nick+" to the channel by "+event.Adder.Nick+"\x1d")
@@ -456,13 +458,18 @@ func (u *User) handleChannelRemoveEvent(event *bridge.ChannelRemoveEvent) {
 
 	for _, removed := range event.Removed {
 		if removed.Me {
-			ch.Part(u, event.Text)
+			if ch.HasUser(u) {
+				ch.Part(u, event.Text)
+			}
+
 			continue
 		}
 
 		ghost := u.createUserFromInfo(removed)
 
-		ch.Part(ghost, event.Text)
+		if ch.HasUser(ghost) {
+			ch.Part(ghost, event.Text)
+		}
 
 		if event.Remover != nil && removed.Nick != event.Remover.Nick && event.Remover.Nick != systemUser {
 			ch.SpoofMessage(systemUser, "\x1dremoved "+removed.Nick+" from the channel by "+event.Remover.Nick+"\x1d")
