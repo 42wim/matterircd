@@ -400,7 +400,8 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 	if u.br.Protocol() == "mattermost" && !u.cfg.Mattermost().DisableAutoView {
 		u.updateLastViewed(event.ChannelID)
 	}
-	u.saveLastViewedAt(event.ChannelID)
+
+	u.saveLastViewedAt(event.ChannelID, event.CreateAt)
 }
 
 func (u *User) handleChannelAddEvent(event *bridge.ChannelAddEvent) {
@@ -436,7 +437,9 @@ func (u *User) handleChannelAddEvent(event *bridge.ChannelAddEvent) {
 
 		ghost := u.createUserFromInfo(added)
 
-		ch.Join(ghost)
+		if !ch.HasUser(ghost) {
+			_ = ch.Join(ghost)
+		}
 
 		if event.Adder != nil && added.Nick != event.Adder.Nick && event.Adder.Nick != systemUser {
 			ch.SpoofMessage(systemUser, "\x1dadded "+added.Nick+" to the channel by "+event.Adder.Nick+"\x1d")
@@ -446,7 +449,8 @@ func (u *User) handleChannelAddEvent(event *bridge.ChannelAddEvent) {
 	if u.br.Protocol() == "mattermost" && !u.cfg.Mattermost().DisableAutoView {
 		u.updateLastViewed(event.ChannelID)
 	}
-	u.saveLastViewedAt(event.ChannelID)
+
+	u.saveLastViewedAt(event.ChannelID, event.CreateAt)
 }
 
 func (u *User) handleChannelRemoveEvent(event *bridge.ChannelRemoveEvent) {
@@ -454,19 +458,25 @@ func (u *User) handleChannelRemoveEvent(event *bridge.ChannelRemoveEvent) {
 
 	for _, removed := range event.Removed {
 		if removed.Me {
-			ch.Part(u, event.Text)
+			if ch.HasUser(u) {
+				ch.Part(u, event.Text)
+			}
+
 			continue
 		}
 
 		ghost := u.createUserFromInfo(removed)
 
-		ch.Part(ghost, event.Text)
+		if ch.HasUser(ghost) {
+			ch.Part(ghost, event.Text)
+		}
 
 		if event.Remover != nil && removed.Nick != event.Remover.Nick && event.Remover.Nick != systemUser {
 			ch.SpoofMessage(systemUser, "\x1dremoved "+removed.Nick+" from the channel by "+event.Remover.Nick+"\x1d")
 		}
 	}
-	u.saveLastViewedAt(event.ChannelID)
+
+	u.saveLastViewedAt(event.ChannelID, event.CreateAt)
 }
 
 func (u *User) getMessageChannel(channelID string, sender *bridge.UserInfo) Channel {
@@ -653,7 +663,8 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 	if u.br.Protocol() == "mattermost" && !u.cfg.Mattermost().DisableAutoView {
 		u.updateLastViewed(event.ChannelID)
 	}
-	u.saveLastViewedAt(event.ChannelID)
+
+	u.saveLastViewedAt(event.ChannelID, event.CreateAt)
 }
 
 func (u *User) handleFileEvent(event *bridge.FileEvent) {
@@ -2304,20 +2315,48 @@ func (u *User) forgetMsgLast(channelID, msgID string) {
 	delete(u.msgLast, channelID)
 }
 
-func (u *User) saveLastViewedAt(channelID string) {
+func (u *User) saveLastViewedAt(channelID string, ts ...int64) {
 	if channelID == "" {
 		return
 	}
 
-	currentTime := make([]byte, 8)
-	//nolint:gosec // time.Now().UnixMilli() is positive (post-1970)
-	binary.LittleEndian.PutUint64(currentTime, uint64(time.Now().UnixMilli()))
+	newTime := time.Now().UnixMilli()
+	if len(ts) > 0 && ts[0] > 0 {
+		newTime = ts[0]
+	}
 
 	err := u.lastViewedAtDB.Update(func(tx *bolt.Tx) error {
 		b, err := tx.CreateBucketIfNotExists(u.dbBucketName())
 		if err != nil {
 			return err
 		}
+
+		var existingTime int64
+
+		var v []byte
+		if b != nil {
+			v = b.Get([]byte(channelID))
+		}
+
+		if v == nil {
+			legacyBucket := tx.Bucket([]byte(u.User))
+			if legacyBucket != nil {
+				v = legacyBucket.Get([]byte(channelID))
+			}
+		}
+
+		if v != nil {
+			val := binary.LittleEndian.Uint64(v)
+			if val <= math.MaxInt64 {
+				existingTime = int64(val)
+			}
+		}
+
+		targetTime := max(newTime, existingTime)
+
+		currentTime := make([]byte, 8)
+		//nolint:gosec // targetTime is positive (post-1970)
+		binary.LittleEndian.PutUint64(currentTime, uint64(targetTime))
 
 		return b.Put([]byte(channelID), currentTime)
 	})
