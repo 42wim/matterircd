@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"unicode"
 
 	"github.com/alecthomas/chroma/v2/quick"
 )
@@ -1304,4 +1305,285 @@ func SanitizeDefaultMentions(text string, unicode bool) string {
 	sb.WriteString(text[last:])
 
 	return sb.String()
+}
+
+// StringWidth returns the visual cell width of a string in a monospace terminal,
+// accounting for East Asian wide characters, combining marks, format characters,
+// regional indicator pairs (flags), and emoji sequences.
+//
+//nolint:funlen
+func StringWidth(s string) int {
+	width := 0
+	inZWJ := false
+	inRI := false
+	prevWasEmoji := false
+	prevEmojiNarrow := false
+
+	for _, r := range s {
+		if r == '\u200d' {
+			if prevWasEmoji {
+				inZWJ = true
+			}
+
+			continue
+		}
+
+		if isZeroWidth(r) {
+			added, narrow := checkEmojiPresentationUpgrade(r, prevEmojiNarrow)
+
+			width += added
+			prevEmojiNarrow = narrow
+
+			if added > 0 {
+				prevWasEmoji = true
+			} else if r == '\ufe0e' {
+				prevWasEmoji = false
+				prevEmojiNarrow = false
+			}
+
+			continue
+		}
+
+		if inZWJ {
+			inZWJ = false
+
+			if isEmoji(r) {
+				prevWasEmoji = true
+				prevEmojiNarrow = false
+
+				continue
+			}
+		}
+
+		if isRegionalIndicator(r) {
+			delta, nextRI := stepRegionalIndicator(inRI)
+
+			inRI = nextRI
+			width += delta
+			prevWasEmoji = true
+			prevEmojiNarrow = false
+
+			continue
+		}
+
+		inRI = false
+
+		if isWide(r) {
+			width += 2
+			prevWasEmoji = isEmoji(r)
+			prevEmojiNarrow = false
+
+			continue
+		}
+
+		width++
+		prevWasEmoji = isEmoji(r)
+		prevEmojiNarrow = prevWasEmoji
+	}
+
+	return width
+}
+
+func stepRegionalIndicator(inRI bool) (int, bool) {
+	if inRI {
+		return 0, false
+	}
+
+	return 2, true
+}
+
+func checkEmojiPresentationUpgrade(r rune, prevEmojiNarrow bool) (int, bool) {
+	if (r == '\ufe0f' || r == 0x20e3 || isFitzpatrickModifier(r)) && prevEmojiNarrow {
+		return 1, false
+	}
+
+	return 0, prevEmojiNarrow
+}
+
+func isFitzpatrickModifier(r rune) bool {
+	return r >= 0x1f3fb && r <= 0x1f3ff
+}
+
+func isRegionalIndicator(r rune) bool {
+	return r >= 0x1f1e6 && r <= 0x1f1ff
+}
+
+//nolint:gocyclo
+func isZeroWidth(r rune) bool {
+	if r < 0x20 || (r >= 0x7f && r < 0xa0) || r == 0xad {
+		return true
+	}
+
+	// Combining characters (Mn, Me) and invisible format characters (Cf, e.g. \u200B and tag characters)
+	if unicode.Is(unicode.Mn, r) || unicode.Is(unicode.Me, r) || unicode.Is(unicode.Cf, r) {
+		return true
+	}
+
+	// Medial and trailing Hangul Jamo (Jungseong U+1160..U+11A7 and Jongseong U+11A8..U+11FF)
+	// and Hangul Jamo Extended-B (U+D7B0..U+D7C6, U+D7CB..U+D7FB)
+	if (r >= 0x1160 && r <= 0x11ff) || (r >= 0xd7b0 && r <= 0xd7c6) || (r >= 0xd7cb && r <= 0xd7fb) {
+		return true
+	}
+
+	// Emoji skin tone modifiers (Fitzpatrick types 1-6)
+	if isFitzpatrickModifier(r) {
+		return true
+	}
+
+	// Variation selectors (VS1-VS16 and VS17-VS256)
+	if (r >= 0xfe00 && r <= 0xfe0f) || (r >= 0xe0100 && r <= 0xe01ef) {
+		return true
+	}
+
+	return false
+}
+
+func isWide(r rune) bool {
+	return isCJK(r) || isEmojiWide(r)
+}
+
+//nolint:gocyclo
+func isCJK(r rune) bool {
+	switch {
+	case r >= 0x1100 && r <= 0x115f:
+		return true
+	case r >= 0x2e80 && r <= 0xa4cf && r != 0x303f:
+		return true
+	case r >= 0xac00 && r <= 0xd7a3:
+		return true
+	case r >= 0xf900 && r <= 0xfaff:
+		return true
+	case r >= 0xfe10 && r <= 0xfe19:
+		return true
+	case r >= 0xfe30 && r <= 0xfe6f:
+		return true
+	case r >= 0xff01 && r <= 0xff60:
+		return true
+	case r >= 0xffe0 && r <= 0xffe6:
+		return true
+	case r >= 0x1b000 && r <= 0x1b2ff: // Supplementary Kana, Small Kana Extension, Nushu (e.g. U+1B001)
+		return true
+	case r >= 0x1f200 && r <= 0x1f2ff: // Enclosed Ideographic Supplement
+		return true
+	case r >= 0x20000 && r <= 0x3fffd: // Plane 2 & Plane 3 CJK Extensions (e.g. 𠀀 U+20000)
+		return true
+	default:
+		return false
+	}
+}
+
+//nolint:gocyclo
+func isEmoji(r rune) bool {
+	switch {
+	case (r >= '0' && r <= '9') || r == '#' || r == '*':
+		return true
+	case r == 0xa9 || r == 0xae || r == 0x203c || r == 0x2049 || r == 0x2122 || r == 0x2139:
+		return true
+	case r >= 0x2194 && r <= 0x21aa:
+		return true
+	case r >= 0x2300 && r <= 0x27bf:
+		return true
+	case r >= 0x2934 && r <= 0x2b55:
+		return true
+	case r == 0x3030 || r == 0x303d || r == 0x3297 || r == 0x3299:
+		return true
+	case r >= 0x1f000 && r <= 0x1faff:
+		return true
+	default:
+		return false
+	}
+}
+
+//nolint:funlen,gocyclo
+func isEmojiWide(r rune) bool {
+	// Standalone wide symbols in SMP
+	if r == 0x1f004 || r == 0x1f0cf || r == 0x1f18e || (r >= 0x1f191 && r <= 0x1f19a) {
+		return true
+	}
+
+	// SMP emoji block (U+1F300..U+1FAFF) excluding text-default symbols
+	if r >= 0x1f300 && r <= 0x1faff {
+		return !isSMPTextDefault(r)
+	}
+
+	// BMP symbols with Emoji_Presentation = Yes
+	switch {
+	case r == 0x231a || r == 0x231b:
+		return true
+	case r >= 0x23e9 && r <= 0x23ec:
+		return true
+	case r == 0x23f0 || r == 0x23f3:
+		return true
+	case r == 0x25fd || r == 0x25fe:
+		return true
+	case r == 0x2614 || r == 0x2615:
+		return true
+	case r >= 0x2648 && r <= 0x2653:
+		return true
+	case r == 0x267f || r == 0x2693 || r == 0x26a1:
+		return true
+	case r == 0x26aa || r == 0x26ab || r == 0x26bd || r == 0x26be:
+		return true
+	case r == 0x26c4 || r == 0x26c5 || r == 0x26ce || r == 0x26d4:
+		return true
+	case r == 0x26ea || r == 0x26f2 || r == 0x26f3 || r == 0x26f5:
+		return true
+	case r == 0x26fa || r == 0x26fd:
+		return true
+	case r == 0x2705: // ✅ U+2705
+		return true
+	case r == 0x270a || r == 0x270b:
+		return true
+	case r == 0x2728:
+		return true
+	case r == 0x274c || r == 0x274e:
+		return true
+	case (r >= 0x2753 && r <= 0x2755) || r == 0x2757:
+		return true
+	case r >= 0x2795 && r <= 0x2797:
+		return true
+	case r == 0x27b0 || r == 0x27bf:
+		return true
+	case r == 0x2b1b || r == 0x2b1c || r == 0x2b50 || r == 0x2b55:
+		return true
+	default:
+		return false
+	}
+}
+
+// isSMPTextDefault identifies SMP symbols that default to text presentation
+// (Emoji_Presentation = No) unless followed by U+FE0F.
+//
+//nolint:gocyclo
+func isSMPTextDefault(r rune) bool {
+	switch {
+	case r >= 0x1f321 && r <= 0x1f32c: // Weather (e.g. 🌡)
+		return true
+	case r == 0x1f336 || r == 0x1f37d: // 🌶, 🍽
+		return true
+	case r >= 0x1f394 && r <= 0x1f39f: // Badges, media controls
+		return true
+	case r >= 0x1f3cb && r <= 0x1f3ce: // Sports, vehicles
+		return true
+	case r >= 0x1f3d4 && r <= 0x1f3df: // Outdoor / buildings
+		return true
+	case r == 0x1f3f3 || r == 0x1f3f5 || r == 0x1f3f7: // 🏳, 🏵, 🏷
+		return true
+	case r == 0x1f43f || r == 0x1f441 || r == 0x1f4fd: // 🐿, 👁, 📽
+		return true
+	case r >= 0x1f549 && r <= 0x1f54a: // 🕉, 🕊
+		return true
+	case (r >= 0x1f56f && r <= 0x1f570) || (r >= 0x1f573 && r <= 0x1f579): // 🕯, 🕰, 🕹, etc.
+		return true
+	case r == 0x1f587 || (r >= 0x1f58a && r <= 0x1f58d) || r == 0x1f590: // 🖇, 🖊, 🖐
+		return true
+	case r == 0x1f5a5 || r == 0x1f5a8 || r == 0x1f5b1 || r == 0x1f5b2 || r == 0x1f5bc: // 🖥 U+1F5A5, 🖨, 🖱, 🖼
+		return true
+	case (r >= 0x1f5c2 && r <= 0x1f5c4) || (r >= 0x1f5d1 && r <= 0x1f5d3): // Office stationery
+		return true
+	case (r >= 0x1f5dc && r <= 0x1f5de) || r == 0x1f5e1 || r == 0x1f5e3 || r == 0x1f5e8 || r == 0x1f5ef || r == 0x1f5f3 || r == 0x1f5fa:
+		return true
+	default:
+		return false
+	}
 }
