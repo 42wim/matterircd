@@ -1318,6 +1318,7 @@ func StringWidth(s string) int {
 	inRI := false
 	prevWasEmoji := false
 	prevEmojiNarrow := false
+	prevWideFallback := false
 
 	for _, r := range s {
 		if r == '\u200d' {
@@ -1325,14 +1326,18 @@ func StringWidth(s string) int {
 				inZWJ = true
 			}
 
+			prevWideFallback = false
+
 			continue
 		}
 
 		if isZeroWidth(r) {
 			added, narrow := checkEmojiPresentationUpgrade(r, prevEmojiNarrow)
+			sub, fallback := checkTextPresentation(r, prevWideFallback)
 
-			width += added
+			width += added - sub
 			prevEmojiNarrow = narrow
+			prevWideFallback = fallback
 
 			if added > 0 {
 				prevWasEmoji = true
@@ -1350,6 +1355,7 @@ func StringWidth(s string) int {
 			if isEmoji(r) {
 				prevWasEmoji = true
 				prevEmojiNarrow = false
+				prevWideFallback = false
 
 				continue
 			}
@@ -1362,6 +1368,7 @@ func StringWidth(s string) int {
 			width += delta
 			prevWasEmoji = true
 			prevEmojiNarrow = false
+			prevWideFallback = false
 
 			continue
 		}
@@ -1372,6 +1379,7 @@ func StringWidth(s string) int {
 			width += 2
 			prevWasEmoji = isEmoji(r)
 			prevEmojiNarrow = false
+			prevWideFallback = isWideFallback(r)
 
 			continue
 		}
@@ -1379,17 +1387,10 @@ func StringWidth(s string) int {
 		width++
 		prevWasEmoji = isEmoji(r)
 		prevEmojiNarrow = prevWasEmoji
+		prevWideFallback = false
 	}
 
 	return width
-}
-
-func stepRegionalIndicator(inRI bool) (int, bool) {
-	if inRI {
-		return 0, false
-	}
-
-	return 2, true
 }
 
 func checkEmojiPresentationUpgrade(r rune, prevEmojiNarrow bool) (int, bool) {
@@ -1398,6 +1399,18 @@ func checkEmojiPresentationUpgrade(r rune, prevEmojiNarrow bool) (int, bool) {
 	}
 
 	return 0, prevEmojiNarrow
+}
+
+func checkTextPresentation(r rune, prevWideFallback bool) (int, bool) {
+	if r == '\ufe0e' && prevWideFallback {
+		return 1, false
+	}
+
+	if r == '\ufe0f' {
+		return 0, false
+	}
+
+	return 0, prevWideFallback
 }
 
 func isFitzpatrickModifier(r rune) bool {
@@ -1440,6 +1453,10 @@ func isZeroWidth(r rune) bool {
 
 func isWide(r rune) bool {
 	return isCJK(r) || isEmojiWide(r)
+}
+
+func isWideFallback(r rune) bool {
+	return r == 0x203c || r == 0x2049
 }
 
 //nolint:gocyclo
@@ -1508,7 +1525,7 @@ func isEmojiWide(r rune) bool {
 
 	// BMP symbols with Emoji_Presentation = Yes (or wide terminal emoji fallback)
 	switch {
-	case r == 0x203c || r == 0x2049: // ‼ U+203C, ⁉ U+2049
+	case isWideFallback(r):
 		return true
 	case r == 0x231a || r == 0x231b:
 		return true
@@ -1588,4 +1605,12 @@ func isSMPTextDefault(r rune) bool {
 	default:
 		return false
 	}
+}
+
+func stepRegionalIndicator(inRI bool) (int, bool) {
+	if inRI {
+		return 0, false
+	}
+
+	return 2, true
 }
