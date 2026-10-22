@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/alecthomas/chroma/v2/quick"
 )
@@ -1304,4 +1305,69 @@ func SanitizeDefaultMentions(text string, unicode bool) string {
 	sb.WriteString(text[last:])
 
 	return sb.String()
+}
+
+// StringWidth returns the visual cell width of a string in a monospace terminal.
+func StringWidth(s string) int {
+	width := 0
+
+	for i := 0; i < len(s); {
+		// Skip standard IRC formatting control codes (bold, color, reset, etc.)
+		switch s[i] {
+		case '\x02', '\x1d', '\x1f', '\x16', '\x0f', '\x11':
+			i++
+
+			continue
+
+		case '\x03': // mIRC color: \x03[FG][,BG]
+			i++
+			for i < len(s) && (s[i] >= '0' && s[i] <= '9') {
+				i++
+			}
+
+			if i < len(s) && s[i] == ',' {
+				i++
+				for i < len(s) && (s[i] >= '0' && s[i] <= '9') {
+					i++
+				}
+			}
+
+			continue
+		}
+
+		r, size := utf8.DecodeRuneInString(s[i:])
+		i += size
+
+		switch {
+		case r < 0x20 || (r >= 0x7f && r < 0xa0):
+			// Non-printable control characters
+			continue
+
+		case (r >= 0x1f300 && r <= 0x1faff) || // Miscellaneous Symbols & Pictographs, Emoticons (🆗, 💤)
+			(r >= 0x2600 && r <= 0x27bf) || // Dingbats & Symbols (✅, ⚠)
+			(r >= 0x2b50 && r <= 0x2b55) ||
+			(r >= 0xfe00 && r <= 0xfe0f): // Variation selectors
+			if r >= 0xfe00 && r <= 0xfe0f {
+				continue
+			}
+
+			width += 2
+
+		case r >= 0x1100 && (r <= 0x115f || r == 0x2329 || r == 0x232a ||
+			(r >= 0x2e80 && r <= 0xa4cf && r != 0x303f) ||
+			(r >= 0xac00 && r <= 0xd7a3) ||
+			(r >= 0xf900 && r <= 0xfaff) ||
+			(r >= 0xfe10 && r <= 0xfe19) ||
+			(r >= 0xfe30 && r <= 0xfe6f) ||
+			(r >= 0xff00 && r <= 0xff60) ||
+			(r >= 0xffe0 && r <= 0xffe6)):
+			// CJK and fullwidth forms
+			width += 2
+
+		default:
+			width++
+		}
+	}
+
+	return width
 }

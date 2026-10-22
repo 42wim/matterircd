@@ -2861,7 +2861,7 @@ func (m *Mattermost) formatAttachmentFields(b *strings.Builder, fields []*model.
 				b.WriteString(candidates[j].title)
 
 				if j < groupSize-1 {
-					padWidth := targetColWidth - len(candidates[j].title) + gutter
+					padWidth := targetColWidth - utils.StringWidth(candidates[j].title) + gutter
 
 					for range padWidth {
 						b.WriteByte(' ')
@@ -2896,7 +2896,7 @@ func (m *Mattermost) formatAttachmentFields(b *strings.Builder, fields []*model.
 				b.WriteString(v)
 
 				if j < groupSize-1 {
-					padWidth := targetColWidth - len(v) + gutter
+					padWidth := targetColWidth - utils.StringWidth(v) + gutter
 
 					for range padWidth {
 						b.WriteByte(' ')
@@ -2914,7 +2914,7 @@ func (m *Mattermost) formatAttachmentFields(b *strings.Builder, fields []*model.
 // fieldsFitColWidth checks if all candidate fields and their multiline values fit within targetColWidth.
 func fieldsFitColWidth(fields []*model.SlackAttachmentField, candidates []attachmentFieldCandidate, targetColWidth int, omitFieldTitles bool) bool {
 	for j, field := range fields {
-		if !omitFieldTitles && len(field.Title) > targetColWidth {
+		if !omitFieldTitles && utils.StringWidth(field.Title) > targetColWidth {
 			return false
 		}
 
@@ -2923,7 +2923,9 @@ func fieldsFitColWidth(fields []*model.SlackAttachmentField, candidates []attach
 
 		for k := 0; k <= len(valStr); k++ {
 			if k == len(valStr) || valStr[k] == '\n' {
-				if (k - start) > targetColWidth {
+				line := valStr[start:k]
+
+				if utils.StringWidth(line) > targetColWidth {
 					return false
 				}
 
