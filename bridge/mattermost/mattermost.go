@@ -1163,31 +1163,27 @@ func (m *Mattermost) createUser(mmuser *model.User) *bridge.UserInfo {
 	directoryURL := ""
 
 	if tmpl := rc.Mattermost.Bridge.DirectoryURL; tmpl != "" {
-		splitIdx := strings.IndexByte(tmpl, '?')
+		pathPart, queryPart, hasQuery := strings.Cut(tmpl, "?")
 
-		escapeFor := func(tag, val string) string {
-			tagIdx := strings.Index(tmpl, tag)
-			if tagIdx == -1 || val == "" {
-				return ""
-			}
-
-			// In query string (after '?'), use url.QueryEscape so '+' and '&' are safely encoded.
-			// In URL path (before '?'), use url.PathEscape so path delimiters are preserved.
-			if splitIdx != -1 && tagIdx > splitIdx {
-				return url.QueryEscape(val)
-			}
-
-			return url.PathEscape(val)
-		}
-
-		replacer := strings.NewReplacer(
-			"{nick}", escapeFor("{nick}", nick),
-			"{username}", escapeFor("{username}", mmuser.Username),
-			"{email}", escapeFor("{email}", mmuser.Email),
-			"{firstname}", escapeFor("{firstname}", mmuser.FirstName),
-			"{lastname}", escapeFor("{lastname}", mmuser.LastName),
+		pathReplacer := strings.NewReplacer(
+			"{nick}", url.PathEscape(nick),
+			"{username}", url.PathEscape(mmuser.Username),
+			"{email}", url.PathEscape(mmuser.Email),
+			"{firstname}", url.PathEscape(mmuser.FirstName),
+			"{lastname}", url.PathEscape(mmuser.LastName),
 		)
-		directoryURL = replacer.Replace(tmpl)
+		directoryURL = pathReplacer.Replace(pathPart)
+
+		if hasQuery {
+			queryReplacer := strings.NewReplacer(
+				"{nick}", url.QueryEscape(nick),
+				"{username}", url.QueryEscape(mmuser.Username),
+				"{email}", url.QueryEscape(mmuser.Email),
+				"{firstname}", url.QueryEscape(mmuser.FirstName),
+				"{lastname}", url.QueryEscape(mmuser.LastName),
+			)
+			directoryURL += "?" + queryReplacer.Replace(queryPart)
+		}
 	}
 
 	info := &bridge.UserInfo{
