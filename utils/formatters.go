@@ -1308,60 +1308,115 @@ func SanitizeDefaultMentions(text string, unicode bool) string {
 }
 
 // StringWidth returns the visual cell width of a string in a monospace terminal,
-// accounting for East Asian wide characters, combining marks, and emoji sequences.
+// accounting for East Asian wide characters, combining marks, regional indicator
+// pairs (flags), and emoji sequences.
+//
+//nolint:funlen
 func StringWidth(s string) int {
 	width := 0
 	inZWJ := false
+	inRI := false
+	prevWasEmoji := false
+	prevEmojiNarrow := false
 
 	for _, r := range s {
 		if r == '\u200d' {
-			inZWJ = true
+			if prevWasEmoji {
+				inZWJ = true
+			}
 
 			continue
 		}
 
 		if isZeroWidth(r) {
+			added, narrow := checkEmojiPresentationUpgrade(r, prevEmojiNarrow)
+
+			width += added
+			prevEmojiNarrow = narrow
+
+			if added > 0 {
+				prevWasEmoji = true
+			} else if r == '\ufe0e' {
+				prevWasEmoji = false
+				prevEmojiNarrow = false
+			}
+
 			continue
 		}
 
 		if inZWJ {
 			inZWJ = false
 
+			if isEmoji(r) {
+				prevWasEmoji = true
+				prevEmojiNarrow = false
+
+				continue
+			}
+		}
+
+		if isRegionalIndicator(r) {
+			delta, nextRI := stepRegionalIndicator(inRI)
+
+			inRI = nextRI
+			width += delta
+			prevWasEmoji = true
+			prevEmojiNarrow = false
+
 			continue
 		}
 
+		inRI = false
+
 		if isWide(r) {
 			width += 2
+			prevWasEmoji = isEmojiWide(r)
+			prevEmojiNarrow = false
 
 			continue
 		}
 
 		width++
+		prevWasEmoji = isEmoji(r)
+		prevEmojiNarrow = prevWasEmoji
 	}
 
 	return width
 }
 
+func stepRegionalIndicator(inRI bool) (int, bool) {
+	if inRI {
+		return 0, false
+	}
+
+	return 2, true
+}
+
+func checkEmojiPresentationUpgrade(r rune, prevEmojiNarrow bool) (int, bool) {
+	if (r == '\ufe0f' || r == 0x20e3) && prevEmojiNarrow {
+		return 1, false
+	}
+
+	return 0, prevEmojiNarrow
+}
+
+func isRegionalIndicator(r rune) bool {
+	return r >= 0x1f1e6 && r <= 0x1f1ff
+}
+
 func isZeroWidth(r rune) bool {
-	if r < 0x20 || (r >= 0x7f && r < 0xa0) {
+	if r < 0x20 || (r >= 0x7f && r < 0xa0) || r == 0xad {
 		return true
 	}
 
-	if r == 0xad { // Soft hyphen
-		return true
-	}
-
-	// Combining characters (Mn: Nonspacing, Me: Enclosing)
 	if unicode.Is(unicode.Mn, r) || unicode.Is(unicode.Me, r) {
 		return true
 	}
 
-	// Emoji skin tone modifiers (Fitzpatrick types 1-6)
 	if r >= 0x1f3fb && r <= 0x1f3ff {
 		return true
 	}
 
-	// Variation Selectors
 	if (r >= 0xfe00 && r <= 0xfe0f) || (r >= 0xe0100 && r <= 0xe01ef) {
 		return true
 	}
@@ -1376,23 +1431,45 @@ func isWide(r rune) bool {
 //nolint:gocyclo
 func isCJK(r rune) bool {
 	switch {
-	case r >= 0x1100 && r <= 0x115f: // Hangul Jamo
+	case r >= 0x1100 && r <= 0x115f:
 		return true
-	case r >= 0x2e80 && r <= 0xa4cf && r != 0x303f: // CJK Radicals, Kangxi, Ideographs, Yi
+	case r >= 0x2e80 && r <= 0xa4cf && r != 0x303f:
 		return true
-	case r >= 0xac00 && r <= 0xd7a3: // Hangul Syllables
+	case r >= 0xac00 && r <= 0xd7a3:
 		return true
-	case r >= 0xf900 && r <= 0xfaff: // CJK Compatibility Ideographs
+	case r >= 0xf900 && r <= 0xfaff:
 		return true
-	case r >= 0xfe10 && r <= 0xfe19: // Vertical Forms
+	case r >= 0xfe10 && r <= 0xfe19:
 		return true
-	case r >= 0xfe30 && r <= 0xfe6f: // CJK Compatibility Forms
+	case r >= 0xfe30 && r <= 0xfe6f:
 		return true
-	case r >= 0xff01 && r <= 0xff60: // Fullwidth ASCII Variants
+	case r >= 0xff01 && r <= 0xff60:
 		return true
-	case r >= 0xffe0 && r <= 0xffe6: // Fullwidth Signs
+	case r >= 0xffe0 && r <= 0xffe6:
 		return true
-	case r >= 0x20000 && r <= 0x3fffd: // Plane 2 & 3 CJK Extensions (e.g. 𠀀 U+20000)
+	case r >= 0x20000 && r <= 0x3fffd:
+		return true
+	default:
+		return false
+	}
+}
+
+//nolint:gocyclo
+func isEmoji(r rune) bool {
+	switch {
+	case (r >= '0' && r <= '9') || r == '#' || r == '*':
+		return true
+	case r == 0xa9 || r == 0xae || r == 0x203c || r == 0x2049 || r == 0x2122 || r == 0x2139:
+		return true
+	case r >= 0x2194 && r <= 0x21aa:
+		return true
+	case r >= 0x2300 && r <= 0x27bf:
+		return true
+	case r >= 0x2934 && r <= 0x2b55:
+		return true
+	case r == 0x3030 || r == 0x303d || r == 0x3297 || r == 0x3299:
+		return true
+	case r >= 0x1f000 && r <= 0x1faff:
 		return true
 	default:
 		return false
@@ -1401,17 +1478,10 @@ func isCJK(r rune) bool {
 
 //nolint:funlen,gocyclo
 func isEmojiWide(r rune) bool {
-	// Enclosed Alphanumeric Supplement (e.g. 🆗 U+1F197) and SMP Emojis (U+1F300..U+1FAFF)
 	if (r >= 0x1f191 && r <= 0x1f19a) || (r >= 0x1f300 && r <= 0x1faff) {
 		return true
 	}
 
-	// Regional Indicator Symbols (Flags)
-	if r >= 0x1f1e6 && r <= 0x1f1ff {
-		return true
-	}
-
-	// BMP symbols with Emoji_Presentation = Yes
 	switch {
 	case r == 0x231a || r == 0x231b:
 		return true
@@ -1435,7 +1505,7 @@ func isEmojiWide(r rune) bool {
 		return true
 	case r == 0x26fa || r == 0x26fd:
 		return true
-	case r == 0x2702 || r == 0x2705: // ✅ U+2705
+	case r == 0x2702 || r == 0x2705:
 		return true
 	case r >= 0x2708 && r <= 0x270d:
 		return true
