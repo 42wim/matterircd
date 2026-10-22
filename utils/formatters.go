@@ -1506,8 +1506,10 @@ func isEmojiWide(r rune) bool {
 		return !isSMPTextDefault(r)
 	}
 
-	// BMP symbols with Emoji_Presentation = Yes
+	// BMP symbols with Emoji_Presentation = Yes (or wide terminal emoji fallback)
 	switch {
+	case r == 0x203c || r == 0x2049: // ‼ U+203C, ⁉ U+2049
+		return true
 	case r == 0x231a || r == 0x231b:
 		return true
 	case r >= 0x23e9 && r <= 0x23ec:
