@@ -1393,17 +1393,22 @@ func stepRegionalIndicator(inRI bool) (int, bool) {
 }
 
 func checkEmojiPresentationUpgrade(r rune, prevEmojiNarrow bool) (int, bool) {
-	if (r == '\ufe0f' || r == 0x20e3) && prevEmojiNarrow {
+	if (r == '\ufe0f' || r == 0x20e3 || isFitzpatrickModifier(r)) && prevEmojiNarrow {
 		return 1, false
 	}
 
 	return 0, prevEmojiNarrow
 }
 
+func isFitzpatrickModifier(r rune) bool {
+	return r >= 0x1f3fb && r <= 0x1f3ff
+}
+
 func isRegionalIndicator(r rune) bool {
 	return r >= 0x1f1e6 && r <= 0x1f1ff
 }
 
+//nolint:gocyclo
 func isZeroWidth(r rune) bool {
 	if r < 0x20 || (r >= 0x7f && r < 0xa0) || r == 0xad {
 		return true
@@ -1421,7 +1426,7 @@ func isZeroWidth(r rune) bool {
 	}
 
 	// Emoji skin tone modifiers (Fitzpatrick types 1-6)
-	if r >= 0x1f3fb && r <= 0x1f3ff {
+	if isFitzpatrickModifier(r) {
 		return true
 	}
 
