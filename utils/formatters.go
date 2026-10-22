@@ -1308,8 +1308,8 @@ func SanitizeDefaultMentions(text string, unicode bool) string {
 }
 
 // StringWidth returns the visual cell width of a string in a monospace terminal,
-// accounting for East Asian wide characters, combining marks, regional indicator
-// pairs (flags), and emoji sequences.
+// accounting for East Asian wide characters, combining marks, format characters,
+// regional indicator pairs (flags), and emoji sequences.
 //
 //nolint:funlen
 func StringWidth(s string) int {
@@ -1370,7 +1370,7 @@ func StringWidth(s string) int {
 
 		if isWide(r) {
 			width += 2
-			prevWasEmoji = isEmojiWide(r)
+			prevWasEmoji = isEmoji(r)
 			prevEmojiNarrow = false
 
 			continue
@@ -1409,14 +1409,17 @@ func isZeroWidth(r rune) bool {
 		return true
 	}
 
-	if unicode.Is(unicode.Mn, r) || unicode.Is(unicode.Me, r) {
+	// Combining characters (Mn, Me) and invisible format characters (Cf, e.g. \u200B and tag characters)
+	if unicode.Is(unicode.Mn, r) || unicode.Is(unicode.Me, r) || unicode.Is(unicode.Cf, r) {
 		return true
 	}
 
+	// Emoji skin tone modifiers (Fitzpatrick types 1-6)
 	if r >= 0x1f3fb && r <= 0x1f3ff {
 		return true
 	}
 
+	// Variation selectors (VS1-VS16 and VS17-VS256)
 	if (r >= 0xfe00 && r <= 0xfe0f) || (r >= 0xe0100 && r <= 0xe01ef) {
 		return true
 	}
@@ -1447,7 +1450,11 @@ func isCJK(r rune) bool {
 		return true
 	case r >= 0xffe0 && r <= 0xffe6:
 		return true
-	case r >= 0x20000 && r <= 0x3fffd:
+	case r >= 0x1b000 && r <= 0x1b2ff: // Supplementary Kana, Small Kana Extension, Nushu (e.g. U+1B001)
+		return true
+	case r >= 0x1f200 && r <= 0x1f2ff: // Enclosed Ideographic Supplement
+		return true
+	case r >= 0x20000 && r <= 0x3fffd: // Plane 2 & Plane 3 CJK Extensions (e.g. 𠀀 U+20000)
 		return true
 	default:
 		return false
@@ -1478,10 +1485,17 @@ func isEmoji(r rune) bool {
 
 //nolint:funlen,gocyclo
 func isEmojiWide(r rune) bool {
-	if (r >= 0x1f191 && r <= 0x1f19a) || (r >= 0x1f300 && r <= 0x1faff) {
+	// Standalone wide symbols in SMP
+	if r == 0x1f004 || r == 0x1f0cf || r == 0x1f18e || (r >= 0x1f191 && r <= 0x1f19a) {
 		return true
 	}
 
+	// SMP emoji block (U+1F300..U+1FAFF) excluding text-default symbols
+	if r >= 0x1f300 && r <= 0x1faff {
+		return !isSMPTextDefault(r)
+	}
+
+	// BMP symbols with Emoji_Presentation = Yes
 	switch {
 	case r == 0x231a || r == 0x231b:
 		return true
@@ -1505,9 +1519,9 @@ func isEmojiWide(r rune) bool {
 		return true
 	case r == 0x26fa || r == 0x26fd:
 		return true
-	case r == 0x2702 || r == 0x2705:
+	case r == 0x2705: // ✅ U+2705
 		return true
-	case r >= 0x2708 && r <= 0x270d:
+	case r == 0x270a || r == 0x270b:
 		return true
 	case r == 0x2728:
 		return true
@@ -1520,6 +1534,43 @@ func isEmojiWide(r rune) bool {
 	case r == 0x27b0 || r == 0x27bf:
 		return true
 	case r == 0x2b1b || r == 0x2b1c || r == 0x2b50 || r == 0x2b55:
+		return true
+	default:
+		return false
+	}
+}
+
+// isSMPTextDefault identifies SMP symbols that default to text presentation
+// (Emoji_Presentation = No) unless followed by U+FE0F.
+//
+//nolint:gocyclo
+func isSMPTextDefault(r rune) bool {
+	switch {
+	case r >= 0x1f321 && r <= 0x1f32c: // Weather (e.g. 🌡)
+		return true
+	case r == 0x1f336 || r == 0x1f37d: // 🌶, 🍽
+		return true
+	case r >= 0x1f394 && r <= 0x1f39f: // Badges, media controls
+		return true
+	case r >= 0x1f3cb && r <= 0x1f3ce: // Sports, vehicles
+		return true
+	case r >= 0x1f3d4 && r <= 0x1f3df: // Outdoor / buildings
+		return true
+	case r == 0x1f3f3 || r == 0x1f3f5 || r == 0x1f3f7: // 🏳, 🏵, 🏷
+		return true
+	case r == 0x1f43f || r == 0x1f441 || r == 0x1f4fd: // 🐿, 👁, 📽
+		return true
+	case r >= 0x1f549 && r <= 0x1f54a: // 🕉, 🕊
+		return true
+	case (r >= 0x1f56f && r <= 0x1f570) || (r >= 0x1f573 && r <= 0x1f579): // 🕯, 🕰, 🕹, etc.
+		return true
+	case r == 0x1f587 || (r >= 0x1f58a && r <= 0x1f58d) || r == 0x1f590: // 🖇, 🖊, 🖐
+		return true
+	case r == 0x1f5a5 || r == 0x1f5a8 || r == 0x1f5b1 || r == 0x1f5b2 || r == 0x1f5bc: // 🖥 U+1F5A5, 🖨, 🖱, 🖼
+		return true
+	case (r >= 0x1f5c2 && r <= 0x1f5c4) || (r >= 0x1f5d1 && r <= 0x1f5d3): // Office stationery
+		return true
+	case (r >= 0x1f5dc && r <= 0x1f5de) || r == 0x1f5e1 || r == 0x1f5e3 || r == 0x1f5e8 || r == 0x1f5ef || r == 0x1f5f3 || r == 0x1f5fa:
 		return true
 	default:
 		return false
