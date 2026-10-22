@@ -1285,6 +1285,15 @@ func CmdWhois(s Server, u *User, msg *irc.Message) error {
 				})
 			}
 
+			if otherUser.Directory != "" {
+				r = append(r, &irc.Message{
+					Prefix:   s.Prefix(),
+					Params:   []string{u.Nick, other.Nick},
+					Command:  RPL_WHOISSPECIAL,
+					Trailing: "directory: " + sanitizeIRCTrailing(otherUser.Directory),
+				})
+			}
+
 			if otherUser.Position != "" {
 				r = append(r, &irc.Message{
 					Prefix:   s.Prefix(),

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net/http"
+	"net/url"
 	"regexp"
 	"sort"
 	"strconv"
@@ -1159,6 +1160,32 @@ func (m *Mattermost) createUser(mmuser *model.User) *bridge.UserInfo {
 		photoURL = m.mc.Client.URL + "/api/v4/users/" + mmuser.Id + "/image"
 	}
 
+	directoryURL := ""
+
+	if tmpl := rc.Mattermost.Bridge.DirectoryURL; tmpl != "" {
+		pathPart, queryPart, hasQuery := strings.Cut(tmpl, "?")
+
+		pathReplacer := strings.NewReplacer(
+			"{nick}", url.PathEscape(nick),
+			"{username}", url.PathEscape(mmuser.Username),
+			"{email}", url.PathEscape(mmuser.Email),
+			"{firstname}", url.PathEscape(mmuser.FirstName),
+			"{lastname}", url.PathEscape(mmuser.LastName),
+		)
+		directoryURL = pathReplacer.Replace(pathPart)
+
+		if hasQuery {
+			queryReplacer := strings.NewReplacer(
+				"{nick}", url.QueryEscape(nick),
+				"{username}", url.QueryEscape(mmuser.Username),
+				"{email}", url.QueryEscape(mmuser.Email),
+				"{firstname}", url.QueryEscape(mmuser.FirstName),
+				"{lastname}", url.QueryEscape(mmuser.LastName),
+			)
+			directoryURL += "?" + queryReplacer.Replace(queryPart)
+		}
+	}
+
 	info := &bridge.UserInfo{
 		Nick:        nick,
 		User:        mmuser.Id,
@@ -1172,6 +1199,7 @@ func (m *Mattermost) createUser(mmuser *model.User) *bridge.UserInfo {
 		FirstName:   mmuser.FirstName,
 		LastName:    mmuser.LastName,
 		Email:       mmuser.Email,
+		Directory:   directoryURL,
 		Position:    mmuser.Position,
 		Photo:       photoURL,
 		MentionKeys: mentionKeys,
