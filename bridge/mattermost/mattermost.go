@@ -1159,6 +1159,19 @@ func (m *Mattermost) createUser(mmuser *model.User) *bridge.UserInfo {
 		photoURL = m.mc.Client.URL + "/api/v4/users/" + mmuser.Id + "/image"
 	}
 
+	directoryURL := ""
+
+	if tmpl := rc.Mattermost.Bridge.DirectoryURL; tmpl != "" {
+		replacer := strings.NewReplacer(
+			"{nick}", nick,
+			"{username}", mmuser.Username,
+			"{email}", mmuser.Email,
+			"{firstname}", mmuser.FirstName,
+			"{lastname}", mmuser.LastName,
+		)
+		directoryURL = replacer.Replace(tmpl)
+	}
+
 	info := &bridge.UserInfo{
 		Nick:        nick,
 		User:        mmuser.Id,
@@ -1172,6 +1185,7 @@ func (m *Mattermost) createUser(mmuser *model.User) *bridge.UserInfo {
 		FirstName:   mmuser.FirstName,
 		LastName:    mmuser.LastName,
 		Email:       mmuser.Email,
+		Directory:   directoryURL,
 		Position:    mmuser.Position,
 		Photo:       photoURL,
 		MentionKeys: mentionKeys,

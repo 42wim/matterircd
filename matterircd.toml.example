@@ -173,6 +173,9 @@ DisableAutoView = false
 # default being to show the Username. (default false)
 PreferNickname = false
 
+# Add Directory URL (appear in WHOIS for user)
+DirectoryURL = "https://directory.mydomain.local/people/{nick}"
+
 # Disable showing parent post / replies
 HideReplies = false
 # Shorten replies to approximately this length

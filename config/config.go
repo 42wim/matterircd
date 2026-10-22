@@ -106,6 +106,8 @@ type BridgeConfig struct {
 	SuffixContext    bool
 	ThreadContext    string
 	ShowContextMulti bool
+
+	DirectoryURL string
 }
 
 type FormatterConfig struct {

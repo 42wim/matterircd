@@ -115,6 +115,7 @@ type UserInfo struct {
 	FirstName   string
 	LastName    string
 	Email       string
+	Directory   string
 	Position    string
 	Photo       string
 	MentionKeys []string
