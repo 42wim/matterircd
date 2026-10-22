@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"unicode/utf8"
+	"unicode"
 
 	"github.com/alecthomas/chroma/v2/quick"
 )
@@ -1307,67 +1307,151 @@ func SanitizeDefaultMentions(text string, unicode bool) string {
 	return sb.String()
 }
 
-// StringWidth returns the visual cell width of a string in a monospace terminal.
+// StringWidth returns the visual cell width of a string in a monospace terminal,
+// accounting for East Asian wide characters, combining marks, and emoji sequences.
 func StringWidth(s string) int {
 	width := 0
+	inZWJ := false
 
-	for i := 0; i < len(s); {
-		// Skip standard IRC formatting control codes (bold, color, reset, etc.)
-		switch s[i] {
-		case '\x02', '\x1d', '\x1f', '\x16', '\x0f', '\x11':
-			i++
-
-			continue
-
-		case '\x03': // mIRC color: \x03[FG][,BG]
-			i++
-			for i < len(s) && (s[i] >= '0' && s[i] <= '9') {
-				i++
-			}
-
-			if i < len(s) && s[i] == ',' {
-				i++
-				for i < len(s) && (s[i] >= '0' && s[i] <= '9') {
-					i++
-				}
-			}
+	for _, r := range s {
+		if r == '\u200d' {
+			inZWJ = true
 
 			continue
 		}
 
-		r, size := utf8.DecodeRuneInString(s[i:])
-		i += size
-
-		switch {
-		case r < 0x20 || (r >= 0x7f && r < 0xa0):
-			// Non-printable control characters
+		if isZeroWidth(r) {
 			continue
-
-		case (r >= 0x1f300 && r <= 0x1faff) || // Miscellaneous Symbols & Pictographs, Emoticons (🆗, 💤)
-			(r >= 0x2600 && r <= 0x27bf) || // Dingbats & Symbols (✅, ⚠)
-			(r >= 0x2b50 && r <= 0x2b55) ||
-			(r >= 0xfe00 && r <= 0xfe0f): // Variation selectors
-			if r >= 0xfe00 && r <= 0xfe0f {
-				continue
-			}
-
-			width += 2
-
-		case r >= 0x1100 && (r <= 0x115f || r == 0x2329 || r == 0x232a ||
-			(r >= 0x2e80 && r <= 0xa4cf && r != 0x303f) ||
-			(r >= 0xac00 && r <= 0xd7a3) ||
-			(r >= 0xf900 && r <= 0xfaff) ||
-			(r >= 0xfe10 && r <= 0xfe19) ||
-			(r >= 0xfe30 && r <= 0xfe6f) ||
-			(r >= 0xff00 && r <= 0xff60) ||
-			(r >= 0xffe0 && r <= 0xffe6)):
-			// CJK and fullwidth forms
-			width += 2
-
-		default:
-			width++
 		}
+
+		if inZWJ {
+			inZWJ = false
+
+			continue
+		}
+
+		if isWide(r) {
+			width += 2
+
+			continue
+		}
+
+		width++
 	}
 
 	return width
+}
+
+func isZeroWidth(r rune) bool {
+	if r < 0x20 || (r >= 0x7f && r < 0xa0) {
+		return true
+	}
+
+	if r == 0xad { // Soft hyphen
+		return true
+	}
+
+	// Combining characters (Mn: Nonspacing, Me: Enclosing)
+	if unicode.Is(unicode.Mn, r) || unicode.Is(unicode.Me, r) {
+		return true
+	}
+
+	// Emoji skin tone modifiers (Fitzpatrick types 1-6)
+	if r >= 0x1f3fb && r <= 0x1f3ff {
+		return true
+	}
+
+	// Variation Selectors
+	if (r >= 0xfe00 && r <= 0xfe0f) || (r >= 0xe0100 && r <= 0xe01ef) {
+		return true
+	}
+
+	return false
+}
+
+func isWide(r rune) bool {
+	return isCJK(r) || isEmojiWide(r)
+}
+
+//nolint:gocyclo
+func isCJK(r rune) bool {
+	switch {
+	case r >= 0x1100 && r <= 0x115f: // Hangul Jamo
+		return true
+	case r >= 0x2e80 && r <= 0xa4cf && r != 0x303f: // CJK Radicals, Kangxi, Ideographs, Yi
+		return true
+	case r >= 0xac00 && r <= 0xd7a3: // Hangul Syllables
+		return true
+	case r >= 0xf900 && r <= 0xfaff: // CJK Compatibility Ideographs
+		return true
+	case r >= 0xfe10 && r <= 0xfe19: // Vertical Forms
+		return true
+	case r >= 0xfe30 && r <= 0xfe6f: // CJK Compatibility Forms
+		return true
+	case r >= 0xff01 && r <= 0xff60: // Fullwidth ASCII Variants
+		return true
+	case r >= 0xffe0 && r <= 0xffe6: // Fullwidth Signs
+		return true
+	case r >= 0x20000 && r <= 0x3fffd: // Plane 2 & 3 CJK Extensions (e.g. 𠀀 U+20000)
+		return true
+	default:
+		return false
+	}
+}
+
+//nolint:funlen,gocyclo
+func isEmojiWide(r rune) bool {
+	// Enclosed Alphanumeric Supplement (e.g. 🆗 U+1F197) and SMP Emojis (U+1F300..U+1FAFF)
+	if (r >= 0x1f191 && r <= 0x1f19a) || (r >= 0x1f300 && r <= 0x1faff) {
+		return true
+	}
+
+	// Regional Indicator Symbols (Flags)
+	if r >= 0x1f1e6 && r <= 0x1f1ff {
+		return true
+	}
+
+	// BMP symbols with Emoji_Presentation = Yes
+	switch {
+	case r == 0x231a || r == 0x231b:
+		return true
+	case r >= 0x23e9 && r <= 0x23ec:
+		return true
+	case r == 0x23f0 || r == 0x23f3:
+		return true
+	case r == 0x25fd || r == 0x25fe:
+		return true
+	case r == 0x2614 || r == 0x2615:
+		return true
+	case r >= 0x2648 && r <= 0x2653:
+		return true
+	case r == 0x267f || r == 0x2693 || r == 0x26a1:
+		return true
+	case r == 0x26aa || r == 0x26ab || r == 0x26bd || r == 0x26be:
+		return true
+	case r == 0x26c4 || r == 0x26c5 || r == 0x26ce || r == 0x26d4:
+		return true
+	case r == 0x26ea || r == 0x26f2 || r == 0x26f3 || r == 0x26f5:
+		return true
+	case r == 0x26fa || r == 0x26fd:
+		return true
+	case r == 0x2702 || r == 0x2705: // ✅ U+2705
+		return true
+	case r >= 0x2708 && r <= 0x270d:
+		return true
+	case r == 0x2728:
+		return true
+	case r == 0x274c || r == 0x274e:
+		return true
+	case (r >= 0x2753 && r <= 0x2755) || r == 0x2757:
+		return true
+	case r >= 0x2795 && r <= 0x2797:
+		return true
+	case r == 0x27b0 || r == 0x27bf:
+		return true
+	case r == 0x2b1b || r == 0x2b1c || r == 0x2b50 || r == 0x2b55:
+		return true
+	default:
+		return false
+	}
 }
