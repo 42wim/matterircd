@@ -1414,6 +1414,12 @@ func isZeroWidth(r rune) bool {
 		return true
 	}
 
+	// Medial and trailing Hangul Jamo (Jungseong U+1160..U+11A7 and Jongseong U+11A8..U+11FF)
+	// and Hangul Jamo Extended-B (U+D7B0..U+D7C6, U+D7CB..U+D7FB)
+	if (r >= 0x1160 && r <= 0x11ff) || (r >= 0xd7b0 && r <= 0xd7c6) || (r >= 0xd7cb && r <= 0xd7fb) {
+		return true
+	}
+
 	// Emoji skin tone modifiers (Fitzpatrick types 1-6)
 	if r >= 0x1f3fb && r <= 0x1f3ff {
 		return true
