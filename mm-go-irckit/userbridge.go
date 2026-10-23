@@ -1243,6 +1243,7 @@ func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(nick, text, timeT
 
 	return func(nick, msg, timeTag string) {
 		target := channelTarget
+
 		if isDM {
 			if nick == u.Nick && otherNick != "" {
 				target = otherNick
@@ -1268,7 +1269,7 @@ func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(nick, text, timeT
 			wrapLimit -= 9
 		}
 
-		for _, line := range strings.Split(utils.WrapMessage(msg, wrapLimit), "\n") {
+		for line := range strings.SplitSeq(utils.WrapMessage(msg, wrapLimit), "\n") {
 			line = strings.TrimSuffix(line, "\r")
 			if isAction {
 				line = "\x01ACTION " + line + "\x01"
@@ -1726,12 +1727,14 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 			}
 
 			var replayMsg string
-			if (u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext) && nick != systemUser {
+
+			switch {
+			case (u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext) && nick != systemUser:
 				threadMsgID := u.prefixContext(brchannel.ID, msgID, parentID, "replay")
 				replayMsg = u.formatContextMessage(tsStr, threadMsgID, line)
-			} else if tsStr != "" {
+			case tsStr != "":
 				replayMsg = "[" + tsStr + "] " + line
-			} else {
+			default:
 				replayMsg = line
 			}
 
