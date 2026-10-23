@@ -1721,7 +1721,7 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 			showReplayHdr = false
 		}
 
-		textToProcess := utils.WrapMessage(text, 380)
+		textToProcess := utils.WrapMessage(text, 460)
 
 		utils.ProcessMessageText(textToProcess, opts, func(line string) {
 			if line != "" {
