@@ -94,8 +94,7 @@ func CmdCap(s Server, u *User, msg *irc.Message) error {
 		supported := true
 
 		for _, capName := range fields {
-			isRemove := strings.HasPrefix(capName, "-")
-			cleanCap := strings.TrimPrefix(capName, "-")
+			cleanCap, isRemove := strings.CutPrefix(capName, "-")
 
 			switch cleanCap {
 			case "message-tags":
@@ -121,8 +120,8 @@ func CmdCap(s Server, u *User, msg *irc.Message) error {
 			}
 
 			for _, capName := range fields {
-				if strings.HasPrefix(capName, "-") {
-					delete(u.Caps, strings.TrimPrefix(capName, "-"))
+				if cleanCap, ok := strings.CutPrefix(capName, "-"); ok {
+					delete(u.Caps, cleanCap)
 				} else {
 					u.Caps[capName] = true
 				}
