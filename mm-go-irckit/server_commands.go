@@ -70,12 +70,13 @@ func CmdCap(s Server, u *User, msg *irc.Message) error {
 		var enabled []string
 
 		u.capsMu.RLock()
+		defer u.capsMu.RUnlock()
+
 		for capName, active := range u.Caps {
 			if active {
 				enabled = append(enabled, capName)
 			}
 		}
-		u.capsMu.RUnlock()
 
 		sort.Strings(enabled)
 
