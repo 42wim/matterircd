@@ -1223,90 +1223,58 @@ func (u *User) addUsersToChannels() {
 	u.eventLoopMutex.Unlock()
 }
 
-//nolint:funlen
-func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(string, string, string, ...int) {
-	if !u.br.IsDMChannelName(mmchannel.Name) {
-		ch := u.Srv.Channel(mmchannel.ID)
 
-		return func(from string, msg string, tag string, maxlen ...int) {
-			ch.SpoofTagged(tag, from, msg, irc.PRIVMSG, maxlen...)
-		}
-	}
+func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(string, string, string) {
+	isDM := u.br.IsDMChannelName(mmchannel.Name)
+	channelTarget := u.Srv.Channel(mmchannel.ID).String()
 
 	var otherNick string
-	if dmUser := u.br.GetDMUser(u.ctx, mmchannel.Name); dmUser != nil {
-		otherNick = dmUser.Nick
+
+	if isDM {
+		if dmUser := u.br.GetDMUser(u.ctx, mmchannel.Name); dmUser != nil {
+			otherNick = dmUser.Nick
+		}
 	}
 
-	return func(nick string, msg string, tag string, maxlen ...int) {
-		limit := 460
-		if len(maxlen) > 0 {
-			limit = maxlen[0]
-		}
+	return func(nick string, text string, timeTag string) {
+		target := channelTarget
 
-		var (
-			target string
-			prefix *irc.Prefix
-		)
-
-		if nick == u.Nick && otherNick != "" {
-			target = otherNick
-			prefix = u.Prefix()
-		} else {
-			usr, ok := u.Srv.HasUser(nick)
-			if !ok {
-				logger.Errorf("%s not found for replay msg", nick)
-
-				return
-			}
-
-			target = u.Nick
-			prefix = usr.Prefix()
-		}
-
-		isAction := strings.HasPrefix(msg, "\x01ACTION ") && strings.HasSuffix(msg, "\x01")
-		if isAction {
-			msg = msg[8 : len(msg)-1]
-			limit = max(1, limit-9)
-		}
-
-		msg = utils.WrapMessage(msg, limit)
-
-		for {
-			line, rest, found := strings.Cut(msg, "\n")
-			line = strings.TrimSuffix(line, "\r")
-
-			if isAction {
-				line = "\x01ACTION " + line + "\x01"
-			}
-
-			var ircMsg *irc.Message
-
-			if tag != "" {
-				ircMsg = &irc.Message{
-					Command:       tag + " :" + prefix.String() + " PRIVMSG",
-					Params:        []string{target},
-					Trailing:      line,
-					EmptyTrailing: true,
-				}
+		if isDM {
+			if nick == u.Nick && otherNick != "" {
+				target = otherNick
 			} else {
-				ircMsg = &irc.Message{
-					Prefix:        prefix,
-					Command:       irc.PRIVMSG,
-					Params:        []string{target},
-					Trailing:      line,
-					EmptyTrailing: true,
-				}
+				target = u.Nick
 			}
-
-			_ = u.Encode(ircMsg)
-
-			if !found {
-				break
-			}
-
-			msg = rest
 		}
+
+		var prefix *irc.Prefix
+		if nick == u.Nick {
+			prefix = u.Prefix()
+		} else if usr, ok := u.Srv.HasUser(nick); ok {
+			prefix = usr.Prefix()
+		} else {
+			prefix = &irc.Prefix{Name: nick, User: nick, Host: nick}
+		}
+
+		var ircMsg *irc.Message
+		if timeTag != "" {
+			ircMsg = &irc.Message{
+				Command:       timeTag + " :" + prefix.String() + " PRIVMSG",
+				Params:        []string{target},
+				Trailing:      text,
+				EmptyTrailing: true,
+			}
+		} else {
+			ircMsg = &irc.Message{
+				Prefix:        prefix,
+				Command:       irc.PRIVMSG,
+				Params:        []string{target},
+				Trailing:      text,
+				EmptyTrailing: true,
+			}
+		}
+
+		_ = u.Encode(ircMsg)
 	}
 }
 
@@ -1726,17 +1694,20 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 			showReplayHdr = false
 		}
 
-		textToProcess := utils.WrapMessage(text, 460)
+		isAction := strings.HasPrefix(text, "\x01ACTION ") && strings.HasSuffix(text, "\x01")
+		wrapLimit := 460
+
+		if isAction {
+			text = text[8 : len(text)-1]
+			wrapLimit -= 9
+		}
+
+		textToProcess := utils.WrapMessage(text, wrapLimit)
 
 		utils.ProcessMessageText(textToProcess, opts, func(line string) {
 			if line != "" {
 				if nick == systemUser {
 					line = "\x1d" + line + "\x1d"
-				}
-
-				isAction := strings.HasPrefix(line, "\x01ACTION ") && strings.HasSuffix(line, "\x01")
-				if isAction {
-					line = line[8 : len(line)-1]
 				}
 
 				var replayMsg string

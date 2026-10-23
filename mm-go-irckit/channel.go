@@ -71,9 +71,6 @@ type Channel interface {
 	// Spoof notice
 	SpoofNotice(from string, text string, maxlen ...int)
 
-	// Spoof message with IRCv3 tags
-	SpoofTagged(tag string, from string, text string, cmd string, maxlen ...int)
-
 	IsPrivate() bool
 }
 
@@ -576,36 +573,22 @@ func (ch *channel) Len() int {
 }
 
 func (ch *channel) Spoof(from string, text string, cmd string, maxlen ...int) {
-	ch.SpoofTagged("", from, text, cmd, maxlen...)
-}
-
-func (ch *channel) SpoofTagged(tag string, from string, text string, cmd string, maxlen ...int) {
 	if len(maxlen) == 0 {
 		text = utils.WrapMessage(text, 460)
 	} else {
 		text = utils.WrapMessage(text, maxlen[0])
 	}
 
-	var msg irc.Message
-	if tag != "" {
-		msg = irc.Message{
-			Command:       tag + " :" + from + "!" + from + "@" + from + " " + cmd,
-			Params:        []string{ch.name},
-			EmptyTrailing: true,
-		}
-	} else {
-		prefix := irc.Prefix{
-			Name: from,
-			User: from,
-			Host: from,
-		}
-
-		msg = irc.Message{
-			Prefix:        &prefix,
-			Command:       cmd,
-			Params:        []string{ch.name},
-			EmptyTrailing: true,
-		}
+	prefix := irc.Prefix{
+		Name: from,
+		User: from,
+		Host: from,
+	}
+	msg := irc.Message{
+		Prefix:        &prefix,
+		Command:       cmd,
+		Params:        []string{ch.name},
+		EmptyTrailing: true,
 	}
 
 	users := ch.realUsers()

@@ -58,7 +58,7 @@ PasteBufferTimeout = 2500
 #DisableSendTyping = true
 
 # EXPERIMENTAL: Enable IRCv3 CAP server-time (be sure to enable in IRC client, e.g. irssi `/set show_server_time on`)
-#ServerTime = false
+#ServerTime = true
 
 
 ###################################
