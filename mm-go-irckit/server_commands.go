@@ -112,6 +112,8 @@ func CmdCap(s Server, u *User, msg *irc.Message) error {
 
 		if supported && len(fields) > 0 {
 			u.capsMu.Lock()
+			defer u.capsMu.Unlock()
+
 			if u.Caps == nil {
 				u.Caps = make(map[string]bool)
 			}
@@ -123,7 +125,6 @@ func CmdCap(s Server, u *User, msg *irc.Message) error {
 					u.Caps[capName] = true
 				}
 			}
-			u.capsMu.Unlock()
 
 			// Ensure we are sending the ACK EXACTLY as IRCv3 expects.
 			// IRC formatting: CAP * ACK :message-tags

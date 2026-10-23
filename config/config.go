@@ -475,7 +475,7 @@ func Load(cfgfile string, flags *pflag.FlagSet) (*Config, error) {
 	// use environment variables
 	v.AutomaticEnv()
 
-	v.SetDefault("ServerTime", true)
+	v.SetDefault("ServerTime", false)
 	v.SetDefault("mattermost.JoinReplayDuration", "15m")
 
 	c := &Config{
