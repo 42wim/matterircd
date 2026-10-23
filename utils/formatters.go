@@ -1158,6 +1158,7 @@ func WrapMessage(msg string, maxLen int) string {
 		lastWrite   int
 	)
 
+	linePrefix := ""
 	lineLen := 0
 	spaceStart, spaceLen := 0, 0
 
@@ -1174,9 +1175,14 @@ func WrapMessage(msg string, maxLen int) string {
 		case msg[i] == '\n':
 			// Natural newline resets line length, no need to wrap
 			lineLen, spaceLen = 0, 0
+			linePrefix = ""
 			i++
 
 		default:
+			if lineLen == 0 {
+				linePrefix = getWrapPrefix(msg[i:])
+			}
+
 			start := i
 			for i < len(msg) && msg[i] != ' ' && msg[i] != '\t' && msg[i] != '\n' {
 				i++
@@ -1196,10 +1202,14 @@ func WrapMessage(msg string, maxLen int) string {
 				b.WriteString(msg[lastWrite:spaceStart])
 				b.WriteByte('\n') // Inject the wrap
 
+				if linePrefix != "" {
+					b.WriteString(linePrefix)
+				}
+
 				// Skip over the spaces we just wrapped on
 				lastWrite = spaceStart + spaceLen
 
-				lineLen = wordLen
+				lineLen = wordLen + len(linePrefix)
 				spaceLen = 0
 			} else {
 				lineLen += spaceLen + wordLen
@@ -1216,6 +1226,33 @@ func WrapMessage(msg string, maxLen int) string {
 	// Flush whatever remains of the string
 	b.WriteString(msg[lastWrite:])
 	return b.String()
+}
+
+func getWrapPrefix(s string) string {
+	idx := strings.IndexAny(s, "🮇|│┃▕")
+	if idx < 0 || idx >= 12 {
+		return ""
+	}
+
+	end := idx + 1
+	if s[idx] != '|' {
+		for end < len(s) && (s[end]&0xc0) == 0x80 {
+			end++
+		}
+	}
+
+	for end < len(s) {
+		switch {
+		case s[end] == '\x0f' || s[end] == ' ' || s[end] == '\t':
+			end++
+		case end+1 < len(s) && s[end] == 0xc2 && s[end+1] == 0xa0:
+			end += 2
+		default:
+			return s[:end]
+		}
+	}
+
+	return s[:end]
 }
 
 func flushEmptyLines(count int, mode string, hasContent bool, yield func(line string)) {

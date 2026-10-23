@@ -3015,6 +3015,7 @@ func (m *Mattermost) formatSingleAttachmentField(b *strings.Builder, field *mode
 		valStr = fmt.Sprintf("%v", field.Value)
 	}
 
+	hadLeadingNewline := strings.HasPrefix(valStr, "\n")
 	valStr = strings.TrimPrefix(valStr, "\n")
 
 	if !opts.DisableMarkdown && strings.HasPrefix(valStr, blockQuoteCharDefault) {
@@ -3022,29 +3023,17 @@ func (m *Mattermost) formatSingleAttachmentField(b *strings.Builder, field *mode
 	}
 
 	valTrimmed := strings.Trim(valStr, "\r\n")
-	canInline := !strings.Contains(valTrimmed, "\n") && !omitFieldTitles && field.Title != ""
 
-	// Wrap line and write with prefix for each sub-line to prevent downstream WrapMessage
-	// from splitting long lines into un-prefixed continuations.
-	writePrefixedWrapped := func(content string) {
-		maxWrap := 380
-		wrapped := utils.WrapMessage(content, maxWrap)
-		start := 0
+	isBulletOrList := hadLeadingNewline ||
+		strings.HasPrefix(valStr, " ") ||
+		strings.HasPrefix(valStr, "\t") ||
+		strings.HasPrefix(valTrimmed, "➥") ||
+		strings.HasPrefix(valTrimmed, "•") ||
+		strings.HasPrefix(valTrimmed, "- ") ||
+		strings.HasPrefix(valTrimmed, "* ") ||
+		strings.EqualFold(field.Title, "Actions")
 
-		for k := 0; k <= len(wrapped); k++ {
-			if k == len(wrapped) || wrapped[k] == '\n' {
-				line := wrapped[start:k]
-
-				if len(line) > 0 {
-					b.WriteString(prefix)
-					b.WriteString(line)
-					b.WriteByte('\n')
-				}
-
-				start = k + 1
-			}
-		}
-	}
+	canInline := !isBulletOrList && !strings.Contains(valTrimmed, "\n") && !omitFieldTitles && field.Title != ""
 
 	if canInline {
 		title := utils.FormatMarkdownAndEmoji(field.Title, true, opts.DisableEmoji, "", "", opts.CustomEmoji)
@@ -3059,7 +3048,12 @@ func (m *Mattermost) formatSingleAttachmentField(b *strings.Builder, field *mode
 			isDuplicate := useFallback && fallbackText != "" && line == fallbackText
 
 			if !isDuplicate {
-				writePrefixedWrapped("\x02" + title + "\x02 " + line)
+				b.WriteString(prefix)
+				b.WriteByte('\x02')
+				b.WriteString(title)
+				b.WriteString("\x02 ")
+				b.WriteString(line)
+				b.WriteByte('\n')
 			}
 		})
 
@@ -3083,7 +3077,9 @@ func (m *Mattermost) formatSingleAttachmentField(b *strings.Builder, field *mode
 		isDuplicate := useFallback && fallbackText != "" && line == fallbackText
 
 		if !isDuplicate {
-			writePrefixedWrapped(line)
+			b.WriteString(prefix)
+			b.WriteString(line)
+			b.WriteByte('\n')
 		}
 	})
 }
