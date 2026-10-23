@@ -63,7 +63,7 @@ func CmdCap(s Server, u *User, msg *irc.Message) error {
 			caps += " server-time"
 		}
 
-		params := fmt.Sprintf("* %s :%s", subcommand, caps)
+		params := "* " + subcommand + " :" + caps
 		_ = s.EncodeMessage(u, irc.CAP, []string{params}, "")
 
 	case irc.CAP_REQ:
@@ -107,10 +107,10 @@ func CmdCap(s Server, u *User, msg *irc.Message) error {
 
 			// Ensure we are sending the ACK EXACTLY as IRCv3 expects.
 			// IRC formatting: CAP * ACK :message-tags
-			params := fmt.Sprintf("* ACK :%s", reqCaps)
+			params := "* ACK :" + reqCaps
 			_ = s.EncodeMessage(u, irc.CAP, []string{params}, "")
 		} else {
-			params := fmt.Sprintf("* NAK :%s", reqCaps)
+			params := "* NAK :" + reqCaps
 			_ = s.EncodeMessage(u, irc.CAP, []string{params}, "")
 		}
 

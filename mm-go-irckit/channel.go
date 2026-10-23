@@ -622,7 +622,6 @@ func (ch *channel) SpoofTagged(tag string, from string, text string, cmd string,
 		if !found {
 			break
 		}
-
 		text = rest
 	}
 }

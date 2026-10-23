@@ -1294,6 +1294,7 @@ func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(string, string, s
 			if !found {
 				break
 			}
+
 			msg = rest
 		}
 	}
@@ -1697,7 +1698,7 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 		var timeTag, tsStr string
 
 		if hasServerTime {
-			timeTag = fmt.Sprintf("@time=%s", time.UnixMilli(createAt).UTC().Format("2006-01-02T15:04:05.000Z"))
+			timeTag = "@time=" + time.UnixMilli(createAt).UTC().Format("2006-01-02T15:04:05.000Z")
 		} else {
 			tsStr = time.UnixMilli(createAt).Format("2006-01-02 15:04")
 		}
@@ -1710,7 +1711,7 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 				target = nick
 			}
 
-			spoof(target, fmt.Sprintf("\x02Replaying msgs since %s\x02 \x1d(%s)\x1d", dateStr, logSince), "")
+			spoof(target, "\x02Replaying msgs since "+dateStr+"\x02 \x1d("+logSince+")\x1d", "")
 			logger.Infof("Replaying msgs for %s (%s) since %s (%s)", channame, brchannel.ID, dateStr, logSince)
 			showReplayHdr = false
 		}
@@ -1733,7 +1734,7 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 					threadMsgID := u.prefixContext(brchannel.ID, msgID, parentID, "replay")
 					replayMsg = u.formatContextMessage(tsStr, threadMsgID, line)
 				} else if tsStr != "" {
-					replayMsg = fmt.Sprintf("[%s] %s", tsStr, line)
+					replayMsg = "[" + tsStr + "] " + line
 				} else {
 					replayMsg = line
 				}
@@ -1752,12 +1753,12 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 				sizeKB = 1
 			}
 
-			fileMsg := fmt.Sprintf("\x1ddownload file - %s (%s, %dKBytes)\x1d", f.URL, f.Name, sizeKB)
+			fileMsg := "\x1ddownload file - " + f.URL + " (" + f.Name + ", " + strconv.FormatInt(sizeKB, 10) + "KBytes)\x1d"
 			if u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext {
 				threadMsgID := u.prefixContext(brchannel.ID, msgID, parentID, "replay_file")
 				fileMsg = u.formatContextMessage(tsStr, threadMsgID, fileMsg)
 			} else if tsStr != "" {
-				fileMsg = fmt.Sprintf("[%s] %s", tsStr, fileMsg)
+				fileMsg = "[" + tsStr + "] " + fileMsg
 			}
 
 			spoof(nick, fileMsg, timeTag)
@@ -2559,7 +2560,7 @@ func (u *User) handleTyping(e *bridge.TypingEvent) {
 		host = "mattermost"
 	}
 
-	prefix := fmt.Sprintf("%s!%s@%s", nick, user, host)
+	prefix := nick + "!" + user + "@" + host
 
 	// Determine the target routing (DM vs Channel)
 	var target string
@@ -2584,9 +2585,9 @@ func (u *User) handleTyping(e *bridge.TypingEvent) {
 			parentID = u.getMsgCounterHex(e.ChannelID, parentID)
 		}
 
-		rawCommand = fmt.Sprintf("@+typing=active;+draft/thread=%s :%s TAGMSG", parentID, prefix)
+		rawCommand = "@+typing=active;+draft/thread=" + parentID + " :" + prefix + " TAGMSG"
 	} else {
-		rawCommand = fmt.Sprintf("@+typing=active :%s TAGMSG", prefix)
+		rawCommand = "@+typing=active :" + prefix + " TAGMSG"
 	}
 
 	logger.Tracef("Sending +typing %s: %s: %s", target, nick, rawCommand)
