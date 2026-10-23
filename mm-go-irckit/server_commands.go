@@ -70,13 +70,11 @@ func CmdCap(s Server, u *User, msg *irc.Message) error {
 		var enabled []string
 
 		u.capsMu.RLock()
-
 		for capName, active := range u.Caps {
 			if active {
 				enabled = append(enabled, capName)
 			}
 		}
-
 		u.capsMu.RUnlock()
 
 		sort.Strings(enabled)
@@ -94,11 +92,13 @@ func CmdCap(s Server, u *User, msg *irc.Message) error {
 		supported := true
 
 		for _, capName := range fields {
-			capName = strings.TrimPrefix(capName, "-")
-			switch capName {
+			isRemove := strings.HasPrefix(capName, "-")
+			cleanCap := strings.TrimPrefix(capName, "-")
+
+			switch cleanCap {
 			case "message-tags":
 			case "server-time":
-				if u.cfg != nil && !u.cfg.Current().ServerTime {
+				if !isRemove && u.cfg != nil && !u.cfg.Current().ServerTime {
 					supported = false
 				}
 			default:
@@ -120,7 +120,7 @@ func CmdCap(s Server, u *User, msg *irc.Message) error {
 
 			for _, capName := range fields {
 				if strings.HasPrefix(capName, "-") {
-					delete(u.Caps, capName[1:])
+					delete(u.Caps, strings.TrimPrefix(capName, "-"))
 				} else {
 					u.Caps[capName] = true
 				}
