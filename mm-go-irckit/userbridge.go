@@ -1223,20 +1223,25 @@ func (u *User) addUsersToChannels() {
 	u.eventLoopMutex.Unlock()
 }
 
+//nolint:funlen
 func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(string, string, string) {
 	isDM := u.br.IsDMChannelName(mmchannel.Name)
-	channelTarget := u.Srv.Channel(mmchannel.ID).String()
 
-	var otherNick string
+	var (
+		channelTarget string
+		otherNick     string
+	)
 
 	// Resolve the other participant's IRC nick for DMs
 	if isDM {
 		if dmUser := u.br.GetDMUser(u.ctx, mmchannel.Name); dmUser != nil {
 			otherNick = dmUser.Nick
 		}
+	} else {
+		channelTarget = u.Srv.Channel(mmchannel.ID).String()
 	}
 
-	return func(nick string, text string, timeTag string) {
+	return func(nick string, msg string, timeTag string) {
 		target := channelTarget
 
 		if isDM {
@@ -1256,25 +1261,54 @@ func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(string, string, s
 			prefix = &irc.Prefix{Name: nick, User: nick, Host: nick}
 		}
 
-		var ircMsg *irc.Message
-		if timeTag != "" {
-			ircMsg = &irc.Message{
-				Command:       timeTag + " :" + prefix.String() + " PRIVMSG",
-				Params:        []string{target},
-				Trailing:      text,
-				EmptyTrailing: true,
-			}
-		} else {
-			ircMsg = &irc.Message{
-				Prefix:        prefix,
-				Command:       irc.PRIVMSG,
-				Params:        []string{target},
-				Trailing:      text,
-				EmptyTrailing: true,
-			}
+		// Calculate max trailing length so the message stays within sorcix/irc's 998-byte ceiling:
+		// ":<prefix> PRIVMSG <target> :<trailing>\r\n"
+		// Syntax overhead: 1 (":") + 1 (" ") + 7 ("PRIVMSG") + 1 (" ") + 2 (" :") + 2 ("\r\n") = 14 bytes
+		overhead := len(prefix.String()) + len(target) + 14
+		limit := max(64, 998-overhead)
+
+		isAction := strings.HasPrefix(msg, "\x01ACTION ") && strings.HasSuffix(msg, "\x01")
+		if isAction {
+			msg = msg[8 : len(msg)-1]
+			limit = max(1, limit-9)
 		}
 
-		_ = u.Encode(ircMsg)
+		wrapped := utils.WrapMessage(msg, limit)
+
+		for {
+			line, rest, found := strings.Cut(wrapped, "\n")
+			line = strings.TrimSuffix(line, "\r")
+
+			if isAction {
+				line = "\x01ACTION " + line + "\x01"
+			}
+
+			var ircMsg *irc.Message
+			if timeTag != "" {
+				ircMsg = &irc.Message{
+					Command:       timeTag + " :" + prefix.String() + " PRIVMSG",
+					Params:        []string{target},
+					Trailing:      line,
+					EmptyTrailing: true,
+				}
+			} else {
+				ircMsg = &irc.Message{
+					Prefix:        prefix,
+					Command:       irc.PRIVMSG,
+					Params:        []string{target},
+					Trailing:      line,
+					EmptyTrailing: true,
+				}
+			}
+
+			_ = u.Encode(ircMsg)
+
+			if !found {
+				break
+			}
+
+			wrapped = rest
+		}
 	}
 }
 
@@ -1694,20 +1728,23 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 			showReplayHdr = false
 		}
 
-		isAction := strings.HasPrefix(text, "\x01ACTION ") && strings.HasSuffix(text, "\x01")
-		wrapLimit := 460
-
-		if isAction {
+		isEventAction := strings.HasPrefix(text, "\x01ACTION ") && strings.HasSuffix(text, "\x01")
+		if isEventAction {
 			text = text[8 : len(text)-1]
-			wrapLimit -= 9
 		}
 
-		textToProcess := utils.WrapMessage(text, wrapLimit)
+		textToProcess := utils.WrapMessage(text, 900)
 
 		utils.ProcessMessageText(textToProcess, opts, func(line string) {
 			if line != "" {
 				if nick == systemUser {
 					line = "\x1d" + line + "\x1d"
+				}
+
+				lineAction := isEventAction
+				if !lineAction && strings.HasPrefix(line, "\x01ACTION ") && strings.HasSuffix(line, "\x01") {
+					lineAction = true
+					line = line[8 : len(line)-1]
 				}
 
 				var replayMsg string
@@ -1720,7 +1757,7 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 					replayMsg = line
 				}
 
-				if isAction {
+				if lineAction {
 					replayMsg = "\x01ACTION " + replayMsg + "\x01"
 				}
 
