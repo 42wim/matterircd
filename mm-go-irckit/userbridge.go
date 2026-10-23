@@ -1223,42 +1223,80 @@ func (u *User) addUsersToChannels() {
 	u.eventLoopMutex.Unlock()
 }
 
-func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(string, string, ...int) {
+//nolint:funlen
+func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(string, string, string, ...int) {
 	if !u.br.IsDMChannelName(mmchannel.Name) {
-		return u.Srv.Channel(mmchannel.ID).SpoofMessage
+		ch := u.Srv.Channel(mmchannel.ID)
+
+		return func(from string, msg string, tag string, maxlen ...int) {
+			ch.SpoofTagged(tag, from, msg, irc.PRIVMSG, maxlen...)
+		}
 	}
 
 	var otherNick string
-
-	// Resolve the other participant's IRC nick for DMs
 	if dmUser := u.br.GetDMUser(u.ctx, mmchannel.Name); dmUser != nil {
 		otherNick = dmUser.Nick
 	}
 
-	spoofDM := func(nick string, msg string, maxlen ...int) {
-		// Outbound DM: Bypass local-echo trap and route to their query window
+	return func(nick string, msg string, tag string, maxlen ...int) {
+		limit := 460
+		if len(maxlen) > 0 {
+			limit = maxlen[0]
+		}
+
+		var (
+			target string
+			prefix *irc.Prefix
+		)
+
 		if nick == u.Nick && otherNick != "" {
-			_ = u.Encode(&irc.Message{
-				Prefix:  u.Prefix(),
-				Command: irc.PRIVMSG,
-				Params:  []string{otherNick, msg},
-			})
+			target = otherNick
+			prefix = u.Prefix()
+		} else {
+			usr, ok := u.Srv.HasUser(nick)
+			if !ok {
+				logger.Errorf("%s not found for replay msg", nick)
 
-			return
+				return
+			}
+
+			target = u.Nick
+			prefix = usr.Prefix()
 		}
 
-		// Inbound DM (or fallback if the user wasn't resolved)
-		usr, ok := u.Srv.HasUser(nick)
-		if !ok {
-			logger.Errorf("%s not found for replay msg", nick)
+		msg = utils.WrapMessage(msg, limit)
 
-			return
+		for {
+			line, rest, found := strings.Cut(msg, "\n")
+			line = strings.TrimSuffix(line, "\r")
+
+			var ircMsg *irc.Message
+
+			if tag != "" {
+				ircMsg = &irc.Message{
+					Command:       tag + " :" + prefix.String() + " PRIVMSG",
+					Params:        []string{target},
+					Trailing:      line,
+					EmptyTrailing: true,
+				}
+			} else {
+				ircMsg = &irc.Message{
+					Prefix:        prefix,
+					Command:       irc.PRIVMSG,
+					Params:        []string{target},
+					Trailing:      line,
+					EmptyTrailing: true,
+				}
+			}
+
+			_ = u.Encode(ircMsg)
+
+			if !found {
+				break
+			}
+			msg = rest
 		}
-
-		u.MsgSpoofUser(usr, u.Nick, msg)
 	}
-
-	return spoofDM
 }
 
 // getChannelSince calculates the 'since' timestamp for a channel based on the configured strategy.
@@ -1654,17 +1692,25 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 			continue
 		}
 
-		ts := time.Unix(0, createAt*int64(time.Millisecond))
-		tsStr := ts.Format("2006-01-02 15:04")
+		hasServerTime := u.HasCapability("server-time")
+
+		var timeTag, tsStr string
+
+		if hasServerTime {
+			timeTag = fmt.Sprintf("@time=%s", time.UnixMilli(createAt).UTC().Format("2006-01-02T15:04:05.000Z"))
+		} else {
+			tsStr = time.UnixMilli(createAt).Format("2006-01-02 15:04")
+		}
 
 		// Print the replay header on the very first valid event we process
 		if showReplayHdr && (text != "" || len(files) > 0) {
-			dateStr := ts.Format("2006-01-02 15:04:05")
+			dateStr := time.UnixMilli(createAt).Format("2006-01-02 15:04:05")
 			target := "matterircd"
 			if u.br.IsDMChannelName(brchannel.Name) {
 				target = nick
 			}
-			spoof(target, fmt.Sprintf("\x02Replaying msgs since %s\x02 \x1d(%s)\x1d", dateStr, logSince))
+
+			spoof(target, fmt.Sprintf("\x02Replaying msgs since %s\x02 \x1d(%s)\x1d", dateStr, logSince), "")
 			logger.Infof("Replaying msgs for %s (%s) since %s (%s)", channame, brchannel.ID, dateStr, logSince)
 			showReplayHdr = false
 		}
@@ -1677,24 +1723,26 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 					line = "\x1d" + line + "\x1d"
 				}
 
-				// Safely unwrap CTCP actions
 				isAction := strings.HasPrefix(line, "\x01ACTION ") && strings.HasSuffix(line, "\x01")
 				if isAction {
 					line = line[8 : len(line)-1]
 				}
 
-				replayMsg := fmt.Sprintf("[%s] %s", tsStr, line)
+				var replayMsg string
 				if (u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext) && nick != systemUser {
 					threadMsgID := u.prefixContext(brchannel.ID, msgID, parentID, "replay")
 					replayMsg = u.formatContextMessage(tsStr, threadMsgID, line)
+				} else if tsStr != "" {
+					replayMsg = fmt.Sprintf("[%s] %s", tsStr, line)
+				} else {
+					replayMsg = line
 				}
 
-				// Re-wrap the entire payload
 				if isAction {
 					replayMsg = "\x01ACTION " + replayMsg + "\x01"
 				}
 
-				spoof(nick, replayMsg)
+				spoof(nick, replayMsg, timeTag)
 			}
 		})
 
@@ -1708,9 +1756,11 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 			if u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext {
 				threadMsgID := u.prefixContext(brchannel.ID, msgID, parentID, "replay_file")
 				fileMsg = u.formatContextMessage(tsStr, threadMsgID, fileMsg)
+			} else if tsStr != "" {
+				fileMsg = fmt.Sprintf("[%s] %s", tsStr, fileMsg)
 			}
 
-			spoof(nick, fileMsg)
+			spoof(nick, fileMsg, timeTag)
 		}
 	}
 }

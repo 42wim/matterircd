@@ -58,7 +58,12 @@ func CmdCap(s Server, u *User, msg *irc.Message) error {
 	subcommand := strings.ToUpper(msg.Params[0])
 	switch subcommand {
 	case irc.CAP_LS, irc.CAP_LIST:
-		params := fmt.Sprintf("* %s :message-tags", subcommand)
+		caps := "message-tags"
+		if u.cfg == nil || u.cfg.Current().ServerTime {
+			caps += " server-time"
+		}
+
+		params := fmt.Sprintf("* %s :%s", subcommand, caps)
 		_ = s.EncodeMessage(u, irc.CAP, []string{params}, "")
 
 	case irc.CAP_REQ:
@@ -67,12 +72,38 @@ func CmdCap(s Server, u *User, msg *irc.Message) error {
 			reqCaps = msg.Params[1]
 		}
 
-		if strings.Contains(reqCaps, "message-tags") {
+		fields := strings.Fields(reqCaps)
+		supported := true
+
+		for _, capName := range fields {
+			capName = strings.TrimPrefix(capName, "-")
+			switch capName {
+			case "message-tags":
+			case "server-time":
+				if u.cfg != nil && !u.cfg.Current().ServerTime {
+					supported = false
+				}
+			default:
+				supported = false
+			}
+
+			if !supported {
+				break
+			}
+		}
+
+		if supported && len(fields) > 0 {
 			if u.Caps == nil {
 				u.Caps = make(map[string]bool)
 			}
 
-			u.Caps["message-tags"] = true
+			for _, capName := range fields {
+				if strings.HasPrefix(capName, "-") {
+					delete(u.Caps, capName[1:])
+				} else {
+					u.Caps[capName] = true
+				}
+			}
 
 			// Ensure we are sending the ACK EXACTLY as IRCv3 expects.
 			// IRC formatting: CAP * ACK :message-tags
