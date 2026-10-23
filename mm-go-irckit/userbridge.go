@@ -1223,13 +1223,13 @@ func (u *User) addUsersToChannels() {
 	u.eventLoopMutex.Unlock()
 }
 
-
 func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(string, string, string) {
 	isDM := u.br.IsDMChannelName(mmchannel.Name)
 	channelTarget := u.Srv.Channel(mmchannel.ID).String()
 
 	var otherNick string
 
+	// Resolve the other participant's IRC nick for DMs
 	if isDM {
 		if dmUser := u.br.GetDMUser(u.ctx, mmchannel.Name); dmUser != nil {
 			otherNick = dmUser.Nick
