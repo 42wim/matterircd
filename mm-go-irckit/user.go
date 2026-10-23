@@ -69,7 +69,8 @@ type User struct {
 	lastSync time.Time
 
 	// IRCv3 capabilities client negotiated
-	Caps map[string]bool
+	capsMu sync.RWMutex
+	Caps   map[string]bool
 }
 
 func (u *User) ID() string {
@@ -165,7 +166,7 @@ func (u *User) Encode(msgs ...*irc.Message) (err error) {
 			logger.Warnf("failed to set write deadline for %s: %v", u.Nick, err)
 		}
 
-		if msg.Command == irc.PRIVMSG && (msg.Prefix.Name == "slack" || msg.Prefix.Name == "mattermost") && msg.Prefix.Host == "service" && strings.Contains(msg.Trailing, "token") { //nolint:goconst,staticcheck
+		if msg.Prefix != nil && msg.Command == irc.PRIVMSG && (msg.Prefix.Name == "slack" || msg.Prefix.Name == "mattermost") && msg.Prefix.Host == "service" && strings.Contains(msg.Trailing, "token") { //nolint:goconst,staticcheck
 			logger.Debugf("-> %s %s %s", msg.Command, msg.Prefix.Name, "[token redacted]")
 
 			err := u.Conn.Encode(msg)
@@ -478,6 +479,9 @@ func incomingLogLine(msg *irc.Message) string {
 }
 
 func (u *User) HasCapability(capability string) bool {
+	u.capsMu.RLock()
+	defer u.capsMu.RUnlock()
+
 	if u.Caps == nil {
 		return false
 	}

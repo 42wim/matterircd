@@ -85,8 +85,9 @@ type GlobalConfig struct {
 
 	PasteBufferTimeout int
 
-	EnableTyping     bool
+	EnableTyping      bool
 	DisableSendTyping bool
+	ServerTime        bool
 }
 
 type BridgeConfig struct {
@@ -363,6 +364,7 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 
 			EnableTyping:      c.v.GetBool("EnableTyping"),
 			DisableSendTyping: c.v.GetBool("DisableSendTyping"),
+			ServerTime:        c.v.GetBool("ServerTime"),
 		},
 
 		AI: aiCfg,
@@ -473,6 +475,7 @@ func Load(cfgfile string, flags *pflag.FlagSet) (*Config, error) {
 	// use environment variables
 	v.AutomaticEnv()
 
+	v.SetDefault("ServerTime", false)
 	v.SetDefault("mattermost.JoinReplayDuration", "15m")
 
 	c := &Config{

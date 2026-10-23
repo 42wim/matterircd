@@ -57,8 +57,31 @@ func CmdCap(s Server, u *User, msg *irc.Message) error {
 
 	subcommand := strings.ToUpper(msg.Params[0])
 	switch subcommand {
-	case irc.CAP_LS, irc.CAP_LIST:
-		params := fmt.Sprintf("* %s :message-tags", subcommand)
+	case irc.CAP_LS:
+		caps := "message-tags"
+		if u.cfg == nil || u.cfg.Current().ServerTime {
+			caps += " server-time"
+		}
+
+		params := "* LS :" + caps
+		_ = s.EncodeMessage(u, irc.CAP, []string{params}, "")
+
+	case irc.CAP_LIST:
+		var enabled []string
+
+		u.capsMu.RLock()
+
+		for capName, active := range u.Caps {
+			if active {
+				enabled = append(enabled, capName)
+			}
+		}
+
+		u.capsMu.RUnlock()
+
+		sort.Strings(enabled)
+
+		params := "* LIST :" + strings.Join(enabled, " ")
 		_ = s.EncodeMessage(u, irc.CAP, []string{params}, "")
 
 	case irc.CAP_REQ:
@@ -67,26 +90,56 @@ func CmdCap(s Server, u *User, msg *irc.Message) error {
 			reqCaps = msg.Params[1]
 		}
 
-		if strings.Contains(reqCaps, "message-tags") {
+		fields := strings.Fields(reqCaps)
+		supported := true
+
+		for _, capName := range fields {
+			cleanCap, isRemove := strings.CutPrefix(capName, "-")
+
+			switch cleanCap {
+			case "message-tags":
+			case "server-time":
+				if !isRemove && u.cfg != nil && !u.cfg.Current().ServerTime {
+					supported = false
+				}
+			default:
+				supported = false
+			}
+
+			if !supported {
+				break
+			}
+		}
+
+		if supported && len(fields) > 0 {
+			u.capsMu.Lock()
+			defer u.capsMu.Unlock()
+
 			if u.Caps == nil {
 				u.Caps = make(map[string]bool)
 			}
 
-			u.Caps["message-tags"] = true
+			for _, capName := range fields {
+				if cleanCap, ok := strings.CutPrefix(capName, "-"); ok {
+					delete(u.Caps, cleanCap)
+				} else {
+					u.Caps[capName] = true
+				}
+			}
 
 			// Ensure we are sending the ACK EXACTLY as IRCv3 expects.
 			// IRC formatting: CAP * ACK :message-tags
-			params := fmt.Sprintf("* ACK :%s", reqCaps)
+			params := "* ACK :" + reqCaps
 			_ = s.EncodeMessage(u, irc.CAP, []string{params}, "")
 		} else {
-			params := fmt.Sprintf("* NAK :%s", reqCaps)
+			params := "* NAK :" + reqCaps
 			_ = s.EncodeMessage(u, irc.CAP, []string{params}, "")
 		}
 
 	case irc.CAP_END:
 		// Do nothing
 	default:
-		params := fmt.Sprintf("* %s", subcommand)
+		params := "* " + subcommand
 		_ = s.EncodeMessage(u, "410", []string{params}, "Invalid or unsupported CAP command")
 	}
 
