@@ -1223,7 +1223,7 @@ func (u *User) addUsersToChannels() {
 	u.eventLoopMutex.Unlock()
 }
 
-//nolint:funlen
+//nolint:funlen,gocognit,gocyclo
 func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(nick, text, timeTag string) {
 	isDM := u.br.IsDMChannelName(mmchannel.Name)
 
@@ -1241,6 +1241,8 @@ func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(nick, text, timeT
 		channelTarget = u.Srv.Channel(mmchannel.ID).String()
 	}
 
+	prefixes := make(map[string]*irc.Prefix)
+
 	return func(nick, msg, timeTag string) {
 		target := channelTarget
 
@@ -1250,15 +1252,24 @@ func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(nick, text, timeT
 			} else {
 				target = u.Nick
 			}
+		} else {
+			ch, ok := u.Srv.HasChannel(target)
+			if !ok || !ch.HasUser(u) {
+				return
+			}
 		}
 
-		var prefix *irc.Prefix
-		if nick == u.Nick {
-			prefix = u.Prefix()
-		} else if usr, ok := u.Srv.HasUser(nick); ok {
-			prefix = usr.Prefix()
-		} else {
-			prefix = &irc.Prefix{Name: nick, User: nick, Host: nick}
+		prefix, ok := prefixes[nick]
+		if !ok {
+			if nick == u.Nick {
+				prefix = u.Prefix()
+			} else if usr, okUser := u.Srv.HasUser(nick); okUser {
+				prefix = usr.Prefix()
+			} else {
+				prefix = &irc.Prefix{Name: nick, User: nick, Host: nick}
+			}
+
+			prefixes[nick] = prefix
 		}
 
 		isAction := strings.HasPrefix(msg, "\x01ACTION ") && strings.HasSuffix(msg, "\x01")
