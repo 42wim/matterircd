@@ -1264,11 +1264,21 @@ func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(string, string, s
 			prefix = usr.Prefix()
 		}
 
+		isAction := strings.HasPrefix(msg, "\x01ACTION ") && strings.HasSuffix(msg, "\x01")
+		if isAction {
+			msg = msg[8 : len(msg)-1]
+			limit = max(1, limit-9)
+		}
+
 		msg = utils.WrapMessage(msg, limit)
 
 		for {
 			line, rest, found := strings.Cut(msg, "\n")
 			line = strings.TrimSuffix(line, "\r")
+
+			if isAction {
+				line = "\x01ACTION " + line + "\x01"
+			}
 
 			var ircMsg *irc.Message
 

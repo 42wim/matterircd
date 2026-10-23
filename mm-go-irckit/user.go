@@ -69,7 +69,8 @@ type User struct {
 	lastSync time.Time
 
 	// IRCv3 capabilities client negotiated
-	Caps map[string]bool
+	capsMu sync.RWMutex
+	Caps   map[string]bool
 }
 
 func (u *User) ID() string {
@@ -478,6 +479,9 @@ func incomingLogLine(msg *irc.Message) string {
 }
 
 func (u *User) HasCapability(capability string) bool {
+	u.capsMu.RLock()
+	defer u.capsMu.RUnlock()
+
 	if u.Caps == nil {
 		return false
 	}
