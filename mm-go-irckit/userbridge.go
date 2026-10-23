@@ -1716,7 +1716,7 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 				target = nick
 			}
 
-			spoof(target, "\x02Replaying msgs since "+dateStr+"\x02 \x1d("+logSince+")\x1d", "")
+			spoof(target, "\x1d\x02Replaying msgs since "+dateStr+"\x02 ("+logSince+")\x1d", "")
 			logger.Infof("Replaying msgs for %s (%s) since %s (%s)", channame, brchannel.ID, dateStr, logSince)
 			showReplayHdr = false
 		}
