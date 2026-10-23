@@ -1224,7 +1224,7 @@ func (u *User) addUsersToChannels() {
 }
 
 //nolint:funlen,gocognit,gocyclo
-func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(nick, text, timeTag string) {
+func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(nick, msg, timeTag string) {
 	isDM := u.br.IsDMChannelName(mmchannel.Name)
 
 	var (
@@ -1286,22 +1286,21 @@ func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(nick, text, timeT
 				line = "\x01ACTION " + line + "\x01"
 			}
 
+			cmd := irc.PRIVMSG
+			msgPrefix := prefix
+
 			if timeTag != "" {
-				_ = u.Encode(&irc.Message{
-					Command:       timeTag + " :" + prefix.String() + " PRIVMSG",
-					Params:        []string{target},
-					Trailing:      line,
-					EmptyTrailing: true,
-				})
-			} else {
-				_ = u.Encode(&irc.Message{
-					Prefix:        prefix,
-					Command:       irc.PRIVMSG,
-					Params:        []string{target},
-					Trailing:      line,
-					EmptyTrailing: true,
-				})
+				cmd = timeTag + " :" + prefix.String() + " PRIVMSG"
+				msgPrefix = nil
 			}
+
+			_ = u.Encode(&irc.Message{
+				Prefix:        msgPrefix,
+				Command:       cmd,
+				Params:        []string{target},
+				Trailing:      line,
+				EmptyTrailing: true,
+			})
 		}
 	}
 }
@@ -1722,38 +1721,39 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 			showReplayHdr = false
 		}
 
-		utils.ProcessMessageText(text, opts, func(line string) {
-			if line == "" {
-				return
+		textToProcess := utils.WrapMessage(text, 380)
+
+		utils.ProcessMessageText(textToProcess, opts, func(line string) {
+			if line != "" {
+				if nick == systemUser {
+					line = "\x1d" + line + "\x1d"
+				}
+
+				// Safely unwrap CTCP actions
+				isAction := strings.HasPrefix(line, "\x01ACTION ") && strings.HasSuffix(line, "\x01")
+				if isAction {
+					line = line[8 : len(line)-1]
+				}
+
+				var replayMsg string
+
+				switch {
+				case (u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext) && nick != systemUser:
+					threadMsgID := u.prefixContext(brchannel.ID, msgID, parentID, "replay")
+					replayMsg = u.formatContextMessage(tsStr, threadMsgID, line)
+				case tsStr != "":
+					replayMsg = "[" + tsStr + "] " + line
+				default:
+					replayMsg = line
+				}
+
+				// Re-wrap the entire payload
+				if isAction {
+					replayMsg = "\x01ACTION " + replayMsg + "\x01"
+				}
+
+				spoof(nick, replayMsg, timeTag)
 			}
-
-			if nick == systemUser {
-				line = "\x1d" + line + "\x1d"
-			}
-
-			// Handle CTCP ACTION per line (supports multiline Mattermost /me)
-			isAction := strings.HasPrefix(line, "\x01ACTION ") && strings.HasSuffix(line, "\x01")
-			if isAction {
-				line = line[8 : len(line)-1]
-			}
-
-			var replayMsg string
-
-			switch {
-			case (u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext) && nick != systemUser:
-				threadMsgID := u.prefixContext(brchannel.ID, msgID, parentID, "replay")
-				replayMsg = u.formatContextMessage(tsStr, threadMsgID, line)
-			case tsStr != "":
-				replayMsg = "[" + tsStr + "] " + line
-			default:
-				replayMsg = line
-			}
-
-			if isAction {
-				replayMsg = "\x01ACTION " + replayMsg + "\x01"
-			}
-
-			spoof(nick, replayMsg, timeTag)
 		})
 
 		for _, f := range files {
