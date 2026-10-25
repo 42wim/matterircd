@@ -391,10 +391,11 @@ func search(u *User, toUser *User, args []string, service string) {
 	}
 
 	var reqServerTime bool
+
 	filteredArgs := make([]string, 0, len(args))
 
 	for i, arg := range args {
- 		if i > 0 && (strings.EqualFold(arg, "server-time") || strings.EqualFold(arg, "--server-time")) {
+		if i > 0 && (strings.EqualFold(arg, "server-time") || strings.EqualFold(arg, "--server-time")) {
 			reqServerTime = true
 			continue
 		}
@@ -521,7 +522,7 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 	filteredArgs := make([]string, 0, len(args))
 
 	for i, arg := range args {
- 		if i > 0 && (strings.EqualFold(arg, "server-time") || strings.EqualFold(arg, "--server-time")) {
+		if i > 0 && (strings.EqualFold(arg, "server-time") || strings.EqualFold(arg, "--server-time")) {
 			reqServerTime = true
 			continue
 		}
