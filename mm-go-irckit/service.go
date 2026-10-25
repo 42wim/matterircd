@@ -394,8 +394,8 @@ func search(u *User, toUser *User, args []string, service string) {
 
 	filteredArgs := make([]string, 0, len(args))
 
-	for i, arg := range args {
-		if i > 0 && (strings.EqualFold(arg, "server-time") || strings.EqualFold(arg, "--server-time")) {
+	for _, arg := range args {
+		if strings.EqualFold(arg, "server-time") || strings.EqualFold(arg, "--server-time") {
 			reqServerTime = true
 			continue
 		}
@@ -622,7 +622,10 @@ func dispatchHistoricalEvent(u *User, toUser *User, event *bridge.Event, searchC
 	channelName := getChannelTargetName(u, channelID)
 	scrollbackUser, _ := u.Srv.HasUser(searchCtx)
 
-	hasServerTime := reqServerTime && u.HasCapability("server-time")
+	u.capsMu.RLock()
+	defer u.capsMu.RUnlock()
+
+	hasServerTime := reqServerTime && u.Caps != nil && u.Caps["server-time"]
 
 	var timeTag, tsStr string
 
@@ -683,6 +686,7 @@ func dispatchHistoricalEvent(u *User, toUser *User, event *bridge.Event, searchC
 
 //nolint:funlen,gocyclo
 func formatScrollbackMsg(u *User, channelID string, channel string, user *User, nick string, tsStr, timeTag string, msgID, parentID, msgText string) {
+	// Safely unwrap CTCP actions
 	isAction := strings.HasPrefix(msgText, "\x01ACTION ") && strings.HasSuffix(msgText, "\x01")
 	if isAction {
 		msgText = msgText[8 : len(msgText)-1]
@@ -690,7 +694,11 @@ func formatScrollbackMsg(u *User, channelID string, channel string, user *User, 
 
 	dmTarget := u.Nick
 	if nick == u.Nick {
-		dmTarget = channel
+		if user != nil {
+			dmTarget = user.Nick
+		} else {
+			dmTarget = channel
+		}
 	}
 
 	var msg string
