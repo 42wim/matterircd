@@ -3044,6 +3044,12 @@ func (m *Mattermost) formatSingleAttachmentField(b *strings.Builder, field *mode
 		}
 
 		utils.ProcessMessageText(valTrimmed, opts, func(line string) {
+			// Ignore duplicate content when field value is the same as fallback
+			// e.g. https://github.com/jenkinsci/mattermost-plugin/pull/18
+			if useFallback && fallbackText != "" && line == fallbackText {
+				return
+			}
+
 			b.WriteString(prefix)
 			b.WriteByte('\x02')
 			b.WriteString(title)
