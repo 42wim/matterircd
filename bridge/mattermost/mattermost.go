@@ -3015,10 +3015,44 @@ func (m *Mattermost) formatSingleAttachmentField(b *strings.Builder, field *mode
 		valStr = fmt.Sprintf("%v", field.Value)
 	}
 
+	hadLeadingNewline := strings.HasPrefix(valStr, "\n") || strings.HasPrefix(valStr, "\r\n")
+
 	valStr = strings.TrimPrefix(valStr, "\n")
 
 	if !opts.DisableMarkdown && strings.HasPrefix(valStr, blockQuoteCharDefault) {
 		valStr = strings.Replace(valStr, blockQuoteCharDefault, prefixChar, 1)
+	}
+
+	valTrimmed := strings.Trim(valStr, "\r\n")
+
+	isBulletOrList := strings.HasPrefix(valStr, " ") ||
+		strings.HasPrefix(valStr, "\t") ||
+		strings.HasPrefix(valTrimmed, "➥") ||
+		strings.HasPrefix(valTrimmed, "•") ||
+		strings.HasPrefix(valTrimmed, "- ") ||
+		strings.HasPrefix(valTrimmed, "* ")
+
+	hasNewline := hadLeadingNewline || strings.Contains(valTrimmed, "\n")
+
+	canInline := !bool(field.Short) && !omitFieldTitles && field.Title != "" && valTrimmed != "" && !hasNewline && !isBulletOrList
+
+	if canInline {
+		title := utils.FormatMarkdownAndEmoji(field.Title, true, opts.DisableEmoji, "", "", opts.CustomEmoji)
+
+		if !strings.HasSuffix(title, ":") {
+			title += ":"
+		}
+
+		utils.ProcessMessageText(valTrimmed, opts, func(line string) {
+			b.WriteString(prefix)
+			b.WriteByte('\x02')
+			b.WriteString(title)
+			b.WriteString("\x02 ")
+			b.WriteString(line)
+			b.WriteByte('\n')
+		})
+
+		return
 	}
 
 	if !omitFieldTitles && field.Title != "" {
