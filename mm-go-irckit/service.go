@@ -390,6 +390,20 @@ func search(u *User, toUser *User, args []string, service string) {
 		return
 	}
 
+	var reqServerTime bool
+	filteredArgs := make([]string, 0, len(args))
+
+	for i, arg := range args {
+ 		if i > 0 && (strings.EqualFold(arg, "server-time") || strings.EqualFold(arg, "--server-time")) {
+			reqServerTime = true
+			continue
+		}
+
+		filteredArgs = append(filteredArgs, arg)
+	}
+
+	args = filteredArgs
+
 	limit := 0
 	if len(args) > 1 {
 		if val, err := strconv.Atoi(args[0]); err == nil {
@@ -399,8 +413,8 @@ func search(u *User, toUser *User, args []string, service string) {
 	}
 
 	if len(args) == 0 || args[0] == "help" {
-		u.MsgUser(toUser, "need SEARCH <limit> <text>")
-		u.MsgUser(toUser, "e.g. SEARCH 10 matterircd")
+		u.MsgUser(toUser, "need SEARCH <limit> <text> [server-time]")
+		u.MsgUser(toUser, "e.g. SEARCH 10 matterircd server-time")
 		return
 	}
 
@@ -424,7 +438,7 @@ func search(u *User, toUser *User, args []string, service string) {
 	}
 
 	for _, event := range events {
-		dispatchHistoricalEvent(u, toUser, event, searchStr, searchRegexes, false)
+		dispatchHistoricalEvent(u, toUser, event, searchStr, searchRegexes, reqServerTime)
 	}
 }
 
@@ -506,8 +520,8 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 
 	filteredArgs := make([]string, 0, len(args))
 
-	for _, arg := range args {
-		if strings.EqualFold(arg, "server-time") || strings.EqualFold(arg, "--server-time") {
+	for i, arg := range args {
+ 		if i > 0 && (strings.EqualFold(arg, "server-time") || strings.EqualFold(arg, "--server-time")) {
 			reqServerTime = true
 			continue
 		}
