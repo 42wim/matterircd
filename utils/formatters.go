@@ -1160,6 +1160,7 @@ func WrapMessage(msg string, maxLen int, hardLineSplit ...bool) string {
 
 	linePrefix := ""
 	lineLen := 0
+	wordsOnLine := 0
 	spaceStart, spaceLen := 0, 0
 
 	i := 0
@@ -1175,6 +1176,7 @@ func WrapMessage(msg string, maxLen int, hardLineSplit ...bool) string {
 		case msg[i] == '\n':
 			// Natural newline resets line length, no need to wrap
 			lineLen, spaceLen = 0, 0
+			wordsOnLine = 0
 			linePrefix = ""
 			i++
 
@@ -1190,8 +1192,8 @@ func WrapMessage(msg string, maxLen int, hardLineSplit ...bool) string {
 
 			wordLen := i - start
 
-			// If this word pushes us over the limit, we need to inject a newline
-			if lineLen > 0 && lineLen+spaceLen+wordLen > maxLen {
+			// If this word pushes us over the limit, inject a newline (only if content is already on the line)
+			if wordsOnLine > 0 && lineLen+spaceLen+wordLen > maxLen {
 				if !initialized {
 					b.Grow(len(msg) + (len(msg)/maxLen)*2)
 
@@ -1211,9 +1213,11 @@ func WrapMessage(msg string, maxLen int, hardLineSplit ...bool) string {
 
 				lineLen = wordLen + len(linePrefix)
 				spaceLen = 0
+				wordsOnLine = 1
 			} else {
 				lineLen += spaceLen + wordLen
 				spaceLen = 0
+				wordsOnLine++
 			}
 
 			if enableHardLineSplit && lineLen > maxLen {
@@ -1253,6 +1257,7 @@ func WrapMessage(msg string, maxLen int, hardLineSplit ...bool) string {
 
 					lastWrite = splitPos
 					lineLen = (i - splitPos) + len(linePrefix)
+					wordsOnLine = 1
 				}
 			}
 		}
@@ -1270,8 +1275,25 @@ func WrapMessage(msg string, maxLen int, hardLineSplit ...bool) string {
 
 //nolint:funlen,gocyclo
 func getWrapPrefix(s string) string {
-	limit := min(len(s), 24)
-	sub := s[:limit]
+	idx := 0
+
+	// Skip bracketed prefix tags if present (e.g. timestamp "[2006-01-02 15:04]" or thread tag "[↪@@...]")
+	for idx < len(s) && s[idx] == '[' {
+		closeIdx := strings.IndexByte(s[idx:], ']')
+		if closeIdx < 0 || closeIdx > 80 {
+			break
+		}
+
+		idx += closeIdx + 1
+
+		for idx < len(s) && (s[idx] == ' ' || s[idx] == '\t') {
+			idx++
+		}
+	}
+
+	rem := s[idx:]
+	limit := min(len(rem), 24)
+	sub := rem[:limit]
 
 	i := 0
 	for i < len(sub) {
@@ -1321,7 +1343,7 @@ checkBar:
 		return ""
 	}
 
-	end := i + barLen
+	end := idx + i + barLen
 
 	for end < len(s) {
 		switch {
@@ -1330,11 +1352,11 @@ checkBar:
 		case end+1 < len(s) && s[end] == 0xc2 && s[end+1] == 0xa0:
 			end += 2
 		default:
-			return s[:end]
+			return s[idx:end]
 		}
 	}
 
-	return s[:end]
+	return s[idx:end]
 }
 
 func flushEmptyLines(count int, mode string, hasContent bool, yield func(line string)) {
