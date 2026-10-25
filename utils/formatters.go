@@ -1159,6 +1159,8 @@ func WrapMessage(msg string, maxLen int, hardLineSplit ...bool) string {
 	)
 
 	linePrefix := ""
+	prefixEnd := 0
+	lineStart := 0
 	lineLen := 0
 	wordsOnLine := 0
 	spaceStart, spaceLen := 0, 0
@@ -1174,15 +1176,21 @@ func WrapMessage(msg string, maxLen int, hardLineSplit ...bool) string {
 			spaceLen = i - spaceStart
 
 		case msg[i] == '\n':
-			// Natural newline resets line length, no need to wrap
+			if initialized {
+				b.WriteString(msg[lastWrite : i+1])
+				lastWrite = i + 1
+			}
 			lineLen, spaceLen = 0, 0
 			wordsOnLine = 0
 			linePrefix = ""
+			prefixEnd = 0
+			lineStart = i + 1
 			i++
 
 		default:
 			if lineLen == 0 {
-				linePrefix = getWrapPrefix(msg[i:])
+				linePrefix, prefixEnd = getWrapPrefix(msg[i:])
+				prefixEnd += i
 			}
 
 			start := i
@@ -1191,9 +1199,10 @@ func WrapMessage(msg string, maxLen int, hardLineSplit ...bool) string {
 			}
 
 			wordLen := i - start
+			isContentWord := start >= prefixEnd
 
 			// If this word pushes us over the limit, inject a newline (only if content is already on the line)
-			if wordsOnLine > 0 && lineLen+spaceLen+wordLen > maxLen {
+			if wordsOnLine > 0 && lineLen+spaceLen+wordLen > maxLen { //nolint:nestif
 				if !initialized {
 					b.Grow(len(msg) + (len(msg)/maxLen)*2)
 
@@ -1213,14 +1222,29 @@ func WrapMessage(msg string, maxLen int, hardLineSplit ...bool) string {
 
 				lineLen = wordLen + len(linePrefix)
 				spaceLen = 0
-				wordsOnLine = 1
+
+				if isContentWord {
+					wordsOnLine = 1
+				} else {
+					wordsOnLine = 0
+				}
 			} else {
 				lineLen += spaceLen + wordLen
 				spaceLen = 0
-				wordsOnLine++
+
+				if isContentWord {
+					wordsOnLine++
+				}
 			}
 
 			if enableHardLineSplit && lineLen > maxLen {
+				if !initialized {
+					b.Grow(len(msg) + (len(msg)/maxLen)*2)
+					b.WriteString(msg[lastWrite:lineStart])
+					lastWrite = lineStart
+					initialized = true
+				}
+
 				for lineLen > maxLen {
 					chunkLimit := max(1, maxLen-len(linePrefix))
 					splitPos := lastWrite + chunkLimit
@@ -1240,12 +1264,6 @@ func WrapMessage(msg string, maxLen int, hardLineSplit ...bool) string {
 						for splitPos < i && (msg[splitPos]&0xc0) == 0x80 {
 							splitPos++
 						}
-					}
-
-					if !initialized {
-						b.Grow(len(msg) + (len(msg)/maxLen)*2)
-
-						initialized = true
 					}
 
 					b.WriteString(msg[lastWrite:splitPos])
@@ -1273,8 +1291,8 @@ func WrapMessage(msg string, maxLen int, hardLineSplit ...bool) string {
 	return b.String()
 }
 
-//nolint:funlen,gocyclo
-func getWrapPrefix(s string) string {
+//nolint:funlen,gocyclo,gocognit
+func getWrapPrefix(s string) (string, int) {
 	idx := 0
 
 	// Skip bracketed prefix tags if present (e.g. timestamp "[2006-01-02 15:04]" or thread tag "[↪@@...]")
@@ -1323,7 +1341,7 @@ func getWrapPrefix(s string) string {
 
 checkBar:
 	if i >= len(sub) {
-		return ""
+		return "", idx
 	}
 
 	var barLen int
@@ -1340,7 +1358,7 @@ checkBar:
 	case strings.HasPrefix(sub[i:], "▕"):
 		barLen = len("▕")
 	default:
-		return ""
+		return "", idx
 	}
 
 	end := idx + i + barLen
@@ -1352,11 +1370,11 @@ checkBar:
 		case end+1 < len(s) && s[end] == 0xc2 && s[end+1] == 0xa0:
 			end += 2
 		default:
-			return s[idx:end]
+			return s[idx:end], end
 		}
 	}
 
-	return s[idx:end]
+	return s[idx:end], end
 }
 
 func flushEmptyLines(count int, mode string, hasContent bool, yield func(line string)) {
