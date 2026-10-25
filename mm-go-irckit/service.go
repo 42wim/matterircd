@@ -625,7 +625,7 @@ func dispatchHistoricalEvent(u *User, toUser *User, event *bridge.Event, searchC
 	u.capsMu.RLock()
 	defer u.capsMu.RUnlock()
 
-	hasServerTime := reqServerTime && u.Caps != nil && u.Caps["server-time"]
+	hasServerTime := reqServerTime && u.cfg.Current().ServerTime && u.Caps != nil && u.Caps["server-time"]
 
 	var timeTag, tsStr string
 
