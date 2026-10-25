@@ -1167,11 +1167,9 @@ func WrapMessage(msg string, maxLen int, hardLineSplit ...bool) string {
 		switch {
 		case msg[i] == ' ' || msg[i] == '\t':
 			spaceStart = i
-
 			for i < len(msg) && (msg[i] == ' ' || msg[i] == '\t') {
 				i++
 			}
-
 			spaceLen = i - spaceStart
 
 		case msg[i] == '\n':
@@ -1186,7 +1184,6 @@ func WrapMessage(msg string, maxLen int, hardLineSplit ...bool) string {
 			}
 
 			start := i
-
 			for i < len(msg) && msg[i] != ' ' && msg[i] != '\t' && msg[i] != '\n' {
 				i++
 			}
@@ -1203,7 +1200,7 @@ func WrapMessage(msg string, maxLen int, hardLineSplit ...bool) string {
 
 				// Write everything from our last position up to the spaces we are splitting on
 				b.WriteString(msg[lastWrite:spaceStart])
-				b.WriteByte('\n')  // Inject the wrap
+				b.WriteByte('\n') // Inject the wrap
 
 				if linePrefix != "" {
 					b.WriteString(linePrefix)
@@ -1268,7 +1265,6 @@ func WrapMessage(msg string, maxLen int, hardLineSplit ...bool) string {
 
 	// Flush whatever remains of the string
 	b.WriteString(msg[lastWrite:])
-
 	return b.String()
 }
 
