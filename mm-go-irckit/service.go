@@ -689,11 +689,7 @@ func formatScrollbackMsg(u *User, channelID string, channel string, user *User, 
 
 	dmTarget := u.Nick
 	if nick == u.Nick {
-		if user != nil {
-			dmTarget = user.Nick
-		} else {
-			dmTarget = channel
-		}
+		dmTarget = channel
 	}
 
 	var msg string
@@ -765,7 +761,7 @@ func (u *User) sendScrollback(target, from, msg, timeTag string) {
 		wrapLimit -= 9
 	}
 
-	for line := range strings.SplitSeq(utils.WrapMessage(msg, wrapLimit), "\n") {
+	for line := range strings.SplitSeq(utils.WrapMessage(msg, wrapLimit, u.cfg.Current().HardLineSplit), "\n") {
 		line = strings.TrimSuffix(line, "\r")
 		if isAction {
 			line = "\x01ACTION " + line + "\x01"
