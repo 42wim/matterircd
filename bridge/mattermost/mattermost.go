@@ -3038,21 +3038,27 @@ func (m *Mattermost) formatSingleAttachmentField(b *strings.Builder, field *mode
 
 	if canInline {
 		title := utils.FormatMarkdownAndEmoji(field.Title, true, opts.DisableEmoji, "", "", opts.CustomEmoji)
+		titleColon := title
 
-		if !strings.HasSuffix(title, ":") {
-			title += ":"
+		if !strings.HasSuffix(titleColon, ":") {
+			titleColon += ":"
 		}
 
 		utils.ProcessMessageText(valTrimmed, opts, func(line string) {
 			// Ignore duplicate content when field value is the same as fallback
 			// e.g. https://github.com/jenkinsci/mattermost-plugin/pull/18
 			if useFallback && fallbackText != "" && line == fallbackText {
+				b.WriteString(prefix)
+				b.WriteByte('\x02')
+				b.WriteString(title)
+				b.WriteString("\x02\n")
+
 				return
 			}
 
 			b.WriteString(prefix)
 			b.WriteByte('\x02')
-			b.WriteString(title)
+			b.WriteString(titleColon)
 			b.WriteString("\x02 ")
 			b.WriteString(line)
 			b.WriteByte('\n')
