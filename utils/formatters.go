@@ -1142,15 +1142,15 @@ func Markdown2irc(msg string, blockQuoteChar string, inlineCode string) string {
 
 // WrapMessage soft-wraps msg into lines of at most maxLen bytes, breaking
 // only at spaces/newlines. Words longer than maxLen are left unbroken and
-// overflow their line rather than being split - fine here since IRC's real
-// line limit (512) leaves headroom above maxLen (460), and splitting mid-
-// word would corrupt URLs/tokens. Pure byte scanning throughout
+// overflow their line rather than being split unless hardLineSplit is enabled.
 //
-//nolint:gocyclo
-func WrapMessage(msg string, maxLen int) string {
+//nolint:funlen,gocyclo,gocognit
+func WrapMessage(msg string, maxLen int, hardLineSplit ...bool) string {
 	if maxLen <= 0 || len(msg) <= maxLen {
 		return msg
 	}
+
+	enableHardLineSplit := len(hardLineSplit) > 0 && hardLineSplit[0]
 
 	var (
 		b           strings.Builder
@@ -1158,7 +1158,11 @@ func WrapMessage(msg string, maxLen int) string {
 		lastWrite   int
 	)
 
+	linePrefix := ""
+	prefixEnd := 0
+	lineStart := 0
 	lineLen := 0
+	wordsOnLine := 0
 	spaceStart, spaceLen := 0, 0
 
 	i := 0
@@ -1172,20 +1176,37 @@ func WrapMessage(msg string, maxLen int) string {
 			spaceLen = i - spaceStart
 
 		case msg[i] == '\n':
-			// Natural newline resets line length, no need to wrap
+			if initialized {
+				b.WriteString(msg[lastWrite : i+1])
+				lastWrite = i + 1
+			}
 			lineLen, spaceLen = 0, 0
+			wordsOnLine = 0
+			linePrefix = ""
+			prefixEnd = 0
+			lineStart = i + 1
 			i++
 
 		default:
+			if lineLen == 0 {
+				linePrefix, prefixEnd = getWrapPrefix(msg[i:])
+				prefixEnd += i
+
+				if enableHardLineSplit && len(linePrefix) >= maxLen {
+					linePrefix = ""
+				}
+			}
+
 			start := i
 			for i < len(msg) && msg[i] != ' ' && msg[i] != '\t' && msg[i] != '\n' {
 				i++
 			}
 
 			wordLen := i - start
+			isContentWord := start >= prefixEnd
 
-			// If this word pushes us over the limit, we need to inject a newline
-			if lineLen > 0 && lineLen+spaceLen+wordLen > maxLen {
+			// If this word pushes us over the limit, inject a newline (only if content is already on the line)
+			if wordsOnLine > 0 && lineLen+spaceLen+wordLen > maxLen { //nolint:nestif
 				if !initialized {
 					b.Grow(len(msg) + (len(msg)/maxLen)*2)
 
@@ -1196,14 +1217,70 @@ func WrapMessage(msg string, maxLen int) string {
 				b.WriteString(msg[lastWrite:spaceStart])
 				b.WriteByte('\n') // Inject the wrap
 
+				if linePrefix != "" {
+					b.WriteString(linePrefix)
+				}
+
 				// Skip over the spaces we just wrapped on
 				lastWrite = spaceStart + spaceLen
 
-				lineLen = wordLen
+				lineLen = wordLen + len(linePrefix)
 				spaceLen = 0
+
+				if isContentWord {
+					wordsOnLine = 1
+				} else {
+					wordsOnLine = 0
+				}
 			} else {
 				lineLen += spaceLen + wordLen
 				spaceLen = 0
+
+				if isContentWord {
+					wordsOnLine++
+				}
+			}
+
+			if enableHardLineSplit && lineLen > maxLen {
+				if !initialized {
+					b.Grow(len(msg) + (len(msg)/maxLen)*2)
+					b.WriteString(msg[lastWrite:lineStart])
+					lastWrite = lineStart
+					initialized = true
+				}
+
+				for lineLen > maxLen {
+					chunkLimit := max(1, maxLen-len(linePrefix))
+					splitPos := lastWrite + chunkLimit
+
+					if splitPos >= i {
+						break
+					}
+
+					for splitPos > lastWrite && (msg[splitPos]&0xc0) == 0x80 {
+						splitPos--
+					}
+
+					// Ensure at least one full rune advances if budget is smaller than rune size
+					if splitPos == lastWrite {
+						splitPos = lastWrite + 1
+
+						for splitPos < i && (msg[splitPos]&0xc0) == 0x80 {
+							splitPos++
+						}
+					}
+
+					b.WriteString(msg[lastWrite:splitPos])
+					b.WriteByte('\n')
+
+					if linePrefix != "" {
+						b.WriteString(linePrefix)
+					}
+
+					lastWrite = splitPos
+					lineLen = (i - splitPos) + len(linePrefix)
+					wordsOnLine = 1
+				}
 			}
 		}
 	}
@@ -1216,6 +1293,92 @@ func WrapMessage(msg string, maxLen int) string {
 	// Flush whatever remains of the string
 	b.WriteString(msg[lastWrite:])
 	return b.String()
+}
+
+//nolint:funlen,gocyclo,gocognit
+func getWrapPrefix(s string) (string, int) {
+	idx := 0
+
+	// Skip bracketed prefix tags if present (e.g. timestamp "[2006-01-02 15:04]" or thread tag "[↪@@...]")
+	for idx < len(s) && s[idx] == '[' {
+		closeIdx := strings.IndexByte(s[idx:], ']')
+		if closeIdx < 0 || closeIdx > 80 {
+			break
+		}
+
+		idx += closeIdx + 1
+
+		for idx < len(s) && (s[idx] == ' ' || s[idx] == '\t') {
+			idx++
+		}
+	}
+
+	rem := s[idx:]
+	limit := min(len(rem), 24)
+	sub := rem[:limit]
+
+	i := 0
+	for i < len(sub) {
+		switch sub[i] {
+		case '\x02':
+			i++
+		case '\x03':
+			i++
+
+			for i < len(sub) && sub[i] >= '0' && sub[i] <= '9' {
+				i++
+			}
+
+			if i < len(sub) && sub[i] == ',' {
+				i++
+
+				for i < len(sub) && sub[i] >= '0' && sub[i] <= '9' {
+					i++
+				}
+			}
+		case '\x04':
+			i += 7
+		default:
+			goto checkBar
+		}
+	}
+
+checkBar:
+	if i >= len(sub) {
+		return "", idx
+	}
+
+	var barLen int
+
+	switch {
+	case sub[i] == '|':
+		barLen = 1
+	case strings.HasPrefix(sub[i:], "🮇"):
+		barLen = len("🮇")
+	case strings.HasPrefix(sub[i:], "│"):
+		barLen = len("│")
+	case strings.HasPrefix(sub[i:], "┃"):
+		barLen = len("┃")
+	case strings.HasPrefix(sub[i:], "▕"):
+		barLen = len("▕")
+	default:
+		return "", idx
+	}
+
+	end := idx + i + barLen
+
+	for end < len(s) {
+		switch {
+		case s[end] == '\x0f' || s[end] == ' ' || s[end] == '\t':
+			end++
+		case end+1 < len(s) && s[end] == 0xc2 && s[end+1] == 0xa0:
+			end += 2
+		default:
+			return s[idx:end], end
+		}
+	}
+
+	return s[idx:end], end
 }
 
 func flushEmptyLines(count int, mode string, hasContent bool, yield func(line string)) {
