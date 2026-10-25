@@ -3033,7 +3033,7 @@ func (m *Mattermost) formatSingleAttachmentField(b *strings.Builder, field *mode
 		strings.HasPrefix(valTrimmed, "* ") ||
 		strings.EqualFold(field.Title, "Actions")
 
-	canInline := !isBulletOrList && !strings.Contains(valTrimmed, "\n") && !omitFieldTitles && field.Title != ""
+	canInline := valTrimmed != "" && !isBulletOrList && !strings.Contains(valTrimmed, "\n") && !omitFieldTitles && field.Title != ""
 
 	if canInline {
 		title := utils.FormatMarkdownAndEmoji(field.Title, true, opts.DisableEmoji, "", "", opts.CustomEmoji)

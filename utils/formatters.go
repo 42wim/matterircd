@@ -1144,7 +1144,7 @@ func Markdown2irc(msg string, blockQuoteChar string, inlineCode string) string {
 // only at spaces/newlines. Words longer than maxLen are left unbroken and
 // overflow their line rather than being split unless hardLineSplit is enabled.
 //
-//nolint:gocyclo
+//nolint:funlen,gocyclo,gocognit
 func WrapMessage(msg string, maxLen int, hardLineSplit ...bool) string {
 	if maxLen <= 0 || len(msg) <= maxLen {
 		return msg
@@ -1167,9 +1167,11 @@ func WrapMessage(msg string, maxLen int, hardLineSplit ...bool) string {
 		switch {
 		case msg[i] == ' ' || msg[i] == '\t':
 			spaceStart = i
+
 			for i < len(msg) && (msg[i] == ' ' || msg[i] == '\t') {
 				i++
 			}
+
 			spaceLen = i - spaceStart
 
 		case msg[i] == '\n':
@@ -1184,6 +1186,7 @@ func WrapMessage(msg string, maxLen int, hardLineSplit ...bool) string {
 			}
 
 			start := i
+
 			for i < len(msg) && msg[i] != ' ' && msg[i] != '\t' && msg[i] != '\n' {
 				i++
 			}
@@ -1200,7 +1203,7 @@ func WrapMessage(msg string, maxLen int, hardLineSplit ...bool) string {
 
 				// Write everything from our last position up to the spaces we are splitting on
 				b.WriteString(msg[lastWrite:spaceStart])
-				b.WriteByte('\n') // Inject the wrap
+				b.WriteByte('\n')  // Inject the wrap
 
 				if linePrefix != "" {
 					b.WriteString(linePrefix)
@@ -1211,34 +1214,49 @@ func WrapMessage(msg string, maxLen int, hardLineSplit ...bool) string {
 
 				lineLen = wordLen + len(linePrefix)
 				spaceLen = 0
-
-				if enableHardLineSplit {
-					for lineLen > maxLen {
-						chunkLimit := max(1, maxLen-len(linePrefix))
-						splitPos := lastWrite + chunkLimit
-
-						if splitPos >= i {
-							break
-						}
-
-						for splitPos > lastWrite && (msg[splitPos]&0xc0) == 0x80 {
-							splitPos--
-						}
-
-						b.WriteString(msg[lastWrite:splitPos])
-						b.WriteByte('\n')
-
-						if linePrefix != "" {
-							b.WriteString(linePrefix)
-						}
-
-						lastWrite = splitPos
-						lineLen = (i - splitPos) + len(linePrefix)
-					}
-				}
 			} else {
 				lineLen += spaceLen + wordLen
 				spaceLen = 0
+			}
+
+			if enableHardLineSplit && lineLen > maxLen {
+				for lineLen > maxLen {
+					chunkLimit := max(1, maxLen-len(linePrefix))
+					splitPos := lastWrite + chunkLimit
+
+					if splitPos >= i {
+						break
+					}
+
+					for splitPos > lastWrite && (msg[splitPos]&0xc0) == 0x80 {
+						splitPos--
+					}
+
+					// Ensure at least one full rune advances if budget is smaller than rune size
+					if splitPos == lastWrite {
+						splitPos = lastWrite + 1
+
+						for splitPos < i && (msg[splitPos]&0xc0) == 0x80 {
+							splitPos++
+						}
+					}
+
+					if !initialized {
+						b.Grow(len(msg) + (len(msg)/maxLen)*2)
+
+						initialized = true
+					}
+
+					b.WriteString(msg[lastWrite:splitPos])
+					b.WriteByte('\n')
+
+					if linePrefix != "" {
+						b.WriteString(linePrefix)
+					}
+
+					lastWrite = splitPos
+					lineLen = (i - splitPos) + len(linePrefix)
+				}
 			}
 		}
 	}
@@ -1250,55 +1268,77 @@ func WrapMessage(msg string, maxLen int, hardLineSplit ...bool) string {
 
 	// Flush whatever remains of the string
 	b.WriteString(msg[lastWrite:])
+
 	return b.String()
 }
 
+//nolint:funlen,gocyclo
 func getWrapPrefix(s string) string {
-	var end int
+	limit := min(len(s), 24)
+	sub := s[:limit]
 
-	// Thread context tag, e.g. "[↪xxxx…,yyyy…] " or "[@@xxxx…] "
-	if strings.HasPrefix(s, "[") {
-		closeIdx := strings.IndexByte(s, ']')
-		if closeIdx > 0 && closeIdx < 48 {
-			end = closeIdx + 1
-			for end < len(s) && (s[end] == ' ' || s[end] == '\t') {
-				end++
+	i := 0
+	for i < len(sub) {
+		switch sub[i] {
+		case '\x02':
+			i++
+		case '\x03':
+			i++
+
+			for i < len(sub) && sub[i] >= '0' && sub[i] <= '9' {
+				i++
 			}
+
+			if i < len(sub) && sub[i] == ',' {
+				i++
+
+				for i < len(sub) && sub[i] >= '0' && sub[i] <= '9' {
+					i++
+				}
+			}
+		case '\x04':
+			i += 7
+		default:
+			goto checkBar
 		}
 	}
 
-	// Attachment or blockquote bar following the thread tag or at line start
-	rem := s[end:]
-	idx := strings.IndexAny(rem, "🮇|│┃▕")
-	if idx >= 0 && idx < 16 {
-		barStart := end + idx
-		barEnd := barStart + 1
-
-		if rem[idx] != '|' {
-			for barEnd < len(s) && (s[barEnd]&0xc0) == 0x80 {
-				barEnd++
-			}
-		}
-
-		for barEnd < len(s) {
-			switch {
-			case s[barEnd] == '\x0f' || s[barEnd] == ' ' || s[barEnd] == '\t':
-				barEnd++
-			case barEnd+1 < len(s) && s[barEnd] == 0xc2 && s[barEnd+1] == 0xa0:
-				barEnd += 2
-			default:
-				return s[:barEnd]
-			}
-		}
-
-		return s[:barEnd]
+checkBar:
+	if i >= len(sub) {
+		return ""
 	}
 
-	if end > 0 {
-		return s[:end]
+	var barLen int
+
+	switch {
+	case sub[i] == '|':
+		barLen = 1
+	case strings.HasPrefix(sub[i:], "🮇"):
+		barLen = len("🮇")
+	case strings.HasPrefix(sub[i:], "│"):
+		barLen = len("│")
+	case strings.HasPrefix(sub[i:], "┃"):
+		barLen = len("┃")
+	case strings.HasPrefix(sub[i:], "▕"):
+		barLen = len("▕")
+	default:
+		return ""
 	}
 
-	return ""
+	end := i + barLen
+
+	for end < len(s) {
+		switch {
+		case s[end] == '\x0f' || s[end] == ' ' || s[end] == '\t':
+			end++
+		case end+1 < len(s) && s[end] == 0xc2 && s[end+1] == 0xa0:
+			end += 2
+		default:
+			return s[:end]
+		}
+	}
+
+	return s[:end]
 }
 
 func flushEmptyLines(count int, mode string, hasContent bool, yield func(line string)) {
