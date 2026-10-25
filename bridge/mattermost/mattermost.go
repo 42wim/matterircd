@@ -3030,8 +3030,7 @@ func (m *Mattermost) formatSingleAttachmentField(b *strings.Builder, field *mode
 		strings.HasPrefix(valTrimmed, "➥") ||
 		strings.HasPrefix(valTrimmed, "•") ||
 		strings.HasPrefix(valTrimmed, "- ") ||
-		strings.HasPrefix(valTrimmed, "* ") ||
-		strings.EqualFold(field.Title, "Actions")
+		strings.HasPrefix(valTrimmed, "* ")
 
 	canInline := valTrimmed != "" && !isBulletOrList && !strings.Contains(valTrimmed, "\n") && !omitFieldTitles && field.Title != ""
 
