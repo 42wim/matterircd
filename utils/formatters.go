@@ -1191,6 +1191,10 @@ func WrapMessage(msg string, maxLen int, hardLineSplit ...bool) string {
 			if lineLen == 0 {
 				linePrefix, prefixEnd = getWrapPrefix(msg[i:])
 				prefixEnd += i
+
+				if enableHardLineSplit && len(linePrefix) >= maxLen {
+					linePrefix = ""
+				}
 			}
 
 			start := i
