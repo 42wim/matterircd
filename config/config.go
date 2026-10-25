@@ -85,6 +85,8 @@ type GlobalConfig struct {
 
 	PasteBufferTimeout int
 
+	HardLineSplit bool
+
 	EnableTyping      bool
 	DisableSendTyping bool
 	ServerTime        bool
@@ -362,6 +364,8 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 
 			PasteBufferTimeout: c.v.GetInt("PasteBufferTimeout"),
 
+			HardLineSplit: c.v.GetBool("HardLineSplit"),
+
 			EnableTyping:      c.v.GetBool("EnableTyping"),
 			DisableSendTyping: c.v.GetBool("DisableSendTyping"),
 			ServerTime:        c.v.GetBool("ServerTime"),
@@ -475,6 +479,7 @@ func Load(cfgfile string, flags *pflag.FlagSet) (*Config, error) {
 	// use environment variables
 	v.AutomaticEnv()
 
+	v.SetDefault("HardLineSplit", true)
 	v.SetDefault("ServerTime", false)
 	v.SetDefault("mattermost.JoinReplayDuration", "15m")
 

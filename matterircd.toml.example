@@ -53,6 +53,10 @@ gops = false
 # Depending on how fast you type 2500 is a good number
 PasteBufferTimeout = 2500
 
+# Hard-split words and URLs that exceed IRC's maximum line length limit (512 bytes).
+# Set to false if you prefer leaving oversized tokens unbroken. (default: true)
+#HardLineSplit = true
+
 # EXPERIMENTAL: Enable IRCv3 CAP +typing message-tags
 #EnableTyping = true
 #DisableSendTyping = true

@@ -300,8 +300,9 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 	syntaxHighlighting := u.br.FormatterConfig().SyntaxHighlighting
 	codeBlockSeparator := u.br.FormatterConfig().CodeBlockSeparator
 	preserveNewLines := u.br.FormatterConfig().PreserveNewLines
+	hardLineSplit := u.cfg.Current().HardLineSplit
 
-	text = utils.WrapMessage(text, maxlen)
+	text = utils.WrapMessage(text, maxlen, hardLineSplit)
 	addPrefix := false
 
 	// Remove message thread context prefix for formatting and remember to add it back
@@ -575,8 +576,9 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 	syntaxHighlighting := u.br.FormatterConfig().SyntaxHighlighting
 	codeBlockSeparator := u.br.FormatterConfig().CodeBlockSeparator
 	preserveNewLines := u.br.FormatterConfig().PreserveNewLines
+	hardLineSplit := u.cfg.Current().HardLineSplit
 
-	text = utils.WrapMessage(text, maxlen)
+	text = utils.WrapMessage(text, maxlen, hardLineSplit)
 	addPrefix := false
 
 	// Remove message thread context prefix for formatting and remember to add it back
@@ -1280,7 +1282,9 @@ func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(nick, msg, timeTa
 			wrapLimit -= 9
 		}
 
-		for line := range strings.SplitSeq(utils.WrapMessage(msg, wrapLimit), "\n") {
+		hardLineSplit := u.cfg.Current().HardLineSplit
+
+		for line := range strings.SplitSeq(utils.WrapMessage(msg, wrapLimit, hardLineSplit), "\n") {
 			line = strings.TrimSuffix(line, "\r")
 			if isAction {
 				line = "\x01ACTION " + line + "\x01"
@@ -1656,6 +1660,7 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 	syntaxHighlighting := u.br.FormatterConfig().SyntaxHighlighting
 	codeBlockSeparator := u.br.FormatterConfig().CodeBlockSeparator
 	preserveNewLines := u.br.FormatterConfig().PreserveNewLines
+	hardLineSplit := u.cfg.Current().HardLineSplit
 
 	opts := utils.ProcessMessageOpts{
 		DisableEmoji:       disableEmoji,
@@ -1721,7 +1726,16 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 			showReplayHdr = false
 		}
 
-		textToProcess := utils.WrapMessage(text, 460)
+		wrapLimit := 460
+		if (u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext) && nick != systemUser {
+			wrapLimit -= len(u.prefixContext(brchannel.ID, msgID, parentID, "replay")) + 1
+		}
+
+		if tsStr != "" {
+			wrapLimit -= len(tsStr) + 3
+		}
+
+		textToProcess := utils.WrapMessage(text, wrapLimit, hardLineSplit)
 
 		utils.ProcessMessageText(textToProcess, opts, func(line string) {
 			if line != "" {
@@ -1783,10 +1797,11 @@ func (u *User) MsgUser(toUser *User, msg string) {
 }
 
 func (u *User) MsgSpoofUser(sender *User, rcvuser string, text string, maxlen ...int) {
+	hardLineSplit := u.cfg.Current().HardLineSplit
 	if len(maxlen) == 0 {
-		text = utils.WrapMessage(text, 460)
+		text = utils.WrapMessage(text, 460, hardLineSplit)
 	} else {
-		text = utils.WrapMessage(text, maxlen[0])
+		text = utils.WrapMessage(text, maxlen[0], hardLineSplit)
 	}
 
 	prefix := irc.Prefix{
