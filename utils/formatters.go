@@ -1142,15 +1142,15 @@ func Markdown2irc(msg string, blockQuoteChar string, inlineCode string) string {
 
 // WrapMessage soft-wraps msg into lines of at most maxLen bytes, breaking
 // only at spaces/newlines. Words longer than maxLen are left unbroken and
-// overflow their line rather than being split - fine here since IRC's real
-// line limit (512) leaves headroom above maxLen (460), and splitting mid-
-// word would corrupt URLs/tokens. Pure byte scanning throughout
+// overflow their line rather than being split unless hardLineSplit is enabled.
 //
 //nolint:gocyclo
-func WrapMessage(msg string, maxLen int) string {
+func WrapMessage(msg string, maxLen int, hardLineSplit ...bool) string {
 	if maxLen <= 0 || len(msg) <= maxLen {
 		return msg
 	}
+
+	enableHardLineSplit := len(hardLineSplit) > 0 && hardLineSplit[0]
 
 	var (
 		b           strings.Builder
@@ -1211,6 +1211,31 @@ func WrapMessage(msg string, maxLen int) string {
 
 				lineLen = wordLen + len(linePrefix)
 				spaceLen = 0
+
+				if enableHardLineSplit {
+					for lineLen > maxLen {
+						chunkLimit := max(1, maxLen-len(linePrefix))
+						splitPos := lastWrite + chunkLimit
+
+						if splitPos >= i {
+							break
+						}
+
+						for splitPos > lastWrite && (msg[splitPos]&0xc0) == 0x80 {
+							splitPos--
+						}
+
+						b.WriteString(msg[lastWrite:splitPos])
+						b.WriteByte('\n')
+
+						if linePrefix != "" {
+							b.WriteString(linePrefix)
+						}
+
+						lastWrite = splitPos
+						lineLen = (i - splitPos) + len(linePrefix)
+					}
+				}
 			} else {
 				lineLen += spaceLen + wordLen
 				spaceLen = 0
@@ -1229,30 +1254,51 @@ func WrapMessage(msg string, maxLen int) string {
 }
 
 func getWrapPrefix(s string) string {
-	idx := strings.IndexAny(s, "🮇|│┃▕")
-	if idx < 0 || idx >= 12 {
-		return ""
-	}
+	var end int
 
-	end := idx + 1
-	if s[idx] != '|' {
-		for end < len(s) && (s[end]&0xc0) == 0x80 {
-			end++
+	// Thread context tag, e.g. "[↪xxxx…,yyyy…] " or "[@@xxxx…] "
+	if strings.HasPrefix(s, "[") {
+		closeIdx := strings.IndexByte(s, ']')
+		if closeIdx > 0 && closeIdx < 48 {
+			end = closeIdx + 1
+			for end < len(s) && (s[end] == ' ' || s[end] == '\t') {
+				end++
+			}
 		}
 	}
 
-	for end < len(s) {
-		switch {
-		case s[end] == '\x0f' || s[end] == ' ' || s[end] == '\t':
-			end++
-		case end+1 < len(s) && s[end] == 0xc2 && s[end+1] == 0xa0:
-			end += 2
-		default:
-			return s[:end]
+	// Attachment or blockquote bar following the thread tag or at line start
+	rem := s[end:]
+	idx := strings.IndexAny(rem, "🮇|│┃▕")
+	if idx >= 0 && idx < 16 {
+		barStart := end + idx
+		barEnd := barStart + 1
+
+		if rem[idx] != '|' {
+			for barEnd < len(s) && (s[barEnd]&0xc0) == 0x80 {
+				barEnd++
+			}
 		}
+
+		for barEnd < len(s) {
+			switch {
+			case s[barEnd] == '\x0f' || s[barEnd] == ' ' || s[barEnd] == '\t':
+				barEnd++
+			case barEnd+1 < len(s) && s[barEnd] == 0xc2 && s[barEnd+1] == 0xa0:
+				barEnd += 2
+			default:
+				return s[:barEnd]
+			}
+		}
+
+		return s[:barEnd]
 	}
 
-	return s[:end]
+	if end > 0 {
+		return s[:end]
+	}
+
+	return ""
 }
 
 func flushEmptyLines(count int, mode string, hasContent bool, yield func(line string)) {
