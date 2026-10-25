@@ -479,6 +479,10 @@ func incomingLogLine(msg *irc.Message) string {
 }
 
 func (u *User) HasCapability(capability string) bool {
+	if capability == "server-time" && (u.cfg == nil || !u.cfg.Current().ServerTime) {
+		return false
+	}
+
 	u.capsMu.RLock()
 	defer u.capsMu.RUnlock()
 

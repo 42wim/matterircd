@@ -58,12 +58,7 @@ func CmdCap(s Server, u *User, msg *irc.Message) error {
 	subcommand := strings.ToUpper(msg.Params[0])
 	switch subcommand {
 	case irc.CAP_LS:
-		caps := "message-tags"
-		if u.cfg == nil || u.cfg.Current().ServerTime {
-			caps += " server-time"
-		}
-
-		params := "* LS :" + caps
+		params := "* LS :message-tags server-time"
 		_ = s.EncodeMessage(u, irc.CAP, []string{params}, "")
 
 	case irc.CAP_LIST:
@@ -94,14 +89,10 @@ func CmdCap(s Server, u *User, msg *irc.Message) error {
 		supported := true
 
 		for _, capName := range fields {
-			cleanCap, isRemove := strings.CutPrefix(capName, "-")
+			cleanCap, _ := strings.CutPrefix(capName, "-")
 
 			switch cleanCap {
-			case "message-tags":
-			case "server-time":
-				if !isRemove && u.cfg != nil && !u.cfg.Current().ServerTime {
-					supported = false
-				}
+			case "message-tags", "server-time":
 			default:
 				supported = false
 			}
