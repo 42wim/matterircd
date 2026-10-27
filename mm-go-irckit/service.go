@@ -383,27 +383,11 @@ func details(u *User, toUser *User, args []string, service string) {
 	}
 }
 
-//nolint:cyclop
 func search(u *User, toUser *User, args []string, service string) {
 	if service != "mattermost" {
 		u.MsgUser(toUser, "not implemented")
 		return
 	}
-
-	var reqServerTime bool
-
-	filteredArgs := make([]string, 0, len(args))
-
-	for _, arg := range args {
-		if strings.EqualFold(arg, "server-time") || strings.EqualFold(arg, "--server-time") {
-			reqServerTime = true
-			continue
-		}
-
-		filteredArgs = append(filteredArgs, arg)
-	}
-
-	args = filteredArgs
 
 	limit := 0
 	if len(args) > 1 {
@@ -414,8 +398,8 @@ func search(u *User, toUser *User, args []string, service string) {
 	}
 
 	if len(args) == 0 || args[0] == "help" {
-		u.MsgUser(toUser, "need SEARCH <limit> <text> [server-time]")
-		u.MsgUser(toUser, "e.g. SEARCH 10 matterircd server-time")
+		u.MsgUser(toUser, "need SEARCH <limit> <text>")
+		u.MsgUser(toUser, "e.g. SEARCH 10 matterircd")
 		return
 	}
 
@@ -439,7 +423,7 @@ func search(u *User, toUser *User, args []string, service string) {
 	}
 
 	for _, event := range events {
-		dispatchHistoricalEvent(u, toUser, event, searchStr, searchRegexes, reqServerTime)
+		dispatchHistoricalEvent(u, toUser, event, searchStr, searchRegexes, false)
 	}
 }
 
@@ -684,7 +668,6 @@ func dispatchHistoricalEvent(u *User, toUser *User, event *bridge.Event, searchC
 	}
 }
 
-//nolint:funlen,gocyclo
 func formatScrollbackMsg(u *User, channelID string, channel string, user *User, nick string, tsStr, timeTag string, msgID, parentID, msgText string) {
 	// Safely unwrap CTCP actions
 	isAction := strings.HasPrefix(msgText, "\x01ACTION ") && strings.HasSuffix(msgText, "\x01")
@@ -692,50 +675,48 @@ func formatScrollbackMsg(u *User, channelID string, channel string, user *User, 
 		msgText = msgText[8 : len(msgText)-1]
 	}
 
-	dmTarget := u.Nick
-	if nick == u.Nick {
-		if user != nil {
-			dmTarget = user.Nick
+	var (
+		target    string
+		from      = nick
+		otherNick = channel
+	)
+
+	if user != nil {
+		otherNick = user.Nick
+	}
+
+	switch {
+	case u.cfg.Mattermost().CollapseScrollback:
+		target = "&messages" //nolint:goconst
+
+		if strings.HasPrefix(channel, "#") {
+			from = nick + "/" + channel
+		} else if otherNick != "" {
+			from = nick + "/@" + otherNick
+		}
+	case strings.HasPrefix(channel, "#"):
+		target = channel
+	default:
+		// Direct Message routing:
+		// Outbound (we spoke): target is the other person's nick -> routes to their query window
+		// Inbound (they spoke): target is our nick -> routes to their query window
+		if nick == u.Nick && otherNick != "" {
+			target = otherNick
 		} else {
-			dmTarget = channel
+			target = u.Nick
 		}
 	}
 
 	var msg string
-	var send func(string)
 
 	switch {
-	case u.cfg.Mattermost().CollapseScrollback && strings.HasPrefix(channel, "#"):
+	case (u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext) && nick != systemUser:
 		threadMsgID := u.prefixContext(channelID, msgID, parentID, "scrollback")
 		msg = u.formatContextMessage(tsStr, threadMsgID, msgText)
-		nick += "/" + channel
-		send = func(m string) { u.sendScrollback("&messages", nick, m, timeTag) }
-	case u.cfg.Mattermost().CollapseScrollback:
-		threadMsgID := u.prefixContext(channelID, msgID, parentID, "scrollback")
-		msg = u.formatContextMessage(tsStr, threadMsgID, msgText)
-		send = func(m string) { u.sendScrollback("&messages", nick, m, timeTag) }
-	case (u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext) && strings.HasPrefix(channel, "#") && nick != systemUser:
-		threadMsgID := u.prefixContext(channelID, msgID, parentID, "scrollback")
-		msg = u.formatContextMessage(tsStr, threadMsgID, msgText)
-		send = func(m string) { u.sendScrollback(channel, nick, m, timeTag) }
-	case strings.HasPrefix(channel, "#"):
-		msg = msgText
-		if tsStr != "" {
-			msg = "[" + tsStr + "] " + msgText
-		}
-
-		send = func(m string) { u.sendScrollback(channel, nick, m, timeTag) }
-	case u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext:
-		threadMsgID := u.prefixContext(channelID, msgID, parentID, "scrollback")
-		msg = u.formatContextMessage(tsStr, threadMsgID, msgText)
-		send = func(m string) { u.sendScrollback(dmTarget, nick, m, timeTag) }
+	case tsStr != "":
+		msg = "[" + tsStr + "] " + msgText
 	default:
 		msg = msgText
-		if tsStr != "" {
-			msg = "[" + tsStr + "] " + msgText
-		}
-
-		send = func(m string) { u.sendScrollback(dmTarget, nick, m, timeTag) }
 	}
 
 	// Re-wrap the entire payload so the IRC client parses it
@@ -743,7 +724,7 @@ func formatScrollbackMsg(u *User, channelID string, channel string, user *User, 
 		msg = "\x01ACTION " + msg + "\x01"
 	}
 
-	send(msg)
+	u.sendScrollback(target, from, msg, timeTag)
 }
 
 func (u *User) sendScrollback(target, from, msg, timeTag string) {
