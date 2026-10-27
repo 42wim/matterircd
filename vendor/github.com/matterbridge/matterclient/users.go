@@ -139,8 +139,17 @@ func (m *Client) GetStatus(ctx context.Context, userID string) string {
 		status = model.StatusOffline
 	}
 
-	if !tracked {
-		user := m.GetUser(ctx, userID)
+	user := m.GetCachedUser(userID)
+	var propCustomStatus string
+
+	if user != nil && user.Props != nil {
+		propCustomStatus = user.Props["customStatus"]
+	}
+
+	if !tracked || (propCustomStatus != "" && customStatus == "") {
+		if user == nil {
+			user = m.GetUser(ctx, userID)
+		}
 
 		var rawJSON string
 		if user != nil && user.Props != nil {
@@ -561,11 +570,18 @@ func (m *Client) SearchUsers(ctx context.Context, search *model.UserSearch) ([]*
 	}
 }
 
-//nolint:funlen,gocyclo
+// SetUserCustomStatus parses and sets the custom status for a user.
 func (c *UsersCache) SetUserCustomStatus(userID string, rawJSON string, tzLoc ...*time.Location) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	c.setUserCustomStatusLocked(userID, rawJSON, tzLoc...)
+}
+
+// setUserCustomStatusLocked parses and sets the custom status for a user.
+// The users cache must be locked.
+//nolint:funlen,gocyclo
+func (c *UsersCache) setUserCustomStatusLocked(userID string, rawJSON string, tzLoc ...*time.Location) {
 	userID = c.userIDKey(userID)
 
 	if c.customStatuses == nil {
@@ -1075,6 +1091,16 @@ func (m *Client) updateUserLocked(id string, updateAt int64, deleteAt int64, use
 			}
 		}
 
+		if props != nil && props["customStatus"] != "" {
+			var tzLoc *time.Location
+
+			if m.User != nil {
+				tzLoc = m.User.GetTimezoneLocation()
+			}
+
+			m.Users.setUserCustomStatusLocked(id, props["customStatus"], tzLoc)
+		}
+
 		return cachedUser
 	}
 
@@ -1134,6 +1160,14 @@ func (m *Client) updateUserLocked(id string, updateAt int64, deleteAt int64, use
 
 	if props != nil {
 		cachedUser.Props = props
+
+		var tzLoc *time.Location
+
+		if m.User != nil {
+			tzLoc = m.User.GetTimezoneLocation()
+		}
+
+		m.Users.setUserCustomStatusLocked(id, props["customStatus"], tzLoc)
 	}
 
 	if timezone != nil {
