@@ -139,36 +139,12 @@ func (m *Client) GetStatus(ctx context.Context, userID string) string {
 		status = model.StatusOffline
 	}
 
-	user := m.GetCachedUser(userID)
-	var propCustomStatus string
+	if !tracked {
+		m.Users.mu.Lock()
 
-	if user != nil && user.Props != nil {
-		propCustomStatus = user.Props["customStatus"]
-	}
+		customStatus = m.syncUserCustomStatusLocked(userID)
 
-	if !tracked || (propCustomStatus != "" && customStatus == "") {
-		if user == nil {
-			user = m.GetUser(ctx, userID)
-		}
-
-		var rawJSON string
-		if user != nil && user.Props != nil {
-			if val, propOk := user.Props["customStatus"]; propOk {
-				rawJSON = val
-			}
-		}
-
-		var tzLoc *time.Location
-		if m.User != nil {
-			tzLoc = m.User.GetTimezoneLocation()
-		}
-
-		// Parse & store in cache (permanently marks user as tracked)
-		m.Users.SetUserCustomStatus(userID, rawJSON, tzLoc)
-
-		m.Users.mu.RLock()
-		customStatus = m.Users.customStatuses[userID]
-		m.Users.mu.RUnlock()
+		m.Users.mu.Unlock()
 	}
 
 	if customStatus != "" {
@@ -580,6 +556,7 @@ func (c *UsersCache) SetUserCustomStatus(userID string, rawJSON string, tzLoc ..
 
 // setUserCustomStatusLocked parses and sets the custom status for a user.
 // The users cache must be locked.
+//
 //nolint:funlen,gocyclo
 func (c *UsersCache) setUserCustomStatusLocked(userID string, rawJSON string, tzLoc ...*time.Location) {
 	userID = c.userIDKey(userID)
@@ -691,6 +668,32 @@ func (c *UsersCache) setUserCustomStatusLocked(userID string, rawJSON string, tz
 
 	c.customStatusExpiresAt[userID] = expiry.Unix()
 	c.customStatuses[userID] = formattedStatus + " (Until " + dateStr + ")"
+}
+
+// syncUserCustomStatusLocked reads the cached user's props and updates custom status if uninitialized.
+// The users cache must be locked.
+func (m *Client) syncUserCustomStatusLocked(userID string) string {
+	customStatus, tracked := m.Users.customStatuses[userID]
+
+	if tracked {
+		return customStatus
+	}
+
+	var rawJSON string
+
+	if u := m.Users.users[userID]; u != nil && u.Props != nil {
+		rawJSON = u.Props["customStatus"]
+	}
+
+	var tzLoc *time.Location
+
+	if m.User != nil {
+		tzLoc = m.User.GetTimezoneLocation()
+	}
+
+	m.Users.setUserCustomStatusLocked(userID, rawJSON, tzLoc)
+
+	return m.Users.customStatuses[userID]
 }
 
 func (m *Client) SetUserStatus(userID string, rawStatus string, batchLock bool, lastActivityAt ...int64) string {
@@ -1158,6 +1161,10 @@ func (m *Client) updateUserLocked(id string, updateAt int64, deleteAt int64, use
 		cachedUser.Roles = roles
 	}
 
+	if timezone != nil {
+		cachedUser.Timezone = timezone
+	}
+
 	if props != nil {
 		cachedUser.Props = props
 
@@ -1168,10 +1175,6 @@ func (m *Client) updateUserLocked(id string, updateAt int64, deleteAt int64, use
 		}
 
 		m.Users.setUserCustomStatusLocked(id, props["customStatus"], tzLoc)
-	}
-
-	if timezone != nil {
-		cachedUser.Timezone = timezone
 	}
 
 	return cachedUser
