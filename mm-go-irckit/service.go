@@ -692,7 +692,7 @@ func formatScrollbackMsg(u *User, channelID string, channel string, user *User, 
 		if strings.HasPrefix(channel, "#") {
 			from = nick + "/" + channel
 		} else if otherNick != "" {
-			from = nick + "/@" + otherNick
+			from = nick + "/" + otherNick
 		}
 	case strings.HasPrefix(channel, "#"):
 		target = channel
