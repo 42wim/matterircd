@@ -155,11 +155,15 @@ const writeTimeout = 10 * time.Second
 
 // Encode and send each msg until an error occurs, then returns.
 func (u *User) Encode(msgs ...*irc.Message) (err error) {
-	if u.Ghost {
+	if u == nil || u.Ghost || u.Conn == nil {
 		return nil
 	}
 
 	for _, msg := range msgs {
+		if msg == nil {
+			continue
+		}
+
 		msg.Trailing = strings.TrimRight(msg.Trailing, " \t\r\n")
 
 		if err := u.Conn.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil {
