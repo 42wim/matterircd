@@ -916,7 +916,7 @@ func (u *User) CreateUsersFromInfo(info []*bridge.UserInfo) []*User {
 	users := make([]*User, 0, len(info))
 
 	for _, userinfo := range info {
-		if userinfo.Me {
+		if userinfo.Me || (u.User != "" && userinfo.User == u.User) {
 			continue
 		}
 
@@ -949,6 +949,10 @@ func (u *User) CreateUsersFromInfo(info []*bridge.UserInfo) []*User {
 }
 
 func (u *User) updateUserFromInfo(info *bridge.UserInfo) *User {
+	if info.Me || (u.User != "" && info.User == u.User) {
+		return u
+	}
+
 	info.Ghost = true
 
 	if ghost, ok := u.Srv.HasUserID(info.User); ok {
@@ -1687,13 +1691,13 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 			createAt, text, nick, msgID, parentID, files = e.CreateAt, e.Text, e.Sender.Nick, e.MessageID, e.ParentID, e.Files
 		case *bridge.ChannelAddEvent:
 			createAt, text, nick = e.CreateAt, e.Text, systemUser
-			if len(e.Added) > 0 {
+			if len(e.Added) > 0 && !e.Added[0].Me && e.Added[0].User != u.User {
 				ghost := u.createUserFromInfo(e.Added[0])
 				u.Srv.Channel(brchannel.ID).Join(ghost) //nolint:errcheck
 			}
 		case *bridge.ChannelRemoveEvent:
 			createAt, text, nick = e.CreateAt, e.Text, systemUser
-			if len(e.Removed) > 0 {
+			if len(e.Removed) > 0 && !e.Removed[0].Me && e.Removed[0].User != u.User {
 				ghost := u.createUserFromInfo(e.Removed[0])
 				u.Srv.Channel(brchannel.ID).Part(ghost, "")
 			}
