@@ -837,8 +837,10 @@ func (u *User) handleStatusChangeEvent(event *bridge.StatusChangeEvent) {
 		return
 	}
 
-	if u.br.IsOnline(event.Status) {
-		u.clearAwayNotified(event.UserID)
+	if other, ok := u.Srv.HasUserID(event.UserID); ok {
+		if effectiveStatus, err := u.br.StatusUser(u.ctx, event.UserID); err == nil && u.br.IsOnline(effectiveStatus) {
+			other.ResetAwayNotified()
+		}
 	}
 }
 

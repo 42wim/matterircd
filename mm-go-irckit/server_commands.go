@@ -710,17 +710,14 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 			if err == nil && status != "" && !u.br.IsOnline(status) {
 				const awayCooldown = 20 * 60 // 20 minutes
 
-				now := time.Now().Unix()
-				lastNotified := u.getAwayNotified(toUser.User)
-
-				if now-lastNotified >= awayCooldown {
+				if shouldNotify, now := toUser.ShouldNotifyAway(awayCooldown); shouldNotify {
 					status = utils.EmojiReplaceAliases(status, u.br.FormatterConfig().CustomEmoji)
-
-					err = s.EncodeMessage(u, irc.RPL_AWAY, []string{u.Nick, toUser.Nick}, status)
-					if err == nil {
-						u.setAwayNotified(toUser.User, now)
+					if err = s.EncodeMessage(u, irc.RPL_AWAY, []string{u.Nick, toUser.Nick}, status); err == nil {
+						toUser.MarkAwayNotified(now)
 					}
 				}
+			} else if err == nil && u.br.IsOnline(status) {
+				toUser.ResetAwayNotified()
 			}
 
 			if threadMsgUser(s, u, msg, toUser.User) {

@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/42wim/matterircd/bridge"
@@ -72,8 +73,7 @@ type User struct {
 	capsMu sync.RWMutex
 	Caps   map[string]bool
 
-	awayNotifiedMutex sync.RWMutex
-	awayNotified      map[string]int64
+	awayNotifiedAt atomic.Int64
 }
 
 func (u *User) ID() string {
@@ -507,27 +507,24 @@ func (u *User) createService(nick string, what string) {
 		})
 }
 
-func (u *User) getAwayNotified(userID string) int64 {
-	u.awayNotifiedMutex.RLock()
-	defer u.awayNotifiedMutex.RUnlock()
+// ShouldNotifyAway checks if the 20-minute cooldown has elapsed.
+func (u *User) ShouldNotifyAway(cooldownSec int64) (bool, int64) {
+	now := time.Now().Unix()
+	last := u.awayNotifiedAt.Load()
 
-	return u.awayNotified[userID]
-}
-
-func (u *User) setAwayNotified(userID string, timestamp int64) {
-	u.awayNotifiedMutex.Lock()
-	defer u.awayNotifiedMutex.Unlock()
-
-	if u.awayNotified == nil {
-		u.awayNotified = make(map[string]int64)
+	if now-last < cooldownSec {
+		return false, 0
 	}
 
-	u.awayNotified[userID] = timestamp
+	return true, now
 }
 
-func (u *User) clearAwayNotified(userID string) {
-	u.awayNotifiedMutex.Lock()
-	defer u.awayNotifiedMutex.Unlock()
+// MarkAwayNotified records that an away notification was delivered.
+func (u *User) MarkAwayNotified(now int64) {
+	u.awayNotifiedAt.Store(now)
+}
 
-	delete(u.awayNotified, userID)
+// ResetAwayNotified clears the cooldown when presence recovers.
+func (u *User) ResetAwayNotified() {
+	u.awayNotifiedAt.Store(0)
 }
