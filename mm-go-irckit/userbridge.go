@@ -833,6 +833,12 @@ func (u *User) handleStatusChangeEvent(event *bridge.StatusChangeEvent) {
 				u.Srv.EncodeMessage(u, irc.RPL_NOWAWAY, []string{u.Nick}, "You have been marked as being away") //nolint:errcheck
 			}
 		}
+
+		return
+	}
+
+	if u.br.IsOnline(event.Status) {
+		u.clearAwayNotified(event.UserID)
 	}
 }
 
