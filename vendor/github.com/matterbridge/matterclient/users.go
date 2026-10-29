@@ -472,6 +472,30 @@ func (m *Client) GetUserLastActivity(userID string) int64 {
 	return m.Users.lastUserActivity[userID]
 }
 
+// GetUserLocalTime returns the formatted local time string for a user if configured.
+func (m *Client) GetUserLocalTime(userID string) string {
+	user := m.GetCachedUser(userID)
+	if user == nil || len(user.Timezone) == 0 {
+		return ""
+	}
+
+	tz := user.Timezone["manualTimezone"]
+	if user.Timezone["useAutomaticTimezone"] == "true" && user.Timezone["automaticTimezone"] != "" {
+		tz = user.Timezone["automaticTimezone"]
+	}
+
+	if tz == "" {
+		return ""
+	}
+
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
+		return ""
+	}
+
+	return time.Now().In(loc).Format("15:04")
+}
+
 func (m *Client) GetUserName(ctx context.Context, userID string) string {
 	if user := m.GetUser(ctx, userID); user != nil {
 		return user.Username

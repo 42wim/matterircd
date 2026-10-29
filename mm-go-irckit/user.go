@@ -71,6 +71,9 @@ type User struct {
 	// IRCv3 capabilities client negotiated
 	capsMu sync.RWMutex
 	Caps   map[string]bool
+
+	awayNotifiedMutex sync.RWMutex
+	awayNotified      map[string]int64
 }
 
 func (u *User) ID() string {
@@ -502,4 +505,29 @@ func (u *User) createService(nick string, what string) {
 			Host:  "service",
 			Ghost: true,
 		})
+}
+
+func (u *User) getAwayNotified(userID string) int64 {
+	u.awayNotifiedMutex.RLock()
+	defer u.awayNotifiedMutex.RUnlock()
+
+	return u.awayNotified[userID]
+}
+
+func (u *User) setAwayNotified(userID string, timestamp int64) {
+	u.awayNotifiedMutex.Lock()
+	defer u.awayNotifiedMutex.Unlock()
+
+	if u.awayNotified == nil {
+		u.awayNotified = make(map[string]int64)
+	}
+
+	u.awayNotified[userID] = timestamp
+}
+
+func (u *User) clearAwayNotified(userID string) {
+	u.awayNotifiedMutex.Lock()
+	defer u.awayNotifiedMutex.Unlock()
+
+	delete(u.awayNotified, userID)
 }

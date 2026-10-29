@@ -708,8 +708,20 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 			// But after reactions as we don't care if we're reacting to an existing message.
 			status, err := u.br.StatusUser(u.ctx, toUser.User)
 			if err == nil && status != "" && !u.br.IsOnline(status) {
-				status = utils.EmojiReplaceAliases(status, u.br.FormatterConfig().CustomEmoji)
-				_ = s.EncodeMessage(u, irc.RPL_AWAY, []string{u.Nick, toUser.Nick}, status)
+				const awayCooldown = 20 * 60 // 20 minutes
+
+				now := time.Now().Unix()
+				lastNotified := u.getAwayNotified(toUser.User)
+
+				if now-lastNotified >= awayCooldown {
+					status = utils.EmojiReplaceAliases(status, u.br.FormatterConfig().CustomEmoji)
+					_ = s.EncodeMessage(u, irc.RPL_AWAY, []string{u.Nick, toUser.Nick}, status)
+
+					u.setAwayNotified(toUser.User, now)
+				}
+			} else if err == nil && u.br.IsOnline(status) {
+				// Clear suppression state when user comes back online so the very next away state triggers immediately
+				u.clearAwayNotified(toUser.User)
 			}
 
 			if threadMsgUser(s, u, msg, toUser.User) {
