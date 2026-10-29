@@ -822,6 +822,10 @@ func (u *User) handleStatusChangeEvent(event *bridge.StatusChangeEvent) {
 				logger.Debug("setting myself online")
 				u.away.Store(false)
 				u.Srv.EncodeMessage(u, irc.RPL_UNAWAY, []string{u.Nick}, "You are no longer marked as being away") //nolint:errcheck
+
+				if u.br.IsOnline(event.Status) {
+					u.ResetAwayNotified()
+				}
 			}
 		// Ignore `offline` status changes to prevent bouncing between being marked away and not.
 		case "offline":
@@ -837,11 +841,26 @@ func (u *User) handleStatusChangeEvent(event *bridge.StatusChangeEvent) {
 		return
 	}
 
-	if other, ok := u.Srv.HasUserID(event.UserID); ok {
-		effectiveStatus, err := u.br.StatusUser(u.ctx, event.UserID)
-		if err == nil && u.br.IsOnline(effectiveStatus) {
+	if event.Status != "online" {
+		return
+	}
+
+	other, ok := u.Srv.HasUserID(event.UserID)
+	if !ok {
+		return
+	}
+
+	statuses, err := u.br.StatusUsers(u.ctx)
+	if err != nil {
+		if u.br.IsOnline(event.Status) {
 			other.ResetAwayNotified()
 		}
+
+		return
+	}
+
+	if userStatus, exists := statuses[event.UserID]; exists && u.br.IsOnline(userStatus) {
+		other.ResetAwayNotified()
 	}
 }
 

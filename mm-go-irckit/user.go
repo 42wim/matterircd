@@ -73,7 +73,8 @@ type User struct {
 	capsMu sync.RWMutex
 	Caps   map[string]bool
 
-	awayNotifiedAt atomic.Int64
+	awayNotifiedAt  atomic.Int64
+	awayNotifiedGen atomic.Uint64
 }
 
 func (u *User) ID() string {
@@ -507,24 +508,30 @@ func (u *User) createService(nick string, what string) {
 		})
 }
 
-// ShouldNotifyAway checks if the 20-minute cooldown has elapsed.
-func (u *User) ShouldNotifyAway(cooldownSec int64) (bool, int64) {
+// ShouldNotifyAway checks if the 20-minute cooldown has elapsed and returns
+// whether to notify, the current timestamp, and the generation snapshot.
+func (u *User) ShouldNotifyAway(cooldownSec int64) (bool, int64, uint64) {
 	now := time.Now().Unix()
 	last := u.awayNotifiedAt.Load()
 
 	if now-last < cooldownSec {
-		return false, 0
+		return false, 0, 0
 	}
 
-	return true, now
+	return true, now, u.awayNotifiedGen.Load()
 }
 
-// MarkAwayNotified records that an away notification was delivered.
-func (u *User) MarkAwayNotified(now int64) {
-	u.awayNotifiedAt.Store(now)
+// MarkAwayNotified records that an away notification was delivered, provided
+// no recovery reset occurred while the message was in-flight.
+func (u *User) MarkAwayNotified(now int64, expectedGen uint64) {
+	if u.awayNotifiedGen.Load() == expectedGen {
+		u.awayNotifiedAt.Store(now)
+	}
 }
 
-// ResetAwayNotified clears the cooldown when presence recovers.
+// ResetAwayNotified clears the cooldown and bumps the generation counter so
+// any stale in-flight sends are discarded.
 func (u *User) ResetAwayNotified() {
+	u.awayNotifiedGen.Add(1)
 	u.awayNotifiedAt.Store(0)
 }

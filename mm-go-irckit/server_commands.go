@@ -710,12 +710,12 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 			if err == nil && status != "" && !u.br.IsOnline(status) {
 				const awayCooldown = 20 * 60 // 20 minutes
 
-				if shouldNotify, now := toUser.ShouldNotifyAway(awayCooldown); shouldNotify {
+				if shouldNotify, now, gen := toUser.ShouldNotifyAway(awayCooldown); shouldNotify {
 					status = utils.EmojiReplaceAliases(status, u.br.FormatterConfig().CustomEmoji)
 
 					err = s.EncodeMessage(u, irc.RPL_AWAY, []string{u.Nick, toUser.Nick}, status)
 					if err == nil {
-						toUser.MarkAwayNotified(now)
+						toUser.MarkAwayNotified(now, gen)
 					}
 				}
 			} else if err == nil && u.br.IsOnline(status) {
