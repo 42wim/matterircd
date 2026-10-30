@@ -508,7 +508,7 @@ func (u *User) createService(nick string, what string) {
 		})
 }
 
-// ShouldNotifyAway checks if the 20-minute cooldown has elapsed and returns
+// ShouldNotifyAway checks if the away cooldown has elapsed and returns
 // whether to notify, the current timestamp, and the generation snapshot.
 func (u *User) ShouldNotifyAway(cooldownSec int64) (bool, int64, uint64) {
 	u.awayNotifyMu.Lock()

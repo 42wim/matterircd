@@ -90,6 +90,8 @@ type GlobalConfig struct {
 	EnableTyping      bool
 	DisableSendTyping bool
 	ServerTime        bool
+
+	AwayCooldown time.Duration
 }
 
 type BridgeConfig struct {
@@ -369,6 +371,8 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 			EnableTyping:      c.v.GetBool("EnableTyping"),
 			DisableSendTyping: c.v.GetBool("DisableSendTyping"),
 			ServerTime:        c.v.GetBool("ServerTime"),
+
+			AwayCooldown: c.v.GetDuration("AwayCooldown"),
 		},
 
 		AI: aiCfg,
@@ -481,6 +485,8 @@ func Load(cfgfile string, flags *pflag.FlagSet) (*Config, error) {
 
 	v.SetDefault("HardLineSplit", true)
 	v.SetDefault("ServerTime", false)
+	v.SetDefault("AwayCooldown", "20m")
+
 	v.SetDefault("mattermost.JoinReplayDuration", "15m")
 
 	c := &Config{

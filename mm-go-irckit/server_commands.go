@@ -708,7 +708,10 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 			// But after reactions as we don't care if we're reacting to an existing message.
 			status, err := u.br.StatusUser(u.ctx, toUser.User)
 			if err == nil && status != "" && !u.br.IsOnline(status) {
-				const awayCooldown = 20 * 60 // 20 minutes
+				awayCooldown := int64(20 * 60)
+				if dur := u.cfg.Current().AwayCooldown; dur > 0 {
+					awayCooldown = int64(dur.Seconds())
+				}
 
 				if shouldNotify, now, gen := toUser.ShouldNotifyAway(awayCooldown); shouldNotify {
 					status = utils.EmojiReplaceAliases(status, u.br.FormatterConfig().CustomEmoji)

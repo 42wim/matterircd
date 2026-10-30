@@ -64,6 +64,9 @@ PasteBufferTimeout = 2500
 # EXPERIMENTAL: Enable IRCv3 CAP server-time (be sure to enable in IRC client, e.g. irssi `/set show_server_time on`)
 #ServerTime = true
 
+# Cooldown period before resending RPL_AWAY for a user whose away status has not changed
+AwayCooldown = "20m"
+
 
 ###################################
 ##### EXPERIMENTAL AI EXAMPLE #####
