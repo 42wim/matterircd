@@ -708,8 +708,21 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 			// But after reactions as we don't care if we're reacting to an existing message.
 			status, err := u.br.StatusUser(u.ctx, toUser.User)
 			if err == nil && status != "" && !u.br.IsOnline(status) {
-				status = utils.EmojiReplaceAliases(status, u.br.FormatterConfig().CustomEmoji)
-				_ = s.EncodeMessage(u, irc.RPL_AWAY, []string{u.Nick, toUser.Nick}, status)
+				awayCooldown := int64(20 * 60)
+				if dur := u.cfg.Current().AwayCooldown; dur > 0 {
+					awayCooldown = int64(dur.Seconds())
+				}
+
+				if shouldNotify, now, gen := toUser.ShouldNotifyAway(awayCooldown); shouldNotify {
+					status = utils.EmojiReplaceAliases(status, u.br.FormatterConfig().CustomEmoji)
+
+					err = s.EncodeMessage(u, irc.RPL_AWAY, []string{u.Nick, toUser.Nick}, status)
+					if err == nil {
+						toUser.MarkAwayNotified(now, gen)
+					}
+				}
+			} else if err == nil && u.br.IsOnline(status) {
+				toUser.ResetAwayNotified()
 			}
 
 			if threadMsgUser(s, u, msg, toUser.User) {

@@ -779,6 +779,11 @@ func (m *Mattermost) SetTopic(ctx context.Context, channelID, text string) error
 	return err
 }
 
+// HasCustomStatus returns true if the user currently has an active custom status in memory.
+func (m *Mattermost) HasCustomStatus(userID string) bool {
+	return m.mc.GetUserCustomStatus(userID) != ""
+}
+
 func (m *Mattermost) IsOnline(status string) bool {
 	// A user is classified as online if their presence is "online" (with or without
 	// display details like activity or local time).
@@ -799,8 +804,7 @@ func (m *Mattermost) StatusUser(ctx context.Context, userID string) (string, err
 		return status, nil
 	}
 
-	user := m.mc.GetUser(ctx, userID)
-	localTime := getUserLocalTime(user)
+	localTime := m.mc.GetUserLocalTime(userID)
 	prefix, custom, hasCustom := strings.Cut(status, ": ")
 
 	lastActivity := m.mc.GetUserLastActivity(userID)
@@ -3089,28 +3093,6 @@ func (m *Mattermost) formatSingleAttachmentField(b *strings.Builder, field *mode
 			b.WriteByte('\n')
 		}
 	})
-}
-
-func getUserLocalTime(user *model.User) string {
-	if user == nil || len(user.Timezone) == 0 {
-		return ""
-	}
-
-	tz := user.Timezone["manualTimezone"]
-	if user.Timezone["useAutomaticTimezone"] == "true" && user.Timezone["automaticTimezone"] != "" {
-		tz = user.Timezone["automaticTimezone"]
-	}
-
-	if tz == "" {
-		return ""
-	}
-
-	loc, err := time.LoadLocation(tz)
-	if err != nil {
-		return ""
-	}
-
-	return time.Now().In(loc).Format("15:04")
 }
 
 // XXX: Bug in Mattermost itself and PostEmbed Data interface{}

@@ -437,6 +437,11 @@ func (m *Client) GetUserCount() int {
 	return n
 }
 
+// GetUserCustomStatus returns the active custom status string for a user, or empty if expired or unset.
+func (m *Client) GetUserCustomStatus(userID string) string {
+	return m.Users.GetUserCustomStatus(userID)
+}
+
 func (c *UsersCache) GetUserCustomStatus(userID string) string {
 	c.mu.RLock()
 	customStatus := c.customStatuses[userID]
@@ -470,6 +475,35 @@ func (m *Client) GetUserLastActivity(userID string) int64 {
 	defer m.Users.mu.RUnlock()
 
 	return m.Users.lastUserActivity[userID]
+}
+
+// GetUserLocalTime returns the formatted local time string for a user if configured.
+func (m *Client) GetUserLocalTime(userID string) string {
+	var tz string
+
+	m.Users.mu.RLock()
+
+	userID = m.Users.userIDKey(userID)
+
+	if user := m.Users.users[userID]; user != nil && len(user.Timezone) > 0 {
+		tz = user.Timezone["manualTimezone"]
+		if user.Timezone["useAutomaticTimezone"] == "true" && user.Timezone["automaticTimezone"] != "" {
+			tz = user.Timezone["automaticTimezone"]
+		}
+	}
+
+	m.Users.mu.RUnlock()
+
+	if tz == "" {
+		return ""
+	}
+
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
+		return ""
+	}
+
+	return time.Now().In(loc).Format("15:04")
 }
 
 func (m *Client) GetUserName(ctx context.Context, userID string) string {

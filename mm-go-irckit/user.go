@@ -71,6 +71,10 @@ type User struct {
 	// IRCv3 capabilities client negotiated
 	capsMu sync.RWMutex
 	Caps   map[string]bool
+
+	awayNotifyMu    sync.Mutex
+	awayNotifiedAt  int64
+	awayNotifiedGen uint64
 }
 
 func (u *User) ID() string {
@@ -506,4 +510,39 @@ func (u *User) createService(nick string, what string) {
 			Host:  "service",
 			Ghost: true,
 		})
+}
+
+// ShouldNotifyAway checks if the away cooldown has elapsed and returns
+// whether to notify, the current timestamp, and the generation snapshot.
+func (u *User) ShouldNotifyAway(cooldownSec int64) (bool, int64, uint64) {
+	u.awayNotifyMu.Lock()
+	defer u.awayNotifyMu.Unlock()
+
+	now := time.Now().Unix()
+	if now-u.awayNotifiedAt < cooldownSec {
+		return false, 0, 0
+	}
+
+	return true, now, u.awayNotifiedGen
+}
+
+// MarkAwayNotified records that an away notification was delivered if no reset
+// occurred while the message was in-flight.
+func (u *User) MarkAwayNotified(now int64, expectedGen uint64) {
+	u.awayNotifyMu.Lock()
+	defer u.awayNotifyMu.Unlock()
+
+	if u.awayNotifiedGen == expectedGen {
+		u.awayNotifiedAt = now
+	}
+}
+
+// ResetAwayNotified clears the cooldown and bumps the generation counter so
+// any stale in-flight sends are discarded.
+func (u *User) ResetAwayNotified() {
+	u.awayNotifyMu.Lock()
+	defer u.awayNotifyMu.Unlock()
+
+	u.awayNotifiedAt = 0
+	u.awayNotifiedGen++
 }
