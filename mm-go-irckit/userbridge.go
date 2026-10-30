@@ -823,7 +823,7 @@ func (u *User) handleStatusChangeEvent(event *bridge.StatusChangeEvent) {
 				u.away.Store(false)
 				u.Srv.EncodeMessage(u, irc.RPL_UNAWAY, []string{u.Nick}, "You are no longer marked as being away") //nolint:errcheck
 
-				if u.br.IsOnline(event.Status) {
+				if !u.br.HasCustomStatus(event.UserID) {
 					u.ResetAwayNotified()
 				}
 			}
@@ -850,16 +850,8 @@ func (u *User) handleStatusChangeEvent(event *bridge.StatusChangeEvent) {
 		return
 	}
 
-	statuses, err := u.br.StatusUsers(u.ctx)
-	if err != nil {
-		if u.br.IsOnline(event.Status) {
-			other.ResetAwayNotified()
-		}
-
-		return
-	}
-
-	if userStatus, exists := statuses[event.UserID]; exists && u.br.IsOnline(userStatus) {
+	// If the user has no custom status, their effective status is strictly online.
+	if !u.br.HasCustomStatus(event.UserID) {
 		other.ResetAwayNotified()
 	}
 }

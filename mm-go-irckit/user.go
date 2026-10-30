@@ -8,7 +8,6 @@ import (
 	"regexp"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/42wim/matterircd/bridge"
@@ -73,8 +72,9 @@ type User struct {
 	capsMu sync.RWMutex
 	Caps   map[string]bool
 
-	awayNotifiedAt  atomic.Int64
-	awayNotifiedGen atomic.Uint64
+	awayNotifyMu    sync.Mutex
+	awayNotifiedAt  int64
+	awayNotifiedGen uint64
 }
 
 func (u *User) ID() string {
@@ -511,27 +511,34 @@ func (u *User) createService(nick string, what string) {
 // ShouldNotifyAway checks if the 20-minute cooldown has elapsed and returns
 // whether to notify, the current timestamp, and the generation snapshot.
 func (u *User) ShouldNotifyAway(cooldownSec int64) (bool, int64, uint64) {
-	now := time.Now().Unix()
-	last := u.awayNotifiedAt.Load()
+	u.awayNotifyMu.Lock()
+	defer u.awayNotifyMu.Unlock()
 
-	if now-last < cooldownSec {
+	now := time.Now().Unix()
+	if now-u.awayNotifiedAt < cooldownSec {
 		return false, 0, 0
 	}
 
-	return true, now, u.awayNotifiedGen.Load()
+	return true, now, u.awayNotifiedGen
 }
 
-// MarkAwayNotified records that an away notification was delivered, provided
-// no recovery reset occurred while the message was in-flight.
+// MarkAwayNotified records that an away notification was delivered if no reset
+// occurred while the message was in-flight.
 func (u *User) MarkAwayNotified(now int64, expectedGen uint64) {
-	if u.awayNotifiedGen.Load() == expectedGen {
-		u.awayNotifiedAt.Store(now)
+	u.awayNotifyMu.Lock()
+	defer u.awayNotifyMu.Unlock()
+
+	if u.awayNotifiedGen == expectedGen {
+		u.awayNotifiedAt = now
 	}
 }
 
 // ResetAwayNotified clears the cooldown and bumps the generation counter so
 // any stale in-flight sends are discarded.
 func (u *User) ResetAwayNotified() {
-	u.awayNotifiedGen.Add(1)
-	u.awayNotifiedAt.Store(0)
+	u.awayNotifyMu.Lock()
+	defer u.awayNotifyMu.Unlock()
+
+	u.awayNotifiedAt = 0
+	u.awayNotifiedGen++
 }

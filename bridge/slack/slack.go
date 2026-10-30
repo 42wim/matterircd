@@ -274,6 +274,10 @@ func (s *Slack) SetTopic(ctx context.Context, channelID, text string) error {
 	return err
 }
 
+func (s *Slack) HasCustomStatus(userID string) bool {
+	return false
+}
+
 func (s *Slack) IsOnline(status string) bool {
 	return status == "active"
 }

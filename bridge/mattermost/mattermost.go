@@ -779,6 +779,21 @@ func (m *Mattermost) SetTopic(ctx context.Context, channelID, text string) error
 	return err
 }
 
+// HasCustomStatus returns true if the user currently has an active custom status in memory.
+func (m *Mattermost) HasCustomStatus(userID string) bool {
+	user := m.mc.GetCachedUser(userID)
+	if user == nil || user.Props == nil {
+		return false
+	}
+
+	customStatus, ok := user.Props["customStatus"]
+	if !ok || customStatus == "" {
+		return false
+	}
+
+	return true
+}
+
 func (m *Mattermost) IsOnline(status string) bool {
 	// A user is classified as online if their presence is "online" (with or without
 	// display details like activity or local time).
