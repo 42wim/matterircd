@@ -437,6 +437,11 @@ func (m *Client) GetUserCount() int {
 	return n
 }
 
+// GetUserCustomStatus returns the active custom status string for a user, or empty if expired or unset.
+func (m *Client) GetUserCustomStatus(userID string) string {
+	return m.Users.GetUserCustomStatus(userID)
+}
+
 func (c *UsersCache) GetUserCustomStatus(userID string) string {
 	c.mu.RLock()
 	customStatus := c.customStatuses[userID]
