@@ -584,7 +584,7 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 
 // Unified dispatcher for handling formatted search and scrollback payloads
 //
-//nolint:funlen,gocyclo,unparam
+//nolint:funlen,gocognit,gocyclo,unparam
 func dispatchHistoricalEvent(u *User, toUser *User, event *bridge.Event, searchCtx string, searchRegexes []*regexp.Regexp, reqServerTime bool) {
 	var createAt int64
 	var text, nick, msgID, parentID, channelID string
@@ -642,29 +642,67 @@ func dispatchHistoricalEvent(u *User, toUser *User, event *bridge.Event, searchC
 
 	textToProcess := utils.WrapMessage(text, 460)
 
+	var lines []string
+
 	utils.ProcessMessageText(textToProcess, opts, func(line string) {
 		if line != "" {
-			if nick == systemUser {
-				line = "\x1d" + line + "\x1d"
-			}
-			if len(searchRegexes) > 0 {
-				for _, re := range searchRegexes {
-					line = re.ReplaceAllString(line, "\x02$1\x02")
-				}
-			}
-
-			formatScrollbackMsg(u, channelID, channelName, scrollbackUser, nick, tsStr, timeTag, msgID, parentID, line)
+			lines = append(lines, line)
 		}
 	})
 
-	for _, f := range files {
+	suffixOnly := !u.br.BridgeConfig().PrefixContext && u.br.BridgeConfig().SuffixContext
+	showMulti := u.br.BridgeConfig().ShowContextMulti
+
+	for i, line := range lines {
+		if nick == systemUser {
+			line = "\x1d" + line + "\x1d"
+		}
+
+		// Safely unwrap CTCP actions
+		isAction := strings.HasPrefix(line, "\x01ACTION ") && strings.HasSuffix(line, "\x01")
+		if isAction {
+			line = line[8 : len(line)-1]
+		}
+
+		if len(searchRegexes) > 0 {
+			for _, re := range searchRegexes {
+				line = re.ReplaceAllString(line, "\x02$1\x02")
+			}
+		}
+
+		currMsgID := msgID
+		currParentID := parentID
+		showContext := showMulti || (!suffixOnly && i == 0) || (suffixOnly && len(files) == 0 && i == len(lines)-1)
+
+		if !showContext {
+			currMsgID = ""
+			currParentID = ""
+		}
+
+		if isAction {
+			line = "\x01ACTION " + line + "\x01"
+		}
+
+		formatScrollbackMsg(u, channelID, channelName, scrollbackUser, nick, tsStr, timeTag, currMsgID, currParentID, line)
+	}
+
+	for i, f := range files {
 		sizeKB := f.Size / 1024
 		if sizeKB == 0 && f.Size > 0 {
 			sizeKB = 1
 		}
 
 		fileMsg := fmt.Sprintf("\x1ddownload file - %s (%s, %dKBytes)\x1d", f.URL, f.Name, sizeKB)
-		formatScrollbackMsg(u, channelID, channelName, scrollbackUser, nick, tsStr, timeTag, msgID, parentID, fileMsg)
+		currMsgID := msgID
+		currParentID := parentID
+		showContext := showMulti || (!suffixOnly && len(lines) == 0 && i == 0) || (suffixOnly && i == len(files)-1)
+
+		if !showContext {
+			currMsgID = ""
+			currParentID = ""
+		}
+
+		formatScrollbackMsg(u, channelID, channelName, scrollbackUser, nick, tsStr, timeTag, currMsgID, currParentID, fileMsg)
 	}
 }
 
