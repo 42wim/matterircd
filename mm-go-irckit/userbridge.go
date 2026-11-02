@@ -1760,6 +1760,7 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 		}
 
 		textToProcess := utils.WrapMessage(text, wrapLimit, hardLineSplit)
+		firstLine := true
 
 		utils.ProcessMessageText(textToProcess, opts, func(line string) {
 			if line != "" {
@@ -1777,7 +1778,11 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 
 				switch {
 				case (u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext) && nick != systemUser:
-					threadMsgID := u.prefixContext(brchannel.ID, msgID, parentID, "replay")
+					var threadMsgID string
+					if firstLine || u.br.BridgeConfig().ShowContextMulti {
+						threadMsgID = u.prefixContext(brchannel.ID, msgID, parentID, "replay")
+					}
+
 					replayMsg = u.formatContextMessage(tsStr, threadMsgID, line)
 				case tsStr != "":
 					replayMsg = "[" + tsStr + "] " + line
@@ -1790,6 +1795,8 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 					replayMsg = "\x01ACTION " + replayMsg + "\x01"
 				}
 
+				firstLine = false
+
 				spoof(nick, replayMsg, timeTag)
 			}
 		})
@@ -1799,11 +1806,17 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 			fileMsg := "\x1ddownload file - " + f.URL + " (" + f.Name + ", " + strconv.FormatInt(sizeKB, 10) + "KBytes)\x1d"
 
 			if u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext {
-				threadMsgID := u.prefixContext(brchannel.ID, msgID, parentID, "replay_file")
+				var threadMsgID string
+				if firstLine || u.br.BridgeConfig().ShowContextMulti {
+					threadMsgID = u.prefixContext(brchannel.ID, msgID, parentID, "replay_file")
+				}
+
 				fileMsg = u.formatContextMessage(tsStr, threadMsgID, fileMsg)
 			} else if tsStr != "" {
 				fileMsg = "[" + tsStr + "] " + fileMsg
 			}
+
+			firstLine = false
 
 			spoof(nick, fileMsg, timeTag)
 		}

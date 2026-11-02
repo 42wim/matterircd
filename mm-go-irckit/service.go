@@ -584,7 +584,7 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 
 // Unified dispatcher for handling formatted search and scrollback payloads
 //
-//nolint:funlen,gocyclo,unparam
+//nolint:funlen,gocognit,gocyclo,unparam
 func dispatchHistoricalEvent(u *User, toUser *User, event *bridge.Event, searchCtx string, searchRegexes []*regexp.Regexp, reqServerTime bool) {
 	var createAt int64
 	var text, nick, msgID, parentID, channelID string
@@ -641,19 +641,37 @@ func dispatchHistoricalEvent(u *User, toUser *User, event *bridge.Event, searchC
 	}
 
 	textToProcess := utils.WrapMessage(text, 460)
+	firstLine := true
 
 	utils.ProcessMessageText(textToProcess, opts, func(line string) {
 		if line != "" {
 			if nick == systemUser {
 				line = "\x1d" + line + "\x1d"
 			}
+
+			// Safely unwrap CTCP actions
+			isAction := strings.HasPrefix(line, "\x01ACTION ") && strings.HasSuffix(line, "\x01")
+			if isAction {
+				line = line[8 : len(line)-1]
+			}
+
 			if len(searchRegexes) > 0 {
 				for _, re := range searchRegexes {
 					line = re.ReplaceAllString(line, "\x02$1\x02")
 				}
 			}
 
-			formatScrollbackMsg(u, channelID, channelName, scrollbackUser, nick, tsStr, timeTag, msgID, parentID, line)
+			currMsgID := msgID
+			currParentID := parentID
+
+			if !firstLine && !u.br.BridgeConfig().ShowContextMulti {
+				currMsgID = ""
+				currParentID = ""
+			}
+
+			firstLine = false
+
+			formatScrollbackMsg(u, channelID, channelName, scrollbackUser, nick, tsStr, timeTag, currMsgID, currParentID, line)
 		}
 	})
 
@@ -664,7 +682,17 @@ func dispatchHistoricalEvent(u *User, toUser *User, event *bridge.Event, searchC
 		}
 
 		fileMsg := fmt.Sprintf("\x1ddownload file - %s (%s, %dKBytes)\x1d", f.URL, f.Name, sizeKB)
-		formatScrollbackMsg(u, channelID, channelName, scrollbackUser, nick, tsStr, timeTag, msgID, parentID, fileMsg)
+		currMsgID := msgID
+		currParentID := parentID
+
+		if !firstLine && !u.br.BridgeConfig().ShowContextMulti {
+			currMsgID = ""
+			currParentID = ""
+		}
+
+		firstLine = false
+
+		formatScrollbackMsg(u, channelID, channelName, scrollbackUser, nick, tsStr, timeTag, currMsgID, currParentID, fileMsg)
 	}
 }
 
