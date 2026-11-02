@@ -1,3 +1,46 @@
+# v0.34.0
+
+## New features
+
+- mattermost: Update EXPERIMENTAL sending of IRCv3 +typing message tags to include message / thread parent (#898, #900, #901, #905)
+- mattermost: Include message parent/thead for EXPERIMENTAL IRCv3 +typing message tags received (#902, #903, #904)
+- mattermost: Add EXPERIMENTAL support for IRCv3 server-time capability for replay history (#939, #942)
+- mattermost: Add EXPERIMENTAL support for IRCv3 server-time capability for scrollback (#944)
+
+## Enhancement
+
+- general: Improve on message sent buffering to reduce chances of lines out of thread (#916)
+- general: Remember the last two sent messages per channel so s/!!/ works after a delete (#918)
+- general: Add support for country code flag emojis (#925)
+- general: Update emoji handling adding Airplane / Flight naming synonyms (#940)
+- mattermost: Debounce EXPERIMENTAL sending of IRCv3 +typing message tags (#899)
+- mattermost: Sanitize default mentions in parent/reply messages to prevent constant highlights (#922)
+- mattermost: Show custom status if set for both offline & online users; show last activity for online (#926, #928)
+- mattermost: Show bots in user WHOIS (#927, #929, #931)
+- mattermost: Add users' email, position, and photo in WHOIS (#932, #933)
+- mattermost: Add custom Directory URL to appear in users' WHOIS (#938)
+
+## Bugfix
+
+- general: Fix memory and goroutine leaks and data races, and reduce per-message overhead (#909)
+- general: Update message attachment markers to make it more like HTML tags (#913)
+- general: Fix race condition with channel renames and showing the SERVER NOTICE (#915)
+- general: Don't lose a held paste-buffer message on QUIT, PART or disconnect (#917)
+- general: Fix joining channel on replay if not already joined (e.g. LazyJoin) (#924)
+- general: Fix crash on being added to channel (#947)
+- irc: Fix splitting / wrapping of lines & add HardLineSplit to prevent IRC message/line truncation (#941)
+- irc: Rate-limit RPL_AWAY messages during PRIVMSG to avoid spamming user (#946)
+- mattermost: Fix incorrect post edits showing as unpinned (#897)
+- mattermost: Fix GetChannelName lookup; remove redundant & unused code (#906)
+- mattermost: Fix to not show unpinned when post was edited removing just the link preview (#914)
+- mattermost: Skip joining of group DMs as well, unless JoinDM or in whitelist/include (#923)
+- mattermost: Handle empty message thread/post ID posts - do not allow them through (#930)
+- mattermost: Fix channel replay to prevent replaying already seen join/part events (#934)
+- mattermost: Fix padding when using unicode chars for short message attachment fields & values (#936, #937)
+- mattermost: Inline single-line full-width attachment fields (#943)
+- mattermost: Fix synchronizing user custom status updates (#945)
+- mattermost: Fix to honor thread context settings on replay & scrollback (#948)
+
 # v0.33.0
 
 ## New features
