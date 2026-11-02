@@ -1,0 +1,199 @@
+// Copyright (c) 2020 Tulir Asokan
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+package event
+
+import (
+	"cmp"
+	"encoding/json"
+	"strings"
+	"time"
+
+	"maunium.net/go/mautrix/id"
+)
+
+// TagEventContent represents the content of a m.tag room account data event.
+// https://spec.matrix.org/v1.2/client-server-api/#mtag
+type TagEventContent struct {
+	Tags Tags `json:"tags"`
+}
+
+type Tags map[RoomTag]TagMetadata
+
+type RoomTag string
+
+const (
+	RoomTagFavourite    RoomTag = "m.favourite"
+	RoomTagLowPriority  RoomTag = "m.lowpriority"
+	RoomTagServerNotice RoomTag = "m.server_notice"
+)
+
+func (rt RoomTag) IsUserDefined() bool {
+	return strings.HasPrefix(string(rt), "u.")
+}
+
+func (rt RoomTag) String() string {
+	return string(rt)
+}
+
+func (rt RoomTag) Name() string {
+	if rt.IsUserDefined() {
+		return string(rt[2:])
+	}
+	switch rt {
+	case RoomTagFavourite:
+		return "Favourite"
+	case RoomTagLowPriority:
+		return "Low priority"
+	case RoomTagServerNotice:
+		return "Server notice"
+	default:
+		return ""
+	}
+}
+
+// Deprecated: type alias
+type Tag = TagMetadata
+
+type TagMetadata struct {
+	Order json.Number `json:"order,omitempty,omitzero"`
+
+	MauDoublePuppetSource string `json:"fi.mau.double_puppet_source,omitempty"`
+}
+
+// DirectChatsEventContent represents the content of a m.direct account data event.
+// https://spec.matrix.org/v1.2/client-server-api/#mdirect
+type DirectChatsEventContent map[id.UserID][]id.RoomID
+
+// FullyReadEventContent represents the content of a m.fully_read account data event.
+// https://spec.matrix.org/v1.2/client-server-api/#mfully_read
+type FullyReadEventContent struct {
+	EventID id.EventID `json:"event_id"`
+}
+
+// IgnoredUserListEventContent represents the content of a m.ignored_user_list account data event.
+// https://spec.matrix.org/v1.2/client-server-api/#mignored_user_list
+type IgnoredUserListEventContent struct {
+	IgnoredUsers map[id.UserID]IgnoredUser `json:"ignored_users"`
+}
+
+type IgnoredUser struct {
+	// This is an empty object
+}
+
+type MarkedUnreadEventContent struct {
+	Unread bool `json:"unread"`
+}
+
+type BeeperMuteEventContent struct {
+	MutedUntil int64 `json:"muted_until,omitzero"`
+}
+
+func (bmec *BeeperMuteEventContent) IsMuted() bool {
+	return bmec.MutedUntil < 0 || (bmec.MutedUntil > 0 && bmec.GetMutedUntilTime().After(time.Now()))
+}
+
+var MutedForever = time.Date(9999, 12, 31, 23, 59, 59, 999999999, time.UTC)
+
+func (bmec *BeeperMuteEventContent) GetMutedUntilTime() time.Time {
+	if bmec.MutedUntil < 0 {
+		return MutedForever
+	} else if bmec.MutedUntil > 0 {
+		return time.UnixMilli(bmec.MutedUntil)
+	}
+	return time.Time{}
+}
+
+func (bmec *BeeperMuteEventContent) GetMuteDuration() time.Duration {
+	ts := bmec.GetMutedUntilTime()
+	now := time.Now()
+	if ts.Before(now) {
+		return 0
+	} else if ts == MutedForever {
+		return -1
+	} else {
+		return ts.Sub(now)
+	}
+}
+
+type StoredPerMessageProfileTrigger struct {
+	Prefix      string `json:"prefix,omitempty"`
+	Suffix      string `json:"suffix,omitempty"`
+	KeepTrigger bool   `json:"keep_trigger,omitzero"`
+}
+
+type StoredPerMessageProfile struct {
+	BeeperPerMessageProfile
+	Triggers []StoredPerMessageProfileTrigger `json:"triggers,omitempty"`
+}
+
+type PerMessageProfilesEventContent struct {
+	DefaultProfileID *string `json:"default_profile_id,omitempty"`
+
+	Profiles []*StoredPerMessageProfile `json:"profiles,omitempty"`
+}
+
+func PickPerMessageProfile(globalData, roomData *PerMessageProfilesEventContent, input string) (string, *BeeperPerMessageProfile) {
+	if text, profile := roomData.Match(input); profile != nil {
+		return text, profile
+	} else if text, profile = globalData.Match(input); profile != nil {
+		return text, profile
+	}
+	defaultProfile := cmp.Or(roomData.GetDefaultProfileID(), globalData.GetDefaultProfileID())
+	if defaultProfile != nil && *defaultProfile != "" {
+		if profile := roomData.GetByID(*defaultProfile); profile != nil {
+			return input, profile
+		} else if profile = globalData.GetByID(*defaultProfile); profile != nil {
+			return input, profile
+		}
+	}
+	return input, nil
+}
+
+func (spec *PerMessageProfilesEventContent) GetDefaultProfileID() *string {
+	if spec == nil {
+		return nil
+	}
+	return spec.DefaultProfileID
+}
+
+func (spec *PerMessageProfilesEventContent) GetByID(id string) *BeeperPerMessageProfile {
+	if spec == nil || id == "" {
+		return nil
+	}
+	for _, profile := range spec.Profiles {
+		if profile != nil && profile.ID == id {
+			profileCopy := profile.BeeperPerMessageProfile
+			profileCopy.HasFallback = false
+			return &profileCopy
+		}
+	}
+	return nil
+}
+
+func (spec *PerMessageProfilesEventContent) Match(input string) (string, *BeeperPerMessageProfile) {
+	if spec == nil || len(spec.Profiles) == 0 {
+		return input, nil
+	}
+	for _, profile := range spec.Profiles {
+		if profile == nil || profile.ID == "" {
+			continue
+		}
+		for _, trigger := range profile.Triggers {
+			if len(input) >= len(trigger.Prefix)+len(trigger.Suffix) &&
+				strings.HasPrefix(input, trigger.Prefix) &&
+				strings.HasSuffix(input, trigger.Suffix) {
+				if !trigger.KeepTrigger {
+					input = input[len(trigger.Prefix) : len(input)-len(trigger.Suffix)]
+				}
+				profileCopy := profile.BeeperPerMessageProfile
+				profileCopy.HasFallback = false
+				return input, &profileCopy
+			}
+		}
+	}
+	return input, nil
+}
