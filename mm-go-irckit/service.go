@@ -641,41 +641,52 @@ func dispatchHistoricalEvent(u *User, toUser *User, event *bridge.Event, searchC
 	}
 
 	textToProcess := utils.WrapMessage(text, 460)
-	firstLine := true
+
+	var lines []string
 
 	utils.ProcessMessageText(textToProcess, opts, func(line string) {
 		if line != "" {
-			if nick == systemUser {
-				line = "\x1d" + line + "\x1d"
-			}
-
-			// Safely unwrap CTCP actions
-			isAction := strings.HasPrefix(line, "\x01ACTION ") && strings.HasSuffix(line, "\x01")
-			if isAction {
-				line = line[8 : len(line)-1]
-			}
-
-			if len(searchRegexes) > 0 {
-				for _, re := range searchRegexes {
-					line = re.ReplaceAllString(line, "\x02$1\x02")
-				}
-			}
-
-			currMsgID := msgID
-			currParentID := parentID
-
-			if !firstLine && !u.br.BridgeConfig().ShowContextMulti {
-				currMsgID = ""
-				currParentID = ""
-			}
-
-			firstLine = false
-
-			formatScrollbackMsg(u, channelID, channelName, scrollbackUser, nick, tsStr, timeTag, currMsgID, currParentID, line)
+			lines = append(lines, line)
 		}
 	})
 
-	for _, f := range files {
+	suffixOnly := !u.br.BridgeConfig().PrefixContext && u.br.BridgeConfig().SuffixContext
+	showMulti := u.br.BridgeConfig().ShowContextMulti
+
+	for i, line := range lines {
+		if nick == systemUser {
+			line = "\x1d" + line + "\x1d"
+		}
+
+		// Safely unwrap CTCP actions
+		isAction := strings.HasPrefix(line, "\x01ACTION ") && strings.HasSuffix(line, "\x01")
+		if isAction {
+			line = line[8 : len(line)-1]
+		}
+
+		if len(searchRegexes) > 0 {
+			for _, re := range searchRegexes {
+				line = re.ReplaceAllString(line, "\x02$1\x02")
+			}
+		}
+
+		currMsgID := msgID
+		currParentID := parentID
+		showContext := showMulti || (!suffixOnly && i == 0) || (suffixOnly && i == len(lines)-1)
+
+		if !showContext {
+			currMsgID = ""
+			currParentID = ""
+		}
+
+		if isAction {
+			line = "\x01ACTION " + line + "\x01"
+		}
+
+		formatScrollbackMsg(u, channelID, channelName, scrollbackUser, nick, tsStr, timeTag, currMsgID, currParentID, line)
+	}
+
+	for i, f := range files {
 		sizeKB := f.Size / 1024
 		if sizeKB == 0 && f.Size > 0 {
 			sizeKB = 1
@@ -684,13 +695,12 @@ func dispatchHistoricalEvent(u *User, toUser *User, event *bridge.Event, searchC
 		fileMsg := fmt.Sprintf("\x1ddownload file - %s (%s, %dKBytes)\x1d", f.URL, f.Name, sizeKB)
 		currMsgID := msgID
 		currParentID := parentID
+		showContext := showMulti || (len(lines) == 0 && ((!suffixOnly && i == 0) || (suffixOnly && i == len(files)-1)))
 
-		if !firstLine && !u.br.BridgeConfig().ShowContextMulti {
+		if !showContext {
 			currMsgID = ""
 			currParentID = ""
 		}
-
-		firstLine = false
 
 		formatScrollbackMsg(u, channelID, channelName, scrollbackUser, nick, tsStr, timeTag, currMsgID, currParentID, fileMsg)
 	}
