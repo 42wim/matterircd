@@ -57,8 +57,26 @@ func CmdCap(s Server, u *User, msg *irc.Message) error {
 
 	subcommand := strings.ToUpper(msg.Params[0])
 	switch subcommand {
-	case irc.CAP_LS, irc.CAP_LIST:
-		params := fmt.Sprintf("* %s :message-tags", subcommand)
+	case irc.CAP_LS:
+		params := "* LS :message-tags server-time"
+		_ = s.EncodeMessage(u, irc.CAP, []string{params}, "")
+
+	case irc.CAP_LIST:
+		var enabled []string
+
+		u.capsMu.RLock()
+
+		for capName, active := range u.Caps {
+			if active {
+				enabled = append(enabled, capName)
+			}
+		}
+
+		u.capsMu.RUnlock()
+
+		sort.Strings(enabled)
+
+		params := "* LIST :" + strings.Join(enabled, " ")
 		_ = s.EncodeMessage(u, irc.CAP, []string{params}, "")
 
 	case irc.CAP_REQ:
@@ -67,26 +85,52 @@ func CmdCap(s Server, u *User, msg *irc.Message) error {
 			reqCaps = msg.Params[1]
 		}
 
-		if strings.Contains(reqCaps, "message-tags") {
+		fields := strings.Fields(reqCaps)
+		supported := true
+
+		for _, capName := range fields {
+			cleanCap, _ := strings.CutPrefix(capName, "-")
+
+			switch cleanCap {
+			case "message-tags", "server-time":
+			default:
+				supported = false
+			}
+
+			if !supported {
+				break
+			}
+		}
+
+		if supported && len(fields) > 0 {
+			u.capsMu.Lock()
+			defer u.capsMu.Unlock()
+
 			if u.Caps == nil {
 				u.Caps = make(map[string]bool)
 			}
 
-			u.Caps["message-tags"] = true
+			for _, capName := range fields {
+				if cleanCap, ok := strings.CutPrefix(capName, "-"); ok {
+					delete(u.Caps, cleanCap)
+				} else {
+					u.Caps[capName] = true
+				}
+			}
 
 			// Ensure we are sending the ACK EXACTLY as IRCv3 expects.
 			// IRC formatting: CAP * ACK :message-tags
-			params := fmt.Sprintf("* ACK :%s", reqCaps)
+			params := "* ACK :" + reqCaps
 			_ = s.EncodeMessage(u, irc.CAP, []string{params}, "")
 		} else {
-			params := fmt.Sprintf("* NAK :%s", reqCaps)
+			params := "* NAK :" + reqCaps
 			_ = s.EncodeMessage(u, irc.CAP, []string{params}, "")
 		}
 
 	case irc.CAP_END:
 		// Do nothing
 	default:
-		params := fmt.Sprintf("* %s", subcommand)
+		params := "* " + subcommand
 		_ = s.EncodeMessage(u, "410", []string{params}, "Invalid or unsupported CAP command")
 	}
 
@@ -504,6 +548,47 @@ var colorRegExp = regexp.MustCompile(`\x03([019]?[0-9](,[019]?[0-9])?)?`)
 // Hex Color - https://modern.ircdocs.horse/formatting.html#hex-color
 var hexColorRegExp = regexp.MustCompile(`\x04[0-9a-fA-F]{6}`)
 
+// isBareThreadID checks if a message consists solely of an unadorned thread ID
+// without any message body, preventing accidental sends from creating root posts.
+// Supports !! (history), 3-hex IDs, 26-char Mattermost IDs, and Matrix ($) IDs.
+func isBareThreadID(msg string) bool {
+	if !strings.HasPrefix(msg, "@@") {
+		return false
+	}
+
+	trimmed := strings.TrimSpace(msg)
+
+	// A message with whitespace or newlines contains message text (or is a multiline paste buffer)
+	if strings.ContainsAny(trimmed, " \t\r\n") {
+		return false
+	}
+
+	id := trimmed[2:]
+
+	if id == "!!" || (len(id) > 1 && id[0] == '$') {
+		return true
+	}
+
+	var validChars string
+
+	switch len(id) {
+	case 3:
+		validChars = "0123456789abcdef"
+	case 26:
+		validChars = "0123456789abcdefghijklmnopqrstuvwxyz"
+	default:
+		return false
+	}
+
+	for i := range len(id) {
+		if strings.IndexByte(validChars, id[i]) == -1 {
+			return false
+		}
+	}
+
+	return true
+}
+
 // CmdPrivMsg is a handler for the /PRIVMSG command.
 func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 	var err error
@@ -535,6 +620,25 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 
 	// Convert IRC formatting / emphasis to markdown.
 	msg.Trailing = utils.Irc2Markdown(msg.Trailing)
+
+	if isBareThreadID(msg.Trailing) {
+		trimmed := strings.TrimSpace(msg.Trailing)
+
+		logger.Debugf("Dropping bare thread ID without message text from %s: %s", u.Nick, trimmed)
+
+		fromUser := u
+
+		br := u.currentBridge()
+		if br != nil {
+			if svc, ok := s.HasUser(br.Protocol()); ok {
+				fromUser = svc
+			}
+		}
+
+		u.MsgSpoofUser(fromUser, query, "Dropped bare thread ID without message text: "+trimmed)
+
+		return nil
+	}
 
 	// are we sending to a channel
 	if ch, exists := s.HasChannel(query); exists {
@@ -604,8 +708,21 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 			// But after reactions as we don't care if we're reacting to an existing message.
 			status, err := u.br.StatusUser(u.ctx, toUser.User)
 			if err == nil && status != "" && !u.br.IsOnline(status) {
-				status = utils.EmojiReplaceAliases(status, u.br.FormatterConfig().CustomEmoji)
-				_ = s.EncodeMessage(u, irc.RPL_AWAY, []string{u.Nick, toUser.Nick}, status)
+				awayCooldown := int64(20 * 60)
+				if dur := u.cfg.Current().AwayCooldown; dur > 0 {
+					awayCooldown = int64(dur.Seconds())
+				}
+
+				if shouldNotify, now, gen := toUser.ShouldNotifyAway(awayCooldown); shouldNotify {
+					status = utils.EmojiReplaceAliases(status, u.br.FormatterConfig().CustomEmoji)
+
+					err = s.EncodeMessage(u, irc.RPL_AWAY, []string{u.Nick, toUser.Nick}, status)
+					if err == nil {
+						toUser.MarkAwayNotified(now, gen)
+					}
+				}
+			} else if err == nil && u.br.IsOnline(status) {
+				toUser.ResetAwayNotified()
 			}
 
 			if threadMsgUser(s, u, msg, toUser.User) {
@@ -1109,6 +1226,26 @@ func CmdWho(s Server, u *User, msg *irc.Message) error {
 	return u.Encode(r...)
 }
 
+// sorcix/irc doesn't support these yet
+const (
+	RPL_WHOISBOT     = "335"
+	RPL_WHOISSPECIAL = "320"
+)
+
+func sanitizeIRCTrailing(s string) string {
+	if !strings.ContainsAny(s, "\r\n\x00") {
+		return s
+	}
+
+	return strings.Map(func(r rune) rune {
+		if r == '\r' || r == '\n' || r == '\x00' {
+			return ' '
+		}
+
+		return r
+	}, s)
+}
+
 // CmdWhois is a handler for the /WHOIS command.
 func CmdWhois(s Server, u *User, msg *irc.Message) error {
 	who := msg.Params[0]
@@ -1197,14 +1334,78 @@ func CmdWhois(s Server, u *User, msg *irc.Message) error {
 			})
 		}
 
-		status, _ := u.br.StatusUser(u.ctx, other.User)
+		otherUser := u.br.GetUser(u.ctx, other.User)
 
-		if status != "" && !u.br.IsOnline(status) {
+		if otherUser != nil && !strings.Contains(otherUser.Roles, "bot") {
+			if otherUser.Email != "" {
+				r = append(r, &irc.Message{
+					Prefix:   s.Prefix(),
+					Params:   []string{u.Nick, other.Nick},
+					Command:  RPL_WHOISSPECIAL,
+					Trailing: "email: " + sanitizeIRCTrailing(otherUser.Email),
+				})
+			}
+
+			if otherUser.Directory != "" {
+				r = append(r, &irc.Message{
+					Prefix:   s.Prefix(),
+					Params:   []string{u.Nick, other.Nick},
+					Command:  RPL_WHOISSPECIAL,
+					Trailing: "directory: " + sanitizeIRCTrailing(otherUser.Directory),
+				})
+			}
+
+			if otherUser.Position != "" {
+				r = append(r, &irc.Message{
+					Prefix:   s.Prefix(),
+					Params:   []string{u.Nick, other.Nick},
+					Command:  RPL_WHOISSPECIAL,
+					Trailing: "position: " + sanitizeIRCTrailing(otherUser.Position),
+				})
+			}
+		}
+
+		if otherUser != nil && otherUser.Photo != "" {
 			r = append(r, &irc.Message{
 				Prefix:   s.Prefix(),
 				Params:   []string{u.Nick, other.Nick},
-				Command:  irc.RPL_AWAY,
-				Trailing: utils.EmojiReplaceAliases(status, u.br.FormatterConfig().CustomEmoji),
+				Command:  RPL_WHOISSPECIAL,
+				Trailing: "photo: " + otherUser.Photo,
+			})
+		}
+
+		status, _ := u.br.StatusUser(u.ctx, other.User)
+
+		if status != "" {
+			if !u.br.IsOnline(status) {
+				r = append(r, &irc.Message{
+					Prefix:   s.Prefix(),
+					Params:   []string{u.Nick, other.Nick},
+					Command:  irc.RPL_AWAY,
+					Trailing: utils.EmojiReplaceAliases(status, u.br.FormatterConfig().CustomEmoji),
+				})
+			} else if status != "online" {
+				r = append(r, &irc.Message{
+					Prefix:   s.Prefix(),
+					Params:   []string{u.Nick, other.Nick},
+					Command:  RPL_WHOISSPECIAL,
+					Trailing: utils.EmojiReplaceAliases(status, u.br.FormatterConfig().CustomEmoji),
+				})
+			}
+		}
+
+		if isServiceBot(other.Nick) || (otherUser != nil && strings.Contains(otherUser.Roles, "bot")) {
+			protocol := "Mattermost"
+
+			if p := u.br.Protocol(); p != "" {
+				protocol = strings.ToUpper(p[:1]) + p[1:]
+			}
+
+			r = append(r, &irc.Message{
+				Prefix:   s.Prefix(),
+				Params:   []string{u.Nick, other.Nick},
+				Command:  RPL_WHOISBOT,
+				Trailing: "is a bot (🤖) on " + protocol,
 			})
 		}
 

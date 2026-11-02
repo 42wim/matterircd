@@ -69,7 +69,12 @@ type User struct {
 	lastSync time.Time
 
 	// IRCv3 capabilities client negotiated
-	Caps map[string]bool
+	capsMu sync.RWMutex
+	Caps   map[string]bool
+
+	awayNotifyMu    sync.Mutex
+	awayNotifiedAt  int64
+	awayNotifiedGen uint64
 }
 
 func (u *User) ID() string {
@@ -154,18 +159,22 @@ const writeTimeout = 10 * time.Second
 
 // Encode and send each msg until an error occurs, then returns.
 func (u *User) Encode(msgs ...*irc.Message) (err error) {
-	if u.Ghost {
+	if u == nil || u.Ghost || u.Conn == nil {
 		return nil
 	}
 
 	for _, msg := range msgs {
+		if msg == nil {
+			continue
+		}
+
 		msg.Trailing = strings.TrimRight(msg.Trailing, " \t\r\n")
 
 		if err := u.Conn.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil {
 			logger.Warnf("failed to set write deadline for %s: %v", u.Nick, err)
 		}
 
-		if msg.Command == irc.PRIVMSG && (msg.Prefix.Name == "slack" || msg.Prefix.Name == "mattermost") && msg.Prefix.Host == "service" && strings.Contains(msg.Trailing, "token") { //nolint:goconst,staticcheck
+		if msg.Prefix != nil && msg.Command == irc.PRIVMSG && (msg.Prefix.Name == "slack" || msg.Prefix.Name == "mattermost") && msg.Prefix.Host == "service" && strings.Contains(msg.Trailing, "token") { //nolint:goconst,staticcheck
 			logger.Debugf("-> %s %s %s", msg.Command, msg.Prefix.Name, "[token redacted]")
 
 			err := u.Conn.Encode(msg)
@@ -479,6 +488,13 @@ func incomingLogLine(msg *irc.Message) string {
 }
 
 func (u *User) HasCapability(capability string) bool {
+	if capability == "server-time" && (u.cfg == nil || !u.cfg.Current().ServerTime) {
+		return false
+	}
+
+	u.capsMu.RLock()
+	defer u.capsMu.RUnlock()
+
 	if u.Caps == nil {
 		return false
 	}
@@ -495,4 +511,39 @@ func (u *User) createService(nick string, what string) {
 			Host:  "service",
 			Ghost: true,
 		})
+}
+
+// ShouldNotifyAway checks if the away cooldown has elapsed and returns
+// whether to notify, the current timestamp, and the generation snapshot.
+func (u *User) ShouldNotifyAway(cooldownSec int64) (bool, int64, uint64) {
+	u.awayNotifyMu.Lock()
+	defer u.awayNotifyMu.Unlock()
+
+	now := time.Now().Unix()
+	if now-u.awayNotifiedAt < cooldownSec {
+		return false, 0, 0
+	}
+
+	return true, now, u.awayNotifiedGen
+}
+
+// MarkAwayNotified records that an away notification was delivered if no reset
+// occurred while the message was in-flight.
+func (u *User) MarkAwayNotified(now int64, expectedGen uint64) {
+	u.awayNotifyMu.Lock()
+	defer u.awayNotifyMu.Unlock()
+
+	if u.awayNotifiedGen == expectedGen {
+		u.awayNotifiedAt = now
+	}
+}
+
+// ResetAwayNotified clears the cooldown and bumps the generation counter so
+// any stale in-flight sends are discarded.
+func (u *User) ResetAwayNotified() {
+	u.awayNotifyMu.Lock()
+	defer u.awayNotifyMu.Unlock()
+
+	u.awayNotifiedAt = 0
+	u.awayNotifiedGen++
 }

@@ -289,6 +289,10 @@ func (m *Matrix) StatusUser(ctx context.Context, userID string) (string, error) 
 	return "", nil
 }
 
+func (m *Matrix) HasCustomStatus(userID string) bool {
+	return false
+}
+
 func (m *Matrix) StatusUsers(ctx context.Context) (map[string]string, error) {
 	return map[string]string{}, nil
 }

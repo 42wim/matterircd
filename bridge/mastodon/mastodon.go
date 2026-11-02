@@ -126,6 +126,10 @@ func (m *Mastodon) MsgChannel(ctx context.Context, channelID, text string) (stri
 	return string(s.ID), nil
 }
 
+func (m *Mastodon) HasCustomStatus(userID string) bool {
+	return false
+}
+
 func (m *Mastodon) IsOnline(status string) bool {
 	return status == "online"
 }

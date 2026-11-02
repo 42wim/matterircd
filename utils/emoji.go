@@ -94,6 +94,25 @@ var GetEmojiMap = sync.OnceValue(func() map[string]string {
 			register("flag-"+rest, unicodeVal, supportsSkinTone)
 		}
 
+		// Airplane / Flight naming synonyms
+		if rest, ok := strings.CutPrefix(name, "flight_"); ok {
+			register("airplane_"+rest, unicodeVal, supportsSkinTone)
+			register("airplane-"+strings.ReplaceAll(rest, "_", "-"), unicodeVal, supportsSkinTone)
+
+			if rest == "arrival" {
+				register("airplane_arriving", unicodeVal, supportsSkinTone)
+				register("airplane-arriving", unicodeVal, supportsSkinTone)
+			}
+		} else if rest, ok := strings.CutPrefix(name, "airplane_"); ok {
+			register("flight_"+rest, unicodeVal, supportsSkinTone)
+			register("flight-"+strings.ReplaceAll(rest, "_", "-"), unicodeVal, supportsSkinTone)
+
+			if rest == "arriving" {
+				register("flight_arrival", unicodeVal, supportsSkinTone)
+				register("flight-arrival", unicodeVal, supportsSkinTone)
+			}
+		}
+
 		// Gender inversions (e.g. bowing_man -> man_bowing, male_artist -> man_artist)
 		if rest, ok := strings.CutSuffix(name, "_man"); ok {
 			register("man_"+rest, unicodeVal, supportsSkinTone)

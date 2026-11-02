@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/mattermost/mattermost/server/public/model"
@@ -69,12 +70,6 @@ func (m *Client) GetStatus(ctx context.Context, userID string) string {
 		m.Users.mu.Unlock()
 	}
 
-	// Only let recent activity override if the user is marked offline or not yet tracked;
-	// never override explicit server states like "away", "dnd", or "ooo" (OutOfOffice).
-	if (status == model.StatusOffline || !ok) && lastActive > 0 && time.Since(time.Unix(lastActive, 0)) < activeThreshold {
-		return model.StatusOnline
-	}
-
 	userName := m.GetCachedUserName(userID)
 	isStale := !ok || lastFetched == 0 || time.Since(time.Unix(lastFetched, 0)) > statusTTL
 
@@ -121,40 +116,39 @@ func (m *Client) GetStatus(ctx context.Context, userID string) string {
 		m.Users.mu.RUnlock()
 	}
 
-	// Downgrade zombie online sessions with no activity for > offlineThreshold to offline
-	if status == model.StatusOnline && lastActive > 0 && time.Since(time.Unix(lastActive, 0)) > offlineThreshold {
-		status = model.StatusOffline
-	}
-
-	if status == model.StatusOnline {
-		return status
-	}
-
-	if !tracked {
-		user := m.GetUser(ctx, userID)
-
-		var rawJSON string
-		if user != nil && user.Props != nil {
-			if val, propOk := user.Props["customStatus"]; propOk {
-				rawJSON = val
-			}
-		}
-
-		var tzLoc *time.Location
-		if m.User != nil {
-			tzLoc = m.User.GetTimezoneLocation()
-		}
-
-		// Parse & store in cache (permanently marks user as tracked)
-		m.Users.SetUserCustomStatus(userID, rawJSON, tzLoc)
+	if m.GetCachedUser(userID) == nil {
+		m.GetUser(ctx, userID)
 
 		m.Users.mu.RLock()
-		customStatus = m.Users.customStatuses[userID]
+
+		if lastActive == 0 {
+			lastActive = m.Users.lastUserActivity[userID]
+		}
+
 		m.Users.mu.RUnlock()
 	}
 
+	// Only let recent activity override if the user is marked offline;
+	// never override explicit server states like "away", "dnd", or "ooo" (OutOfOffice).
+	if status == model.StatusOffline && lastActive > 0 && time.Since(time.Unix(lastActive, 0)) < activeThreshold {
+		status = model.StatusOnline
+	}
+
+	// Downgrade zombie online sessions with no activity for > offlineThreshold to offline (bots exempt)
+	if !m.IsBot(userID) && status == model.StatusOnline && lastActive > 0 && time.Since(time.Unix(lastActive, 0)) > offlineThreshold {
+		status = model.StatusOffline
+	}
+
+	if !tracked {
+		m.Users.mu.Lock()
+
+		customStatus = m.syncUserCustomStatusLocked(userID)
+
+		m.Users.mu.Unlock()
+	}
+
 	if customStatus != "" {
-		if status != model.StatusOnline && status != "" {
+		if status != "" {
 			return status + ": " + customStatus
 		}
 
@@ -180,7 +174,7 @@ func (m *Client) GetStatuses(ctx context.Context) map[string]string {
 		status, ok := m.Users.statuses[id]
 		lastActive := m.Users.lastUserActivity[id]
 
-		if ok && status == model.StatusOnline && lastActive > 0 && now.Sub(time.Unix(lastActive, 0)) > offlineThreshold {
+		if !m.IsBot(id, true) && ok && status == model.StatusOnline && lastActive > 0 && now.Sub(time.Unix(lastActive, 0)) > offlineThreshold {
 			statuses[id] = model.StatusOffline
 
 			continue
@@ -443,6 +437,11 @@ func (m *Client) GetUserCount() int {
 	return n
 }
 
+// GetUserCustomStatus returns the active custom status string for a user, or empty if expired or unset.
+func (m *Client) GetUserCustomStatus(userID string) string {
+	return m.Users.GetUserCustomStatus(userID)
+}
+
 func (c *UsersCache) GetUserCustomStatus(userID string) string {
 	c.mu.RLock()
 	customStatus := c.customStatuses[userID]
@@ -478,6 +477,35 @@ func (m *Client) GetUserLastActivity(userID string) int64 {
 	return m.Users.lastUserActivity[userID]
 }
 
+// GetUserLocalTime returns the formatted local time string for a user if configured.
+func (m *Client) GetUserLocalTime(userID string) string {
+	var tz string
+
+	m.Users.mu.RLock()
+
+	userID = m.Users.userIDKey(userID)
+
+	if user := m.Users.users[userID]; user != nil && len(user.Timezone) > 0 {
+		tz = user.Timezone["manualTimezone"]
+		if user.Timezone["useAutomaticTimezone"] == "true" && user.Timezone["automaticTimezone"] != "" {
+			tz = user.Timezone["automaticTimezone"]
+		}
+	}
+
+	m.Users.mu.RUnlock()
+
+	if tz == "" {
+		return ""
+	}
+
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
+		return ""
+	}
+
+	return time.Now().In(loc).Format("15:04")
+}
+
 func (m *Client) GetUserName(ctx context.Context, userID string) string {
 	if user := m.GetUser(ctx, userID); user != nil {
 		return user.Username
@@ -497,6 +525,22 @@ func (m *Client) GetUsers() map[string]*model.User {
 	}
 
 	return users
+}
+
+// IsBot reports whether the cached user is a bot account safely under the cache lock.
+func (m *Client) IsBot(userID string, batchLock ...bool) bool {
+	hasBatchLock := len(batchLock) > 0 && batchLock[0]
+	if !hasBatchLock {
+		m.Users.mu.RLock()
+		defer m.Users.mu.RUnlock()
+	}
+
+	u := m.Users.users[userID]
+	if u == nil {
+		return false
+	}
+
+	return u.IsBot || u.AuthService == "bot" || strings.Contains(u.Roles, "bot")
 }
 
 func (c *UsersCache) RecordUserActivity(userID string) {
@@ -536,11 +580,19 @@ func (m *Client) SearchUsers(ctx context.Context, search *model.UserSearch) ([]*
 	}
 }
 
-//nolint:funlen,gocyclo
+// SetUserCustomStatus parses and sets the custom status for a user.
 func (c *UsersCache) SetUserCustomStatus(userID string, rawJSON string, tzLoc ...*time.Location) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	c.setUserCustomStatusLocked(userID, rawJSON, tzLoc...)
+}
+
+// setUserCustomStatusLocked parses and sets the custom status for a user.
+// The users cache must be locked.
+//
+//nolint:funlen,gocyclo
+func (c *UsersCache) setUserCustomStatusLocked(userID string, rawJSON string, tzLoc ...*time.Location) {
 	userID = c.userIDKey(userID)
 
 	if c.customStatuses == nil {
@@ -586,7 +638,7 @@ func (c *UsersCache) SetUserCustomStatus(userID string, rawJSON string, tzLoc ..
 		return
 	}
 
-	if status.ExpiresAt == "" {
+	if status.Duration == "dont_clear" || status.ExpiresAt == "" || status.ExpiresAt == "0001-01-01T00:00:00Z" {
 		delete(c.customStatusExpiresAt, userID)
 		c.customStatuses[userID] = formattedStatus
 
@@ -595,8 +647,8 @@ func (c *UsersCache) SetUserCustomStatus(userID string, rawJSON string, tzLoc ..
 
 	expiry, parseErr := time.Parse(time.RFC3339, status.ExpiresAt)
 	if parseErr != nil {
+		c.customStatuses[userID] = ""
 		delete(c.customStatusExpiresAt, userID)
-		c.customStatuses[userID] = formattedStatus
 
 		return
 	}
@@ -650,6 +702,32 @@ func (c *UsersCache) SetUserCustomStatus(userID string, rawJSON string, tzLoc ..
 
 	c.customStatusExpiresAt[userID] = expiry.Unix()
 	c.customStatuses[userID] = formattedStatus + " (Until " + dateStr + ")"
+}
+
+// syncUserCustomStatusLocked reads the cached user's props and updates custom status if uninitialized.
+// The users cache must be locked.
+func (m *Client) syncUserCustomStatusLocked(userID string) string {
+	customStatus, tracked := m.Users.customStatuses[userID]
+
+	if tracked {
+		return customStatus
+	}
+
+	var rawJSON string
+
+	if u := m.Users.users[userID]; u != nil && u.Props != nil {
+		rawJSON = u.Props["customStatus"]
+	}
+
+	var tzLoc *time.Location
+
+	if m.User != nil {
+		tzLoc = m.User.GetTimezoneLocation()
+	}
+
+	m.Users.setUserCustomStatusLocked(userID, rawJSON, tzLoc)
+
+	return m.Users.customStatuses[userID]
 }
 
 func (m *Client) SetUserStatus(userID string, rawStatus string, batchLock bool, lastActivityAt ...int64) string {
@@ -902,12 +980,16 @@ func (m *Client) UpdateUser(user *model.User, batchLock ...bool) *model.User {
 		user.UpdateAt,
 		user.DeleteAt,
 		user.Username,
+		user.Email,
 		user.FirstName,
 		user.LastName,
 		user.Nickname,
+		user.Position,
 		user.Roles,
 		user.Props,
 		user.Timezone,
+		user.IsBot,
+		user.LastActivityAt,
 	)
 }
 
@@ -929,12 +1011,16 @@ func (m *Client) UpdateUserSummary(u *UserSummary, batchLock ...bool) *model.Use
 		u.UpdateAt,
 		u.DeleteAt,
 		u.Username,
+		u.Email,
 		u.FirstName,
 		u.LastName,
 		u.Nickname,
+		u.Position,
 		u.Roles,
 		u.Props,
 		u.Timezone,
+		u.IsBot,
+		u.LastActivityAt,
 	)
 }
 
@@ -996,8 +1082,8 @@ func (c *UsersCache) userIDKey(userID string) string {
 	return userID
 }
 
-//nolint:funlen
-func (m *Client) updateUserLocked(id string, updateAt int64, deleteAt int64, username, firstName, lastName, nickname, roles string, props map[string]string, timezone map[string]string) *model.User {
+//nolint:funlen,gocyclo
+func (m *Client) updateUserLocked(id string, updateAt int64, deleteAt int64, username, email, firstName, lastName, nickname, position, roles string, props map[string]string, timezone map[string]string, isBot bool, lastActivityAt ...int64) *model.User {
 	switch roles {
 	case "system_user":
 		roles = "system_user"
@@ -1005,23 +1091,72 @@ func (m *Client) updateUserLocked(id string, updateAt int64, deleteAt int64, use
 		roles = "system_admin system_user"
 	}
 
+	var rawActivity int64
+	if len(lastActivityAt) > 0 {
+		rawActivity = lastActivityAt[0]
+	}
+
 	cachedUser, exists := m.Users.users[id]
 	if !exists {
 		cachedUser = &model.User{
-			Id:        id,
-			UpdateAt:  max(0, updateAt),
-			DeleteAt:  max(0, deleteAt),
-			Username:  username,
-			FirstName: firstName,
-			LastName:  lastName,
-			Nickname:  nickname,
-			Roles:     roles,
-			Props:     props,
-			Timezone:  timezone,
+			Id:             id,
+			UpdateAt:       max(0, updateAt),
+			DeleteAt:       max(0, deleteAt),
+			Username:       username,
+			Email:          email,
+			FirstName:      firstName,
+			LastName:       lastName,
+			Nickname:       nickname,
+			Position:       position,
+			Roles:          roles,
+			Props:          props,
+			Timezone:       timezone,
+			IsBot:          isBot,
+			LastActivityAt: max(0, rawActivity),
 		}
 		m.Users.users[id] = cachedUser
 
+		if rawActivity > 0 {
+			actSec := rawActivity / 1000
+
+			if m.Users.lastUserActivity == nil {
+				m.Users.lastUserActivity = make(map[string]int64, 1000)
+			}
+
+			if actSec > m.Users.lastUserActivity[id] {
+				m.Users.lastUserActivity[id] = actSec
+			}
+		}
+
+		if props != nil && props["customStatus"] != "" {
+			var tzLoc *time.Location
+
+			if m.User != nil {
+				tzLoc = m.User.GetTimezoneLocation()
+			}
+
+			m.Users.setUserCustomStatusLocked(id, props["customStatus"], tzLoc)
+		}
+
 		return cachedUser
+	}
+
+	if isBot != cachedUser.IsBot {
+		cachedUser.IsBot = isBot
+	}
+
+	cachedUser.LastActivityAt = max(cachedUser.LastActivityAt, rawActivity)
+
+	if rawActivity > 0 {
+		actSec := rawActivity / 1000
+
+		if m.Users.lastUserActivity == nil {
+			m.Users.lastUserActivity = make(map[string]int64, 1000)
+		}
+
+		if actSec > m.Users.lastUserActivity[id] {
+			m.Users.lastUserActivity[id] = actSec
+		}
 	}
 
 	if updateAt > 0 && cachedUser.UpdateAt != updateAt {
@@ -1036,6 +1171,10 @@ func (m *Client) updateUserLocked(id string, updateAt int64, deleteAt int64, use
 		cachedUser.Username = username
 	}
 
+	if cachedUser.Email != email {
+		cachedUser.Email = email
+	}
+
 	if cachedUser.FirstName != firstName {
 		cachedUser.FirstName = firstName
 	}
@@ -1048,16 +1187,28 @@ func (m *Client) updateUserLocked(id string, updateAt int64, deleteAt int64, use
 		cachedUser.Nickname = nickname
 	}
 
+	if cachedUser.Position != position {
+		cachedUser.Position = position
+	}
+
 	if cachedUser.Roles != roles {
 		cachedUser.Roles = roles
 	}
 
-	if props != nil {
-		cachedUser.Props = props
-	}
-
 	if timezone != nil {
 		cachedUser.Timezone = timezone
+	}
+
+	if props != nil {
+		cachedUser.Props = props
+
+		var tzLoc *time.Location
+
+		if m.User != nil {
+			tzLoc = m.User.GetTimezoneLocation()
+		}
+
+		m.Users.setUserCustomStatusLocked(id, props["customStatus"], tzLoc)
 	}
 
 	return cachedUser

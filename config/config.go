@@ -86,8 +86,13 @@ type GlobalConfig struct {
 
 	PasteBufferTimeout int
 
-	EnableTyping     bool
+	HardLineSplit bool
+
+	EnableTyping      bool
 	DisableSendTyping bool
+	ServerTime        bool
+
+	AwayCooldown time.Duration
 }
 
 type BridgeConfig struct {
@@ -107,6 +112,8 @@ type BridgeConfig struct {
 	SuffixContext    bool
 	ThreadContext    string
 	ShowContextMulti bool
+
+	DirectoryURL string
 }
 
 type FormatterConfig struct {
@@ -245,6 +252,8 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 		SuffixContext:    c.v.GetBool("mattermost.SuffixContext"),
 		ShowContextMulti: c.v.GetBool("mattermost.ShowContextMulti"),
 		ThreadContext:    c.v.GetString("mattermost.ThreadContext"),
+
+		DirectoryURL: c.v.GetString("mattermost.DirectoryURL"),
 	}
 	slBridge := BridgeConfig{
 		Restrict: append([]string(nil), c.v.GetStringSlice("slack.Restrict")...),
@@ -262,6 +271,8 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 		SuffixContext:    c.v.GetBool("slack.SuffixContext"),
 		ShowContextMulti: c.v.GetBool("slack.ShowContextMulti"),
 		ThreadContext:    c.v.GetString("slack.ThreadContext"),
+
+		DirectoryURL: c.v.GetString("slack.DirectoryURL"),
 	}
 	mdBridge := BridgeConfig{
 		Restrict: append([]string(nil), c.v.GetStringSlice("mastodon.Restrict")...),
@@ -279,6 +290,8 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 		SuffixContext:    c.v.GetBool("mastodon.SuffixContext"),
 		ShowContextMulti: c.v.GetBool("mastodon.ShowContextMulti"),
 		ThreadContext:    c.v.GetString("mastodon.ThreadContext"),
+
+		DirectoryURL: c.v.GetString("mastodon.DirectoryURL"),
 	}
 
 	mxBridge := BridgeConfig{
@@ -400,8 +413,13 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 
 			PasteBufferTimeout: c.v.GetInt("PasteBufferTimeout"),
 
+			HardLineSplit: c.v.GetBool("HardLineSplit"),
+
 			EnableTyping:      c.v.GetBool("EnableTyping"),
 			DisableSendTyping: c.v.GetBool("DisableSendTyping"),
+			ServerTime:        c.v.GetBool("ServerTime"),
+
+			AwayCooldown: c.v.GetDuration("AwayCooldown"),
 		},
 
 		AI: aiCfg,
@@ -523,6 +541,10 @@ func Load(cfgfile string, flags *pflag.FlagSet) (*Config, error) {
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_", "-", "_"))
 	// use environment variables
 	v.AutomaticEnv()
+
+	v.SetDefault("HardLineSplit", true)
+	v.SetDefault("ServerTime", false)
+	v.SetDefault("AwayCooldown", "20m")
 
 	v.SetDefault("mattermost.JoinReplayDuration", "15m")
 

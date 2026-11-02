@@ -12,6 +12,7 @@ import (
 
 	"github.com/42wim/matterircd/bridge"
 	"github.com/42wim/matterircd/utils"
+	"github.com/sorcix/irc"
 )
 
 type CommandHandler interface {
@@ -441,7 +442,6 @@ func details(u *User, toUser *User, args []string, service string) {
 	}
 }
 
-//nolint:cyclop
 func search(u *User, toUser *User, args []string, service string) {
 	if service != "mattermost" {
 		u.MsgUser(toUser, "not implemented")
@@ -482,7 +482,7 @@ func search(u *User, toUser *User, args []string, service string) {
 	}
 
 	for _, event := range events {
-		dispatchHistoricalEvent(u, toUser, event, searchStr, searchRegexes)
+		dispatchHistoricalEvent(u, toUser, event, searchStr, searchRegexes, false)
 	}
 }
 
@@ -560,18 +560,33 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 		return
 	}
 
+	var reqServerTime bool
+
+	filteredArgs := make([]string, 0, len(args))
+
+	for i, arg := range args {
+		if i > 0 && (strings.EqualFold(arg, "server-time") || strings.EqualFold(arg, "--server-time")) {
+			reqServerTime = true
+			continue
+		}
+
+		filteredArgs = append(filteredArgs, arg)
+	}
+
 	var err error
 	limit := 0
-	if len(args) == 2 {
-		limit, err = strconv.Atoi(args[1])
+
+	if len(filteredArgs) == 2 {
+		limit, err = strconv.Atoi(filteredArgs[1])
 	}
-	if len(args) == 0 || len(args) > 2 || err != nil {
-		u.MsgUser(toUser, "need SCROLLBACK (#<channel>|<user>|<post/thread ID>) <lines>")
-		u.MsgUser(toUser, "e.g. SCROLLBACK #bugs 10 (show last 10 lines from #bugs)")
+
+	if len(filteredArgs) == 0 || len(filteredArgs) > 2 || err != nil {
+		u.MsgUser(toUser, "need SCROLLBACK (#<channel>|<user>|<post/thread ID>) [lines] [server-time]")
+		u.MsgUser(toUser, "e.g. SCROLLBACK #bugs 10, SCROLLBACK @@nkrtrp6ym... server-time")
 		return
 	}
 
-	search := args[0]
+	search := filteredArgs[0]
 
 	var channelID, searchPostID string
 	scrollbackUser, exists := u.Srv.HasUser(search)
@@ -618,7 +633,7 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 	}
 
 	for _, event := range events {
-		dispatchHistoricalEvent(u, toUser, event, search, nil)
+		dispatchHistoricalEvent(u, toUser, event, search, nil, reqServerTime)
 	}
 
 	if !u.cfg.Mattermost().CollapseScrollback {
@@ -628,8 +643,8 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 
 // Unified dispatcher for handling formatted search and scrollback payloads
 //
-//nolint:funlen,gocyclo,unparam
-func dispatchHistoricalEvent(u *User, toUser *User, event *bridge.Event, searchCtx string, searchRegexes []*regexp.Regexp) {
+//nolint:funlen,gocognit,gocyclo,unparam
+func dispatchHistoricalEvent(u *User, toUser *User, event *bridge.Event, searchCtx string, searchRegexes []*regexp.Regexp, reqServerTime bool) {
 	var createAt int64
 	var text, nick, msgID, parentID, channelID string
 	var files []*bridge.File
@@ -650,7 +665,18 @@ func dispatchHistoricalEvent(u *User, toUser *User, event *bridge.Event, searchC
 	channelName := getChannelTargetName(u, channelID)
 	scrollbackUser, _ := u.Srv.HasUser(searchCtx)
 
-	tsStr := time.Unix(0, createAt*int64(time.Millisecond)).Format("2006-01-02 15:04")
+	u.capsMu.RLock()
+	defer u.capsMu.RUnlock()
+
+	hasServerTime := reqServerTime && u.cfg.Current().ServerTime && u.Caps != nil && u.Caps["server-time"]
+
+	var timeTag, tsStr string
+
+	if hasServerTime {
+		timeTag = "@time=" + time.UnixMilli(createAt).UTC().Format("2006-01-02T15:04:05.000Z")
+	} else {
+		tsStr = time.UnixMilli(createAt).Format("2006-01-02 15:04")
+	}
 
 	customEmoji := u.br.FormatterConfig().CustomEmoji
 	disableEmoji := u.br.FormatterConfig().DisableEmoji
@@ -675,65 +701,119 @@ func dispatchHistoricalEvent(u *User, toUser *User, event *bridge.Event, searchC
 
 	textToProcess := utils.WrapMessage(text, 460)
 
+	var lines []string
+
 	utils.ProcessMessageText(textToProcess, opts, func(line string) {
 		if line != "" {
-			if nick == systemUser {
-				line = "\x1d" + line + "\x1d"
-			}
-			if len(searchRegexes) > 0 {
-				for _, re := range searchRegexes {
-					line = re.ReplaceAllString(line, "\x02$1\x02")
-				}
-			}
-			formatScrollbackMsg(u, channelID, channelName, scrollbackUser, nick, tsStr, msgID, parentID, line)
+			lines = append(lines, line)
 		}
 	})
 
-	for _, f := range files {
+	suffixOnly := !u.br.BridgeConfig().PrefixContext && u.br.BridgeConfig().SuffixContext
+	showMulti := u.br.BridgeConfig().ShowContextMulti
+
+	for i, line := range lines {
+		if nick == systemUser {
+			line = "\x1d" + line + "\x1d"
+		}
+
+		// Safely unwrap CTCP actions
+		isAction := strings.HasPrefix(line, "\x01ACTION ") && strings.HasSuffix(line, "\x01")
+		if isAction {
+			line = line[8 : len(line)-1]
+		}
+
+		if len(searchRegexes) > 0 {
+			for _, re := range searchRegexes {
+				line = re.ReplaceAllString(line, "\x02$1\x02")
+			}
+		}
+
+		currMsgID := msgID
+		currParentID := parentID
+		showContext := showMulti || (!suffixOnly && i == 0) || (suffixOnly && len(files) == 0 && i == len(lines)-1)
+
+		if !showContext {
+			currMsgID = ""
+			currParentID = ""
+		}
+
+		if isAction {
+			line = "\x01ACTION " + line + "\x01"
+		}
+
+		formatScrollbackMsg(u, channelID, channelName, scrollbackUser, nick, tsStr, timeTag, currMsgID, currParentID, line)
+	}
+
+	for i, f := range files {
 		sizeKB := f.Size / 1024
 		if sizeKB == 0 && f.Size > 0 {
 			sizeKB = 1
 		}
 
 		fileMsg := fmt.Sprintf("\x1ddownload file - %s (%s, %dKBytes)\x1d", f.URL, f.Name, sizeKB)
-		formatScrollbackMsg(u, channelID, channelName, scrollbackUser, nick, tsStr, msgID, parentID, fileMsg)
+		currMsgID := msgID
+		currParentID := parentID
+		showContext := showMulti || (!suffixOnly && len(lines) == 0 && i == 0) || (suffixOnly && i == len(files)-1)
+
+		if !showContext {
+			currMsgID = ""
+			currParentID = ""
+		}
+
+		formatScrollbackMsg(u, channelID, channelName, scrollbackUser, nick, tsStr, timeTag, currMsgID, currParentID, fileMsg)
 	}
 }
 
-func formatScrollbackMsg(u *User, channelID string, channel string, user *User, nick string, tsStr string, msgID, parentID, msgText string) {
+func formatScrollbackMsg(u *User, channelID string, channel string, user *User, nick string, tsStr, timeTag string, msgID, parentID, msgText string) {
 	// Safely unwrap CTCP actions
 	isAction := strings.HasPrefix(msgText, "\x01ACTION ") && strings.HasSuffix(msgText, "\x01")
 	if isAction {
 		msgText = msgText[8 : len(msgText)-1]
 	}
 
-	var msg string
-	var send func(string)
+	var (
+		target    string
+		from      = nick
+		otherNick = channel
+	)
+
+	if user != nil {
+		otherNick = user.Nick
+	}
 
 	switch {
-	case u.cfg.Mattermost().CollapseScrollback && strings.HasPrefix(channel, "#"):
-		threadMsgID := u.prefixContext(channelID, msgID, parentID, "scrollback")
-		msg = u.formatContextMessage(tsStr, threadMsgID, msgText)
-		nick += "/" + channel
-		send = func(m string) { u.Srv.Channel("&messages").SpoofMessage(nick, m) }
 	case u.cfg.Mattermost().CollapseScrollback:
-		threadMsgID := u.prefixContext(channelID, msgID, parentID, "scrollback")
-		msg = u.formatContextMessage(tsStr, threadMsgID, msgText)
-		send = func(m string) { u.Srv.Channel("&messages").SpoofMessage(nick, m) }
-	case (u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext) && strings.HasPrefix(channel, "#") && nick != systemUser:
-		threadMsgID := u.prefixContext(channelID, msgID, parentID, "scrollback")
-		msg = u.formatContextMessage(tsStr, threadMsgID, msgText)
-		send = func(m string) { u.Srv.Channel(channelID).SpoofMessage(nick, m) }
+		target = "&messages" //nolint:goconst
+
+		if strings.HasPrefix(channel, "#") {
+			from = nick + "/" + channel
+		} else if otherNick != "" {
+			from = nick + "/" + otherNick
+		}
 	case strings.HasPrefix(channel, "#"):
-		msg = "[" + tsStr + "] " + msgText
-		send = func(m string) { u.Srv.Channel(channelID).SpoofMessage(nick, m) }
-	case u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext:
+		target = channel
+	default:
+		// Direct Message routing:
+		// Outbound (we spoke): target is the other person's nick -> routes to their query window
+		// Inbound (they spoke): target is our nick -> routes to their query window
+		if nick == u.Nick && otherNick != "" {
+			target = otherNick
+		} else {
+			target = u.Nick
+		}
+	}
+
+	var msg string
+
+	switch {
+	case (u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext) && nick != systemUser:
 		threadMsgID := u.prefixContext(channelID, msgID, parentID, "scrollback")
 		msg = u.formatContextMessage(tsStr, threadMsgID, msgText)
-		send = func(m string) { u.MsgSpoofUser(user, nick, m) }
+	case tsStr != "":
+		msg = "[" + tsStr + "] " + msgText
 	default:
-		msg = "[" + tsStr + "] <" + nick + "> " + msgText
-		send = func(m string) { u.MsgSpoofUser(user, nick, m) }
+		msg = msgText
 	}
 
 	// Re-wrap the entire payload so the IRC client parses it
@@ -741,7 +821,55 @@ func formatScrollbackMsg(u *User, channelID string, channel string, user *User, 
 		msg = "\x01ACTION " + msg + "\x01"
 	}
 
-	send(msg)
+	u.sendScrollback(target, from, msg, timeTag)
+}
+
+func (u *User) sendScrollback(target, from, msg, timeTag string) {
+	if strings.HasPrefix(target, "#") {
+		if ch, ok := u.Srv.HasChannel(target); !ok || !ch.HasUser(u) {
+			return
+		}
+	}
+
+	var prefix *irc.Prefix
+	if from == u.Nick {
+		prefix = u.Prefix()
+	} else if usr, ok := u.Srv.HasUser(from); ok {
+		prefix = usr.Prefix()
+	} else {
+		prefix = &irc.Prefix{Name: from, User: from, Host: from}
+	}
+
+	isAction := strings.HasPrefix(msg, "\x01ACTION ") && strings.HasSuffix(msg, "\x01")
+	wrapLimit := 460
+
+	if isAction {
+		msg = msg[8 : len(msg)-1]
+		wrapLimit -= 9
+	}
+
+	for line := range strings.SplitSeq(utils.WrapMessage(msg, wrapLimit, u.cfg.Current().HardLineSplit), "\n") {
+		line = strings.TrimSuffix(line, "\r")
+		if isAction {
+			line = "\x01ACTION " + line + "\x01"
+		}
+
+		cmd := irc.PRIVMSG
+		msgPrefix := prefix
+
+		if timeTag != "" {
+			cmd = timeTag + " :" + prefix.String() + " PRIVMSG"
+			msgPrefix = nil
+		}
+
+		_ = u.Encode(&irc.Message{
+			Prefix:        msgPrefix,
+			Command:       cmd,
+			Params:        []string{target},
+			Trailing:      line,
+			EmptyTrailing: true,
+		})
+	}
 }
 
 func updatelastviewed(u *User, toUser *User, args []string, service string) {
@@ -792,7 +920,7 @@ var cmds = map[string]Command{
 	"part":             {handler: part, login: true, minParams: 1, maxParams: 1},
 	"ping":             {handler: ping, login: true, minParams: 0, maxParams: 0},
 	"replay":           {handler: replay, login: true, minParams: 1, maxParams: 2},
-	"scrollback":       {handler: scrollback, login: true, minParams: 2, maxParams: 2},
+	"scrollback":       {handler: scrollback, login: true, minParams: 1, maxParams: 3},
 	"search":           {handler: search, login: true, minParams: 1, maxParams: -1},
 	"searchusers":      {handler: searchUsers, login: true, minParams: 1, maxParams: -1},
 	"summarize":        {handler: summarize, login: true, minParams: 1, maxParams: 4},

@@ -302,8 +302,9 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 	syntaxHighlighting := u.br.FormatterConfig().SyntaxHighlighting
 	codeBlockSeparator := u.br.FormatterConfig().CodeBlockSeparator
 	preserveNewLines := u.br.FormatterConfig().PreserveNewLines
+	hardLineSplit := u.cfg.Current().HardLineSplit
 
-	text = utils.WrapMessage(text, maxlen)
+	text = utils.WrapMessage(text, maxlen, hardLineSplit)
 	addPrefix := false
 
 	// Remove message thread context prefix for formatting and remember to add it back
@@ -402,7 +403,8 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 	if u.br.Protocol() == "mattermost" && !u.cfg.Mattermost().DisableAutoView {
 		u.updateLastViewed(event.ChannelID)
 	}
-	u.saveLastViewedAt(event.ChannelID)
+
+	u.saveLastViewedAt(event.ChannelID, event.CreateAt)
 }
 
 func (u *User) handleChannelAddEvent(event *bridge.ChannelAddEvent) {
@@ -438,7 +440,9 @@ func (u *User) handleChannelAddEvent(event *bridge.ChannelAddEvent) {
 
 		ghost := u.createUserFromInfo(added)
 
-		ch.Join(ghost)
+		if !ch.HasUser(ghost) {
+			_ = ch.Join(ghost)
+		}
 
 		if event.Adder != nil && added.Nick != event.Adder.Nick && event.Adder.Nick != systemUser {
 			ch.SpoofMessage(systemUser, "\x1dadded "+added.Nick+" to the channel by "+event.Adder.Nick+"\x1d")
@@ -448,7 +452,8 @@ func (u *User) handleChannelAddEvent(event *bridge.ChannelAddEvent) {
 	if u.br.Protocol() == "mattermost" && !u.cfg.Mattermost().DisableAutoView {
 		u.updateLastViewed(event.ChannelID)
 	}
-	u.saveLastViewedAt(event.ChannelID)
+
+	u.saveLastViewedAt(event.ChannelID, event.CreateAt)
 }
 
 func (u *User) handleChannelRemoveEvent(event *bridge.ChannelRemoveEvent) {
@@ -456,19 +461,25 @@ func (u *User) handleChannelRemoveEvent(event *bridge.ChannelRemoveEvent) {
 
 	for _, removed := range event.Removed {
 		if removed.Me {
-			ch.Part(u, event.Text)
+			if ch.HasUser(u) {
+				ch.Part(u, event.Text)
+			}
+
 			continue
 		}
 
 		ghost := u.createUserFromInfo(removed)
 
-		ch.Part(ghost, event.Text)
+		if ch.HasUser(ghost) {
+			ch.Part(ghost, event.Text)
+		}
 
 		if event.Remover != nil && removed.Nick != event.Remover.Nick && event.Remover.Nick != systemUser {
 			ch.SpoofMessage(systemUser, "\x1dremoved "+removed.Nick+" from the channel by "+event.Remover.Nick+"\x1d")
 		}
 	}
-	u.saveLastViewedAt(event.ChannelID)
+
+	u.saveLastViewedAt(event.ChannelID, event.CreateAt)
 }
 
 func (u *User) getMessageChannel(channelID string, sender *bridge.UserInfo) Channel {
@@ -567,8 +578,9 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 	syntaxHighlighting := u.br.FormatterConfig().SyntaxHighlighting
 	codeBlockSeparator := u.br.FormatterConfig().CodeBlockSeparator
 	preserveNewLines := u.br.FormatterConfig().PreserveNewLines
+	hardLineSplit := u.cfg.Current().HardLineSplit
 
-	text = utils.WrapMessage(text, maxlen)
+	text = utils.WrapMessage(text, maxlen, hardLineSplit)
 	addPrefix := false
 
 	// Remove message thread context prefix for formatting and remember to add it back
@@ -655,7 +667,8 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 	if u.br.Protocol() == "mattermost" && !u.cfg.Mattermost().DisableAutoView {
 		u.updateLastViewed(event.ChannelID)
 	}
-	u.saveLastViewedAt(event.ChannelID)
+
+	u.saveLastViewedAt(event.ChannelID, event.CreateAt)
 }
 
 func (u *User) handleFileEvent(event *bridge.FileEvent) {
@@ -811,6 +824,10 @@ func (u *User) handleStatusChangeEvent(event *bridge.StatusChangeEvent) {
 				logger.Debug("setting myself online")
 				u.away.Store(false)
 				u.Srv.EncodeMessage(u, irc.RPL_UNAWAY, []string{u.Nick}, "You are no longer marked as being away") //nolint:errcheck
+
+				if !u.br.HasCustomStatus(event.UserID) {
+					u.ResetAwayNotified()
+				}
 			}
 		// Ignore `offline` status changes to prevent bouncing between being marked away and not.
 		case "offline":
@@ -822,6 +839,22 @@ func (u *User) handleStatusChangeEvent(event *bridge.StatusChangeEvent) {
 				u.Srv.EncodeMessage(u, irc.RPL_NOWAWAY, []string{u.Nick}, "You have been marked as being away") //nolint:errcheck
 			}
 		}
+
+		return
+	}
+
+	if event.Status != "online" {
+		return
+	}
+
+	other, ok := u.Srv.HasUserID(event.UserID)
+	if !ok {
+		return
+	}
+
+	// If the user has no custom status, their effective status is strictly online.
+	if !u.br.HasCustomStatus(event.UserID) {
+		other.ResetAwayNotified()
 	}
 }
 
@@ -905,7 +938,7 @@ func (u *User) CreateUsersFromInfo(info []*bridge.UserInfo) []*User {
 	users := make([]*User, 0, len(info))
 
 	for _, userinfo := range info {
-		if userinfo.Me {
+		if userinfo.Me || (u.User != "" && userinfo.User == u.User) {
 			continue
 		}
 
@@ -938,6 +971,10 @@ func (u *User) CreateUsersFromInfo(info []*bridge.UserInfo) []*User {
 }
 
 func (u *User) updateUserFromInfo(info *bridge.UserInfo) *User {
+	if info.Me || (u.User != "" && info.User == u.User) {
+		return u
+	}
+
 	info.Ghost = true
 
 	if ghost, ok := u.Srv.HasUserID(info.User); ok {
@@ -1214,42 +1251,88 @@ func (u *User) addUsersToChannels() {
 	u.eventLoopMutex.Unlock()
 }
 
-func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(string, string, ...int) {
-	if !u.br.IsDMChannelName(mmchannel.Name) {
-		return u.Srv.Channel(mmchannel.ID).SpoofMessage
-	}
+//nolint:funlen,gocognit,gocyclo
+func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(nick, msg, timeTag string) {
+	isDM := u.br.IsDMChannelName(mmchannel.Name)
 
-	var otherNick string
+	var (
+		channelTarget string
+		otherNick     string
+	)
 
 	// Resolve the other participant's IRC nick for DMs
-	if dmUser := u.br.GetDMUser(u.ctx, mmchannel.Name); dmUser != nil {
-		otherNick = dmUser.Nick
+	if isDM {
+		if dmUser := u.br.GetDMUser(u.ctx, mmchannel.Name); dmUser != nil {
+			otherNick = dmUser.Nick
+		}
+	} else {
+		channelTarget = u.Srv.Channel(mmchannel.ID).String()
 	}
 
-	spoofDM := func(nick string, msg string, maxlen ...int) {
-		// Outbound DM: Bypass local-echo trap and route to their query window
-		if nick == u.Nick && otherNick != "" {
-			_ = u.Encode(&irc.Message{
-				Prefix:  u.Prefix(),
-				Command: irc.PRIVMSG,
-				Params:  []string{otherNick, msg},
-			})
+	prefixes := make(map[string]*irc.Prefix)
 
-			return
+	return func(nick, msg, timeTag string) {
+		target := channelTarget
+
+		if isDM {
+			if nick == u.Nick && otherNick != "" {
+				target = otherNick
+			} else {
+				target = u.Nick
+			}
+		} else {
+			ch, ok := u.Srv.HasChannel(target)
+			if !ok || !ch.HasUser(u) {
+				return
+			}
 		}
 
-		// Inbound DM (or fallback if the user wasn't resolved)
-		usr, ok := u.Srv.HasUser(nick)
+		prefix, ok := prefixes[nick]
 		if !ok {
-			logger.Errorf("%s not found for replay msg", nick)
+			if nick == u.Nick {
+				prefix = u.Prefix()
+			} else if usr, okUser := u.Srv.HasUser(nick); okUser {
+				prefix = usr.Prefix()
+			} else {
+				prefix = &irc.Prefix{Name: nick, User: nick, Host: nick}
+			}
 
-			return
+			prefixes[nick] = prefix
 		}
 
-		u.MsgSpoofUser(usr, u.Nick, msg)
-	}
+		isAction := strings.HasPrefix(msg, "\x01ACTION ") && strings.HasSuffix(msg, "\x01")
+		wrapLimit := 460
 
-	return spoofDM
+		if isAction {
+			msg = msg[8 : len(msg)-1]
+			wrapLimit -= 9
+		}
+
+		hardLineSplit := u.cfg.Current().HardLineSplit
+
+		for line := range strings.SplitSeq(utils.WrapMessage(msg, wrapLimit, hardLineSplit), "\n") {
+			line = strings.TrimSuffix(line, "\r")
+			if isAction {
+				line = "\x01ACTION " + line + "\x01"
+			}
+
+			cmd := irc.PRIVMSG
+			msgPrefix := prefix
+
+			if timeTag != "" {
+				cmd = timeTag + " :" + prefix.String() + " PRIVMSG"
+				msgPrefix = nil
+			}
+
+			_ = u.Encode(&irc.Message{
+				Prefix:        msgPrefix,
+				Command:       cmd,
+				Params:        []string{target},
+				Trailing:      line,
+				EmptyTrailing: true,
+			})
+		}
+	}
 }
 
 // getChannelSince calculates the 'since' timestamp for a channel based on the configured strategy.
@@ -1603,6 +1686,7 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 	syntaxHighlighting := u.br.FormatterConfig().SyntaxHighlighting
 	codeBlockSeparator := u.br.FormatterConfig().CodeBlockSeparator
 	preserveNewLines := u.br.FormatterConfig().PreserveNewLines
+	hardLineSplit := u.cfg.Current().HardLineSplit
 
 	opts := utils.ProcessMessageOpts{
 		DisableEmoji:       disableEmoji,
@@ -1629,13 +1713,13 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 			createAt, text, nick, msgID, parentID, files = e.CreateAt, e.Text, e.Sender.Nick, e.MessageID, e.ParentID, e.Files
 		case *bridge.ChannelAddEvent:
 			createAt, text, nick = e.CreateAt, e.Text, systemUser
-			if len(e.Added) > 0 {
+			if len(e.Added) > 0 && !e.Added[0].Me && e.Added[0].User != u.User {
 				ghost := u.createUserFromInfo(e.Added[0])
 				u.Srv.Channel(brchannel.ID).Join(ghost) //nolint:errcheck
 			}
 		case *bridge.ChannelRemoveEvent:
 			createAt, text, nick = e.CreateAt, e.Text, systemUser
-			if len(e.Removed) > 0 {
+			if len(e.Removed) > 0 && !e.Removed[0].Me && e.Removed[0].User != u.User {
 				ghost := u.createUserFromInfo(e.Removed[0])
 				u.Srv.Channel(brchannel.ID).Part(ghost, "")
 			}
@@ -1645,63 +1729,106 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 			continue
 		}
 
-		ts := time.Unix(0, createAt*int64(time.Millisecond))
-		tsStr := ts.Format("2006-01-02 15:04")
+		hasServerTime := u.HasCapability("server-time")
+
+		var timeTag, tsStr string
+
+		if hasServerTime {
+			timeTag = "@time=" + time.UnixMilli(createAt).UTC().Format("2006-01-02T15:04:05.000Z")
+		} else {
+			tsStr = time.UnixMilli(createAt).Format("2006-01-02 15:04")
+		}
 
 		// Print the replay header on the very first valid event we process
 		if showReplayHdr && (text != "" || len(files) > 0) {
-			dateStr := ts.Format("2006-01-02 15:04:05")
+			dateStr := time.UnixMilli(createAt).Format("2006-01-02 15:04:05")
 			target := "matterircd"
 			if u.br.IsDMChannelName(brchannel.Name) {
 				target = nick
 			}
-			spoof(target, fmt.Sprintf("\x02Replaying msgs since %s\x02 \x1d(%s)\x1d", dateStr, logSince))
+
+			spoof(target, "\x1d\x02Replaying msgs since "+dateStr+"\x02 ("+logSince+")\x1d", "")
 			logger.Infof("Replaying msgs for %s (%s) since %s (%s)", channame, brchannel.ID, dateStr, logSince)
 			showReplayHdr = false
 		}
 
-		textToProcess := utils.WrapMessage(text, 460)
+		wrapLimit := 460
+		if (u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext) && nick != systemUser {
+			wrapLimit -= len(u.prefixContext(brchannel.ID, msgID, parentID, "replay")) + 1
+		}
+
+		if tsStr != "" {
+			wrapLimit -= len(tsStr) + 3
+		}
+
+		textToProcess := utils.WrapMessage(text, wrapLimit, hardLineSplit)
+
+		var lines []string
 
 		utils.ProcessMessageText(textToProcess, opts, func(line string) {
 			if line != "" {
-				if nick == systemUser {
-					line = "\x1d" + line + "\x1d"
-				}
-
-				// Safely unwrap CTCP actions
-				isAction := strings.HasPrefix(line, "\x01ACTION ") && strings.HasSuffix(line, "\x01")
-				if isAction {
-					line = line[8 : len(line)-1]
-				}
-
-				replayMsg := fmt.Sprintf("[%s] %s", tsStr, line)
-				if (u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext) && nick != systemUser {
-					threadMsgID := u.prefixContext(brchannel.ID, msgID, parentID, "replay")
-					replayMsg = u.formatContextMessage(tsStr, threadMsgID, line)
-				}
-
-				// Re-wrap the entire payload
-				if isAction {
-					replayMsg = "\x01ACTION " + replayMsg + "\x01"
-				}
-
-				spoof(nick, replayMsg)
+				lines = append(lines, line)
 			}
 		})
 
-		for _, f := range files {
-			sizeKB := f.Size / 1024
-			if sizeKB == 0 && f.Size > 0 {
-				sizeKB = 1
+		suffixOnly := !u.br.BridgeConfig().PrefixContext && u.br.BridgeConfig().SuffixContext
+		showMulti := u.br.BridgeConfig().ShowContextMulti
+
+		for i, line := range lines {
+			if nick == systemUser {
+				line = "\x1d" + line + "\x1d"
 			}
 
-			fileMsg := fmt.Sprintf("\x1ddownload file - %s (%s, %dKBytes)\x1d", f.URL, f.Name, sizeKB)
+			// Safely unwrap CTCP actions
+			isAction := strings.HasPrefix(line, "\x01ACTION ") && strings.HasSuffix(line, "\x01")
+			if isAction {
+				line = line[8 : len(line)-1]
+			}
+
+			var replayMsg string
+
+			switch {
+			case (u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext) && nick != systemUser:
+				var threadMsgID string
+
+				showContext := showMulti || (!suffixOnly && i == 0) || (suffixOnly && len(files) == 0 && i == len(lines)-1)
+				if showContext {
+					threadMsgID = u.prefixContext(brchannel.ID, msgID, parentID, "replay")
+				}
+
+				replayMsg = u.formatContextMessage(tsStr, threadMsgID, line)
+			case tsStr != "":
+				replayMsg = "[" + tsStr + "] " + line
+			default:
+				replayMsg = line
+			}
+
+			// Re-wrap the entire payload
+			if isAction {
+				replayMsg = "\x01ACTION " + replayMsg + "\x01"
+			}
+
+			spoof(nick, replayMsg, timeTag)
+		}
+
+		for i, f := range files {
+			sizeKB := max(1, f.Size/1024)
+			fileMsg := "\x1ddownload file - " + f.URL + " (" + f.Name + ", " + strconv.FormatInt(sizeKB, 10) + "KBytes)\x1d"
+
 			if u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext {
-				threadMsgID := u.prefixContext(brchannel.ID, msgID, parentID, "replay_file")
+				var threadMsgID string
+
+				showContext := showMulti || (!suffixOnly && len(lines) == 0 && i == 0) || (suffixOnly && i == len(files)-1)
+				if showContext {
+					threadMsgID = u.prefixContext(brchannel.ID, msgID, parentID, "replay_file")
+				}
+
 				fileMsg = u.formatContextMessage(tsStr, threadMsgID, fileMsg)
+			} else if tsStr != "" {
+				fileMsg = "[" + tsStr + "] " + fileMsg
 			}
 
-			spoof(nick, fileMsg)
+			spoof(nick, fileMsg, timeTag)
 		}
 	}
 }
@@ -1717,10 +1844,11 @@ func (u *User) MsgUser(toUser *User, msg string) {
 }
 
 func (u *User) MsgSpoofUser(sender *User, rcvuser string, text string, maxlen ...int) {
+	hardLineSplit := u.cfg.Current().HardLineSplit
 	if len(maxlen) == 0 {
-		text = utils.WrapMessage(text, 460)
+		text = utils.WrapMessage(text, 460, hardLineSplit)
 	} else {
-		text = utils.WrapMessage(text, maxlen[0])
+		text = utils.WrapMessage(text, maxlen[0], hardLineSplit)
 	}
 
 	prefix := irc.Prefix{
@@ -2311,20 +2439,48 @@ func (u *User) forgetMsgLast(channelID, msgID string) {
 	delete(u.msgLast, channelID)
 }
 
-func (u *User) saveLastViewedAt(channelID string) {
+func (u *User) saveLastViewedAt(channelID string, ts ...int64) {
 	if channelID == "" {
 		return
 	}
 
-	currentTime := make([]byte, 8)
-	//nolint:gosec // time.Now().UnixMilli() is positive (post-1970)
-	binary.LittleEndian.PutUint64(currentTime, uint64(time.Now().UnixMilli()))
+	newTime := time.Now().UnixMilli()
+	if len(ts) > 0 && ts[0] > 0 {
+		newTime = ts[0]
+	}
 
 	err := u.lastViewedAtDB.Update(func(tx *bolt.Tx) error {
 		b, err := tx.CreateBucketIfNotExists(u.dbBucketName())
 		if err != nil {
 			return err
 		}
+
+		var existingTime int64
+
+		var v []byte
+		if b != nil {
+			v = b.Get([]byte(channelID))
+		}
+
+		if v == nil {
+			legacyBucket := tx.Bucket([]byte(u.User))
+			if legacyBucket != nil {
+				v = legacyBucket.Get([]byte(channelID))
+			}
+		}
+
+		if v != nil {
+			val := binary.LittleEndian.Uint64(v)
+			if val <= math.MaxInt64 {
+				existingTime = int64(val)
+			}
+		}
+
+		targetTime := max(newTime, existingTime)
+
+		currentTime := make([]byte, 8)
+		//nolint:gosec // targetTime is positive (post-1970)
+		binary.LittleEndian.PutUint64(currentTime, uint64(targetTime))
 
 		return b.Put([]byte(channelID), currentTime)
 	})
@@ -2477,7 +2633,7 @@ func (u *User) handleTyping(e *bridge.TypingEvent) {
 		host = "mattermost"
 	}
 
-	prefix := fmt.Sprintf("%s!%s@%s", nick, user, host)
+	prefix := nick + "!" + user + "@" + host
 
 	// Determine the target routing (DM vs Channel)
 	var target string
@@ -2502,9 +2658,9 @@ func (u *User) handleTyping(e *bridge.TypingEvent) {
 			parentID = u.getMsgCounterHex(e.ChannelID, parentID)
 		}
 
-		rawCommand = fmt.Sprintf("@+typing=active;+draft/thread=%s :%s TAGMSG", parentID, prefix)
+		rawCommand = "@+typing=active;+draft/thread=" + parentID + " :" + prefix + " TAGMSG"
 	} else {
-		rawCommand = fmt.Sprintf("@+typing=active :%s TAGMSG", prefix)
+		rawCommand = "@+typing=active :" + prefix + " TAGMSG"
 	}
 
 	logger.Tracef("Sending +typing %s: %s: %s", target, nick, rawCommand)

@@ -53,9 +53,19 @@ gops = false
 # Depending on how fast you type 2500 is a good number
 PasteBufferTimeout = 2500
 
-# EXPERIMENTAL: Enable IRCv3 CAP +typing message tags
+# Hard-split words and URLs that exceed IRC's maximum line length limit (512 bytes).
+# Set to false if you prefer leaving oversized tokens unbroken. (default: true)
+#HardLineSplit = true
+
+# EXPERIMENTAL: Enable IRCv3 CAP +typing message-tags
 #EnableTyping = true
 #DisableSendTyping = true
+
+# EXPERIMENTAL: Enable IRCv3 CAP server-time (be sure to enable in IRC client, e.g. irssi `/set show_server_time on`)
+#ServerTime = true
+
+# Cooldown period before resending RPL_AWAY for a user whose away status has not changed
+AwayCooldown = "20m"
 
 
 ###################################
@@ -172,6 +182,9 @@ DisableAutoView = false
 # to display in the IRC client. The option PreferNickname controls that, the
 # default being to show the Username. (default false)
 PreferNickname = false
+
+# Add Directory URL (appear in WHOIS for user)
+DirectoryURL = "https://directory.mydomain.local/people/{nick}"
 
 # Disable showing parent post / replies
 HideReplies = false

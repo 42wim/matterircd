@@ -66,7 +66,7 @@ You can find the binaries [here](https://github.com/42wim/matterircd/releases/la
 
 ## Building
 
-Go 1.22+ is required
+Go 1.26+ is required
 
 ```bash
 go build -ldflags="-X main.githash=$(git describe --always --dirty --exclude '*')"

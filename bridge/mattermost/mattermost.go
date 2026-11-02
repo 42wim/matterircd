@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net/http"
+	"net/url"
 	"regexp"
 	"sort"
 	"strconv"
@@ -778,34 +779,48 @@ func (m *Mattermost) SetTopic(ctx context.Context, channelID, text string) error
 	return err
 }
 
+// HasCustomStatus returns true if the user currently has an active custom status in memory.
+func (m *Mattermost) HasCustomStatus(userID string) bool {
+	return m.mc.GetUserCustomStatus(userID) != ""
+}
+
 func (m *Mattermost) IsOnline(status string) bool {
-	return status == model.StatusOnline
+	// A user is classified as online if their presence is "online" (with or without
+	// display details like activity or local time).
+	// Custom statuses (indicated by "): " or ": ") are excluded so that handlers
+	// preserve intentional custom-status notifications (RPL_AWAY).
+	if status == model.StatusOnline {
+		return true
+	}
+
+	return strings.HasPrefix(status, model.StatusOnline+" (") && !strings.Contains(status, "): ")
 }
 
 func (m *Mattermost) StatusUser(ctx context.Context, userID string) (string, error) {
 	userName := m.mc.GetCachedUserName(userID)
 
-	var lastOnline string
+	status := m.mc.GetStatus(ctx, userID)
+	if status == "" {
+		return status, nil
+	}
+
+	localTime := m.mc.GetUserLocalTime(userID)
+	prefix, custom, hasCustom := strings.Cut(status, ": ")
 
 	lastActivity := m.mc.GetUserLastActivity(userID)
+
+	var lastOnline string
+
 	if lastActivity > 0 {
-		// Suppress "Last online" for any non-online status if activity is within the 20-minute threshold
 		diff := max(0, time.Now().Unix()-lastActivity)
-		if diff >= 20*60 {
+		if prefix == model.StatusOnline {
+			lastOnline = formatLastOnline(lastActivity, true)
+		} else if diff >= 20*60 {
 			lastOnline = formatLastOnline(lastActivity)
 		}
 	}
 
 	logger.Debugf("StatusUser: User: %s (%s) lastOnline: %s (%d)", userName, userID, formatLastOnline(lastActivity), lastActivity)
-
-	status := m.mc.GetStatus(ctx, userID)
-	if status == "" || m.IsOnline(status) {
-		return status, nil
-	}
-
-	user := m.mc.GetUser(ctx, userID)
-
-	localTime := getUserLocalTime(user)
 
 	var details string
 
@@ -817,10 +832,13 @@ func (m *Mattermost) StatusUser(ctx context.Context, userID string) (string, err
 	case localTime != "":
 		details = fmt.Sprintf("local time: %s", localTime)
 	default:
+		if hasCustom {
+			return fmt.Sprintf("%s: %s", prefix, custom), nil
+		}
+
 		return status, nil
 	}
 
-	prefix, custom, hasCustom := strings.Cut(status, ": ")
 	if hasCustom {
 		return fmt.Sprintf("%s (%s): %s", prefix, details, custom), nil
 	}
@@ -1136,18 +1154,58 @@ func (m *Mattermost) createUser(mmuser *model.User) *bridge.UserInfo {
 		}
 	}
 
+	roles := mmuser.Roles
+	if m.mc.IsBot(mmuser.Id) {
+		roles += " bot"
+	}
+
+	photoURL := ""
+	if m.mc != nil && m.mc.Client != nil && m.mc.Client.URL != "" && mmuser.Id != "" {
+		photoURL = m.mc.Client.URL + "/api/v4/users/" + mmuser.Id + "/image"
+	}
+
+	directoryURL := ""
+
+	if tmpl := rc.Mattermost.Bridge.DirectoryURL; tmpl != "" {
+		pathPart, queryPart, hasQuery := strings.Cut(tmpl, "?")
+
+		pathReplacer := strings.NewReplacer(
+			"{nick}", url.PathEscape(nick),
+			"{username}", url.PathEscape(mmuser.Username),
+			"{email}", url.PathEscape(mmuser.Email),
+			"{firstname}", url.PathEscape(mmuser.FirstName),
+			"{lastname}", url.PathEscape(mmuser.LastName),
+		)
+		directoryURL = pathReplacer.Replace(pathPart)
+
+		if hasQuery {
+			queryReplacer := strings.NewReplacer(
+				"{nick}", url.QueryEscape(nick),
+				"{username}", url.QueryEscape(mmuser.Username),
+				"{email}", url.QueryEscape(mmuser.Email),
+				"{firstname}", url.QueryEscape(mmuser.FirstName),
+				"{lastname}", url.QueryEscape(mmuser.LastName),
+			)
+			directoryURL += "?" + queryReplacer.Replace(queryPart)
+		}
+	}
+
 	info := &bridge.UserInfo{
 		Nick:        nick,
 		User:        mmuser.Id,
 		Real:        realName,
 		Host:        m.credentials.Server,
-		Roles:       mmuser.Roles,
+		Roles:       roles,
 		Ghost:       true,
 		Me:          me,
 		TeamID:      teamID,
 		Username:    mmuser.Username,
 		FirstName:   mmuser.FirstName,
 		LastName:    mmuser.LastName,
+		Email:       mmuser.Email,
+		Directory:   directoryURL,
+		Position:    mmuser.Position,
+		Photo:       photoURL,
 		MentionKeys: mentionKeys,
 	}
 
@@ -1707,7 +1765,7 @@ func (m *Mattermost) handleFileEvent(ctx context.Context, channelType string, gh
 func (m *Mattermost) wsActionPostJoinLeave(ctx context.Context, data *model.Post, extraProps map[string]interface{}, logger *logrus.Entry) {
 	logger.Tracef("wsActionPostJoinLeave: extraProps: %#v", extraProps)
 	switch data.Type {
-	case "system_add_to_channel":
+	case model.PostTypeAddToChannel:
 		if added, ok := extraProps["addedUsername"].(string); ok {
 			if adder, ok := extraProps["username"].(string); ok {
 				event := &bridge.Event{
@@ -1718,13 +1776,14 @@ func (m *Mattermost) wsActionPostJoinLeave(ctx context.Context, data *model.Post
 						},
 						Adder:     m.GetUserByUsername(ctx, adder),
 						ChannelID: data.ChannelId,
+						CreateAt:  data.CreateAt,
 					},
 				}
 
 				m.sendEvent(event)
 			}
 		}
-	case "system_remove_from_channel":
+	case model.PostTypeRemoveFromChannel:
 		if removed, ok := extraProps["removedUsername"].(string); ok {
 			event := &bridge.Event{
 				Type: "channel_remove",
@@ -1733,11 +1792,38 @@ func (m *Mattermost) wsActionPostJoinLeave(ctx context.Context, data *model.Post
 						m.GetUserByUsername(ctx, removed),
 					},
 					ChannelID: data.ChannelId,
+					CreateAt:  data.CreateAt,
 				},
 			}
 
 			m.sendEvent(event)
 		}
+	case model.PostTypeJoinChannel:
+		event := &bridge.Event{
+			Type: "channel_add",
+			Data: &bridge.ChannelAddEvent{
+				Added: []*bridge.UserInfo{
+					m.GetUser(ctx, data.UserId),
+				},
+				ChannelID: data.ChannelId,
+				CreateAt:  data.CreateAt,
+			},
+		}
+
+		m.sendEvent(event)
+	case model.PostTypeLeaveChannel:
+		event := &bridge.Event{
+			Type: "channel_remove",
+			Data: &bridge.ChannelRemoveEvent{
+				Removed: []*bridge.UserInfo{
+					m.GetUser(ctx, data.UserId),
+				},
+				ChannelID: data.ChannelId,
+				CreateAt:  data.CreateAt,
+			},
+		}
+
+		m.sendEvent(event)
 	}
 }
 
@@ -2807,7 +2893,7 @@ func (m *Mattermost) formatAttachmentFields(b *strings.Builder, fields []*model.
 				b.WriteString(candidates[j].title)
 
 				if j < groupSize-1 {
-					padWidth := targetColWidth - len(candidates[j].title) + gutter
+					padWidth := targetColWidth - utils.StringWidth(candidates[j].title) + gutter
 
 					for range padWidth {
 						b.WriteByte(' ')
@@ -2842,7 +2928,7 @@ func (m *Mattermost) formatAttachmentFields(b *strings.Builder, fields []*model.
 				b.WriteString(v)
 
 				if j < groupSize-1 {
-					padWidth := targetColWidth - len(v) + gutter
+					padWidth := targetColWidth - utils.StringWidth(v) + gutter
 
 					for range padWidth {
 						b.WriteByte(' ')
@@ -2860,7 +2946,7 @@ func (m *Mattermost) formatAttachmentFields(b *strings.Builder, fields []*model.
 // fieldsFitColWidth checks if all candidate fields and their multiline values fit within targetColWidth.
 func fieldsFitColWidth(fields []*model.SlackAttachmentField, candidates []attachmentFieldCandidate, targetColWidth int, omitFieldTitles bool) bool {
 	for j, field := range fields {
-		if !omitFieldTitles && len(field.Title) > targetColWidth {
+		if !omitFieldTitles && utils.StringWidth(field.Title) > targetColWidth {
 			return false
 		}
 
@@ -2869,7 +2955,9 @@ func fieldsFitColWidth(fields []*model.SlackAttachmentField, candidates []attach
 
 		for k := 0; k <= len(valStr); k++ {
 			if k == len(valStr) || valStr[k] == '\n' {
-				if (k - start) > targetColWidth {
+				line := valStr[start:k]
+
+				if utils.StringWidth(line) > targetColWidth {
 					return false
 				}
 
@@ -2881,39 +2969,44 @@ func fieldsFitColWidth(fields []*model.SlackAttachmentField, candidates []attach
 	return true
 }
 
-func formatLastOnline(lastActivity int64) string {
+func formatLastOnline(lastActivity int64, isOnline ...bool) string {
 	if lastActivity <= 0 {
 		return ""
+	}
+
+	label := "Last online"
+	if len(isOnline) > 0 && isOnline[0] {
+		label = "Last activity"
 	}
 
 	diff := max(0, time.Now().Unix()-lastActivity)
 
 	switch {
 	case diff < 45:
-		return "Last online just now"
+		return label + " just now"
 	case diff < 3300: // < 55 minutes
 		mins := max(1, (diff+30)/60)
 		if mins == 1 {
-			return "Last online 1 min. ago"
+			return label + " 1 min. ago"
 		}
 
-		return fmt.Sprintf("Last online %d mins. ago", mins)
+		return fmt.Sprintf("%s %d mins. ago", label, mins)
 	case diff < 84600: // < 23.5 hours
 		hours := (diff + 1800) / 3600
 		if hours == 1 {
-			return "Last online 1 hr. ago"
+			return label + " 1 hr. ago"
 		}
 
-		return fmt.Sprintf("Last online %d hr. ago", hours)
+		return fmt.Sprintf("%s %d hr. ago", label, hours)
 	case diff < 30*86400:
 		days := (diff + 43200) / 86400
 		if days == 1 {
-			return "Last online 1 day ago"
+			return label + " 1 day ago"
 		}
 
-		return fmt.Sprintf("Last online %d days ago", days)
+		return fmt.Sprintf("%s %d days ago", label, days)
 	default:
-		return fmt.Sprintf("Last online %s", time.Unix(lastActivity, 0).Format("2006-01-02"))
+		return fmt.Sprintf("%s %s", label, time.Unix(lastActivity, 0).Format("2006-01-02"))
 	}
 }
 
@@ -2926,10 +3019,56 @@ func (m *Mattermost) formatSingleAttachmentField(b *strings.Builder, field *mode
 		valStr = fmt.Sprintf("%v", field.Value)
 	}
 
+	hadLeadingNewline := strings.HasPrefix(valStr, "\n") || strings.HasPrefix(valStr, "\r\n")
+
 	valStr = strings.TrimPrefix(valStr, "\n")
 
 	if !opts.DisableMarkdown && strings.HasPrefix(valStr, blockQuoteCharDefault) {
 		valStr = strings.Replace(valStr, blockQuoteCharDefault, prefixChar, 1)
+	}
+
+	valTrimmed := strings.Trim(valStr, "\r\n")
+
+	isBulletOrList := strings.HasPrefix(valStr, " ") ||
+		strings.HasPrefix(valStr, "\t") ||
+		strings.HasPrefix(valTrimmed, "➥") ||
+		strings.HasPrefix(valTrimmed, "•") ||
+		strings.HasPrefix(valTrimmed, "- ") ||
+		strings.HasPrefix(valTrimmed, "* ")
+
+	hasNewline := hadLeadingNewline || strings.Contains(valTrimmed, "\n")
+
+	canInline := !bool(field.Short) && !omitFieldTitles && field.Title != "" && valTrimmed != "" && !hasNewline && !isBulletOrList
+
+	if canInline {
+		title := utils.FormatMarkdownAndEmoji(field.Title, true, opts.DisableEmoji, "", "", opts.CustomEmoji)
+		titleColon := title
+
+		if !strings.HasSuffix(titleColon, ":") {
+			titleColon += ":"
+		}
+
+		utils.ProcessMessageText(valTrimmed, opts, func(line string) {
+			// Ignore duplicate content when field value is the same as fallback
+			// e.g. https://github.com/jenkinsci/mattermost-plugin/pull/18
+			if useFallback && fallbackText != "" && line == fallbackText {
+				b.WriteString(prefix)
+				b.WriteByte('\x02')
+				b.WriteString(title)
+				b.WriteString("\x02\n")
+
+				return
+			}
+
+			b.WriteString(prefix)
+			b.WriteByte('\x02')
+			b.WriteString(titleColon)
+			b.WriteString("\x02 ")
+			b.WriteString(line)
+			b.WriteByte('\n')
+		})
+
+		return
 	}
 
 	if !omitFieldTitles && field.Title != "" {
@@ -2954,28 +3093,6 @@ func (m *Mattermost) formatSingleAttachmentField(b *strings.Builder, field *mode
 			b.WriteByte('\n')
 		}
 	})
-}
-
-func getUserLocalTime(user *model.User) string {
-	if user == nil || len(user.Timezone) == 0 {
-		return ""
-	}
-
-	tz := user.Timezone["manualTimezone"]
-	if user.Timezone["useAutomaticTimezone"] == "true" && user.Timezone["automaticTimezone"] != "" {
-		tz = user.Timezone["automaticTimezone"]
-	}
-
-	if tz == "" {
-		return ""
-	}
-
-	loc, err := time.LoadLocation(tz)
-	if err != nil {
-		return ""
-	}
-
-	return time.Now().In(loc).Format("15:04")
 }
 
 // XXX: Bug in Mattermost itself and PostEmbed Data interface{}
@@ -3228,7 +3345,7 @@ func (m *Mattermost) postListToEvents(ctx context.Context, postlist interface{},
 		// relaying messages/logs so let's skip these.
 		//
 		// See https://github.com/mattermost/mattermost/issues/13846 and https://github.com/anneschuth/claude-threads/pull/66
-		if eventType == "replay" && (p.DeleteAt > p.CreateAt || p.CreateAt < since) {
+		if eventType == "replay" && (p.DeleteAt > p.CreateAt || p.CreateAt <= since) {
 			continue
 		} else if eventType != "details" && eventType != "replay" && p.DeleteAt > p.CreateAt {
 			continue
