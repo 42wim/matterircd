@@ -672,7 +672,7 @@ func dispatchHistoricalEvent(u *User, toUser *User, event *bridge.Event, searchC
 
 		currMsgID := msgID
 		currParentID := parentID
-		showContext := showMulti || (!suffixOnly && i == 0) || (suffixOnly && i == len(lines)-1)
+		showContext := showMulti || (!suffixOnly && i == 0) || (suffixOnly && len(files) == 0 && i == len(lines)-1)
 
 		if !showContext {
 			currMsgID = ""
@@ -695,7 +695,7 @@ func dispatchHistoricalEvent(u *User, toUser *User, event *bridge.Event, searchC
 		fileMsg := fmt.Sprintf("\x1ddownload file - %s (%s, %dKBytes)\x1d", f.URL, f.Name, sizeKB)
 		currMsgID := msgID
 		currParentID := parentID
-		showContext := showMulti || (len(lines) == 0 && ((!suffixOnly && i == 0) || (suffixOnly && i == len(files)-1)))
+		showContext := showMulti || (!suffixOnly && len(lines) == 0 && i == 0) || (suffixOnly && i == len(files)-1)
 
 		if !showContext {
 			currMsgID = ""

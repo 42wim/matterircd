@@ -1789,7 +1789,7 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 			case (u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext) && nick != systemUser:
 				var threadMsgID string
 
-				showContext := showMulti || (!suffixOnly && i == 0) || (suffixOnly && i == len(lines)-1)
+				showContext := showMulti || (!suffixOnly && i == 0) || (suffixOnly && len(files) == 0 && i == len(lines)-1)
 				if showContext {
 					threadMsgID = u.prefixContext(brchannel.ID, msgID, parentID, "replay")
 				}
@@ -1816,7 +1816,7 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 			if u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext {
 				var threadMsgID string
 
-				showContext := showMulti || (len(lines) == 0 && ((!suffixOnly && i == 0) || (suffixOnly && i == len(files)-1)))
+				showContext := showMulti || (!suffixOnly && len(lines) == 0 && i == 0) || (suffixOnly && i == len(files)-1)
 				if showContext {
 					threadMsgID = u.prefixContext(brchannel.ID, msgID, parentID, "replay_file")
 				}
