@@ -28,13 +28,14 @@ type AIConfig struct {
 	Provider           string // "gemini" (default), "copilot", or "openai"
 	Token              string // Default token for configured Provider
 	CopilotToken       string // GitHub token for Copilot
-	OpenAIToken        string // API key for OpenAI / Hetzner
+	OpenAIToken        string // API key for OpenAI
+	HetznerToken       string // API key for Hetzner
 	URL                string // Base URL for OpenAI / compatible endpoints (e.g. https://api.openai.com/v1, https://inference.hetzner.com/api/v1)
 	ServiceAccountFile string // Gemini / Vertex AI
 	Project            string
 	Location           string
 	Model              string            // Fallback model if not specified in Models map
-	Models             map[string]string // Provider-specific models, e.g. { "gemini": "gemini-3.8-flash", "copilot": "gpt-4o-mini" }
+	Models             map[string]string // Provider-specific models, e.g. { "gemini": "gemini-3.8-flash", "copilot": "gpt-4o" }
 	Prompt             string
 	DefaultPostLimit   int
 	MaxPostLimit       int
@@ -240,6 +241,7 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 		Token:              c.v.GetString("ai.token"),
 		CopilotToken:       c.v.GetString("ai.copilot_token"),
 		OpenAIToken:        c.v.GetString("ai.openai_token"),
+		HetznerToken:       c.v.GetString("ai.hetzner_token"),
 		URL:                unquoteString(aiURL),
 		ServiceAccountFile: unquoteString(c.v.GetString("ai.service_account_file")),
 		Project:            c.v.GetString("ai.project"),
@@ -532,25 +534,38 @@ func (c *Config) AI() *AIConfig {
 }
 
 // GetToken resolves the token for the requested provider, ensuring credentials
-// do not cross provider boundaries while preserving the legacy Copilot token fallback.
+// do not cross provider or endpoint boundaries while preserving the legacy Copilot token fallback.
 func (c *AIConfig) GetToken(provider string) string {
-	switch strings.ToLower(provider) {
+	p := strings.ToLower(strings.TrimSpace(provider))
+
+	switch p {
 	case "copilot", "github":
 		if c.CopilotToken != "" {
 			return c.CopilotToken
 		}
 
-		p := strings.ToLower(c.Provider)
-		if p == "" || p == "gemini" || p == "copilot" || p == "github" {
+		cfgP := strings.ToLower(c.Provider)
+		if cfgP == "" || cfgP == "gemini" || cfgP == "copilot" || cfgP == "github" {
 			return c.Token
 		}
-	case "openai", "hetzner", "ollama", "local", "vllm":
+	case "openai":
 		if c.OpenAIToken != "" {
 			return c.OpenAIToken
 		}
 
-		switch strings.ToLower(c.Provider) {
-		case "openai", "hetzner", "ollama", "local", "vllm":
+		if strings.EqualFold(c.Provider, "openai") {
+			return c.Token
+		}
+	case "hetzner":
+		if c.HetznerToken != "" {
+			return c.HetznerToken
+		}
+
+		if strings.EqualFold(c.Provider, "hetzner") {
+			return c.Token
+		}
+	case "ollama", "local", "vllm":
+		if strings.EqualFold(c.Provider, p) {
 			return c.Token
 		}
 	}

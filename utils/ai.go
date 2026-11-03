@@ -122,6 +122,7 @@ const (
 	DefaultGeminiModel  = "gemini-3.8-flash"
 	DefaultCopilotModel = "gpt-4o"
 	DefaultOpenAIModel  = "gpt-4o"
+	DefaultHetznerModel = "meta-llama/Meta-Llama-3.1-70B-Instruct"
 
 	DefaultOpenAIBaseURL  = "https://api.openai.com/v1"
 	DefaultHetznerBaseURL = "https://inference.hetzner.com/api/v1"
@@ -143,12 +144,12 @@ func GetModel(provider, fallbackModel string, models map[string]string) string {
 	if models != nil {
 		switch p {
 		case AIOpenAIProvider:
-			for _, k := range [...]string{AIHetznerProvider, AIOllamaProvider, AILocalProvider, AIvLLMProvider} {
+			for _, k := range [...]string{AIOllamaProvider, AILocalProvider, AIvLLMProvider} {
 				if m, ok := models[k]; ok && m != "" {
 					return m
 				}
 			}
-		case AIHetznerProvider, AIOllamaProvider, AILocalProvider, AIvLLMProvider:
+		case AIOllamaProvider, AILocalProvider, AIvLLMProvider:
 			if m, ok := models[AIOpenAIProvider]; ok && m != "" {
 				return m
 			}
@@ -158,7 +159,9 @@ func GetModel(provider, fallbackModel string, models map[string]string) string {
 	switch p {
 	case AICopilotProvider, AIGitHubProvider:
 		return DefaultCopilotModel
-	case AIOpenAIProvider, AIHetznerProvider, AIOllamaProvider, AILocalProvider, AIvLLMProvider:
+	case AIHetznerProvider:
+		return DefaultHetznerModel
+	case AIOpenAIProvider, AIOllamaProvider, AILocalProvider, AIvLLMProvider:
 		return DefaultOpenAIModel
 	default:
 		return DefaultGeminiModel

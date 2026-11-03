@@ -91,6 +91,7 @@ token = "ghu_..." # GitHub token for Copilot, or API key for OpenAI / Hetzner
 # Or specify provider-scoped tokens to safely switch between providers on IRC without leaking keys:
 #copilot_token = "ghu_..."
 #openai_token = "sk-..."
+#hetzner_token = "..."
 # Base URL for OpenAI-compatible endpoints (defaults to https://api.openai.com/v1 if omitted)
 # Examples:
 # url = "https://api.openai.com/v1"
