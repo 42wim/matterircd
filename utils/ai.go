@@ -102,6 +102,10 @@ const (
 	AICopilotProvider = "copilot"
 	AIGitHubProvider  = "github"
 	AIOpenAIProvider  = "openai"
+	AIHetznerProvider = "hetzner"
+	AIOllamaProvider  = "ollama"
+	AILocalProvider   = "local"
+	AIvLLMProvider    = "vllm"
 
 	DefaultGeminiModel  = "gemini-3.8-flash"
 	DefaultCopilotModel = "gpt-4o-mini"
@@ -120,12 +124,12 @@ func GetModel(provider, fallbackModel string, models map[string]string) string {
 
 		switch p {
 		case AIOpenAIProvider:
-			for _, k := range [...]string{"hetzner", "ollama", "local", "vllm"} {
+			for _, k := range [...]string{AIHetznerProvider, AIOllamaProvider, AILocalProvider, AIvLLMProvider} {
 				if m, ok := models[k]; ok && m != "" {
 					return m
 				}
 			}
-		case "hetzner", "ollama", "local", "vllm":
+		case AIHetznerProvider, AIOllamaProvider, AILocalProvider, AIvLLMProvider:
 			if m, ok := models[AIOpenAIProvider]; ok && m != "" {
 				return m
 			}
@@ -139,7 +143,7 @@ func GetModel(provider, fallbackModel string, models map[string]string) string {
 	switch p {
 	case AICopilotProvider, AIGitHubProvider:
 		return DefaultCopilotModel
-	case AIOpenAIProvider, "hetzner", "ollama", "local", "vllm":
+	case AIOpenAIProvider, AIHetznerProvider, AIOllamaProvider, AILocalProvider, AIvLLMProvider:
 		return DefaultOpenAIModel
 	default:
 		return DefaultGeminiModel

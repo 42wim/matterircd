@@ -1335,7 +1335,7 @@ func parseSummarizeAIProvider(arg string) (string, bool) {
 		return utils.AIGeminiProvider, true
 	case utils.AICopilotProvider, utils.AIGitHubProvider:
 		return utils.AICopilotProvider, true
-	case utils.AIOpenAIProvider, "hetzner", "ollama", "local", "vllm":
+	case utils.AIOpenAIProvider, utils.AIHetznerProvider, utils.AIOllamaProvider, utils.AILocalProvider, utils.AIvLLMProvider:
 		return strings.ToLower(strings.TrimSpace(arg)), true
 	default:
 		return "", false
@@ -1489,7 +1489,7 @@ func summarize(u *User, toUser *User, args []string, service string) {
 
 			return
 		}
-	case utils.AIOpenAIProvider, "hetzner", "ollama", "local", "vllm":
+	case utils.AIOpenAIProvider, utils.AIHetznerProvider, utils.AIOllamaProvider, utils.AILocalProvider, utils.AIvLLMProvider:
 		baseURL := cfg.URL
 		if baseURL == "" {
 			baseURL = utils.DefaultOpenAIBaseURL
@@ -1582,7 +1582,7 @@ func summarize(u *User, toUser *User, args []string, service string) {
 	switch strings.ToLower(provider) {
 	case utils.AICopilotProvider, utils.AIGitHubProvider:
 		logger.Debugf("AI summarization for %s (provider: %s, model: %s, thinking: %s)", contextLabel, provider, model, thinking)
-	case utils.AIOpenAIProvider, "hetzner", "ollama", "local", "vllm":
+	case utils.AIOpenAIProvider, utils.AIHetznerProvider, utils.AIOllamaProvider, utils.AILocalProvider, utils.AIvLLMProvider:
 		baseURL := cfg.URL
 		if baseURL == "" {
 			baseURL = utils.DefaultOpenAIBaseURL
