@@ -3,16 +3,53 @@
 package matrix
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/42wim/matterircd/bridge"
 	"github.com/matterbridge/matrixclient"
 	"github.com/matterbridge/matrixclient/e2ee"
+	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/event"
 )
+
+func storeHash(s string) string {
+	sum := sha256.Sum256([]byte(s))
+
+	return hex.EncodeToString(sum[:8])
+}
+
+// storeName names the key database of an account by hash to keep the path safe.
+// Token logins use the stable user and device the token belongs to, as the
+// token itself changes when replaced.
+func (m *Matrix) storeName(cred bridge.Credentials) string {
+	if cred.Token == "" {
+		return storeHash(cred.Login + "@" + cred.Server)
+	}
+
+	mc, err := mautrix.NewClient(cred.Server, "", cred.Token)
+	if err != nil {
+		logger.Errorf("matrix: cannot look up token owner: %s", err)
+
+		return storeHash(cred.Token + "@" + cred.Server)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	resp, err := mc.Whoami(ctx)
+	if err != nil {
+		logger.Errorf("matrix: cannot look up token owner: %s", err)
+
+		return storeHash(cred.Token + "@" + cred.Server)
+	}
+
+	return storeHash(resp.UserID.String() + "/" + resp.DeviceID.String() + "@" + cred.Server)
+}
 
 func (m *Matrix) encryptionOptions(cred bridge.Credentials) []matrixclient.Option {
 	mxCfg := m.cfg.Matrix()
@@ -27,15 +64,7 @@ func (m *Matrix) encryptionOptions(cred bridge.Credentials) []matrixclient.Optio
 		return nil
 	}
 
-	// One key database per account, named by hash to keep the path safe.
-	account := cred.Login
-	if account == "" {
-		// A token belongs to one device, which the key database is bound to.
-		account = cred.Token
-	}
-
-	sum := sha256.Sum256([]byte(account + "@" + cred.Server))
-	dbPath := filepath.Join(mxCfg.EncryptionDir, hex.EncodeToString(sum[:8])+".db")
+	dbPath := filepath.Join(mxCfg.EncryptionDir, m.storeName(cred)+".db")
 
 	return []matrixclient.Option{e2ee.Factory(e2ee.Config{
 		DBPath:    dbPath,
