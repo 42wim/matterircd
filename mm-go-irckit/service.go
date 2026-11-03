@@ -1491,15 +1491,11 @@ func summarize(u *User, toUser *User, args []string, service string) {
 			return
 		}
 	case utils.AIOpenAIProvider, utils.AIHetznerProvider, utils.AIOllamaProvider, utils.AILocalProvider, utils.AIvLLMProvider:
-		if cfg.URL == "" && utils.IsLocalAIProvider(provider) {
+		baseURL := utils.ResolveBaseURL(provider, cfg.URL)
+		if baseURL == "" {
 			u.MsgUser(toUser, fmt.Sprintf("%s AI is not configured (missing url).", provider))
 
 			return
-		}
-
-		baseURL := cfg.URL
-		if baseURL == "" {
-			baseURL = utils.DefaultOpenAIBaseURL
 		}
 
 		if token == "" && (strings.Contains(baseURL, "api.openai.com") || strings.Contains(baseURL, "inference.hetzner.com")) {
@@ -1508,7 +1504,7 @@ func summarize(u *User, toUser *User, args []string, service string) {
 			return
 		}
 
-		aiClient, err = utils.NewOpenAIClient(token, cfg.URL, model)
+		aiClient, err = utils.NewOpenAIClient(token, baseURL, model)
 		if err != nil {
 			u.MsgUser(toUser, fmt.Sprintf("Failed to initialize OpenAI client: %v", err))
 
@@ -1590,10 +1586,7 @@ func summarize(u *User, toUser *User, args []string, service string) {
 	case utils.AICopilotProvider, utils.AIGitHubProvider:
 		logger.Debugf("AI summarization for %s (provider: %s, model: %s, thinking: %s)", contextLabel, provider, model, thinking)
 	case utils.AIOpenAIProvider, utils.AIHetznerProvider, utils.AIOllamaProvider, utils.AILocalProvider, utils.AIvLLMProvider:
-		baseURL := cfg.URL
-		if baseURL == "" {
-			baseURL = utils.DefaultOpenAIBaseURL
-		}
+		baseURL := utils.ResolveBaseURL(provider, cfg.URL)
 
 		logger.Debugf("AI summarization for %s (provider: %s, model: %s, thinking: %s, url: %s)", contextLabel, provider, model, thinking, baseURL)
 	default:

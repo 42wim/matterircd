@@ -162,14 +162,10 @@ func main() {
 
 			logger.Infof("AI summarization enabled (default provider: %s, model: %s)", provider, model)
 		case utils.AIOpenAIProvider, utils.AIHetznerProvider, utils.AIOllamaProvider, utils.AILocalProvider, utils.AIvLLMProvider:
-			if aiCfg.URL == "" && utils.IsLocalAIProvider(provider) {
+			baseURL := utils.ResolveBaseURL(provider, aiCfg.URL)
+			if baseURL == "" {
 				logger.Warnf("AI summarization enabled for %s, but url is missing", provider)
 				break
-			}
-
-			baseURL := aiCfg.URL
-			if baseURL == "" {
-				baseURL = utils.DefaultOpenAIBaseURL
 			}
 
 			if token == "" && (strings.Contains(baseURL, "api.openai.com") || strings.Contains(baseURL, "inference.hetzner.com")) {
@@ -177,7 +173,7 @@ func main() {
 				break
 			}
 
-			client, err := utils.NewOpenAIClient(token, aiCfg.URL, model)
+			client, err := utils.NewOpenAIClient(token, baseURL, model)
 			if err != nil {
 				logger.Errorf("AI summarization setup error: %v", err)
 				break

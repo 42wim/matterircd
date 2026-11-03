@@ -123,18 +123,9 @@ const (
 	DefaultCopilotModel = "gpt-4o-mini"
 	DefaultOpenAIModel  = "gpt-4o-mini"
 
-	DefaultOpenAIBaseURL = "https://api.openai.com/v1"
+	DefaultOpenAIBaseURL  = "https://api.openai.com/v1"
+	DefaultHetznerBaseURL = "https://inference.hetzner.com/api/v1"
 )
-
-// IsLocalAIProvider reports whether the provider is intended to run against a local endpoint.
-func IsLocalAIProvider(provider string) bool {
-	switch strings.ToLower(strings.TrimSpace(provider)) {
-	case AIOllamaProvider, AILocalProvider, AIvLLMProvider:
-		return true
-	default:
-		return false
-	}
-}
 
 // GetModel resolves the AI model to use based on provider, fallback model, and the models map.
 func GetModel(provider, fallbackModel string, models map[string]string) string {
@@ -171,6 +162,34 @@ func GetModel(provider, fallbackModel string, models map[string]string) string {
 		return DefaultOpenAIModel
 	default:
 		return DefaultGeminiModel
+	}
+}
+
+// IsLocalAIProvider reports whether the provider is intended to run against a local endpoint.
+func IsLocalAIProvider(provider string) bool {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case AIOllamaProvider, AILocalProvider, AIvLLMProvider:
+		return true
+	default:
+		return false
+	}
+}
+
+// ResolveBaseURL returns the endpoint base URL for the given provider.
+// If configuredURL is set, it takes precedence. Otherwise, it defaults to the
+// official endpoint for OpenAI and Hetzner, returning an empty string for local providers.
+func ResolveBaseURL(provider, configuredURL string) string {
+	if configuredURL != "" {
+		return strings.TrimRight(configuredURL, "/")
+	}
+
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case AIOpenAIProvider:
+		return DefaultOpenAIBaseURL
+	case AIHetznerProvider:
+		return DefaultHetznerBaseURL
+	default:
+		return ""
 	}
 }
 
@@ -427,10 +446,10 @@ type OpenAIClient struct {
 	httpClient *http.Client
 }
 
-// NewOpenAIClient creates a client targeting standard OpenAI or compatible REST endpoints (e.g. Hetzner, Ollama, vLLM).
+// NewOpenAIClient creates a client targeting standard OpenAI or compatible REST endpoints.
 func NewOpenAIClient(token, baseURL, model string) (*OpenAIClient, error) {
 	if baseURL == "" {
-		baseURL = DefaultOpenAIBaseURL
+		return nil, errors.New("base url is required")
 	}
 
 	baseURL = strings.TrimRight(baseURL, "/")
