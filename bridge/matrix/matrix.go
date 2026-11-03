@@ -114,14 +114,15 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 	setLogLevel(cfg.Current())
 	cfg.RegisterReloadHook(setLogLevel)
 
-	if cred.Token != "" && cred.Login == "" {
-		return nil, nil, errors.New("matrix: login with an access token is not supported, use LOGIN <server> <login> <pass>")
+	if cred.Token != "" && cred.Server == "" {
+		return nil, nil, errors.New("matrix: login with an access token needs a server, use LOGIN <server> <token>")
 	}
 
 	mc, err := matrixclient.New(ctx, matrixclient.Credentials{
 		Server: cred.Server,
 		Login:  cred.Login,
 		Pass:   cred.Pass,
+		Token:  cred.Token,
 	}, m, m.encryptionOptions(cred)...)
 	if err != nil {
 		return nil, nil, err
@@ -549,7 +550,12 @@ func (m *Matrix) Protocol() string {
 }
 
 func (m *Matrix) Kick(ctx context.Context, channelID, username string) error {
-	return errors.New("kick is not supported by matrixclient yet")
+	userID, ok := m.resolveUserID(username)
+	if !ok {
+		return errors.New("unknown user " + username)
+	}
+
+	return m.mc.Kick(ctx, id.RoomID(channelID), userID, "")
 }
 
 func (m *Matrix) SetStatus(ctx context.Context, status string) error {
@@ -782,9 +788,9 @@ func (m *Matrix) GetTeamName(ctx context.Context, teamID string) string {
 	return ""
 }
 
-// GetLastViewedAt is always 0, Matrix read markers cannot be fetched with matrixclient.
+// GetLastViewedAt returns the time of the event our read marker points to, 0 if unknown.
 func (m *Matrix) GetLastViewedAt(ctx context.Context, channelID string) int64 {
-	return 0
+	return m.mc.LastViewedAt(ctx, id.RoomID(channelID))
 }
 
 func (m *Matrix) GetPostsSince(ctx context.Context, channelID string, since int64) []*bridge.Event {

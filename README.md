@@ -194,6 +194,12 @@ Login
 /msg matrix login <server> <login> <pass>
 ```
 
+or with an existing access token (it cannot be renewed once it expires)
+
+```
+/msg matrix login <server> <token>
+```
+
 Settings are in the `[matrix]` section in [matterircd.toml.example](https://github.com/42wim/matterircd/blob/master/matterircd.toml.example)
 
 ### Mastodon user commands

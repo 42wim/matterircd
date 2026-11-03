@@ -28,7 +28,13 @@ func (m *Matrix) encryptionOptions(cred bridge.Credentials) []matrixclient.Optio
 	}
 
 	// One key database per account, named by hash to keep the path safe.
-	sum := sha256.Sum256([]byte(cred.Login + "@" + cred.Server))
+	account := cred.Login
+	if account == "" {
+		// A token belongs to one device, which the key database is bound to.
+		account = cred.Token
+	}
+
+	sum := sha256.Sum256([]byte(account + "@" + cred.Server))
 	dbPath := filepath.Join(mxCfg.EncryptionDir, hex.EncodeToString(sum[:8])+".db")
 
 	return []matrixclient.Option{e2ee.Factory(e2ee.Config{
