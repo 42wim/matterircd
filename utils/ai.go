@@ -79,7 +79,7 @@ type openAIRequest struct {
 func isOpenAIReasoningModel(model string) bool {
 	m := strings.ToLower(strings.TrimSpace(model))
 
-	return strings.HasPrefix(m, "o1") || strings.HasPrefix(m, "o3") || strings.HasPrefix(m, "o4")
+	return strings.HasPrefix(m, "o1") || strings.HasPrefix(m, "o3") || strings.HasPrefix(m, "o4") || strings.HasPrefix(m, "gpt-5")
 }
 
 type thinkingConfig struct {
@@ -368,7 +368,10 @@ func (c *CopilotClient) Summarize(ctx context.Context, prompt string, _ string) 
 	}
 
 	if len(chatResp.Choices) > 0 {
-		return strings.TrimSpace(chatResp.Choices[0].Message.Content), nil
+		content := strings.TrimSpace(chatResp.Choices[0].Message.Content)
+		if content != "" {
+			return content, nil
+		}
 	}
 
 	return "", fmt.Errorf("no summary generated")
@@ -516,7 +519,10 @@ func (c *OpenAIClient) Summarize(ctx context.Context, prompt string, _ string) (
 	}
 
 	if len(chatResp.Choices) > 0 {
-		return strings.TrimSpace(chatResp.Choices[0].Message.Content), nil
+		content := strings.TrimSpace(chatResp.Choices[0].Message.Content)
+		if content != "" {
+			return content, nil
+		}
 	}
 
 	return "", errors.New("no summary generated")

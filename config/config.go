@@ -532,7 +532,7 @@ func (c *Config) AI() *AIConfig {
 }
 
 // GetToken resolves the token for the requested provider, ensuring credentials
-// do not cross provider boundaries.
+// do not cross provider boundaries while preserving the legacy Copilot token fallback.
 func (c *AIConfig) GetToken(provider string) string {
 	switch strings.ToLower(provider) {
 	case "copilot", "github":
@@ -540,7 +540,8 @@ func (c *AIConfig) GetToken(provider string) string {
 			return c.CopilotToken
 		}
 
-		if strings.EqualFold(c.Provider, "copilot") || strings.EqualFold(c.Provider, "github") {
+		p := strings.ToLower(c.Provider)
+		if p == "" || p == "gemini" || p == "copilot" || p == "github" {
 			return c.Token
 		}
 	case "openai", "hetzner", "ollama", "local", "vllm":
