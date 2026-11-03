@@ -123,6 +123,7 @@ const (
 	DefaultCopilotModel = "gpt-4o"
 	DefaultOpenAIModel  = "gpt-4o"
 	DefaultHetznerModel = "meta-llama/Meta-Llama-3.1-70B-Instruct"
+	DefaultLocalModel   = "llama3.2"
 
 	DefaultOpenAIBaseURL  = "https://api.openai.com/v1"
 	DefaultHetznerBaseURL = "https://inference.hetzner.com/api/v1"
@@ -130,7 +131,7 @@ const (
 
 // GetModel resolves the AI model to use based on provider, fallback model, and the models map.
 func GetModel(provider, fallbackModel string, models map[string]string) string {
-	p := strings.ToLower(provider)
+	p := strings.ToLower(strings.TrimSpace(provider))
 	if models != nil {
 		if m, ok := models[p]; ok && m != "" {
 			return m
@@ -141,28 +142,15 @@ func GetModel(provider, fallbackModel string, models map[string]string) string {
 		return fallbackModel
 	}
 
-	if models != nil {
-		switch p {
-		case AIOpenAIProvider:
-			for _, k := range [...]string{AIOllamaProvider, AILocalProvider, AIvLLMProvider} {
-				if m, ok := models[k]; ok && m != "" {
-					return m
-				}
-			}
-		case AIOllamaProvider, AILocalProvider, AIvLLMProvider:
-			if m, ok := models[AIOpenAIProvider]; ok && m != "" {
-				return m
-			}
-		}
-	}
-
 	switch p {
 	case AICopilotProvider, AIGitHubProvider:
 		return DefaultCopilotModel
 	case AIHetznerProvider:
 		return DefaultHetznerModel
-	case AIOpenAIProvider, AIOllamaProvider, AILocalProvider, AIvLLMProvider:
+	case AIOpenAIProvider:
 		return DefaultOpenAIModel
+	case AIOllamaProvider, AILocalProvider, AIvLLMProvider:
+		return DefaultLocalModel
 	default:
 		return DefaultGeminiModel
 	}
