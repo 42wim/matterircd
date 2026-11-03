@@ -8,7 +8,6 @@ import (
 
 	"github.com/42wim/matterircd/bridge"
 	"github.com/matterbridge/matrixclient"
-	logger "github.com/sirupsen/logrus"
 )
 
 const (
@@ -130,13 +129,18 @@ func (m *Matrix) OnMember(c *matrixclient.MemberChange) {
 // coming from the other side, as handled by the IRC layer.
 func (m *Matrix) sendText(ghost *bridge.UserInfo, roomID id.RoomID, direct bool, eventID, parentID id.EventID, text, eventType string, ts int64) {
 	if direct {
+		receiver := m.dmReceiver(ghost, roomID, true)
+		if receiver == nil {
+			return
+		}
+
 		m.sendEvent(&bridge.Event{
 			Type: "direct_message",
 			Data: &bridge.DirectMessageEvent{
 				Text:      text,
 				ChannelID: roomID.String(),
 				Sender:    ghost,
-				Receiver:  m.GetMe(),
+				Receiver:  receiver,
 				MessageID: eventID.String(),
 				Event:     eventType,
 				ParentID:  parentID.String(),
@@ -265,6 +269,16 @@ func (m *Matrix) dmPeer(roomID id.RoomID) *bridge.UserInfo {
 	return m.createUser(users[0])
 }
 
+// dmReceiver returns the receiver of a message: the peer for our own messages
+// in a DM, as they are sent from another client, otherwise ourselves.
+func (m *Matrix) dmReceiver(ghost *bridge.UserInfo, roomID id.RoomID, direct bool) *bridge.UserInfo {
+	if direct && ghost.Me {
+		return m.dmPeer(roomID)
+	}
+
+	return m.GetMe()
+}
+
 func (m *Matrix) msgsToEvents(msgs []*matrixclient.Message, eventType string) []*bridge.Event {
 	events := make([]*bridge.Event, 0, len(msgs))
 
@@ -289,7 +303,7 @@ func (m *Matrix) resolveUserID(name string) (id.UserID, bool) {
 		return id.UserID(name), true
 	}
 
-	localpart, isIdent := strings.CutPrefix(name, "~")
+	isIdent := strings.HasPrefix(name, "~")
 
 	for _, userID := range m.mc.KnownUsers() {
 		u := m.createUser(userID)
@@ -297,7 +311,7 @@ func (m *Matrix) resolveUserID(name string) (id.UserID, bool) {
 			continue
 		}
 
-		if isIdent && u.User == name && strings.EqualFold(userID.Localpart(), localpart) {
+		if isIdent && strings.EqualFold(u.User, name) {
 			return userID, true
 		}
 

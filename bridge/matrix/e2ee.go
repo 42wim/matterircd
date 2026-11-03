@@ -11,7 +11,6 @@ import (
 	"github.com/42wim/matterircd/bridge"
 	"github.com/matterbridge/matrixclient"
 	"github.com/matterbridge/matrixclient/e2ee"
-	logger "github.com/sirupsen/logrus"
 	"maunium.net/go/mautrix/event"
 )
 

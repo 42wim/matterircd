@@ -110,6 +110,9 @@ type Reaction struct {
 // called from the sync goroutine and must not block for long.
 type Handler interface {
 	// Ready is called once, after the events of the initial sync were processed.
+	// The messages, reactions, redactions and typing events of the initial sync
+	// are not delivered, as a handler typically only starts consuming them once
+	// Ready was called. Use the history methods to fetch earlier messages.
 	Ready()
 	OnMessage(msg *Message)
 	OnReaction(r *Reaction)

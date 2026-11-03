@@ -116,7 +116,7 @@ github.com/magiconair/properties
 # github.com/matterbridge/logrus-prefixed-formatter v0.5.3-0.20200523233437-d971309a77ba
 ## explicit
 github.com/matterbridge/logrus-prefixed-formatter
-# github.com/matterbridge/matrixclient v0.0.0-20261103004043-c7b9f2229271
+# github.com/matterbridge/matrixclient v0.0.0-20261103202459-b52eefbbfcc7
 ## explicit; go 1.26.0
 github.com/matterbridge/matrixclient
 github.com/matterbridge/matrixclient/e2ee

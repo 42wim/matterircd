@@ -5,7 +5,6 @@ package matrix
 import (
 	"github.com/42wim/matterircd/bridge"
 	"github.com/matterbridge/matrixclient"
-	logger "github.com/sirupsen/logrus"
 )
 
 func (m *Matrix) encryptionOptions(bridge.Credentials) []matrixclient.Option {
