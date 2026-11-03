@@ -587,8 +587,14 @@ func (m *Matrix) GetChannels() []*bridge.ChannelInfo {
 			teamID = teams[0].String()
 		}
 
+		// IsDMChannelName and GetDMUser need the raw room ID of a one-to-one DM.
+		name := strings.TrimPrefix(room.Name, "#")
+		if room.IsDirect && len(m.mc.DirectUsers(room.ID)) == 1 {
+			name = room.ID.String()
+		}
+
 		channels = append(channels, &bridge.ChannelInfo{
-			Name:       strings.TrimPrefix(room.Name, "#"),
+			Name:       name,
 			ID:         room.ID.String(),
 			TeamID:     teamID,
 			DM:         room.IsDirect,
