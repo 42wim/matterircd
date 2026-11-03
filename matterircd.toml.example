@@ -92,18 +92,19 @@ token = "ghu_..." # GitHub token for Copilot, or API key for OpenAI / Hetzner
 #copilot_token = "ghu_..."
 #openai_token = "sk-..."
 #hetzner_token = "..."
-# Base URL for OpenAI-compatible endpoints (defaults to https://api.openai.com/v1 if omitted)
-# Examples:
-# url = "https://api.openai.com/v1"
-# url = "https://inference.hetzner.com/api/v1"
-# url = "http://localhost:11434/v1"            # Ollama
-# url = "http://localhost:8000/v1"             # vLLM
-# url = "http://localhost:1234/v1"             # LM Studio
-#url = "https://inference.hetzner.com/api/v1"
 
 service_account_file = "/etc/matterircd/sa.json"
 project = "myproject-req-10375"
 location = "us"
+
+# Base URL for default provider or local engines:
+# url = "http://localhost:11434/v1"
+
+# Or configure provider-specific endpoints to prevent endpoint bleed:
+#[ai.urls]
+#openai = "https://api.openai.com/v1"
+#hetzner = "https://inference.hetzner.com/api/v1"
+#ollama = "http://localhost:11434/v1"
 
 # Provider-specific models
 [ai.models]

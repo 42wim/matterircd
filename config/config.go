@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/42wim/matterircd/utils"
 	"github.com/fsnotify/fsnotify"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
@@ -30,7 +31,8 @@ type AIConfig struct {
 	CopilotToken       string // GitHub token for Copilot
 	OpenAIToken        string // API key for OpenAI
 	HetznerToken       string // API key for Hetzner
-	URL                string // Base URL for OpenAI / compatible endpoints (e.g. https://api.openai.com/v1, https://inference.hetzner.com/api/v1)
+	URL                string // Fallback base URL for configured Provider
+	URLs               map[string]string // Provider-specific base URLs
 	ServiceAccountFile string // Gemini / Vertex AI
 	Project            string
 	Location           string
@@ -243,6 +245,7 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 		OpenAIToken:        c.v.GetString("ai.openai_token"),
 		HetznerToken:       c.v.GetString("ai.hetzner_token"),
 		URL:                unquoteString(aiURL),
+		URLs:               c.v.GetStringMapString("ai.urls"),
 		ServiceAccountFile: unquoteString(c.v.GetString("ai.service_account_file")),
 		Project:            c.v.GetString("ai.project"),
 		Location:           c.v.GetString("ai.location"),
@@ -533,6 +536,45 @@ func (c *Config) AI() *AIConfig {
 	return &c.Current().AI
 }
 
+// GetBaseURL resolves the endpoint base URL for the requested provider, ensuring
+// credentials and requests are not dispatched to unrelated endpoints.
+//
+//nolint:gocyclo
+func (c *AIConfig) GetBaseURL(provider string) string {
+	p := strings.ToLower(strings.TrimSpace(provider))
+
+	if c.URLs != nil {
+		if u, ok := c.URLs[p]; ok && u != "" {
+			return strings.TrimRight(u, "/")
+		}
+	}
+
+	cfgP := strings.ToLower(strings.TrimSpace(c.Provider))
+
+	switch p {
+	case utils.AIOpenAIProvider:
+		if cfgP == utils.AIOpenAIProvider && c.URL != "" {
+			return strings.TrimRight(c.URL, "/")
+		}
+
+		return utils.DefaultOpenAIBaseURL
+	case utils.AIHetznerProvider:
+		if cfgP == utils.AIHetznerProvider && c.URL != "" {
+			return strings.TrimRight(c.URL, "/")
+		}
+
+		return utils.DefaultHetznerBaseURL
+	case utils.AIOllamaProvider, utils.AILocalProvider, utils.AIvLLMProvider:
+		if (cfgP == p || cfgP == utils.AILocalProvider || cfgP == utils.AIOllamaProvider || cfgP == utils.AIvLLMProvider || cfgP == "" || cfgP == "gemini") && c.URL != "" {
+			return strings.TrimRight(c.URL, "/")
+		}
+
+		return ""
+	default:
+		return ""
+	}
+}
+
 // GetToken resolves the token for the requested provider, ensuring credentials
 // do not cross provider or endpoint boundaries while preserving the legacy Copilot token fallback.
 func (c *AIConfig) GetToken(provider string) string {
@@ -548,23 +590,23 @@ func (c *AIConfig) GetToken(provider string) string {
 		if cfgP == "" || cfgP == "gemini" || cfgP == "copilot" || cfgP == "github" {
 			return c.Token
 		}
-	case "openai":
+	case utils.AIOpenAIProvider:
 		if c.OpenAIToken != "" {
 			return c.OpenAIToken
 		}
 
-		if strings.EqualFold(c.Provider, "openai") {
+		if strings.EqualFold(c.Provider, utils.AIOpenAIProvider) {
 			return c.Token
 		}
-	case "hetzner":
+	case utils.AIHetznerProvider:
 		if c.HetznerToken != "" {
 			return c.HetznerToken
 		}
 
-		if strings.EqualFold(c.Provider, "hetzner") {
+		if strings.EqualFold(c.Provider, utils.AIHetznerProvider) {
 			return c.Token
 		}
-	case "ollama", "local", "vllm":
+	case utils.AIOllamaProvider, utils.AILocalProvider, utils.AIvLLMProvider:
 		if strings.EqualFold(c.Provider, p) {
 			return c.Token
 		}

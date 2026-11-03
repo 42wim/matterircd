@@ -168,24 +168,6 @@ func GetModel(provider, fallbackModel string, models map[string]string) string {
 	}
 }
 
-// ResolveBaseURL returns the endpoint base URL for the given provider.
-// If configuredURL is set, it takes precedence. Otherwise, it defaults to the
-// official endpoint for OpenAI and Hetzner, returning an empty string for local providers.
-func ResolveBaseURL(provider, configuredURL string) string {
-	if configuredURL != "" {
-		return strings.TrimRight(configuredURL, "/")
-	}
-
-	switch strings.ToLower(strings.TrimSpace(provider)) {
-	case AIOpenAIProvider:
-		return DefaultOpenAIBaseURL
-	case AIHetznerProvider:
-		return DefaultHetznerBaseURL
-	default:
-		return ""
-	}
-}
-
 // NewCopilotClient creates a client targeting the native GitHub Copilot API.
 func NewCopilotClient(token, model string) (*CopilotClient, error) {
 	if token == "" {

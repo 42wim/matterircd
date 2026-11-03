@@ -1491,7 +1491,7 @@ func summarize(u *User, toUser *User, args []string, service string) {
 			return
 		}
 	case utils.AIOpenAIProvider, utils.AIHetznerProvider, utils.AIOllamaProvider, utils.AILocalProvider, utils.AIvLLMProvider:
-		baseURL := utils.ResolveBaseURL(provider, cfg.URL)
+		baseURL := cfg.GetBaseURL(provider)
 		if baseURL == "" {
 			u.MsgUser(toUser, fmt.Sprintf("%s AI is not configured (missing url).", provider))
 
@@ -1586,7 +1586,7 @@ func summarize(u *User, toUser *User, args []string, service string) {
 	case utils.AICopilotProvider, utils.AIGitHubProvider:
 		logger.Debugf("AI summarization for %s (provider: %s, model: %s, thinking: %s)", contextLabel, provider, model, thinking)
 	case utils.AIOpenAIProvider, utils.AIHetznerProvider, utils.AIOllamaProvider, utils.AILocalProvider, utils.AIvLLMProvider:
-		baseURL := utils.ResolveBaseURL(provider, cfg.URL)
+		baseURL := cfg.GetBaseURL(provider)
 
 		logger.Debugf("AI summarization for %s (provider: %s, model: %s, thinking: %s, url: %s)", contextLabel, provider, model, thinking, baseURL)
 	default:
