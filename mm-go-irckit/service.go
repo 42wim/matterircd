@@ -1496,7 +1496,7 @@ func summarize(u *User, toUser *User, args []string, service string) {
 		}
 
 		if cfg.Token == "" && (strings.Contains(baseURL, "api.openai.com") || strings.Contains(baseURL, "inference.hetzner.com")) {
-			u.MsgUser(toUser, "OpenAI is not configured (missing token).")
+			u.MsgUser(toUser, fmt.Sprintf("%s AI is not configured (missing token).", provider))
 
 			return
 		}
