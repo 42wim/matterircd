@@ -2266,11 +2266,13 @@ func (u *User) prefixContext(channelID, messageID, parentID, event string) strin
 		prefixChar = "↪"
 	}
 
-	if u.br.BridgeConfig().ThreadContext == "mattermost" || u.br.BridgeConfig().ThreadContext == "mattermost+post" || u.br.BridgeConfig().ThreadContext == serviceMatrix {
+	tc := u.br.BridgeConfig().ThreadContext
+	if tc == "mattermost" || tc == "mattermost+post" || tc == serviceMatrix || tc == serviceMatrix+"+post" {
 		if parentID == "" {
 			return "[@@" + messageID + "]"
 		}
-		if u.br.BridgeConfig().ThreadContext == "mattermost" || parentID == messageID {
+
+		if tc == "mattermost" || tc == serviceMatrix || parentID == messageID {
 			return "[" + prefixChar + "@@" + parentID + "]"
 		}
 		return "[" + prefixChar + "@@" + parentID + ",@@" + messageID + "]"
@@ -2630,7 +2632,7 @@ func (u *User) handleTyping(e *bridge.TypingEvent) {
 
 	host := e.Sender.Host
 	if host == "" {
-		host = "mattermost"
+		host = u.br.Protocol()
 	}
 
 	prefix := nick + "!" + user + "@" + host
@@ -2654,7 +2656,8 @@ func (u *User) handleTyping(e *bridge.TypingEvent) {
 
 	parentID := e.ParentID
 	if parentID != "" {
-		if u.br.BridgeConfig().ThreadContext != "mattermost" && u.br.BridgeConfig().ThreadContext != "mattermost+post" {
+		tc := u.br.BridgeConfig().ThreadContext
+		if tc != "mattermost" && tc != "mattermost+post" && tc != serviceMatrix && tc != serviceMatrix+"+post" {
 			parentID = u.getMsgCounterHex(e.ChannelID, parentID)
 		}
 

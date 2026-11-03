@@ -666,7 +666,7 @@ func (m *Matrix) GetPostChannelID(ctx context.Context, postID string) string {
 }
 
 func (m *Matrix) GetPostSizeLimit() int {
-	return 0
+	return 32768
 }
 
 func (m *Matrix) GetPostThread(ctx context.Context, postID string) []*bridge.Event {
