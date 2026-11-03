@@ -165,7 +165,8 @@ func (m *Matrix) OnMessage(msg *matrixclient.Message) {
 	m.msgRoomCache.Add(msg.EventID, msg.RoomID)
 	m.lastEvent.Store(msg.RoomID, msg.EventID)
 
-	if prev, ok := m.lastPost.Load(msg.RoomID); !ok || msg.Timestamp > prev.(int64) {
+	prev, _ := m.lastPost.Load(msg.RoomID)
+	if prevTS, _ := prev.(int64); msg.Timestamp > prevTS {
 		m.lastPost.Store(msg.RoomID, msg.Timestamp)
 	}
 
@@ -323,6 +324,7 @@ func (m *Matrix) List(ctx context.Context) (map[string]string, error) {
 		}
 
 		roomName := strings.TrimPrefix(room.Name, "#")
+
 		name := "#" + roomName
 		if teams := m.mc.RoomTeams(room.ID); len(teams) > 0 {
 			name = m.GetTeamName(ctx, teams[0].String()) + "/" + roomName
@@ -587,10 +589,8 @@ func (m *Matrix) GetChannels() []*bridge.ChannelInfo {
 			teamID = teams[0].String()
 		}
 
-		var lastPostAt int64
-		if ts, ok := m.lastPost.Load(room.ID); ok {
-			lastPostAt = ts.(int64)
-		}
+		ts, _ := m.lastPost.Load(room.ID)
+		lastPostAt, _ := ts.(int64)
 
 		channels = append(channels, &bridge.ChannelInfo{
 			Name:       strings.TrimPrefix(room.Name, "#"),
@@ -683,13 +683,13 @@ func (m *Matrix) createUser(userID id.UserID) *bridge.UserInfo {
 	// Drop the homeserver/host part if it's a user on the same homeserver as us.
 	nick := localpart + "@" + homeserver
 
-	// The IRC user is the key of a ghost, so it has to differ between homeservers.
+	// The IRC user is the key of a ghost. It always has the homeserver, as '/' is
+	// legal in a localpart and would otherwise collide with a remote user.
 	ident := "~" + localpart + "/" + homeserver
 
 	_, myHomeserver, err := m.mc.UserID().Parse()
 	if err == nil && homeserver == myHomeserver {
 		nick = localpart
-		ident = "~" + localpart
 	}
 
 	return &bridge.UserInfo{
