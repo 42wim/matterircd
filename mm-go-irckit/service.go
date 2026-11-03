@@ -1335,6 +1335,8 @@ func parseSummarizeAIProvider(arg string) (string, bool) {
 		return utils.AIGeminiProvider, true
 	case utils.AICopilotProvider, utils.AIGitHubProvider:
 		return utils.AICopilotProvider, true
+	case utils.AIOpenAIProvider, "hetzner", "ollama", "local", "vllm":
+		return utils.AIOpenAIProvider, true
 	default:
 		return "", false
 	}
@@ -1416,7 +1418,7 @@ func parseSummarizeLimit(extraArgs []string, defaultLimit, maxLimit int) (summar
 		// Fall back to parsing as an integer count (e.g. 50)
 		val, err := strconv.Atoi(arg)
 		if err != nil || val <= 0 {
-			return summarizeQuery{}, errors.New("invalid option: expected post count (e.g. 50), duration (e.g. 24h), thinking mode (off, low, medium, high), or provider (gemini, copilot)")
+			return summarizeQuery{}, errors.New("invalid option: expected post count (e.g. 50), duration (e.g. 24h), thinking mode (off, low, medium, high), or provider (gemini, copilot, openai)")
 		}
 
 		if hasLimit {
@@ -1444,8 +1446,8 @@ func summarize(u *User, toUser *User, args []string, service string) {
 	}
 
 	if len(args) == 0 || len(args) > 4 {
-		u.MsgUser(toUser, "Usage: SUMMARIZE <#channel | user | @@thread_id> [post_count | duration] [thinking] [gemini | copilot]")
-		u.MsgUser(toUser, "e.g. SUMMARIZE #dev 50, SUMMARIZE #dev 24h gemini high, SUMMARIZE @@q3kz9... copilot, SUMMARIZE someuser 30m")
+		u.MsgUser(toUser, "Usage: SUMMARIZE <#channel | user | @@thread_id> [post_count | duration] [thinking] [gemini | copilot | openai]")
+		u.MsgUser(toUser, "e.g. SUMMARIZE #dev 50, SUMMARIZE #dev 24h gemini high, SUMMARIZE @@q3kz9... openai, SUMMARIZE someuser 30m")
 
 		return
 	}
@@ -1484,6 +1486,24 @@ func summarize(u *User, toUser *User, args []string, service string) {
 		aiClient, err = utils.NewCopilotClient(cfg.Token, model)
 		if err != nil {
 			u.MsgUser(toUser, fmt.Sprintf("Failed to initialize Copilot AI: %v", err))
+
+			return
+		}
+	case utils.AIOpenAIProvider:
+		baseURL := cfg.URL
+		if baseURL == "" {
+			baseURL = utils.DefaultOpenAIBaseURL
+		}
+
+		if cfg.Token == "" && (strings.Contains(baseURL, "api.openai.com") || strings.Contains(baseURL, "inference.hetzner.com")) {
+			u.MsgUser(toUser, "OpenAI is not configured (missing token).")
+
+			return
+		}
+
+		aiClient, err = utils.NewOpenAIClient(cfg.Token, cfg.URL, model)
+		if err != nil {
+			u.MsgUser(toUser, fmt.Sprintf("Failed to initialize OpenAI client: %v", err))
 
 			return
 		}
@@ -1562,6 +1582,13 @@ func summarize(u *User, toUser *User, args []string, service string) {
 	switch strings.ToLower(provider) {
 	case utils.AICopilotProvider, utils.AIGitHubProvider:
 		logger.Debugf("AI summarization for %s (provider: %s, model: %s, thinking: %s)", contextLabel, provider, model, thinking)
+	case utils.AIOpenAIProvider:
+		baseURL := cfg.URL
+		if baseURL == "" {
+			baseURL = utils.DefaultOpenAIBaseURL
+		}
+
+		logger.Debugf("AI summarization for %s (provider: %s, model: %s, thinking: %s, url: %s)", contextLabel, provider, model, thinking, baseURL)
 	default:
 		region := cfg.Location
 		if region == "" {

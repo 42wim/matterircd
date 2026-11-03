@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -100,9 +101,13 @@ const (
 	AIGeminiProvider  = "gemini"
 	AICopilotProvider = "copilot"
 	AIGitHubProvider  = "github"
+	AIOpenAIProvider  = "openai"
 
 	DefaultGeminiModel  = "gemini-3.8-flash"
 	DefaultCopilotModel = "gpt-4o-mini"
+	DefaultOpenAIModel  = "gpt-4o-mini"
+
+	DefaultOpenAIBaseURL = "https://api.openai.com/v1"
 )
 
 // GetModel resolves the AI model to use based on provider, fallback model, and the models map.
@@ -111,6 +116,14 @@ func GetModel(provider, fallbackModel string, models map[string]string) string {
 	if models != nil {
 		if m, ok := models[p]; ok && m != "" {
 			return m
+		}
+
+		if p == AIOpenAIProvider {
+			for _, k := range [...]string{"hetzner", "ollama", "local", "vllm"} {
+				if m, ok := models[k]; ok && m != "" {
+					return m
+				}
+			}
 		}
 	}
 
@@ -121,6 +134,8 @@ func GetModel(provider, fallbackModel string, models map[string]string) string {
 	switch p {
 	case AICopilotProvider, AIGitHubProvider:
 		return DefaultCopilotModel
+	case AIOpenAIProvider:
+		return DefaultOpenAIModel
 	default:
 		return DefaultGeminiModel
 	}
@@ -367,6 +382,102 @@ func (c *CopilotClient) getGitHubSessionToken(ctx context.Context) (string, erro
 	}
 
 	return tokenResp.Token, nil
+}
+
+type OpenAIClient struct {
+	token      string
+	baseURL    string
+	model      string
+	httpClient *http.Client
+}
+
+// NewOpenAIClient creates a client targeting standard OpenAI or compatible REST endpoints (e.g. Hetzner, Ollama, vLLM).
+func NewOpenAIClient(token, baseURL, model string) (*OpenAIClient, error) {
+	if baseURL == "" {
+		baseURL = DefaultOpenAIBaseURL
+	}
+
+	baseURL = strings.TrimRight(baseURL, "/")
+
+	if model == "" {
+		model = DefaultOpenAIModel
+	}
+
+	return &OpenAIClient{
+		token:      token,
+		baseURL:    baseURL,
+		model:      model,
+		httpClient: &http.Client{Timeout: 60 * time.Second},
+	}, nil
+}
+
+// BaseURL returns the configured base URL.
+func (c *OpenAIClient) BaseURL() string {
+	return c.baseURL
+}
+
+//nolint:funlen
+func (c *OpenAIClient) Summarize(ctx context.Context, prompt string, _ string) (string, error) {
+	reqBody := copilotRequest{
+		Model: c.model,
+		Messages: []copilotMessage{
+			{
+				Role:    "user",
+				Content: prompt,
+			},
+		},
+		Temperature: 0.2,
+	}
+
+	rawJSON, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", err
+	}
+
+	url := c.baseURL + "/chat/completions"
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(rawJSON))
+	if err != nil {
+		return "", err
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("openai api request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("openai api returned status %s: %s", resp.Status, strings.TrimSpace(string(body)))
+	}
+
+	var chatResp copilotResponse
+
+	err = json.Unmarshal(body, &chatResp)
+	if err != nil {
+		return "", fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	if chatResp.Error != nil {
+		return "", fmt.Errorf("openai error: %s", chatResp.Error.Message)
+	}
+
+	if len(chatResp.Choices) > 0 {
+		return strings.TrimSpace(chatResp.Choices[0].Message.Content), nil
+	}
+
+	return "", errors.New("no summary generated")
 }
 
 func resolveThinkingBudget(mode string) *int {

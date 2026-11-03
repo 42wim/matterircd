@@ -79,14 +79,23 @@ AwayCooldown = "20m"
 # *** WARNING: Information fed through will more than likely be used to train these models. ***
 [ai]
 enabled = true
-provider = "gemini" # default provider when not specified on IRC - "gemini" (default) or "copilot"
+provider = "gemini" # default provider when not specified on IRC - "gemini" (default), "copilot", or "openai"
 default_post_limit = 30
 max_post_limit = 100
 # Optional additional instructions appended to the summarizer prompt.
 # prompt = "Pay special attention to code reviews, diffs/patches, and deployment blockers."
 
-# Credentials
-token = "ghu_..." # OAuth tokens for GitHub Apps
+# Credentials & Endpoints
+token = "ghu_..." # GitHub token for Copilot, or API key for OpenAI / Hetzner
+# Base URL for OpenAI-compatible endpoints (defaults to https://api.openai.com/v1 if omitted)
+# Examples:
+# url = "https://api.openai.com/v1"
+# url = "https://inference.hetzner.com/api/v1"
+# url = "http://localhost:11434/v1"            # Ollama
+# url = "http://localhost:8000/v1"             # vLLM
+# url = "http://localhost:1234/v1"             # LM Studio
+#url = "https://inference.hetzner.com/api/v1"
+
 service_account_file = "/etc/matterircd/sa.json"
 project = "myproject-req-10375"
 location = "us"
@@ -95,6 +104,8 @@ location = "us"
 [ai.models]
 gemini = "gemini-3.8-flash"
 copilot = "gpt-4o-mini"
+openai = "gpt-4o-mini"
+#hetzner = "meta-llama/Meta-Llama-3.1-70B-Instruct"
 
 ##################################
 ##### MATTERMOST EXAMPLE #########

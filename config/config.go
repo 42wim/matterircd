@@ -25,8 +25,9 @@ var (
 
 type AIConfig struct {
 	Enabled            bool
-	Provider           string // "gemini" (default) or "copilot"
-	Token              string // GitHub token for Copilot
+	Provider           string // "gemini" (default), "copilot", or "openai"
+	Token              string // GitHub token for Copilot, or API key for OpenAI
+	URL                string // Base URL for OpenAI / compatible endpoints (e.g. https://api.openai.com/v1, https://inference.hetzner.com/api/v1)
 	ServiceAccountFile string // Gemini / Vertex AI
 	Project            string
 	Location           string
@@ -226,10 +227,16 @@ type MastodonConfig struct {
 
 //nolint:funlen
 func (c *Config) buildRuntimeCfg() *RuntimeConfig {
+	aiURL := c.v.GetString("ai.url")
+	if aiURL == "" {
+		aiURL = c.v.GetString("ai.base_url")
+	}
+
 	aiCfg := AIConfig{
 		Enabled:            c.v.GetBool("ai.enabled"),
 		Provider:           c.v.GetString("ai.provider"),
 		Token:              c.v.GetString("ai.token"),
+		URL:                unquoteString(aiURL),
 		ServiceAccountFile: unquoteString(c.v.GetString("ai.service_account_file")),
 		Project:            c.v.GetString("ai.project"),
 		Location:           c.v.GetString("ai.location"),

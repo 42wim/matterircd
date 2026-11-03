@@ -160,6 +160,14 @@ func main() {
 			}
 
 			logger.Infof("AI summarization enabled (default provider: %s, model: %s)", provider, model)
+		case utils.AIOpenAIProvider:
+			client, err := utils.NewOpenAIClient(aiCfg.Token, aiCfg.URL, model)
+			if err != nil {
+				logger.Errorf("AI summarization setup error: %v", err)
+				break
+			}
+
+			logger.Infof("AI summarization enabled (default provider: %s, model: %s, url: %s)", provider, model, client.BaseURL())
 		default:
 			if aiCfg.ServiceAccountFile == "" {
 				logger.Warn("AI summarization enabled, but service_account_file is missing")
