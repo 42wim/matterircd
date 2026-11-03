@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"maunium.net/go/mautrix/id"
 
@@ -15,9 +16,25 @@ import (
 	"github.com/42wim/matterircd/config"
 	"github.com/42wim/matterircd/utils"
 	lru "github.com/hashicorp/golang-lru/v2"
+	prefixed "github.com/matterbridge/logrus-prefixed-formatter"
 	"github.com/matterbridge/matrixclient"
-	logger "github.com/sirupsen/logrus"
+	"github.com/sirupsen/logrus"
 )
+
+// logger is shared by all users, so creating it once avoids racing on a
+// per-login replacement. It matches the format of the matterclient logging.
+var logger = newLogger()
+
+func newLogger() *logrus.Entry {
+	l := logrus.New()
+	l.SetFormatter(&prefixed.TextFormatter{
+		PrefixPadding: 18,
+		DisableColors: false,
+		FullTimestamp: true,
+	})
+
+	return l.WithFields(logrus.Fields{"prefix": "bridge/matrix"})
+}
 
 const (
 	blockquoteCharNonUnicode = "|"
@@ -25,9 +42,11 @@ const (
 
 	lastSentSummaryLen = 90
 
-	searchUsersLimit  = 50
-	msgRoomCacheSize  = 2000
-	reactionCacheSize = 100
+	searchUsersLimit   = 50
+	msgRoomCacheSize   = 2000
+	reactionCacheSize  = 100
+	sentCacheSize      = 100
+	sentReactionWindow = time.Minute
 )
 
 // markdownReplacer combines multi-line messages into a single line, making
@@ -45,6 +64,7 @@ type Matrix struct {
 	onConnect func()
 
 	connected atomic.Bool
+	ready     atomic.Bool
 
 	ctx context.Context //nolint:containedctx
 
@@ -52,8 +72,17 @@ type Matrix struct {
 	msgLastSentCache *lru.Cache[string, string]
 	msgRoomCache     *lru.Cache[id.EventID, id.RoomID]
 	reactionCache    *lru.Cache[string, id.EventID]
+	sentReactions    *lru.Cache[string, time.Time]    // reactions added from IRC, whose echo is dropped
+	sentRedactions   *lru.Cache[id.EventID, struct{}] // messages deleted from IRC, whose echo is dropped
 
 	lastEvent sync.Map // id.RoomID -> id.EventID, the newest event seen per room
+
+	// sentMu is never held across network I/O. It guards sentCache and pendingSends,
+	// which together recognize the echo of a message sent from IRC, also when the
+	// echo is synced before the send call returned its event ID.
+	sentMu       sync.Mutex
+	sentCache    *lru.Cache[id.EventID, struct{}]
+	pendingSends map[string]int // text of the sends in flight
 }
 
 func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Event, onConnect func()) (bridge.Bridger, *matrixclient.Client, error) {
@@ -66,30 +95,40 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 	m.msgParentCache, _ = lru.New[id.EventID, string](100)
 	m.msgLastSentCache, _ = lru.New[string, string](10)
 	m.msgRoomCache, _ = lru.New[id.EventID, id.RoomID](msgRoomCacheSize)
+	m.pendingSends = make(map[string]int)
+	m.sentCache, _ = lru.New[id.EventID, struct{}](sentCacheSize)
+	m.sentReactions, _ = lru.New[string, time.Time](reactionCacheSize)
+	m.sentRedactions, _ = lru.New[id.EventID, struct{}](sentCacheSize)
 	m.reactionCache, _ = lru.New[string, id.EventID](reactionCacheSize)
 
 	setLogLevel := func(rc *config.RuntimeConfig) {
 		switch {
 		case rc.Trace:
-			logger.SetLevel(logger.TraceLevel)
+			logger.Logger.SetLevel(logrus.TraceLevel)
 		case rc.Debug:
-			logger.SetLevel(logger.DebugLevel)
+			logger.Logger.SetLevel(logrus.DebugLevel)
 		default:
-			logger.SetLevel(logger.InfoLevel)
+			logger.Logger.SetLevel(logrus.InfoLevel)
 		}
 	}
 	setLogLevel(cfg.Current())
 	cfg.RegisterReloadHook(setLogLevel)
 
-	if cred.Token != "" && cred.Login == "" {
-		return nil, nil, errors.New("matrix: login with an access token is not supported, use LOGIN <server> <login> <pass>")
+	if cred.Token != "" && cred.Server == "" {
+		return nil, nil, errors.New("matrix: login with an access token needs a server, use LOGIN <server> <token>")
+	}
+
+	opts, err := m.encryptionOptions(cred)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	mc, err := matrixclient.New(ctx, matrixclient.Credentials{
 		Server: cred.Server,
 		Login:  cred.Login,
 		Pass:   cred.Pass,
-	}, m, m.encryptionOptions(cred)...)
+		Token:  cred.Token,
+	}, m, opts...)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -102,10 +141,19 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 
 // Ready implements matrixclient.Handler.
 func (m *Matrix) Ready() {
+	m.ready.Store(true)
+
 	go m.onConnect()
 }
 
 func (m *Matrix) sendEvent(ev *bridge.Event) {
+	// The event loop only starts from onConnect, which Ready triggers. Blocking
+	// the sync goroutine on the unbuffered channel before that would deadlock the
+	// initial sync, so its events are dropped, history is replayed on join.
+	if !m.ready.Load() {
+		return
+	}
+
 	select {
 	case m.eventChan <- ev:
 	case <-m.ctx.Done():
@@ -117,6 +165,12 @@ func (m *Matrix) OnMessage(msg *matrixclient.Message) {
 	ghost := m.createUser(msg.Sender)
 	if ghost == nil {
 		return
+	}
+
+	if ghost.Me {
+		if m.isSentEcho(msg.EventID, msg.Text) {
+			return
+		}
 	}
 
 	m.msgRoomCache.Add(msg.EventID, msg.RoomID)
@@ -152,10 +206,15 @@ func (m *Matrix) sendFile(ghost *bridge.UserInfo, msg *matrixclient.Message, fil
 		channelType = "D"
 	}
 
+	receiver := m.dmReceiver(ghost, msg.RoomID, msg.Direct)
+	if receiver == nil {
+		return
+	}
+
 	m.sendEvent(&bridge.Event{
 		Type: "file_event",
 		Data: &bridge.FileEvent{
-			Receiver:    m.GetMe(),
+			Receiver:    receiver,
 			Sender:      ghost,
 			ChannelID:   msg.RoomID.String(),
 			ChannelType: channelType,
@@ -172,6 +231,10 @@ func (m *Matrix) OnReaction(r *matrixclient.Reaction) {
 
 	ghost := m.createUser(r.Sender)
 	if ghost == nil {
+		return
+	}
+
+	if ghost.Me && m.isSentReaction(r.ParentID, r.Key) {
 		return
 	}
 
@@ -192,16 +255,22 @@ func (m *Matrix) OnReaction(r *matrixclient.Reaction) {
 		channelType = "D"
 	}
 
+	receiver := m.dmReceiver(ghost, r.RoomID, r.Direct)
+	if receiver == nil {
+		return
+	}
+
+	// The reacted message is the MessageID, a ParentID would show it as a reply to itself.
 	m.sendEvent(&bridge.Event{
 		Type: "reaction_add",
 		Data: &bridge.ReactionAddEvent{
 			ChannelID:   r.RoomID.String(),
 			MessageID:   string(r.ParentID),
+			Receiver:    receiver,
 			Sender:      ghost,
 			Reaction:    r.Key,
 			ChannelType: channelType,
 			Message:     text,
-			ParentID:    r.ParentID.String(),
 		},
 	})
 }
@@ -238,7 +307,18 @@ func (m *Matrix) Join(ctx context.Context, channelName string) (string, string, 
 		}
 	}
 
-	roomID, err := m.mc.Join(ctx, channelName)
+	// CmdJoin strips the leading '#' of an alias like "#room:server".
+	target := channelName
+	if !strings.HasPrefix(target, "!") && !strings.HasPrefix(target, "#") {
+		// A listed name can contain a colon (a homeserver with a port), so known rooms come first.
+		if channelID := m.GetChannelID(ctx, target, ""); channelID != "" {
+			target = channelID
+		} else if strings.Contains(target, ":") {
+			target = "#" + target
+		}
+	}
+
+	roomID, err := m.mc.Join(ctx, target)
 	if err != nil {
 		return "", "", err
 	}
@@ -254,9 +334,11 @@ func (m *Matrix) List(ctx context.Context) (map[string]string, error) {
 			continue
 		}
 
-		name := "#" + room.Name
+		roomName := strings.TrimPrefix(room.Name, "#")
+
+		name := "#" + roomName
 		if teams := m.mc.RoomTeams(room.ID); len(teams) > 0 {
-			name = m.GetTeamName(ctx, teams[0].String()) + "/" + room.Name
+			name = m.GetTeamName(ctx, teams[0].String()) + "/" + roomName
 		}
 
 		rooms[name] = strings.ReplaceAll(m.mc.Topic(room.ID), "\n", " | ")
@@ -292,7 +374,11 @@ func (m *Matrix) MsgUserThread(ctx context.Context, userID, parentID, text strin
 		return "", errors.New("unknown user " + userID)
 	}
 
+	m.beginSend(text)
+
 	eventID, err := m.mc.SendDirect(ctx, uid, id.EventID(parentID), text)
+	m.endSend(text, eventID, err)
+
 	if err != nil {
 		logger.Error("msguserthread sending message: error ", err)
 		return "", err
@@ -303,6 +389,54 @@ func (m *Matrix) MsgUserThread(ctx context.Context, userID, parentID, text strin
 	}
 
 	return m.recordSent(ctx, "", eventID, text), nil
+}
+
+// isSentReaction reports, once, whether our own reaction was added from IRC.
+func (m *Matrix) isSentReaction(parentID id.EventID, key string) bool {
+	sentKey := parentID.String() + "\x00" + key
+
+	at, ok := m.sentReactions.Get(sentKey)
+	if !ok {
+		return false
+	}
+
+	m.sentReactions.Remove(sentKey)
+
+	return time.Since(at) < sentReactionWindow
+}
+
+func (m *Matrix) beginSend(text string) {
+	m.sentMu.Lock()
+	m.pendingSends[text]++
+	m.sentMu.Unlock()
+}
+
+func (m *Matrix) endSend(text string, eventID id.EventID, err error) {
+	m.sentMu.Lock()
+	defer m.sentMu.Unlock()
+
+	if m.pendingSends[text] <= 1 {
+		delete(m.pendingSends, text)
+	} else {
+		m.pendingSends[text]--
+	}
+
+	if err == nil {
+		m.sentCache.Add(eventID, struct{}{})
+	}
+}
+
+// isSentEcho reports whether our own message was sent from IRC. A message with
+// the text of a send in flight is taken as its echo, as the event ID isn't known yet.
+func (m *Matrix) isSentEcho(eventID id.EventID, text string) bool {
+	m.sentMu.Lock()
+	defer m.sentMu.Unlock()
+
+	if _, ok := m.sentCache.Get(eventID); ok {
+		return true
+	}
+
+	return m.pendingSends[text] > 0
 }
 
 func (m *Matrix) recordSent(ctx context.Context, channelID string, eventID id.EventID, text string) string {
@@ -324,7 +458,11 @@ func (m *Matrix) MsgChannel(ctx context.Context, channelID, text string) (string
 func (m *Matrix) MsgChannelThread(ctx context.Context, channelID, parentID, text string) (string, error) {
 	logger.Debugf("msgchannelthread: sending message thread '%s' '%s' '%s'", channelID, parentID, text)
 
+	m.beginSend(text)
+
 	eventID, err := m.mc.Send(ctx, id.RoomID(channelID), id.EventID(parentID), text)
+	m.endSend(text, eventID, err)
+
 	if err != nil {
 		return "", err
 	}
@@ -343,10 +481,20 @@ func (m *Matrix) ModifyPost(ctx context.Context, msgID, text string) error {
 	m.msgParentCache.Remove(id.EventID(msgID))
 
 	if text == "" {
-		return m.mc.Delete(ctx, roomID, id.EventID(msgID))
+		m.sentRedactions.Add(id.EventID(msgID), struct{}{})
+
+		err := m.mc.Delete(ctx, roomID, id.EventID(msgID))
+		if err != nil {
+			m.sentRedactions.Remove(id.EventID(msgID))
+		}
+
+		return err
 	}
 
-	_, err := m.mc.Edit(ctx, roomID, id.EventID(msgID), text)
+	m.beginSend(text)
+
+	eventID, err := m.mc.Edit(ctx, roomID, id.EventID(msgID), text)
+	m.endSend(text, eventID, err)
 
 	return err
 }
@@ -407,7 +555,12 @@ func (m *Matrix) Protocol() string {
 }
 
 func (m *Matrix) Kick(ctx context.Context, channelID, username string) error {
-	return errors.New("kick is not supported by matrixclient yet")
+	userID, ok := m.resolveUserID(username)
+	if !ok {
+		return errors.New("unknown user " + username)
+	}
+
+	return m.mc.Kick(ctx, id.RoomID(channelID), userID, "")
 }
 
 func (m *Matrix) SetStatus(ctx context.Context, status string) error {
@@ -421,7 +574,11 @@ func (m *Matrix) Nick(ctx context.Context, name string) error {
 func (m *Matrix) GetChannelName(ctx context.Context, channelID string) string {
 	for _, channel := range m.GetChannels() {
 		if channel.ID == channelID {
-			return channel.Name
+			if channel.DM {
+				return channel.Name
+			}
+
+			return "#" + channel.Name
 		}
 	}
 
@@ -472,12 +629,19 @@ func (m *Matrix) GetChannels() []*bridge.ChannelInfo {
 			teamID = teams[0].String()
 		}
 
+		// IsDMChannelName and GetDMUser need the raw room ID of a one-to-one DM.
+		name := strings.TrimPrefix(room.Name, "#")
+		if room.IsDirect && len(m.mc.DirectUsers(room.ID)) == 1 {
+			name = room.ID.String()
+		}
+
 		channels = append(channels, &bridge.ChannelInfo{
-			Name:    room.Name,
-			ID:      room.ID.String(),
-			TeamID:  teamID,
-			DM:      room.IsDirect,
-			Private: false,
+			Name:       name,
+			ID:         room.ID.String(),
+			TeamID:     teamID,
+			DM:         room.IsDirect,
+			Private:    false,
+			LastPostAt: room.LastActivity,
 		})
 
 		logger.Debugf("GetChannels %s (%s)", room.Name, room.ID.String())
@@ -562,6 +726,10 @@ func (m *Matrix) createUser(userID id.UserID) *bridge.UserInfo {
 	// Drop the homeserver/host part if it's a user on the same homeserver as us.
 	nick := localpart + "@" + homeserver
 
+	// The IRC user is the key of a ghost. It always has the homeserver, as '/' is
+	// legal in a localpart and would otherwise collide with a remote user.
+	ident := "~" + localpart + "/" + homeserver
+
 	_, myHomeserver, err := m.mc.UserID().Parse()
 	if err == nil && homeserver == myHomeserver {
 		nick = localpart
@@ -569,7 +737,7 @@ func (m *Matrix) createUser(userID id.UserID) *bridge.UserInfo {
 
 	return &bridge.UserInfo{
 		Nick:     nick,
-		User:     "~" + localpart,
+		User:     ident,
 		Real:     displayName,
 		Host:     homeserver,
 		Ghost:    true,
@@ -625,9 +793,9 @@ func (m *Matrix) GetTeamName(ctx context.Context, teamID string) string {
 	return ""
 }
 
-// GetLastViewedAt is always 0, Matrix read markers cannot be fetched with matrixclient.
+// GetLastViewedAt returns the time of the event our read marker points to, 0 if unknown.
 func (m *Matrix) GetLastViewedAt(ctx context.Context, channelID string) int64 {
-	return 0
+	return m.mc.LastViewedAt(ctx, id.RoomID(channelID))
 }
 
 func (m *Matrix) GetPostsSince(ctx context.Context, channelID string, since int64) []*bridge.Event {
@@ -771,6 +939,11 @@ func (m *Matrix) GetChannelID(ctx context.Context, name, teamID string) string {
 		}
 	}
 
+	// A user resolves to the direct room with them.
+	if roomID := m.dmRoom(name); roomID != "" {
+		return roomID.String()
+	}
+
 	return ""
 }
 
@@ -849,8 +1022,14 @@ func (m *Matrix) AddReaction(ctx context.Context, msgID, emoji string) error {
 
 	key := m.reactionKey(emoji)
 
+	// The reaction has no event ID to match its echo, so the echo is expected for a while.
+	sentKey := msgID + "\x00" + key
+	m.sentReactions.Add(sentKey, time.Now())
+
 	reactionID, err := m.mc.React(ctx, roomID, id.EventID(msgID), key)
 	if err != nil {
+		m.sentReactions.Remove(sentKey)
+
 		return err
 	}
 

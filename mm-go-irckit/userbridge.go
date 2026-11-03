@@ -354,7 +354,7 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 				event.Sender.Me = false
 				ghostMe := u.createUserFromInfo(event.Sender)
 				event.Sender.Me = true
-				u.MsgSpoofUser(ghostMe, event.Receiver.Nick, line, len(line))
+				u.MsgSpoofUser(ghostMe, u.createUserFromInfo(event.Receiver).Nick, line, len(line))
 			}
 		} else {
 			// Inbound DM
@@ -700,7 +700,7 @@ func (u *User) handleFileEvent(event *bridge.FileEvent) {
 					event.Sender.Me = false
 					ghostMe := u.createUserFromInfo(event.Sender)
 					event.Sender.Me = true
-					u.MsgSpoofUser(ghostMe, event.Receiver.Nick, fileMsg)
+					u.MsgSpoofUser(ghostMe, u.createUserFromInfo(event.Receiver).Nick, fileMsg)
 				}
 			} else {
 				u.MsgSpoofUser(u.createUserFromInfo(event.Sender), u.Nick, fileMsg)
@@ -2389,7 +2389,14 @@ func (u *User) updateLastViewed(channelID string) {
 
 func (u *User) dbBucketName() []byte {
 	if br := u.currentBridge(); br != nil && br.Protocol() != "" {
-		return []byte(br.Protocol() + ":" + u.User)
+		user := u.User
+		// The IRC user of Matrix accounts has the homeserver, the bucket doesn't to
+		// keep the replay cursors saved before that.
+		if br.Protocol() == serviceMatrix {
+			user = strings.TrimSuffix(user, "/"+br.GetMe().Host)
+		}
+
+		return []byte(br.Protocol() + ":" + user)
 	}
 
 	return []byte(u.User)

@@ -52,13 +52,8 @@ func loginMatrix(u *User, toUser *User, args []string) {
 	u.MsgUser(toUser, "WARNING: "+wMsg)
 	logger.Warn(wMsg)
 
-	if len(args) != 1 && len(args) != 3 {
-		u.MsgUser(toUser, "need LOGIN <server> <login> <pass> or LOGIN <token>")
-		return
-	}
-
-	if len(args) == 1 && args[0] == helpArg {
-		u.MsgUser(toUser, "need LOGIN <server> <login> <pass> or LOGIN <token>")
+	if len(args) != 2 && len(args) != 3 {
+		u.MsgUser(toUser, "need LOGIN <server> <login> <pass> or LOGIN <server> <token>")
 		return
 	}
 
@@ -74,8 +69,8 @@ func loginMatrix(u *User, toUser *User, args []string) {
 		return
 	}
 
-	if len(args) == 1 {
-		u.Credentials = bridge.Credentials{Token: args[0]}
+	if len(args) == 2 {
+		u.Credentials = bridge.Credentials{Server: args[0], Token: args[1]}
 	} else {
 		u.Credentials = bridge.Credentials{
 			Server: args[0],
@@ -91,10 +86,6 @@ func loginMatrix(u *User, toUser *User, args []string) {
 	}
 
 	u.MsgUser(toUser, "login OK")
-
-	if u.Credentials.Token != "" {
-		u.MsgUser(toUser, "token used: "+u.Credentials.Token)
-	}
 }
 
 func login(u *User, toUser *User, args []string, service string) {

@@ -5,13 +5,12 @@ package matrix
 import (
 	"github.com/42wim/matterircd/bridge"
 	"github.com/matterbridge/matrixclient"
-	logger "github.com/sirupsen/logrus"
 )
 
-func (m *Matrix) encryptionOptions(bridge.Credentials) []matrixclient.Option {
+func (m *Matrix) encryptionOptions(bridge.Credentials) ([]matrixclient.Option, error) {
 	if m.cfg.Matrix().EncryptionDir != "" {
 		logger.Warn("matrix: EncryptionDir is set but this build has no encryption support, build with -tags goolm")
 	}
 
-	return nil
+	return nil, nil
 }

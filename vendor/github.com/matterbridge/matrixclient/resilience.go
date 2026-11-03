@@ -51,6 +51,10 @@ func (c *Client) onSynced() {
 // relogin obtains a new access token, reusing the device. It must only be
 // called while the sync loop is not running a sync, as it replaces the token.
 func (c *Client) relogin(ctx context.Context) error {
+	if c.cred.Token != "" {
+		return errors.New("matrixclient: access token expired and cannot be renewed")
+	}
+
 	for attempt := 0; ; attempt++ {
 		_, err := c.mc.Login(ctx, loginReq(c.cred, c.mc.DeviceID))
 		if err == nil {
