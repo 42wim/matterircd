@@ -161,7 +161,12 @@ func main() {
 			}
 
 			logger.Infof("AI summarization enabled (default provider: %s, model: %s)", provider, model)
-		case utils.AIOpenAIProvider, "hetzner", "ollama", "local", "vllm":
+		case utils.AIOpenAIProvider, utils.AIHetznerProvider, utils.AIOllamaProvider, utils.AILocalProvider, utils.AIvLLMProvider:
+			if aiCfg.URL == "" && utils.IsLocalAIProvider(provider) {
+				logger.Warnf("AI summarization enabled for %s, but url is missing", provider)
+				break
+			}
+
 			baseURL := aiCfg.URL
 			if baseURL == "" {
 				baseURL = utils.DefaultOpenAIBaseURL

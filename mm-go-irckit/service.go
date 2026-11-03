@@ -1491,6 +1491,12 @@ func summarize(u *User, toUser *User, args []string, service string) {
 			return
 		}
 	case utils.AIOpenAIProvider, utils.AIHetznerProvider, utils.AIOllamaProvider, utils.AILocalProvider, utils.AIvLLMProvider:
+		if cfg.URL == "" && utils.IsLocalAIProvider(provider) {
+			u.MsgUser(toUser, fmt.Sprintf("%s AI is not configured (missing url).", provider))
+
+			return
+		}
+
 		baseURL := cfg.URL
 		if baseURL == "" {
 			baseURL = utils.DefaultOpenAIBaseURL

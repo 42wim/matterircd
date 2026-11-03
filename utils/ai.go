@@ -126,6 +126,16 @@ const (
 	DefaultOpenAIBaseURL = "https://api.openai.com/v1"
 )
 
+// IsLocalAIProvider reports whether the provider is intended to run against a local endpoint.
+func IsLocalAIProvider(provider string) bool {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case AIOllamaProvider, AILocalProvider, AIvLLMProvider:
+		return true
+	default:
+		return false
+	}
+}
+
 // GetModel resolves the AI model to use based on provider, fallback model, and the models map.
 func GetModel(provider, fallbackModel string, models map[string]string) string {
 	p := strings.ToLower(provider)
@@ -133,7 +143,13 @@ func GetModel(provider, fallbackModel string, models map[string]string) string {
 		if m, ok := models[p]; ok && m != "" {
 			return m
 		}
+	}
 
+	if fallbackModel != "" {
+		return fallbackModel
+	}
+
+	if models != nil {
 		switch p {
 		case AIOpenAIProvider:
 			for _, k := range [...]string{AIHetznerProvider, AIOllamaProvider, AILocalProvider, AIvLLMProvider} {
@@ -146,10 +162,6 @@ func GetModel(provider, fallbackModel string, models map[string]string) string {
 				return m
 			}
 		}
-	}
-
-	if fallbackModel != "" {
-		return fallbackModel
 	}
 
 	switch p {
