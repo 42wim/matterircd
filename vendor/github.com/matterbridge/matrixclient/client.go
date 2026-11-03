@@ -139,7 +139,42 @@ func newLoggers() (*logrus.Logger, *logrus.Logger) {
 	return rootLogger, rootAPILogger
 }
 
+// loginToken adopts cred.Token, looking up the user and device it belongs to.
+func (c *Client) loginToken(ctx context.Context) error {
+	c.mc.AccessToken = c.cred.Token
+
+	resp, err := c.mc.Whoami(ctx)
+	if err != nil {
+		return err
+	}
+
+	// Whoami may omit the device ID, only then is the configured one trusted.
+	if resp.DeviceID != "" && c.cred.DeviceID != "" && resp.DeviceID != c.cred.DeviceID {
+		return errors.New("matrixclient: token belongs to device " + resp.DeviceID.String() + ", not the configured " + c.cred.DeviceID.String())
+	}
+
+	c.mc.UserID = resp.UserID
+	c.mc.DeviceID = resp.DeviceID
+
+	if c.mc.DeviceID == "" {
+		c.mc.DeviceID = c.cred.DeviceID
+	}
+
+	return nil
+}
+
 func (c *Client) login(ctx context.Context, factory CryptoFactory) error {
+	if c.cred.Token != "" {
+		err := c.loginToken(ctx)
+		if err != nil {
+			return err
+		}
+
+		if factory == nil {
+			return nil
+		}
+	}
+
 	if factory == nil {
 		_, err := c.mc.Login(ctx, loginReq(c.cred, ""))
 
@@ -147,7 +182,12 @@ func (c *Client) login(ctx context.Context, factory CryptoFactory) error {
 	}
 
 	// The crypto helper logs in itself to reuse the device stored with its keys.
-	crypto, err := factory(c.mc, loginReq(c.cred, ""))
+	var req *mautrix.ReqLogin
+	if c.cred.Token == "" {
+		req = loginReq(c.cred, "")
+	}
+
+	crypto, err := factory(c.mc, req)
 	if err != nil {
 		return err
 	}
@@ -185,7 +225,7 @@ func (c *Client) syncLoop() {
 	backoff := time.Second
 
 	for c.ctx.Err() == nil {
-		if c.forceRelogin.Swap(false) {
+		if c.forceRelogin.Swap(false) && c.cred.Token == "" {
 			err := c.relogin(c.ctx)
 			if err != nil {
 				c.apiLogger.Errorf("reconnect: %s", err)

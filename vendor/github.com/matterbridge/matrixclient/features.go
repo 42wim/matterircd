@@ -100,7 +100,7 @@ func (c *Client) UpdateLastViewed(ctx context.Context, roomID id.RoomID, eventID
 	c.lastViewed[roomID] = viewedMark{eventID: eventID, at: now}
 	c.stateLock.Unlock()
 
-	err := c.mc.MarkRead(ctx, roomID, eventID)
+	err := c.mc.SetReadMarkers(ctx, roomID, &mautrix.ReqSetReadMarkers{Read: eventID, FullyRead: eventID})
 	if err != nil {
 		c.stateLock.Lock()
 		delete(c.lastViewed, roomID)
@@ -168,6 +168,31 @@ func (c *Client) Leave(ctx context.Context, roomID id.RoomID) error {
 	_, err := c.mc.LeaveRoom(ctx, roomID)
 
 	return err
+}
+
+// Kick removes userID from a room.
+func (c *Client) Kick(ctx context.Context, roomID id.RoomID, userID id.UserID, reason string) error {
+	_, err := c.mc.KickUser(ctx, roomID, &mautrix.ReqKickUser{UserID: userID, Reason: reason})
+
+	return err
+}
+
+// LastViewedAt returns the timestamp in milliseconds of the event our read
+// marker (m.fully_read) points to, or 0 if the room has none.
+func (c *Client) LastViewedAt(ctx context.Context, roomID id.RoomID) int64 {
+	var marker event.FullyReadEventContent
+
+	err := c.mc.GetRoomAccountData(ctx, roomID, event.AccountDataFullyRead.Type, &marker)
+	if err != nil || marker.EventID == "" {
+		return 0
+	}
+
+	ev, err := c.Event(ctx, roomID, marker.EventID)
+	if err != nil {
+		return 0
+	}
+
+	return ev.Timestamp
 }
 
 // Invite invites userID to a room.

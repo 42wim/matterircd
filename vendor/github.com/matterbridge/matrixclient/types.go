@@ -12,6 +12,15 @@ type Credentials struct {
 	Server string
 	Login  string
 	Pass   string
+
+	// Token logs in with an existing access token instead of Login and Pass.
+	// The token cannot be renewed, so it is not refreshed once it expires.
+	Token string
+	// DeviceID is the device the token belongs to. Optional, looked up when empty,
+	// and a mismatch with the device the server reports for the token is an error.
+	// With e2ee, the key database is bound to this device: a different device
+	// fails to start instead of reusing or overwriting the stored keys.
+	DeviceID id.DeviceID
 }
 
 // User is a Matrix user as seen in room state.
@@ -69,7 +78,9 @@ type Edit struct {
 	Timestamp int64
 }
 
-// Redaction is an incoming deletion of an event, which can be a message or a reaction.
+// Redaction is an incoming deletion of an event, which can be a message or a
+// reaction. Redactions from ourselves are delivered too, compare Sender with
+// Client.UserID.
 type Redaction struct {
 	RoomID   id.RoomID
 	TargetID id.EventID
@@ -100,7 +111,8 @@ type TopicChange struct {
 	Topic  string
 }
 
-// Reaction is an incoming reaction to an event.
+// Reaction is an incoming reaction to an event. Reactions from ourselves are
+// delivered too, compare Sender with Client.UserID.
 type Reaction struct {
 	RoomID   id.RoomID
 	ParentID id.EventID
@@ -110,7 +122,10 @@ type Reaction struct {
 }
 
 // Handler receives events from the client. All methods, including Ready, are
-// called from the sync goroutine and must not block for long.
+// called from the sync goroutine and must not block for long. The exception
+// are encrypted messages whose room key arrives late: they are delivered from
+// another goroutine once decrypted, possibly after Ready, so a handler must
+// be safe for concurrent use.
 type Handler interface {
 	// Ready is called once, after the events of the initial sync were processed.
 	// The messages, reactions, redactions and typing events of the initial sync

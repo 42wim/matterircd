@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"maunium.net/go/mautrix/id"
 
@@ -41,10 +42,11 @@ const (
 
 	lastSentSummaryLen = 90
 
-	searchUsersLimit  = 50
-	msgRoomCacheSize  = 2000
-	reactionCacheSize = 100
-	sentCacheSize     = 100
+	searchUsersLimit   = 50
+	msgRoomCacheSize   = 2000
+	reactionCacheSize  = 100
+	sentCacheSize      = 100
+	sentReactionWindow = time.Minute
 )
 
 // markdownReplacer combines multi-line messages into a single line, making
@@ -70,6 +72,8 @@ type Matrix struct {
 	msgLastSentCache *lru.Cache[string, string]
 	msgRoomCache     *lru.Cache[id.EventID, id.RoomID]
 	reactionCache    *lru.Cache[string, id.EventID]
+	sentReactions    *lru.Cache[string, time.Time]    // reactions added from IRC, whose echo is dropped
+	sentRedactions   *lru.Cache[id.EventID, struct{}] // messages deleted from IRC, whose echo is dropped
 
 	lastEvent sync.Map // id.RoomID -> id.EventID, the newest event seen per room
 
@@ -93,6 +97,8 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 	m.msgRoomCache, _ = lru.New[id.EventID, id.RoomID](msgRoomCacheSize)
 	m.pendingSends = make(map[string]int)
 	m.sentCache, _ = lru.New[id.EventID, struct{}](sentCacheSize)
+	m.sentReactions, _ = lru.New[string, time.Time](reactionCacheSize)
+	m.sentRedactions, _ = lru.New[id.EventID, struct{}](sentCacheSize)
 	m.reactionCache, _ = lru.New[string, id.EventID](reactionCacheSize)
 
 	setLogLevel := func(rc *config.RuntimeConfig) {
@@ -219,6 +225,10 @@ func (m *Matrix) OnReaction(r *matrixclient.Reaction) {
 
 	ghost := m.createUser(r.Sender)
 	if ghost == nil {
+		return
+	}
+
+	if ghost.Me && m.isSentReaction(r.ParentID, r.Key) {
 		return
 	}
 
@@ -375,6 +385,20 @@ func (m *Matrix) MsgUserThread(ctx context.Context, userID, parentID, text strin
 	return m.recordSent(ctx, "", eventID, text), nil
 }
 
+// isSentReaction reports, once, whether our own reaction was added from IRC.
+func (m *Matrix) isSentReaction(parentID id.EventID, key string) bool {
+	sentKey := parentID.String() + "\x00" + key
+
+	at, ok := m.sentReactions.Get(sentKey)
+	if !ok {
+		return false
+	}
+
+	m.sentReactions.Remove(sentKey)
+
+	return time.Since(at) < sentReactionWindow
+}
+
 func (m *Matrix) beginSend(text string) {
 	m.sentMu.Lock()
 	m.pendingSends[text]++
@@ -451,7 +475,14 @@ func (m *Matrix) ModifyPost(ctx context.Context, msgID, text string) error {
 	m.msgParentCache.Remove(id.EventID(msgID))
 
 	if text == "" {
-		return m.mc.Delete(ctx, roomID, id.EventID(msgID))
+		m.sentRedactions.Add(id.EventID(msgID), struct{}{})
+
+		err := m.mc.Delete(ctx, roomID, id.EventID(msgID))
+		if err != nil {
+			m.sentRedactions.Remove(id.EventID(msgID))
+		}
+
+		return err
 	}
 
 	m.beginSend(text)
@@ -980,8 +1011,14 @@ func (m *Matrix) AddReaction(ctx context.Context, msgID, emoji string) error {
 
 	key := m.reactionKey(emoji)
 
+	// The reaction has no event ID to match its echo, so the echo is expected for a while.
+	sentKey := msgID + "\x00" + key
+	m.sentReactions.Add(sentKey, time.Now())
+
 	reactionID, err := m.mc.React(ctx, roomID, id.EventID(msgID), key)
 	if err != nil {
+		m.sentReactions.Remove(sentKey)
+
 		return err
 	}
 

@@ -33,7 +33,9 @@ func Factory(cfg Config) matrixclient.Option {
 			return nil, err
 		}
 
-		helper.LoginAs = login
+		if login != nil {
+			helper.LoginAs = login
+		}
 
 		if cfg.OnDecryptError != nil {
 			helper.DecryptErrorCallback = cfg.OnDecryptError

@@ -46,6 +46,10 @@ func (m *Matrix) OnRedaction(r *matrixclient.Redaction) {
 		return
 	}
 
+	if ghost.Me && m.sentRedactions.Remove(r.TargetID) {
+		return
+	}
+
 	m.msgParentCache.Remove(r.TargetID)
 
 	m.sendText(ghost, r.RoomID, r.Direct, r.TargetID, "", deletedText, "post_deleted", 0)
