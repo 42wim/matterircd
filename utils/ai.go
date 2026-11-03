@@ -120,8 +120,8 @@ const (
 	AIvLLMProvider    = "vllm"
 
 	DefaultGeminiModel  = "gemini-3.8-flash"
-	DefaultCopilotModel = "gpt-4o-mini"
-	DefaultOpenAIModel  = "gpt-4o-mini"
+	DefaultCopilotModel = "gpt-4o"
+	DefaultOpenAIModel  = "gpt-4o"
 
 	DefaultOpenAIBaseURL  = "https://api.openai.com/v1"
 	DefaultHetznerBaseURL = "https://inference.hetzner.com/api/v1"
@@ -162,16 +162,6 @@ func GetModel(provider, fallbackModel string, models map[string]string) string {
 		return DefaultOpenAIModel
 	default:
 		return DefaultGeminiModel
-	}
-}
-
-// IsLocalAIProvider reports whether the provider is intended to run against a local endpoint.
-func IsLocalAIProvider(provider string) bool {
-	switch strings.ToLower(strings.TrimSpace(provider)) {
-	case AIOllamaProvider, AILocalProvider, AIvLLMProvider:
-		return true
-	default:
-		return false
 	}
 }
 
