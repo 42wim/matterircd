@@ -7,10 +7,10 @@ import (
 	"github.com/matterbridge/matrixclient"
 )
 
-func (m *Matrix) encryptionOptions(bridge.Credentials) []matrixclient.Option {
+func (m *Matrix) encryptionOptions(bridge.Credentials) ([]matrixclient.Option, error) {
 	if m.cfg.Matrix().EncryptionDir != "" {
 		logger.Warn("matrix: EncryptionDir is set but this build has no encryption support, build with -tags goolm")
 	}
 
-	return nil
+	return nil, nil
 }

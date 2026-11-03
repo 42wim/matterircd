@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -26,16 +27,14 @@ func storeHash(s string) string {
 // storeName names the key database of an account by hash to keep the path safe.
 // Token logins use the stable user and device the token belongs to, as the
 // token itself changes when replaced.
-func (m *Matrix) storeName(cred bridge.Credentials) string {
+func (m *Matrix) storeName(cred bridge.Credentials) (string, error) {
 	if cred.Token == "" {
-		return storeHash(cred.Login + "@" + cred.Server)
+		return storeHash(cred.Login + "@" + cred.Server), nil
 	}
 
 	mc, err := mautrix.NewClient(cred.Server, "", cred.Token)
 	if err != nil {
-		logger.Errorf("matrix: cannot look up token owner: %s", err)
-
-		return storeHash(cred.Token + "@" + cred.Server)
+		return "", fmt.Errorf("matrix: cannot look up token owner: %w", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -43,28 +42,31 @@ func (m *Matrix) storeName(cred bridge.Credentials) string {
 
 	resp, err := mc.Whoami(ctx)
 	if err != nil {
-		logger.Errorf("matrix: cannot look up token owner: %s", err)
-
-		return storeHash(cred.Token + "@" + cred.Server)
+		return "", fmt.Errorf("matrix: cannot look up token owner: %w", err)
 	}
 
-	return storeHash(resp.UserID.String() + "/" + resp.DeviceID.String() + "@" + cred.Server)
+	return storeHash(resp.UserID.String() + "/" + resp.DeviceID.String() + "@" + cred.Server), nil
 }
 
-func (m *Matrix) encryptionOptions(cred bridge.Credentials) []matrixclient.Option {
+func (m *Matrix) encryptionOptions(cred bridge.Credentials) ([]matrixclient.Option, error) {
 	mxCfg := m.cfg.Matrix()
 	if mxCfg.EncryptionDir == "" || mxCfg.EncryptionPickleKey == "" {
-		return nil
+		return nil, nil
 	}
 
 	err := os.MkdirAll(mxCfg.EncryptionDir, 0o700)
 	if err != nil {
 		logger.Errorf("matrix: encryption disabled, cannot create %s: %s", mxCfg.EncryptionDir, err)
 
-		return nil
+		return nil, nil
 	}
 
-	dbPath := filepath.Join(mxCfg.EncryptionDir, m.storeName(cred)+".db")
+	name, err := m.storeName(cred)
+	if err != nil {
+		return nil, err
+	}
+
+	dbPath := filepath.Join(mxCfg.EncryptionDir, name+".db")
 
 	return []matrixclient.Option{e2ee.Factory(e2ee.Config{
 		DBPath:    dbPath,
@@ -72,5 +74,5 @@ func (m *Matrix) encryptionOptions(cred bridge.Credentials) []matrixclient.Optio
 		OnDecryptError: func(ev *event.Event, err error) {
 			logger.Warnf("matrix: cannot decrypt %s in %s: %s", ev.ID, ev.RoomID, err)
 		},
-	})}
+	})}, nil
 }

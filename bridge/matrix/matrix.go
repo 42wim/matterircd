@@ -118,12 +118,17 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 		return nil, nil, errors.New("matrix: login with an access token needs a server, use LOGIN <server> <token>")
 	}
 
+	opts, err := m.encryptionOptions(cred)
+	if err != nil {
+		return nil, nil, err
+	}
+
 	mc, err := matrixclient.New(ctx, matrixclient.Credentials{
 		Server: cred.Server,
 		Login:  cred.Login,
 		Pass:   cred.Pass,
 		Token:  cred.Token,
-	}, m, m.encryptionOptions(cred)...)
+	}, m, opts...)
 	if err != nil {
 		return nil, nil, err
 	}
