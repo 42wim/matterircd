@@ -82,6 +82,20 @@ func (c *Client) handleMember(_ context.Context, ev *event.Event) {
 
 	targetID := id.UserID(*ev.StateKey)
 
+	c.applyMember(ev, member, targetID)
+
+	if h, ok := c.handler.(MemberHandler); ok && c.synced.Load() {
+		h.OnMember(&MemberChange{
+			RoomID:     ev.RoomID,
+			UserID:     targetID,
+			Sender:     ev.Sender,
+			Membership: member.Membership,
+			Reason:     member.Reason,
+		})
+	}
+}
+
+func (c *Client) applyMember(ev *event.Event, member *event.MemberEventContent, targetID id.UserID) {
 	c.Lock()
 	defer c.Unlock()
 
@@ -123,6 +137,7 @@ func (c *Client) handleRoomName(_ context.Context, ev *event.Event) {
 	ch.Lock()
 	defer ch.Unlock()
 
+	ch.RawName = name.Name
 	ch.Name = ""
 	if name.Name != "" {
 		ch.Name = "#" + strings.ReplaceAll(name.Name, " ", "")
@@ -155,6 +170,29 @@ func (c *Client) handleMessage(_ context.Context, ev *event.Event) {
 		return
 	}
 
+	if targetID := content.RelatesTo.GetReplaceID(); targetID != "" {
+		if h, ok := c.handler.(EditHandler); ok {
+			text := content.Body
+			if content.NewContent != nil {
+				text = content.NewContent.Body
+			}
+
+			h.OnEdit(&Edit{
+				RoomID:    ev.RoomID,
+				EventID:   ev.ID,
+				TargetID:  targetID,
+				Sender:    ev.Sender,
+				Text:      text,
+				Direct:    c.IsDirect(ev.RoomID),
+				Timestamp: ev.Timestamp,
+			})
+
+			return
+		}
+	}
+
+	c.noteSender(ev.Sender, content.MsgType)
+
 	msg := &Message{
 		RoomID:    ev.RoomID,
 		EventID:   ev.ID,
@@ -162,6 +200,11 @@ func (c *Client) handleMessage(_ context.Context, ev *event.Event) {
 		Text:      content.Body,
 		Direct:    c.IsDirect(ev.RoomID),
 		Timestamp: ev.Timestamp,
+		MsgType:   content.MsgType,
+		URL:       content.URL,
+		FileName:  content.GetFileName(),
+		Info:      content.Info,
+		File:      content.File,
 	}
 	if content.RelatesTo != nil {
 		msg.ParentID = content.RelatesTo.EventID
@@ -187,4 +230,49 @@ func (c *Client) handleReaction(_ context.Context, ev *event.Event) {
 		Key:      content.RelatesTo.Key,
 		Direct:   c.IsDirect(ev.RoomID),
 	})
+}
+
+func (c *Client) handleRedaction(_ context.Context, ev *event.Event) {
+	h, ok := c.handler.(RedactionHandler)
+	if !ok || ev.Sender == c.mc.UserID {
+		return
+	}
+
+	targetID := ev.Redacts
+	if content := ev.Content.AsRedaction(); content != nil && content.Redacts != "" {
+		targetID = content.Redacts
+	}
+
+	if targetID == "" {
+		return
+	}
+
+	h.OnRedaction(&Redaction{
+		RoomID:   ev.RoomID,
+		TargetID: targetID,
+		Sender:   ev.Sender,
+		Direct:   c.IsDirect(ev.RoomID),
+	})
+}
+
+func (c *Client) handleTyping(_ context.Context, ev *event.Event) {
+	h, ok := c.handler.(TypingHandler)
+	if !ok {
+		return
+	}
+
+	content := ev.Content.AsTyping()
+	if content == nil {
+		return
+	}
+
+	users := make([]id.UserID, 0, len(content.UserIDs))
+
+	for _, userID := range content.UserIDs {
+		if userID != c.mc.UserID {
+			users = append(users, userID)
+		}
+	}
+
+	h.OnTyping(&Typing{RoomID: ev.RoomID, Users: users, Direct: c.IsDirect(ev.RoomID)})
 }
