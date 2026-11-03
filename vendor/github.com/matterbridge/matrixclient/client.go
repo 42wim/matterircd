@@ -292,6 +292,8 @@ type RoomInfo struct {
 	ID       id.RoomID
 	Name     string // alias with ':' replaced by '/'
 	IsDirect bool
+
+	LastActivity int64 // timestamp in milliseconds of the newest message seen, 0 if none
 }
 
 // Rooms returns a snapshot of the known rooms (excluding 1:1 direct rooms).
@@ -304,7 +306,7 @@ func (c *Client) Rooms() []RoomInfo {
 	for roomID, ch := range c.channels {
 		ch.RLock()
 
-		name, alias, direct, members := ch.Name, ch.Alias, ch.IsDirect, len(ch.Members)
+		name, alias, direct, members, last := ch.Name, ch.Alias, ch.IsDirect, len(ch.Members), ch.LastActivity
 
 		ch.RUnlock()
 
@@ -325,6 +327,8 @@ func (c *Client) Rooms() []RoomInfo {
 			ID:       roomID,
 			Name:     strings.Replace(string(alias), ":", "/", 1),
 			IsDirect: direct,
+
+			LastActivity: last,
 		})
 	}
 

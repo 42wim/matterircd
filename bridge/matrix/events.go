@@ -23,6 +23,10 @@ func (m *Matrix) OnEdit(e *matrixclient.Edit) {
 		return
 	}
 
+	if ghost.Me && m.isSentEcho(e.EventID, e.Text) {
+		return
+	}
+
 	// Replies to the edited message must show the new text.
 	m.msgParentCache.Remove(e.TargetID)
 	m.msgRoomCache.Add(e.TargetID, e.RoomID)

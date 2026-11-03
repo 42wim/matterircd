@@ -72,7 +72,6 @@ type Matrix struct {
 	reactionCache    *lru.Cache[string, id.EventID]
 
 	lastEvent sync.Map // id.RoomID -> id.EventID, the newest event seen per room
-	lastPost  sync.Map // id.RoomID -> int64, the timestamp (ms) of the newest message seen per room
 
 	// sentMu is never held across network I/O. It guards sentCache and pendingSends,
 	// which together recognize the echo of a message sent from IRC, also when the
@@ -157,18 +156,13 @@ func (m *Matrix) OnMessage(msg *matrixclient.Message) {
 	}
 
 	if ghost.Me {
-		if m.isSentEcho(msg) {
+		if m.isSentEcho(msg.EventID, msg.Text) {
 			return
 		}
 	}
 
 	m.msgRoomCache.Add(msg.EventID, msg.RoomID)
 	m.lastEvent.Store(msg.RoomID, msg.EventID)
-
-	prev, _ := m.lastPost.Load(msg.RoomID)
-	if prevTS, _ := prev.(int64); msg.Timestamp > prevTS {
-		m.lastPost.Store(msg.RoomID, msg.Timestamp)
-	}
 
 	text := msg.Text
 
@@ -300,10 +294,11 @@ func (m *Matrix) Join(ctx context.Context, channelName string) (string, string, 
 	// CmdJoin strips the leading '#' of an alias like "#room:server".
 	target := channelName
 	if !strings.HasPrefix(target, "!") && !strings.HasPrefix(target, "#") {
-		if strings.Contains(target, ":") {
-			target = "#" + target
-		} else if channelID := m.GetChannelID(ctx, target, ""); channelID != "" {
+		// A listed name can contain a colon (a homeserver with a port), so known rooms come first.
+		if channelID := m.GetChannelID(ctx, target, ""); channelID != "" {
 			target = channelID
+		} else if strings.Contains(target, ":") {
+			target = "#" + target
 		}
 	}
 
@@ -403,15 +398,15 @@ func (m *Matrix) endSend(text string, eventID id.EventID, err error) {
 
 // isSentEcho reports whether our own message was sent from IRC. A message with
 // the text of a send in flight is taken as its echo, as the event ID isn't known yet.
-func (m *Matrix) isSentEcho(msg *matrixclient.Message) bool {
+func (m *Matrix) isSentEcho(eventID id.EventID, text string) bool {
 	m.sentMu.Lock()
 	defer m.sentMu.Unlock()
 
-	if _, ok := m.sentCache.Get(msg.EventID); ok {
+	if _, ok := m.sentCache.Get(eventID); ok {
 		return true
 	}
 
-	return m.pendingSends[msg.Text] > 0
+	return m.pendingSends[text] > 0
 }
 
 func (m *Matrix) recordSent(ctx context.Context, channelID string, eventID id.EventID, text string) string {
@@ -459,7 +454,10 @@ func (m *Matrix) ModifyPost(ctx context.Context, msgID, text string) error {
 		return m.mc.Delete(ctx, roomID, id.EventID(msgID))
 	}
 
-	_, err := m.mc.Edit(ctx, roomID, id.EventID(msgID), text)
+	m.beginSend(text)
+
+	eventID, err := m.mc.Edit(ctx, roomID, id.EventID(msgID), text)
+	m.endSend(text, eventID, err)
 
 	return err
 }
@@ -589,16 +587,13 @@ func (m *Matrix) GetChannels() []*bridge.ChannelInfo {
 			teamID = teams[0].String()
 		}
 
-		ts, _ := m.lastPost.Load(room.ID)
-		lastPostAt, _ := ts.(int64)
-
 		channels = append(channels, &bridge.ChannelInfo{
 			Name:       strings.TrimPrefix(room.Name, "#"),
 			ID:         room.ID.String(),
 			TeamID:     teamID,
 			DM:         room.IsDirect,
 			Private:    false,
-			LastPostAt: lastPostAt,
+			LastPostAt: room.LastActivity,
 		})
 
 		logger.Debugf("GetChannels %s (%s)", room.Name, room.ID.String())

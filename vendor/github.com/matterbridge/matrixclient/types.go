@@ -37,9 +37,12 @@ type Channel struct {
 	IsDirect   bool
 	Encrypted  bool
 	Topic      string
+
+	LastActivity int64 // timestamp in milliseconds of the newest message seen, 0 if none
 }
 
-// Message is an incoming room or direct message.
+// Message is an incoming room or direct message. Messages sent by ourselves
+// from other sessions are delivered too, compare Sender with Client.UserID.
 type Message struct {
 	RoomID    id.RoomID
 	EventID   id.EventID
