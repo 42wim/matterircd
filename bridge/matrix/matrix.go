@@ -666,7 +666,10 @@ func (m *Matrix) GetPostChannelID(ctx context.Context, postID string) string {
 }
 
 func (m *Matrix) GetPostSizeLimit() int {
-	return 32768
+	// Matrix limits event PDUs to 65,536 bytes (64 KiB). Accounting for worst-case
+	// JSON escaping (\u003c) and Megolm base64 ciphertext expansion (~8x), a conservative
+	// 4,000 raw byte cap guarantees encrypted room posts stay well within homeserver limits.
+	return 4000
 }
 
 func (m *Matrix) GetPostThread(ctx context.Context, postID string) []*bridge.Event {
