@@ -26,14 +26,14 @@ var (
 
 type AIConfig struct {
 	Enabled            bool
-	Provider           string // "gemini" (default), "copilot", or "openai"
-	Token              string // Default token for configured Provider
-	CopilotToken       string // GitHub token for Copilot
-	OpenAIToken        string // API key for OpenAI
-	HetznerToken       string // API key for Hetzner
-	URL                string // Fallback base URL for configured Provider
+	Provider           string            // "gemini" (default), "copilot", or "openai"
+	Token              string            // Default token for configured Provider
+	CopilotToken       string            // GitHub token for Copilot
+	OpenAIToken        string            // API key for OpenAI
+	HetznerToken       string            // API key for Hetzner
+	URL                string            // Fallback base URL for configured Provider
 	URLs               map[string]string // Provider-specific base URLs
-	ServiceAccountFile string // Gemini / Vertex AI
+	ServiceAccountFile string            // Gemini / Vertex AI
 	Project            string
 	Location           string
 	Model              string            // Fallback model if not specified in Models map
