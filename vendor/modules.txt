@@ -116,9 +116,10 @@ github.com/magiconair/properties
 # github.com/matterbridge/logrus-prefixed-formatter v0.5.3-0.20200523233437-d971309a77ba
 ## explicit
 github.com/matterbridge/logrus-prefixed-formatter
-# github.com/matterbridge/matrixclient v0.0.0-20261011201826-1240a08a5861
+# github.com/matterbridge/matrixclient v0.0.0-20261103004043-c7b9f2229271
 ## explicit; go 1.26.0
 github.com/matterbridge/matrixclient
+github.com/matterbridge/matrixclient/e2ee
 # github.com/matterbridge/matterclient v0.0.0-20261030152733-ef16c80601cb
 ## explicit; go 1.25.0
 github.com/matterbridge/matterclient
@@ -154,6 +155,9 @@ github.com/mattn/go-isatty
 # github.com/mattn/go-mastodon v0.0.6
 ## explicit; go 1.16
 github.com/mattn/go-mastodon
+# github.com/mattn/go-sqlite3 v1.14.52
+## explicit; go 1.21
+github.com/mattn/go-sqlite3
 # github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d
 ## explicit
 github.com/mgutz/ansi
@@ -181,6 +185,9 @@ github.com/pelletier/go-toml/v2/internal/characters
 github.com/pelletier/go-toml/v2/internal/danger
 github.com/pelletier/go-toml/v2/internal/tracker
 github.com/pelletier/go-toml/v2/unstable
+# github.com/petermattis/goid v0.0.0-20260820044319-269ab09b5261
+## explicit; go 1.17
+github.com/petermattis/goid
 # github.com/philhofer/fwd v1.1.2
 ## explicit; go 1.15
 github.com/philhofer/fwd
@@ -192,6 +199,7 @@ github.com/pkg/errors
 github.com/rs/zerolog
 github.com/rs/zerolog/internal/cbor
 github.com/rs/zerolog/internal/json
+github.com/rs/zerolog/log
 # github.com/sagikazarmark/locafero v0.3.0
 ## explicit; go 1.20
 github.com/sagikazarmark/locafero
@@ -287,6 +295,9 @@ go.etcd.io/bbolt
 # go.mau.fi/util v0.10.1
 ## explicit; go 1.26.0
 go.mau.fi/util/base58
+go.mau.fi/util/confusable
+go.mau.fi/util/dbutil
+go.mau.fi/util/dbutil/litestream
 go.mau.fi/util/exbytes
 go.mau.fi/util/exerrors
 go.mau.fi/util/exgjson
@@ -295,6 +306,7 @@ go.mau.fi/util/exmaps
 go.mau.fi/util/exslices
 go.mau.fi/util/exstrings
 go.mau.fi/util/exsync
+go.mau.fi/util/exzerolog
 go.mau.fi/util/glob
 go.mau.fi/util/jsonbytes
 go.mau.fi/util/jsontime
@@ -508,19 +520,32 @@ gopkg.in/yaml.v3
 # maunium.net/go/mautrix v0.31.0
 ## explicit; go 1.26.0
 maunium.net/go/mautrix
+maunium.net/go/mautrix/crypto
 maunium.net/go/mautrix/crypto/aescbc
 maunium.net/go/mautrix/crypto/attachment
 maunium.net/go/mautrix/crypto/backup
 maunium.net/go/mautrix/crypto/canonicaljson
+maunium.net/go/mautrix/crypto/cryptohelper
 maunium.net/go/mautrix/crypto/ed25519
+maunium.net/go/mautrix/crypto/goolm
+maunium.net/go/mautrix/crypto/goolm/account
 maunium.net/go/mautrix/crypto/goolm/aessha2
 maunium.net/go/mautrix/crypto/goolm/crypto
 maunium.net/go/mautrix/crypto/goolm/goolmbase64
 maunium.net/go/mautrix/crypto/goolm/libolmpickle
+maunium.net/go/mautrix/crypto/goolm/megolm
+maunium.net/go/mautrix/crypto/goolm/message
+maunium.net/go/mautrix/crypto/goolm/pk
+maunium.net/go/mautrix/crypto/goolm/ratchet
+maunium.net/go/mautrix/crypto/goolm/session
+maunium.net/go/mautrix/crypto/libolm
 maunium.net/go/mautrix/crypto/olm
 maunium.net/go/mautrix/crypto/signatures
+maunium.net/go/mautrix/crypto/sql_store_upgrade
+maunium.net/go/mautrix/crypto/ssss
 maunium.net/go/mautrix/crypto/utils
 maunium.net/go/mautrix/event
 maunium.net/go/mautrix/id
 maunium.net/go/mautrix/oauth
 maunium.net/go/mautrix/pushrules
+maunium.net/go/mautrix/sqlstatestore

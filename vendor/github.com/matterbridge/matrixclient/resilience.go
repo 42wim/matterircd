@@ -1,0 +1,191 @@
+package matrixclient
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"time"
+
+	"maunium.net/go/mautrix"
+	"maunium.net/go/mautrix/id"
+)
+
+const (
+	maxSyncBackoff   = time.Minute
+	maxLoginRetries  = 10
+	defaultRateLimit = 3 * time.Second
+
+	// Users not seen active for this long are reported offline, matching matterclient.
+	activeThreshold = 20 * time.Minute
+	maintainEvery   = time.Minute
+
+	pingSkipWindow = 30 * time.Second // /sync long polls return at least this often
+
+	lastViewedDebounce = 3 * time.Second
+	typingDebounce     = 4 * time.Second
+	debounceMapLimit   = 1024
+)
+
+// viewedMark is the last read receipt we sent for a room.
+type viewedMark struct {
+	eventID id.EventID
+	at      time.Time
+}
+
+func loginReq(cred Credentials, deviceID id.DeviceID) *mautrix.ReqLogin {
+	return &mautrix.ReqLogin{
+		Type:             mautrix.AuthTypePassword,
+		Identifier:       mautrix.UserIdentifier{Type: mautrix.IdentifierTypeUser, User: cred.Login},
+		Password:         cred.Pass,
+		DeviceID:         deviceID,
+		StoreCredentials: true,
+	}
+}
+
+func (c *Client) onSynced() {
+	c.lastSync.Store(time.Now().UnixNano())
+	c.connected.Store(true)
+	c.synced.Store(true)
+}
+
+// relogin obtains a new access token, reusing the device. It must only be
+// called while the sync loop is not running a sync, as it replaces the token.
+func (c *Client) relogin(ctx context.Context) error {
+	for attempt := 0; ; attempt++ {
+		_, err := c.mc.Login(ctx, loginReq(c.cred, c.mc.DeviceID))
+		if err == nil {
+			return nil
+		}
+
+		retry, herr := c.HandleRetry(ctx, "login", err, attempt, maxLoginRetries)
+		if herr != nil {
+			return herr
+		}
+
+		if !retry {
+			return err
+		}
+	}
+}
+
+// HandleRetry decides whether a failed API call should be retried, sleeping
+// before returning true. Rate limits respect the server's retry_after_ms and
+// other 4xx errors are not retried. It returns an error only when ctx is done.
+func (c *Client) HandleRetry(ctx context.Context, name string, err error, current, maxLimit int) (bool, error) {
+	if ctx.Err() != nil {
+		return false, ctx.Err()
+	}
+
+	if current >= maxLimit {
+		return false, nil
+	}
+
+	wait := time.Duration(current+1) * time.Second
+
+	var httpErr mautrix.HTTPError
+	if errors.As(err, &httpErr) && httpErr.Response != nil {
+		status := httpErr.Response.StatusCode
+
+		switch {
+		case status == http.StatusTooManyRequests:
+			wait = defaultRateLimit
+
+			if httpErr.RespError != nil {
+				if ms, ok := httpErr.RespError.ExtraData["retry_after_ms"].(float64); ok && ms > 0 {
+					wait = time.Duration(ms) * time.Millisecond
+				}
+			}
+		case status < http.StatusInternalServerError:
+			return false, nil
+		}
+	}
+
+	c.logger.Warnf("%s failed: %s, retrying in %s (attempt %d/%d)", name, err, wait, current+1, maxLimit)
+
+	select {
+	case <-ctx.Done():
+		return false, ctx.Err()
+	case <-time.After(wait):
+		return true, nil
+	}
+}
+
+// Reconnect restarts the sync and logs in again, reusing the device. It
+// returns immediately, the sync goroutine does the work so the access token
+// is never replaced while a request is using it.
+func (c *Client) Reconnect() {
+	c.forceRelogin.Store(true)
+	c.mc.StopSync()
+}
+
+// Ping checks that the homeserver is reachable and our access token is valid.
+// A recent sync response already proves that, so no request is made then.
+func (c *Client) Ping(ctx context.Context) error {
+	if c.connected.Load() && time.Since(time.Unix(0, c.lastSync.Load())) < pingSkipWindow {
+		return nil
+	}
+
+	_, err := c.mc.Whoami(ctx)
+
+	return err
+}
+
+// ServerVersions returns the Matrix spec versions supported by the homeserver.
+func (c *Client) ServerVersions(ctx context.Context) ([]string, error) {
+	resp, err := c.mc.Versions(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	versions := make([]string, 0, len(resp.Versions))
+	for _, v := range resp.Versions {
+		versions = append(versions, v.String())
+	}
+
+	return versions, nil
+}
+
+// LastSync returns when the last sync response was processed, the zero time if none yet.
+func (c *Client) LastSync() time.Time {
+	ns := c.lastSync.Load()
+	if ns == 0 {
+		return time.Time{}
+	}
+
+	return time.Unix(0, ns)
+}
+
+// maintainPresence reports users without recent activity as offline and drops
+// presence of users we no longer share a room with.
+func (c *Client) maintainPresence() {
+	ticker := time.NewTicker(maintainEvery)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-c.ctx.Done():
+			return
+		case <-ticker.C:
+			c.expirePresence(time.Now())
+		}
+	}
+}
+
+func (c *Client) expirePresence(now time.Time) {
+	cutoff := now.Add(-activeThreshold).UnixMilli()
+
+	c.Lock()
+	defer c.Unlock()
+
+	for userID, p := range c.presence {
+		if _, ok := c.users[userID]; !ok {
+			delete(c.presence, userID)
+
+			continue
+		}
+
+		if p.Status != StatusOffline && p.LastActivityAt > 0 && p.LastActivityAt < cutoff {
+			p.Status = StatusOffline
+		}
+	}
+}

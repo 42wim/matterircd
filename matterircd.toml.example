@@ -360,6 +360,11 @@ PrefixContext = false
 #Threads are shown using Matrix event IDs
 #ThreadContext = "matrix"
 #PrefixContext = false
+#Encrypted rooms need a build with "go build -tags goolm" and cgo.
+#Directory for the per user key databases and the key encrypting them.
+#Keep both, losing them makes earlier messages undecryptable.
+#EncryptionDir = "/var/lib/matterircd/matrix"
+#EncryptionPickleKey = "change me"
 
 
 #############################

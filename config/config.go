@@ -207,6 +207,10 @@ type MatrixConfig struct {
 
 	HideReplies      bool
 	ShortenRepliesTo int
+
+	// Encrypted rooms, needs a build with -tags goolm and cgo.
+	EncryptionDir       string
+	EncryptionPickleKey string
 }
 
 type MastodonConfig struct {
@@ -494,6 +498,9 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 
 			HideReplies:      c.v.GetBool("matrix.HideReplies"),
 			ShortenRepliesTo: c.v.GetInt("matrix.ShortenRepliesTo"),
+
+			EncryptionDir:       c.v.GetString("matrix.EncryptionDir"),
+			EncryptionPickleKey: c.v.GetString("matrix.EncryptionPickleKey"),
 		},
 
 		Mastodon: MastodonConfig{

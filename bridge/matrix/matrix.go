@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"maunium.net/go/mautrix/id"
@@ -22,6 +24,10 @@ const (
 	blockquoteCharUnicode    = "▕"
 
 	lastSentSummaryLen = 90
+
+	searchUsersLimit  = 50
+	msgRoomCacheSize  = 2000
+	reactionCacheSize = 100
 )
 
 // markdownReplacer combines multi-line messages into a single line, making
@@ -44,6 +50,10 @@ type Matrix struct {
 
 	msgParentCache   *lru.Cache[id.EventID, string]
 	msgLastSentCache *lru.Cache[string, string]
+	msgRoomCache     *lru.Cache[id.EventID, id.RoomID]
+	reactionCache    *lru.Cache[string, id.EventID]
+
+	lastEvent sync.Map // id.RoomID -> id.EventID, the newest event seen per room
 }
 
 func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Event, onConnect func()) (bridge.Bridger, *matrixclient.Client, error) {
@@ -55,6 +65,8 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 	}
 	m.msgParentCache, _ = lru.New[id.EventID, string](100)
 	m.msgLastSentCache, _ = lru.New[string, string](10)
+	m.msgRoomCache, _ = lru.New[id.EventID, id.RoomID](msgRoomCacheSize)
+	m.reactionCache, _ = lru.New[string, id.EventID](reactionCacheSize)
 
 	setLogLevel := func(rc *config.RuntimeConfig) {
 		switch {
@@ -77,7 +89,7 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 		Server: cred.Server,
 		Login:  cred.Login,
 		Pass:   cred.Pass,
-	}, m)
+	}, m, m.encryptionOptions(cred)...)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -107,7 +119,19 @@ func (m *Matrix) OnMessage(msg *matrixclient.Message) {
 		return
 	}
 
+	m.msgRoomCache.Add(msg.EventID, msg.RoomID)
+	m.lastEvent.Store(msg.RoomID, msg.EventID)
+
 	text := msg.Text
+
+	file := m.fileFromMessage(msg)
+	if file != nil {
+		m.sendFile(ghost, msg, file)
+
+		if !hasCaption(msg) {
+			return
+		}
+	}
 
 	mxCfg := m.cfg.Matrix()
 	if !mxCfg.HideReplies && msg.ParentID != "" {
@@ -119,39 +143,33 @@ func (m *Matrix) OnMessage(msg *matrixclient.Message) {
 		text = message
 	}
 
-	if msg.Direct {
-		m.sendEvent(&bridge.Event{
-			Type: "direct_message",
-			Data: &bridge.DirectMessageEvent{
-				Text:      text,
-				ChannelID: msg.RoomID.String(),
-				Sender:    ghost,
-				Receiver:  m.GetMe(),
-				MessageID: string(msg.EventID),
-				ParentID:  msg.ParentID.String(),
-				CreateAt:  msg.Timestamp,
-			},
-		})
+	m.sendText(ghost, msg.RoomID, msg.Direct, msg.EventID, msg.ParentID, text, "", msg.Timestamp)
+}
 
-		return
+func (m *Matrix) sendFile(ghost *bridge.UserInfo, msg *matrixclient.Message, file *bridge.File) {
+	channelType := ""
+	if msg.Direct {
+		channelType = "D"
 	}
 
 	m.sendEvent(&bridge.Event{
-		Type: "channel_message",
-		Data: &bridge.ChannelMessageEvent{
-			Text:        text,
-			ChannelID:   msg.RoomID.String(),
+		Type: "file_event",
+		Data: &bridge.FileEvent{
+			Receiver:    m.GetMe(),
 			Sender:      ghost,
-			ChannelType: "P",
-			MessageID:   string(msg.EventID),
+			ChannelID:   msg.RoomID.String(),
+			ChannelType: channelType,
+			Files:       []*bridge.File{file},
+			MessageID:   msg.EventID.String(),
 			ParentID:    msg.ParentID.String(),
-			CreateAt:    msg.Timestamp,
 		},
 	})
 }
 
 // OnReaction implements matrixclient.Handler.
 func (m *Matrix) OnReaction(r *matrixclient.Reaction) {
+	m.msgRoomCache.Add(r.ParentID, r.RoomID)
+
 	ghost := m.createUser(r.Sender)
 	if ghost == nil {
 		return
@@ -189,7 +207,12 @@ func (m *Matrix) OnReaction(r *matrixclient.Reaction) {
 }
 
 func (m *Matrix) Invite(ctx context.Context, channelID, username string) error {
-	return nil
+	userID, ok := m.resolveUserID(username)
+	if !ok {
+		return errors.New("unknown user " + username)
+	}
+
+	return m.mc.Invite(ctx, id.RoomID(channelID), userID)
 }
 
 func (m *Matrix) IsChannelMember(channelID string) bool {
@@ -203,6 +226,18 @@ func (m *Matrix) IsChannelMember(channelID string) bool {
 }
 
 func (m *Matrix) Join(ctx context.Context, channelName string) (string, string, error) {
+	// "space/room" joins a room of a space we know of.
+	if spaceName, name, ok := strings.Cut(channelName, "/"); ok && !strings.HasPrefix(channelName, "#") {
+		if spaceID := m.mc.TeamByName(spaceName); spaceID != "" {
+			channelID := m.GetChannelID(ctx, name, spaceID.String())
+			if channelID == "" {
+				return "", "", errors.New("room " + name + " not found in " + spaceName)
+			}
+
+			return channelID, spaceID.String(), nil
+		}
+	}
+
 	roomID, err := m.mc.Join(ctx, channelName)
 	if err != nil {
 		return "", "", err
@@ -212,11 +247,26 @@ func (m *Matrix) Join(ctx context.Context, channelName string) (string, string, 
 }
 
 func (m *Matrix) List(ctx context.Context) (map[string]string, error) {
-	return map[string]string{}, nil
+	rooms := make(map[string]string)
+
+	for _, room := range m.mc.Rooms() {
+		if room.IsDirect {
+			continue
+		}
+
+		name := "#" + room.Name
+		if teams := m.mc.RoomTeams(room.ID); len(teams) > 0 {
+			name = m.GetTeamName(ctx, teams[0].String()) + "/" + room.Name
+		}
+
+		rooms[name] = strings.ReplaceAll(m.mc.Topic(room.ID), "\n", " | ")
+	}
+
+	return rooms, nil
 }
 
 func (m *Matrix) Part(ctx context.Context, channelID string) error {
-	return nil
+	return m.mc.Leave(ctx, id.RoomID(channelID))
 }
 
 func (m *Matrix) UpdateChannels(ctx context.Context) error {
@@ -237,10 +287,19 @@ func (m *Matrix) MsgUser(ctx context.Context, userID, text string) (string, erro
 func (m *Matrix) MsgUserThread(ctx context.Context, userID, parentID, text string) (string, error) {
 	logger.Debugf("sending message '%s' '%s' '%s'", userID, parentID, text)
 
-	eventID, err := m.mc.SendDirect(ctx, id.UserID(userID), id.EventID(parentID), text)
+	uid, ok := m.resolveUserID(userID)
+	if !ok {
+		return "", errors.New("unknown user " + userID)
+	}
+
+	eventID, err := m.mc.SendDirect(ctx, uid, id.EventID(parentID), text)
 	if err != nil {
 		logger.Error("msguserthread sending message: error ", err)
 		return "", err
+	}
+
+	if roomID := m.mc.DirectRoom(uid); roomID != "" {
+		m.msgRoomCache.Add(eventID, roomID)
 	}
 
 	return m.recordSent(ctx, "", eventID, text), nil
@@ -270,31 +329,73 @@ func (m *Matrix) MsgChannelThread(ctx context.Context, channelID, parentID, text
 		return "", err
 	}
 
+	m.msgRoomCache.Add(eventID, id.RoomID(channelID))
+
 	return m.recordSent(ctx, channelID, eventID, text), nil
 }
 
 func (m *Matrix) ModifyPost(ctx context.Context, msgID, text string) error {
-	return errors.New("not implemented yet")
+	roomID, ok := m.roomOf(msgID)
+	if !ok {
+		return errors.New("unknown message " + msgID)
+	}
+
+	m.msgParentCache.Remove(id.EventID(msgID))
+
+	if text == "" {
+		return m.mc.Delete(ctx, roomID, id.EventID(msgID))
+	}
+
+	_, err := m.mc.Edit(ctx, roomID, id.EventID(msgID), text)
+
+	return err
 }
 
 func (m *Matrix) Topic(ctx context.Context, channelID string) string {
-	return ""
+	return m.mc.Topic(id.RoomID(channelID))
 }
 
 func (m *Matrix) SetTopic(ctx context.Context, channelID, text string) error {
-	return nil
+	return m.mc.SetTopic(ctx, id.RoomID(channelID), text)
 }
 
 func (m *Matrix) StatusUser(ctx context.Context, userID string) (string, error) {
-	return "", nil
+	uid, ok := m.resolveUserID(userID)
+	if !ok {
+		return "", nil
+	}
+
+	err := m.mc.UpdateStatus(ctx, uid)
+	if err != nil {
+		return "", err
+	}
+
+	status := m.mc.GetStatus(uid)
+	if custom := m.mc.GetUserCustomStatus(uid); custom != "" {
+		status += ": " + custom
+	}
+
+	if localTime := m.mc.GetUserLocalTime(ctx, uid); localTime != "" {
+		status += " (local time: " + localTime + ")"
+	}
+
+	return status, nil
 }
 
 func (m *Matrix) HasCustomStatus(userID string) bool {
-	return false
+	uid, ok := m.resolveUserID(userID)
+
+	return ok && m.mc.GetUserCustomStatus(uid) != ""
 }
 
 func (m *Matrix) StatusUsers(ctx context.Context) (map[string]string, error) {
-	return map[string]string{}, nil
+	statuses := make(map[string]string)
+
+	for _, userID := range m.mc.KnownUsers() {
+		statuses[userID.String()] = m.mc.GetStatus(userID)
+	}
+
+	return statuses, nil
 }
 
 func (m *Matrix) IsOnline(status string) bool {
@@ -306,15 +407,15 @@ func (m *Matrix) Protocol() string {
 }
 
 func (m *Matrix) Kick(ctx context.Context, channelID, username string) error {
-	return nil
+	return errors.New("kick is not supported by matrixclient yet")
 }
 
 func (m *Matrix) SetStatus(ctx context.Context, status string) error {
-	return nil
+	return m.mc.SetStatus(ctx, status, "")
 }
 
 func (m *Matrix) Nick(ctx context.Context, name string) error {
-	return nil
+	return m.mc.SetDisplayName(ctx, name)
 }
 
 func (m *Matrix) GetChannelName(ctx context.Context, channelID string) string {
@@ -366,9 +467,15 @@ func (m *Matrix) GetChannels() []*bridge.ChannelInfo {
 	var channels []*bridge.ChannelInfo
 
 	for _, room := range m.mc.Rooms() {
+		teamID := ""
+		if teams := m.mc.RoomTeams(room.ID); len(teams) > 0 && !room.IsDirect {
+			teamID = teams[0].String()
+		}
+
 		channels = append(channels, &bridge.ChannelInfo{
 			Name:    room.Name,
 			ID:      room.ID.String(),
+			TeamID:  teamID,
 			DM:      room.IsDirect,
 			Private: false,
 		})
@@ -394,11 +501,34 @@ func (m *Matrix) GetChannelCount() int {
 }
 
 func (m *Matrix) GetUser(ctx context.Context, userID string) *bridge.UserInfo {
-	return m.createUser(id.UserID(userID))
+	uid, ok := m.resolveUserID(userID)
+	if !ok {
+		return nil
+	}
+
+	return m.createUser(uid)
 }
 
 func (m *Matrix) GetUserChannels(ctx context.Context, userID string) ([]string, error) {
-	return []string{}, nil
+	uid, ok := m.resolveUserID(userID)
+	if !ok {
+		return []string{}, nil
+	}
+
+	var names []string
+
+	for _, room := range m.mc.Rooms() {
+		if room.IsDirect {
+			continue
+		}
+
+		members, err := m.mc.RoomUsers(ctx, room.ID)
+		if err == nil && slices.Contains(members, uid) {
+			names = append(names, room.Name)
+		}
+	}
+
+	return names, nil
 }
 
 func (m *Matrix) GetUserCount() int {
@@ -410,7 +540,12 @@ func (m *Matrix) GetMe() *bridge.UserInfo {
 }
 
 func (m *Matrix) GetUserByUsername(ctx context.Context, username string) *bridge.UserInfo {
-	return nil
+	userID, ok := m.resolveUserID(username)
+	if !ok {
+		return nil
+	}
+
+	return m.createUser(userID)
 }
 
 func (m *Matrix) createUser(userID id.UserID) *bridge.UserInfo {
@@ -481,23 +616,53 @@ func (m *Matrix) createParentReply(ctx context.Context, roomID id.RoomID, parent
 }
 
 func (m *Matrix) GetTeamName(ctx context.Context, teamID string) string {
+	for _, team := range m.mc.Teams() {
+		if team.ID.String() == teamID {
+			return team.Name
+		}
+	}
+
 	return ""
 }
 
+// GetLastViewedAt is always 0, Matrix read markers cannot be fetched with matrixclient.
 func (m *Matrix) GetLastViewedAt(ctx context.Context, channelID string) int64 {
 	return 0
 }
 
 func (m *Matrix) GetPostsSince(ctx context.Context, channelID string, since int64) []*bridge.Event {
-	return []*bridge.Event{}
+	return m.historySince(ctx, channelID, since, "scrollback")
+}
+
+func (m *Matrix) historySince(ctx context.Context, channelID string, since int64, eventType string) []*bridge.Event {
+	msgs, err := m.mc.GetMessagesSince(ctx, id.RoomID(channelID), since)
+	if err != nil {
+		logger.Errorf("matrix: fetching messages of %s: %s", channelID, err)
+
+		return []*bridge.Event{}
+	}
+
+	return m.msgsToEvents(msgs, eventType)
 }
 
 func (m *Matrix) GetPosts(ctx context.Context, channelID string, limit int) []*bridge.Event {
-	return []*bridge.Event{}
+	msgs, err := m.mc.GetMessages(ctx, id.RoomID(channelID), limit)
+	if err != nil {
+		logger.Errorf("matrix: fetching messages of %s: %s", channelID, err)
+
+		return []*bridge.Event{}
+	}
+
+	return m.msgsToEvents(msgs, "scrollback")
 }
 
 func (m *Matrix) GetPostChannelID(ctx context.Context, postID string) string {
-	return ""
+	roomID, ok := m.roomOf(postID)
+	if !ok {
+		return ""
+	}
+
+	return roomID.String()
 }
 
 func (m *Matrix) GetPostSizeLimit() int {
@@ -505,35 +670,100 @@ func (m *Matrix) GetPostSizeLimit() int {
 }
 
 func (m *Matrix) GetPostThread(ctx context.Context, postID string) []*bridge.Event {
-	return []*bridge.Event{}
+	roomID, ok := m.roomOf(postID)
+	if !ok {
+		return []*bridge.Event{}
+	}
+
+	msgs, err := m.mc.GetThread(ctx, roomID, id.EventID(postID))
+	if err != nil {
+		logger.Errorf("matrix: fetching thread %s: %s", postID, err)
+
+		return []*bridge.Event{}
+	}
+
+	return m.msgsToEvents(msgs, "details")
 }
 
 func (m *Matrix) GetReplayEvents(ctx context.Context, channelID string, since int64) []*bridge.Event {
-	return []*bridge.Event{}
+	return m.historySince(ctx, channelID, since, "replay")
 }
 
 func (m *Matrix) SearchPosts(ctx context.Context, search string) []*bridge.Event {
-	return []*bridge.Event{}
+	msgs, err := m.mc.SearchMessages(ctx, search)
+	if err != nil {
+		logger.Errorf("matrix: searching messages: %s", err)
+
+		return []*bridge.Event{}
+	}
+
+	return m.msgsToEvents(msgs, "search")
 }
 
 func (m *Matrix) UpdateLastViewed(ctx context.Context, channelID string) {
+	roomID := id.RoomID(channelID)
+
+	eventID, ok := m.lastEvent.Load(roomID)
+	if !ok {
+		return
+	}
+
+	evID, _ := eventID.(id.EventID)
+
+	sendLogErr("marking "+channelID+" as read", m.mc.UpdateLastViewed(ctx, roomID, evID))
 }
 
 func (m *Matrix) UpdateLastViewedUser(ctx context.Context, userID string) error {
+	roomID := m.dmRoom(userID)
+	if roomID == "" {
+		return nil
+	}
+
+	m.UpdateLastViewed(ctx, roomID.String())
+
 	return nil
 }
 
+// GetFilesInfo takes mxc:// URIs as file IDs.
 func (m *Matrix) GetFilesInfo(ctx context.Context, fileIDs []string) []*bridge.File {
-	return []*bridge.File{}
+	files := make([]*bridge.File, 0, len(fileIDs))
+
+	for _, fileID := range fileIDs {
+		link := m.mc.PublicLink(id.ContentURIString(fileID))
+		if link != "" {
+			files = append(files, &bridge.File{Name: fileID, URL: link})
+		}
+	}
+
+	return files
 }
 
 func (m *Matrix) SearchUsers(ctx context.Context, query string) ([]*bridge.UserInfo, error) {
-	return nil, nil
+	found, err := m.mc.SearchUsers(ctx, query, searchUsersLimit)
+	if err != nil {
+		return nil, err
+	}
+
+	users := make([]*bridge.UserInfo, 0, len(found))
+
+	for _, u := range found {
+		if info := m.createUser(u.ID); info != nil {
+			users = append(users, info)
+		}
+	}
+
+	return users, nil
 }
 
 func (m *Matrix) GetChannelID(ctx context.Context, name, teamID string) string {
+	name = strings.TrimPrefix(name, "#")
+
 	for _, channel := range m.GetChannels() {
-		if channel.Name == name {
+		if channel.ID != name && channel.Name != name {
+			continue
+		}
+
+		if teamID == "" || channel.ID == name || m.inTeam(channel.ID, teamID) {
 			return channel.ID
 		}
 	}
@@ -541,16 +771,26 @@ func (m *Matrix) GetChannelID(ctx context.Context, name, teamID string) string {
 	return ""
 }
 
+func (m *Matrix) inTeam(channelID, teamID string) bool {
+	return slices.Contains(m.mc.RoomTeams(id.RoomID(channelID)), id.RoomID(teamID))
+}
+
 func (m *Matrix) CreateChannel(ctx context.Context, channelName string, channelType string) (*bridge.ChannelInfo, error) {
-	return nil, errors.New("not implemented yet")
+	roomID, err := m.mc.CreateRoom(ctx, strings.TrimPrefix(channelName, "#"), "", channelType == "O")
+	if err != nil {
+		return nil, err
+	}
+
+	return &bridge.ChannelInfo{Name: channelName, ID: roomID.String(), Private: channelType != "O"}, nil
 }
 
 func (m *Matrix) GetDMChannelID(ctx context.Context, userID string) string {
-	return m.mc.DirectRoom(id.UserID(userID)).String()
+	return m.dmRoom(userID).String()
 }
 
+// GetDMChannelName returns the room ID, which GetChannelID resolves again.
 func (m *Matrix) GetDMChannelName(userID1 string, userID2 string) string {
-	return ""
+	return m.dmRoom(userID2).String()
 }
 
 func (m *Matrix) GetDMUser(ctx context.Context, channelName string) *bridge.UserInfo {
@@ -563,11 +803,21 @@ func (m *Matrix) GetDMUser(ctx context.Context, channelName string) *bridge.User
 }
 
 func (m *Matrix) GetDMUserIDs(channelName string) (string, string, bool) {
-	return "", "", false
+	other := m.dmPeer(id.RoomID(channelName))
+	if other == nil {
+		return "", "", false
+	}
+
+	return m.GetMe().User, other.User, true
 }
 
 func (m *Matrix) GetDMOtherUserID(channelName, myUserID string) (string, bool) {
-	return "", false
+	other := m.dmPeer(id.RoomID(channelName))
+	if other == nil {
+		return "", false
+	}
+
+	return other.User, true
 }
 
 func (m *Matrix) IsDMChannelName(channelName string) bool {
@@ -578,11 +828,54 @@ func (m *Matrix) Connected() bool {
 	return m.connected.Load()
 }
 
+func (m *Matrix) reactionKey(emoji string) string {
+	emoji = strings.Trim(emoji, ":")
+
+	if unicode, ok := utils.EmojiFromAlias(emoji, m.cfg.Matrix().Formatter.CustomEmoji); ok {
+		return unicode
+	}
+
+	return emoji
+}
+
 func (m *Matrix) AddReaction(ctx context.Context, msgID, emoji string) error {
+	roomID, ok := m.roomOf(msgID)
+	if !ok {
+		return errors.New("unknown message " + msgID)
+	}
+
+	key := m.reactionKey(emoji)
+
+	reactionID, err := m.mc.React(ctx, roomID, id.EventID(msgID), key)
+	if err != nil {
+		return err
+	}
+
+	m.reactionCache.Add(msgID+"\x00"+key, reactionID)
+
 	return nil
 }
 
 func (m *Matrix) RemoveReaction(ctx context.Context, msgID, emoji string) error {
+	roomID, ok := m.roomOf(msgID)
+	if !ok {
+		return errors.New("unknown message " + msgID)
+	}
+
+	cacheKey := msgID + "\x00" + m.reactionKey(emoji)
+
+	reactionID, ok := m.reactionCache.Get(cacheKey)
+	if !ok {
+		return errors.New("reaction was not added by this session")
+	}
+
+	err := m.mc.DeleteReaction(ctx, roomID, reactionID)
+	if err != nil {
+		return err
+	}
+
+	m.reactionCache.Remove(cacheKey)
+
 	return nil
 }
 
@@ -611,14 +904,38 @@ func (m *Matrix) FormatterConfig() *config.FormatterConfig {
 }
 
 func (m *Matrix) Ping(ctx context.Context, proto ...string) error {
-	return nil
+	return m.mc.Ping(ctx)
 }
 
 func (m *Matrix) NormalizePostID(msgID string) string {
-	return msgID
+	if strings.HasPrefix(msgID, "$") {
+		return msgID
+	}
+
+	return ""
 }
 
 func (m *Matrix) SendTyping(ctx context.Context, channelName string) {
+	rc := m.cfg.Current()
+	if !rc.EnableTyping || rc.DisableSendTyping || strings.HasPrefix(channelName, "&") {
+		return
+	}
+
+	var roomID id.RoomID
+
+	if postID, ok := strings.CutPrefix(channelName, "@@"); ok {
+		roomID, _ = m.roomOf(postID)
+	} else if roomID = id.RoomID(m.GetChannelID(ctx, channelName, "")); roomID == "" {
+		if userID, found := m.resolveUserID(channelName); found {
+			roomID = m.mc.DirectRoom(userID)
+		}
+	}
+
+	if roomID == "" {
+		return
+	}
+
+	sendLogErr("sending typing to "+roomID.String(), m.mc.SendTyping(ctx, roomID))
 }
 
 // formatSummary renders msg like the Mattermost bridge does for replies: markdown
