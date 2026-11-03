@@ -160,7 +160,7 @@ func main() {
 			}
 
 			logger.Infof("AI summarization enabled (default provider: %s, model: %s)", provider, model)
-		case utils.AIOpenAIProvider:
+		case utils.AIOpenAIProvider, "hetzner", "ollama", "local", "vllm":
 			client, err := utils.NewOpenAIClient(aiCfg.Token, aiCfg.URL, model)
 			if err != nil {
 				logger.Errorf("AI summarization setup error: %v", err)

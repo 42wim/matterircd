@@ -118,11 +118,16 @@ func GetModel(provider, fallbackModel string, models map[string]string) string {
 			return m
 		}
 
-		if p == AIOpenAIProvider {
+		switch p {
+		case AIOpenAIProvider:
 			for _, k := range [...]string{"hetzner", "ollama", "local", "vllm"} {
 				if m, ok := models[k]; ok && m != "" {
 					return m
 				}
+			}
+		case "hetzner", "ollama", "local", "vllm":
+			if m, ok := models[AIOpenAIProvider]; ok && m != "" {
+				return m
 			}
 		}
 	}
@@ -134,7 +139,7 @@ func GetModel(provider, fallbackModel string, models map[string]string) string {
 	switch p {
 	case AICopilotProvider, AIGitHubProvider:
 		return DefaultCopilotModel
-	case AIOpenAIProvider:
+	case AIOpenAIProvider, "hetzner", "ollama", "local", "vllm":
 		return DefaultOpenAIModel
 	default:
 		return DefaultGeminiModel
@@ -416,7 +421,6 @@ func (c *OpenAIClient) BaseURL() string {
 	return c.baseURL
 }
 
-//nolint:funlen
 func (c *OpenAIClient) Summarize(ctx context.Context, prompt string, _ string) (string, error) {
 	reqBody := copilotRequest{
 		Model: c.model,
