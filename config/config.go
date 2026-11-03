@@ -565,7 +565,7 @@ func (c *AIConfig) GetBaseURL(provider string) string {
 
 		return utils.DefaultHetznerBaseURL
 	case utils.AIOllamaProvider, utils.AILocalProvider, utils.AIvLLMProvider:
-		if (cfgP == p || cfgP == utils.AILocalProvider || cfgP == utils.AIOllamaProvider || cfgP == utils.AIvLLMProvider || cfgP == "" || cfgP == "gemini") && c.URL != "" {
+		if (cfgP == p || cfgP == utils.AILocalProvider || cfgP == utils.AIOllamaProvider || cfgP == utils.AIvLLMProvider || cfgP == "" || cfgP == utils.AIGeminiProvider) && c.URL != "" {
 			return strings.TrimRight(c.URL, "/")
 		}
 
@@ -581,13 +581,13 @@ func (c *AIConfig) GetToken(provider string) string {
 	p := strings.ToLower(strings.TrimSpace(provider))
 
 	switch p {
-	case "copilot", "github":
+	case utils.AICopilotProvider, utils.AIGitHubProvider:
 		if c.CopilotToken != "" {
 			return c.CopilotToken
 		}
 
 		cfgP := strings.ToLower(c.Provider)
-		if cfgP == "" || cfgP == "gemini" || cfgP == "copilot" || cfgP == "github" {
+		if cfgP == "" || cfgP == utils.AIGeminiProvider || cfgP == utils.AICopilotProvider || cfgP == utils.AIGitHubProvider {
 			return c.Token
 		}
 	case utils.AIOpenAIProvider:
