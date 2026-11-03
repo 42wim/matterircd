@@ -26,7 +26,9 @@ var (
 type AIConfig struct {
 	Enabled            bool
 	Provider           string // "gemini" (default), "copilot", or "openai"
-	Token              string // GitHub token for Copilot, or API key for OpenAI
+	Token              string // Default token for configured Provider
+	CopilotToken       string // GitHub token for Copilot
+	OpenAIToken        string // API key for OpenAI / Hetzner
 	URL                string // Base URL for OpenAI / compatible endpoints (e.g. https://api.openai.com/v1, https://inference.hetzner.com/api/v1)
 	ServiceAccountFile string // Gemini / Vertex AI
 	Project            string
@@ -236,6 +238,8 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 		Enabled:            c.v.GetBool("ai.enabled"),
 		Provider:           c.v.GetString("ai.provider"),
 		Token:              c.v.GetString("ai.token"),
+		CopilotToken:       c.v.GetString("ai.copilot_token"),
+		OpenAIToken:        c.v.GetString("ai.openai_token"),
 		URL:                unquoteString(aiURL),
 		ServiceAccountFile: unquoteString(c.v.GetString("ai.service_account_file")),
 		Project:            c.v.GetString("ai.project"),
@@ -525,6 +529,32 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 
 func (c *Config) AI() *AIConfig {
 	return &c.Current().AI
+}
+
+// GetToken resolves the token for the requested provider, ensuring credentials
+// do not cross provider boundaries.
+func (c *AIConfig) GetToken(provider string) string {
+	switch strings.ToLower(provider) {
+	case "copilot", "github":
+		if c.CopilotToken != "" {
+			return c.CopilotToken
+		}
+
+		if strings.EqualFold(c.Provider, "copilot") || strings.EqualFold(c.Provider, "github") {
+			return c.Token
+		}
+	case "openai", "hetzner", "ollama", "local", "vllm":
+		if c.OpenAIToken != "" {
+			return c.OpenAIToken
+		}
+
+		switch strings.ToLower(c.Provider) {
+		case "openai", "hetzner", "ollama", "local", "vllm":
+			return c.Token
+		}
+	}
+
+	return ""
 }
 
 func (c *Config) Current() *RuntimeConfig {

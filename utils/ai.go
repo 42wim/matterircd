@@ -70,6 +70,18 @@ type generationConfig struct {
 	ThinkingConfig *thinkingConfig `json:"thinkingConfig,omitempty"`
 }
 
+type openAIRequest struct {
+	Model       string           `json:"model"`
+	Messages    []copilotMessage `json:"messages"`
+	Temperature *float64         `json:"temperature,omitempty"`
+}
+
+func isOpenAIReasoningModel(model string) bool {
+	m := strings.ToLower(strings.TrimSpace(model))
+
+	return strings.HasPrefix(m, "o1") || strings.HasPrefix(m, "o3") || strings.HasPrefix(m, "o4")
+}
+
 type thinkingConfig struct {
 	ThinkingBudget *int `json:"thinkingBudget,omitempty"`
 }
@@ -425,8 +437,9 @@ func (c *OpenAIClient) BaseURL() string {
 	return c.baseURL
 }
 
+//nolint:funlen
 func (c *OpenAIClient) Summarize(ctx context.Context, prompt string, _ string) (string, error) {
-	reqBody := copilotRequest{
+	reqBody := openAIRequest{
 		Model: c.model,
 		Messages: []copilotMessage{
 			{
@@ -434,7 +447,11 @@ func (c *OpenAIClient) Summarize(ctx context.Context, prompt string, _ string) (
 				Content: prompt,
 			},
 		},
-		Temperature: 0.2,
+	}
+
+	if !isOpenAIReasoningModel(c.model) {
+		temp := 0.2
+		reqBody.Temperature = &temp
 	}
 
 	rawJSON, err := json.Marshal(reqBody)
@@ -467,7 +484,22 @@ func (c *OpenAIClient) Summarize(ctx context.Context, prompt string, _ string) (
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("openai api returned status %s: %s", resp.Status, strings.TrimSpace(string(body)))
+		var errResp struct {
+			Error *struct {
+				Message string `json:"message"`
+			} `json:"error,omitempty"`
+		}
+
+		errMsg := string(body)
+
+		err = json.Unmarshal(body, &errResp)
+		if err == nil && errResp.Error != nil && errResp.Error.Message != "" {
+			errMsg = errResp.Error.Message
+		}
+
+		errMsg = strings.Join(strings.Fields(errMsg), " ")
+
+		return "", fmt.Errorf("openai api returned status %s: %s", resp.Status, errMsg)
 	}
 
 	var chatResp copilotResponse
@@ -478,7 +510,9 @@ func (c *OpenAIClient) Summarize(ctx context.Context, prompt string, _ string) (
 	}
 
 	if chatResp.Error != nil {
-		return "", fmt.Errorf("openai error: %s", chatResp.Error.Message)
+		errMsg := strings.Join(strings.Fields(chatResp.Error.Message), " ")
+
+		return "", fmt.Errorf("openai error: %s", errMsg)
 	}
 
 	if len(chatResp.Choices) > 0 {

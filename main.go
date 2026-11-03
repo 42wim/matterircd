@@ -145,15 +145,16 @@ func main() {
 		}
 
 		model := utils.GetModel(provider, aiCfg.Model, aiCfg.Models)
+		token := aiCfg.GetToken(provider)
 
 		switch strings.ToLower(provider) {
 		case utils.AICopilotProvider, utils.AIGitHubProvider:
-			if aiCfg.Token == "" {
+			if token == "" {
 				logger.Warn("AI summarization enabled, but token is missing")
 				break
 			}
 
-			_, err := utils.NewCopilotClient(aiCfg.Token, model)
+			_, err := utils.NewCopilotClient(token, model)
 			if err != nil {
 				logger.Errorf("AI summarization setup error: %v", err)
 				break
@@ -161,7 +162,17 @@ func main() {
 
 			logger.Infof("AI summarization enabled (default provider: %s, model: %s)", provider, model)
 		case utils.AIOpenAIProvider, "hetzner", "ollama", "local", "vllm":
-			client, err := utils.NewOpenAIClient(aiCfg.Token, aiCfg.URL, model)
+			baseURL := aiCfg.URL
+			if baseURL == "" {
+				baseURL = utils.DefaultOpenAIBaseURL
+			}
+
+			if token == "" && (strings.Contains(baseURL, "api.openai.com") || strings.Contains(baseURL, "inference.hetzner.com")) {
+				logger.Warn("AI summarization enabled, but token is missing")
+				break
+			}
+
+			client, err := utils.NewOpenAIClient(token, aiCfg.URL, model)
 			if err != nil {
 				logger.Errorf("AI summarization setup error: %v", err)
 				break

@@ -1469,6 +1469,7 @@ func summarize(u *User, toUser *User, args []string, service string) {
 	}
 
 	model := utils.GetModel(provider, cfg.Model, cfg.Models)
+	token := cfg.GetToken(provider)
 
 	var (
 		aiClient utils.Summarizer
@@ -1477,13 +1478,13 @@ func summarize(u *User, toUser *User, args []string, service string) {
 
 	switch strings.ToLower(provider) {
 	case utils.AICopilotProvider, utils.AIGitHubProvider:
-		if cfg.Token == "" {
+		if token == "" {
 			u.MsgUser(toUser, "Copilot AI is not configured (missing token).")
 
 			return
 		}
 
-		aiClient, err = utils.NewCopilotClient(cfg.Token, model)
+		aiClient, err = utils.NewCopilotClient(token, model)
 		if err != nil {
 			u.MsgUser(toUser, fmt.Sprintf("Failed to initialize Copilot AI: %v", err))
 
@@ -1495,13 +1496,13 @@ func summarize(u *User, toUser *User, args []string, service string) {
 			baseURL = utils.DefaultOpenAIBaseURL
 		}
 
-		if cfg.Token == "" && (strings.Contains(baseURL, "api.openai.com") || strings.Contains(baseURL, "inference.hetzner.com")) {
+		if token == "" && (strings.Contains(baseURL, "api.openai.com") || strings.Contains(baseURL, "inference.hetzner.com")) {
 			u.MsgUser(toUser, fmt.Sprintf("%s AI is not configured (missing token).", provider))
 
 			return
 		}
 
-		aiClient, err = utils.NewOpenAIClient(cfg.Token, cfg.URL, model)
+		aiClient, err = utils.NewOpenAIClient(token, cfg.URL, model)
 		if err != nil {
 			u.MsgUser(toUser, fmt.Sprintf("Failed to initialize OpenAI client: %v", err))
 
