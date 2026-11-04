@@ -72,7 +72,11 @@ type Matrix struct {
 	onConnect func()
 
 	connected atomic.Bool
+	e2ee      atomic.Bool
 	ready     atomic.Bool
+
+	// unregisterReloadHook removes the hook that New registered on the config.
+	unregisterReloadHook func()
 
 	ctx context.Context //nolint:containedctx
 
@@ -107,19 +111,6 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 	m.sentRedactions, _ = lru.New[id.EventID, struct{}](sentCacheSize)
 	m.reactionCache, _ = lru.New[string, id.EventID](reactionCacheSize)
 
-	setLogLevel := func(rc *config.RuntimeConfig) {
-		switch {
-		case rc.Trace:
-			logger.Logger.SetLevel(logrus.TraceLevel)
-		case rc.Debug:
-			logger.Logger.SetLevel(logrus.DebugLevel)
-		default:
-			logger.Logger.SetLevel(logrus.InfoLevel)
-		}
-	}
-	setLogLevel(cfg.Current())
-	cfg.RegisterReloadHook(setLogLevel)
-
 	if cred.Token != "" && cred.Server == "" {
 		return nil, nil, errors.New("matrix: login with an access token needs a server, use LOGIN <server> <token>")
 	}
@@ -144,6 +135,37 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 	}
 
 	m.mc = mc
+	m.e2ee.Store(mc.Encrypted())
+
+	setLogLevels := func(rc *config.RuntimeConfig) {
+		switch {
+		case rc.Trace:
+			logger.Logger.SetLevel(logrus.TraceLevel)
+		case rc.Debug:
+			logger.Logger.SetLevel(logrus.DebugLevel)
+		default:
+			logger.Logger.SetLevel(logrus.InfoLevel)
+		}
+
+		mc.SetLogLevel("info")
+		mc.SetLogAPICalls("error")
+
+		if rc.Profiling {
+			if rc.Trace {
+				logger.Infof("enabling matrixclient API logging: level: trace")
+				mc.SetLogAPICalls("trace")
+			} else if rc.Debug {
+				logger.Infof("enabling matrixclient API logging: level: warn")
+				mc.SetLogAPICalls("warn")
+			}
+		}
+	}
+
+	setLogLevels(cfg.Current())
+
+	// The hook keeps this client alive for as long as it is registered, so Logout
+	// has to remove it again.
+	m.unregisterReloadHook = cfg.RegisterReloadHook(setLogLevels)
 	m.connected.Store(true)
 
 	return m, mc, nil
@@ -375,6 +397,11 @@ func (m *Matrix) UpdateChannels(ctx context.Context) error {
 
 func (m *Matrix) Logout(ctx context.Context) error {
 	m.connected.Store(false)
+
+	if m.unregisterReloadHook != nil {
+		m.unregisterReloadHook()
+	}
+
 	m.mc.Logout()
 
 	return nil
@@ -1082,6 +1109,11 @@ func (m *Matrix) GetDMOtherUserID(channelName, myUserID string) (string, bool) {
 
 func (m *Matrix) IsDMChannelName(channelName string) bool {
 	return m.mc.IsDirect(id.RoomID(channelName))
+}
+
+// EncryptionEnabled reports whether this session can use encrypted rooms.
+func (m *Matrix) EncryptionEnabled() bool {
+	return m.e2ee.Load()
 }
 
 func (m *Matrix) Connected() bool {

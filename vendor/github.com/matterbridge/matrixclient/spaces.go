@@ -68,8 +68,13 @@ func (c *Client) handleEncryption(_ context.Context, ev *event.Event) {
 	ch := c.channelLocked(ev.RoomID)
 
 	ch.Lock()
+	first := !ch.Encrypted
 	ch.Encrypted = true
 	ch.Unlock()
+
+	if first && c.crypto == nil {
+		c.logger.Warnf("room %s is encrypted but end-to-end encryption is not enabled, its messages are unreadable", ev.RoomID)
+	}
 }
 
 // IsEncrypted reports whether roomID is end-to-end encrypted.

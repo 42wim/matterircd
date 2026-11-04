@@ -86,6 +86,10 @@ func loginMatrix(u *User, toUser *User, args []string) {
 	}
 
 	u.MsgUser(toUser, "login OK")
+
+	if e, ok := u.currentBridge().(interface{ EncryptionEnabled() bool }); ok && e.EncryptionEnabled() {
+		u.MsgUser(toUser, "end-to-end encryption (e2ee) is enabled")
+	}
 }
 
 func login(u *User, toUser *User, args []string, service string) {

@@ -69,13 +69,15 @@ You can find the binaries [here](https://github.com/42wim/matterircd/releases/la
 Go 1.26+ is required
 
 ```bash
-go build -ldflags="-X main.githash=$(git describe --always --dirty --exclude '*')"
+go build -tags goolm -ldflags="-X main.githash=$(git describe --always --dirty --exclude '*')"
 ```
+
+The `goolm` tag enables Matrix end-to-end encryption, which also needs cgo (`CGO_ENABLED=1` and a C compiler).
 
 Or:
 
 ```bash
-go install github.com/42wim/matterircd
+go install -tags goolm github.com/42wim/matterircd
 ```
 
 You should now have matterircd binary in the bin directory:

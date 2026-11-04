@@ -51,6 +51,8 @@ func (m *Matrix) storeName(cred bridge.Credentials) (string, error) {
 func (m *Matrix) encryptionOptions(cred bridge.Credentials) ([]matrixclient.Option, error) {
 	mxCfg := m.cfg.Matrix()
 	if mxCfg.EncryptionDir == "" || mxCfg.EncryptionPickleKey == "" {
+		logger.Info("matrix: end-to-end encryption NOT ENABLED - EncryptionDir and EncryptionPickleKey must both be set")
+
 		return nil, nil
 	}
 
