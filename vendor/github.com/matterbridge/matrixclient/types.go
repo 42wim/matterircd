@@ -47,7 +47,8 @@ type Channel struct {
 	Encrypted  bool
 	Topic      string
 
-	LastActivity int64 // timestamp in milliseconds of the newest message seen, 0 if none
+	LastActivity int64      // timestamp in milliseconds of the newest message seen, 0 if none
+	LastEventID  id.EventID // newest message event seen, set during the initial sync as well
 }
 
 // Message is an incoming room or direct message. Messages sent by ourselves

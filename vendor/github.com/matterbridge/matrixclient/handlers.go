@@ -160,16 +160,18 @@ func (c *Client) handleCanonicalAlias(_ context.Context, ev *event.Event) {
 	ch.Unlock()
 }
 
-// noteActivity records the newest message timestamp of a room, including
+// noteActivity records the newest message of a room, including
 // those of the initial sync which are not delivered to the handler.
-func (c *Client) noteActivity(roomID id.RoomID, ts int64) {
+func (c *Client) noteActivity(roomID id.RoomID, eventID id.EventID, ts int64) {
 	c.Lock()
 	defer c.Unlock()
 
 	ch := c.channelLocked(roomID)
 
 	ch.Lock()
-	ch.LastActivity = max(ch.LastActivity, ts)
+	if ts >= ch.LastActivity {
+		ch.LastActivity, ch.LastEventID = ts, eventID
+	}
 	ch.Unlock()
 }
 
@@ -179,7 +181,7 @@ func (c *Client) handleMessage(_ context.Context, ev *event.Event) {
 		return
 	}
 
-	c.noteActivity(ev.RoomID, ev.Timestamp)
+	c.noteActivity(ev.RoomID, ev.ID, ev.Timestamp)
 
 	if targetID := content.RelatesTo.GetReplaceID(); targetID != "" {
 		if h, ok := c.handler.(EditHandler); ok {

@@ -331,6 +331,22 @@ func (c *Client) DirectRoom(userID id.UserID) id.RoomID {
 	return ""
 }
 
+// LastEventID returns the newest message event seen in a room, "" if none.
+func (c *Client) LastEventID(roomID id.RoomID) id.EventID {
+	c.RLock()
+	ch, ok := c.channels[roomID]
+	c.RUnlock()
+
+	if !ok {
+		return ""
+	}
+
+	ch.RLock()
+	defer ch.RUnlock()
+
+	return ch.LastEventID
+}
+
 // RoomInfo is a snapshot of a room.
 type RoomInfo struct {
 	ID       id.RoomID

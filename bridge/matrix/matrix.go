@@ -957,16 +957,14 @@ func (m *Matrix) UpdateLastViewed(ctx context.Context, channelID string) {
 
 	eventID, ok := m.lastEvent.Load(roomID)
 	if !ok {
-		// Replayed history doesn't pass through OnMessage, so look up the newest event.
-		msgs, err := m.mc.GetMessages(ctx, roomID, 1)
-		if err != nil || len(msgs) == 0 {
-			sendLogErr("fetching latest event of "+channelID, err)
-
+		// Initial-sync events don't pass through OnMessage, the client has the newest one.
+		latest := m.mc.LastEventID(roomID)
+		if latest == "" {
 			return
 		}
 
 		// A live event stored meanwhile wins, the marker must not move backwards.
-		eventID, _ = m.lastEvent.LoadOrStore(roomID, msgs[len(msgs)-1].EventID)
+		eventID, _ = m.lastEvent.LoadOrStore(roomID, latest)
 	}
 
 	evID, _ := eventID.(id.EventID)
