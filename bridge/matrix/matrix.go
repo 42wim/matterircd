@@ -72,6 +72,7 @@ type Matrix struct {
 	onConnect func()
 
 	connected atomic.Bool
+	e2ee      atomic.Bool
 	ready     atomic.Bool
 
 	ctx context.Context //nolint:containedctx
@@ -1082,6 +1083,11 @@ func (m *Matrix) GetDMOtherUserID(channelName, myUserID string) (string, bool) {
 
 func (m *Matrix) IsDMChannelName(channelName string) bool {
 	return m.mc.IsDirect(id.RoomID(channelName))
+}
+
+// EncryptionEnabled reports whether this session can use encrypted rooms.
+func (m *Matrix) EncryptionEnabled() bool {
+	return m.e2ee.Load()
 }
 
 func (m *Matrix) Connected() bool {
