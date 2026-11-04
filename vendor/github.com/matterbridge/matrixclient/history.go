@@ -111,9 +111,17 @@ func (c *Client) GetMessages(ctx context.Context, roomID id.RoomID, limit int) (
 			return nil, err
 		}
 
-		msgs = append(msgs, c.messagesFromEvents(ctx, page)...)
-		// Pages are newest first, so the surplus is the oldest.
-		msgs = msgs[:min(len(msgs), limit)]
+		// Pages are newest first, so stopping at limit keeps the newest and avoids decrypting the surplus.
+		for _, ev := range page {
+			if len(msgs) >= limit {
+				break
+			}
+
+			msg := c.messageFromEvent(ctx, ev)
+			if msg != nil {
+				msgs = append(msgs, msg)
+			}
+		}
 
 		if next == "" || len(page) == 0 {
 			break
@@ -142,14 +150,18 @@ func (c *Client) GetMessagesSince(ctx context.Context, roomID id.RoomID, since i
 
 		done := next == "" || len(page) == 0
 
-		for _, msg := range c.messagesFromEvents(ctx, page) {
-			if msg.Timestamp < since {
+		for _, ev := range page {
+			// Checked on the raw event so undecryptable pages still hit the cutoff.
+			if ev.Timestamp < since {
 				done = true
 
 				break
 			}
 
-			msgs = append(msgs, msg)
+			msg := c.messageFromEvent(ctx, ev)
+			if msg != nil {
+				msgs = append(msgs, msg)
+			}
 		}
 
 		if done {
