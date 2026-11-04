@@ -799,8 +799,8 @@ func (m *Matrix) directoryURL(nick, username string) string {
 	return directoryURL
 }
 
-// roomMentionRegexp matches the @room mention, the equivalent of Mattermost's @channel.
-var roomMentionRegexp = regexp.MustCompile(`@room(?:\W|$)`)
+// roomMentionRegexp matches the Matrix @room mention along with Mattermost's @channel, @all and @here.
+var roomMentionRegexp = regexp.MustCompile(`@(?:room|channel|all|here)(?:\W|$)`)
 
 // messageType returns "notice" for messages mentioning the whole room, so they don't highlight.
 func (m *Matrix) messageType(text string) string {
