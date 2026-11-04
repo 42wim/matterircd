@@ -403,7 +403,6 @@ func (m *Mattermost) loginToMattermost(ctx context.Context, onWsConnect func()) 
 	logger.Info("login succeeded")
 
 	m.mc = mc
-	m.mc.WsQuit = false
 
 	quitChan := make(chan struct{})
 	m.quitChan = append(m.quitChan, quitChan)
@@ -614,8 +613,6 @@ func (m *Mattermost) logout(ctx context.Context) {
 		close(m.done)
 	}
 
-	m.mc.WsQuit = true
-
 	if m.wsCancel != nil {
 		m.wsCancel()
 	}
@@ -626,16 +623,18 @@ func (m *Mattermost) logout(ctx context.Context) {
 
 	m.quitChan = nil
 
-	if m.mc.WsClient == nil {
-		return
-	}
-
+	// mc.Logout closes the websocket right away, only invalidating the session needs the
+	// network. Don't make the caller (quit, reconnect) wait for the server to answer that.
 	logoutCtx, cancel := logoutContext(ctx, m.mc.Timeout)
-	defer cancel()
+	mc := m.mc
 
-	_ = m.mc.Logout(logoutCtx)
+	go func() {
+		defer cancel()
 
-	logger.Info("logout succeeded")
+		_ = mc.Logout(logoutCtx)
+
+		logger.Info("logout succeeded")
+	}()
 }
 
 // sendLogoutEvent tells the event loop that we're done. The loop may never have started, or

@@ -4,8 +4,10 @@ package matrixclient
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"maps"
+	"math/big"
 	"slices"
 	"strings"
 	"sync"
@@ -109,7 +111,7 @@ func New(ctx context.Context, cred Credentials, h Handler, opts ...Option) (*Cli
 
 	// Ready is called from the sync goroutine, after the events of the first
 	// sync response were processed, so handler calls stay serialized.
-	mc.Syncer = &readySyncer{DefaultSyncer: syncer, ready: h.Ready, synced: c.onSynced, track: c.noteTimeline, decrypted: c.noteDecrypted}
+	mc.Syncer = &readySyncer{DefaultSyncer: syncer, ready: h.Ready, synced: c.onSynced, track: c.noteTimeline, decrypted: c.noteDecrypted, failed: c.onSyncFailed}
 
 	err = c.login(ctx, o.crypto)
 	if err != nil {
@@ -282,6 +284,9 @@ type readySyncer struct {
 	synced    func()
 	track     func(*mautrix.RespSync)
 	decrypted func(*event.Event)
+	failed    func(err error, wait time.Duration)
+
+	failures int // consecutive failed syncs, only used from the sync goroutine
 }
 
 func (r *readySyncer) ProcessResponse(ctx context.Context, res *mautrix.RespSync, since string) error {
@@ -289,11 +294,33 @@ func (r *readySyncer) ProcessResponse(ctx context.Context, res *mautrix.RespSync
 
 	err := r.DefaultSyncer.ProcessResponse(ctx, res, since)
 	if err == nil {
+		r.failures = 0
 		r.synced()
 		r.once.Do(r.ready)
 	}
 
 	return err
+}
+
+// OnFailedSync retries quickly at first, then backs off exponentially with
+// jitter, instead of the 10 second fixed wait of the default syncer. The sync
+// resumes from the last next_batch token, so no events are missed.
+func (r *readySyncer) OnFailedSync(res *mautrix.RespSync, err error) (time.Duration, error) {
+	if errors.Is(err, mautrix.MUnknownToken) {
+		return 0, err
+	}
+
+	wait := min(time.Second<<min(r.failures, 5), maxSyncRetryWait)
+
+	jitter, randomErr := rand.Int(rand.Reader, big.NewInt(int64(wait/2)+1))
+	if randomErr == nil {
+		wait += time.Duration(jitter.Int64())
+	}
+	r.failures++
+
+	r.failed(err, wait)
+
+	return wait, nil
 }
 
 // Dispatch sees the events the crypto helper dispatches after decrypting them.

@@ -12,6 +12,7 @@ import (
 
 const (
 	maxSyncBackoff   = time.Minute
+	maxSyncRetryWait = 30 * time.Second
 	maxLoginRetries  = 10
 	defaultRateLimit = 3 * time.Second
 
@@ -46,6 +47,11 @@ func (c *Client) onSynced() {
 	c.lastSync.Store(time.Now().UnixNano())
 	c.connected.Store(true)
 	c.synced.Store(true)
+}
+
+func (c *Client) onSyncFailed(err error, wait time.Duration) {
+	c.connected.Store(false)
+	c.apiLogger.Warnf("sync failed: %s, retrying in %s", err, wait.Round(time.Millisecond))
 }
 
 // relogin obtains a new access token, reusing the device. It must only be
