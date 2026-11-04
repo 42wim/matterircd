@@ -31,7 +31,7 @@ func (m *Matrix) OnEdit(e *matrixclient.Edit) {
 	m.msgParentCache.Remove(e.TargetID)
 	m.msgRoomCache.Add(e.TargetID, e.RoomID)
 
-	m.sendText(ghost, e.RoomID, e.Direct, e.TargetID, "", e.Text+editedSuffix, "post_edited", e.Timestamp)
+	m.sendText(ghost, e.RoomID, e.Direct, e.TargetID, "", e.Text+editedSuffix, "post_edited", m.messageType(e.Text), e.Timestamp)
 }
 
 // OnRedaction implements matrixclient.RedactionHandler.
@@ -52,7 +52,7 @@ func (m *Matrix) OnRedaction(r *matrixclient.Redaction) {
 
 	m.msgParentCache.Remove(r.TargetID)
 
-	m.sendText(ghost, r.RoomID, r.Direct, r.TargetID, "", deletedText, "post_deleted", 0)
+	m.sendText(ghost, r.RoomID, r.Direct, r.TargetID, "", deletedText, "post_deleted", "", 0)
 }
 
 // OnTyping implements matrixclient.TypingHandler.
@@ -135,7 +135,7 @@ func (m *Matrix) OnMember(c *matrixclient.MemberChange) {
 
 // sendText emits a direct or channel message event. DMs are always shown as
 // coming from the other side, as handled by the IRC layer.
-func (m *Matrix) sendText(ghost *bridge.UserInfo, roomID id.RoomID, direct bool, eventID, parentID id.EventID, text, eventType string, ts int64) {
+func (m *Matrix) sendText(ghost *bridge.UserInfo, roomID id.RoomID, direct bool, eventID, parentID id.EventID, text, eventType, messageType string, ts int64) {
 	if direct {
 		receiver := m.dmReceiver(ghost, roomID, true)
 		if receiver == nil {
@@ -166,6 +166,7 @@ func (m *Matrix) sendText(ghost *bridge.UserInfo, roomID id.RoomID, direct bool,
 			ChannelID:   roomID.String(),
 			Sender:      ghost,
 			ChannelType: "P",
+			MessageType: messageType,
 			MessageID:   eventID.String(),
 			Event:       eventType,
 			ParentID:    parentID.String(),
@@ -259,6 +260,7 @@ func (m *Matrix) msgToEvent(msg *matrixclient.Message, eventType string) *bridge
 			ChannelID:   msg.RoomID.String(),
 			Sender:      ghost,
 			ChannelType: "P",
+			MessageType: m.messageType(text),
 			Files:       files,
 			MessageID:   msg.EventID.String(),
 			Event:       eventType,

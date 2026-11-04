@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -20,6 +22,12 @@ import (
 	"github.com/matterbridge/matrixclient"
 	"github.com/sirupsen/logrus"
 )
+
+// defaultScrollbackLimit is the number of messages shown when none is requested.
+const defaultScrollbackLimit = 60
+
+// maxScrollbackLimit is the most messages one scrollback request fetches.
+const maxScrollbackLimit = 1000
 
 // logger is shared by all users, so creating it once avoids racing on a
 // per-login replacement. It matches the format of the matterclient logging.
@@ -74,8 +82,6 @@ type Matrix struct {
 	reactionCache    *lru.Cache[string, id.EventID]
 	sentReactions    *lru.Cache[string, time.Time]    // reactions added from IRC, whose echo is dropped
 	sentRedactions   *lru.Cache[id.EventID, struct{}] // messages deleted from IRC, whose echo is dropped
-
-	lastEvent sync.Map // id.RoomID -> id.EventID, the newest event seen per room
 
 	// sentMu is never held across network I/O. It guards sentCache and pendingSends,
 	// which together recognize the echo of a message sent from IRC, also when the
@@ -178,7 +184,6 @@ func (m *Matrix) OnMessage(msg *matrixclient.Message) {
 	}
 
 	m.msgRoomCache.Add(msg.EventID, msg.RoomID)
-	m.lastEvent.Store(msg.RoomID, msg.EventID)
 
 	text := msg.Text
 
@@ -201,7 +206,7 @@ func (m *Matrix) OnMessage(msg *matrixclient.Message) {
 		text = message
 	}
 
-	m.sendText(ghost, msg.RoomID, msg.Direct, msg.EventID, msg.ParentID, text, "", msg.Timestamp)
+	m.sendText(ghost, msg.RoomID, msg.Direct, msg.EventID, msg.ParentID, text, "", m.messageType(text), msg.Timestamp)
 }
 
 func (m *Matrix) sendFile(ghost *bridge.UserInfo, msg *matrixclient.Message, file *bridge.File) {
@@ -238,7 +243,7 @@ func (m *Matrix) OnReaction(r *matrixclient.Reaction) {
 		return
 	}
 
-	if ghost.Me && m.isSentReaction(r.ParentID, r.Key) {
+	if ghost.Me && (!m.cfg.Matrix().ShowOwnReactions || m.isSentReaction(r.ParentID, r.Key)) {
 		return
 	}
 
@@ -751,15 +756,59 @@ func (m *Matrix) createUser(userID id.UserID) *bridge.UserInfo {
 		nick = localpart
 	}
 
-	return &bridge.UserInfo{
-		Nick:     nick,
-		User:     ident,
-		Real:     displayName,
-		Host:     homeserver,
-		Ghost:    true,
-		Me:       userID == m.mc.UserID(),
-		Username: nick,
+	info := &bridge.UserInfo{
+		Nick:      nick,
+		User:      ident,
+		Real:      displayName,
+		Host:      homeserver,
+		Ghost:     true,
+		Me:        userID == m.mc.UserID(),
+		Username:  nick,
+		Directory: m.directoryURL(nick, localpart),
 	}
+
+	if info.Me {
+		info.MentionKeys = []string{localpart, displayName, userID.String()}
+	}
+
+	return info
+}
+
+// directoryURL expands the {nick} and {username} placeholders of matrix.DirectoryURL,
+// escaping them for the path and query part respectively.
+func (m *Matrix) directoryURL(nick, username string) string {
+	tmpl := m.cfg.Matrix().Bridge.DirectoryURL
+	if tmpl == "" {
+		return ""
+	}
+
+	pathPart, queryPart, hasQuery := strings.Cut(tmpl, "?")
+
+	directoryURL := strings.NewReplacer(
+		"{nick}", url.PathEscape(nick),
+		"{username}", url.PathEscape(username),
+	).Replace(pathPart)
+
+	if hasQuery {
+		directoryURL += "?" + strings.NewReplacer(
+			"{nick}", url.QueryEscape(nick),
+			"{username}", url.QueryEscape(username),
+		).Replace(queryPart)
+	}
+
+	return directoryURL
+}
+
+// roomMentionRegexp matches the Matrix @room mention along with Mattermost's @channel, @all and @here.
+var roomMentionRegexp = regexp.MustCompile(`@(?:room|channel|all|here)(?:\W|$)`)
+
+// messageType returns "notice" for messages mentioning the whole room, so they don't highlight.
+func (m *Matrix) messageType(text string) string {
+	if !m.cfg.Matrix().DisableDefaultMentions && roomMentionRegexp.MatchString(text) {
+		return "notice"
+	}
+
+	return ""
 }
 
 func (m *Matrix) addParentMsg(ctx context.Context, roomID id.RoomID, parentID id.EventID, msg string, newLen int, uncounted string) (string, error) {
@@ -796,7 +845,12 @@ func (m *Matrix) createParentReply(ctx context.Context, roomID id.RoomID, parent
 		nick = parentUser.Nick
 	}
 
-	return " (re @" + nick + ": " + m.formatSummary(body, newLen, uncounted) + ")", nil
+	summary := m.formatSummary(body, newLen, uncounted)
+	if mxCfg := m.cfg.Matrix(); mxCfg.DisableDefaultMentions {
+		summary = utils.SanitizeDefaultMentions(summary, mxCfg.Formatter.Unicode)
+	}
+
+	return " (re @" + nick + ": " + summary + ")", nil
 }
 
 func (m *Matrix) GetTeamName(ctx context.Context, teamID string) string {
@@ -823,13 +877,22 @@ func (m *Matrix) historySince(ctx context.Context, channelID string, since int64
 	if err != nil {
 		logger.Errorf("matrix: fetching messages of %s: %s", channelID, err)
 
-		return []*bridge.Event{}
+		// nil, unlike an empty result, tells replay that the fetch failed.
+		return nil
 	}
 
 	return m.msgsToEvents(msgs, eventType)
 }
 
 func (m *Matrix) GetPosts(ctx context.Context, channelID string, limit int) []*bridge.Event {
+	// A negative capacity panics and zero fetches nothing, so default like Mattermost.
+	if limit <= 0 {
+		limit = defaultScrollbackLimit
+	}
+
+	// The limit sizes an allocation, so a huge one from a client would panic.
+	limit = min(limit, maxScrollbackLimit)
+
 	msgs, err := m.mc.GetMessages(ctx, id.RoomID(channelID), limit)
 	if err != nil {
 		logger.Errorf("matrix: fetching messages of %s: %s", channelID, err)
@@ -890,14 +953,19 @@ func (m *Matrix) SearchPosts(ctx context.Context, search string) []*bridge.Event
 func (m *Matrix) UpdateLastViewed(ctx context.Context, channelID string) {
 	roomID := id.RoomID(channelID)
 
-	eventID, ok := m.lastEvent.Load(roomID)
-	if !ok {
+	// The client orders events by timeline position, unlike arrival or decryption order.
+	evID := m.mc.LastEventID(roomID)
+	if evID == "" {
 		return
 	}
 
-	evID, _ := eventID.(id.EventID)
-
 	sendLogErr("marking "+channelID+" as read", m.mc.UpdateLastViewed(ctx, roomID, evID))
+}
+
+// ReplayHidesHistory reports whether replay can't show the history of a room: encrypted
+// events aren't fetched, so marking the room read afterwards would acknowledge unseen messages.
+func (m *Matrix) ReplayHidesHistory(channelID string) bool {
+	return m.mc.IsEncrypted(id.RoomID(channelID))
 }
 
 func (m *Matrix) UpdateLastViewedUser(ctx context.Context, userID string) error {

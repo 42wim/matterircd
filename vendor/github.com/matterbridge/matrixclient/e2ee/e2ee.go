@@ -25,22 +25,40 @@ type Config struct {
 	OnDecryptError func(ev *event.Event, err error)
 }
 
+// helper reports terminal decryption failures to the client, so it can drop
+// the ordering data kept for the undelivered message.
+type helper struct {
+	*cryptohelper.CryptoHelper
+}
+
+func (h helper) OnDecryptFailure(f func(ev *event.Event, err error)) {
+	prev := h.DecryptErrorCallback
+
+	h.DecryptErrorCallback = func(ev *event.Event, err error) {
+		f(ev, err)
+
+		if prev != nil {
+			prev(ev, err)
+		}
+	}
+}
+
 // Factory returns the option to pass to matrixclient.New.
 func Factory(cfg Config) matrixclient.Option {
 	return matrixclient.WithCrypto(func(mc *mautrix.Client, login *mautrix.ReqLogin) (matrixclient.Crypto, error) {
-		helper, err := cryptohelper.NewCryptoHelper(mc, cfg.PickleKey, cfg.DBPath)
+		ch, err := cryptohelper.NewCryptoHelper(mc, cfg.PickleKey, cfg.DBPath)
 		if err != nil {
 			return nil, err
 		}
 
 		if login != nil {
-			helper.LoginAs = login
+			ch.LoginAs = login
 		}
 
 		if cfg.OnDecryptError != nil {
-			helper.DecryptErrorCallback = cfg.OnDecryptError
+			ch.DecryptErrorCallback = cfg.OnDecryptError
 		}
 
-		return helper, nil
+		return helper{ch}, nil
 	})
 }

@@ -277,7 +277,7 @@ func login(u *User, toUser *User, args []string, service string) {
 }
 
 func replay(u *User, toUser *User, args []string, service string) {
-	if service != "mattermost" {
+	if service != serviceMattermost && service != serviceMatrix {
 		u.MsgUser(toUser, "not implemented")
 		return
 	}
@@ -297,7 +297,7 @@ func replay(u *User, toUser *User, args []string, service string) {
 	// Parse optional duration argument
 	if len(args) == 2 {
 		if d, err := time.ParseDuration(args[1]); err == nil {
-			// Mattermost uses Unix milliseconds
+			// Bridges use Unix milliseconds
 			since = time.Now().Add(-d).UnixMilli()
 			logSince = fmt.Sprintf("user requested: %s", args[1])
 		} else {
@@ -329,7 +329,7 @@ func replay(u *User, toUser *User, args []string, service string) {
 	// If no custom duration was provided, fall back to our configured strategy
 	if since == 0 {
 		// Cap manual unbounded replays just like the startup worker
-		maxReplay := u.cfg.Mattermost().MaxReplayDuration
+		maxReplay := u.sharedCfg().MaxReplayDuration
 		if maxReplay == 0 {
 			maxReplay = 31 * 24 * time.Hour
 		}
@@ -343,7 +343,7 @@ func replay(u *User, toUser *User, args []string, service string) {
 
 //nolint:forcetypeassert,goconst
 func details(u *User, toUser *User, args []string, service string) {
-	if service != "mattermost" {
+	if service != serviceMattermost && service != serviceMatrix {
 		u.MsgUser(toUser, "not implemented")
 		return
 	}
@@ -363,6 +363,16 @@ func details(u *User, toUser *User, args []string, service string) {
 	postlistURL := proto + "://" + u.Credentials.Server + "/" + u.Credentials.Team + "/pl/"
 
 	switch {
+	case service == serviceMatrix:
+		postID = u.br.NormalizePostID(strings.TrimPrefix(postID, "@@"))
+		postlistURL = ""
+
+		if postID == "" {
+			u.MsgUser(toUser, "need DETAILS <event ID>")
+			u.MsgUser(toUser, "e.g. DETAILS $abc123...")
+
+			return
+		}
 	case len(postID) == 26:
 		// Do nothing
 	case strings.HasPrefix(postID, "@@"):
@@ -434,7 +444,7 @@ func details(u *User, toUser *User, args []string, service string) {
 }
 
 func search(u *User, toUser *User, args []string, service string) {
-	if service != "mattermost" {
+	if service != serviceMattermost && service != serviceMatrix {
 		u.MsgUser(toUser, "not implemented")
 		return
 	}
@@ -461,7 +471,12 @@ func search(u *User, toUser *User, args []string, service string) {
 	}
 
 	if limit > 0 && limit < len(events) {
-		events = events[len(events)-limit:]
+		if service == serviceMatrix {
+			// Matrix returns the best match first.
+			events = events[:limit]
+		} else {
+			events = events[len(events)-limit:]
+		}
 	}
 
 	var searchRegexes []*regexp.Regexp
@@ -478,7 +493,7 @@ func search(u *User, toUser *User, args []string, service string) {
 }
 
 func searchUsers(u *User, toUser *User, args []string, service string) {
-	if service != "mattermost" {
+	if service != serviceMattermost && service != serviceMatrix {
 		u.MsgUser(toUser, "not implemented")
 		return
 	}
@@ -546,7 +561,7 @@ func ping(u *User, toUser *User, args []string, service string) {
 
 //nolint:funlen,gocognit,gocyclo,cyclop
 func scrollback(u *User, toUser *User, args []string, service string) {
-	if service != "mattermost" {
+	if service != serviceMattermost && service != serviceMatrix {
 		u.MsgUser(toUser, "not implemented")
 		return
 	}
@@ -595,6 +610,12 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 	case exists && scrollbackUser.Ghost:
 		dmName := u.br.GetDMChannelName(u.User, scrollbackUser.User)
 		channelID = u.br.GetChannelID(u.ctx, dmName, u.br.GetMe().TeamID)
+	case service == serviceMatrix:
+		searchPostID = u.br.NormalizePostID(strings.TrimPrefix(search, "@@"))
+		if searchPostID == "" {
+			u.MsgUser(toUser, "need SCROLLBACK (#<room>|<user>|<event ID>) [lines] [server-time]")
+			return
+		}
 	case len(search) == 26:
 		searchPostID = search
 	case strings.HasPrefix(search, "@@"):
@@ -627,7 +648,7 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 		dispatchHistoricalEvent(u, toUser, event, search, nil, reqServerTime)
 	}
 
-	if !u.cfg.Mattermost().CollapseScrollback {
+	if !u.sharedCfg().CollapseScrollback {
 		u.MsgUser(toUser, fmt.Sprintf("scrollback results shown in \x1d%s\x1d", search))
 	}
 }
@@ -645,6 +666,11 @@ func dispatchHistoricalEvent(u *User, toUser *User, event *bridge.Event, searchC
 		createAt, text, nick, msgID, parentID, files, channelID = e.CreateAt, e.Text, e.Sender.Nick, e.MessageID, e.ParentID, e.Files, e.ChannelID
 	case *bridge.DirectMessageEvent:
 		createAt, text, nick, msgID, parentID, files, channelID = e.CreateAt, e.Text, e.Sender.Nick, e.MessageID, e.ParentID, e.Files, e.ChannelID
+
+		// The IRC nick can differ from the account's, own messages must route as ours.
+		if e.Sender.Me {
+			nick = u.Nick
+		}
 	case *bridge.ChannelAddEvent:
 		createAt, text, nick, channelID = e.CreateAt, e.Text, systemUser, e.ChannelID
 	case *bridge.ChannelRemoveEvent:
@@ -774,7 +800,7 @@ func formatScrollbackMsg(u *User, channelID string, channel string, user *User, 
 	}
 
 	switch {
-	case u.cfg.Mattermost().CollapseScrollback:
+	case u.sharedCfg().CollapseScrollback:
 		target = "&messages" //nolint:goconst
 
 		if strings.HasPrefix(channel, "#") {
@@ -864,7 +890,7 @@ func (u *User) sendScrollback(target, from, msg, timeTag string) {
 }
 
 func updatelastviewed(u *User, toUser *User, args []string, service string) {
-	if service != "mattermost" {
+	if service != serviceMattermost && service != serviceMatrix {
 		u.MsgUser(toUser, "not implemented")
 		return
 	}

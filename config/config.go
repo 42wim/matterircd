@@ -137,7 +137,30 @@ type FormatterConfig struct {
 	PreserveNewLines string
 }
 
+// SharedConfig holds the options that apply to both the Mattermost and Matrix bridges.
+type SharedConfig struct {
+	CollapseScrollback bool
+
+	ShowOwnReactions bool
+
+	ShowMentions bool
+
+	DisableDefaultMentions bool
+
+	DisableAutoView bool
+	ReplayStrategy  string
+	EnableLazyJoin  bool
+	LazyJoinExclude []string
+	ReplayExclude   []string
+
+	JoinReplayDuration time.Duration
+	MaxReplayDuration  time.Duration
+	LazyJoinDuration   time.Duration
+}
+
 type MattermostConfig struct {
+	SharedConfig
+
 	Bridge    BridgeConfig
 	Formatter FormatterConfig
 
@@ -148,8 +171,6 @@ type MattermostConfig struct {
 
 	Insecure            bool
 	IgnoreServerVersion bool
-
-	CollapseScrollback bool
 
 	SkipTLSVerify bool
 
@@ -164,25 +185,13 @@ type MattermostConfig struct {
 	HideReplies      bool
 	ShortenRepliesTo int
 
-	HideReactions    bool
-	ShowOwnReactions bool
+	HideReactions bool
 
-	ShowMentions bool
-
-	DisableDefaultMentions bool
 	DisableShowOwnModified bool
 
-	DisableAutoView      bool
 	LastViewedSaveFile   string
-	ReplayStrategy       string
-	EnableLazyJoin       bool
-	LazyJoinExclude      []string
-	ReplayExclude        []string
 	ForceSyncOnReconnect bool
 
-	JoinReplayDuration        time.Duration
-	MaxReplayDuration         time.Duration
-	LazyJoinDuration          time.Duration
 	DefaultDMOfflineThreshold time.Duration
 	HeavySyncThreshold        time.Duration
 
@@ -202,8 +211,13 @@ type SlackConfig struct {
 }
 
 type MatrixConfig struct {
+	SharedConfig
+
 	Bridge    BridgeConfig
 	Formatter FormatterConfig
+
+	// Only used when mattermost.LastViewedSaveFile is unset, there is one file for all bridges.
+	LastViewedSaveFile string
 
 	HideReplies      bool
 	ShortenRepliesTo int
@@ -225,6 +239,28 @@ type MastodonConfig struct {
 	ClientID     string
 	ClientSecret string
 	AccessToken  string
+}
+
+func (c *Config) buildSharedConfig(section string) SharedConfig {
+	return SharedConfig{
+		CollapseScrollback: c.v.GetBool(section + ".CollapseScrollback"),
+
+		ShowOwnReactions: c.v.GetBool(section + ".ShowOwnReactions"),
+
+		ShowMentions: c.v.GetBool(section + ".ShowMentions"),
+
+		DisableDefaultMentions: c.v.GetBool(section + ".DisableDefaultMentions"),
+
+		DisableAutoView: c.v.GetBool(section + ".DisableAutoView"),
+		ReplayStrategy:  c.v.GetString(section + ".ReplayStrategy"),
+		EnableLazyJoin:  c.v.GetBool(section + ".EnableLazyJoin"),
+		LazyJoinExclude: append([]string(nil), c.v.GetStringSlice(section+".LazyJoinExclude")...),
+		ReplayExclude:   append([]string(nil), c.v.GetStringSlice(section+".ReplayExclude")...),
+
+		JoinReplayDuration: c.v.GetDuration(section + ".JoinReplayDuration"),
+		MaxReplayDuration:  c.v.GetDuration(section + ".MaxReplayDuration"),
+		LazyJoinDuration:   c.v.GetDuration(section + ".LazyJoinDuration"),
+	}
 }
 
 //nolint:funlen
@@ -317,6 +353,8 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 		SuffixContext:    c.v.GetBool("matrix.SuffixContext"),
 		ShowContextMulti: c.v.GetBool("matrix.ShowContextMulti"),
 		ThreadContext:    c.v.GetString("matrix.ThreadContext"),
+
+		DirectoryURL: c.v.GetString("matrix.DirectoryURL"),
 	}
 
 	mmFormatter := FormatterConfig{
@@ -432,8 +470,9 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 		AI: aiCfg,
 
 		Mattermost: MattermostConfig{
-			Bridge:    mmBridge,
-			Formatter: mmFormatter,
+			Bridge:       mmBridge,
+			Formatter:    mmFormatter,
+			SharedConfig: c.buildSharedConfig("mattermost"),
 
 			MatterclientLogLevel: c.v.GetString("mattermost.MatterclientLogLevel"),
 
@@ -442,8 +481,6 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 
 			Insecure:            c.v.GetBool("mattermost.Insecure"),
 			IgnoreServerVersion: c.v.GetBool("mattermost.IgnoreServerVersion"),
-
-			CollapseScrollback: c.v.GetBool("mattermost.CollapseScrollback"),
 
 			SkipTLSVerify: c.v.GetBool("mattermost.SkipTLSVerify"),
 
@@ -458,25 +495,13 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 			HideReplies:      c.v.GetBool("mattermost.HideReplies"),
 			ShortenRepliesTo: c.v.GetInt("mattermost.ShortenRepliesTo"),
 
-			HideReactions:    c.v.GetBool("mattermost.HideReactions"),
-			ShowOwnReactions: c.v.GetBool("mattermost.ShowOwnReactions"),
+			HideReactions: c.v.GetBool("mattermost.HideReactions"),
 
-			ShowMentions: c.v.GetBool("mattermost.ShowMentions"),
-
-			DisableDefaultMentions: c.v.GetBool("mattermost.DisableDefaultMentions"),
 			DisableShowOwnModified: c.v.GetBool("mattermost.DisableShowOwnModified"),
 
-			DisableAutoView:      c.v.GetBool("mattermost.DisableAutoView"),
 			LastViewedSaveFile:   c.v.GetString("mattermost.LastViewedSaveFile"),
-			ReplayStrategy:       c.v.GetString("mattermost.ReplayStrategy"),
-			EnableLazyJoin:       c.v.GetBool("mattermost.EnableLazyJoin"),
-			LazyJoinExclude:      append([]string(nil), c.v.GetStringSlice("mattermost.LazyJoinExclude")...),
-			ReplayExclude:        append([]string(nil), c.v.GetStringSlice("mattermost.ReplayExclude")...),
 			ForceSyncOnReconnect: c.v.GetBool("mattermost.ForceSyncOnReconnect"),
 
-			JoinReplayDuration:        c.v.GetDuration("mattermost.JoinReplayDuration"),
-			MaxReplayDuration:         c.v.GetDuration("mattermost.MaxReplayDuration"),
-			LazyJoinDuration:          c.v.GetDuration("mattermost.LazyJoinDuration"),
 			DefaultDMOfflineThreshold: c.v.GetDuration("mattermost.DefaultDMOfflineThreshold"),
 			HeavySyncThreshold:        c.v.GetDuration("mattermost.HeavySyncThreshold"),
 
@@ -496,8 +521,11 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 		},
 
 		Matrix: MatrixConfig{
-			Bridge:    mxBridge,
-			Formatter: mxFormatter,
+			Bridge:       mxBridge,
+			Formatter:    mxFormatter,
+			SharedConfig: c.buildSharedConfig("matrix"),
+
+			LastViewedSaveFile: c.v.GetString("matrix.LastViewedSaveFile"),
 
 			HideReplies:      c.v.GetBool("matrix.HideReplies"),
 			ShortenRepliesTo: c.v.GetInt("matrix.ShortenRepliesTo"),
@@ -558,6 +586,7 @@ func Load(cfgfile string, flags *pflag.FlagSet) (*Config, error) {
 	v.SetDefault("AwayCooldown", "20m")
 
 	v.SetDefault("mattermost.JoinReplayDuration", "15m")
+	v.SetDefault("matrix.JoinReplayDuration", "15m")
 
 	c := &Config{
 		v: v,

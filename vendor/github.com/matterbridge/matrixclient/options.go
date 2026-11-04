@@ -2,6 +2,7 @@ package matrixclient
 
 import (
 	"maunium.net/go/mautrix"
+	"maunium.net/go/mautrix/event"
 )
 
 // Crypto adds end-to-end encryption support to a client. The e2ee subpackage
@@ -11,6 +12,13 @@ type Crypto interface {
 	mautrix.CryptoHelper
 
 	Close() error
+}
+
+// DecryptFailureNotifier is optionally implemented by a Crypto that reports
+// the messages it gave up decrypting, which are then never delivered. Without
+// it the client expires the ordering data of undelivered encrypted messages by age.
+type DecryptFailureNotifier interface {
+	OnDecryptFailure(f func(ev *event.Event, err error))
 }
 
 // CryptoFactory creates a Crypto for mc. The returned Crypto is responsible for
