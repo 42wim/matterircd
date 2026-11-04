@@ -1,6 +1,8 @@
 package matrixclient
 
 import (
+	"time"
+
 	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/event"
 )
@@ -31,6 +33,9 @@ type Option func(*options)
 type options struct {
 	crypto          CryptoFactory
 	defaultProvider string
+	skipTLSVerify   bool
+	timeout         time.Duration
+	userAgent       string
 }
 
 // WithCrypto enables end-to-end encryption, see the e2ee subpackage.
@@ -43,4 +48,19 @@ func WithCrypto(f CryptoFactory) Option {
 // aliases that have none.
 func WithDefaultProvider(provider string) Option {
 	return func(o *options) { o.defaultProvider = provider }
+}
+
+// WithSkipTLSVerify disables verification of the homeserver certificate.
+func WithSkipTLSVerify(skip bool) Option {
+	return func(o *options) { o.skipTLSVerify = skip }
+}
+
+// WithTimeout sets the dial and TLS handshake timeout, 10 seconds by default.
+func WithTimeout(d time.Duration) Option {
+	return func(o *options) { o.timeout = d }
+}
+
+// WithUserAgent sets the User-Agent header of the API requests.
+func WithUserAgent(ua string) Option {
+	return func(o *options) { o.userAgent = ua }
 }

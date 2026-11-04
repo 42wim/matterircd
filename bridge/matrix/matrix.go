@@ -75,6 +75,9 @@ type Matrix struct {
 	e2ee      atomic.Bool
 	ready     atomic.Bool
 
+	// unregisterReloadHook removes the hook that New registered on the config.
+	unregisterReloadHook func()
+
 	ctx context.Context //nolint:containedctx
 
 	msgParentCache   *lru.Cache[id.EventID, string]
@@ -108,19 +111,6 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 	m.sentRedactions, _ = lru.New[id.EventID, struct{}](sentCacheSize)
 	m.reactionCache, _ = lru.New[string, id.EventID](reactionCacheSize)
 
-	setLogLevel := func(rc *config.RuntimeConfig) {
-		switch {
-		case rc.Trace:
-			logger.Logger.SetLevel(logrus.TraceLevel)
-		case rc.Debug:
-			logger.Logger.SetLevel(logrus.DebugLevel)
-		default:
-			logger.Logger.SetLevel(logrus.InfoLevel)
-		}
-	}
-	setLogLevel(cfg.Current())
-	cfg.RegisterReloadHook(setLogLevel)
-
 	if cred.Token != "" && cred.Server == "" {
 		return nil, nil, errors.New("matrix: login with an access token needs a server, use LOGIN <server> <token>")
 	}
@@ -145,6 +135,36 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 	}
 
 	m.mc = mc
+
+	setLogLevels := func(rc *config.RuntimeConfig) {
+		switch {
+		case rc.Trace:
+			logger.Logger.SetLevel(logrus.TraceLevel)
+		case rc.Debug:
+			logger.Logger.SetLevel(logrus.DebugLevel)
+		default:
+			logger.Logger.SetLevel(logrus.InfoLevel)
+		}
+
+		mc.SetLogLevel("info")
+		mc.SetLogAPICalls("error")
+
+		if rc.Profiling {
+			if rc.Trace {
+				logger.Infof("enabling matrixclient API logging: level: trace")
+				mc.SetLogAPICalls("trace")
+			} else if rc.Debug {
+				logger.Infof("enabling matrixclient API logging: level: warn")
+				mc.SetLogAPICalls("warn")
+			}
+		}
+	}
+
+	setLogLevels(cfg.Current())
+
+	// The hook keeps this client alive for as long as it is registered, so Logout
+	// has to remove it again.
+	m.unregisterReloadHook = cfg.RegisterReloadHook(setLogLevels)
 	m.connected.Store(true)
 
 	return m, mc, nil
@@ -376,6 +396,11 @@ func (m *Matrix) UpdateChannels(ctx context.Context) error {
 
 func (m *Matrix) Logout(ctx context.Context) error {
 	m.connected.Store(false)
+
+	if m.unregisterReloadHook != nil {
+		m.unregisterReloadHook()
+	}
+
 	m.mc.Logout()
 
 	return nil

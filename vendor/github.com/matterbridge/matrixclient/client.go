@@ -102,6 +102,12 @@ func New(ctx context.Context, cred Credentials, h Handler, opts ...Option) (*Cli
 	}
 	c.ctx, c.cancel = context.WithCancel(ctx)
 
+	if o.userAgent != "" {
+		mc.UserAgent = o.userAgent
+	}
+
+	mc.Client.Transport = newAPILogTransport(newTransport(&o), c.apiLogger)
+
 	syncer, ok := mc.Syncer.(*mautrix.DefaultSyncer)
 	if !ok {
 		return nil, errors.New("matrixclient: unexpected syncer type")
@@ -216,6 +222,8 @@ func (c *Client) login(ctx context.Context, factory CryptoFactory) error {
 
 		return err
 	}
+
+	c.logger.Info("end-to-end encryption enabled")
 
 	return nil
 }
@@ -341,6 +349,9 @@ func (c *Client) Logout() {
 
 // Connected reports whether the client is logged in.
 func (c *Client) Connected() bool { return c.connected.Load() }
+
+// Encrypted reports whether end-to-end encryption is enabled.
+func (c *Client) Encrypted() bool { return c.crypto != nil }
 
 // UserID is our own user ID.
 func (c *Client) UserID() id.UserID { return c.mc.UserID }
