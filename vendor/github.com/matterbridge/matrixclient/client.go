@@ -54,6 +54,8 @@ type Client struct {
 
 	crypto Crypto
 
+	decryptFailures bool // crypto reports terminal decryption failures
+
 	defaultProvider string
 
 	lastSync     atomic.Int64 // unix nanoseconds of the last processed sync response
@@ -107,7 +109,7 @@ func New(ctx context.Context, cred Credentials, h Handler, opts ...Option) (*Cli
 
 	// Ready is called from the sync goroutine, after the events of the first
 	// sync response were processed, so handler calls stay serialized.
-	mc.Syncer = &readySyncer{DefaultSyncer: syncer, ready: h.Ready, synced: c.onSynced}
+	mc.Syncer = &readySyncer{DefaultSyncer: syncer, ready: h.Ready, synced: c.onSynced, track: c.noteTimeline, decrypted: c.noteDecrypted}
 
 	err = c.login(ctx, o.crypto)
 	if err != nil {
@@ -197,6 +199,13 @@ func (c *Client) login(ctx context.Context, factory CryptoFactory) error {
 	}
 
 	c.crypto = crypto
+
+	if n, ok := crypto.(DecryptFailureNotifier); ok {
+		n.OnDecryptFailure(c.noteDecryptFailure)
+
+		c.decryptFailures = true
+	}
+
 	c.mc.Crypto = crypto
 
 	err = crypto.Init(ctx)
@@ -268,12 +277,16 @@ func (c *Client) syncLoop() {
 type readySyncer struct {
 	*mautrix.DefaultSyncer
 
-	once   sync.Once
-	ready  func()
-	synced func()
+	once      sync.Once
+	ready     func()
+	synced    func()
+	track     func(*mautrix.RespSync)
+	decrypted func(*event.Event)
 }
 
 func (r *readySyncer) ProcessResponse(ctx context.Context, res *mautrix.RespSync, since string) error {
+	r.track(res)
+
 	err := r.DefaultSyncer.ProcessResponse(ctx, res, since)
 	if err == nil {
 		r.synced()
@@ -281,6 +294,12 @@ func (r *readySyncer) ProcessResponse(ctx context.Context, res *mautrix.RespSync
 	}
 
 	return err
+}
+
+// Dispatch sees the events the crypto helper dispatches after decrypting them.
+func (r *readySyncer) Dispatch(ctx context.Context, ev *event.Event) {
+	r.decrypted(ev)
+	r.DefaultSyncer.Dispatch(ctx, ev)
 }
 
 // Logout stops syncing.

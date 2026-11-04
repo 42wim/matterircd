@@ -4,7 +4,9 @@ import (
 	"context"
 	"slices"
 	"strings"
+	"time"
 
+	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
 )
@@ -160,6 +162,115 @@ func (c *Client) handleCanonicalAlias(_ context.Context, ev *event.Event) {
 	ch.Unlock()
 }
 
+const (
+	// pruneThreshold is the minimum Channel.eventSeq size that triggers a prune.
+	pruneThreshold = 1024
+	// pendingTTL is how long a position is kept for an undelivered message when
+	// the Crypto cannot report terminal decryption failures, see DecryptFailureNotifier.
+	pendingTTL = time.Hour
+)
+
+// noteTimeline records the sync timeline position of the messages in res before
+// they are dispatched. Encrypted messages with a late room key are delivered
+// out of order, so their position can only be taken from the sync response.
+func (c *Client) noteTimeline(res *mautrix.RespSync) {
+	c.Lock()
+	defer c.Unlock()
+
+	for roomID, room := range res.Rooms.Join {
+		if room != nil {
+			c.noteTimelineLocked(roomID, room.Timeline.Events)
+		}
+	}
+
+	for roomID, room := range res.Rooms.Leave {
+		if room != nil {
+			c.noteTimelineLocked(roomID, room.Timeline.Events)
+		}
+	}
+}
+
+func (c *Client) noteTimelineLocked(roomID id.RoomID, events []*event.Event) {
+	var ch *Channel
+
+	now := time.Now()
+
+	for _, ev := range events {
+		// Without crypto an encrypted event is never delivered, so it would stay pending.
+		if ev.Type != event.EventMessage && (ev.Type != event.EventEncrypted || c.crypto == nil) {
+			continue
+		}
+
+		if ch == nil {
+			ch = c.channelLocked(roomID)
+			ch.Lock()
+
+			if ch.eventSeq == nil {
+				ch.eventSeq = make(map[id.EventID]pendingSeq)
+			}
+		}
+
+		ch.nextSeq++
+		ch.eventSeq[ev.ID] = pendingSeq{seq: ch.nextSeq, at: now}
+	}
+
+	if ch == nil {
+		return
+	}
+
+	if len(ch.eventSeq) > max(ch.pruneAt, pruneThreshold) {
+		pruneEventSeq(ch, !c.decryptFailures)
+	}
+
+	ch.Unlock()
+}
+
+// pruneEventSeq drops the positions that cannot advance LastEventID. Pending
+// positions are kept until delivery or a terminal decryption failure, only
+// without failure reports they expire after pendingTTL to bound memory.
+// The caller holds ch's lock.
+func pruneEventSeq(ch *Channel, expire bool) {
+	now := time.Now()
+
+	for evID, p := range ch.eventSeq {
+		if p.seq <= ch.lastSeq || (expire && now.Sub(p.at) > pendingTTL) {
+			delete(ch.eventSeq, evID)
+		}
+	}
+
+	// Avoid rescanning on every sync while a large tail stays pending.
+	ch.pruneAt = 2 * len(ch.eventSeq)
+}
+
+// dropPending forgets the position of a message that will not advance LastEventID.
+func (c *Client) dropPending(roomID id.RoomID, eventID id.EventID) {
+	c.RLock()
+	ch, ok := c.channels[roomID]
+	c.RUnlock()
+
+	if !ok {
+		return
+	}
+
+	ch.Lock()
+	delete(ch.eventSeq, eventID)
+	ch.Unlock()
+}
+
+// noteDecryptFailure drops the position of a message the Crypto gave up on, as
+// it is never delivered.
+func (c *Client) noteDecryptFailure(ev *event.Event, _ error) {
+	c.dropPending(ev.RoomID, ev.ID)
+}
+
+// noteDecrypted drops the position of a decrypted event that is not a message,
+// as it never reaches noteActivity.
+func (c *Client) noteDecrypted(ev *event.Event) {
+	if ev.Mautrix.WasEncrypted && ev.Type != event.EventMessage {
+		c.dropPending(ev.RoomID, ev.ID)
+	}
+}
+
 // noteActivity records the newest message of a room, including
 // those of the initial sync which are not delivered to the handler.
 func (c *Client) noteActivity(roomID id.RoomID, eventID id.EventID, ts int64) {
@@ -169,15 +280,26 @@ func (c *Client) noteActivity(roomID id.RoomID, eventID id.EventID, ts int64) {
 	ch := c.channelLocked(roomID)
 
 	ch.Lock()
-	if ts >= ch.LastActivity {
-		ch.LastActivity, ch.LastEventID = ts, eventID
+	ch.LastActivity = max(ch.LastActivity, ts)
+
+	// The timeline position, not the arrival or decryption order, decides the
+	// newest event, as origin_server_ts is not monotonic either.
+	if p, ok := ch.eventSeq[eventID]; ok {
+		delete(ch.eventSeq, eventID)
+
+		if p.seq > ch.lastSeq {
+			ch.lastSeq, ch.LastEventID = p.seq, eventID
+		}
 	}
+
 	ch.Unlock()
 }
 
 func (c *Client) handleMessage(_ context.Context, ev *event.Event) {
 	content := ev.Content.AsMessage()
 	if content == nil {
+		c.dropPending(ev.RoomID, ev.ID)
+
 		return
 	}
 
