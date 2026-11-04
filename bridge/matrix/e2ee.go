@@ -70,9 +70,6 @@ func (m *Matrix) encryptionOptions(cred bridge.Credentials) ([]matrixclient.Opti
 
 	dbPath := filepath.Join(mxCfg.EncryptionDir, name+".db")
 
-	logger.Infof("matrix: end-to-end encryption enabled, key database %s", dbPath)
-	m.e2ee.Store(true)
-
 	return []matrixclient.Option{e2ee.Factory(e2ee.Config{
 		DBPath:    dbPath,
 		PickleKey: []byte(mxCfg.EncryptionPickleKey),

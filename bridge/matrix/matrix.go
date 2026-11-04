@@ -135,6 +135,7 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 	}
 
 	m.mc = mc
+	m.e2ee.Store(mc.Encrypted())
 
 	setLogLevels := func(rc *config.RuntimeConfig) {
 		switch {
