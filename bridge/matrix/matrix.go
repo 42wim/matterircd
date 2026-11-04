@@ -877,7 +877,8 @@ func (m *Matrix) historySince(ctx context.Context, channelID string, since int64
 	if err != nil {
 		logger.Errorf("matrix: fetching messages of %s: %s", channelID, err)
 
-		return []*bridge.Event{}
+		// nil, unlike an empty result, tells replay that the fetch failed.
+		return nil
 	}
 
 	return m.msgsToEvents(msgs, eventType)

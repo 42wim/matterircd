@@ -1642,7 +1642,11 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			if u.isReplayExcluded(brchannel, channelName) {
 				logger.Debugf("Skipping history replay for excluded channel %s (%s)", channelName, brchannel.ID)
 			} else {
-				u.replayHistory(brchannel, since, sinceStr)
+				if !u.replayHistory(brchannel, since, sinceStr) {
+					logger.Warnf("Replay of %s failed, keeping its saved position for the next startup", channelName)
+
+					continue
+				}
 			}
 
 			if u.hasSharedCfg() && !u.sharedCfg().DisableAutoView && !u.replayHidesHistory(brchannel.ID) {
@@ -1662,10 +1666,13 @@ func (u *User) replayHidesHistory(channelID string) bool {
 
 // replayHistory handles the actual fetching and spoofing of historical channel messages.
 //
+// It returns false when the history couldn't be fetched, so callers keep the saved position
+// and read marker and the next startup retries instead of skipping the history.
+//
 //nolint:funlen,gocognit,gocyclo
-func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSince string) {
+func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSince string) bool {
 	if since == 0 || u.ctx.Err() != nil || u.br == nil {
-		return
+		return true
 	}
 
 	spoof := u.createSpoof(brchannel)
@@ -1681,7 +1688,9 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 		if events == nil && brchannel.TeamID == u.br.GetMe().TeamID {
 			logger.Errorf("something wrong with GetReplayEvents for %s for channel %s (%s)", u.Nick, channame, brchannel.ID)
 		}
-		return
+
+		// Only Matrix reports a failed fetch as nil, an empty result is not one.
+		return events != nil || u.br.Protocol() != serviceMatrix
 	}
 
 	showReplayHdr := true
@@ -1839,6 +1848,8 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 			spoof(nick, fileMsg, timeTag)
 		}
 	}
+
+	return true
 }
 
 func (u *User) MsgUser(toUser *User, msg string) {
