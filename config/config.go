@@ -501,6 +501,7 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 
 			HideReplies:      c.v.GetBool("matrix.HideReplies"),
 			ShortenRepliesTo: c.v.GetInt("matrix.ShortenRepliesTo"),
+			DefaultProvider:  c.v.GetString("matrix.DefaultProvider"),
 
 			EncryptionDir:       c.v.GetString("matrix.EncryptionDir"),
 			EncryptionPickleKey: c.v.GetString("matrix.EncryptionPickleKey"),

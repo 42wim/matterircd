@@ -317,7 +317,8 @@ func (m *Matrix) Join(ctx context.Context, channelName string) (string, string, 
 		// A listed name can contain a colon (a homeserver with a port), so known rooms come first.
 		if channelID := m.GetChannelID(ctx, target, ""); channelID != "" {
 			target = channelID
-		} else if strings.Contains(target, ":") {
+		} else {
+			// Without a homeserver, Join appends the default provider.
 			target = "#" + target
 		}
 	}
