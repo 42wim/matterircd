@@ -59,7 +59,6 @@ func (m *Matrix) encryptionOptions(cred bridge.Credentials) ([]matrixclient.Opti
 	err := os.MkdirAll(mxCfg.EncryptionDir, 0o700)
 	if err != nil {
 		logger.Errorf("matrix: encryption disabled, cannot create %s: %s", mxCfg.EncryptionDir, err)
-		logger.Info("matrix: end-to-end encryption NOT ENABLED")
 
 		return nil, nil
 	}
