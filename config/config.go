@@ -208,6 +208,9 @@ type MatrixConfig struct {
 	HideReplies      bool
 	ShortenRepliesTo int
 
+	// DefaultProvider is left out of channel names, e.g. "ubuntu.com".
+	DefaultProvider string
+
 	// Encrypted rooms, needs a build with -tags goolm and cgo.
 	EncryptionDir       string
 	EncryptionPickleKey string

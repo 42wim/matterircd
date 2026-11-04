@@ -359,6 +359,8 @@ PrefixContext = false
 #ShortenRepliesTo = 0
 #Threads are shown using Matrix event IDs
 #ThreadContext = "matrix"
+#Homeserver left out of channel names, so #room/ubuntu.com becomes #room
+#DefaultProvider = "ubuntu.com"
 #PrefixContext = false
 #Encrypted rooms need a build with "go build -tags goolm" and cgo.
 #Directory for the per user key databases and the key encrypting them.

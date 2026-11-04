@@ -21,10 +21,18 @@ type CryptoFactory func(mc *mautrix.Client, login *mautrix.ReqLogin) (Crypto, er
 type Option func(*options)
 
 type options struct {
-	crypto CryptoFactory
+	crypto          CryptoFactory
+	defaultProvider string
 }
 
 // WithCrypto enables end-to-end encryption, see the e2ee subpackage.
 func WithCrypto(f CryptoFactory) Option {
 	return func(o *options) { o.crypto = f }
+}
+
+// WithDefaultProvider sets the homeserver that is left out of room names: aliases on
+// it are reported without the "/provider" suffix by Rooms, and Join appends it to
+// aliases that have none.
+func WithDefaultProvider(provider string) Option {
+	return func(o *options) { o.defaultProvider = provider }
 }

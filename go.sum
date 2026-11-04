@@ -250,6 +250,8 @@ github.com/matterbridge/matrixclient v0.0.0-20261103210108-9b50efaf5963 h1:9I//w
 github.com/matterbridge/matrixclient v0.0.0-20261103210108-9b50efaf5963/go.mod h1:14RGANRRPwjJ3OxEs2tHGGdvvBjrP3nWTVONogCkhsw=
 github.com/matterbridge/matrixclient v0.0.0-20261103215525-27a39f28280b h1:AnIzg1K3oHfZiqNlwIcOqhNqYy/BeJhvD8ImTzb49q0=
 github.com/matterbridge/matrixclient v0.0.0-20261103215525-27a39f28280b/go.mod h1:14RGANRRPwjJ3OxEs2tHGGdvvBjrP3nWTVONogCkhsw=
+github.com/matterbridge/matrixclient v0.0.0-20261104075056-8a199cde5d57 h1:W8RJRxdHBtN+FOccQrufsDXzzU0waoBA0o8zSfX/qzM=
+github.com/matterbridge/matrixclient v0.0.0-20261104075056-8a199cde5d57/go.mod h1:14RGANRRPwjJ3OxEs2tHGGdvvBjrP3nWTVONogCkhsw=
 github.com/matterbridge/matterclient v0.0.0-20261030152733-ef16c80601cb h1:r1c+gn6UPB0aQNZxU+PIgVciCxAbk/BXqJOTydQah8Q=
 github.com/matterbridge/matterclient v0.0.0-20261030152733-ef16c80601cb/go.mod h1:ZWzKICYtiPg77zcXOPf7CEqqzFYEjkcbr+F20LPTaSs=
 github.com/mattermost/go-i18n v1.11.1-0.20211013152124-5c415071e404 h1:Khvh6waxG1cHc4Cz5ef9n3XVCxRWpAKUtqg9PJl5+y8=
