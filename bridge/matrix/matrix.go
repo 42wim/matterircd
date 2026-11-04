@@ -28,7 +28,7 @@ var logger = newLogger()
 func newLogger() *logrus.Entry {
 	l := logrus.New()
 	l.SetFormatter(&prefixed.TextFormatter{
-		PrefixPadding: 18,
+		PrefixPadding: 13,
 		DisableColors: false,
 		FullTimestamp: true,
 	})
@@ -121,6 +121,10 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 	opts, err := m.encryptionOptions(cred)
 	if err != nil {
 		return nil, nil, err
+	}
+
+	if provider := m.cfg.Matrix().DefaultProvider; provider != "" {
+		opts = append(opts, matrixclient.WithDefaultProvider(provider))
 	}
 
 	mc, err := matrixclient.New(ctx, matrixclient.Credentials{
@@ -313,7 +317,8 @@ func (m *Matrix) Join(ctx context.Context, channelName string) (string, string, 
 		// A listed name can contain a colon (a homeserver with a port), so known rooms come first.
 		if channelID := m.GetChannelID(ctx, target, ""); channelID != "" {
 			target = channelID
-		} else if strings.Contains(target, ":") {
+		} else {
+			// Without a homeserver, Join appends the default provider.
 			target = "#" + target
 		}
 	}
@@ -572,17 +577,16 @@ func (m *Matrix) Nick(ctx context.Context, name string) error {
 }
 
 func (m *Matrix) GetChannelName(ctx context.Context, channelID string) string {
-	for _, channel := range m.GetChannels() {
-		if channel.ID == channelID {
-			if channel.DM {
-				return channel.Name
-			}
-
-			return "#" + channel.Name
-		}
+	channel, err := m.GetChannel(ctx, channelID)
+	if err != nil {
+		return channelID
 	}
 
-	return channelID
+	if channel.DM {
+		return channel.Name
+	}
+
+	return "#" + channel.Name
 }
 
 func (m *Matrix) GetChannelUsers(ctx context.Context, channelID string) ([]*bridge.UserInfo, error) {
@@ -621,39 +625,43 @@ func (m *Matrix) GetUsers() []*bridge.UserInfo {
 }
 
 func (m *Matrix) GetChannels() []*bridge.ChannelInfo {
-	var channels []*bridge.ChannelInfo
+	rooms := m.mc.Rooms()
+	channels := make([]*bridge.ChannelInfo, 0, len(rooms))
 
-	for _, room := range m.mc.Rooms() {
-		teamID := ""
-		if teams := m.mc.RoomTeams(room.ID); len(teams) > 0 && !room.IsDirect {
-			teamID = teams[0].String()
-		}
-
-		// IsDMChannelName and GetDMUser need the raw room ID of a one-to-one DM.
-		name := strings.TrimPrefix(room.Name, "#")
-		if room.IsDirect && len(m.mc.DirectUsers(room.ID)) == 1 {
-			name = room.ID.String()
-		}
-
-		channels = append(channels, &bridge.ChannelInfo{
-			Name:       name,
-			ID:         room.ID.String(),
-			TeamID:     teamID,
-			DM:         room.IsDirect,
-			Private:    false,
-			LastPostAt: room.LastActivity,
-		})
-
-		logger.Debugf("GetChannels %s (%s)", room.Name, room.ID.String())
+	for _, room := range rooms {
+		channels = append(channels, m.channelInfo(room))
 	}
 
 	return channels
 }
 
+// channelInfo builds the channel for a room, RoomTeams being the costly part.
+func (m *Matrix) channelInfo(room matrixclient.RoomInfo) *bridge.ChannelInfo {
+	teamID := ""
+	if teams := m.mc.RoomTeams(room.ID); len(teams) > 0 && !room.IsDirect {
+		teamID = teams[0].String()
+	}
+
+	// IsDMChannelName and GetDMUser need the raw room ID of a one-to-one DM.
+	name := strings.TrimPrefix(room.Name, "#")
+	if room.IsDirect && len(m.mc.DirectUsers(room.ID)) == 1 {
+		name = room.ID.String()
+	}
+
+	return &bridge.ChannelInfo{
+		Name:       name,
+		ID:         room.ID.String(),
+		TeamID:     teamID,
+		DM:         room.IsDirect,
+		Private:    false,
+		LastPostAt: room.LastActivity,
+	}
+}
+
 func (m *Matrix) GetChannel(ctx context.Context, channelID string) (*bridge.ChannelInfo, error) {
-	for _, channel := range m.GetChannels() {
-		if channel.ID == channelID {
-			return channel, nil
+	for _, room := range m.mc.Rooms() {
+		if room.ID.String() == channelID {
+			return m.channelInfo(room), nil
 		}
 	}
 
@@ -661,7 +669,7 @@ func (m *Matrix) GetChannel(ctx context.Context, channelID string) (*bridge.Chan
 }
 
 func (m *Matrix) GetChannelCount() int {
-	return len(m.GetChannels())
+	return len(m.mc.Rooms())
 }
 
 func (m *Matrix) GetUser(ctx context.Context, userID string) *bridge.UserInfo {

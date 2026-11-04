@@ -208,6 +208,9 @@ type MatrixConfig struct {
 	HideReplies      bool
 	ShortenRepliesTo int
 
+	// DefaultProvider is left out of channel names, e.g. "ubuntu.com".
+	DefaultProvider string
+
 	// Encrypted rooms, needs a build with -tags goolm and cgo.
 	EncryptionDir       string
 	EncryptionPickleKey string
@@ -498,6 +501,7 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 
 			HideReplies:      c.v.GetBool("matrix.HideReplies"),
 			ShortenRepliesTo: c.v.GetInt("matrix.ShortenRepliesTo"),
+			DefaultProvider:  c.v.GetString("matrix.DefaultProvider"),
 
 			EncryptionDir:       c.v.GetString("matrix.EncryptionDir"),
 			EncryptionPickleKey: c.v.GetString("matrix.EncryptionPickleKey"),
