@@ -1412,16 +1412,18 @@ func matchDefaultMention(text string, start int) int {
 		return 4
 	case strings.HasPrefix(text[start:], "all") && checkWordBoundaryEnd(text, start+3):
 		return 3
+	case strings.HasPrefix(text[start:], "room") && checkWordBoundaryEnd(text, start+4):
+		return 4
 	default:
 		return 0
 	}
 }
 
-// SanitizeDefaultMentions defangs @channel, @all, and @here mentions to prevent
+// SanitizeDefaultMentions defangs @channel, @all, @here, and Matrix @room mentions to prevent
 // unwanted highlights in IRC clients. When unicode is enabled, it inserts a
 // Zero-Width Non-Joiner (ZWNJ) after the '@'. When disabled, it inserts a hyphen.
 func SanitizeDefaultMentions(text string, unicode bool) string {
-	if !strings.Contains(text, "@channel") && !strings.Contains(text, "@all") && !strings.Contains(text, "@here") {
+	if !strings.Contains(text, "@channel") && !strings.Contains(text, "@all") && !strings.Contains(text, "@here") && !strings.Contains(text, "@room") {
 		return text
 	}
 

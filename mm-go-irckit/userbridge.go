@@ -251,7 +251,7 @@ func (u *User) getMarkdownBlockCodePrefix() (string, string) {
 }
 
 func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
-	if u.br.Protocol() == "mattermost" && u.cfg.Mattermost().ShowMentions {
+	if u.hasSharedCfg() && u.sharedCfg().ShowMentions {
 		for _, m := range u.MentionKeys {
 			if m == u.Nick || m == "" {
 				continue
@@ -400,7 +400,7 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 		}
 	}
 
-	if u.br.Protocol() == "mattermost" && !u.cfg.Mattermost().DisableAutoView {
+	if u.hasSharedCfg() && !u.sharedCfg().DisableAutoView {
 		u.updateLastViewed(event.ChannelID)
 	}
 
@@ -426,7 +426,7 @@ func (u *User) handleChannelAddEvent(event *bridge.ChannelAddEvent) {
 				continue
 			}
 
-			replayDur := u.cfg.Mattermost().JoinReplayDuration
+			replayDur := u.sharedCfg().JoinReplayDuration
 			if replayDur <= 0 {
 				continue
 			}
@@ -449,7 +449,7 @@ func (u *User) handleChannelAddEvent(event *bridge.ChannelAddEvent) {
 		}
 	}
 
-	if u.br.Protocol() == "mattermost" && !u.cfg.Mattermost().DisableAutoView {
+	if u.hasSharedCfg() && !u.sharedCfg().DisableAutoView {
 		u.updateLastViewed(event.ChannelID)
 	}
 
@@ -531,7 +531,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		nick += "/" + u.Srv.Channel(event.ChannelID).String()
 	}
 
-	if u.br.Protocol() == "mattermost" && u.cfg.Mattermost().ShowMentions {
+	if u.hasSharedCfg() && u.sharedCfg().ShowMentions {
 		for _, m := range u.MentionKeys {
 			if m == u.Nick || m == "" {
 				continue
@@ -664,7 +664,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		}
 	}
 
-	if u.br.Protocol() == "mattermost" && !u.cfg.Mattermost().DisableAutoView {
+	if u.hasSharedCfg() && !u.sharedCfg().DisableAutoView {
 		u.updateLastViewed(event.ChannelID)
 	}
 
@@ -1336,10 +1336,11 @@ func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(nick, msg, timeTa
 }
 
 // getChannelSince calculates the 'since' timestamp for a channel based on the configured strategy.
+//
 //nolint:funlen,gocyclo
 func (u *User) getChannelSince(ctx context.Context, brchannel *bridge.ChannelInfo, replayCutoff int64) (int64, string, bool) {
 	// Fetch server-side last viewed if strategy allows
-	strategy := u.cfg.Mattermost().ReplayStrategy
+	strategy := u.sharedCfg().ReplayStrategy
 	if strategy == "" {
 		strategy = "hybrid" //nolint:goconst
 	}
@@ -1454,22 +1455,21 @@ func (u *User) getChannelSince(ctx context.Context, brchannel *bridge.ChannelInf
 
 //nolint:funlen,cyclop,gocognit,gocyclo
 func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throttle *time.Ticker, logger *logrus.Entry) {
-	strategy := u.cfg.Mattermost().ReplayStrategy
+	strategy := u.sharedCfg().ReplayStrategy
 	if strategy == "" {
 		strategy = "hybrid"
 	}
 
-	replayDuration := u.cfg.Mattermost().MaxReplayDuration
+	replayDuration := u.sharedCfg().MaxReplayDuration
 	if replayDuration == 0 {
 		replayDuration = 31 * 24 * time.Hour
 	}
 
 	replayCutoff := time.Now().Add(-replayDuration).UnixMilli()
 
-	// Currently only supported and tested with Mattermost
-	lazyJoin := u.br.Protocol() == "mattermost" && u.cfg.Mattermost().EnableLazyJoin
+	lazyJoin := u.hasSharedCfg() && u.sharedCfg().EnableLazyJoin
 
-	lazyJoinDuration := u.cfg.Mattermost().LazyJoinDuration
+	lazyJoinDuration := u.sharedCfg().LazyJoinDuration
 	if lazyJoinDuration == 0 {
 		lazyJoinDuration = 21 * 24 * time.Hour
 	}
@@ -1515,7 +1515,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 				channelName = u.br.GetTeamName(u.ctx, brchannel.TeamID) + "/" + brchannel.Name
 			}
 
-			lje := u.cfg.Mattermost().LazyJoinExclude
+			lje := u.sharedCfg().LazyJoinExclude
 			isConfigWhitelisted := len(lje) > 0 && (stringInRegexp(channelName, lje) || stringInRegexp("#"+channelName, lje))
 
 			isRequested := u.isRequestedChannel(channelName)
@@ -1644,7 +1644,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 				u.replayHistory(brchannel, since, sinceStr)
 			}
 
-			if u.br.Protocol() == "mattermost" && !u.cfg.Mattermost().DisableAutoView {
+			if u.hasSharedCfg() && !u.sharedCfg().DisableAutoView {
 				u.updateLastViewed(brchannel.ID)
 			}
 			u.saveLastViewedAt(brchannel.ID)
@@ -1983,12 +1983,26 @@ func (u *User) mayJoin(channelID string) bool {
 	return false
 }
 
+// hasSharedCfg reports whether the bridge takes the options of config.SharedConfig.
+func (u *User) hasSharedCfg() bool {
+	return u.br != nil && (u.br.Protocol() == "mattermost" || u.br.Protocol() == serviceMatrix)
+}
+
+// sharedCfg returns the shared options of the bridge's protocol, Mattermost's for the others.
+func (u *User) sharedCfg() *config.SharedConfig {
+	if u.br != nil && u.br.Protocol() == serviceMatrix {
+		return &u.cfg.Matrix().SharedConfig
+	}
+
+	return &u.cfg.Mattermost().SharedConfig
+}
+
 func (u *User) isReplayExcluded(brchannel *bridge.ChannelInfo, channelName string) bool {
-	if u.br == nil || u.br.Protocol() != "mattermost" {
+	if u.br == nil || !u.hasSharedCfg() {
 		return false
 	}
 
-	re := u.cfg.Mattermost().ReplayExclude
+	re := u.sharedCfg().ReplayExclude
 	if len(re) == 0 {
 		return false
 	}

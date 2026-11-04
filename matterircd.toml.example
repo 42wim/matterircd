@@ -362,6 +362,22 @@ PrefixContext = false
 #Homeserver left out of channel names, so #room/ubuntu.com becomes #room
 #DefaultProvider = "ubuntu.com"
 #PrefixContext = false
+#These options work as their [mattermost] counterparts:
+#DirectoryURL = "https://directory.mydomain.local/people/{nick}"  # {nick} and {username}
+#CollapseScrollback = false
+#ShowOwnReactions = false
+#ShowMentions = false
+#DisableDefaultMentions = false
+#DisableAutoView = false
+#ReplayStrategy = "hybrid"
+#ReplayExclude = ["#some-room"]
+#MaxReplayDuration = "744h"
+#JoinReplayDuration = "15m"
+#EnableLazyJoin = false
+#LazyJoinDuration = "504h"
+#LazyJoinExclude = ["#some-room"]
+#The replay positions are saved in one file, [mattermost] LastViewedSaveFile has precedence.
+#LastViewedSaveFile = "matterircd-lastsaved.db"
 #Encrypted rooms need a build with "go build -tags goolm" and cgo.
 #Directory for the per user key databases and the key encrypting them.
 #Keep both, losing them makes earlier messages undecryptable.

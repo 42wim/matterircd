@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -238,7 +240,7 @@ func (m *Matrix) OnReaction(r *matrixclient.Reaction) {
 		return
 	}
 
-	if ghost.Me && m.isSentReaction(r.ParentID, r.Key) {
+	if ghost.Me && (!m.cfg.Matrix().ShowOwnReactions || m.isSentReaction(r.ParentID, r.Key)) {
 		return
 	}
 
@@ -751,15 +753,59 @@ func (m *Matrix) createUser(userID id.UserID) *bridge.UserInfo {
 		nick = localpart
 	}
 
-	return &bridge.UserInfo{
-		Nick:     nick,
-		User:     ident,
-		Real:     displayName,
-		Host:     homeserver,
-		Ghost:    true,
-		Me:       userID == m.mc.UserID(),
-		Username: nick,
+	info := &bridge.UserInfo{
+		Nick:      nick,
+		User:      ident,
+		Real:      displayName,
+		Host:      homeserver,
+		Ghost:     true,
+		Me:        userID == m.mc.UserID(),
+		Username:  nick,
+		Directory: m.directoryURL(nick, localpart),
 	}
+
+	if info.Me {
+		info.MentionKeys = []string{localpart, displayName, userID.String()}
+	}
+
+	return info
+}
+
+// directoryURL expands the {nick} and {username} placeholders of matrix.DirectoryURL,
+// escaping them for the path and query part respectively.
+func (m *Matrix) directoryURL(nick, username string) string {
+	tmpl := m.cfg.Matrix().Bridge.DirectoryURL
+	if tmpl == "" {
+		return ""
+	}
+
+	pathPart, queryPart, hasQuery := strings.Cut(tmpl, "?")
+
+	directoryURL := strings.NewReplacer(
+		"{nick}", url.PathEscape(nick),
+		"{username}", url.PathEscape(username),
+	).Replace(pathPart)
+
+	if hasQuery {
+		directoryURL += "?" + strings.NewReplacer(
+			"{nick}", url.QueryEscape(nick),
+			"{username}", url.QueryEscape(username),
+		).Replace(queryPart)
+	}
+
+	return directoryURL
+}
+
+// roomMentionRegexp matches the @room mention, the equivalent of Mattermost's @channel.
+var roomMentionRegexp = regexp.MustCompile(`@room\W`)
+
+// messageType returns "notice" for messages mentioning the whole room, so they don't highlight.
+func (m *Matrix) messageType(text string) string {
+	if !m.cfg.Matrix().DisableDefaultMentions && roomMentionRegexp.MatchString(text) {
+		return "notice"
+	}
+
+	return ""
 }
 
 func (m *Matrix) addParentMsg(ctx context.Context, roomID id.RoomID, parentID id.EventID, msg string, newLen int, uncounted string) (string, error) {
@@ -796,7 +842,12 @@ func (m *Matrix) createParentReply(ctx context.Context, roomID id.RoomID, parent
 		nick = parentUser.Nick
 	}
 
-	return " (re @" + nick + ": " + m.formatSummary(body, newLen, uncounted) + ")", nil
+	summary := m.formatSummary(body, newLen, uncounted)
+	if mxCfg := m.cfg.Matrix(); mxCfg.DisableDefaultMentions {
+		summary = utils.SanitizeDefaultMentions(summary, mxCfg.Formatter.Unicode)
+	}
+
+	return " (re @" + nick + ": " + summary + ")", nil
 }
 
 func (m *Matrix) GetTeamName(ctx context.Context, teamID string) string {

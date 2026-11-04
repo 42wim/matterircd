@@ -129,6 +129,8 @@ func main() {
 	mmLastViewedFile := project + "-lastsaved.db"
 	if statePath := rc.Mattermost.LastViewedSaveFile; statePath != "" {
 		mmLastViewedFile = statePath
+	} else if statePath := rc.Matrix.LastViewedSaveFile; statePath != "" {
+		mmLastViewedFile = statePath
 	}
 	db, err := bolt.Open(mmLastViewedFile, 0o600, &bolt.Options{Timeout: 1 * time.Second})
 	if err != nil {
