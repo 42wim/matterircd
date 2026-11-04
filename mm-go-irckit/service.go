@@ -666,6 +666,11 @@ func dispatchHistoricalEvent(u *User, toUser *User, event *bridge.Event, searchC
 		createAt, text, nick, msgID, parentID, files, channelID = e.CreateAt, e.Text, e.Sender.Nick, e.MessageID, e.ParentID, e.Files, e.ChannelID
 	case *bridge.DirectMessageEvent:
 		createAt, text, nick, msgID, parentID, files, channelID = e.CreateAt, e.Text, e.Sender.Nick, e.MessageID, e.ParentID, e.Files, e.ChannelID
+
+		// The IRC nick can differ from the account's, own messages must route as ours.
+		if e.Sender.Me {
+			nick = u.Nick
+		}
 	case *bridge.ChannelAddEvent:
 		createAt, text, nick, channelID = e.CreateAt, e.Text, systemUser, e.ChannelID
 	case *bridge.ChannelRemoveEvent:

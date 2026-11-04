@@ -26,6 +26,9 @@ import (
 // defaultScrollbackLimit is the number of messages shown when none is requested.
 const defaultScrollbackLimit = 60
 
+// maxScrollbackLimit is the most messages one scrollback request fetches.
+const maxScrollbackLimit = 1000
+
 // logger is shared by all users, so creating it once avoids racing on a
 // per-login replacement. It matches the format of the matterclient logging.
 var logger = newLogger()
@@ -206,7 +209,7 @@ func (m *Matrix) OnMessage(msg *matrixclient.Message) {
 		text = message
 	}
 
-	m.sendText(ghost, msg.RoomID, msg.Direct, msg.EventID, msg.ParentID, text, "", m.messageType(msg.Text), msg.Timestamp)
+	m.sendText(ghost, msg.RoomID, msg.Direct, msg.EventID, msg.ParentID, text, "", m.messageType(text), msg.Timestamp)
 }
 
 func (m *Matrix) sendFile(ghost *bridge.UserInfo, msg *matrixclient.Message, file *bridge.File) {
@@ -888,6 +891,9 @@ func (m *Matrix) GetPosts(ctx context.Context, channelID string, limit int) []*b
 	if limit <= 0 {
 		limit = defaultScrollbackLimit
 	}
+
+	// The limit sizes an allocation, so a huge one from a client would panic.
+	limit = min(limit, maxScrollbackLimit)
 
 	msgs, err := m.mc.GetMessages(ctx, id.RoomID(channelID), limit)
 	if err != nil {

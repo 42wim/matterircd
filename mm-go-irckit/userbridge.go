@@ -449,7 +449,8 @@ func (u *User) handleChannelAddEvent(event *bridge.ChannelAddEvent) {
 		}
 	}
 
-	if u.hasSharedCfg() && !u.sharedCfg().DisableAutoView {
+	// Marking a room we're not in as read would clear unseen history.
+	if u.hasSharedCfg() && !u.sharedCfg().DisableAutoView && ch.HasUser(u) {
 		u.updateLastViewed(event.ChannelID)
 	}
 

@@ -586,6 +586,7 @@ func Load(cfgfile string, flags *pflag.FlagSet) (*Config, error) {
 	v.SetDefault("AwayCooldown", "20m")
 
 	v.SetDefault("mattermost.JoinReplayDuration", "15m")
+	v.SetDefault("matrix.JoinReplayDuration", "15m")
 
 	c := &Config{
 		v: v,
