@@ -23,6 +23,9 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// defaultScrollbackLimit is the number of messages shown when none is requested.
+const defaultScrollbackLimit = 60
+
 // logger is shared by all users, so creating it once avoids racing on a
 // per-login replacement. It matches the format of the matterclient logging.
 var logger = newLogger()
@@ -203,7 +206,7 @@ func (m *Matrix) OnMessage(msg *matrixclient.Message) {
 		text = message
 	}
 
-	m.sendText(ghost, msg.RoomID, msg.Direct, msg.EventID, msg.ParentID, text, "", msg.Timestamp)
+	m.sendText(ghost, msg.RoomID, msg.Direct, msg.EventID, msg.ParentID, text, "", m.messageType(msg.Text), msg.Timestamp)
 }
 
 func (m *Matrix) sendFile(ghost *bridge.UserInfo, msg *matrixclient.Message, file *bridge.File) {
@@ -797,7 +800,7 @@ func (m *Matrix) directoryURL(nick, username string) string {
 }
 
 // roomMentionRegexp matches the @room mention, the equivalent of Mattermost's @channel.
-var roomMentionRegexp = regexp.MustCompile(`@room\W`)
+var roomMentionRegexp = regexp.MustCompile(`@room(?:\W|$)`)
 
 // messageType returns "notice" for messages mentioning the whole room, so they don't highlight.
 func (m *Matrix) messageType(text string) string {
@@ -881,6 +884,11 @@ func (m *Matrix) historySince(ctx context.Context, channelID string, since int64
 }
 
 func (m *Matrix) GetPosts(ctx context.Context, channelID string, limit int) []*bridge.Event {
+	// A negative capacity panics and zero fetches nothing, so default like Mattermost.
+	if limit <= 0 {
+		limit = defaultScrollbackLimit
+	}
+
 	msgs, err := m.mc.GetMessages(ctx, id.RoomID(channelID), limit)
 	if err != nil {
 		logger.Errorf("matrix: fetching messages of %s: %s", channelID, err)
@@ -943,7 +951,16 @@ func (m *Matrix) UpdateLastViewed(ctx context.Context, channelID string) {
 
 	eventID, ok := m.lastEvent.Load(roomID)
 	if !ok {
-		return
+		// Replayed history doesn't pass through OnMessage, so look up the newest event.
+		msgs, err := m.mc.GetMessages(ctx, roomID, 1)
+		if err != nil || len(msgs) == 0 {
+			sendLogErr("fetching latest event of "+channelID, err)
+
+			return
+		}
+
+		// A live event stored meanwhile wins, the marker must not move backwards.
+		eventID, _ = m.lastEvent.LoadOrStore(roomID, msgs[len(msgs)-1].EventID)
 	}
 
 	evID, _ := eventID.(id.EventID)

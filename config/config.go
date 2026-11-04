@@ -159,9 +159,10 @@ type SharedConfig struct {
 }
 
 type MattermostConfig struct {
+	SharedConfig
+
 	Bridge    BridgeConfig
 	Formatter FormatterConfig
-	SharedConfig
 
 	MatterclientLogLevel string
 
@@ -210,9 +211,10 @@ type SlackConfig struct {
 }
 
 type MatrixConfig struct {
+	SharedConfig
+
 	Bridge    BridgeConfig
 	Formatter FormatterConfig
-	SharedConfig
 
 	// Only used when mattermost.LastViewedSaveFile is unset, there is one file for all bridges.
 	LastViewedSaveFile string

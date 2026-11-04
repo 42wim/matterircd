@@ -277,7 +277,7 @@ func login(u *User, toUser *User, args []string, service string) {
 }
 
 func replay(u *User, toUser *User, args []string, service string) {
-	if service != "mattermost" && service != serviceMatrix {
+	if service != serviceMattermost && service != serviceMatrix {
 		u.MsgUser(toUser, "not implemented")
 		return
 	}
@@ -343,7 +343,7 @@ func replay(u *User, toUser *User, args []string, service string) {
 
 //nolint:forcetypeassert,goconst
 func details(u *User, toUser *User, args []string, service string) {
-	if service != "mattermost" && service != serviceMatrix {
+	if service != serviceMattermost && service != serviceMatrix {
 		u.MsgUser(toUser, "not implemented")
 		return
 	}
@@ -370,6 +370,7 @@ func details(u *User, toUser *User, args []string, service string) {
 		if postID == "" {
 			u.MsgUser(toUser, "need DETAILS <event ID>")
 			u.MsgUser(toUser, "e.g. DETAILS $abc123...")
+
 			return
 		}
 	case len(postID) == 26:
@@ -443,7 +444,7 @@ func details(u *User, toUser *User, args []string, service string) {
 }
 
 func search(u *User, toUser *User, args []string, service string) {
-	if service != "mattermost" && service != serviceMatrix {
+	if service != serviceMattermost && service != serviceMatrix {
 		u.MsgUser(toUser, "not implemented")
 		return
 	}
@@ -470,7 +471,12 @@ func search(u *User, toUser *User, args []string, service string) {
 	}
 
 	if limit > 0 && limit < len(events) {
-		events = events[len(events)-limit:]
+		if service == serviceMatrix {
+			// Matrix returns the best match first.
+			events = events[:limit]
+		} else {
+			events = events[len(events)-limit:]
+		}
 	}
 
 	var searchRegexes []*regexp.Regexp
@@ -487,7 +493,7 @@ func search(u *User, toUser *User, args []string, service string) {
 }
 
 func searchUsers(u *User, toUser *User, args []string, service string) {
-	if service != "mattermost" && service != serviceMatrix {
+	if service != serviceMattermost && service != serviceMatrix {
 		u.MsgUser(toUser, "not implemented")
 		return
 	}
@@ -555,7 +561,7 @@ func ping(u *User, toUser *User, args []string, service string) {
 
 //nolint:funlen,gocognit,gocyclo,cyclop
 func scrollback(u *User, toUser *User, args []string, service string) {
-	if service != "mattermost" && service != serviceMatrix {
+	if service != serviceMattermost && service != serviceMatrix {
 		u.MsgUser(toUser, "not implemented")
 		return
 	}
@@ -879,7 +885,7 @@ func (u *User) sendScrollback(target, from, msg, timeTag string) {
 }
 
 func updatelastviewed(u *User, toUser *User, args []string, service string) {
-	if service != "mattermost" && service != serviceMatrix {
+	if service != serviceMattermost && service != serviceMatrix {
 		u.MsgUser(toUser, "not implemented")
 		return
 	}
