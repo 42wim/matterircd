@@ -1645,12 +1645,19 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 				u.replayHistory(brchannel, since, sinceStr)
 			}
 
-			if u.hasSharedCfg() && !u.sharedCfg().DisableAutoView {
+			if u.hasSharedCfg() && !u.sharedCfg().DisableAutoView && !u.replayHidesHistory(brchannel.ID) {
 				u.updateLastViewed(brchannel.ID)
 			}
 			u.saveLastViewedAt(brchannel.ID)
 		}
 	}
+}
+
+// replayHidesHistory reports whether the bridge can't replay the channel's history in full.
+func (u *User) replayHidesHistory(channelID string) bool {
+	h, ok := u.br.(interface{ ReplayHidesHistory(channelID string) bool })
+
+	return ok && h.ReplayHidesHistory(channelID)
 }
 
 // replayHistory handles the actual fetching and spoofing of historical channel messages.

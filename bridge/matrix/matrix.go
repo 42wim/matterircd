@@ -83,8 +83,6 @@ type Matrix struct {
 	sentReactions    *lru.Cache[string, time.Time]    // reactions added from IRC, whose echo is dropped
 	sentRedactions   *lru.Cache[id.EventID, struct{}] // messages deleted from IRC, whose echo is dropped
 
-	lastEvent sync.Map // id.RoomID -> id.EventID, the newest event seen per room
-
 	// sentMu is never held across network I/O. It guards sentCache and pendingSends,
 	// which together recognize the echo of a message sent from IRC, also when the
 	// echo is synced before the send call returned its event ID.
@@ -186,7 +184,6 @@ func (m *Matrix) OnMessage(msg *matrixclient.Message) {
 	}
 
 	m.msgRoomCache.Add(msg.EventID, msg.RoomID)
-	m.lastEvent.Store(msg.RoomID, msg.EventID)
 
 	text := msg.Text
 
@@ -955,21 +952,19 @@ func (m *Matrix) SearchPosts(ctx context.Context, search string) []*bridge.Event
 func (m *Matrix) UpdateLastViewed(ctx context.Context, channelID string) {
 	roomID := id.RoomID(channelID)
 
-	eventID, ok := m.lastEvent.Load(roomID)
-	if !ok {
-		// Initial-sync events don't pass through OnMessage, the client has the newest one.
-		latest := m.mc.LastEventID(roomID)
-		if latest == "" {
-			return
-		}
-
-		// A live event stored meanwhile wins, the marker must not move backwards.
-		eventID, _ = m.lastEvent.LoadOrStore(roomID, latest)
+	// The client orders events by timeline position, unlike arrival or decryption order.
+	evID := m.mc.LastEventID(roomID)
+	if evID == "" {
+		return
 	}
 
-	evID, _ := eventID.(id.EventID)
-
 	sendLogErr("marking "+channelID+" as read", m.mc.UpdateLastViewed(ctx, roomID, evID))
+}
+
+// ReplayHidesHistory reports whether replay can't show the history of a room: encrypted
+// events aren't fetched, so marking the room read afterwards would acknowledge unseen messages.
+func (m *Matrix) ReplayHidesHistory(channelID string) bool {
+	return m.mc.IsEncrypted(id.RoomID(channelID))
 }
 
 func (m *Matrix) UpdateLastViewedUser(ctx context.Context, userID string) error {
