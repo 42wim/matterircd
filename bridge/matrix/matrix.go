@@ -318,6 +318,11 @@ func (m *Matrix) Join(ctx context.Context, channelName string) (string, string, 
 		if channelID := m.GetChannelID(ctx, target, ""); channelID != "" {
 			target = channelID
 		} else {
+			// Clients rejoin saved names that still carry the default provider.
+			if provider := m.cfg.Matrix().DefaultProvider; provider != "" {
+				target = strings.TrimSuffix(target, "/"+provider)
+			}
+
 			// Without a homeserver, Join appends the default provider.
 			target = "#" + target
 		}
