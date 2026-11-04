@@ -86,6 +86,10 @@ type UsersCache struct {
 
 	channelData    map[string]*model.Channel
 	joinedChannels map[string]struct{}
+	// membershipWatchers collect the joins (true) and leaves (false) applied while a channel refresh is in flight, so
+	// that its stale response doesn't undo them. Only populated during a refresh.
+	membershipWatchers map[int]map[string]bool
+	nextWatcherID      int
 
 	channelLastViewedAt map[string]int64
 
@@ -146,6 +150,13 @@ type Client struct {
 	OnWsConnect   func()
 	reconnectBusy bool
 	Timeout       int
+
+	// wsReconnectMu serializes in-place websocket replacement between WsReceiver and checkConnection.
+	wsReconnectMu sync.Mutex
+	// wsMu guards WsClient, WsConnected and WsQuit. Never hold it across network operations.
+	wsMu sync.RWMutex
+	// resyncCancel cancels the resync of the previous in-place reconnect, guarded by wsMu.
+	resyncCancel context.CancelFunc
 
 	logger     *logrus.Entry
 	rootLogger *logrus.Logger
@@ -265,8 +276,10 @@ func New(login string, pass string, team string, server string, mfatoken string)
 //nolint:funlen,gocyclo
 func (m *Client) Login(ctx context.Context) error {
 	// check if this is a first connect or a reconnection
+	// A retained websocket means a reconnect, even when an in-place redial left WsConnected false.
 	firstConnection := true
-	if m.WsConnected {
+
+	if ws, _ := m.wsSnapshot(); ws != nil {
 		firstConnection = false
 	}
 
@@ -290,8 +303,12 @@ func (m *Client) Login(ctx context.Context) error {
 		}
 	}
 
+	m.wsMu.Lock()
 	m.WsConnected = false
-	if m.WsQuit {
+	quit := m.WsQuit
+	m.wsMu.Unlock()
+
+	if quit {
 		return nil
 	}
 
@@ -327,12 +344,23 @@ func (m *Client) Login(ctx context.Context) error {
 		return err
 	}
 
+	// Statuses are fetched over HTTP, so overlap them with the websocket handshake.
 	m.logger.Trace("requesting initial user statuses for cache")
-	_ = m.GetStatuses(ctx)
+
+	statusesDone := make(chan struct{})
+
+	go func() {
+		defer close(statusesDone)
+
+		_ = m.GetStatuses(ctx)
+	}()
 
 	// Connect websocket using the short-lived Login operation context.
 	// If the login operation is canceled, this will cleanly abort.
 	err := m.wsConnect(ctx)
+
+	<-statusesDone
+
 	if err != nil {
 		return err
 	}
@@ -872,6 +900,280 @@ func (m *Client) createCookieJar(token string) *cookiejar.Jar {
 	return jar
 }
 
+func (m *Client) wsURL() string {
+	if m.NoTLS {
+		return "ws://" + m.Server
+	}
+
+	return "wss://" + m.Server
+}
+
+func (m *Client) dialWs(wsurl string) (*model.WebSocketClient, error) {
+	wsDialer := &websocket.Dialer{
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: m.SkipTLSVerify, //nolint:gosec
+		},
+		Proxy:             http.ProxyFromEnvironment,
+		EnableCompression: false,
+		// Same as websocket.DefaultDialer, otherwise a server that never answers the handshake blocks forever.
+		HandshakeTimeout: 45 * time.Second,
+	}
+
+	return model.NewWebSocketClientWithDialer(wsDialer, wsurl, m.Client.AuthToken)
+}
+
+func (m *Client) wsSnapshot() (*model.WebSocketClient, bool) {
+	m.wsMu.RLock()
+	defer m.wsMu.RUnlock()
+
+	return m.WsClient, m.WsConnected
+}
+
+func (m *Client) setWsQuit(quit bool) {
+	m.wsMu.Lock()
+	m.WsQuit = quit
+	m.wsMu.Unlock()
+}
+
+// installWs publishes a freshly dialed websocket. It refuses once the login that owns ctx was canceled or Logout ran:
+// Logout cancels first and then closes whatever is published under wsMu, so a socket is either closed by Logout or
+// refused here, and never left running without an owner. The caller closes a refused ws.
+func (m *Client) installWs(ctx context.Context, ws *model.WebSocketClient) error {
+	m.wsMu.Lock()
+	defer m.wsMu.Unlock()
+
+	if ctx.Err() != nil {
+		return fmt.Errorf("websocket install aborted: %w", ctx.Err())
+	}
+
+	if m.WsQuit {
+		return errors.New("websocket install aborted: logged out")
+	}
+
+	m.WsClient = ws
+	m.WsConnected = true
+
+	return nil
+}
+
+// discardWs closes a websocket whose listener is running. The listener closes its channels and stops the ping watchdog
+// once the connection is gone, so draining ends. A socket that was never published still needs Listen called first,
+// as only the listener's cleanup stops the watchdog.
+func discardWs(ws *model.WebSocketClient) {
+	// The SDK's Close waits for its writer, which is stuck in a write on a half-open connection until the transport
+	// is closed, so close that first.
+	_ = wsSafely(func() { _ = ws.Conn.Close() })
+	_ = wsSafely(ws.Close)
+
+	go drainChannel(ws.EventChannel)
+	go drainChannel(ws.ResponseChannel)
+}
+
+// dialWsWithRetry dials a websocket with a short backoff, giving up after a few attempts so the caller can fall back.
+func (m *Client) dialWsWithRetry(ctx context.Context) (*model.WebSocketClient, error) {
+	const maxAttempts = 5
+
+	b := &backoff.Backoff{
+		Min:    time.Second,
+		Max:    8 * time.Second,
+		Jitter: true,
+	}
+
+	wsurl := m.wsURL()
+
+	for attempt := 1; ; attempt++ {
+		ws, err := m.dialWs(wsurl)
+		if err == nil {
+			return ws, nil
+		}
+
+		if attempt == maxAttempts {
+			return nil, fmt.Errorf("websocket reconnect failed after %d attempts: %w", maxAttempts, err)
+		}
+
+		d := b.Duration()
+
+		m.logger.Warnf("websocket reconnect %d/%d failed: %s, retrying in %s", attempt, maxAttempts, err, d)
+
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("websocket reconnect aborted: %w", ctx.Err())
+		case <-time.After(d):
+		}
+	}
+}
+
+// reconnectWs replaces a dead websocket in place, keeping the HTTP session and the caches. old is the client the caller
+// saw fail; if it was already replaced by another goroutine, there is nothing left to do.
+func (m *Client) reconnectWs(ctx context.Context, old *model.WebSocketClient) error {
+	m.wsReconnectMu.Lock()
+	defer m.wsReconnectMu.Unlock()
+
+	if current, _ := m.wsSnapshot(); current != old {
+		return nil
+	}
+
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
+	// Only an invalid session needs a full login; a transient network error is covered by the dial retries below.
+	_, resp, err := m.Client.GetMe(ctx, "")
+	if err != nil && resp != nil && (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) {
+		return fmt.Errorf("session no longer valid: %w", err)
+	}
+
+	// A full reconnect doesn't take wsReconnectMu, so it may have replaced the socket during GetMe.
+	m.wsMu.Lock()
+	if ctx.Err() != nil || m.WsClient != old {
+		m.wsMu.Unlock()
+
+		return nil
+	}
+
+	m.WsConnected = false
+	m.wsMu.Unlock()
+
+	if old != nil {
+		// The reader blocks on full channels until they are drained, see Logout.
+		discardWs(old)
+	}
+
+	ws, err := m.dialWsWithRetry(ctx)
+	if err != nil {
+		return err
+	}
+
+	err = m.installWs(ctx, ws)
+	if err != nil {
+		// Listen so the SDK's cleanup runs on close, see discardWs.
+		ws.Listen()
+		discardWs(ws)
+
+		return err
+	}
+
+	ws.Listen()
+
+	m.lastWsActivity.Store(time.Now().Unix())
+	m.connectedAt.Store(time.Now().Unix())
+
+	m.logger.Info("websocket reconnected in place")
+
+	go m.resyncAfterWsReconnect(m.beginResync(ctx), ws)
+
+	return nil
+}
+
+// beginResync returns the context of the resync for a newly installed websocket, canceling the resync of the previous
+// one, so that only one resync is ever running.
+func (m *Client) beginResync(ctx context.Context) context.Context {
+	m.wsMu.Lock()
+	defer m.wsMu.Unlock()
+
+	if m.resyncCancel != nil {
+		m.resyncCancel()
+	}
+
+	resyncCtx, cancel := context.WithCancel(ctx)
+	m.resyncCancel = cancel
+
+	return resyncCtx
+}
+
+func (m *Client) isCurrentWs(ws *model.WebSocketClient) bool {
+	current, _ := m.wsSnapshot()
+
+	return current == ws
+}
+
+// resyncAfterWsReconnect catches up on what was missed while the websocket was down. Refreshing the channels updates
+// LastPostAt, which OnWsConnect consumers rely on to replay missed posts: GetPostsSince skips channels whose cached
+// LastPostAt is stale, so replaying after a failed refresh would silently lose posts. If the refresh keeps failing,
+// fall back to a full reconnect, which replays through Login.
+func (m *Client) resyncAfterWsReconnect(ctx context.Context, ws *model.WebSocketClient) {
+	const maxAttempts = 3
+
+	var err error
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		err = m.UpdateChannels(ctx)
+		if err == nil {
+			break
+		}
+
+		if ctx.Err() != nil {
+			return
+		}
+
+		m.logger.Warnf("websocket reconnect: updating channels failed %d/%d: %s", attempt, maxAttempts, err)
+
+		if attempt == maxAttempts {
+			break
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(time.Duration(attempt) * 2 * time.Second):
+		}
+	}
+
+	if err != nil {
+		// A newer socket has superseded this resync, and its own resync is in charge of recovery.
+		if ctx.Err() != nil || !m.isCurrentWs(ws) {
+			return
+		}
+
+		m.logger.Warnf("websocket reconnect: channel refresh failed, falling back to full reconnect")
+		m.Reconnect(ctx)
+
+		return
+	}
+
+	// GetStatuses only fetches users missing from the cache, so ask for everyone. The responses update the cache.
+	m.Users.mu.RLock()
+	userIDs := make([]string, 0, len(m.Users.users))
+
+	for id := range m.Users.users {
+		userIDs = append(userIDs, id)
+	}
+
+	m.Users.mu.RUnlock()
+
+	m.WsGetStatusesByIds(userIDs)
+
+	if ctx.Err() != nil || !m.isCurrentWs(ws) {
+		return
+	}
+
+	if m.OnWsConnect != nil {
+		m.OnWsConnect()
+	}
+}
+
+// recoverWs re-establishes only the websocket, and falls back to a full Reconnect if that fails. It reports whether
+// the websocket was recovered, i.e. whether the goroutines of the current login are still valid.
+func (m *Client) recoverWs(ctx context.Context, old *model.WebSocketClient) bool {
+	if ctx.Err() != nil {
+		return false
+	}
+
+	err := m.reconnectWs(ctx, old)
+	if err == nil {
+		return true
+	}
+
+	if ctx.Err() != nil {
+		return false
+	}
+
+	m.logger.Warnf("websocket reconnect failed, falling back to full reconnect: %s", err)
+	m.Reconnect(ctx)
+
+	return false
+}
+
 //nolint:funlen
 func (m *Client) wsConnect(ctx context.Context) error {
 	b := &backoff.Backoff{
@@ -880,7 +1182,10 @@ func (m *Client) wsConnect(ctx context.Context) error {
 		Jitter: true,
 	}
 
+	m.wsMu.Lock()
 	m.WsConnected = false
+	m.wsMu.Unlock()
+
 	wsScheme := "wss://"
 
 	if m.NoTLS {
@@ -896,23 +1201,15 @@ func (m *Client) wsConnect(ctx context.Context) error {
 
 	m.logger.Tracef("WsClient: making connection: %s", wsurl)
 
+	var wsClient *model.WebSocketClient
+
 	for {
 		if ctx.Err() != nil {
 			m.logger.Errorf("wsConnect aborted: %v", ctx.Err())
 			return fmt.Errorf("wsConnect aborted: %w", ctx.Err())
 		}
 
-		wsDialer := &websocket.Dialer{
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: m.SkipTLSVerify, //nolint:gosec
-			},
-			Proxy:             http.ProxyFromEnvironment,
-			EnableCompression: false,
-			// Same as websocket.DefaultDialer, otherwise a server that never answers the handshake blocks forever.
-			HandshakeTimeout: 45 * time.Second,
-		}
-
-		ws, err := model.NewWebSocketClientWithDialer(wsDialer, wsurl, m.Client.AuthToken)
+		ws, err := m.dialWs(wsurl)
 		if err != nil {
 			d := b.Duration()
 
@@ -928,20 +1225,26 @@ func (m *Client) wsConnect(ctx context.Context) error {
 		}
 
 		// Only set m.WsClient once connected: a failed attempt returns nil, which WsReceiver crashes on.
-		m.WsClient = ws
+		err = m.installWs(ctx, ws)
+		if err != nil {
+			// Listen so the SDK's cleanup runs on close, see discardWs.
+			ws.Listen()
+			discardWs(ws)
+
+			return err
+		}
+
+		wsClient = ws
 
 		break
 	}
 
-	m.WsClient.Listen()
+	wsClient.Listen()
 
 	m.lastWsActivity.Store(time.Now().Unix())
 	m.connectedAt.Store(time.Now().Unix())
 
 	m.logger.Debug("WsClient: connected")
-
-	// only start to parse WS messages when login is completely done
-	m.WsConnected = true
 
 	return nil
 }
@@ -954,8 +1257,9 @@ func (m *Client) doCheckAlive(ctx context.Context) (err error) {
 		}
 	}()
 
-	if m.WsClient != nil && m.WsClient.ListenError != nil {
-		return fmt.Errorf("websocket listen error: %w", m.WsClient.ListenError)
+	ws, _ := m.wsSnapshot()
+	if ws != nil && ws.ListenError != nil {
+		return fmt.Errorf("websocket listen error: %w", ws.ListenError)
 	}
 
 	connectedUnix := m.connectedAt.Load()
@@ -964,16 +1268,16 @@ func (m *Client) doCheckAlive(ctx context.Context) (err error) {
 	lastActiveUnix := m.lastWsActivity.Load()
 	timeSinceActivity := time.Since(time.Unix(lastActiveUnix, 0))
 
-	if timeSinceActivity < 20*time.Second {
+	if timeSinceActivity < 10*time.Second {
 		m.logger.Tracef("websocket is active (last event %v ago; up %s), skipping ping", timeSinceActivity.Round(time.Second), uptime)
 		return nil
 	}
 
-	if timeSinceActivity < 55*time.Second {
+	if timeSinceActivity < 45*time.Second {
 		// Send a ping down the websocket to try to keep it active/alive
-		if m.WsClient != nil {
+		if ws != nil {
 			m.logger.Tracef("websocket has been quiet (last event %v ago; up %s), sending websocket ping", timeSinceActivity.Round(time.Second), uptime)
-			m.WsClient.SendMessage("ping", nil)
+			ws.SendMessage("ping", nil)
 			return nil
 		}
 	}
@@ -985,13 +1289,14 @@ func (m *Client) doCheckAlive(ctx context.Context) (err error) {
 		return fmt.Errorf("fallback HTTP ping failed (up %s): %w", uptime, err)
 	}
 
-	m.lastWsActivity.Store(time.Now().Unix())
-
-	return nil
+	// The server answers every websocket ping, so a socket silent for this long is dead even though the session is fine.
+	// Don't refresh lastWsActivity here: that would hide a half-open connection forever.
+	return fmt.Errorf("websocket silent for %v despite pings (up %s)", timeSinceActivity.Round(time.Second), uptime)
 }
 
 func (m *Client) checkAlive(ctx context.Context) {
-	ticker := time.NewTicker(time.Second * 30)
+	// Frequent enough to keep proxies and NATs from dropping an idle connection.
+	ticker := time.NewTicker(time.Second * 15)
 	defer ticker.Stop()
 
 	for {
@@ -1051,8 +1356,10 @@ func (m *Client) checkConnection(ctx context.Context) {
 				case <-time.After(time.Second * 10):
 				}
 
+				ws, _ := m.wsSnapshot()
+
 				if m.doCheckAlive(ctx) != nil {
-					m.Reconnect(ctx)
+					m.recoverWs(ctx, ws)
 				}
 			}
 		case <-ctx.Done():
@@ -1073,9 +1380,17 @@ func (m *Client) WsReceiver(ctx context.Context) {
 	defer ticker.Stop()
 
 	for {
+		// Snapshot: recoverWs may swap m.WsClient, and the select must not mix channels of two clients.
+		ws, _ := m.wsSnapshot()
+
 		select {
-		case event := <-m.WsClient.EventChannel:
+		case event := <-ws.EventChannel:
 			if event == nil {
+				// The reader closes its channels when the connection dies.
+				if m.recoverWs(ctx, ws) {
+					continue
+				}
+
 				return
 			}
 
@@ -1134,7 +1449,7 @@ func (m *Client) WsReceiver(ctx context.Context) {
 				// Message channel buffer full, drop/discard
 				m.logger.Errorf("CRITICAL: MessageChan is blocked! Downstream processor is hung. Dropping event: %s", event.EventType())
 			}
-		case response := <-m.WsClient.ResponseChannel:
+		case response := <-ws.ResponseChannel:
 			if response == nil || !response.IsValid() {
 				continue
 			}
@@ -1161,15 +1476,21 @@ func (m *Client) WsReceiver(ctx context.Context) {
 
 			m.logger.Debugf("WsReceiver response: %#v", response)
 			m.parseResponse(response)
-		case <-m.WsClient.PingTimeoutChannel:
+		case <-ws.PingTimeoutChannel:
 			m.logger.Error("got a ping timeout")
-			m.Reconnect(ctx)
+
+			if m.recoverWs(ctx, ws) {
+				continue
+			}
 
 			return
 		case <-ticker.C:
-			if m.WsClient.ListenError != nil {
-				m.logger.Errorf("%#v", m.WsClient.ListenError)
-				m.Reconnect(ctx)
+			if ws.ListenError != nil {
+				m.logger.Errorf("%#v", ws.ListenError)
+
+				if m.recoverWs(ctx, ws) {
+					continue
+				}
 
 				return
 			}
@@ -1196,7 +1517,7 @@ func (m *Client) reconnectLogout(ctx context.Context) {
 	err := m.Logout(ctx)
 
 	// Always reset WsQuit so the subsequent Login() doesn't instantly abort
-	m.WsQuit = false
+	m.setWsQuit(false)
 
 	if err != nil {
 		m.logger.Debugf("reconnectLogout encountered error during teardown: %v", err)
@@ -1213,17 +1534,18 @@ func (m *Client) Logout(ctx context.Context) error {
 	}
 
 	m.logger.Debugf("logout as %s (team: %s) on %s", m.Credentials.Login, m.Credentials.Team, m.Credentials.Server)
+	m.wsMu.Lock()
 	m.WsQuit = true
+	ws := m.WsClient
+	m.wsMu.Unlock()
 
 	// close the websocket
-	if ws := m.WsClient; ws != nil {
+	if ws != nil {
 		m.logger.Debug("closing websocket")
-		ws.Close()
 
 		// The websocket client's reader blocks on full event/response channels, even after Close(),
-		// once WsReceiver is stopped. Keep receiving until it has closed them, or it leaks.
-		go drainChannel(ws.EventChannel)
-		go drainChannel(ws.ResponseChannel)
+		// once WsReceiver is stopped. discardWs keeps receiving until it has closed them, or it leaks.
+		discardWs(ws)
 	}
 
 	// NOTE: We no longer wipe the m.Users maps here.
@@ -1351,7 +1673,11 @@ func (m *Client) HttpPing(ctx context.Context) (string, error) {
 
 // IsAborted checks if the user disconnected, logout was called, or the context died.
 func (m *Client) IsAborted(ctx context.Context) bool {
-	if m.WsQuit {
+	m.wsMu.RLock()
+	quit := m.WsQuit
+	m.wsMu.RUnlock()
+
+	if quit {
 		return true
 	}
 
@@ -1414,7 +1740,7 @@ func (m *Client) RemoveUserFromTeamChannelsCache(teamID, userID string) []string
 				continue
 			}
 
-			delete(m.Users.joinedChannels, chID)
+			m.Users.markLeftLocked(chID)
 
 			if !slices.Contains(removedChannels, chID) {
 				removedChannels = append(removedChannels, chID)
@@ -1456,7 +1782,7 @@ func (m *Client) SetLogLevel(level string) {
 //
 //nolint:funlen,gocyclo,gocognit
 func (m *Client) SyncActiveContextStatuses() {
-	if m.WsClient == nil || !m.WsConnected {
+	if ws, connected := m.wsSnapshot(); ws == nil || !connected {
 		return
 	}
 
@@ -1603,7 +1929,8 @@ func wsSafely(fn func()) (err error) {
 
 // WsPing sends a WebSocket ping and blocks until the server responds or ctx times out.
 func (m *Client) WsPing(ctx context.Context) error {
-	if m.WsClient == nil || !m.WsConnected {
+	ws, connected := m.wsSnapshot()
+	if ws == nil || !connected {
 		return errors.New("websocket not connected")
 	}
 
@@ -1621,7 +1948,7 @@ func (m *Client) WsPing(ctx context.Context) error {
 
 	m.logger.Trace("WsPing: sending ping")
 
-	err := wsSafely(func() { m.WsClient.SendMessage("ping", data) })
+	err := wsSafely(func() { ws.SendMessage("ping", data) })
 	if err != nil {
 		return err
 	}
@@ -1636,7 +1963,8 @@ func (m *Client) WsPing(ctx context.Context) error {
 
 // WsSendTyping broadcasts a user_typing event to Mattermost with a 4-second debounce per channel.
 func (m *Client) WsSendTyping(channelID, parentID string) error {
-	if m.WsClient == nil || !m.WsConnected {
+	ws, connected := m.wsSnapshot()
+	if ws == nil || !connected {
 		return errors.New("websocket not connected")
 	}
 
@@ -1666,7 +1994,7 @@ func (m *Client) WsSendTyping(channelID, parentID string) error {
 		m.logger.Tracef("WsSendTyping: sending user_typing for channel %s", channelID)
 	}
 
-	return wsSafely(func() { m.WsClient.UserTyping(channelID, parentID) })
+	return wsSafely(func() { ws.UserTyping(channelID, parentID) })
 }
 
 func (m *Client) antiIdle(ctx context.Context, channelID string, interval int) {
@@ -2077,9 +2405,9 @@ func (m *Client) syncJoinedChannelsCache(event *model.WebSocketEvent) {
 
 		m.Users.mu.Lock()
 		if event.EventType() == model.WebsocketEventUserAdded {
-			m.Users.joinedChannels[broadcast.ChannelId] = struct{}{}
+			m.Users.markJoinedLocked(broadcast.ChannelId)
 		} else {
-			delete(m.Users.joinedChannels, broadcast.ChannelId)
+			m.Users.markLeftLocked(broadcast.ChannelId)
 		}
 		m.Users.mu.Unlock()
 
@@ -2116,7 +2444,7 @@ func (m *Client) syncJoinedChannelsCache(event *model.WebSocketEvent) {
 
 		if chType == model.ChannelTypeDirect || chType == model.ChannelTypeGroup {
 			m.Users.mu.Lock()
-			m.Users.joinedChannels[chID] = struct{}{}
+			m.Users.markJoinedLocked(chID)
 			m.Users.mu.Unlock()
 		}
 	}

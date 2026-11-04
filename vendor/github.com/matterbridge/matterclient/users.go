@@ -1216,16 +1216,18 @@ func (m *Client) updateUserLocked(id string, updateAt int64, deleteAt int64, use
 
 // WsGetStatuses requests all user statuses over the WebSocket.
 func (m *Client) WsGetStatuses() {
-	if m.WsClient == nil || !m.WsConnected {
+	ws, connected := m.wsSnapshot()
+	if ws == nil || !connected {
 		return
 	}
 
-	_ = wsSafely(func() { m.WsClient.GetStatuses() })
+	_ = wsSafely(func() { ws.GetStatuses() })
 }
 
 // WsGetStatusesByIds requests statuses for specific user IDs in batches over the WebSocket.
 func (m *Client) WsGetStatusesByIds(userIDs []string) {
-	if m.WsClient == nil || !m.WsConnected || len(userIDs) == 0 {
+	ws, connected := m.wsSnapshot()
+	if ws == nil || !connected || len(userIDs) == 0 {
 		return
 	}
 
@@ -1241,6 +1243,6 @@ func (m *Client) WsGetStatusesByIds(userIDs []string) {
 
 		m.logger.Tracef("WsGetStatusesByIds: batch %d-%d of %d: %v", i+1, end, len(userIDs), batch)
 
-		_ = wsSafely(func() { m.WsClient.GetStatusesByIds(batch) })
+		_ = wsSafely(func() { ws.GetStatusesByIds(batch) })
 	}
 }

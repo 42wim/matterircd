@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mattermost/mattermost/server/public/model"
@@ -693,7 +694,7 @@ func (m *Client) JoinChannel(ctx context.Context, channelID string) error {
 	_, err := m.AddChannelMember(ctx, channelID, m.User.Id)
 	if err == nil {
 		m.Users.mu.Lock()
-		m.Users.joinedChannels[channelID] = struct{}{}
+		m.Users.markJoinedLocked(channelID)
 		m.Users.mu.Unlock()
 
 		return nil
@@ -744,7 +745,7 @@ func (m *Client) RemoveUserFromChannel(ctx context.Context, channelID, userID st
 			m.RUnlock()
 			if isCurrentUser {
 				m.Users.mu.Lock()
-				delete(m.Users.joinedChannels, channelID)
+				m.Users.markLeftLocked(channelID)
 				m.Users.mu.Unlock()
 			}
 
@@ -797,11 +798,17 @@ func (m *Client) PatchChannel(ctx context.Context, channelID string, patch *mode
 func (m *Client) UpdateChannelsTeam(ctx context.Context, teamID string) error {
 	var joinedSummaries []ChannelSummary
 
+	// WebSocket events applied while the request is in flight are newer than its response.
+	deltas, stopWatching := m.Users.watchMembership()
+	defer stopWatching()
+
 	retryCount := 0
 	for {
 		if m.IsAborted(ctx) {
 			return errors.New("login aborted")
 		}
+
+		joinedSummaries = joinedSummaries[:0]
 
 		query := "/users/" + m.User.Id + "/teams/" + teamID + "/channels"
 		m.apiLogger.Warnf("UpdateChannelsTeam: DoAPIGet: query %s #%d", query, retryCount)
@@ -832,11 +839,17 @@ func (m *Client) UpdateChannelsTeam(ctx context.Context, teamID string) error {
 	}
 
 	m.Users.mu.Lock()
+
 	if m.Users.channelData == nil {
 		m.Users.channelData = make(map[string]*model.Channel, len(joinedSummaries))
 		m.Users.joinedChannels = make(map[string]struct{}, len(joinedSummaries))
 	} else {
 		for chanID := range m.Users.joinedChannels {
+			if joined, changed := deltas[chanID]; changed && joined {
+				// Joined by an event during the request, the response can't know about it.
+				continue
+			}
+
 			if ch, ok := m.Users.channelData[chanID]; ok && ch.TeamId == teamID {
 				delete(m.Users.joinedChannels, chanID)
 			}
@@ -844,7 +857,14 @@ func (m *Client) UpdateChannelsTeam(ctx context.Context, teamID string) error {
 	}
 
 	for i := range joinedSummaries {
-		m.Users.joinedChannels[m.Users.cacheChannelLocked(teamID, &joinedSummaries[i]).Id] = struct{}{}
+		id := m.Users.cacheChannelLocked(teamID, &joinedSummaries[i]).Id
+
+		if joined, changed := deltas[id]; changed && !joined {
+			// Left by an event during the request, don't resurrect it from the stale response.
+			continue
+		}
+
+		m.Users.joinedChannels[id] = struct{}{}
 	}
 
 	_, hasCache := m.Users.publicChannelsSynced[teamID]
@@ -1029,17 +1049,37 @@ func (m *Client) UpdateChannels(ctx context.Context) error {
 		return err
 	}
 
+	var (
+		wg       sync.WaitGroup
+		errMu    sync.Mutex
+		firstErr error
+	)
+
 	for _, t := range m.OtherTeams {
 		// We've already populated users/channels for team in the above.
 		if t.ID == m.Team.ID {
 			continue
 		}
-		if err := m.UpdateChannelsTeam(ctx, t.ID); err != nil {
-			return err
-		}
+
+		wg.Add(1)
+
+		go func(teamID string) {
+			defer wg.Done()
+
+			err := m.UpdateChannelsTeam(ctx, teamID)
+			if err != nil {
+				errMu.Lock()
+				if firstErr == nil {
+					firstErr = err
+				}
+				errMu.Unlock()
+			}
+		}(t.ID)
 	}
 
-	return nil
+	wg.Wait()
+
+	return firstErr
 }
 
 func (m *Client) UpdateChannelHeader(ctx context.Context, channelID string, header string) {
@@ -1131,5 +1171,46 @@ func (m *Client) UpdateLastViewed(ctx context.Context, channelID string) error {
 
 		m.logger.Errorf("ChannelView update for %s (%s) failed: %v", channelName, channelID, err)
 		return err
+	}
+}
+
+// markJoinedLocked records that the user joined the channel. The users cache has to be locked.
+func (c *UsersCache) markJoinedLocked(channelID string) {
+	c.joinedChannels[channelID] = struct{}{}
+
+	for _, deltas := range c.membershipWatchers {
+		deltas[channelID] = true
+	}
+}
+
+// markLeftLocked records that the user left the channel. The users cache has to be locked.
+func (c *UsersCache) markLeftLocked(channelID string) {
+	delete(c.joinedChannels, channelID)
+
+	for _, deltas := range c.membershipWatchers {
+		deltas[channelID] = false
+	}
+}
+
+// watchMembership starts collecting the membership changes made from now on, including those of channels the cache
+// doesn't know about yet. The returned map is only safe to read with the users cache locked, and the stop function
+// has to be called to release it.
+func (c *UsersCache) watchMembership() (map[string]bool, func()) {
+	deltas := make(map[string]bool)
+
+	c.mu.Lock()
+	if c.membershipWatchers == nil {
+		c.membershipWatchers = make(map[int]map[string]bool)
+	}
+
+	id := c.nextWatcherID
+	c.nextWatcherID++
+	c.membershipWatchers[id] = deltas
+	c.mu.Unlock()
+
+	return deltas, func() {
+		c.mu.Lock()
+		delete(c.membershipWatchers, id)
+		c.mu.Unlock()
 	}
 }
