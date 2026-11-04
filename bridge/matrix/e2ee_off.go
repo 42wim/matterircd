@@ -12,5 +12,7 @@ func (m *Matrix) encryptionOptions(bridge.Credentials) ([]matrixclient.Option, e
 		logger.Warn("matrix: EncryptionDir is set but this build has no encryption support, build with -tags goolm")
 	}
 
+	logger.Info("matrix: end-to-end encryption NOT ENABLED - make sure built with `CGO_ENABLED=1` and `-tags=goolm`")
+
 	return nil, nil
 }
