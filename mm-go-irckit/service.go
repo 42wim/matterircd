@@ -93,6 +93,7 @@ func loginMatrix(u *User, toUser *User, args []string) {
 		if d, ok := u.currentBridge().(interface{ DeviceInfo() (string, string) }); ok {
 			deviceID, fingerprint := d.DeviceInfo()
 			u.MsgUser(toUser, "to verify this session, compare in your other client: device ID "+deviceID+", session key "+fingerprint)
+			u.MsgUser(toUser, "or use VERIFY START to verify interactively")
 		}
 	}
 }
@@ -936,6 +937,29 @@ func updatelastviewed(u *User, toUser *User, args []string, service string) {
 	u.MsgUser(toUser, fmt.Sprintf("set viewed for %s", args[0]))
 }
 
+func verify(u *User, toUser *User, args []string, service string) {
+	v, ok := u.currentBridge().(interface {
+		Verify(ctx context.Context, action string) (string, error)
+	})
+	if !ok {
+		u.MsgUser(toUser, "verification is not supported by this service")
+		return
+	}
+
+	if len(args) != 1 || args[0] == helpArg {
+		u.MsgUser(toUser, "usage: VERIFY START|ACCEPT|SAS|CONFIRM|MISMATCH|CANCEL")
+		return
+	}
+
+	msg, err := v.Verify(u.ctx, strings.ToLower(args[0]))
+	if err != nil {
+		u.MsgUser(toUser, "verify: "+err.Error())
+		return
+	}
+
+	u.MsgUser(toUser, msg)
+}
+
 var cmds = map[string]Command{
 	"channel":          {handler: channelCmd, login: true, minParams: 2, maxParams: 3},
 	"details":          {handler: details, login: true, minParams: 1, maxParams: 1},
@@ -953,6 +977,7 @@ var cmds = map[string]Command{
 	"summary":          {handler: summarize, login: true, minParams: 1, maxParams: 4},
 	"tldr":             {handler: summarize, login: true, minParams: 1, maxParams: 4},
 	"updatelastviewed": {handler: updatelastviewed, login: true, minParams: 1, maxParams: 1},
+	"verify":           {handler: verify, login: true, minParams: 1, maxParams: 1},
 }
 
 func (u *User) handleServiceBot(service string, toUser *User, msg string) {

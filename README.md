@@ -74,6 +74,8 @@ go build -tags goolm -ldflags="-X main.githash=$(git describe --always --dirty -
 
 The `goolm` tag enables Matrix end-to-end encryption, which also needs cgo (`CGO_ENABLED=1` and a C compiler).
 
+With encryption enabled, verify a Matrix session from the service bot with `VERIFY START`, accept it on your other device, then `VERIFY SAS`, compare the emoji and `VERIFY CONFIRM` (or `VERIFY MISMATCH`). Incoming requests are answered with `VERIFY ACCEPT` or `VERIFY CANCEL`. The request goes to all your other devices, not a selected one.
+
 Or:
 
 ```bash

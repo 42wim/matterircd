@@ -116,6 +116,12 @@ type Matrix struct {
 	sentMu       sync.Mutex
 	sentCache    *lru.Cache[id.EventID, struct{}]
 	pendingSends map[string]int // text of the sends in flight
+
+	// verifyMu guards verifyTxn, the verification the VERIFY commands act on.
+	verifyMu    sync.Mutex
+	verifyTxn   id.VerificationTransactionID
+	verifySAS   bool // the SAS of verifyTxn was shown, which VERIFY CONFIRM requires
+	verifyQueue chan *matrixclient.Verification
 }
 
 func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Event, onConnect func()) (bridge.Bridger, *matrixclient.Client, error) {
@@ -131,6 +137,7 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 		initDone:  make(chan struct{}),
 
 		roomUpdateWake: make(chan struct{}, 1),
+		verifyQueue:    make(chan *matrixclient.Verification, verificationQueueSize),
 	}
 
 	// Also unblocks a Ready that is waiting for a failed New.
@@ -169,6 +176,8 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 		Login:  cred.Login,
 		Pass:   cred.Pass,
 		Token:  cred.Token,
+
+		DeviceName: "matterircd",
 	}, m, opts...)
 	if err != nil {
 		cancel()
@@ -232,6 +241,9 @@ func (m *Matrix) Ready() {
 	}
 
 	m.ready.Store(true)
+
+	// Started after ready is set, as sendEventCtx drops notices before that.
+	go m.verificationLoop()
 
 	// Invitations of the initial sync are not delivered to OnInvite. The snapshot
 	// is taken here, on the sync goroutine, so a later invite cannot be missed or
