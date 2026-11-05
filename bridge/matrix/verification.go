@@ -26,7 +26,7 @@ var sasEmojiAliases = map[string]string{
 	"Book": "closed_book", "Pencil": "pencil2", "Flag": "checkered_flag", "Train": "steam_locomotive",
 	"Bicycle": "bike", "Ball": "soccer", "Folder": "file_folder", "Pin": "pushpin",
 	"Aeroplane": "airplane", //nolint:misspell // the description string used by the SAS spec
-	"Horse": "racehorse", "Umbrella": "umbrella2",
+	"Horse":     "racehorse", "Umbrella": "umbrella2",
 }
 
 var errNoVerification = errors.New("no verification in progress, use VERIFY START")
