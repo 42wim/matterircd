@@ -780,6 +780,14 @@ func (u *User) handleChannelDeleteEvent(event *bridge.ChannelDeleteEvent) {
 	} else {
 		logger.Debugf("ACTION_CHANNEL_DELETED not in channel %s (%s)", u.br.GetChannelName(u.ctx, event.ChannelID), event.ChannelID)
 	}
+
+	// Unlink it so a channel created later for this ID, a room restored after
+	// turning into a DM for instance, gets the current name instead of reusing this one.
+	u.Lock()
+	delete(u.channels, ch)
+	u.Unlock()
+
+	ch.Unlink()
 }
 
 //nolint:funlen

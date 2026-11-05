@@ -111,9 +111,10 @@ func (m *Matrix) onRoomNameResolved(roomID id.RoomID, name string) {
 }
 
 // queueRoomUpdate hands a rename to roomUpdateLoop. matrixclient serializes its
-// callbacks, so queueing in call order and keeping only the newest name per room
-// stops a stale name from being applied last. It never blocks.
-// A drop or restore is kept when a plain rename of the room is queued after it.
+// callbacks, so queueing in call order and keeping only the newest name of
+// consecutive renames of a room stops a stale name from being applied last.
+// Drops and restores are never merged, the IRC side has to see each transition
+// in order to part, unlink and recreate the channel. It never blocks.
 func (m *Matrix) queueRoomUpdate(roomID id.RoomID, name, displayName string, kind matrixclient.RoomRenameKind) {
 	name = strings.TrimPrefix(name, "#")
 	if displayName == "" {
@@ -122,24 +123,34 @@ func (m *Matrix) queueRoomUpdate(roomID id.RoomID, name, displayName string, kin
 
 	m.roomUpdateMu.Lock()
 
-	if m.roomUpdates == nil {
-		m.roomUpdates = make(map[id.RoomID]*roomUpdate)
-	}
-
-	queued, ok := m.roomUpdates[roomID]
-	if !ok {
-		m.roomUpdateOrder = append(m.roomUpdateOrder, roomID)
-	} else if kind == matrixclient.RoomRenamed {
-		kind = queued.kind
-	}
-
-	m.roomUpdates[roomID] = &roomUpdate{
+	update := &roomUpdate{
 		kind: kind,
 		ev: &bridge.ChannelUpdateEvent{
 			ChannelID:   roomID.String(),
 			Name:        name,
 			DisplayName: displayName,
 		},
+	}
+
+	merged := false
+
+	if kind == matrixclient.RoomRenamed {
+		for i := len(m.roomUpdates) - 1; i >= 0; i-- {
+			if m.roomUpdates[i].ev.ChannelID != update.ev.ChannelID {
+				continue
+			}
+
+			if m.roomUpdates[i].kind == matrixclient.RoomRenamed {
+				m.roomUpdates[i] = update
+				merged = true
+			}
+
+			break
+		}
+	}
+
+	if !merged {
+		m.roomUpdates = append(m.roomUpdates, update)
 	}
 
 	m.roomUpdateMu.Unlock()
@@ -162,17 +173,15 @@ func (m *Matrix) roomUpdateLoop(ctx context.Context) {
 		for {
 			m.roomUpdateMu.Lock()
 
-			if len(m.roomUpdateOrder) == 0 {
+			if len(m.roomUpdates) == 0 {
 				m.roomUpdateMu.Unlock()
 
 				break
 			}
 
-			roomID := m.roomUpdateOrder[0]
-			m.roomUpdateOrder = m.roomUpdateOrder[1:]
-			update := m.roomUpdates[roomID]
-
-			delete(m.roomUpdates, roomID)
+			update := m.roomUpdates[0]
+			m.roomUpdates[0] = nil
+			m.roomUpdates = m.roomUpdates[1:]
 			m.roomUpdateMu.Unlock()
 
 			m.sendRoomUpdate(ctx, update)

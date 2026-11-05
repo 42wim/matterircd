@@ -94,8 +94,7 @@ type Matrix struct {
 
 	// roomUpdateMu guards the renames waiting for roomUpdateLoop, see queueRoomUpdate.
 	roomUpdateMu     sync.Mutex
-	roomUpdates      map[id.RoomID]*roomUpdate
-	roomUpdateOrder  []id.RoomID
+	roomUpdates      []*roomUpdate
 	roomUpdateWake   chan struct{}
 	roomUpdateCancel context.CancelFunc
 
