@@ -194,7 +194,7 @@ func (m *Matrix) Verify(ctx context.Context, action string) (string, error) {
 
 		m.setVerifyTxn(txn)
 
-		return "verification requested, accept it on your other device", nil
+		return "verification requested, accept it on your other device, then use VERIFY SAS to begin the comparison", nil
 	}
 
 	txn, shown := m.currentVerifyTxn()
@@ -212,7 +212,7 @@ func (m *Matrix) Verify(ctx context.Context, action string) (string, error) {
 			return "", errors.New("no emoji comparison shown for the active verification")
 		}
 
-		return "confirmed, waiting for the other device", m.mc.ConfirmSAS(ctx, txn)
+		return "confirmed, now confirm the match on your other device too, then wait for the verification complete notice (VERIFY CANCEL to abort)", m.mc.ConfirmSAS(ctx, txn)
 	case "mismatch":
 		return "canceled, the symbols did not match", m.cancelVerification(ctx, txn, event.VerificationCancelCodeSASMismatch, "SAS mismatch")
 	case "cancel":
