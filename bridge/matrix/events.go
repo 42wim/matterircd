@@ -100,20 +100,21 @@ func (m *Matrix) OnTopic(t *matrixclient.TopicChange) {
 
 // OnRoomName implements matrixclient.RoomNameHandler.
 func (m *Matrix) OnRoomName(r *matrixclient.RoomRename) {
-	m.queueRoomUpdate(r.RoomID, r.Name, r.DisplayName)
+	m.queueRoomUpdate(r.RoomID, r.Name, r.DisplayName, r.Kind)
 }
 
 // onRoomNameResolved is the matrixclient.WithRoomNameResolved callback, which
 // must not block.
 func (m *Matrix) onRoomNameResolved(roomID id.RoomID, name string) {
 	m.nameResolveTried.Delete(roomID)
-	m.queueRoomUpdate(roomID, name, "")
+	m.queueRoomUpdate(roomID, name, "", matrixclient.RoomRenamed)
 }
 
 // queueRoomUpdate hands a rename to roomUpdateLoop. matrixclient serializes its
 // callbacks, so queueing in call order and keeping only the newest name per room
 // stops a stale name from being applied last. It never blocks.
-func (m *Matrix) queueRoomUpdate(roomID id.RoomID, name, displayName string) {
+// A drop or restore is kept when a plain rename of the room is queued after it.
+func (m *Matrix) queueRoomUpdate(roomID id.RoomID, name, displayName string, kind matrixclient.RoomRenameKind) {
 	name = strings.TrimPrefix(name, "#")
 	if displayName == "" {
 		displayName = name
@@ -122,17 +123,23 @@ func (m *Matrix) queueRoomUpdate(roomID id.RoomID, name, displayName string) {
 	m.roomUpdateMu.Lock()
 
 	if m.roomUpdates == nil {
-		m.roomUpdates = make(map[id.RoomID]*bridge.ChannelUpdateEvent)
+		m.roomUpdates = make(map[id.RoomID]*roomUpdate)
 	}
 
-	if _, queued := m.roomUpdates[roomID]; !queued {
+	queued, ok := m.roomUpdates[roomID]
+	if !ok {
 		m.roomUpdateOrder = append(m.roomUpdateOrder, roomID)
+	} else if kind == matrixclient.RoomRenamed {
+		kind = queued.kind
 	}
 
-	m.roomUpdates[roomID] = &bridge.ChannelUpdateEvent{
-		ChannelID:   roomID.String(),
-		Name:        name,
-		DisplayName: displayName,
+	m.roomUpdates[roomID] = &roomUpdate{
+		kind: kind,
+		ev: &bridge.ChannelUpdateEvent{
+			ChannelID:   roomID.String(),
+			Name:        name,
+			DisplayName: displayName,
+		},
 	}
 
 	m.roomUpdateMu.Unlock()
@@ -163,29 +170,40 @@ func (m *Matrix) roomUpdateLoop(ctx context.Context) {
 
 			roomID := m.roomUpdateOrder[0]
 			m.roomUpdateOrder = m.roomUpdateOrder[1:]
-			ev := m.roomUpdates[roomID]
+			update := m.roomUpdates[roomID]
 
 			delete(m.roomUpdates, roomID)
 			m.roomUpdateMu.Unlock()
 
-			// The name may have been given a suffix to keep it unique.
-			info, err := m.GetChannel(ctx, ev.ChannelID)
-			if err == nil && info.DM {
-				// The room turned into a DM after it was joined as a channel.
-				m.sendEventCtx(ctx, &bridge.Event{
-					Type: "channel_delete",
-					Data: &bridge.ChannelDeleteEvent{ChannelID: ev.ChannelID},
-				})
-
-				continue
-			}
-
-			if err == nil {
-				ev.Name = info.Name
-			}
-
-			m.sendEventCtx(ctx, &bridge.Event{Type: "channel_update", Data: ev})
+			m.sendRoomUpdate(ctx, update)
 		}
+	}
+}
+
+// sendRoomUpdate dispatches on the kind captured by matrixclient, not on the live
+// DM state, which may have changed again since the update was queued.
+func (m *Matrix) sendRoomUpdate(ctx context.Context, update *roomUpdate) {
+	ev := update.ev
+
+	switch update.kind {
+	case matrixclient.RoomDropped:
+		m.sendEventCtx(ctx, &bridge.Event{
+			Type: "channel_delete",
+			Data: &bridge.ChannelDeleteEvent{ChannelID: ev.ChannelID},
+		})
+	case matrixclient.RoomRestored:
+		m.sendEventCtx(ctx, &bridge.Event{
+			Type: "channel_create",
+			Data: &bridge.ChannelCreateEvent{ChannelID: ev.ChannelID},
+		})
+	case matrixclient.RoomRenamed:
+		// The name may have been given a suffix to keep it unique.
+		info, err := m.GetChannel(ctx, ev.ChannelID)
+		if err == nil && !info.DM {
+			ev.Name = info.Name
+		}
+
+		m.sendEventCtx(ctx, &bridge.Event{Type: "channel_update", Data: ev})
 	}
 }
 

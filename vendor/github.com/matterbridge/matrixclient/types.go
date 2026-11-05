@@ -63,6 +63,10 @@ type Channel struct {
 	joinRule event.JoinRule // from the join_rules state, "" until seen
 	// worldReadable is set by the history_visibility state, anyone can read such a room without joining.
 	worldReadable bool
+	// listedAsChannel is set once the room was handed out as a channel, so a later turn into a DM is reported.
+	listedAsChannel bool
+	// droppedAsDirect is set once a DM transition was reported, so turning back into a channel is reported too.
+	droppedAsDirect bool
 
 	heroes       []id.UserID // members the server suggests to name the room after, from the sync summary
 	reportedName string      // channel name last reported to the consumer, see RoomNameHandler
@@ -215,12 +219,28 @@ type InviteHandler interface {
 	OnInvite(invite *Invitation)
 }
 
+// RoomRenameKind tells what a RoomRename reports.
+type RoomRenameKind int
+
+const (
+	RoomRenamed  RoomRenameKind = iota // the channel was renamed
+	RoomDropped                        // the room turned into a DM, drop the channel of OldName
+	RoomRestored                       // the room is a channel again, JOIN Name
+)
+
 // RoomRename is a change of the channel name of a room, as listed by Client.Rooms.
 // Like matterircd's ChannelUpdateEvent for Mattermost it carries the room ID, the
 // new channel name and the display name. A consumer is expected to handle it the
 // same way: PART the channel of OldName with "Channel renamed to <Name>", JOIN
-// Name and send a server notice. Direct rooms are never reported.
+// Name and send a server notice. Direct rooms are never reported, except once when a
+// room that was handed out as a channel turns into one: the consumer is expected to
+// drop the channel of OldName (Kind RoomDropped). Turning back into a channel is reported once
+// as well (Kind RoomRestored), JOIN Name then, OldName is not a channel the consumer holds.
+// Consumers should dispatch on Kind, not on the live Client.IsDirect.
 type RoomRename struct {
+	// Kind is captured when the event is created, a consumer that queues it must not infer
+	// the transition from the live Client.IsDirect, which may have changed since.
+	Kind        RoomRenameKind
 	RoomID      id.RoomID
 	OldName     string
 	Name        string

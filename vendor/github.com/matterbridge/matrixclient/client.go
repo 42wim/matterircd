@@ -567,10 +567,15 @@ func (c *Client) Rooms() []RoomInfo {
 		ch.Lock()
 
 		display := c.displayNameLocked(roomID, ch)
-		ch.reportNameLocked(display)
-
 		_, inferred := c.inferredDirectLocked(ch)
 		unresolved, direct, members, last := ch.nameUnresolvedLocked(), ch.IsDirect || inferred, len(ch.Members), ch.LastActivity
+
+		// The name of a DM is not a channel name, the baseline stays what the consumer holds.
+		if !direct {
+			ch.reportNameLocked(display)
+		}
+
+		ch.noteListedLocked(direct)
 
 		ch.Unlock()
 

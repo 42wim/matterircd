@@ -67,6 +67,12 @@ var markdownReplacer = strings.NewReplacer(
 	"~~~", "`",
 )
 
+// roomUpdate is a queued room change, see queueRoomUpdate.
+type roomUpdate struct {
+	ev   *bridge.ChannelUpdateEvent
+	kind matrixclient.RoomRenameKind
+}
+
 type Matrix struct {
 	mc        *matrixclient.Client
 	eventChan chan *bridge.Event
@@ -88,7 +94,7 @@ type Matrix struct {
 
 	// roomUpdateMu guards the renames waiting for roomUpdateLoop, see queueRoomUpdate.
 	roomUpdateMu     sync.Mutex
-	roomUpdates      map[id.RoomID]*bridge.ChannelUpdateEvent
+	roomUpdates      map[id.RoomID]*roomUpdate
 	roomUpdateOrder  []id.RoomID
 	roomUpdateWake   chan struct{}
 	roomUpdateCancel context.CancelFunc
