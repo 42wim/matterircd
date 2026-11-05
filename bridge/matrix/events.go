@@ -2,6 +2,7 @@ package matrix
 
 import (
 	"context"
+	"slices"
 	"strings"
 
 	"maunium.net/go/mautrix/event"
@@ -135,12 +136,12 @@ func (m *Matrix) queueRoomUpdate(roomID id.RoomID, name, displayName string, kin
 	merged := false
 
 	if kind == matrixclient.RoomRenamed {
-		for i := len(m.roomUpdates) - 1; i >= 0; i-- {
-			if m.roomUpdates[i].ev.ChannelID != update.ev.ChannelID {
+		for i, queued := range slices.Backward(m.roomUpdates) {
+			if queued.ev.ChannelID != update.ev.ChannelID {
 				continue
 			}
 
-			if m.roomUpdates[i].kind == matrixclient.RoomRenamed {
+			if queued.kind == matrixclient.RoomRenamed {
 				m.roomUpdates[i] = update
 				merged = true
 			}
