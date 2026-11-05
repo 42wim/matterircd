@@ -24,7 +24,8 @@ var sasEmojiAliases = map[string]string{
 	"Moon": "crescent_moon", "Smiley": "grinning", "Hat": "tophat", "Glasses": "eyeglasses",
 	"Spanner": "wrench", "Thumbs Up": "+1", "Clock": "alarm_clock", "Light Bulb": "bulb",
 	"Book": "closed_book", "Pencil": "pencil2", "Flag": "checkered_flag", "Train": "steam_locomotive",
-	"Bicycle": "bike", "Aeroplane": "airplane", "Ball": "soccer", "Folder": "file_folder", "Pin": "pushpin",
+	"Bicycle": "bike", "Ball": "soccer", "Folder": "file_folder", "Pin": "pushpin",
+	"Aeroplane": "airplane", //nolint:misspell // the description string used by the SAS spec
 	"Horse": "racehorse", "Umbrella": "umbrella2",
 }
 
@@ -51,17 +52,21 @@ func (m *Matrix) verificationLoop() {
 	}
 }
 
+// setVerifyTxn makes txn the active verification. Any displayed SAS belongs to
+// the previous transaction, so it no longer allows a confirmation.
 func (m *Matrix) setVerifyTxn(txn id.VerificationTransactionID) {
 	m.verifyMu.Lock()
 	m.verifyTxn = txn
+	m.verifySAS = false
 	m.verifyMu.Unlock()
 }
 
-func (m *Matrix) currentVerifyTxn() id.VerificationTransactionID {
+// currentVerifyTxn returns the active transaction, and whether its SAS was shown.
+func (m *Matrix) currentVerifyTxn() (id.VerificationTransactionID, bool) {
 	m.verifyMu.Lock()
 	defer m.verifyMu.Unlock()
 
-	return m.verifyTxn
+	return m.verifyTxn, m.verifySAS
 }
 
 // clearVerifyTxn forgets txn, unless a newer transaction replaced it.
@@ -69,21 +74,60 @@ func (m *Matrix) clearVerifyTxn(txn id.VerificationTransactionID) {
 	m.verifyMu.Lock()
 	if m.verifyTxn == txn {
 		m.verifyTxn = ""
+		m.verifySAS = false
 	}
 	m.verifyMu.Unlock()
 }
 
+// updateVerifyTxn applies an update to the active transaction. It reports false
+// for a superseded transaction, whose updates must not reach the user. A new
+// request replaces the active one, and a ready update only adopts a
+// transaction when none is active, as it follows our own start.
+func (m *Matrix) updateVerifyTxn(v *matrixclient.Verification) bool {
+	m.verifyMu.Lock()
+	defer m.verifyMu.Unlock()
+
+	switch {
+	case v.Stage == matrixclient.VerificationRequested:
+		m.verifyTxn = v.TransactionID
+		m.verifySAS = false
+	case v.Stage == matrixclient.VerificationReady && m.verifyTxn == "":
+		m.verifyTxn = v.TransactionID
+	case m.verifyTxn != v.TransactionID:
+		return false
+	case v.Stage == matrixclient.VerificationSAS:
+		m.verifySAS = true
+	case v.Stage == matrixclient.VerificationCancelled, v.Stage == matrixclient.VerificationDone:
+		m.verifyTxn = ""
+		m.verifySAS = false
+	}
+
+	return true
+}
+
+// sanitizeNotice replaces the characters that would end the IRC line, as the
+// reason and codes of a cancellation are chosen by the remote device.
+func sanitizeNotice(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\r' || r == '\n' || r == 0 {
+			return ' '
+		}
+
+		return r
+	}, s)
+}
+
 func (m *Matrix) handleVerification(v *matrixclient.Verification) {
+	if !m.updateVerifyTxn(v) {
+		return
+	}
+
 	var text string
 
 	switch v.Stage {
 	case matrixclient.VerificationRequested:
-		m.setVerifyTxn(v.TransactionID)
-
 		text = fmt.Sprintf("verification requested by %s (device %s), use VERIFY ACCEPT to accept or VERIFY CANCEL to decline", v.UserID, v.DeviceID)
 	case matrixclient.VerificationReady:
-		m.setVerifyTxn(v.TransactionID)
-
 		if !v.SupportsSAS {
 			text = "the other device does not support emoji verification, use VERIFY CANCEL"
 
@@ -94,18 +138,14 @@ func (m *Matrix) handleVerification(v *matrixclient.Verification) {
 	case matrixclient.VerificationSAS:
 		text = "compare with the other device: " + formatSAS(v) + " - if identical use VERIFY CONFIRM, else VERIFY MISMATCH"
 	case matrixclient.VerificationCancelled:
-		m.clearVerifyTxn(v.TransactionID)
-
 		text = fmt.Sprintf("verification canceled: %s (%s)", v.Reason, v.CancelCode)
 	case matrixclient.VerificationDone:
-		m.clearVerifyTxn(v.TransactionID)
-
 		text = "verification complete, this session is now verified"
 	default:
 		return
 	}
 
-	m.sendEventCtx(m.ctx, &bridge.Event{Type: "banner_change", Data: &bridge.BannerChangeEvent{Text: text}})
+	m.sendEventCtx(m.ctx, &bridge.Event{Type: "banner_change", Data: &bridge.BannerChangeEvent{Text: sanitizeNotice(text)}})
 }
 
 func formatSAS(v *matrixclient.Verification) string {
@@ -157,7 +197,7 @@ func (m *Matrix) Verify(ctx context.Context, action string) (string, error) {
 		return "verification requested, accept it on your other device", nil
 	}
 
-	txn := m.currentVerifyTxn()
+	txn, shown := m.currentVerifyTxn()
 	if txn == "" {
 		return "", errNoVerification
 	}
@@ -168,6 +208,10 @@ func (m *Matrix) Verify(ctx context.Context, action string) (string, error) {
 	case "sas":
 		return "starting emoji comparison", m.mc.StartSAS(ctx, txn)
 	case "confirm":
+		if !shown {
+			return "", errors.New("no emoji comparison shown for the active verification")
+		}
+
 		return "confirmed, waiting for the other device", m.mc.ConfirmSAS(ctx, txn)
 	case "mismatch":
 		return "canceled, the symbols did not match", m.cancelVerification(ctx, txn, event.VerificationCancelCodeSASMismatch, "SAS mismatch")

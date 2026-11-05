@@ -120,6 +120,7 @@ type Matrix struct {
 	// verifyMu guards verifyTxn, the verification the VERIFY commands act on.
 	verifyMu    sync.Mutex
 	verifyTxn   id.VerificationTransactionID
+	verifySAS   bool // the SAS of verifyTxn was shown, which VERIFY CONFIRM requires
 	verifyQueue chan *matrixclient.Verification
 }
 
@@ -192,7 +193,6 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 	loopCtx, m.roomUpdateCancel = context.WithCancel(ctx)
 
 	go m.roomUpdateLoop(loopCtx)
-	go m.verificationLoop()
 
 	setLogLevels := func(rc *config.RuntimeConfig) {
 		switch {
@@ -241,6 +241,9 @@ func (m *Matrix) Ready() {
 	}
 
 	m.ready.Store(true)
+
+	// Started after ready is set, as sendEventCtx drops notices before that.
+	go m.verificationLoop()
 
 	// Invitations of the initial sync are not delivered to OnInvite. The snapshot
 	// is taken here, on the sync goroutine, so a later invite cannot be missed or
