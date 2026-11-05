@@ -293,6 +293,7 @@ func (c *Client) register(s *mautrix.DefaultSyncer) {
 	s.OnEventType(event.AccountDataDirectChats, c.handleDM)
 	onState(event.StateCanonicalAlias, c.handleCanonicalAlias)
 	onState(event.StateJoinRules, c.handleJoinRules)
+	onState(event.StateHistoryVisibility, c.handleHistoryVisibility)
 	s.OnEventType(event.EventRedaction, c.handleRedaction)
 	s.OnEventType(event.EphemeralEventTyping, c.handleTyping)
 	onState(event.StateTopic, c.handleTopic)

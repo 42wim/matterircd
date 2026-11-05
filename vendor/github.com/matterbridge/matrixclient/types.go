@@ -61,6 +61,8 @@ type Channel struct {
 	joinedSeen, invitedSeen   bool
 
 	joinRule event.JoinRule // from the join_rules state, "" until seen
+	// worldReadable is set by the history_visibility state, anyone can read such a room without joining.
+	worldReadable bool
 
 	heroes       []id.UserID // members the server suggests to name the room after, from the sync summary
 	reportedName string      // channel name last reported to the consumer, see RoomNameHandler

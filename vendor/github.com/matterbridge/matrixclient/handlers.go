@@ -81,11 +81,16 @@ func (c *Client) handleDM(_ context.Context, ev *event.Event) {
 }
 
 // inferredDirectLocked returns the peer of a room that clients such as Element show as a
-// direct message although it is not in m.direct: it is invite-only, so nobody else can join and
-// read what is sent as a private message, has two members, no name and no alias (confirmed by the
-// server), and the other member is known. c must be read locked and ch locked.
+// direct message although it is not in m.direct: it is invite-only and not world readable, so
+// nobody else can join or read what is sent as a private message, it is not a space, has two
+// members, no name and no alias (confirmed by the server), and the other member is known. c must
+// be read locked and ch locked.
 func (c *Client) inferredDirectLocked(ch *Channel) (id.UserID, bool) {
-	if ch.IsDirect || ch.joinRule != event.JoinRuleInvite || !ch.joinedSeen || !ch.invitedSeen || ch.joinedCount+ch.invitedCount != 2 || ch.Name != "" || ch.Alias != "" || !ch.nameChecked {
+	if sp, isSpace := c.spaces[ch.ID]; isSpace && sp.isSpace {
+		return "", false
+	}
+
+	if ch.IsDirect || ch.joinRule != event.JoinRuleInvite || ch.worldReadable || !ch.joinedSeen || !ch.invitedSeen || ch.joinedCount+ch.invitedCount != 2 || ch.Name != "" || ch.Alias != "" || !ch.nameChecked {
 		return "", false
 	}
 
@@ -224,6 +229,22 @@ func (c *Client) handleJoinRules(_ context.Context, ev *event.Event) {
 
 	ch.Lock()
 	ch.joinRule = rules.JoinRule
+	ch.Unlock()
+}
+
+func (c *Client) handleHistoryVisibility(_ context.Context, ev *event.Event) {
+	vis := ev.Content.AsHistoryVisibility()
+	if vis == nil {
+		return
+	}
+
+	c.Lock()
+	defer c.Unlock()
+
+	ch := c.channelLocked(ev.RoomID)
+
+	ch.Lock()
+	ch.worldReadable = vis.HistoryVisibility == event.HistoryVisibilityWorldReadable
 	ch.Unlock()
 }
 
