@@ -398,6 +398,26 @@ func (c *Client) Connected() bool { return c.connected.Load() }
 // Encrypted reports whether end-to-end encryption is enabled.
 func (c *Client) Encrypted() bool { return c.crypto != nil }
 
+// DeviceID is the ID of our device, as listed under the sessions of other clients.
+// It is empty when end-to-end encryption is disabled.
+func (c *Client) DeviceID() id.DeviceID {
+	if c.crypto == nil {
+		return ""
+	}
+
+	return c.mc.DeviceID
+}
+
+// Fingerprint is the fingerprint of our device's Ed25519 key, for manual verification.
+// It is empty when end-to-end encryption is disabled.
+func (c *Client) Fingerprint() string {
+	if p, ok := c.crypto.(FingerprintProvider); ok {
+		return p.Fingerprint()
+	}
+
+	return ""
+}
+
 // UserID is our own user ID.
 func (c *Client) UserID() id.UserID { return c.mc.UserID }
 
