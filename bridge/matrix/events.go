@@ -170,7 +170,17 @@ func (m *Matrix) roomUpdateLoop(ctx context.Context) {
 
 			// The name may have been given a suffix to keep it unique.
 			info, err := m.GetChannel(ctx, ev.ChannelID)
-			if err == nil && !info.DM {
+			if err == nil && info.DM {
+				// The room turned into a DM after it was joined as a channel.
+				m.sendEventCtx(ctx, &bridge.Event{
+					Type: "channel_delete",
+					Data: &bridge.ChannelDeleteEvent{ChannelID: ev.ChannelID},
+				})
+
+				continue
+			}
+
+			if err == nil {
 				ev.Name = info.Name
 			}
 
