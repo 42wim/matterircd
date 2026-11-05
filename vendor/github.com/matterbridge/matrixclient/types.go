@@ -75,6 +75,12 @@ type pendingSeq struct {
 	at  time.Time
 }
 
+// pendingAssoc is a direct room association not yet seen in a synced m.direct.
+type pendingAssoc struct {
+	user    id.UserID
+	written bool // the write succeeded, it stays pending until a sync confirms it
+}
+
 // Message is an incoming room or direct message. Messages sent by ourselves
 // from other sessions are delivered too, compare Sender with Client.UserID.
 type Message struct {
@@ -129,6 +135,17 @@ type MemberChange struct {
 	Reason     string
 }
 
+// Invitation is a pending invitation for Client.UserID. Name, Alias and Reason
+// may be empty; RoomID is the authoritative target to pass to Client.Join.
+type Invitation struct {
+	RoomID id.RoomID
+	Sender id.UserID
+	Name   string
+	Alias  id.RoomAlias
+	Reason string
+	Direct bool
+}
+
 // TopicChange is a room topic change.
 type TopicChange struct {
 	RoomID id.RoomID
@@ -177,6 +194,13 @@ type RedactionHandler interface {
 // membership changes. Changes from the initial sync are not delivered.
 type MemberHandler interface {
 	OnMember(m *MemberChange)
+}
+
+// InviteHandler can optionally be implemented by a Handler to receive new or
+// changed invitations after the initial sync. Initial invitations are available
+// through Client.Invitations when Ready is called. Callbacks must not block.
+type InviteHandler interface {
+	OnInvite(invite *Invitation)
 }
 
 // RoomRename is a change of the channel name of a room, as listed by Client.Rooms.

@@ -163,7 +163,7 @@ func (c *Client) DeleteReaction(ctx context.Context, roomID id.RoomID, reactionI
 	return c.Delete(ctx, roomID, reactionID)
 }
 
-// Leave leaves a room.
+// Leave leaves a room or rejects a pending invitation.
 func (c *Client) Leave(ctx context.Context, roomID id.RoomID) error {
 	_, err := c.mc.LeaveRoom(ctx, roomID)
 

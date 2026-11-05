@@ -148,6 +148,15 @@ type ChannelAddEvent struct {
 	CreateAt  int64
 }
 
+type ChannelInviteEvent struct {
+	Inviter   *UserInfo
+	ChannelID string
+	Name      string
+	Alias     string
+	Reason    string
+	Direct    bool
+}
+
 type ChannelRemoveEvent struct {
 	Remover   *UserInfo
 	Removed   []*UserInfo

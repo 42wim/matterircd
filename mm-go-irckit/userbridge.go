@@ -1,6 +1,7 @@
 package irckit
 
 import (
+	"cmp"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -140,6 +141,8 @@ func (u *User) handleEventChan(ctx context.Context, eventChan <-chan *bridge.Eve
 			case *bridge.ChannelRemoveEvent:
 				u.updateLastEventTime(e.CreateAt)
 				u.handleChannelRemoveEvent(e)
+			case *bridge.ChannelInviteEvent:
+				u.handleChannelInviteEvent(e)
 			case *bridge.ChannelCreateEvent:
 				u.handleChannelCreateEvent(e)
 			case *bridge.ChannelDeleteEvent:
@@ -455,6 +458,40 @@ func (u *User) handleChannelAddEvent(event *bridge.ChannelAddEvent) {
 	}
 
 	u.saveLastViewedAt(event.ChannelID, event.CreateAt)
+}
+
+// handleChannelInviteEvent shows an invitation as an IRC INVITE. Joining the
+// channel, named by its ID as it may have no alias, accepts the invitation.
+func (u *User) handleChannelInviteEvent(event *bridge.ChannelInviteEvent) {
+	target := "#" + event.ChannelID
+	inviter := u.createUserFromInfo(event.Inviter)
+
+	u.Encode(&irc.Message{ //nolint:errcheck
+		Prefix:  inviter.Prefix(),
+		Command: irc.INVITE,
+		Params:  []string{u.Nick, target},
+	})
+
+	svc, ok := u.Srv.HasUser(u.br.Protocol())
+	if !ok {
+		return
+	}
+
+	what := "the room"
+	if event.Direct {
+		what = "a direct chat"
+	}
+
+	if name := cmp.Or(event.Name, event.Alias); name != "" {
+		what += " " + name
+	}
+
+	text := fmt.Sprintf("%s invited you to %s", inviter.Nick, what)
+	if event.Reason != "" {
+		text += ": " + event.Reason
+	}
+
+	u.MsgUser(svc, text+". Accept with /join "+target)
 }
 
 func (u *User) handleChannelRemoveEvent(event *bridge.ChannelRemoveEvent) {

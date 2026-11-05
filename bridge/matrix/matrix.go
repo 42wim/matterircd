@@ -203,7 +203,21 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 func (m *Matrix) Ready() {
 	m.ready.Store(true)
 
+	// Invitations of the initial sync are not delivered to OnInvite. The snapshot
+	// is taken here, on the sync goroutine, so a later invite cannot be missed or
+	// duplicated, and sent from another goroutine as the event loop starts after
+	// onConnect.
+	invites := m.mc.Invitations()
+
 	go m.onConnect()
+
+	if len(invites) > 0 {
+		go func() {
+			for i := range invites {
+				m.sendInvite(&invites[i])
+			}
+		}()
+	}
 }
 
 func (m *Matrix) sendEvent(ev *bridge.Event) {

@@ -179,6 +179,32 @@ func (m *Matrix) roomUpdateLoop(ctx context.Context) {
 	}
 }
 
+// OnInvite implements matrixclient.InviteHandler.
+func (m *Matrix) OnInvite(invite *matrixclient.Invitation) {
+	m.sendInvite(invite)
+}
+
+// sendInvite reports an invitation to the IRC layer. Joining the room by its
+// ID accepts it, so the ID is always sent, also when a name or alias is known.
+func (m *Matrix) sendInvite(invite *matrixclient.Invitation) {
+	inviter := m.createUser(invite.Sender)
+	if inviter == nil {
+		return
+	}
+
+	m.sendEvent(&bridge.Event{
+		Type: "channel_invite",
+		Data: &bridge.ChannelInviteEvent{
+			Inviter:   inviter,
+			ChannelID: invite.RoomID.String(),
+			Name:      invite.Name,
+			Alias:     invite.Alias.String(),
+			Reason:    invite.Reason,
+			Direct:    invite.Direct,
+		},
+	})
+}
+
 // OnMember implements matrixclient.MemberHandler.
 func (m *Matrix) OnMember(c *matrixclient.MemberChange) {
 	if c.UserID == m.mc.UserID() && c.Membership != event.MembershipJoin {
