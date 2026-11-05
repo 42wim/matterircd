@@ -116,6 +116,11 @@ type Matrix struct {
 	sentMu       sync.Mutex
 	sentCache    *lru.Cache[id.EventID, struct{}]
 	pendingSends map[string]int // text of the sends in flight
+
+	// verifyMu guards verifyTxn, the verification the VERIFY commands act on.
+	verifyMu    sync.Mutex
+	verifyTxn   id.VerificationTransactionID
+	verifyQueue chan *matrixclient.Verification
 }
 
 func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Event, onConnect func()) (bridge.Bridger, *matrixclient.Client, error) {
@@ -131,6 +136,7 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 		initDone:  make(chan struct{}),
 
 		roomUpdateWake: make(chan struct{}, 1),
+		verifyQueue:    make(chan *matrixclient.Verification, verificationQueueSize),
 	}
 
 	// Also unblocks a Ready that is waiting for a failed New.
@@ -169,6 +175,8 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 		Login:  cred.Login,
 		Pass:   cred.Pass,
 		Token:  cred.Token,
+
+		DeviceName: "matterircd",
 	}, m, opts...)
 	if err != nil {
 		cancel()
@@ -184,6 +192,7 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 	loopCtx, m.roomUpdateCancel = context.WithCancel(ctx)
 
 	go m.roomUpdateLoop(loopCtx)
+	go m.verificationLoop()
 
 	setLogLevels := func(rc *config.RuntimeConfig) {
 		switch {

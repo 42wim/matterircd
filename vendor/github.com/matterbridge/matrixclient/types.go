@@ -22,6 +22,9 @@ type Credentials struct {
 	// With e2ee, the key database is bound to this device: a different device
 	// fails to start instead of reusing or overwriting the stored keys.
 	DeviceID id.DeviceID
+	// DeviceName is the session name other clients list for this device, instead of
+	// the generated device ID. Optional. It is also applied to an existing device.
+	DeviceName string
 }
 
 // User is a Matrix user as seen in room state.
@@ -167,7 +170,8 @@ type Reaction struct {
 // called from the sync goroutine and must not block for long. The exception
 // are encrypted messages whose room key arrives late: they are delivered from
 // another goroutine once decrypted, possibly after Ready, so a handler must
-// be safe for concurrent use.
+// be safe for concurrent use. VerificationHandler has separate concurrency and
+// reentrancy rules; see its documentation.
 type Handler interface {
 	// Ready is called once, after the events of the initial sync were processed.
 	// The messages, reactions, redactions and typing events of the initial sync

@@ -63,7 +63,8 @@ type Client struct {
 	// replaces the whole account data. It is never held with the client lock over network I/O.
 	directWriteMu sync.Mutex
 
-	crypto Crypto
+	crypto       Crypto
+	verification VerificationController
 
 	decryptFailures bool // crypto reports terminal decryption failures
 
@@ -127,7 +128,8 @@ func New(ctx context.Context, cred Credentials, h Handler, opts ...Option) (*Cli
 		lastViewed: make(map[id.RoomID]viewedMark),
 		lastTyping: make(map[id.RoomID]time.Time),
 	}
-	c.ctx, c.cancel = context.WithCancel(ctx)
+	ctx, c.cancel = context.WithCancel(ctx)
+	c.ctx = ctx
 
 	if o.userAgent != "" {
 		mc.UserAgent = o.userAgent
@@ -148,8 +150,12 @@ func New(ctx context.Context, cred Credentials, h Handler, opts ...Option) (*Cli
 
 	err = c.login(ctx, o.crypto)
 	if err != nil {
+		c.cancel()
+
 		return nil, err
 	}
+
+	c.applyDeviceName(ctx)
 
 	c.connected.Store(true)
 
@@ -248,6 +254,17 @@ func (c *Client) login(ctx context.Context, factory CryptoFactory) error {
 		_ = crypto.Close()
 
 		return err
+	}
+
+	if h, ok := c.handler.(VerificationHandler); ok {
+		if p, supported := crypto.(VerificationProvider); supported {
+			c.verification, err = p.InitVerification(ctx, h.OnVerification)
+			if err != nil {
+				_ = crypto.Close()
+
+				return err
+			}
+		}
 	}
 
 	c.logger.Info("end-to-end encryption enabled")
