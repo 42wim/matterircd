@@ -90,11 +90,26 @@ func loginMatrix(u *User, toUser *User, args []string) {
 	if e, ok := u.currentBridge().(interface{ EncryptionEnabled() bool }); ok && e.EncryptionEnabled() {
 		u.MsgUser(toUser, "end-to-end encryption (e2ee) is enabled")
 
-		if v, ok := u.currentBridge().(interface{ DeviceVerified() bool }); ok && v.DeviceVerified() {
-			u.MsgUser(toUser, "this session is verified")
-		} else if d, ok := u.currentBridge().(interface{ DeviceInfo() (string, string) }); ok {
+		state := "this session is unverified"
+
+		if v, ok := u.currentBridge().(interface{ DeviceVerified() (bool, error) }); ok {
+			verified, err := v.DeviceVerified()
+
+			switch {
+			case err != nil:
+				logger.Warnf("could not determine the verification state of this session: %v", err)
+
+				state = "could not determine if this session is verified"
+			case verified:
+				state = ""
+
+				u.MsgUser(toUser, "this session is verified")
+			}
+		}
+
+		if d, ok := u.currentBridge().(interface{ DeviceInfo() (string, string) }); ok && state != "" {
 			deviceID, fingerprint := d.DeviceInfo()
-			u.MsgUser(toUser, "this session is unverified, to verify it compare in your other client: device ID "+deviceID+", session key "+fingerprint)
+			u.MsgUser(toUser, state+", to verify it compare in your other client: device ID "+deviceID+", session key "+fingerprint)
 			u.MsgUser(toUser, "or use VERIFY START to verify interactively")
 		}
 	}

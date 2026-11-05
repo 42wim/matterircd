@@ -34,7 +34,7 @@ type FingerprintProvider interface {
 // DeviceVerifier is optionally implemented by a Crypto that can report whether
 // our device is verified and trusted, see Client.DeviceVerified.
 type DeviceVerifier interface {
-	DeviceVerified(ctx context.Context) bool
+	DeviceVerified(ctx context.Context) (bool, error)
 }
 
 // CryptoFactory creates a Crypto for mc. The returned Crypto is responsible for

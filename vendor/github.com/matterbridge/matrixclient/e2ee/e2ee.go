@@ -8,10 +8,13 @@ package e2ee
 
 import (
 	"context"
+	"fmt"
 
 	"maunium.net/go/mautrix"
+	"maunium.net/go/mautrix/crypto"
 	"maunium.net/go/mautrix/crypto/cryptohelper"
 	"maunium.net/go/mautrix/event"
+	"maunium.net/go/mautrix/id"
 
 	"github.com/matterbridge/matrixclient"
 )
@@ -57,21 +60,78 @@ func (h helper) Fingerprint() string {
 	return m.Fingerprint()
 }
 
+// ownDevice returns our device, refreshed from the server when possible.
+func (h helper) ownDevice(ctx context.Context, m *crypto.OlmMachine) (*id.Device, error) {
+	// GetOrFetchDevice would return the cached device, whose trust may predate a
+	// verification done from another client, so refresh from the server. FetchKeys
+	// reaches into StateStore, which is not set up until the machine is fully
+	// initialized, so use the read-only store until then.
+	if m.StateStore == nil {
+		dev, err := m.CryptoStore.GetDevice(ctx, h.client.UserID, h.client.DeviceID)
+		if err != nil {
+			return nil, fmt.Errorf("get own device: %w", err)
+		}
+
+		if dev == nil {
+			return nil, fmt.Errorf("own device %s not in crypto store", h.client.DeviceID)
+		}
+
+		return dev, nil
+	}
+
+	devices, err := m.FetchKeys(ctx, []id.UserID{h.client.UserID}, true)
+	if err != nil {
+		return nil, fmt.Errorf("fetch own device keys: %w", err)
+	}
+
+	// FetchKeys omits the user or device without an error when the server
+	// query or validation of the device failed.
+	dev := devices[h.client.UserID][h.client.DeviceID]
+	if dev == nil {
+		return nil, fmt.Errorf("server did not return own device %s", h.client.DeviceID)
+	}
+
+	return dev, nil
+}
+
 // DeviceVerified implements matrixclient.DeviceVerifier.
-func (h helper) DeviceVerified(ctx context.Context) bool {
+func (h helper) DeviceVerified(ctx context.Context) (bool, error) {
 	m := h.Machine()
 	if m == nil {
-		return false
+		return false, nil
 	}
 
-	// GetOrFetchDevice would return the cached device, whose trust may predate a
-	// verification done from another client, so always refresh from the server.
-	dev, ok := m.LoadDevices(ctx, h.client.UserID)[h.client.DeviceID]
-	if !ok {
-		return false
+	dev, err := h.ownDevice(ctx, m)
+	if err != nil {
+		return false, err
 	}
 
-	return m.IsDeviceTrusted(ctx, dev)
+	trust, err := m.ResolveTrustContext(ctx, dev)
+	if err != nil {
+		return false, fmt.Errorf("resolve own device trust: %w", err)
+	}
+
+	// ResolveTrustContext discards IsUserTrusted errors and falls back to TOFU or
+	// untrusted, so retry it to surface errors and honor a trusted result.
+	if trust == id.TrustStateCrossSignedTOFU || trust == id.TrustStateCrossSignedUntrusted {
+		var trusted bool
+
+		trusted, err = m.IsUserTrusted(ctx, h.client.UserID)
+		if err != nil {
+			return false, fmt.Errorf("check own user trust: %w", err)
+		}
+
+		if trusted {
+			trust = id.TrustStateCrossSignedVerified
+		}
+	}
+
+	switch trust {
+	case id.TrustStateVerified, id.TrustStateCrossSignedTOFU, id.TrustStateCrossSignedVerified:
+		return true, nil
+	default:
+		return false, nil
+	}
 }
 
 // Factory returns the option to pass to matrixclient.New.

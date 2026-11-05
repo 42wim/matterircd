@@ -1256,8 +1256,9 @@ func (m *Matrix) DeviceInfo() (string, string) {
 	return m.mc.DeviceID().String(), m.mc.Fingerprint()
 }
 
-// DeviceVerified reports whether this session is verified or cross-signed.
-func (m *Matrix) DeviceVerified() bool {
+// DeviceVerified reports whether this session is verified or cross-signed. A
+// non-nil error means the state could not be determined.
+func (m *Matrix) DeviceVerified() (bool, error) {
 	return m.mc.DeviceVerified(m.ctx)
 }
 
