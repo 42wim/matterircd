@@ -32,6 +32,9 @@ import (
 
 const systemUser = "system"
 
+// maxInviteTextLen keeps an invitation notice well below the IRC line limit.
+const maxInviteTextLen = 400
+
 type UserBridge struct {
 	Srv         Server
 	Credentials bridge.Credentials
@@ -491,8 +494,15 @@ func (u *User) handleChannelInviteEvent(event *bridge.ChannelInviteEvent) {
 		text += ": " + event.Reason
 	}
 
-	// The name and reason are chosen by the inviter, and must not end the line.
-	u.MsgUser(svc, sanitizeIRCTrailing(text)+". Accept with /join "+target)
+	// The name and reason are chosen by the inviter, and must not end the line or
+	// push the instruction, sent separately, past the line limit.
+	text = sanitizeIRCTrailing(text)
+	if len(text) > maxInviteTextLen {
+		text = strings.ToValidUTF8(text[:maxInviteTextLen], "") + "…"
+	}
+
+	u.MsgUser(svc, text)
+	u.MsgUser(svc, "Accept with /join "+target)
 }
 
 func (u *User) handleChannelRemoveEvent(event *bridge.ChannelRemoveEvent) {
