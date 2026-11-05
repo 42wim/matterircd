@@ -52,15 +52,6 @@ func (m *Matrix) verificationLoop() {
 	}
 }
 
-// setVerifyTxn makes txn the active verification. Any displayed SAS belongs to
-// the previous transaction, so it no longer allows a confirmation.
-func (m *Matrix) setVerifyTxn(txn id.VerificationTransactionID) {
-	m.verifyMu.Lock()
-	m.verifyTxn = txn
-	m.verifySAS = false
-	m.verifyMu.Unlock()
-}
-
 // currentVerifyTxn returns the active transaction, and whether its SAS was shown.
 func (m *Matrix) currentVerifyTxn() (id.VerificationTransactionID, bool) {
 	m.verifyMu.Lock()
@@ -80,9 +71,10 @@ func (m *Matrix) clearVerifyTxn(txn id.VerificationTransactionID) {
 }
 
 // updateVerifyTxn applies an update to the active transaction. It reports false
-// for a superseded transaction, whose updates must not reach the user. A new
-// request replaces the active one, and a ready update only adopts a
-// transaction when none is active, as it follows our own start.
+// for a superseded or finished transaction, whose updates must not reach the
+// user. Only a new request replaces the active one: our own start registers its
+// transaction in startVerification, which holds verifyMu so no update of it is
+// processed earlier.
 func (m *Matrix) updateVerifyTxn(v *matrixclient.Verification) bool {
 	m.verifyMu.Lock()
 	defer m.verifyMu.Unlock()
@@ -91,8 +83,6 @@ func (m *Matrix) updateVerifyTxn(v *matrixclient.Verification) bool {
 	case v.Stage == matrixclient.VerificationRequested:
 		m.verifyTxn = v.TransactionID
 		m.verifySAS = false
-	case v.Stage == matrixclient.VerificationReady && m.verifyTxn == "":
-		m.verifyTxn = v.TransactionID
 	case m.verifyTxn != v.TransactionID:
 		return false
 	case v.Stage == matrixclient.VerificationSAS:
@@ -187,12 +177,10 @@ func formatSAS(v *matrixclient.Verification) string {
 // notices from OnVerification, not by the return value.
 func (m *Matrix) Verify(ctx context.Context, action string) (string, error) {
 	if action == "start" {
-		txn, err := m.mc.StartVerification(ctx, m.mc.UserID())
+		err := m.startVerification(ctx)
 		if err != nil {
 			return "", err
 		}
-
-		m.setVerifyTxn(txn)
 
 		return "verification requested, accept it on your other device, then use VERIFY SAS to begin the comparison", nil
 	}
@@ -220,6 +208,23 @@ func (m *Matrix) Verify(ctx context.Context, action string) (string, error) {
 	}
 
 	return "", errors.New("unknown action " + action)
+}
+
+// startVerification holds verifyMu across the request, so verificationLoop
+// processes the updates of the new transaction only once it is registered.
+func (m *Matrix) startVerification(ctx context.Context) error {
+	m.verifyMu.Lock()
+	defer m.verifyMu.Unlock()
+
+	txn, err := m.mc.StartVerification(ctx, m.mc.UserID())
+	if err != nil {
+		return err
+	}
+
+	m.verifyTxn = txn
+	m.verifySAS = false
+
+	return nil
 }
 
 func (m *Matrix) cancelVerification(ctx context.Context, txn id.VerificationTransactionID, code event.VerificationCancelCode, reason string) error {
