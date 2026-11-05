@@ -80,7 +80,52 @@ func (h helper) ownDevice(ctx context.Context, m *crypto.OlmMachine) (*id.Device
 	return dev, nil
 }
 
-// DeviceVerified implements matrixclient.DeviceVerifier.
+// Init initializes the crypto helper and, before syncing starts, tracks our own
+// user so a brand-new store gets our device and cross-signing keys.
+func (h helper) Init(ctx context.Context) error {
+	err := h.CryptoHelper.Init(ctx)
+	if err != nil {
+		return err
+	}
+
+	m := h.Machine()
+	if m == nil {
+		return nil
+	}
+
+	tracked, err := m.CryptoStore.FilterTrackedUsers(ctx, []id.UserID{h.client.UserID})
+	if err != nil {
+		return fmt.Errorf("check own user tracking: %w", err)
+	}
+
+	if len(tracked) > 0 {
+		return nil
+	}
+
+	// Safe here: the sync loop has not started, so nothing else writes the keys.
+	_, err = m.FetchKeys(ctx, []id.UserID{h.client.UserID}, true)
+	if err != nil {
+		return fmt.Errorf("fetch own keys: %w", err)
+	}
+
+	// FetchKeys logs per-server and storage failures without returning them.
+	tracked, err = m.CryptoStore.FilterTrackedUsers(ctx, []id.UserID{h.client.UserID})
+	if err != nil {
+		return fmt.Errorf("check own user tracking: %w", err)
+	}
+
+	if len(tracked) == 0 {
+		return fmt.Errorf("own user %s not tracked after fetching keys", h.client.UserID)
+	}
+
+	_, err = h.ownDevice(ctx, m)
+
+	return err
+}
+
+// DeviceVerified implements matrixclient.DeviceVerifier. It resolves trust from
+// the crypto store only: the machine's cached resolvers (ResolveTrustContext,
+// IsUserTrusted) mutate unsynchronized fields shared with the sync handling.
 func (h helper) DeviceVerified(ctx context.Context) (bool, error) {
 	m := h.Machine()
 	if m == nil {
@@ -92,32 +137,62 @@ func (h helper) DeviceVerified(ctx context.Context) (bool, error) {
 		return false, err
 	}
 
-	trust, err := m.ResolveTrustContext(ctx, dev)
-	if err != nil {
-		return false, fmt.Errorf("resolve own device trust: %w", err)
-	}
-
-	// ResolveTrustContext discards IsUserTrusted errors and falls back to TOFU or
-	// untrusted, so retry it to surface errors and honor a trusted result.
-	if trust == id.TrustStateCrossSignedTOFU || trust == id.TrustStateCrossSignedUntrusted {
-		var trusted bool
-
-		trusted, err = m.IsUserTrusted(ctx, h.client.UserID)
-		if err != nil {
-			return false, fmt.Errorf("check own user trust: %w", err)
-		}
-
-		if trusted {
-			trust = id.TrustStateCrossSignedVerified
-		}
-	}
-
-	switch trust {
-	case id.TrustStateVerified, id.TrustStateCrossSignedTOFU, id.TrustStateCrossSignedVerified:
+	switch dev.Trust {
+	case id.TrustStateVerified:
 		return true, nil
-	default:
+	case id.TrustStateBlacklisted:
 		return false, nil
 	}
+
+	keys, err := m.CryptoStore.GetCrossSigningKeys(ctx, h.client.UserID)
+	if err != nil {
+		return false, fmt.Errorf("get own cross-signing keys: %w", err)
+	}
+
+	msk, ssk, usk := keys[id.XSUsageMaster], keys[id.XSUsageSelfSigning], keys[id.XSUsageUserSigning]
+	if msk.Key == "" || ssk.Key == "" {
+		return false, nil
+	}
+
+	user := h.client.UserID
+
+	signed, err := m.CryptoStore.IsKeySignedBy(ctx, user, ssk.Key, user, msk.Key)
+	if err != nil {
+		return false, fmt.Errorf("check self-signing key signature: %w", err)
+	}
+
+	if !signed {
+		return false, nil
+	}
+
+	signed, err = m.CryptoStore.IsKeySignedBy(ctx, user, dev.SigningKey, user, ssk.Key)
+	if err != nil {
+		return false, fmt.Errorf("check own device signature: %w", err)
+	}
+
+	if !signed {
+		return false, nil
+	}
+
+	// Mirrors IsUserTrusted for our own user: the master key must be signed by
+	// this device and the user-signing key by the master key.
+	trusted := usk.Key != ""
+	if trusted {
+		trusted, err = m.CryptoStore.IsKeySignedBy(ctx, user, msk.Key, user, dev.SigningKey)
+		if err != nil {
+			return false, fmt.Errorf("check master key signature: %w", err)
+		}
+	}
+
+	if trusted {
+		trusted, err = m.CryptoStore.IsKeySignedBy(ctx, user, usk.Key, user, msk.Key)
+		if err != nil {
+			return false, fmt.Errorf("check user-signing key signature: %w", err)
+		}
+	}
+
+	// Trust on first use, unless the master key changed since first seen.
+	return trusted || msk.Key == msk.First, nil
 }
 
 // Factory returns the option to pass to matrixclient.New.
