@@ -1,6 +1,7 @@
 package matrix
 
 import (
+	"context"
 	"strings"
 
 	"maunium.net/go/mautrix/event"
@@ -99,31 +100,77 @@ func (m *Matrix) OnTopic(t *matrixclient.TopicChange) {
 
 // OnRoomName implements matrixclient.RoomNameHandler.
 func (m *Matrix) OnRoomName(r *matrixclient.RoomRename) {
-	m.sendRoomUpdate(r.RoomID, r.Name, r.DisplayName)
+	m.queueRoomUpdate(r.RoomID, r.Name, r.DisplayName)
 }
 
 // onRoomNameResolved is the matrixclient.WithRoomNameResolved callback, which
-// must not block, so the event is sent from its own goroutine.
+// must not block.
 func (m *Matrix) onRoomNameResolved(roomID id.RoomID, name string) {
 	m.nameResolveTried.Delete(roomID)
-
-	go m.sendRoomUpdate(roomID, name, "")
+	m.queueRoomUpdate(roomID, name, "")
 }
 
-func (m *Matrix) sendRoomUpdate(roomID id.RoomID, name, displayName string) {
+// queueRoomUpdate hands a rename to roomUpdateLoop. matrixclient serializes its
+// callbacks, so queueing in call order and keeping only the newest name per room
+// stops a stale name from being applied last. It never blocks.
+func (m *Matrix) queueRoomUpdate(roomID id.RoomID, name, displayName string) {
 	name = strings.TrimPrefix(name, "#")
 	if displayName == "" {
 		displayName = name
 	}
 
-	m.sendEvent(&bridge.Event{
-		Type: "channel_update",
-		Data: &bridge.ChannelUpdateEvent{
-			ChannelID:   roomID.String(),
-			Name:        name,
-			DisplayName: displayName,
-		},
-	})
+	m.roomUpdateMu.Lock()
+
+	if m.roomUpdates == nil {
+		m.roomUpdates = make(map[id.RoomID]*bridge.ChannelUpdateEvent)
+	}
+
+	if _, queued := m.roomUpdates[roomID]; !queued {
+		m.roomUpdateOrder = append(m.roomUpdateOrder, roomID)
+	}
+
+	m.roomUpdates[roomID] = &bridge.ChannelUpdateEvent{
+		ChannelID:   roomID.String(),
+		Name:        name,
+		DisplayName: displayName,
+	}
+
+	m.roomUpdateMu.Unlock()
+
+	select {
+	case m.roomUpdateWake <- struct{}{}:
+	default:
+	}
+}
+
+// roomUpdateLoop sends the queued renames until ctx is done.
+func (m *Matrix) roomUpdateLoop(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-m.roomUpdateWake:
+		}
+
+		for {
+			m.roomUpdateMu.Lock()
+
+			if len(m.roomUpdateOrder) == 0 {
+				m.roomUpdateMu.Unlock()
+
+				break
+			}
+
+			roomID := m.roomUpdateOrder[0]
+			m.roomUpdateOrder = m.roomUpdateOrder[1:]
+			ev := m.roomUpdates[roomID]
+
+			delete(m.roomUpdates, roomID)
+			m.roomUpdateMu.Unlock()
+
+			m.sendEvent(&bridge.Event{Type: "channel_update", Data: ev})
+		}
+	}
 }
 
 // OnMember implements matrixclient.MemberHandler.

@@ -81,6 +81,13 @@ type Matrix struct {
 	// synchronously once, so an unreachable homeserver cannot stall every lookup.
 	nameResolveTried sync.Map
 
+	// roomUpdateMu guards the renames waiting for roomUpdateLoop, see queueRoomUpdate.
+	roomUpdateMu     sync.Mutex
+	roomUpdates      map[id.RoomID]*bridge.ChannelUpdateEvent
+	roomUpdateOrder  []id.RoomID
+	roomUpdateWake   chan struct{}
+	roomUpdateCancel context.CancelFunc
+
 	// unregisterReloadHook removes the hook that New registered on the config.
 	unregisterReloadHook func()
 
@@ -107,6 +114,8 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 		cfg:       cfg,
 		onConnect: onConnect,
 		ctx:       ctx,
+
+		roomUpdateWake: make(chan struct{}, 1),
 	}
 	m.msgParentCache, _ = lru.New[id.EventID, string](100)
 	m.msgLastSentCache, _ = lru.New[string, string](10)
@@ -144,6 +153,12 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 
 	m.mc = mc
 	m.e2ee.Store(mc.Encrypted())
+
+	var loopCtx context.Context
+
+	loopCtx, m.roomUpdateCancel = context.WithCancel(ctx)
+
+	go m.roomUpdateLoop(loopCtx)
 
 	setLogLevels := func(rc *config.RuntimeConfig) {
 		switch {
@@ -411,6 +426,7 @@ func (m *Matrix) Logout(ctx context.Context) error {
 	}
 
 	m.mc.Logout()
+	m.roomUpdateCancel()
 
 	return nil
 }

@@ -2274,14 +2274,14 @@ func (m *Mattermost) handleWsActionChannelUpdated(rmsg *model.WebSocketEvent, lo
 // in the background, which must not block, so the event is sent from its own goroutine.
 func (m *Mattermost) onChannelNameResolved(channelID, _ string) {
 	go func() {
-		name := m.GetChannelName(m.wsCtx, channelID)
-		if !strings.HasPrefix(name, "#") {
+		channel := m.mc.GetChannel(m.wsCtx, channelID)
+		if channel == nil || channel.Type == model.ChannelTypeDirect || channel.Type == model.ChannelTypeGroup {
 			return
 		}
 
-		var displayName string
-		if channel := m.mc.GetChannel(m.wsCtx, channelID); channel != nil {
-			displayName = channel.DisplayName
+		name := m.GetChannelName(m.wsCtx, channelID)
+		if !strings.HasPrefix(name, "#") {
+			return
 		}
 
 		m.sendEvent(&bridge.Event{
@@ -2289,7 +2289,7 @@ func (m *Mattermost) onChannelNameResolved(channelID, _ string) {
 			Data: &bridge.ChannelUpdateEvent{
 				ChannelID:   channelID,
 				Name:        strings.TrimPrefix(name, "#"),
-				DisplayName: displayName,
+				DisplayName: channel.DisplayName,
 			},
 		})
 	}()
