@@ -73,7 +73,7 @@ func (h helper) ownDevice(ctx context.Context, m *crypto.OlmMachine) (*id.Device
 		return nil, fmt.Errorf("own device %s not in crypto store", h.client.DeviceID)
 	}
 
-	if dev.SigningKey.String() != m.Fingerprint() {
+	if dev.SigningKey.Fingerprint() != m.Fingerprint() {
 		return nil, fmt.Errorf("own device %s signing key does not match local key", h.client.DeviceID)
 	}
 

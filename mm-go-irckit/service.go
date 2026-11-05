@@ -98,7 +98,7 @@ func loginMatrix(u *User, toUser *User, args []string) {
 		ready := true
 
 		// The verification state is only current once the initial sync was processed.
-		if w, ok := u.currentBridge().(interface{ WaitReady(context.Context) bool }); ok {
+		if w, ok := u.currentBridge().(interface{ WaitReady(ctx context.Context) bool }); ok {
 			waitCtx, cancel := context.WithTimeout(u.ctx, matrixReadyTimeout)
 			ready = w.WaitReady(waitCtx)
 
