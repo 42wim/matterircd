@@ -161,8 +161,8 @@ github.com/mattn/go-isatty
 # github.com/mattn/go-mastodon v0.0.6
 ## explicit; go 1.16
 github.com/mattn/go-mastodon
-# github.com/mattn/go-sqlite3 v2.0.3+incompatible
-## explicit
+# github.com/mattn/go-sqlite3 v2.0.3+incompatible => github.com/mattn/go-sqlite3 v1.14.34
+## explicit; go 1.19
 github.com/mattn/go-sqlite3
 # github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d
 ## explicit
@@ -537,3 +537,4 @@ maunium.net/go/mautrix/id
 maunium.net/go/mautrix/oauth
 maunium.net/go/mautrix/pushrules
 maunium.net/go/mautrix/sqlstatestore
+# github.com/mattn/go-sqlite3 => github.com/mattn/go-sqlite3 v1.14.34

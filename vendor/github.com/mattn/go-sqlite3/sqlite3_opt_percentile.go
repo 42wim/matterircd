@@ -1,13 +1,15 @@
 // Copyright (C) 2019 Yasuhiro Matsumoto <mattn.jp@gmail.com>.
+// Copyright (C) 2018 G.J.R. Timmer <gjr.timmer@gmail.com>.
 //
 // Use of this source code is governed by an MIT-style
 // license that can be found in the LICENSE file.
 
-// +build sqlite_json sqlite_json1 json1
+//go:build sqlite_percentile
+// +build sqlite_percentile
 
 package sqlite3
 
 /*
-#cgo CFLAGS: -DSQLITE_ENABLE_JSON1
+#cgo CFLAGS: -DSQLITE_ENABLE_PERCENTILE
 */
 import "C"
