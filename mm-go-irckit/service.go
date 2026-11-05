@@ -90,9 +90,11 @@ func loginMatrix(u *User, toUser *User, args []string) {
 	if e, ok := u.currentBridge().(interface{ EncryptionEnabled() bool }); ok && e.EncryptionEnabled() {
 		u.MsgUser(toUser, "end-to-end encryption (e2ee) is enabled")
 
-		if d, ok := u.currentBridge().(interface{ DeviceInfo() (string, string) }); ok {
+		if v, ok := u.currentBridge().(interface{ DeviceVerified() bool }); ok && v.DeviceVerified() {
+			u.MsgUser(toUser, "this session is verified")
+		} else if d, ok := u.currentBridge().(interface{ DeviceInfo() (string, string) }); ok {
 			deviceID, fingerprint := d.DeviceInfo()
-			u.MsgUser(toUser, "to verify this session, compare in your other client: device ID "+deviceID+", session key "+fingerprint)
+			u.MsgUser(toUser, "this session is unverified, to verify it compare in your other client: device ID "+deviceID+", session key "+fingerprint)
 			u.MsgUser(toUser, "or use VERIFY START to verify interactively")
 		}
 	}

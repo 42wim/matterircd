@@ -1251,6 +1251,11 @@ func (m *Matrix) DeviceInfo() (string, string) {
 	return m.mc.DeviceID().String(), m.mc.Fingerprint()
 }
 
+// DeviceVerified reports whether this session is verified or cross-signed.
+func (m *Matrix) DeviceVerified() bool {
+	return m.mc.DeviceVerified(m.ctx)
+}
+
 func (m *Matrix) Connected() bool {
 	return m.connected.Load()
 }

@@ -1,6 +1,7 @@
 package matrixclient
 
 import (
+	"context"
 	"time"
 
 	"maunium.net/go/mautrix"
@@ -28,6 +29,12 @@ type DecryptFailureNotifier interface {
 // fingerprint of the device's Ed25519 signing key, see Client.Fingerprint.
 type FingerprintProvider interface {
 	Fingerprint() string
+}
+
+// DeviceVerifier is optionally implemented by a Crypto that can report whether
+// our device is verified and trusted, see Client.DeviceVerified.
+type DeviceVerifier interface {
+	DeviceVerified(ctx context.Context) bool
 }
 
 // CryptoFactory creates a Crypto for mc. The returned Crypto is responsible for

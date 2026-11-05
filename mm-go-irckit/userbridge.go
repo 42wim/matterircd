@@ -2636,6 +2636,13 @@ func (u *User) handleBannerChangeEvent(e *bridge.BannerChangeEvent) {
 	}
 
 	_ = u.Encode(msg)
+
+	// Also as a message from the service bot, so it shows in its query window.
+	if u.br.Protocol() == serviceMatrix {
+		if bot, ok := u.Srv.HasUser(serviceMatrix); ok {
+			u.MsgUser(bot, e.Text)
+		}
+	}
 }
 
 func (u *User) handleMessageThreadContext(channelID, messageID, parentID, event, text string) (string, string, string, bool, int) {

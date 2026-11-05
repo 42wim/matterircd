@@ -179,6 +179,24 @@ func (ch *Channel) noteSelfMembershipLocked(joined bool) bool {
 	return true
 }
 
+// noteListedLocked records that the room was handed out as a channel. While a callback is
+// being delivered the flags stay, as the callback may still drop the channel that was
+// just handed out, and the comparison after it must restore it. ch must be locked.
+func (ch *Channel) noteListedLocked(direct bool) {
+	if ch.delivering {
+		// A DM confirmed during delivery skipped reportNameLocked, the loop still has to compare again.
+		ch.renameAgain = true
+
+		return
+	}
+
+	if direct {
+		return
+	}
+
+	ch.listedAsChannel, ch.droppedAsDirect = true, false
+}
+
 // reportNameLocked records display as the name the consumer holds. While a callback is
 // being delivered the baseline stays, as the callback carries an older name, and the
 // delivery loop of notifyRoomName compares again once the callback returned. ch must be locked.
@@ -225,7 +243,15 @@ func (c *Client) ResolveRoomName(ctx context.Context, roomID id.RoomID) string {
 	defer ch.Unlock()
 
 	display := c.displayNameLocked(roomID, ch)
-	ch.reportNameLocked(display)
+	_, inferred := c.inferredDirectLocked(ch)
+	direct := ch.IsDirect || inferred
+
+	// The name of a DM is not a channel name, the baseline stays what the consumer holds.
+	if !direct {
+		ch.reportNameLocked(display)
+	}
+
+	ch.noteListedLocked(direct)
 
 	return display
 }
@@ -238,7 +264,16 @@ func (c *Client) ResolveRoomName(ctx context.Context, roomID id.RoomID) string {
 // names. No other lock is held during a callback, so it may call client methods.
 func (c *Client) notifyRoomName(roomID id.RoomID, healed bool) {
 	h, isHandler := c.handler.(RoomNameHandler)
-	if healed && c.nameResolved == nil || !healed && (!isHandler || !c.synced.Load()) {
+
+	// Drops and restores of a channel always go through RoomNameHandler, also when healed.
+	transitions := isHandler && c.synced.Load()
+	names := transitions
+
+	if healed {
+		names = c.nameResolved != nil
+	}
+
+	if !names && !transitions {
 		return
 	}
 
@@ -246,12 +281,12 @@ func (c *Client) notifyRoomName(roomID id.RoomID, healed bool) {
 	defer c.nameNotify.Unlock()
 
 	for {
-		rename, changed := c.claimRoomName(roomID)
+		rename, changed, transition := c.claimRoomName(roomID, names, transitions)
 		if !changed {
 			return
 		}
 
-		if healed {
+		if healed && !transition {
 			c.nameResolved(roomID, rename.Name)
 		} else {
 			h.OnRoomName(rename)
@@ -263,15 +298,23 @@ func (c *Client) notifyRoomName(roomID id.RoomID, healed bool) {
 	}
 }
 
+// departedLocked reports whether roomID is an invitation or a room we left, which Rooms excludes. c must be read locked.
+func (c *Client) departedLocked(roomID id.RoomID) bool {
+	_, invited := c.invitations[roomID]
+	_, left := c.leftRooms[roomID]
+
+	return invited || left
+}
+
 // claimRoomName moves the reported name of a room to its current name and marks the
 // delivery of the callback as running, see reportNameLocked.
-func (c *Client) claimRoomName(roomID id.RoomID) (*RoomRename, bool) {
+func (c *Client) claimRoomName(roomID id.RoomID, names, transitions bool) (*RoomRename, bool, bool) {
 	c.RLock()
 	defer c.RUnlock()
 
 	ch, ok := c.channels[roomID]
 	if !ok {
-		return nil, false
+		return nil, false, false
 	}
 
 	ch.Lock()
@@ -280,15 +323,41 @@ func (c *Client) claimRoomName(roomID id.RoomID) (*RoomRename, bool) {
 	old := ch.reportedName
 	name := c.displayNameLocked(roomID, ch)
 
-	if name == old || old == "" || ch.IsDirect {
-		return nil, false
+	_, inferred := c.inferredDirectLocked(ch)
+	direct := ch.IsDirect || inferred
+
+	// A room handed out as a channel that turned into a DM is reported once, whatever its name,
+	// so the consumer can drop the channel. Later changes of a DM name are not reported.
+	if transitions && direct && ch.listedAsChannel {
+		ch.listedAsChannel, ch.droppedAsDirect = false, true
+
+		return ch.startDeliveryLocked(roomID, old, name, RoomDropped), true, true
 	}
 
+	// The reverse transition: a room reported as a DM is a channel again, so the consumer restores it.
+	if transitions && !direct && ch.droppedAsDirect && !c.departedLocked(roomID) {
+		ch.listedAsChannel, ch.droppedAsDirect = true, false
+
+		return ch.startDeliveryLocked(roomID, old, name, RoomRestored), true, true
+	}
+
+	// A room reported as a DM is not held by the consumer, so its renames are not reported
+	// until it is restored, which a departed room never is.
+	if !names || name == old || old == "" || direct || ch.droppedAsDirect {
+		return nil, false, false
+	}
+
+	return ch.startDeliveryLocked(roomID, old, name, RoomRenamed), true, false
+}
+
+// startDeliveryLocked moves the reported name to name and marks the delivery of a callback
+// as running. ch must be locked.
+func (ch *Channel) startDeliveryLocked(roomID id.RoomID, old, name string, kind RoomRenameKind) *RoomRename {
 	ch.reportedName = name
 	ch.delivering = true
 	ch.renameAgain = false
 
-	return &RoomRename{RoomID: roomID, OldName: old, Name: name, DisplayName: ch.RawName}, true
+	return &RoomRename{Kind: kind, RoomID: roomID, OldName: old, Name: name, DisplayName: ch.RawName}
 }
 
 // finishRoomName ends the delivery of a callback and reports whether the room
@@ -391,6 +460,16 @@ func (c *Client) healRoomName(parent context.Context, roomID id.RoomID, ch *Chan
 		for attempt := 1; attempt <= nameHealMaxAttempts; attempt++ {
 			resolved, final := c.attemptRoomName(ctx, roomID, epoch)
 			if final {
+				// A room confirmed to have no name may turn out to be a DM. That is reported through
+				// RoomNameHandler, so it does not depend on the optional WithRoomNameResolved callback.
+				if ctx.Err() == nil {
+					if resolved {
+						c.notifyRoomName(roomID, true)
+					}
+
+					c.notifyRoomName(roomID, false)
+				}
+
 				return
 			}
 
@@ -552,7 +631,7 @@ func (c *Client) RefreshRoomName(ctx context.Context, roomID id.RoomID) error {
 		ch.setNameLocked(name.Name)
 	}
 
-	if ch.Alias == "" && alias.Alias != "" && ch.aliasRev == aliasRev {
+	if ch.Alias == "" && (alias.Alias != "" || len(alias.AltAliases) > 0) && ch.aliasRev == aliasRev {
 		ch.Alias, ch.AltAliases = alias.Alias, alias.AltAliases
 	}
 
