@@ -202,6 +202,11 @@ func (m *Matrix) Ready() {
 }
 
 func (m *Matrix) sendEvent(ev *bridge.Event) {
+	m.sendEventCtx(m.ctx, ev)
+}
+
+// sendEventCtx is sendEvent that also gives up when ctx is done.
+func (m *Matrix) sendEventCtx(ctx context.Context, ev *bridge.Event) {
 	// The event loop only starts from onConnect, which Ready triggers. Blocking
 	// the sync goroutine on the unbuffered channel before that would deadlock the
 	// initial sync, so its events are dropped, history is replayed on join.
@@ -211,6 +216,7 @@ func (m *Matrix) sendEvent(ev *bridge.Event) {
 
 	select {
 	case m.eventChan <- ev:
+	case <-ctx.Done():
 	case <-m.ctx.Done():
 	}
 }

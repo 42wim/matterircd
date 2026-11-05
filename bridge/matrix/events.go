@@ -168,7 +168,7 @@ func (m *Matrix) roomUpdateLoop(ctx context.Context) {
 			delete(m.roomUpdates, roomID)
 			m.roomUpdateMu.Unlock()
 
-			m.sendEvent(&bridge.Event{Type: "channel_update", Data: ev})
+			m.sendEventCtx(ctx, &bridge.Event{Type: "channel_update", Data: ev})
 		}
 	}
 }
