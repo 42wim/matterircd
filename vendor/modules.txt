@@ -39,18 +39,34 @@ github.com/dyatlov/go-opengraph/opengraph/types/image
 github.com/dyatlov/go-opengraph/opengraph/types/music
 github.com/dyatlov/go-opengraph/opengraph/types/profile
 github.com/dyatlov/go-opengraph/opengraph/types/video
-# github.com/fatih/color v1.16.0
+# github.com/fatih/color v1.18.0
 ## explicit; go 1.17
 github.com/fatih/color
 # github.com/francoispqt/gojay v1.2.13
 ## explicit; go 1.12
 github.com/francoispqt/gojay
-# github.com/fsnotify/fsnotify v1.6.0
-## explicit; go 1.16
+# github.com/fsnotify/fsnotify v1.9.0
+## explicit; go 1.17
 github.com/fsnotify/fsnotify
-# github.com/go-asn1-ber/asn1-ber v1.5.5
+github.com/fsnotify/fsnotify/internal
+# github.com/go-asn1-ber/asn1-ber v1.5.7
 ## explicit; go 1.13
 github.com/go-asn1-ber/asn1-ber
+# github.com/go-viper/mapstructure/v2 v2.4.0
+## explicit; go 1.18
+github.com/go-viper/mapstructure/v2
+github.com/go-viper/mapstructure/v2/internal/errors
+# github.com/goccy/go-yaml v1.18.0
+## explicit; go 1.21.0
+github.com/goccy/go-yaml
+github.com/goccy/go-yaml/ast
+github.com/goccy/go-yaml/internal/errors
+github.com/goccy/go-yaml/internal/format
+github.com/goccy/go-yaml/lexer
+github.com/goccy/go-yaml/parser
+github.com/goccy/go-yaml/printer
+github.com/goccy/go-yaml/scanner
+github.com/goccy/go-yaml/token
 # github.com/golang/protobuf v1.5.4
 ## explicit; go 1.17
 github.com/golang/protobuf/ptypes/empty
@@ -71,14 +87,14 @@ github.com/grokify/html-strip-tags-go
 # github.com/hashicorp/errwrap v1.1.0
 ## explicit
 github.com/hashicorp/errwrap
-# github.com/hashicorp/go-hclog v1.6.2
+# github.com/hashicorp/go-hclog v1.6.3
 ## explicit; go 1.13
 github.com/hashicorp/go-hclog
 # github.com/hashicorp/go-multierror v1.1.1
 ## explicit; go 1.13
 github.com/hashicorp/go-multierror
-# github.com/hashicorp/go-plugin v1.6.0
-## explicit; go 1.17
+# github.com/hashicorp/go-plugin v1.7.0
+## explicit; go 1.24
 github.com/hashicorp/go-plugin
 github.com/hashicorp/go-plugin/internal/cmdrunner
 github.com/hashicorp/go-plugin/internal/grpcmux
@@ -89,20 +105,8 @@ github.com/hashicorp/go-plugin/runner
 github.com/hashicorp/golang-lru/v2
 github.com/hashicorp/golang-lru/v2/internal
 github.com/hashicorp/golang-lru/v2/simplelru
-# github.com/hashicorp/hcl v1.0.0
-## explicit
-github.com/hashicorp/hcl
-github.com/hashicorp/hcl/hcl/ast
-github.com/hashicorp/hcl/hcl/parser
-github.com/hashicorp/hcl/hcl/printer
-github.com/hashicorp/hcl/hcl/scanner
-github.com/hashicorp/hcl/hcl/strconv
-github.com/hashicorp/hcl/hcl/token
-github.com/hashicorp/hcl/json/parser
-github.com/hashicorp/hcl/json/scanner
-github.com/hashicorp/hcl/json/token
-# github.com/hashicorp/yamux v0.1.1
-## explicit; go 1.15
+# github.com/hashicorp/yamux v0.1.2
+## explicit; go 1.20
 github.com/hashicorp/yamux
 # github.com/jpillora/backoff v1.0.0
 ## explicit; go 1.13
@@ -110,9 +114,6 @@ github.com/jpillora/backoff
 # github.com/kenshaw/emoji v0.6.2
 ## explicit; go 1.22
 github.com/kenshaw/emoji
-# github.com/magiconair/properties v1.8.7
-## explicit; go 1.19
-github.com/magiconair/properties
 # github.com/matterbridge/logrus-prefixed-formatter v0.5.3-0.20200523233437-d971309a77ba
 ## explicit
 github.com/matterbridge/logrus-prefixed-formatter
@@ -132,20 +133,25 @@ github.com/mattermost/go-i18n/i18n/translation
 # github.com/mattermost/ldap v0.0.0-20231116144001-0f480c025956
 ## explicit; go 1.18
 github.com/mattermost/ldap
-# github.com/mattermost/logr/v2 v2.0.21
-## explicit; go 1.18
+# github.com/mattermost/logr/v2 v2.0.22
+## explicit; go 1.23
 github.com/mattermost/logr/v2
 github.com/mattermost/logr/v2/config
 github.com/mattermost/logr/v2/formatters
 github.com/mattermost/logr/v2/targets
-# github.com/mattermost/mattermost/server/public v0.1.3
-## explicit; go 1.21
+# github.com/mattermost/mattermost/server/public v0.1.22
+## explicit; go 1.24.11
 github.com/mattermost/mattermost/server/public/model
 github.com/mattermost/mattermost/server/public/shared/i18n
 github.com/mattermost/mattermost/server/public/shared/markdown
 github.com/mattermost/mattermost/server/public/shared/mlog
 github.com/mattermost/mattermost/server/public/shared/timezones
 github.com/mattermost/mattermost/server/public/utils
+github.com/mattermost/mattermost/server/public/utils/timeutils
+# github.com/mattermost/mattermost/server/v8 v8.0.0-20251014075701-833e0125320d
+## explicit; go 1.24.6
+github.com/mattermost/mattermost/server/v8/channels/app/password/hashers
+github.com/mattermost/mattermost/server/v8/channels/app/password/phcparser
 # github.com/mattn/go-colorable v0.1.14
 ## explicit; go 1.18
 github.com/mattn/go-colorable
@@ -155,22 +161,19 @@ github.com/mattn/go-isatty
 # github.com/mattn/go-mastodon v0.0.6
 ## explicit; go 1.16
 github.com/mattn/go-mastodon
-# github.com/mattn/go-sqlite3 v1.14.52
-## explicit; go 1.21
+# github.com/mattn/go-sqlite3 v2.0.3+incompatible
+## explicit
 github.com/mattn/go-sqlite3
 # github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d
 ## explicit
 github.com/mgutz/ansi
-# github.com/mitchellh/go-testing-interface v1.14.1
-## explicit; go 1.14
-github.com/mitchellh/go-testing-interface
 # github.com/mitchellh/mapstructure v1.5.0
 ## explicit; go 1.14
 github.com/mitchellh/mapstructure
 # github.com/nxadm/tail v1.4.11
 ## explicit; go 1.13
-# github.com/oklog/run v1.1.0
-## explicit; go 1.13
+# github.com/oklog/run v1.2.0
+## explicit; go 1.20
 github.com/oklog/run
 # github.com/pborman/uuid v1.2.1
 ## explicit
@@ -178,8 +181,8 @@ github.com/pborman/uuid
 # github.com/pelletier/go-toml v1.9.5
 ## explicit; go 1.12
 github.com/pelletier/go-toml
-# github.com/pelletier/go-toml/v2 v2.1.0
-## explicit; go 1.16
+# github.com/pelletier/go-toml/v2 v2.2.4
+## explicit; go 1.21.0
 github.com/pelletier/go-toml/v2
 github.com/pelletier/go-toml/v2/internal/characters
 github.com/pelletier/go-toml/v2/internal/danger
@@ -188,8 +191,8 @@ github.com/pelletier/go-toml/v2/unstable
 # github.com/petermattis/goid v0.0.0-20260820044319-269ab09b5261
 ## explicit; go 1.17
 github.com/petermattis/goid
-# github.com/philhofer/fwd v1.1.2
-## explicit; go 1.15
+# github.com/philhofer/fwd v1.2.0
+## explicit; go 1.20
 github.com/philhofer/fwd
 # github.com/pkg/errors v0.9.1
 ## explicit
@@ -200,12 +203,9 @@ github.com/rs/zerolog
 github.com/rs/zerolog/internal/cbor
 github.com/rs/zerolog/internal/json
 github.com/rs/zerolog/log
-# github.com/sagikazarmark/locafero v0.3.0
-## explicit; go 1.20
+# github.com/sagikazarmark/locafero v0.11.0
+## explicit; go 1.23.0
 github.com/sagikazarmark/locafero
-# github.com/sagikazarmark/slog-shim v0.1.0
-## explicit; go 1.20
-github.com/sagikazarmark/slog-shim
 # github.com/sirupsen/logrus v1.9.4
 ## explicit; go 1.17
 github.com/sirupsen/logrus
@@ -219,34 +219,31 @@ github.com/slack-go/slack/slackutilsx
 # github.com/sorcix/irc v1.1.4
 ## explicit
 github.com/sorcix/irc
-# github.com/sourcegraph/conc v0.3.0
-## explicit; go 1.19
+# github.com/sourcegraph/conc v0.3.1-0.20240121214520-5f936abd7ae8
+## explicit; go 1.20
 github.com/sourcegraph/conc
-github.com/sourcegraph/conc/internal/multierror
-github.com/sourcegraph/conc/iter
 github.com/sourcegraph/conc/panics
-# github.com/spf13/afero v1.10.0
-## explicit; go 1.16
+github.com/sourcegraph/conc/pool
+# github.com/spf13/afero v1.15.0
+## explicit; go 1.23.0
 github.com/spf13/afero
 github.com/spf13/afero/internal/common
 github.com/spf13/afero/mem
-# github.com/spf13/cast v1.5.1
-## explicit; go 1.18
+# github.com/spf13/cast v1.10.0
+## explicit; go 1.21.0
 github.com/spf13/cast
-# github.com/spf13/pflag v1.0.5
+github.com/spf13/cast/internal
+# github.com/spf13/pflag v1.0.10
 ## explicit; go 1.12
 github.com/spf13/pflag
-# github.com/spf13/viper v1.17.0
-## explicit; go 1.18
+# github.com/spf13/viper v1.21.0
+## explicit; go 1.23.0
 github.com/spf13/viper
-github.com/spf13/viper/internal/encoding
 github.com/spf13/viper/internal/encoding/dotenv
-github.com/spf13/viper/internal/encoding/hcl
-github.com/spf13/viper/internal/encoding/ini
-github.com/spf13/viper/internal/encoding/javaproperties
 github.com/spf13/viper/internal/encoding/json
 github.com/spf13/viper/internal/encoding/toml
 github.com/spf13/viper/internal/encoding/yaml
+github.com/spf13/viper/internal/features
 # github.com/stretchr/testify v1.12.0
 ## explicit; go 1.17
 github.com/stretchr/testify/assert
@@ -268,8 +265,8 @@ github.com/tidwall/pretty
 # github.com/tidwall/sjson v1.2.5
 ## explicit; go 1.14
 github.com/tidwall/sjson
-# github.com/tinylib/msgp v1.1.9
-## explicit; go 1.18
+# github.com/tinylib/msgp v1.4.0
+## explicit; go 1.22
 github.com/tinylib/msgp/msgp
 # github.com/tomnomnom/linkheader v0.0.0-20180905144013-02ca5825eb80
 ## explicit
@@ -314,14 +311,9 @@ go.mau.fi/util/pkcs7
 go.mau.fi/util/ptr
 go.mau.fi/util/random
 go.mau.fi/util/retryafter
-# go.uber.org/atomic v1.9.0
-## explicit; go 1.13
-go.uber.org/atomic
-# go.uber.org/multierr v1.9.0
-## explicit; go 1.19
-go.uber.org/multierr
 # go.yaml.in/yaml/v3 v3.0.5
 ## explicit; go 1.16
+go.yaml.in/yaml/v3
 # golang.org/x/crypto v0.57.0
 ## explicit; go 1.26.0
 golang.org/x/crypto/bcrypt
@@ -335,10 +327,9 @@ golang.org/x/crypto/ssh/terminal
 ## explicit; go 1.26.0
 golang.org/x/exp/constraints
 golang.org/x/exp/maps
-golang.org/x/exp/slices
-golang.org/x/exp/slog
-golang.org/x/exp/slog/internal
-golang.org/x/exp/slog/internal/buffer
+# golang.org/x/mod v0.41.0
+## explicit; go 1.26.0
+golang.org/x/mod/semver
 # golang.org/x/net v0.59.0
 ## explicit; go 1.26.0
 golang.org/x/net/html
@@ -505,9 +496,6 @@ google.golang.org/protobuf/types/known/anypb
 google.golang.org/protobuf/types/known/durationpb
 google.golang.org/protobuf/types/known/emptypb
 google.golang.org/protobuf/types/known/timestamppb
-# gopkg.in/ini.v1 v1.67.0
-## explicit
-gopkg.in/ini.v1
 # gopkg.in/natefinch/lumberjack.v2 v2.2.1
 ## explicit; go 1.13
 gopkg.in/natefinch/lumberjack.v2

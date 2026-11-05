@@ -23,7 +23,7 @@ var errNilPtr = errors.New("destination pointer is nil") // embedded in descript
 // convertAssign copies to dest the value in src, converting it if possible.
 // An error is returned if the copy would result in loss of information.
 // dest should be a pointer type.
-func convertAssign(dest, src any) error {
+func convertAssign(dest, src interface{}) error {
 	// Common cases, without reflect.
 	switch s := src.(type) {
 	case string:
@@ -55,7 +55,7 @@ func convertAssign(dest, src any) error {
 			}
 			*d = string(s)
 			return nil
-		case *any:
+		case *interface{}:
 			if d == nil {
 				return errNilPtr
 			}
@@ -97,7 +97,7 @@ func convertAssign(dest, src any) error {
 		}
 	case nil:
 		switch d := dest.(type) {
-		case *any:
+		case *interface{}:
 			if d == nil {
 				return errNilPtr
 			}
@@ -149,7 +149,7 @@ func convertAssign(dest, src any) error {
 			*d = bv.(bool)
 		}
 		return err
-	case *any:
+	case *interface{}:
 		*d = src
 		return nil
 	}
@@ -159,7 +159,7 @@ func convertAssign(dest, src any) error {
 	}
 
 	dpv := reflect.ValueOf(dest)
-	if dpv.Kind() != reflect.Pointer {
+	if dpv.Kind() != reflect.Ptr {
 		return errors.New("destination not a pointer")
 	}
 	if dpv.IsNil() {
@@ -192,7 +192,7 @@ func convertAssign(dest, src any) error {
 	// This also allows scanning into user defined types such as "type Int int64".
 	// For symmetry, also check for string destination types.
 	switch dv.Kind() {
-	case reflect.Pointer:
+	case reflect.Ptr:
 		if src == nil {
 			dv.Set(reflect.Zero(dv.Type()))
 			return nil
@@ -256,7 +256,7 @@ func cloneBytes(b []byte) []byte {
 	return c
 }
 
-func asString(src any) string {
+func asString(src interface{}) string {
 	switch v := src.(type) {
 	case string:
 		return v

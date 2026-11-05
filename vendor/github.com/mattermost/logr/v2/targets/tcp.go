@@ -92,6 +92,7 @@ func (tcp *Tcp) getConn(reporter func(err interface{})) (net.Conn, error) {
 		conn, err := tcp.dial(ctx)
 		if err != nil {
 			reporter(fmt.Errorf("log target %s connection error: %w", tcp.String(), err))
+			ch <- result{conn: nil, err: err}
 			return
 		}
 		tcp.conn = conn
@@ -126,11 +127,12 @@ func (tcp *Tcp) dial(ctx context.Context) (net.Conn, error) {
 		ServerName:         tcp.options.IP,
 		InsecureSkipVerify: tcp.options.Insecure,
 	}
-	if tcp.options.Cert != "" {
-		pool, err := GetCertPool(tcp.options.Cert)
-		if err != nil {
-			return nil, err
-		}
+
+	pool, err := GetCertPoolOrNil(tcp.options.Cert)
+	if err != nil {
+		return nil, err
+	}
+	if pool != nil {
 		tlsconfig.RootCAs = pool
 	}
 
