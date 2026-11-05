@@ -35,3 +35,8 @@ logs
 test/cmd/testapp1/testapp1
 test/cmd/simple/simple
 test/cmd/gelf/gelf
+
+# tools
+.aider*
+!.aider.conf.yml
+!.aiderignore

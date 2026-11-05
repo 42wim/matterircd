@@ -64,11 +64,12 @@ func (s *Syslog) Init() error {
 	if s.params.TLS {
 		network = "tcp+tls"
 		config = &tls.Config{InsecureSkipVerify: s.params.Insecure}
-		if s.params.Cert != "" {
-			pool, err := GetCertPool(s.params.Cert)
-			if err != nil {
-				return err
-			}
+
+		pool, err := GetCertPoolOrNil(s.params.Cert)
+		if err != nil {
+			return err
+		}
+		if pool != nil {
 			config.RootCAs = pool
 		}
 	}
