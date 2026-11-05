@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"sort"
 	"strconv"
@@ -445,12 +446,261 @@ func (m *Client) getGroupChannelName(channelID string) string {
 
 func (m *Client) GetChannelName(ctx context.Context, channelID string) string {
 	if ch := m.GetChannel(ctx, channelID); ch != nil {
-		m.Users.mu.RLock()
-		defer m.Users.mu.RUnlock()
+		myID := m.currentUserID()
 
-		return m.getNormalisedName(ch)
+		m.Users.mu.RLock()
+		name := m.getNormalisedName(ch)
+		unresolved := m.channelNameUnresolvedLocked(ch, name, myID)
+		channelID := ch.Id
+
+		m.Users.mu.RUnlock()
+
+		if unresolved {
+			m.healChannelName(ctx, channelID)
+		}
+
+		return name
 	}
 	return ""
+}
+
+const (
+	nameHealInitialDelay = 5 * time.Second
+	nameHealMaxDelay     = 5 * time.Minute
+	nameHealMaxAttempts  = 12
+)
+
+// currentUserID returns the current user's ID under the client lock, which guards m.User.
+// It must not be called with the users cache lock held.
+func (m *Client) currentUserID() string {
+	m.RLock()
+	defer m.RUnlock()
+
+	if m.User == nil {
+		return ""
+	}
+
+	return m.User.Id
+}
+
+// channelNameUnresolvedLocked reports whether name is still only an ID (or empty), i.e. the
+// data needed to build a readable name was missing. The users cache has to be locked.
+func (m *Client) channelNameUnresolvedLocked(ch *model.Channel, name, myID string) bool {
+	switch ch.Type {
+	case model.ChannelTypeGroup:
+		if name == "" || name == ch.Name {
+			return true
+		}
+
+		if ch.DisplayName != "" {
+			return false
+		}
+
+		// getGroupChannelName omits members without a username, so every member must be known.
+		for userID := range m.Users.channels[ch.Id] {
+			if u := m.Users.users[userID]; u == nil || u.Username == "" {
+				return true
+			}
+		}
+
+		return false
+	case model.ChannelTypeDirect:
+		if myID == "" {
+			return false
+		}
+
+		otherID, ok := m.GetDMOtherUserID(ch.Name, myID)
+		if !ok {
+			return ch.Name == ""
+		}
+
+		u := m.Users.users[otherID]
+
+		return u == nil || u.Username == ""
+	default:
+		return name == ""
+	}
+}
+
+// healChannelName starts, at most once per channel, a background retry with exponential backoff
+// that refetches the data needed to name the channel. It stops on success, on a 404 (channel
+// is gone), after nameHealMaxAttempts, or when the client context is canceled.
+func (m *Client) healChannelName(ctx context.Context, channelID string) {
+	if _, running := m.nameHealing.LoadOrStore(channelID, struct{}{}); running {
+		return
+	}
+
+	// Detach from the caller's cancellation (it may be a short-lived request context) but
+	// still stop on Logout, which cancels the login context.
+	ctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+
+	stop := func() bool { return false }
+
+	if lc := m.loginCtx.Load(); lc != nil {
+		//nolint:contextcheck // Tied to the long-lived login session, not the caller's context
+		stop = context.AfterFunc(*lc, cancel)
+	}
+
+	go func() {
+		defer stop()
+		defer cancel()
+		defer m.nameHealing.Delete(channelID)
+
+		delay := nameHealInitialDelay
+
+		for attempt := 1; attempt <= nameHealMaxAttempts; attempt++ {
+			resolved, final := m.refreshChannelName(ctx, channelID)
+			if final {
+				return
+			}
+
+			if resolved {
+				m.logger.Infof("channel name for %s resolved after %d attempt(s)", channelID, attempt)
+
+				if cb := m.OnChannelNameResolved; cb != nil {
+					cb(channelID, m.resolvedChannelName(channelID))
+				}
+
+				return
+			}
+
+			m.logger.Debugf("channel name for %s still unresolved (attempt %d/%d), retrying in %s",
+				channelID, attempt, nameHealMaxAttempts, delay)
+
+			if ok, _ := m.sleepWithContext(ctx, delay); !ok {
+				return
+			}
+
+			delay = min(delay*2, nameHealMaxDelay)
+		}
+
+		m.logger.Warnf("giving up resolving channel name for %s", channelID)
+	}()
+}
+
+// resolvedChannelName returns the readable name of a channel: the peer's username for a DM,
+// otherwise the normalised name. GetCachedChannelName keeps returning the raw DM name.
+func (m *Client) resolvedChannelName(channelID string) string {
+	myID := m.currentUserID()
+
+	m.Users.mu.RLock()
+	defer m.Users.mu.RUnlock()
+
+	ch := m.Users.channelData[channelID]
+	if ch == nil {
+		return ""
+	}
+
+	if ch.Type == model.ChannelTypeDirect && myID != "" {
+		if otherID, ok := m.GetDMOtherUserID(ch.Name, myID); ok {
+			if u := m.Users.users[otherID]; u != nil && u.Username != "" {
+				return u.Username
+			}
+		}
+	}
+
+	return m.getNormalisedName(ch)
+}
+
+// fetchUserWithName fetches the user from the server unless a cached copy already has a username.
+func (m *Client) fetchUserWithName(ctx context.Context, userID string) {
+	m.Users.mu.RLock()
+	u := m.Users.users[userID]
+	hasName := u != nil && u.Username != ""
+
+	m.Users.mu.RUnlock()
+
+	if hasName {
+		return
+	}
+
+	user, _, err := m.Client.GetUser(ctx, userID, "")
+	if err != nil {
+		m.logger.Debugf("fetching user %s for channel name failed: %v", userID, err)
+
+		return
+	}
+
+	m.UpdateUser(user)
+}
+
+// refreshChannelName refetches the channel and the users needed for its name. It returns
+// whether the name is now resolved, and whether retrying is pointless (channel gone, or
+// context canceled).
+func (m *Client) refreshChannelName(ctx context.Context, channelID string) (bool, bool) {
+	resp, err := m.Client.DoAPIGet(ctx, "/channels/"+channelID, "")
+	if err != nil {
+		var statusCode int
+		if resp != nil {
+			statusCode = resp.StatusCode
+			resp.Body.Close()
+		}
+
+		return false, statusCode == http.StatusNotFound || ctx.Err() != nil
+	}
+
+	var summary ChannelSummary
+
+	body, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+
+	if err == nil {
+		err = json.Unmarshal(body, &summary)
+	}
+
+	if err != nil {
+		return false, ctx.Err() != nil
+	}
+
+	m.Users.mu.Lock()
+	ch := m.Users.cacheChannelLocked(summary.TeamId, &summary)
+	chType, chName := ch.Type, ch.Name
+	m.Users.mu.Unlock()
+
+	myID := m.currentUserID()
+
+	switch chType {
+	case model.ChannelTypeGroup:
+		m.refreshGroupMembers(ctx, channelID)
+	case model.ChannelTypeDirect:
+		if myID != "" {
+			if otherID, ok := m.GetDMOtherUserID(chName, myID); ok {
+				m.fetchUserWithName(ctx, otherID)
+			}
+		}
+	}
+
+	m.Users.mu.RLock()
+	defer m.Users.mu.RUnlock()
+
+	return !m.channelNameUnresolvedLocked(ch, m.getNormalisedName(ch), myID), ctx.Err() != nil
+}
+
+// refreshGroupMembers makes sure the users of a group channel are cached with their usernames.
+func (m *Client) refreshGroupMembers(ctx context.Context, channelID string) {
+	m.Users.mu.Lock()
+	ids := make([]string, 0, len(m.Users.channels[channelID]))
+
+	for id := range m.Users.channels[channelID] {
+		ids = append(ids, id)
+	}
+
+	// GetChannelUsers returns an existing (even empty) entry without a request.
+	if len(ids) == 0 {
+		delete(m.Users.channels, channelID)
+	}
+
+	m.Users.mu.Unlock()
+
+	if len(ids) == 0 {
+		_, _ = m.GetChannelUsers(ctx, channelID)
+
+		return
+	}
+
+	for _, id := range ids {
+		m.fetchUserWithName(ctx, id)
+	}
 }
 
 func (m *Client) GetChannelTeamID(ctx context.Context, id string) string {

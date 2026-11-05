@@ -55,6 +55,8 @@ const (
 	reactionCacheSize  = 100
 	sentCacheSize      = 100
 	sentReactionWindow = time.Minute
+
+	roomNameResolveTimeout = 5 * time.Second
 )
 
 // markdownReplacer combines multi-line messages into a single line, making
@@ -74,6 +76,10 @@ type Matrix struct {
 	connected atomic.Bool
 	e2ee      atomic.Bool
 	ready     atomic.Bool
+
+	// nameResolveTried holds the rooms whose name was already resolved
+	// synchronously once, so an unreachable homeserver cannot stall every lookup.
+	nameResolveTried sync.Map
 
 	// unregisterReloadHook removes the hook that New registered on the config.
 	unregisterReloadHook func()
@@ -123,6 +129,8 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 	if provider := m.cfg.Matrix().DefaultProvider; provider != "" {
 		opts = append(opts, matrixclient.WithDefaultProvider(provider))
 	}
+
+	opts = append(opts, matrixclient.WithRoomNameResolved(m.onRoomNameResolved))
 
 	mc, err := matrixclient.New(ctx, matrixclient.Credentials{
 		Server: cred.Server,
@@ -617,6 +625,8 @@ func (m *Matrix) Nick(ctx context.Context, name string) error {
 }
 
 func (m *Matrix) GetChannelName(ctx context.Context, channelID string) string {
+	m.resolveRoomName(ctx, id.RoomID(channelID))
+
 	channel, err := m.GetChannel(ctx, channelID)
 	if err != nil {
 		return channelID
@@ -627,6 +637,19 @@ func (m *Matrix) GetChannelName(ctx context.Context, channelID string) string {
 	}
 
 	return "#" + channel.Name
+}
+
+// resolveRoomName looks up a room known only by its ID before its channel is
+// created, within a short deadline. Later failures are healed in the background.
+func (m *Matrix) resolveRoomName(ctx context.Context, roomID id.RoomID) {
+	if _, tried := m.nameResolveTried.LoadOrStore(roomID, struct{}{}); tried {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, roomNameResolveTimeout)
+	defer cancel()
+
+	m.mc.ResolveRoomName(ctx, roomID)
 }
 
 func (m *Matrix) GetChannelUsers(ctx context.Context, channelID string) ([]*bridge.UserInfo, error) {

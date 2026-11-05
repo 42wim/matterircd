@@ -48,6 +48,19 @@ type Channel struct {
 	Encrypted  bool
 	Topic      string
 
+	nameChecked bool // the server confirmed the room has no name or alias, see RefreshRoomName
+	// nameRev and aliasRev count the sync events for the name and alias, clears included,
+	// so a lookup does not restore a value a newer sync event removed.
+	nameRev, aliasRev uint64
+
+	heroes       []id.UserID // members the server suggests to name the room after, from the sync summary
+	reportedName string      // channel name last reported to the consumer, see RoomNameHandler
+	delivering   bool        // a name callback is running, see reportNameLocked
+	renameAgain  bool        // the name was reported while delivering, re-evaluate it afterwards
+	nameGaveUp   bool        // healing ended without a name (forbidden, or out of attempts), see healRoomName
+	selfJoined   bool        // we are joined, as last seen in our member event
+	nameEpoch    uint64      // incremented when we join or leave, lookups of an older epoch are discarded
+
 	LastActivity int64      // timestamp in milliseconds of the newest message seen, 0 if none
 	LastEventID  id.EventID // newest message event seen, set during the initial sync as well
 
@@ -164,6 +177,27 @@ type RedactionHandler interface {
 // membership changes. Changes from the initial sync are not delivered.
 type MemberHandler interface {
 	OnMember(m *MemberChange)
+}
+
+// RoomRename is a change of the channel name of a room, as listed by Client.Rooms.
+// Like matterircd's ChannelUpdateEvent for Mattermost it carries the room ID, the
+// new channel name and the display name. A consumer is expected to handle it the
+// same way: PART the channel of OldName with "Channel renamed to <Name>", JOIN
+// Name and send a server notice. Direct rooms are never reported.
+type RoomRename struct {
+	RoomID      id.RoomID
+	OldName     string
+	Name        string
+	DisplayName string // the room name as set, empty if it has none
+}
+
+// RoomNameHandler can optionally be implemented by a Handler to be told when the
+// channel name of a room changes through the sync, the counterpart of the channel
+// update event of Mattermost. Only rooms whose name was reported through
+// Client.Rooms or Client.ResolveRoomName are delivered. A name healed in the
+// background is reported through the WithRoomNameResolved callback instead.
+type RoomNameHandler interface {
+	OnRoomName(r *RoomRename)
 }
 
 // TopicHandler can optionally be implemented by a Handler to receive topic

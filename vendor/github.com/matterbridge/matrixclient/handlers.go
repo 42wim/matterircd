@@ -107,11 +107,33 @@ func (c *Client) applyMember(ev *event.Event, member *event.MemberEventContent, 
 		c.users[targetID] = u
 	}
 
+	// The profile is shared by the rooms of the user, so they all may be named differently now.
+	if c.synced.Load() && (u.MemberEventContent == nil || u.Displayname != member.Displayname) {
+		for roomID, other := range c.channels {
+			other.RLock()
+			_, in := other.Members[targetID]
+			// A hero names the room even when it is not among the members.
+			in = in || slices.Contains(other.heroes, targetID)
+			other.RUnlock()
+
+			if in {
+				c.nameDirty[roomID] = struct{}{}
+			}
+		}
+	}
+
 	u.MemberEventContent = member
 
 	ch := c.channelLocked(ev.RoomID)
 
 	ch.Lock()
+
+	if targetID == c.mc.UserID {
+		if ch.noteSelfMembershipLocked(member.Membership == event.MembershipJoin) {
+			c.cancelNameHealing(ev.RoomID)
+		}
+	}
+
 	switch member.Membership {
 	case event.MembershipJoin, event.MembershipInvite:
 		ch.Members[targetID] = u
@@ -139,10 +161,16 @@ func (c *Client) handleRoomName(_ context.Context, ev *event.Event) {
 	ch.Lock()
 	defer ch.Unlock()
 
-	ch.RawName = name.Name
+	ch.nameRev++
+	ch.setNameLocked(name.Name)
+}
+
+// setNameLocked sets the room name, ch must be locked.
+func (ch *Channel) setNameLocked(name string) {
+	ch.RawName = name
 	ch.Name = ""
-	if name.Name != "" {
-		ch.Name = "#" + strings.ReplaceAll(name.Name, " ", "")
+	if name != "" {
+		ch.Name = "#" + strings.ReplaceAll(name, " ", "")
 	}
 }
 
@@ -158,6 +186,7 @@ func (c *Client) handleCanonicalAlias(_ context.Context, ev *event.Event) {
 	ch := c.channelLocked(ev.RoomID)
 
 	ch.Lock()
+	ch.aliasRev++
 	ch.Alias, ch.AltAliases = alias.Alias, alias.AltAliases
 	ch.Unlock()
 }
@@ -180,6 +209,15 @@ func (c *Client) noteTimeline(res *mautrix.RespSync) {
 	for roomID, room := range res.Rooms.Join {
 		if room != nil {
 			c.noteTimelineLocked(roomID, room.Timeline.Events)
+
+			// An omitted field keeps the heroes, an empty array clears them.
+			if room.Summary.Heroes != nil {
+				ch := c.channelLocked(roomID)
+
+				ch.Lock()
+				ch.heroes = slices.Clone(room.Summary.Heroes)
+				ch.Unlock()
+			}
 		}
 	}
 

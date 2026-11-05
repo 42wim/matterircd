@@ -403,6 +403,7 @@ func (m *Mattermost) loginToMattermost(ctx context.Context, onWsConnect func()) 
 	logger.Info("login succeeded")
 
 	m.mc = mc
+	mc.OnChannelNameResolved = m.onChannelNameResolved
 
 	quitChan := make(chan struct{})
 	m.quitChan = append(m.quitChan, quitChan)
@@ -2267,6 +2268,31 @@ func (m *Mattermost) handleWsActionChannelUpdated(rmsg *model.WebSocketEvent, lo
 			DisplayName: updatedChannel.DisplayName,
 		},
 	})
+}
+
+// onChannelNameResolved is the matterclient callback for a channel name healed
+// in the background, which must not block, so the event is sent from its own goroutine.
+func (m *Mattermost) onChannelNameResolved(channelID, _ string) {
+	go func() {
+		name := m.GetChannelName(m.wsCtx, channelID)
+		if !strings.HasPrefix(name, "#") {
+			return
+		}
+
+		var displayName string
+		if channel := m.mc.GetChannel(m.wsCtx, channelID); channel != nil {
+			displayName = channel.DisplayName
+		}
+
+		m.sendEvent(&bridge.Event{
+			Type: "channel_update",
+			Data: &bridge.ChannelUpdateEvent{
+				ChannelID:   channelID,
+				Name:        strings.TrimPrefix(name, "#"),
+				DisplayName: displayName,
+			},
+		})
+	}()
 }
 
 func (m *Mattermost) handleConfigChangedEvent(rmsg *model.WebSocketEvent, logger *logrus.Entry) {

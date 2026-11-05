@@ -97,6 +97,35 @@ func (m *Matrix) OnTopic(t *matrixclient.TopicChange) {
 	})
 }
 
+// OnRoomName implements matrixclient.RoomNameHandler.
+func (m *Matrix) OnRoomName(r *matrixclient.RoomRename) {
+	m.sendRoomUpdate(r.RoomID, r.Name, r.DisplayName)
+}
+
+// onRoomNameResolved is the matrixclient.WithRoomNameResolved callback, which
+// must not block, so the event is sent from its own goroutine.
+func (m *Matrix) onRoomNameResolved(roomID id.RoomID, name string) {
+	m.nameResolveTried.Delete(roomID)
+
+	go m.sendRoomUpdate(roomID, name, "")
+}
+
+func (m *Matrix) sendRoomUpdate(roomID id.RoomID, name, displayName string) {
+	name = strings.TrimPrefix(name, "#")
+	if displayName == "" {
+		displayName = name
+	}
+
+	m.sendEvent(&bridge.Event{
+		Type: "channel_update",
+		Data: &bridge.ChannelUpdateEvent{
+			ChannelID:   roomID.String(),
+			Name:        name,
+			DisplayName: displayName,
+		},
+	})
+}
+
 // OnMember implements matrixclient.MemberHandler.
 func (m *Matrix) OnMember(c *matrixclient.MemberChange) {
 	if m.mc.IsDirect(c.RoomID) {
