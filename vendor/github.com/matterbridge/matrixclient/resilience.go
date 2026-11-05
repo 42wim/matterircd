@@ -40,6 +40,26 @@ func loginReq(cred Credentials, deviceID id.DeviceID) *mautrix.ReqLogin {
 		Password:         cred.Pass,
 		DeviceID:         deviceID,
 		StoreCredentials: true,
+
+		InitialDeviceDisplayName: cred.DeviceName,
+	}
+}
+
+// applyDeviceName renames our device when it differs, as the login name only
+// applies to newly created devices. Failure is not fatal.
+func (c *Client) applyDeviceName(ctx context.Context) {
+	if c.cred.DeviceName == "" || c.mc.DeviceID == "" {
+		return
+	}
+
+	info, err := c.mc.GetDeviceInfo(ctx, c.mc.DeviceID)
+	if err == nil && info.DisplayName == c.cred.DeviceName {
+		return
+	}
+
+	err = c.mc.SetDeviceInfo(ctx, c.mc.DeviceID, &mautrix.ReqDeviceInfo{DisplayName: c.cred.DeviceName})
+	if err != nil {
+		c.logger.Warnf("could not set device name: %s", err)
 	}
 }
 
