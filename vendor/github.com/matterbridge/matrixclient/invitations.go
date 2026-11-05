@@ -53,6 +53,8 @@ func (c *Client) syncInvitations(_ context.Context, res *mautrix.RespSync, _ str
 
 	c.Unlock()
 
+	var notify []Invitation
+
 	for roomID, room := range res.Rooms.Invite {
 		invite := c.parseInvitation(roomID, room.State.Events)
 		if invite.Sender == "" {
@@ -66,8 +68,15 @@ func (c *Client) syncInvitations(_ context.Context, res *mautrix.RespSync, _ str
 		c.invitations[roomID] = invite
 		c.Unlock()
 
-		if h, ok := c.handler.(InviteHandler); ok && c.synced.Load() && (!exists || previous != invite) {
-			h.OnInvite(&invite)
+		if !exists || previous != invite {
+			notify = append(notify, invite)
+		}
+	}
+
+	// Callbacks run after every invitation is cached, so none can see another pending one as joined.
+	if h, ok := c.handler.(InviteHandler); ok && c.synced.Load() {
+		for i := range notify {
+			h.OnInvite(&notify[i])
 		}
 	}
 
@@ -79,17 +88,18 @@ func (c *Client) syncInvitations(_ context.Context, res *mautrix.RespSync, _ str
 func (c *Client) persistAcceptedDirect(ctx context.Context, roomID id.RoomID) {
 	c.Lock()
 
-	userID, ok := c.acceptedDirect[roomID]
-	if !ok {
-		invite, invited := c.invitations[roomID]
-		if !invited || !invite.Direct {
-			c.Unlock()
+	var userID id.UserID
 
-			return
-		}
-
+	// A current invitation is newer than a historical acceptance of the same room.
+	if invite, invited := c.invitations[roomID]; invited && invite.Direct {
 		userID = invite.Sender
 		c.acceptedDirect[roomID] = userID
+	} else if accepted, ok := c.acceptedDirect[roomID]; ok {
+		userID = accepted
+	} else {
+		c.Unlock()
+
+		return
 	}
 
 	c.Unlock()
@@ -117,13 +127,6 @@ func (c *Client) recordDirect(ctx context.Context, userID id.UserID, roomID id.R
 	unwritten := make([]id.RoomID, 0, len(c.pendingDirect))
 
 	for pendingRoom, p := range c.pendingDirect {
-		// The room being recorded was just joined or created, so its marker may be stale until the next sync.
-		if _, left := c.leftRooms[pendingRoom]; left && pendingRoom != roomID {
-			delete(c.pendingDirect, pendingRoom)
-
-			continue
-		}
-
 		if slices.Contains(direct[p.user], pendingRoom) {
 			delete(c.pendingDirect, pendingRoom)
 

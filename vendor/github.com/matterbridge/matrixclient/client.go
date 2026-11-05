@@ -438,8 +438,10 @@ func (c *Client) Fingerprint() string {
 }
 
 // DeviceVerified reports whether our device is verified or cross-signed and
-// trusted. It queries the server, so it is not stale right after login. It is
-// false when end-to-end encryption is disabled or the account has no cross-signing.
+// trusted. It reads the local crypto store without querying the server, so
+// verification or revocation done elsewhere is only reflected once sync has
+// stored it. It is false when end-to-end encryption is disabled or the account
+// has no cross-signing.
 // A non-nil error means the state could not be determined, which is not the
 // same as unverified.
 func (c *Client) DeviceVerified(ctx context.Context) (bool, error) {

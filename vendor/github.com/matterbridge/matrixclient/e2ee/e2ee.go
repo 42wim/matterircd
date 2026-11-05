@@ -60,35 +60,21 @@ func (h helper) Fingerprint() string {
 	return m.Fingerprint()
 }
 
-// ownDevice returns our device, refreshed from the server when possible.
+// ownDevice returns our device from the local crypto store. It deliberately
+// avoids FetchKeys, which writes device and cross-signing data without
+// synchronizing with the machine's own sync handling.
 func (h helper) ownDevice(ctx context.Context, m *crypto.OlmMachine) (*id.Device, error) {
-	// GetOrFetchDevice would return the cached device, whose trust may predate a
-	// verification done from another client, so refresh from the server. FetchKeys
-	// reaches into StateStore, which is not set up until the machine is fully
-	// initialized, so use the read-only store until then.
-	if m.StateStore == nil {
-		dev, err := m.CryptoStore.GetDevice(ctx, h.client.UserID, h.client.DeviceID)
-		if err != nil {
-			return nil, fmt.Errorf("get own device: %w", err)
-		}
-
-		if dev == nil {
-			return nil, fmt.Errorf("own device %s not in crypto store", h.client.DeviceID)
-		}
-
-		return dev, nil
-	}
-
-	devices, err := m.FetchKeys(ctx, []id.UserID{h.client.UserID}, true)
+	dev, err := m.CryptoStore.GetDevice(ctx, h.client.UserID, h.client.DeviceID)
 	if err != nil {
-		return nil, fmt.Errorf("fetch own device keys: %w", err)
+		return nil, fmt.Errorf("get own device: %w", err)
 	}
 
-	// FetchKeys omits the user or device without an error when the server
-	// query or validation of the device failed.
-	dev := devices[h.client.UserID][h.client.DeviceID]
 	if dev == nil {
-		return nil, fmt.Errorf("server did not return own device %s", h.client.DeviceID)
+		return nil, fmt.Errorf("own device %s not in crypto store", h.client.DeviceID)
+	}
+
+	if dev.SigningKey.String() != m.Fingerprint() {
+		return nil, fmt.Errorf("own device %s signing key does not match local key", h.client.DeviceID)
 	}
 
 	return dev, nil
