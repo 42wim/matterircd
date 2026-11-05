@@ -783,6 +783,10 @@ func (u *User) handleChannelDeleteEvent(event *bridge.ChannelDeleteEvent) {
 
 	// Unlink it so a channel created later for this ID, a room restored after
 	// turning into a DM for instance, gets the current name instead of reusing this one.
+	// The ghosts left in it are evicted first, or they would keep the unlinked channel
+	// where the server sweep cannot reach it.
+	evictIfOnlyGhosts(ch)
+
 	u.Lock()
 	delete(u.channels, ch)
 	u.Unlock()

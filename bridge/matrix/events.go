@@ -202,6 +202,13 @@ func (m *Matrix) sendRoomUpdate(ctx context.Context, update *roomUpdate) {
 			Data: &bridge.ChannelDeleteEvent{ChannelID: ev.ChannelID},
 		})
 	case matrixclient.RoomRestored:
+		// A later transition may have made it a DM again, whose channel name is the raw room ID.
+		// That drop is queued behind this one, so the channel is not created in between.
+		info, err := m.GetChannel(ctx, ev.ChannelID)
+		if err == nil && info.DM {
+			return
+		}
+
 		m.sendEventCtx(ctx, &bridge.Event{
 			Type: "channel_create",
 			Data: &bridge.ChannelCreateEvent{ChannelID: ev.ChannelID},
