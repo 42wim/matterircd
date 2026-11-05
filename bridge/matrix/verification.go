@@ -10,11 +10,23 @@ import (
 	"maunium.net/go/mautrix/id"
 
 	"github.com/42wim/matterircd/bridge"
+	"github.com/42wim/matterircd/utils"
 	"github.com/matterbridge/matrixclient"
 )
 
 // verificationQueueSize bounds the updates waiting for verificationLoop.
 const verificationQueueSize = 16
+
+// sasEmojiAliases maps the SAS descriptions to emoji shortcodes. The SAS runes
+// of some emoji lack the variation selector, so terminals draw them as text.
+var sasEmojiAliases = map[string]string{
+	"Panda": "panda_face", "Flower": "tulip", "Tree": "deciduous_tree", "Globe": "earth_asia",
+	"Moon": "crescent_moon", "Smiley": "grinning", "Hat": "tophat", "Glasses": "eyeglasses",
+	"Spanner": "wrench", "Thumbs Up": "+1", "Clock": "alarm_clock", "Light Bulb": "bulb",
+	"Book": "closed_book", "Pencil": "pencil2", "Flag": "checkered_flag", "Train": "steam_locomotive",
+	"Bicycle": "bike", "Aeroplane": "airplane", "Ball": "soccer", "Folder": "file_folder", "Pin": "pushpin",
+	"Horse": "racehorse", "Umbrella": "umbrella2",
+}
 
 var errNoVerification = errors.New("no verification in progress, use VERIFY START")
 
@@ -104,11 +116,13 @@ func formatSAS(v *matrixclient.Verification) string {
 			sb.WriteString("  ")
 		}
 
-		sb.WriteRune(e)
+		if i >= len(v.EmojiDescriptions) {
+			sb.WriteRune(e)
 
-		if i < len(v.EmojiDescriptions) {
-			sb.WriteString(" " + v.EmojiDescriptions[i])
+			continue
 		}
+
+		sb.WriteString(sasEmoji(e, v.EmojiDescriptions[i]) + " " + v.EmojiDescriptions[i])
 	}
 
 	if len(v.Decimals) > 0 {
@@ -173,4 +187,23 @@ func (m *Matrix) cancelVerification(ctx context.Context, txn id.VerificationTran
 	m.clearVerifyTxn(txn)
 
 	return nil
+}
+
+// sasEmoji returns the fully qualified emoji for a SAS symbol. An alias that
+// resolves to a different symbol is ignored, as the user compares symbols.
+func sasEmoji(r rune, description string) string {
+	alias, ok := sasEmojiAliases[description]
+	if !ok {
+		alias = strings.ReplaceAll(strings.ToLower(description), " ", "_")
+	}
+
+	if e, found := utils.EmojiFromAlias(alias, nil); found && strings.HasPrefix(e, string(r)) {
+		return e
+	}
+
+	if r < 0x1F000 {
+		return string(r) + "\ufe0f"
+	}
+
+	return string(r)
 }
