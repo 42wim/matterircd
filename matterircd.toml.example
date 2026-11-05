@@ -79,22 +79,40 @@ AwayCooldown = "20m"
 # *** WARNING: Information fed through will more than likely be used to train these models. ***
 [ai]
 enabled = true
-provider = "gemini" # default provider when not specified on IRC - "gemini" (default) or "copilot"
+provider = "gemini" # default provider when not specified on IRC - "gemini" (default), "copilot", or "openai"
 default_post_limit = 30
 max_post_limit = 100
 # Optional additional instructions appended to the summarizer prompt.
 # prompt = "Pay special attention to code reviews, diffs/patches, and deployment blockers."
 
-# Credentials
-token = "ghu_..." # OAuth tokens for GitHub Apps
+# Credentials & Endpoints
+# Default token for the configured provider:
+token = "ghu_..." # GitHub token for Copilot, or API key for OpenAI / Hetzner
+# Or specify provider-scoped tokens to safely switch between providers on IRC without leaking keys:
+#copilot_token = "ghu_..."
+#openai_token = "sk-..."
+#hetzner_token = "..."
+
 service_account_file = "/etc/matterircd/sa.json"
 project = "myproject-req-10375"
 location = "us"
 
+# Base URL for default provider or local engines:
+# url = "http://localhost:11434/v1"
+
+# Or configure provider-specific endpoints to prevent endpoint bleed:
+#[ai.urls]
+#openai = "https://api.openai.com/v1"
+#hetzner = "https://inference.hetzner.com/api/v1"
+#ollama = "http://localhost:11434/v1"
+
 # Provider-specific models
 [ai.models]
 gemini = "gemini-3.8-flash"
-copilot = "gpt-4o-mini"
+copilot = "gpt-4o"          # or "gpt-4o-mini"
+openai = "gpt-4o"           # or "gpt-4o-mini", "o3-mini"
+#hetzner = "meta-llama/Meta-Llama-3.1-70B-Instruct"
+#ollama = "llama3.2"
 
 ##################################
 ##### MATTERMOST EXAMPLE #########

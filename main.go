@@ -147,21 +147,41 @@ func main() {
 		}
 
 		model := utils.GetModel(provider, aiCfg.Model, aiCfg.Models)
+		token := aiCfg.GetToken(provider)
 
 		switch strings.ToLower(provider) {
 		case utils.AICopilotProvider, utils.AIGitHubProvider:
-			if aiCfg.Token == "" {
+			if token == "" {
 				logger.Warn("AI summarization enabled, but token is missing")
 				break
 			}
 
-			_, err := utils.NewCopilotClient(aiCfg.Token, model)
+			_, err := utils.NewCopilotClient(token, model)
 			if err != nil {
 				logger.Errorf("AI summarization setup error: %v", err)
 				break
 			}
 
 			logger.Infof("AI summarization enabled (default provider: %s, model: %s)", provider, model)
+		case utils.AIOpenAIProvider, utils.AIHetznerProvider, utils.AIOllamaProvider, utils.AILocalProvider, utils.AIvLLMProvider:
+			baseURL := aiCfg.GetBaseURL(provider)
+			if baseURL == "" {
+				logger.Warnf("AI summarization enabled for %s, but url is missing", provider)
+				break
+			}
+
+			if token == "" && (strings.Contains(baseURL, "api.openai.com") || strings.Contains(baseURL, "inference.hetzner.com")) {
+				logger.Warn("AI summarization enabled, but token is missing")
+				break
+			}
+
+			client, err := utils.NewOpenAIClient(token, baseURL, model)
+			if err != nil {
+				logger.Errorf("AI summarization setup error: %v", err)
+				break
+			}
+
+			logger.Infof("AI summarization enabled (default provider: %s, model: %s, url: %s)", provider, model, client.BaseURL())
 		default:
 			if aiCfg.ServiceAccountFile == "" {
 				logger.Warn("AI summarization enabled, but service_account_file is missing")

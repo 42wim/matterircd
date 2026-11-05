@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/42wim/matterircd/utils"
 	"github.com/fsnotify/fsnotify"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
@@ -25,13 +26,18 @@ var (
 
 type AIConfig struct {
 	Enabled            bool
-	Provider           string // "gemini" (default) or "copilot"
-	Token              string // GitHub token for Copilot
-	ServiceAccountFile string // Gemini / Vertex AI
+	Provider           string            // "gemini" (default), "copilot", or "openai"
+	Token              string            // Default token for configured Provider
+	CopilotToken       string            // GitHub token for Copilot
+	OpenAIToken        string            // API key for OpenAI
+	HetznerToken       string            // API key for Hetzner
+	URL                string            // Fallback base URL for configured Provider
+	URLs               map[string]string // Provider-specific base URLs
+	ServiceAccountFile string            // Gemini / Vertex AI
 	Project            string
 	Location           string
 	Model              string            // Fallback model if not specified in Models map
-	Models             map[string]string // Provider-specific models, e.g. { "gemini": "gemini-3.8-flash", "copilot": "gpt-4o-mini" }
+	Models             map[string]string // Provider-specific models, e.g. { "gemini": "gemini-3.8-flash", "copilot": "gpt-4o" }
 	Prompt             string
 	DefaultPostLimit   int
 	MaxPostLimit       int
@@ -265,10 +271,20 @@ func (c *Config) buildSharedConfig(section string) SharedConfig {
 
 //nolint:funlen
 func (c *Config) buildRuntimeCfg() *RuntimeConfig {
+	aiURL := c.v.GetString("ai.url")
+	if aiURL == "" {
+		aiURL = c.v.GetString("ai.base_url")
+	}
+
 	aiCfg := AIConfig{
 		Enabled:            c.v.GetBool("ai.enabled"),
 		Provider:           c.v.GetString("ai.provider"),
 		Token:              c.v.GetString("ai.token"),
+		CopilotToken:       c.v.GetString("ai.copilot_token"),
+		OpenAIToken:        c.v.GetString("ai.openai_token"),
+		HetznerToken:       c.v.GetString("ai.hetzner_token"),
+		URL:                unquoteString(aiURL),
+		URLs:               c.v.GetStringMapString("ai.urls"),
 		ServiceAccountFile: unquoteString(c.v.GetString("ai.service_account_file")),
 		Project:            c.v.GetString("ai.project"),
 		Location:           c.v.GetString("ai.location"),
@@ -550,6 +566,85 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 
 func (c *Config) AI() *AIConfig {
 	return &c.Current().AI
+}
+
+// GetBaseURL resolves the endpoint base URL for the requested provider, ensuring
+// credentials and requests are not dispatched to unrelated endpoints.
+//
+//nolint:gocyclo
+func (c *AIConfig) GetBaseURL(provider string) string {
+	p := strings.ToLower(strings.TrimSpace(provider))
+
+	if c.URLs != nil {
+		if u, ok := c.URLs[p]; ok && u != "" {
+			return strings.TrimRight(u, "/")
+		}
+	}
+
+	cfgP := strings.ToLower(strings.TrimSpace(c.Provider))
+
+	switch p {
+	case utils.AIOpenAIProvider:
+		if cfgP == utils.AIOpenAIProvider && c.URL != "" {
+			return strings.TrimRight(c.URL, "/")
+		}
+
+		return utils.DefaultOpenAIBaseURL
+	case utils.AIHetznerProvider:
+		if cfgP == utils.AIHetznerProvider && c.URL != "" {
+			return strings.TrimRight(c.URL, "/")
+		}
+
+		return utils.DefaultHetznerBaseURL
+	case utils.AIOllamaProvider, utils.AILocalProvider, utils.AIvLLMProvider:
+		if (cfgP == p || cfgP == utils.AILocalProvider || cfgP == utils.AIOllamaProvider || cfgP == utils.AIvLLMProvider || cfgP == "" || cfgP == utils.AIGeminiProvider) && c.URL != "" {
+			return strings.TrimRight(c.URL, "/")
+		}
+
+		return ""
+	default:
+		return ""
+	}
+}
+
+// GetToken resolves the token for the requested provider, ensuring credentials
+// do not cross provider or endpoint boundaries while preserving the legacy Copilot token fallback.
+func (c *AIConfig) GetToken(provider string) string {
+	p := strings.ToLower(strings.TrimSpace(provider))
+
+	switch p {
+	case utils.AICopilotProvider, utils.AIGitHubProvider:
+		if c.CopilotToken != "" {
+			return c.CopilotToken
+		}
+
+		cfgP := strings.ToLower(c.Provider)
+		if cfgP == "" || cfgP == utils.AIGeminiProvider || cfgP == utils.AICopilotProvider || cfgP == utils.AIGitHubProvider {
+			return c.Token
+		}
+	case utils.AIOpenAIProvider:
+		if c.OpenAIToken != "" {
+			return c.OpenAIToken
+		}
+
+		if strings.EqualFold(c.Provider, utils.AIOpenAIProvider) {
+			return c.Token
+		}
+	case utils.AIHetznerProvider:
+		if c.HetznerToken != "" {
+			return c.HetznerToken
+		}
+
+		if strings.EqualFold(c.Provider, utils.AIHetznerProvider) {
+			return c.Token
+		}
+	case utils.AIOllamaProvider, utils.AILocalProvider, utils.AIvLLMProvider:
+		if strings.EqualFold(c.Provider, p) {
+			return c.Token
+		}
+	}
+
+	return ""
 }
 
 func (c *Config) Current() *RuntimeConfig {
