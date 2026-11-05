@@ -766,6 +766,14 @@ func (u *User) handleFileEvent(event *bridge.FileEvent) {
 }
 
 func (u *User) handleChannelCreateEvent(event *bridge.ChannelCreateEvent) {
+	// The event may have been queued while the room became a DM again, whose channel name is not joinable.
+	info, err := u.br.GetChannel(u.ctx, event.ChannelID)
+	if err == nil && info.DM {
+		logger.Debugf("ACTION_CHANNEL_CREATED skipping %s, it is a DM", event.ChannelID)
+
+		return
+	}
+
 	logger.Debugf("ACTION_CHANNEL_CREATED syncing channel %s (%s)", u.br.GetChannelName(u.ctx, event.ChannelID), event.ChannelID)
 
 	u.syncChannel(event.ChannelID, u.br.GetChannelName(u.ctx, event.ChannelID))
