@@ -29,6 +29,8 @@ type Config struct {
 // the ordering data kept for the undelivered message.
 type helper struct {
 	*cryptohelper.CryptoHelper
+
+	client *mautrix.Client
 }
 
 func (h helper) OnDecryptFailure(f func(ev *event.Event, err error)) {
@@ -69,6 +71,6 @@ func Factory(cfg Config) matrixclient.Option {
 			ch.DecryptErrorCallback = cfg.OnDecryptError
 		}
 
-		return helper{ch}, nil
+		return helper{CryptoHelper: ch, client: mc}, nil
 	})
 }

@@ -280,7 +280,9 @@ func (c *Client) claimRoomName(roomID id.RoomID) (*RoomRename, bool) {
 	old := ch.reportedName
 	name := c.displayNameLocked(roomID, ch)
 
-	if name == old || old == "" || ch.IsDirect {
+	_, inferred := c.inferredDirectLocked(ch)
+
+	if name == old || old == "" || ch.IsDirect || inferred {
 		return nil, false
 	}
 

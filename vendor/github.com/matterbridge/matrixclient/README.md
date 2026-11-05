@@ -48,8 +48,51 @@ c, err := matrixclient.New(ctx, cred, handler, e2ee.Factory(e2ee.Config{
 ```
 
 Build with `go build -tags goolm`. Keep the database and pickle key, they hold
-the device keys. Devices are not verified or cross-signed, so other clients
-show the session as unverified.
+the device keys. Interactive device verification is available through the
+optional `VerificationHandler` below; without it the session stays unverified.
+
+## Interactive device verification
+
+With `e2ee.Factory`, implement `VerificationHandler.OnVerification(*Verification)`
+on the handler passed to `New`. This enables mautrix's SAS engine before syncing,
+including incoming to-device requests received during the initial sync. No
+cryptography or raw to-device event handling is needed in matterircd.
+
+Queue these callbacks to a separate consumer. They may run concurrently, before
+`Handler.Ready`, or while a verification API call holds a transaction lock.
+**Do not call verification methods directly inside the callback**, and do not
+block it waiting for user input. Make the consumer ready before calling `New`;
+it may need to wait for `New` to return before using the client.
+
+Correlate updates and user commands by `TransactionID`:
+
+| Stage | What matterircd should display/do |
+| --- | --- |
+| `VerificationRequested` | Show the requesting `UserID` and `DeviceID`. Ask the user to accept; call `AcceptVerification(ctx, txnID)` on acceptance. |
+| `VerificationReady` | Acceptance is complete, not verification. If `SupportsSAS`, call `StartSAS(ctx, txnID)` to begin comparing; the peer may also initiate this exchange. |
+| `VerificationSAS` | Display `Emojis` with `EmojiDescriptions`, or the three `Decimals`, in order. Ask whether they match the other device. Call `ConfirmSAS(ctx, txnID)` only after explicit confirmation. |
+| `VerificationCancelled` | Show `CancelCode` and `Reason`, including timeout or cryptographic mismatch, and discard the pending UI. |
+| `VerificationDone` | Report successful verification and discard the pending UI. |
+
+For the other client's "Start verification on the other device" screen, either
+initiate from matterircd with `StartVerification(ctx, c.UserID())`, or initiate
+from the other client and accept its `VerificationRequested` update in matterircd.
+Outgoing requests go to the user's other devices, not a single device ID; the
+first device accepting is identified in `VerificationReady.DeviceID`. Keep the
+request's user/device information for later updates, which carry the transaction
+ID but do not repeat all peer information.
+
+Reject or cancel with `CancelVerification(ctx, txnID,
+event.VerificationCancelCodeUser, reason)`; use
+`event.VerificationCancelCodeSASMismatch` if the SAS differs. Surface every API
+error to the user. Local cancellation succeeds via its return value (there is no
+additional local callback). Never report success on acceptance or confirmation
+alone: wait for `VerificationDone`, after MAC validation and completion.
+
+Verification methods return `ErrVerificationUnavailable` without a verification
+handler and a supporting crypto provider. Pending transactions are in memory
+and cannot be resumed after a restart. QR verification, recovery-key entry and
+cross-signing private-key recovery are not exposed by this API.
 
 ## Mattermost concepts
 
