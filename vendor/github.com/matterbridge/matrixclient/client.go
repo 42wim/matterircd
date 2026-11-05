@@ -62,6 +62,15 @@ type Client struct {
 
 	lastSync     atomic.Int64 // unix nanoseconds of the last processed sync response
 	forceRelogin atomic.Bool
+
+	nameResolved func(roomID id.RoomID, name string) // see WithRoomNameResolved
+	// nameHealing tracks the room IDs with a running healing goroutine.
+	nameHealing sync.Map
+	nameLookups chan struct{} // bounds the concurrent name lookups of all healing goroutines
+	// nameNotify serializes the room name callbacks with the name state they report,
+	// so a late callback cannot overtake a newer one. It is taken before the client lock.
+	nameNotify sync.Mutex
+	nameDirty  map[id.RoomID]struct{} // rooms whose fallback name a shared profile change may have changed
 }
 
 // New logs in and starts syncing. Handler.Ready is called after the initial sync.
@@ -97,6 +106,10 @@ func New(ctx context.Context, cred Credentials, h Handler, opts ...Option) (*Cli
 		presence:   make(map[id.UserID]*Presence),
 		spaces:     make(map[id.RoomID]*space),
 
+		nameResolved: o.nameResolved,
+		nameLookups:  make(chan struct{}, maxNameLookups),
+		nameDirty:    make(map[id.RoomID]struct{}),
+
 		lastViewed: make(map[id.RoomID]viewedMark),
 		lastTyping: make(map[id.RoomID]time.Time),
 	}
@@ -117,7 +130,7 @@ func New(ctx context.Context, cred Credentials, h Handler, opts ...Option) (*Cli
 
 	// Ready is called from the sync goroutine, after the events of the first
 	// sync response were processed, so handler calls stay serialized.
-	mc.Syncer = &readySyncer{DefaultSyncer: syncer, ready: h.Ready, synced: c.onSynced, track: c.noteTimeline, decrypted: c.noteDecrypted, failed: c.onSyncFailed}
+	mc.Syncer = &readySyncer{DefaultSyncer: syncer, ready: h.Ready, synced: c.onSynced, named: c.noteRoomNames, track: c.noteTimeline, decrypted: c.noteDecrypted, failed: c.onSyncFailed}
 
 	err = c.login(ctx, o.crypto)
 	if err != nil {
@@ -290,6 +303,7 @@ type readySyncer struct {
 	once      sync.Once
 	ready     func()
 	synced    func()
+	named     func(*mautrix.RespSync)
 	track     func(*mautrix.RespSync)
 	decrypted func(*event.Event)
 	failed    func(err error, wait time.Duration)
@@ -304,6 +318,7 @@ func (r *readySyncer) ProcessResponse(ctx context.Context, res *mautrix.RespSync
 	if err == nil {
 		r.failures = 0
 		r.synced()
+		r.named(res)
 		r.once.Do(r.ready)
 	}
 
@@ -407,7 +422,7 @@ func (c *Client) LastEventID(roomID id.RoomID) id.EventID {
 // RoomInfo is a snapshot of a room.
 type RoomInfo struct {
 	ID       id.RoomID
-	Name     string // alias with ':' replaced by '/'
+	Name     string // alias, room name, member names or short ID, with ':' replaced by '/'
 	IsDirect bool
 
 	LastActivity int64 // timestamp in milliseconds of the newest message seen, 0 if none
@@ -421,23 +436,18 @@ func (c *Client) Rooms() []RoomInfo {
 	rooms := make([]RoomInfo, 0, len(c.channels))
 
 	for roomID, ch := range c.channels {
-		ch.RLock()
+		ch.Lock()
 
-		name, alias, direct, members, last := ch.Name, ch.Alias, ch.IsDirect, len(ch.Members), ch.LastActivity
+		display := c.displayNameLocked(roomID, ch)
+		ch.reportNameLocked(display)
 
-		ch.RUnlock()
+		unresolved, direct, members, last := ch.nameUnresolvedLocked(), ch.IsDirect, len(ch.Members), ch.LastActivity
 
-		// A canonical alias is preferred over the room name. Only it has the
-		// default provider stripped.
-		var display string
+		ch.Unlock()
 
-		switch {
-		case alias != "":
-			display = c.roomName(alias)
-		case name != "":
-			display = strings.Replace(name, ":", "/", 1)
-		default:
-			display = strings.Replace(string(roomID), ":", "/", 1)
+		if unresolved {
+			c.logger.Debugf("room %s has no name or alias, listing it as %s", roomID, display)
+			c.healRoomName(c.ctx, roomID, ch)
 		}
 
 		if direct && members == 1 {

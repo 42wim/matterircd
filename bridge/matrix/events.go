@@ -1,6 +1,7 @@
 package matrix
 
 import (
+	"context"
 	"strings"
 
 	"maunium.net/go/mautrix/event"
@@ -97,8 +98,93 @@ func (m *Matrix) OnTopic(t *matrixclient.TopicChange) {
 	})
 }
 
+// OnRoomName implements matrixclient.RoomNameHandler.
+func (m *Matrix) OnRoomName(r *matrixclient.RoomRename) {
+	m.queueRoomUpdate(r.RoomID, r.Name, r.DisplayName)
+}
+
+// onRoomNameResolved is the matrixclient.WithRoomNameResolved callback, which
+// must not block.
+func (m *Matrix) onRoomNameResolved(roomID id.RoomID, name string) {
+	m.nameResolveTried.Delete(roomID)
+	m.queueRoomUpdate(roomID, name, "")
+}
+
+// queueRoomUpdate hands a rename to roomUpdateLoop. matrixclient serializes its
+// callbacks, so queueing in call order and keeping only the newest name per room
+// stops a stale name from being applied last. It never blocks.
+func (m *Matrix) queueRoomUpdate(roomID id.RoomID, name, displayName string) {
+	name = strings.TrimPrefix(name, "#")
+	if displayName == "" {
+		displayName = name
+	}
+
+	m.roomUpdateMu.Lock()
+
+	if m.roomUpdates == nil {
+		m.roomUpdates = make(map[id.RoomID]*bridge.ChannelUpdateEvent)
+	}
+
+	if _, queued := m.roomUpdates[roomID]; !queued {
+		m.roomUpdateOrder = append(m.roomUpdateOrder, roomID)
+	}
+
+	m.roomUpdates[roomID] = &bridge.ChannelUpdateEvent{
+		ChannelID:   roomID.String(),
+		Name:        name,
+		DisplayName: displayName,
+	}
+
+	m.roomUpdateMu.Unlock()
+
+	select {
+	case m.roomUpdateWake <- struct{}{}:
+	default:
+	}
+}
+
+// roomUpdateLoop sends the queued renames until ctx is done.
+func (m *Matrix) roomUpdateLoop(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-m.roomUpdateWake:
+		}
+
+		for {
+			m.roomUpdateMu.Lock()
+
+			if len(m.roomUpdateOrder) == 0 {
+				m.roomUpdateMu.Unlock()
+
+				break
+			}
+
+			roomID := m.roomUpdateOrder[0]
+			m.roomUpdateOrder = m.roomUpdateOrder[1:]
+			ev := m.roomUpdates[roomID]
+
+			delete(m.roomUpdates, roomID)
+			m.roomUpdateMu.Unlock()
+
+			// The name may have been given a suffix to keep it unique.
+			info, err := m.GetChannel(ctx, ev.ChannelID)
+			if err == nil && !info.DM {
+				ev.Name = info.Name
+			}
+
+			m.sendEventCtx(ctx, &bridge.Event{Type: "channel_update", Data: ev})
+		}
+	}
+}
+
 // OnMember implements matrixclient.MemberHandler.
 func (m *Matrix) OnMember(c *matrixclient.MemberChange) {
+	if c.UserID == m.mc.UserID() && c.Membership != event.MembershipJoin {
+		m.nameResolveTried.Delete(c.RoomID)
+	}
+
 	if m.mc.IsDirect(c.RoomID) {
 		return
 	}

@@ -738,47 +738,20 @@ func (u *User) handleChannelDeleteEvent(event *bridge.ChannelDeleteEvent) {
 func (u *User) handleChannelUpdateEvent(e *bridge.ChannelUpdateEvent) {
 	newIRCChanStr := "#" + e.Name
 
-	// Snapshot the joined channels so we don't hold the lock during API calls
-	u.RLock()
-
-	channelsToCheck := make([]Channel, 0, len(u.channels))
-	alreadyJoinedNew := false
-
-	for ch := range u.channels {
-		if ch.String() == newIRCChanStr {
-			alreadyJoinedNew = true
-		}
-
-		channelsToCheck = append(channelsToCheck, ch)
-	}
-
-	u.RUnlock()
-
-	// If already in the channel, it's just a display name change.
-	if alreadyJoinedNew {
-		return
-	}
-
 	var staleChannels []Channel
 
-	// Identify the stale channels using proper ch.String() calls
-	for _, ch := range channelsToCheck {
-		// Skip special matterircd system channels (they don't exist on Mattermost)
-		// Only check standard IRC channels (skips DMs, &users, &messages)
-		if !strings.HasPrefix(ch.String(), "#") {
-			continue
-		}
+	// Match by channel ID: old names cannot be looked up, as the client already
+	// holds the new one, and a lookup failure must not select unrelated channels.
+	// A channel already named newIRCChanStr is just a display name change.
+	u.RLock()
 
-		// Passing ch.String() with "#" signals GetChannelID to skip DM username lookups
-		chID := u.br.GetChannelID(u.ctx, ch.String(), u.br.GetMe().TeamID)
-
-		// A channel is only stale for this update if its cached ID matches the updated ChannelID
-		// Because matterclient already overwrote the old name in cache, GetChannelID
-		// on a renamed channel will 404 and return "".
-		if chID == "" || chID == e.ChannelID {
+	for ch := range u.channels {
+		if ch.ID() == ID(e.ChannelID) && ch.String() != newIRCChanStr {
 			staleChannels = append(staleChannels, ch)
 		}
 	}
+
+	u.RUnlock()
 
 	// Just a display name change? exit.
 	if len(staleChannels) == 0 {
@@ -800,7 +773,7 @@ func (u *User) handleChannelUpdateEvent(e *bridge.ChannelUpdateEvent) {
 
 	// Only join the new channel if we actually parted a stale channel we were in
 	if len(staleChannels) > 0 {
-		newCh := u.Srv.Channel(newIRCChanStr)
+		newCh := u.Srv.Channel(e.ChannelID)
 		_ = newCh.Join(u)
 
 		noticeMsg := &irc.Message{

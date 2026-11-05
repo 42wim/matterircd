@@ -5,6 +5,7 @@ import (
 
 	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/event"
+	"maunium.net/go/mautrix/id"
 )
 
 // Crypto adds end-to-end encryption support to a client. The e2ee subpackage
@@ -33,6 +34,7 @@ type Option func(*options)
 type options struct {
 	crypto          CryptoFactory
 	defaultProvider string
+	nameResolved    func(roomID id.RoomID, name string)
 	skipTLSVerify   bool
 	timeout         time.Duration
 	userAgent       string
@@ -48,6 +50,15 @@ func WithCrypto(f CryptoFactory) Option {
 // aliases that have none.
 func WithDefaultProvider(provider string) Option {
 	return func(o *options) { o.defaultProvider = provider }
+}
+
+// WithRoomNameResolved sets the callback for room names healed in the background,
+// the counterpart of matterclient's OnChannelNameResolved. A room that was listed
+// without a name or alias is reported once it has one, unless a RoomNameHandler
+// rename already reported it. It is installed before syncing starts, and is
+// called one at a time and must not block.
+func WithRoomNameResolved(f func(roomID id.RoomID, name string)) Option {
+	return func(o *options) { o.nameResolved = f }
 }
 
 // WithSkipTLSVerify disables verification of the homeserver certificate.
