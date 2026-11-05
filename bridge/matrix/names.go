@@ -2,6 +2,7 @@ package matrix
 
 import (
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -45,49 +46,99 @@ func (b *nameBudget) spend(d time.Duration) {
 	b.mu.Unlock()
 }
 
-// uniqueRoomNames returns the channel name, without '#', of every room. Names are
-// compared case-insensitively as in IRC. The room with the smallest ID keeps a shared
-// name, the others get a suffix of their room ID, so the result does not depend on
-// the map order of rooms. rooms is sorted by ID.
-func uniqueRoomNames(rooms []matrixclient.RoomInfo) map[id.RoomID]string {
+// roomName is the channel name given to a room, and the name it was derived from.
+type roomName struct {
+	base string
+	name string
+}
+
+// assignRoomNames returns the unique channel name, without '#', of every room. Names
+// are compared case-insensitively as in IRC. An assignment is kept while the base name
+// of its room is unchanged, so a room never loses its name to another one and only a
+// room whose own name changed is renamed. Rooms that need a name take it in ID order,
+// a taken one gets a suffix of its room ID, so the result does not depend on the map
+// order of rooms. The rooms are sorted by ID.
+func (m *Matrix) assignRoomNames(rooms []matrixclient.RoomInfo) map[id.RoomID]string {
 	slices.SortFunc(rooms, func(a, b matrixclient.RoomInfo) int {
 		return strings.Compare(string(a.ID), string(b.ID))
 	})
 
+	m.roomNamesMu.Lock()
+	defer m.roomNamesMu.Unlock()
+
+	if m.roomNames == nil {
+		m.roomNames = make(map[id.RoomID]roomName)
+	}
+
+	present := make(map[id.RoomID]struct{}, len(rooms))
 	names := make(map[id.RoomID]string, len(rooms))
 	used := make(map[string]struct{}, len(rooms))
 
 	for _, room := range rooms {
-		base := strings.TrimPrefix(room.Name, "#")
-		local, _, _ := strings.Cut(strings.TrimPrefix(room.ID.String(), "!"), ":")
-		name := base
+		present[room.ID] = struct{}{}
 
-		for n := nameSuffixLen; ; n++ {
-			if _, taken := used[strings.ToLower(name)]; !taken {
-				break
-			}
-
-			if n >= len(local) {
-				name = base + "-" + local
-
-				break
-			}
-
-			name = base + "-" + local[:n]
+		kept, ok := m.roomNames[room.ID]
+		if ok && kept.base == strings.TrimPrefix(room.Name, "#") {
+			names[room.ID] = kept.name
+			used[strings.ToLower(kept.name)] = struct{}{}
 		}
+	}
+
+	for roomID := range m.roomNames {
+		if _, ok := present[roomID]; !ok {
+			delete(m.roomNames, roomID)
+		}
+	}
+
+	for _, room := range rooms {
+		if _, done := names[room.ID]; done {
+			continue
+		}
+
+		base := strings.TrimPrefix(room.Name, "#")
+		name := freeRoomName(base, room.ID, used)
 
 		used[strings.ToLower(name)] = struct{}{}
 		names[room.ID] = name
+		m.roomNames[room.ID] = roomName{base: base, name: name}
 	}
 
 	return names
+}
+
+// freeRoomName returns base, or base with a suffix of the room ID, that is not in used.
+// The suffix grows up to the whole ID and then gets a counter, so a free name is always found.
+func freeRoomName(base string, roomID id.RoomID, used map[string]struct{}) string {
+	free := func(name string) bool {
+		_, taken := used[strings.ToLower(name)]
+
+		return !taken
+	}
+
+	if free(base) {
+		return base
+	}
+
+	local, _, _ := strings.Cut(strings.TrimPrefix(roomID.String(), "!"), ":")
+
+	for n := min(nameSuffixLen, len(local)); n <= len(local); n++ {
+		if name := base + "-" + local[:n]; free(name) {
+			return name
+		}
+	}
+
+	for n := 2; ; n++ {
+		if name := base + "-" + local + "-" + strconv.Itoa(n); free(name) {
+			return name
+		}
+	}
 }
 
 // roomsWithNames returns the rooms sorted by ID and their unique channel names.
 func (m *Matrix) roomsWithNames() ([]matrixclient.RoomInfo, map[id.RoomID]string) {
 	rooms := m.mc.Rooms()
 
-	return rooms, uniqueRoomNames(rooms)
+	return rooms, m.assignRoomNames(rooms)
 }
 
 // nameResolveDue reports whether the room should be looked up now, and records it.

@@ -82,6 +82,10 @@ type Matrix struct {
 	nameResolveTried sync.Map
 	nameBudget       nameBudget
 
+	// roomNamesMu guards roomNames, the channel names given to rooms, see assignRoomNames.
+	roomNamesMu sync.Mutex
+	roomNames   map[id.RoomID]roomName
+
 	// roomUpdateMu guards the renames waiting for roomUpdateLoop, see queueRoomUpdate.
 	roomUpdateMu     sync.Mutex
 	roomUpdates      map[id.RoomID]*bridge.ChannelUpdateEvent
