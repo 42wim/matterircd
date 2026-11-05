@@ -43,6 +43,16 @@ func (h helper) OnDecryptFailure(f func(ev *event.Event, err error)) {
 	}
 }
 
+// Fingerprint implements matrixclient.FingerprintProvider.
+func (h helper) Fingerprint() string {
+	m := h.Machine()
+	if m == nil {
+		return ""
+	}
+
+	return m.Fingerprint()
+}
+
 // Factory returns the option to pass to matrixclient.New.
 func Factory(cfg Config) matrixclient.Option {
 	return matrixclient.WithCrypto(func(mc *mautrix.Client, login *mautrix.ReqLogin) (matrixclient.Crypto, error) {

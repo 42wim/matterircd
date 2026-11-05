@@ -1233,6 +1233,12 @@ func (m *Matrix) EncryptionEnabled() bool {
 	return m.e2ee.Load()
 }
 
+// DeviceInfo returns the device ID and Ed25519 fingerprint to verify this
+// session manually from another client.
+func (m *Matrix) DeviceInfo() (string, string) {
+	return m.mc.DeviceID().String(), m.mc.Fingerprint()
+}
+
 func (m *Matrix) Connected() bool {
 	return m.connected.Load()
 }

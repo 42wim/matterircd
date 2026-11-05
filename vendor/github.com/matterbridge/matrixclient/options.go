@@ -24,6 +24,12 @@ type DecryptFailureNotifier interface {
 	OnDecryptFailure(f func(ev *event.Event, err error))
 }
 
+// FingerprintProvider is optionally implemented by a Crypto that can report the
+// fingerprint of the device's Ed25519 signing key, see Client.Fingerprint.
+type FingerprintProvider interface {
+	Fingerprint() string
+}
+
 // CryptoFactory creates a Crypto for mc. The returned Crypto is responsible for
 // logging in with login, so that the device that owns the stored keys is reused.
 type CryptoFactory func(mc *mautrix.Client, login *mautrix.ReqLogin) (Crypto, error)
