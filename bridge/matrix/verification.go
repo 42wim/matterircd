@@ -6,10 +6,11 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/42wim/matterircd/bridge"
-	"github.com/matterbridge/matrixclient"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
+
+	"github.com/42wim/matterircd/bridge"
+	"github.com/matterbridge/matrixclient"
 )
 
 // verificationQueueSize bounds the updates waiting for verificationLoop.
@@ -83,7 +84,7 @@ func (m *Matrix) handleVerification(v *matrixclient.Verification) {
 	case matrixclient.VerificationCancelled:
 		m.clearVerifyTxn(v.TransactionID)
 
-		text = fmt.Sprintf("verification cancelled: %s (%s)", v.Reason, v.CancelCode)
+		text = fmt.Sprintf("verification canceled: %s (%s)", v.Reason, v.CancelCode)
 	case matrixclient.VerificationDone:
 		m.clearVerifyTxn(v.TransactionID)
 
@@ -155,9 +156,9 @@ func (m *Matrix) Verify(ctx context.Context, action string) (string, error) {
 	case "confirm":
 		return "confirmed, waiting for the other device", m.mc.ConfirmSAS(ctx, txn)
 	case "mismatch":
-		return "cancelled, the symbols did not match", m.cancelVerification(ctx, txn, event.VerificationCancelCodeSASMismatch, "SAS mismatch")
+		return "canceled, the symbols did not match", m.cancelVerification(ctx, txn, event.VerificationCancelCodeSASMismatch, "SAS mismatch")
 	case "cancel":
-		return "cancelled", m.cancelVerification(ctx, txn, event.VerificationCancelCodeUser, "cancelled by user")
+		return "canceled", m.cancelVerification(ctx, txn, event.VerificationCancelCodeUser, "canceled by user")
 	}
 
 	return "", errors.New("unknown action " + action)
