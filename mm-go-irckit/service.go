@@ -47,6 +47,9 @@ func logout(u *User, toUser *User, args []string, service string) {
 
 const helpArg = "help"
 
+// matrixReadyTimeout bounds the wait for the initial sync before reporting the verification state.
+const matrixReadyTimeout = 2 * time.Minute
+
 func loginMatrix(u *User, toUser *User, args []string) {
 	wMsg := "Matrix support is very much experimental and a work in progress. Use at your own risk."
 	u.MsgUser(toUser, "WARNING: "+wMsg)
@@ -92,7 +95,23 @@ func loginMatrix(u *User, toUser *User, args []string) {
 
 		state := "this session is unverified"
 
-		if v, ok := u.currentBridge().(interface{ DeviceVerified() (bool, error) }); ok {
+		ready := true
+
+		// The verification state is only current once the initial sync was processed.
+		if w, ok := u.currentBridge().(interface{ WaitReady(context.Context) bool }); ok {
+			waitCtx, cancel := context.WithTimeout(u.ctx, matrixReadyTimeout)
+			ready = w.WaitReady(waitCtx)
+
+			cancel()
+
+			if !ready && u.ctx.Err() != nil {
+				return
+			}
+		}
+
+		if !ready {
+			state = "could not determine if this session is verified yet"
+		} else if v, ok := u.currentBridge().(interface{ DeviceVerified() (bool, error) }); ok {
 			verified, err := v.DeviceVerified()
 
 			switch {
