@@ -491,7 +491,8 @@ func (u *User) handleChannelInviteEvent(event *bridge.ChannelInviteEvent) {
 		text += ": " + event.Reason
 	}
 
-	u.MsgUser(svc, text+". Accept with /join "+target)
+	// The name and reason are chosen by the inviter, and must not end the line.
+	u.MsgUser(svc, sanitizeIRCTrailing(text)+". Accept with /join "+target)
 }
 
 func (u *User) handleChannelRemoveEvent(event *bridge.ChannelRemoveEvent) {
