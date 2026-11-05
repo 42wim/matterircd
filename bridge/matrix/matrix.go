@@ -77,9 +77,10 @@ type Matrix struct {
 	e2ee      atomic.Bool
 	ready     atomic.Bool
 
-	// nameResolveTried holds the rooms whose name was already resolved
-	// synchronously once, so an unreachable homeserver cannot stall every lookup.
+	// nameResolveTried holds when a room name was last looked up synchronously, see
+	// nameResolveDue, so an unreachable homeserver cannot stall every lookup.
 	nameResolveTried sync.Map
+	nameBudget       nameBudget
 
 	// roomUpdateMu guards the renames waiting for roomUpdateLoop, see queueRoomUpdate.
 	roomUpdateMu     sync.Mutex
@@ -398,12 +399,14 @@ func (m *Matrix) Join(ctx context.Context, channelName string) (string, string, 
 func (m *Matrix) List(ctx context.Context) (map[string]string, error) {
 	rooms := make(map[string]string)
 
-	for _, room := range m.mc.Rooms() {
+	all, names := m.roomsWithNames()
+
+	for _, room := range all {
 		if room.IsDirect {
 			continue
 		}
 
-		roomName := strings.TrimPrefix(room.Name, "#")
+		roomName := names[room.ID]
 
 		name := "#" + roomName
 		if teams := m.mc.RoomTeams(room.ID); len(teams) > 0 {
@@ -417,6 +420,8 @@ func (m *Matrix) List(ctx context.Context) (map[string]string, error) {
 }
 
 func (m *Matrix) Part(ctx context.Context, channelID string) error {
+	m.nameResolveTried.Delete(id.RoomID(channelID))
+
 	return m.mc.Leave(ctx, id.RoomID(channelID))
 }
 
@@ -664,12 +669,16 @@ func (m *Matrix) GetChannelName(ctx context.Context, channelID string) string {
 // resolveRoomName looks up a room known only by its ID before its channel is
 // created, within a short deadline. Later failures are healed in the background.
 func (m *Matrix) resolveRoomName(ctx context.Context, roomID id.RoomID) {
-	if _, tried := m.nameResolveTried.LoadOrStore(roomID, struct{}{}); tried {
+	timeout := min(roomNameResolveTimeout, m.nameBudget.remaining())
+	if timeout <= 0 || !m.nameResolveDue(roomID) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, roomNameResolveTimeout)
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+
+	start := time.Now()
+	defer func() { m.nameBudget.spend(time.Since(start)) }()
 
 	m.mc.ResolveRoomName(ctx, roomID)
 }
@@ -710,25 +719,24 @@ func (m *Matrix) GetUsers() []*bridge.UserInfo {
 }
 
 func (m *Matrix) GetChannels() []*bridge.ChannelInfo {
-	rooms := m.mc.Rooms()
+	rooms, names := m.roomsWithNames()
 	channels := make([]*bridge.ChannelInfo, 0, len(rooms))
 
 	for _, room := range rooms {
-		channels = append(channels, m.channelInfo(room))
+		channels = append(channels, m.channelInfo(room, names[room.ID]))
 	}
 
 	return channels
 }
 
 // channelInfo builds the channel for a room, RoomTeams being the costly part.
-func (m *Matrix) channelInfo(room matrixclient.RoomInfo) *bridge.ChannelInfo {
+func (m *Matrix) channelInfo(room matrixclient.RoomInfo, name string) *bridge.ChannelInfo {
 	teamID := ""
 	if teams := m.mc.RoomTeams(room.ID); len(teams) > 0 && !room.IsDirect {
 		teamID = teams[0].String()
 	}
 
 	// IsDMChannelName and GetDMUser need the raw room ID of a one-to-one DM.
-	name := strings.TrimPrefix(room.Name, "#")
 	if room.IsDirect && len(m.mc.DirectUsers(room.ID)) == 1 {
 		name = room.ID.String()
 	}
@@ -744,9 +752,11 @@ func (m *Matrix) channelInfo(room matrixclient.RoomInfo) *bridge.ChannelInfo {
 }
 
 func (m *Matrix) GetChannel(ctx context.Context, channelID string) (*bridge.ChannelInfo, error) {
-	for _, room := range m.mc.Rooms() {
+	rooms, names := m.roomsWithNames()
+
+	for _, room := range rooms {
 		if room.ID.String() == channelID {
-			return m.channelInfo(room), nil
+			return m.channelInfo(room, names[room.ID]), nil
 		}
 	}
 
@@ -772,20 +782,22 @@ func (m *Matrix) GetUserChannels(ctx context.Context, userID string) ([]string, 
 		return []string{}, nil
 	}
 
-	var names []string
+	var channels []string
 
-	for _, room := range m.mc.Rooms() {
+	rooms, names := m.roomsWithNames()
+
+	for _, room := range rooms {
 		if room.IsDirect {
 			continue
 		}
 
 		members, err := m.mc.RoomUsers(ctx, room.ID)
 		if err == nil && slices.Contains(members, uid) {
-			names = append(names, room.Name)
+			channels = append(channels, "#"+names[room.ID])
 		}
 	}
 
-	return names, nil
+	return channels, nil
 }
 
 func (m *Matrix) GetUserCount() int {
@@ -1092,6 +1104,17 @@ func (m *Matrix) GetChannelID(ctx context.Context, name, teamID string) string {
 
 		if teamID == "" || channel.ID == name || m.inTeam(channel.ID, teamID) {
 			return channel.ID
+		}
+	}
+
+	// A room of the space named by its own name, even if its channel name got a suffix.
+	if teamID != "" {
+		rooms, _ := m.roomsWithNames()
+
+		for _, room := range rooms {
+			if strings.TrimPrefix(room.Name, "#") == name && m.inTeam(room.ID.String(), teamID) {
+				return room.ID.String()
+			}
 		}
 	}
 

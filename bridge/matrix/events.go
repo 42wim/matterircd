@@ -168,6 +168,12 @@ func (m *Matrix) roomUpdateLoop(ctx context.Context) {
 			delete(m.roomUpdates, roomID)
 			m.roomUpdateMu.Unlock()
 
+			// The name may have been given a suffix to keep it unique.
+			info, err := m.GetChannel(ctx, ev.ChannelID)
+			if err == nil && !info.DM {
+				ev.Name = info.Name
+			}
+
 			m.sendEventCtx(ctx, &bridge.Event{Type: "channel_update", Data: ev})
 		}
 	}
@@ -175,6 +181,10 @@ func (m *Matrix) roomUpdateLoop(ctx context.Context) {
 
 // OnMember implements matrixclient.MemberHandler.
 func (m *Matrix) OnMember(c *matrixclient.MemberChange) {
+	if c.UserID == m.mc.UserID() && c.Membership != event.MembershipJoin {
+		m.nameResolveTried.Delete(c.RoomID)
+	}
+
 	if m.mc.IsDirect(c.RoomID) {
 		return
 	}
