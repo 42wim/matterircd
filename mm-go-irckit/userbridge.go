@@ -766,6 +766,14 @@ func (u *User) handleFileEvent(event *bridge.FileEvent) {
 }
 
 func (u *User) handleChannelCreateEvent(event *bridge.ChannelCreateEvent) {
+	// The event may have been queued while the room became a DM again, whose channel name is not joinable.
+	info, err := u.br.GetChannel(u.ctx, event.ChannelID)
+	if err == nil && info.DM {
+		logger.Debugf("ACTION_CHANNEL_CREATED skipping %s, it is a DM", event.ChannelID)
+
+		return
+	}
+
 	logger.Debugf("ACTION_CHANNEL_CREATED syncing channel %s (%s)", u.br.GetChannelName(u.ctx, event.ChannelID), event.ChannelID)
 
 	u.syncChannel(event.ChannelID, u.br.GetChannelName(u.ctx, event.ChannelID))
@@ -780,6 +788,18 @@ func (u *User) handleChannelDeleteEvent(event *bridge.ChannelDeleteEvent) {
 	} else {
 		logger.Debugf("ACTION_CHANNEL_DELETED not in channel %s (%s)", u.br.GetChannelName(u.ctx, event.ChannelID), event.ChannelID)
 	}
+
+	// Unlink it so a channel created later for this ID, a room restored after
+	// turning into a DM for instance, gets the current name instead of reusing this one.
+	// The ghosts left in it are evicted first, or they would keep the unlinked channel
+	// where the server sweep cannot reach it.
+	evictIfOnlyGhosts(ch)
+
+	u.Lock()
+	delete(u.channels, ch)
+	u.Unlock()
+
+	ch.Unlink()
 }
 
 //nolint:funlen
