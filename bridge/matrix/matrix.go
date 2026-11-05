@@ -96,7 +96,12 @@ type Matrix struct {
 	// unregisterReloadHook removes the hook that New registered on the config.
 	unregisterReloadHook func()
 
-	ctx context.Context //nolint:containedctx
+	ctx    context.Context //nolint:containedctx
+	cancel context.CancelFunc
+
+	// initDone is closed once New published mc, as matrixclient.New starts syncing
+	// before it returns and Ready may be called by then.
+	initDone chan struct{}
 
 	msgParentCache   *lru.Cache[id.EventID, string]
 	msgLastSentCache *lru.Cache[string, string]
@@ -114,14 +119,23 @@ type Matrix struct {
 }
 
 func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Event, onConnect func()) (bridge.Bridger, *matrixclient.Client, error) {
+	// The lifetime of this bridge, so Logout can release goroutines blocked on eventChan.
+	bridgeCtx, cancel := context.WithCancel(ctx)
+
 	m := &Matrix{
 		eventChan: eventChan,
 		cfg:       cfg,
 		onConnect: onConnect,
-		ctx:       ctx,
+		ctx:       bridgeCtx,
+		cancel:    cancel,
+		initDone:  make(chan struct{}),
 
 		roomUpdateWake: make(chan struct{}, 1),
 	}
+
+	// Also unblocks a Ready that is waiting for a failed New.
+	defer close(m.initDone)
+
 	m.msgParentCache, _ = lru.New[id.EventID, string](100)
 	m.msgLastSentCache, _ = lru.New[string, string](10)
 	m.msgRoomCache, _ = lru.New[id.EventID, id.RoomID](msgRoomCacheSize)
@@ -132,11 +146,15 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 	m.reactionCache, _ = lru.New[string, id.EventID](reactionCacheSize)
 
 	if cred.Token != "" && cred.Server == "" {
+		cancel()
+
 		return nil, nil, errors.New("matrix: login with an access token needs a server, use LOGIN <server> <token>")
 	}
 
 	opts, err := m.encryptionOptions(cred)
 	if err != nil {
+		cancel()
+
 		return nil, nil, err
 	}
 
@@ -153,6 +171,8 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 		Token:  cred.Token,
 	}, m, opts...)
 	if err != nil {
+		cancel()
+
 		return nil, nil, err
 	}
 
@@ -201,9 +221,33 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 
 // Ready implements matrixclient.Handler.
 func (m *Matrix) Ready() {
+	select {
+	case <-m.initDone:
+	case <-m.ctx.Done():
+		return
+	}
+
+	if m.mc == nil {
+		return
+	}
+
 	m.ready.Store(true)
 
+	// Invitations of the initial sync are not delivered to OnInvite. The snapshot
+	// is taken here, on the sync goroutine, so a later invite cannot be missed or
+	// duplicated, and sent from another goroutine as the event loop starts after
+	// onConnect.
+	invites := m.mc.Invitations()
+
 	go m.onConnect()
+
+	if len(invites) > 0 {
+		go func() {
+			for i := range invites {
+				m.sendInvite(&invites[i])
+			}
+		}()
+	}
 }
 
 func (m *Matrix) sendEvent(ev *bridge.Event) {
@@ -442,6 +486,7 @@ func (m *Matrix) Logout(ctx context.Context) error {
 
 	m.mc.Logout()
 	m.roomUpdateCancel()
+	m.cancel()
 
 	return nil
 }

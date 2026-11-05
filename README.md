@@ -202,6 +202,8 @@ or with an existing access token (it cannot be renewed once it expires)
 /msg matrix login <server> <token>
 ```
 
+Room invitations are shown as an IRC `INVITE` with a message from the `matrix` user. Accept one with the `/join` it names, e.g. `/join #!roomid:example.org`.
+
 Settings are in the `[matrix]` section in [matterircd.toml.example](https://github.com/42wim/matterircd/blob/master/matterircd.toml.example)
 
 ### Mastodon user commands

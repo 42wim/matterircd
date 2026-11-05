@@ -21,24 +21,13 @@ func (c *Client) channelLocked(roomID id.RoomID) *Channel {
 	return ch
 }
 
-// addDirectLocked marks roomID as direct with userID. A nil member keeps any
-// cached profile of the user.
-func (c *Client) addDirectLocked(roomID id.RoomID, userID id.UserID, member *event.MemberEventContent) {
-	u, ok := c.users[userID]
-	if !ok {
-		u = &User{ID: userID}
-		c.users[userID] = u
-	}
-
-	if member != nil {
-		u.MemberEventContent = member
-	}
-
+// addDirectLocked records a DM association, not room membership. Account data
+// and saved invitations can refer to users who have already left the room.
+func (c *Client) addDirectLocked(roomID id.RoomID, userID id.UserID) {
 	ch := c.channelLocked(roomID)
 
 	ch.Lock()
 	ch.IsDirect = true
-	ch.Members[userID] = u
 	ch.Unlock()
 
 	if !slices.Contains(c.dmChannels[roomID], userID) {
@@ -71,8 +60,23 @@ func (c *Client) handleDM(_ context.Context, ev *event.Event) {
 		c.directData[userID] = slices.Clone(rooms)
 
 		for _, roomID := range rooms {
-			c.addDirectLocked(roomID, userID, nil)
+			c.addDirectLocked(roomID, userID)
 		}
+	}
+
+	for roomID, userID := range c.acceptedDirect {
+		c.addDirectLocked(roomID, userID)
+	}
+
+	// Associations not persisted yet are not in the snapshot, but still hold locally.
+	for roomID, p := range c.pendingDirect {
+		if slices.Contains(c.directData[p.user], roomID) {
+			delete(c.pendingDirect, roomID)
+
+			continue
+		}
+
+		c.addDirectLocked(roomID, p.user)
 	}
 }
 
@@ -84,7 +88,13 @@ func (c *Client) handleMember(_ context.Context, ev *event.Event) {
 
 	targetID := id.UserID(*ev.StateKey)
 
-	c.applyMember(ev, member, targetID)
+	if ev.Mautrix.EventSource&event.SourceInvite != 0 {
+		if targetID != c.mc.UserID || member.Membership != event.MembershipInvite {
+			return
+		}
+	} else {
+		c.applyMember(ev, member, targetID)
+	}
 
 	if h, ok := c.handler.(MemberHandler); ok && c.synced.Load() {
 		h.OnMember(&MemberChange{
@@ -142,8 +152,9 @@ func (c *Client) applyMember(ev *event.Event, member *event.MemberEventContent, 
 	}
 	ch.Unlock()
 
-	if member.IsDirect {
-		c.addDirectLocked(ev.RoomID, targetID, member)
+	// Our own member event also carries is_direct, but the peer is the other user.
+	if member.IsDirect && targetID != c.mc.UserID {
+		c.addDirectLocked(ev.RoomID, targetID)
 	}
 }
 

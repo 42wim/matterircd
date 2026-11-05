@@ -6,7 +6,6 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
-	"maps"
 	"math/big"
 	"slices"
 	"strings"
@@ -53,6 +52,16 @@ type Client struct {
 	users      map[id.UserID]*User
 	presence   map[id.UserID]*Presence
 	spaces     map[id.RoomID]*space
+
+	invitations map[id.RoomID]Invitation
+	// Accepted direct invites may not appear in m.direct, even after joining.
+	acceptedDirect map[id.RoomID]id.UserID
+	pendingDirect  map[id.RoomID]pendingAssoc // associations not yet seen in m.direct, see recordDirect
+	leftRooms      map[id.RoomID]struct{}     // excludes departed rooms from selection, not DM classification
+
+	// directWriteMu serializes the m.direct snapshot, write and cache update, as each write
+	// replaces the whole account data. It is never held with the client lock over network I/O.
+	directWriteMu sync.Mutex
 
 	crypto Crypto
 
@@ -106,6 +115,11 @@ func New(ctx context.Context, cred Credentials, h Handler, opts ...Option) (*Cli
 		presence:   make(map[id.UserID]*Presence),
 		spaces:     make(map[id.RoomID]*space),
 
+		invitations:    make(map[id.RoomID]Invitation),
+		acceptedDirect: make(map[id.RoomID]id.UserID),
+		pendingDirect:  make(map[id.RoomID]pendingAssoc),
+		leftRooms:      make(map[id.RoomID]struct{}),
+
 		nameResolved: o.nameResolved,
 		nameLookups:  make(chan struct{}, maxNameLookups),
 		nameDirty:    make(map[id.RoomID]struct{}),
@@ -130,7 +144,7 @@ func New(ctx context.Context, cred Credentials, h Handler, opts ...Option) (*Cli
 
 	// Ready is called from the sync goroutine, after the events of the first
 	// sync response were processed, so handler calls stay serialized.
-	mc.Syncer = &readySyncer{DefaultSyncer: syncer, ready: h.Ready, synced: c.onSynced, named: c.noteRoomNames, track: c.noteTimeline, decrypted: c.noteDecrypted, failed: c.onSyncFailed}
+	mc.Syncer = &readySyncer{DefaultSyncer: syncer, ready: h.Ready, synced: c.onSynced, named: c.noteRoomNames, track: c.noteTimeline, leftInvites: c.removeLeftInvitations, decrypted: c.noteDecrypted, failed: c.onSyncFailed}
 
 	err = c.login(ctx, o.crypto)
 	if err != nil {
@@ -242,18 +256,31 @@ func (c *Client) login(ctx context.Context, factory CryptoFactory) error {
 }
 
 func (c *Client) register(s *mautrix.DefaultSyncer) {
+	s.OnSync(c.syncInvitations)
+
+	onState := func(t event.Type, handler mautrix.EventHandler) {
+		s.OnEventType(t, func(ctx context.Context, ev *event.Event) {
+			// Stripped invite state belongs to Invitations, not the joined room cache.
+			if ev.Mautrix.EventSource&event.SourceInvite != 0 {
+				return
+			}
+
+			handler(ctx, ev)
+		})
+	}
+
 	s.OnEventType(event.EventMessage, c.handleMessage)
 	s.OnEventType(event.EventReaction, c.handleReaction)
 	s.OnEventType(event.StateMember, c.handleMember)
-	s.OnEventType(event.StateRoomName, c.handleRoomName)
+	onState(event.StateRoomName, c.handleRoomName)
 	s.OnEventType(event.AccountDataDirectChats, c.handleDM)
-	s.OnEventType(event.StateCanonicalAlias, c.handleCanonicalAlias)
+	onState(event.StateCanonicalAlias, c.handleCanonicalAlias)
 	s.OnEventType(event.EventRedaction, c.handleRedaction)
 	s.OnEventType(event.EphemeralEventTyping, c.handleTyping)
-	s.OnEventType(event.StateTopic, c.handleTopic)
-	s.OnEventType(event.StateCreate, c.handleCreate)
-	s.OnEventType(event.StateEncryption, c.handleEncryption)
-	s.OnEventType(event.StateSpaceChild, c.handleSpaceChild)
+	onState(event.StateTopic, c.handleTopic)
+	onState(event.StateCreate, c.handleCreate)
+	onState(event.StateEncryption, c.handleEncryption)
+	onState(event.StateSpaceChild, c.handleSpaceChild)
 	s.OnEventType(event.EphemeralEventPresence, c.handlePresence)
 }
 
@@ -308,6 +335,8 @@ type readySyncer struct {
 	decrypted func(*event.Event)
 	failed    func(err error, wait time.Duration)
 
+	leftInvites func(*mautrix.RespSync)
+
 	failures int // consecutive failed syncs, only used from the sync goroutine
 }
 
@@ -317,6 +346,7 @@ func (r *readySyncer) ProcessResponse(ctx context.Context, res *mautrix.RespSync
 	err := r.DefaultSyncer.ProcessResponse(ctx, res, since)
 	if err == nil {
 		r.failures = 0
+		r.leftInvites(res)
 		r.synced()
 		r.named(res)
 		r.once.Do(r.ready)
@@ -389,12 +419,20 @@ func (c *Client) DirectUsers(roomID id.RoomID) []id.UserID {
 	return slices.Clone(c.dmChannels[roomID])
 }
 
-// DirectRoom returns the direct message room with userID, or "".
+// DirectRoom returns the direct message room with userID, or "", excluding invitations and departed rooms.
 func (c *Client) DirectRoom(userID id.UserID) id.RoomID {
 	c.RLock()
 	defer c.RUnlock()
 
 	for roomID, users := range c.dmChannels {
+		if _, invited := c.invitations[roomID]; invited {
+			continue
+		}
+
+		if _, left := c.leftRooms[roomID]; left {
+			continue
+		}
+
 		if len(users) == 1 && users[0] == userID {
 			return roomID
 		}
@@ -428,7 +466,7 @@ type RoomInfo struct {
 	LastActivity int64 // timestamp in milliseconds of the newest message seen, 0 if none
 }
 
-// Rooms returns a snapshot of the known rooms (excluding 1:1 direct rooms).
+// Rooms returns a snapshot of the known rooms (excluding invitations, departed rooms and 1:1 direct rooms).
 func (c *Client) Rooms() []RoomInfo {
 	c.RLock()
 	defer c.RUnlock()
@@ -436,6 +474,14 @@ func (c *Client) Rooms() []RoomInfo {
 	rooms := make([]RoomInfo, 0, len(c.channels))
 
 	for roomID, ch := range c.channels {
+		if _, invited := c.invitations[roomID]; invited {
+			continue
+		}
+
+		if _, left := c.leftRooms[roomID]; left {
+			continue
+		}
+
 		ch.Lock()
 
 		display := c.displayNameLocked(roomID, ch)
@@ -450,7 +496,8 @@ func (c *Client) Rooms() []RoomInfo {
 			c.healRoomName(c.ctx, roomID, ch)
 		}
 
-		if direct && members == 1 {
+		// DM associations carry no members, so a direct room may not have any cached yet.
+		if direct && members <= 1 {
 			continue
 		}
 
@@ -517,7 +564,7 @@ func (c *Client) JoinedMembers(ctx context.Context, roomID id.RoomID) ([]id.User
 	return ids, nil
 }
 
-// Join joins a room by ID or alias.
+// Join joins a room by ID or alias, accepting a pending invitation if there is one.
 func (c *Client) Join(ctx context.Context, roomIDOrAlias string) (id.RoomID, error) {
 	if c.defaultProvider != "" && strings.HasPrefix(roomIDOrAlias, "#") && !strings.Contains(roomIDOrAlias, ":") {
 		roomIDOrAlias += ":" + c.defaultProvider
@@ -527,6 +574,8 @@ func (c *Client) Join(ctx context.Context, roomIDOrAlias string) (id.RoomID, err
 	if err != nil {
 		return "", err
 	}
+
+	c.persistAcceptedDirect(ctx, resp.RoomID)
 
 	return resp.RoomID, nil
 }
@@ -561,26 +610,13 @@ func (c *Client) SendDirect(ctx context.Context, userID id.UserID, parentID id.E
 
 		roomID = resp.RoomID
 
-		c.Lock()
-		direct := maps.Clone(c.directData)
-		c.Unlock()
-
-		if direct == nil {
-			direct = make(map[id.UserID][]id.RoomID)
-		}
-
-		direct[userID] = append(slices.Clone(direct[userID]), roomID)
-
-		// m.direct is not set by the homeserver, persist it ourselves.
-		err = c.mc.SetAccountData(ctx, event.AccountDataDirectChats.Type, direct)
-		if err != nil {
-			c.logger.Errorf("failed to persist m.direct for %s: %s", roomID, err)
-		}
+		c.recordDirect(ctx, userID, roomID)
 
 		c.Lock()
-		c.directData[userID] = direct[userID]
-		c.addDirectLocked(roomID, userID, nil)
+		c.addDirectLocked(roomID, userID)
 		c.Unlock()
+	} else {
+		c.retryDirect(ctx, roomID)
 	}
 
 	return c.Send(ctx, roomID, parentID, text)
