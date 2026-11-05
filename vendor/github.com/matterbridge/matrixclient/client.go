@@ -292,6 +292,7 @@ func (c *Client) register(s *mautrix.DefaultSyncer) {
 	onState(event.StateRoomName, c.handleRoomName)
 	s.OnEventType(event.AccountDataDirectChats, c.handleDM)
 	onState(event.StateCanonicalAlias, c.handleCanonicalAlias)
+	onState(event.StateJoinRules, c.handleJoinRules)
 	s.OnEventType(event.EventRedaction, c.handleRedaction)
 	s.OnEventType(event.EphemeralEventTyping, c.handleTyping)
 	onState(event.StateTopic, c.handleTopic)
@@ -578,7 +579,7 @@ func (c *Client) Rooms() []RoomInfo {
 		}
 
 		// DM associations carry no members, so a direct room may not have any cached yet.
-		if inferred || direct && members <= 1 {
+		if direct && members <= 1 {
 			continue
 		}
 

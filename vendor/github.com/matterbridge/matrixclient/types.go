@@ -60,6 +60,8 @@ type Channel struct {
 	joinedCount, invitedCount int
 	joinedSeen, invitedSeen   bool
 
+	joinRule event.JoinRule // from the join_rules state, "" until seen
+
 	heroes       []id.UserID // members the server suggests to name the room after, from the sync summary
 	reportedName string      // channel name last reported to the consumer, see RoomNameHandler
 	delivering   bool        // a name callback is running, see reportNameLocked
