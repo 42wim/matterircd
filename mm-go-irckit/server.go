@@ -657,9 +657,12 @@ outerloop:
 				// With other params present the trailing part is a password and stays verbatim.
 				if len(msg.Params) == 1 && msg.Trailing != "" && strings.ContainsAny(msg.Trailing, " \t") {
 					args, err := parseCommandString(msg.Trailing)
-					if err == nil {
-						u.Pass = args
+					if err != nil {
+						// Never fall through with the raw payload, it could be sent to Slack as a token.
+						return fmt.Errorf("invalid PASS: %w", err)
 					}
+
+					u.Pass = args
 				}
 			case irc.JOIN:
 				if len(msg.Params) > 0 {
