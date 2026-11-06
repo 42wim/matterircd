@@ -333,6 +333,7 @@ func login(u *User, toUser *User, args []string, service string) {
 	u.MsgUser(toUser, "login OK")
 }
 
+//nolint:funlen
 func replay(u *User, toUser *User, args []string, service string) {
 	if service != serviceMattermost && service != serviceMatrix {
 		u.MsgUser(toUser, "not implemented")
@@ -1042,7 +1043,7 @@ var cmds = map[string]Command{
 	"details":          {handler: details, login: true, minParams: 1, maxParams: 1},
 	"header":           {handler: channelHeader, login: true, minParams: 2, maxParams: -1},
 	"lastsent":         {handler: lastsent, login: true, minParams: 0, maxParams: 0},
-	"login":            {handler: login, minParams: 2, maxParams: 5},
+	"login":            {handler: login, minParams: 2, maxParams: 5}, //nolint:goconst
 	"logout":           {handler: logout, login: true, minParams: 0, maxParams: 0},
 	"part":             {handler: part, login: true, minParams: 1, maxParams: 1},
 	"ping":             {handler: ping, login: true, minParams: 0, maxParams: 0},
@@ -1106,7 +1107,7 @@ func (u *User) handleServiceBot(service string, toUser *User, msg string) {
 	cmd.handler(u, toUser, commands[1:], service)
 }
 
-//nolint:gocyclo
+//nolint:gocyclo,funlen
 func parseCommandString(line string) ([]string, error) {
 	args := []string{}
 	buf := ""

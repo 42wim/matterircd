@@ -2646,7 +2646,7 @@ func (u *User) saveLastViewedAt(channelID string, ts ...int64) {
 		targetTime := max(newTime, existingTime)
 
 		currentTime := make([]byte, 8)
-		binary.LittleEndian.PutUint64(currentTime, uint64(targetTime))
+		binary.LittleEndian.PutUint64(currentTime, uint64(targetTime)) //nolint:gosec
 
 		return b.Put([]byte(channelID), currentTime)
 	})
