@@ -539,8 +539,8 @@ func CmdPart(s Server, u *User, msg *irc.Message) error {
 func CmdPing(s Server, u *User, msg *irc.Message) error {
 	if len(msg.Params) > 0 {
 		msg.Trailing = msg.Params[0]
-
 	}
+
 	_ = s.EncodeMessage(u, irc.PONG, []string{s.Name()}, msg.Trailing)
 	return nil
 }

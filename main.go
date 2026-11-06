@@ -362,8 +362,8 @@ func setupSignalHandling(cfg *config.Config) {
 
 	go func() {
 		for range sighupChan {
-
 			logger.Info("received SIGHUP signal, triggering config reload...")
+
 			err := cfg.Reload()
 			if err != nil {
 				logger.WithError(err).Error("SIGHUP config reload failed")
