@@ -575,6 +575,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 	*/
 	nick := sanitizeNick(event.Sender.Nick)
 	logger.Tracef("in handleChannelMessageEvent from %s", nick)
+
 	ch, ghost := u.getMessageChannelUser(event.ChannelID, event.Sender)
 	if event.Sender.Me {
 		nick = u.Nick
