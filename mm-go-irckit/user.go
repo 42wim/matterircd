@@ -168,8 +168,8 @@ const writeTimeout = 10 * time.Second
 
 // Encode and send each msg until an error occurs, then returns.
 //
-//nolint:gocyclo,nonamedreturns
-func (u *User) Encode(msgs ...*irc.Message) (err error) {
+//nolint:gocyclo
+func (u *User) Encode(msgs ...*irc.Message) error {
 	if u == nil || u.Ghost || u.Conn == nil {
 		return nil
 	}

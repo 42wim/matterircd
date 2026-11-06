@@ -977,8 +977,6 @@ func updatelastviewed(u *User, toUser *User, args []string, service string) {
 		return
 	}
 
-	channelID := "" //nolint:wastedassign
-
 	if len(args) != 1 {
 		u.MsgUser(toUser, "need UPDATELASTVIEWED <channel>")
 		u.MsgUser(toUser, "e.g. UPDATELASTVIEWED #bugs")
@@ -989,11 +987,14 @@ func updatelastviewed(u *User, toUser *User, args []string, service string) {
 	if strings.Contains(args[0], "#") {
 		args[0] = strings.ReplaceAll(args[0], "#", "")
 
-		channelID = u.br.GetChannelID(u.ctx, args[0], u.br.GetMe().TeamID)
+		channelID := u.br.GetChannelID(u.ctx, args[0], u.br.GetMe().TeamID)
 		if channelID == "" {
 			u.MsgUser(toUser, "channel does not exist")
 			return
 		}
+
+		u.br.UpdateLastViewed(u.ctx, channelID)
+		u.MsgUser(toUser, fmt.Sprintf("set viewed for %s", args[0]))
 	} else if updateUser, exists := u.Srv.HasUser(args[0]); exists && updateUser.Ghost {
 		err := u.br.UpdateLastViewedUser(u.ctx, updateUser.User)
 		if err != nil {
@@ -1006,9 +1007,6 @@ func updatelastviewed(u *User, toUser *User, args []string, service string) {
 		u.MsgUser(toUser, fmt.Sprintf("user %s does not exist", args[0]))
 		return
 	}
-
-	u.br.UpdateLastViewed(u.ctx, channelID)
-	u.MsgUser(toUser, fmt.Sprintf("set viewed for %s", args[0]))
 }
 
 func verify(u *User, toUser *User, args []string, service string) {

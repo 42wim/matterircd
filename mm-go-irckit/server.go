@@ -613,13 +613,11 @@ func (s *server) BatchAdd(users []*User) {
 	}
 }
 
-//nolint:nonamedreturns
-func (s *server) Add(u *User) (ok bool) {
+func (s *server) Add(u *User) bool {
 	return s.add(u)
 }
 
-//nolint:nonamedreturns
-func (s *server) add(u *User) (ok bool) {
+func (s *server) add(u *User) bool {
 	s.Lock()
 	defer s.Unlock()
 
