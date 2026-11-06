@@ -127,6 +127,16 @@ func (c *Client) inferredDirectLocked(ch *Channel) (id.UserID, bool) {
 	return peer, peer != ""
 }
 
+// memberInFlight reports whether roomID may be a DM that SendDirect is still creating, which
+// the consumer must not learn of as a channel.
+func (c *Client) memberInFlight(roomID id.RoomID) bool {
+	c.RLock()
+	ch, ok := c.channels[roomID]
+	c.RUnlock()
+
+	return ok && c.creatingDirectRoom(ch)
+}
+
 func (c *Client) handleMember(_ context.Context, ev *event.Event) {
 	member := ev.Content.AsMember()
 	if member == nil || ev.StateKey == nil {
@@ -143,7 +153,7 @@ func (c *Client) handleMember(_ context.Context, ev *event.Event) {
 		c.applyMember(ev, member, targetID)
 	}
 
-	if h, ok := c.handler.(MemberHandler); ok && c.synced.Load() {
+	if h, ok := c.handler.(MemberHandler); ok && c.synced.Load() && !c.memberInFlight(ev.RoomID) {
 		h.OnMember(&MemberChange{
 			RoomID:     ev.RoomID,
 			UserID:     targetID,
@@ -226,6 +236,7 @@ func (c *Client) handleRoomName(_ context.Context, ev *event.Event) {
 // setNameLocked sets the room name, ch must be locked.
 func (ch *Channel) setNameLocked(name string) {
 	ch.RawName = name
+
 	ch.Name = ""
 	if name != "" {
 		ch.Name = "#" + strings.ReplaceAll(name, " ", "")
@@ -297,7 +308,7 @@ func (c *Client) noteTimeline(res *mautrix.RespSync) {
 	defer c.Unlock()
 
 	for roomID, room := range res.Rooms.Join {
-		if room != nil {
+		if room != nil { //nolint:nestif
 			c.noteTimelineLocked(roomID, room.Timeline.Events)
 
 			// An omitted field keeps the heroes, an empty array clears them.
@@ -450,7 +461,7 @@ func (c *Client) handleMessage(_ context.Context, ev *event.Event) {
 
 	c.noteActivity(ev.RoomID, ev.ID, ev.Timestamp)
 
-	if targetID := content.RelatesTo.GetReplaceID(); targetID != "" {
+	if targetID := content.RelatesTo.GetReplaceID(); targetID != "" { //nolint:nestif
 		if h, ok := c.handler.(EditHandler); ok {
 			if !c.synced.Load() {
 				return

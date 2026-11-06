@@ -152,7 +152,7 @@ func (h helper) primeOwnKeys(ctx context.Context, m *crypto.OlmMachine) {
 // DeviceVerified implements matrixclient.DeviceVerifier. It resolves trust from
 // the crypto store only: the machine's cached resolvers (ResolveTrustContext,
 // IsUserTrusted) mutate unsynchronized fields shared with the sync handling.
-func (h helper) DeviceVerified(ctx context.Context) (bool, error) {
+func (h helper) DeviceVerified(ctx context.Context) (bool, error) { //nolint:gocyclo,funlen
 	m := h.Machine()
 	if m == nil {
 		return false, nil
