@@ -799,7 +799,7 @@ func (m *Mattermost) IsOnline(status string) bool {
 func (m *Mattermost) StatusUser(ctx context.Context, userID string) (string, error) {
 	userName := m.mc.GetCachedUserName(userID)
 
-	status := m.mc.GetStatus(ctx, userID)
+	status := m.mc.GetStatusFresh(ctx, userID)
 	if status == "" {
 		return status, nil
 	}
