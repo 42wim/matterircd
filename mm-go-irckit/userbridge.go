@@ -532,6 +532,13 @@ func (u *User) handleChannelRemoveEvent(event *bridge.ChannelRemoveEvent) {
 }
 
 func (u *User) getMessageChannel(channelID string, sender *bridge.UserInfo) Channel {
+	ch, _ := u.getMessageChannelUser(channelID, sender)
+
+	return ch
+}
+
+// getMessageChannelUser also returns the resolved sender, so callers don't need to look it up again.
+func (u *User) getMessageChannelUser(channelID string, sender *bridge.UserInfo) (Channel, *User) {
 	ch := u.Srv.Channel(channelID)
 	ghost := u.createUserFromInfo(sender)
 
@@ -545,7 +552,7 @@ func (u *User) getMessageChannel(channelID string, sender *bridge.UserInfo) Chan
 
 	// if we are already in the channel, route message directly to it
 	if ch.HasUser(u) {
-		return ch
+		return ch, ghost
 	}
 
 	// check if we mayjoin this channel
@@ -553,10 +560,10 @@ func (u *User) getMessageChannel(channelID string, sender *bridge.UserInfo) Chan
 		// otherwise first sync it
 		u.syncChannel(channelID, u.br.GetChannelName(u.ctx, channelID))
 
-		return ch
+		return ch, ghost
 	}
 
-	return u.Srv.Channel("&messages")
+	return u.Srv.Channel("&messages"), ghost
 }
 
 func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
@@ -568,9 +575,14 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 	*/
 	nick := sanitizeNick(event.Sender.Nick)
 	logger.Tracef("in handleChannelMessageEvent from %s", nick)
-	ch := u.getMessageChannel(event.ChannelID, event.Sender)
+	ch, ghost := u.getMessageChannelUser(event.ChannelID, event.Sender)
 	if event.Sender.Me {
 		nick = u.Nick
+	}
+
+	senderPrefix := &irc.Prefix{Name: nick, User: ghost.User, Host: ghost.Host}
+	if event.Sender.Me {
+		senderPrefix = u.Prefix()
 	}
 
 	if event.ChannelType != "D" && ch.ID() == "&messages" {
@@ -578,6 +590,8 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 			return
 		}
 		nick += "/" + u.Srv.Channel(event.ChannelID).String()
+		// The decorated nick isn't a user, so it has no WHOIS identity to match.
+		senderPrefix = &irc.Prefix{Name: nick, User: nick, Host: u.Srv.Name()}
 	}
 
 	if u.hasSharedCfg() && u.sharedCfg().ShowMentions {
@@ -629,15 +643,27 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 	preserveNewLines := u.br.FormatterConfig().PreserveNewLines
 	hardLineSplit := u.cfg.Current().HardLineSplit
 
-	// The wire line is ":prefix CMD target :text\r\n" and must fit in 512 bytes.
-	senderPrefix := ch.SpoofPrefix(nick)
 	cmd := irc.PRIVMSG
 
 	if event.MessageType == "notice" {
 		cmd = irc.NOTICE
 	}
 
-	maxlen = max(min(maxlen, 505-senderPrefix.Len()-len(cmd)-len(ch.String())), 50)
+	// The line must fit in 512 bytes on the wire. Context is added after wrapping
+	// when showContext is set, and a CTCP ACTION envelope is restored on every line.
+	wireBudget := wireTextBudget(senderPrefix, cmd, ch.String())
+	if showContext {
+		wireBudget = max(wireBudget-len(prefix)-len(suffix), minWireText)
+	}
+
+	isAction := strings.HasPrefix(text, "\x01ACTION ") && strings.HasSuffix(text, "\x01")
+	if isAction {
+		// The context in an ACTION is already part of text, so only the envelope is reserved.
+		text = text[8 : len(text)-1]
+		maxlen = min(460, wireBudget) - len("\x01ACTION \x01")
+	} else {
+		maxlen = min(maxlen, wireBudget)
+	}
 
 	text = utils.WrapMessage(text, maxlen, hardLineSplit)
 	addPrefix := false
@@ -676,6 +702,10 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		if showContext || addPrefix {
 			line = prefix + line + suffix
 			addPrefix = false
+		}
+
+		if isAction {
+			line = "\x01ACTION " + line + "\x01"
 		}
 
 		ch.SpoofWithPrefix(senderPrefix, line, cmd, len(line))
