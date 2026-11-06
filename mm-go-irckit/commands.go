@@ -40,6 +40,7 @@ func (cmds commands) Run(s Server, u *User, msg *irc.Message) error {
 	if !ok {
 		return ErrUnknownCommand
 	}
+
 	if len(msg.Params) < cmd.MinParams {
 		return u.Encode(&irc.Message{
 			Prefix:  s.Prefix(),
@@ -52,5 +53,6 @@ func (cmds commands) Run(s Server, u *User, msg *irc.Message) error {
 	if cmd.LoggedIn && u.br == nil {
 		return nil
 	}
+
 	return cmd.Call(s, u, msg)
 }

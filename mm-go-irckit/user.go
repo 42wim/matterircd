@@ -53,6 +53,7 @@ type User struct {
 
 	sync.RWMutex
 	*bridge.UserInfo
+	UserBridge
 
 	BufferedMsg *irc.Message
 	DecodeCh    chan *irc.Message
@@ -60,8 +61,6 @@ type User struct {
 	channels map[Channel]struct{}
 
 	cfg *config.Config
-
-	UserBridge
 
 	//nolint:containedctx // Tied to the lifecycle of the persistent client session
 	ctx    context.Context
@@ -114,16 +113,20 @@ func (u *User) String() string {
 func (u *User) NumChannels() int {
 	u.RLock()
 	defer u.RUnlock()
+
 	return len(u.channels)
 }
 
 func (u *User) Channels() []Channel {
 	u.RLock()
+
 	channels := make([]Channel, 0, len(u.channels))
 	for ch := range u.channels {
 		channels = append(channels, ch)
 	}
+
 	u.RUnlock()
+
 	return channels
 }
 
@@ -132,6 +135,7 @@ func (u *User) VisibleTo() []*User {
 	seen[u] = struct{}{}
 
 	channels := u.Channels()
+
 	num := 0
 	for _, ch := range channels {
 		// Don't include self
@@ -150,11 +154,13 @@ func (u *User) VisibleTo() []*User {
 			if _, dupe := seen[other]; dupe {
 				continue
 			}
+
 			seen[other] = struct{}{}
 			// TODO: Check visibility (once it's implemented)
 			users = append(users, other)
 		}
 	}
+
 	return users
 }
 
@@ -163,7 +169,7 @@ const writeTimeout = 10 * time.Second
 // Encode and send each msg until an error occurs, then returns.
 //
 //nolint:gocyclo
-func (u *User) Encode(msgs ...*irc.Message) (err error) {
+func (u *User) Encode(msgs ...*irc.Message) error {
 	if u == nil || u.Ghost || u.Conn == nil {
 		return nil
 	}
@@ -180,8 +186,8 @@ func (u *User) Encode(msgs ...*irc.Message) (err error) {
 			logger.Warnf("failed to set write deadline for %s: %v", u.Nick, err)
 		}
 
-		if msg.Prefix != nil && msg.Command == irc.PRIVMSG && (msg.Prefix.Name == "slack" || msg.Prefix.Name == "mattermost") && msg.Prefix.Host == "service" && strings.Contains(msg.Trailing, "token") { //nolint:goconst,staticcheck
-			logger.Debugf("-> %s %s %s", msg.Command, msg.Prefix.Name, "[token redacted]")
+		if msg.Prefix != nil && msg.Command == irc.PRIVMSG && (msg.Name == "slack" || msg.Name == "mattermost") && msg.Host == "service" && strings.Contains(msg.Trailing, "token") { //nolint:goconst
+			logger.Debugf("-> %s %s %s", msg.Command, msg.Name, "[token redacted]")
 
 			err := u.Conn.Encode(msg)
 			if err != nil {
@@ -238,6 +244,7 @@ func (u *User) Decode() {
 		logger.Trace("ghost user, skipping Decode")
 		return
 	}
+
 	buffer := make(chan *irc.Message, 512)
 	bufferTimeout := max(
 		// we need at least 100
@@ -246,6 +253,7 @@ func (u *User) Decode() {
 	timeout := time.Duration(bufferTimeout) * time.Millisecond
 	t := timer.NewTimer(timeout)
 	t.Stop()
+
 	var wg sync.WaitGroup
 	wg.Add(1)
 
@@ -266,6 +274,7 @@ func (u *User) Decode() {
 			t.Stop()
 
 			resumeTarget, resumeReply = "", ""
+
 			if bufferedMsg == nil {
 				return
 			}
@@ -283,6 +292,7 @@ func (u *User) Decode() {
 			}
 
 			logger.Tracef("flushing buffer: %#v", logMsg)
+
 			u.DecodeCh <- bufferedMsg
 			// clear buffer
 			bufferedMsg = nil
@@ -305,6 +315,7 @@ func (u *User) Decode() {
 				if !ok {
 					// Best-effort flush on shutdown. Avoid blocking forever if nobody is draining DecodeCh.
 					t.Stop()
+
 					if bufferedMsg != nil {
 						// trim last newline
 						bufferedMsg.Trailing = strings.TrimSpace(bufferedMsg.Trailing)
@@ -313,9 +324,12 @@ func (u *User) Decode() {
 						case <-time.After(1 * time.Second):
 							logger.Warnf("timed out flushing decode buffer for %s", u.Nick)
 						}
+
 						bufferedMsg = nil
 					}
+
 					logger.Tracef("decode buffer goroutine exiting for %s", u.Nick)
+
 					return
 				}
 
@@ -414,10 +428,12 @@ func (u *User) Decode() {
 			}
 
 			isEOF := errors.Is(err, io.EOF) || err.Error() == "EOF"
+
 			isClosed := errors.Is(err, net.ErrClosed) || strings.Contains(err.Error(), "use of closed network connection")
 			if !isEOF && !isClosed {
 				logger.Errorf("msg: %v err: %v", msg, err)
 			}
+
 			break
 		}
 
@@ -441,12 +457,15 @@ func (u *User) Decode() {
 		switch command {
 		case irc.PRIVMSG, irc.QUIT, irc.PART:
 			logger.Debugf("B: %#v", dmsg)
+
 			buffer <- msg
 		case irc.PING, irc.MODE:
 			logger.Trace(dmsg)
+
 			u.DecodeCh <- msg
 		default:
 			logger.Debug(dmsg)
+
 			u.DecodeCh <- msg
 		}
 	}

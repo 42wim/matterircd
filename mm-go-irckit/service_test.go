@@ -97,7 +97,9 @@ func TestParseCommandString(t *testing.T) {
 		if err != nil && tc.IsGood {
 			t.Fatal(tc.Desc + " should be an error.")
 		}
+
 		fmt.Println(tc.Desc)
+
 		for i, r := range tc.Results {
 			fmt.Printf("Testing [%s] == [%s]\n", results[i], r)
 			assert.Equal(t, results[i], r)

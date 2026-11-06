@@ -32,6 +32,7 @@ func (c *conn) ResolveHost() string {
 	addr := c.RemoteAddr()
 
 	s := addr.String()
+
 	ip, _, err := net.SplitHostPort(s)
 	if err != nil {
 		return s

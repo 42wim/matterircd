@@ -54,13 +54,16 @@ func stringInRegexp(a string, list []string) bool {
 	return false
 }
 
+//nolint:unused
 func removeStringInSlice(a string, list []string) []string {
 	newlist := []string{}
+
 	for _, b := range list {
 		if b != a {
 			newlist = append(newlist, b)
 		}
 	}
+
 	return newlist
 }
 
@@ -70,7 +73,9 @@ func sanitizeNick(nick string) string {
 		if strings.ContainsRune("!+%@&#$:'\"?*, ", r) {
 			return '-'
 		}
+
 		return r
 	}
+
 	return strings.Map(sanitize, nick)
 }

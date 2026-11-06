@@ -76,6 +76,7 @@ func main() {
 	}
 
 	logger.Infof("Running version %s %s", version, githash)
+
 	if strings.Contains(version, "-dev") {
 		logger.Infof("WARNING: THIS IS A DEVELOPMENT VERSION. Things may break.")
 	}
@@ -89,10 +90,12 @@ func main() {
 
 	// Attempt to load values from the config file
 	var err error
+
 	cfg, err = config.Load(*flagConfig, pflag.CommandLine)
 	if err != nil {
 		log.Fatal(err)
 	}
+
 	rc := cfg.Current()
 
 	// Setup live-reloading subsystems
@@ -111,6 +114,7 @@ func main() {
 
 	// Backwards compatible: Bind standard socket synchronously (if configured)
 	var stdSocket net.Listener
+
 	if rc.Bind != "" {
 		var network string
 		if strings.ContainsRune(rc.Bind, os.PathSeparator) {
@@ -120,6 +124,7 @@ func main() {
 		}
 
 		var err error
+
 		stdSocket, err = net.Listen(network, rc.Bind)
 		if err != nil {
 			logger.Fatal(err)
@@ -133,11 +138,13 @@ func main() {
 	} else if statePath := rc.Matrix.LastViewedSaveFile; statePath != "" {
 		mmLastViewedFile = statePath
 	}
+
 	db, err := bolt.Open(mmLastViewedFile, 0o600, &bolt.Options{Timeout: 1 * time.Second})
 	if err != nil {
 		logger.Fatalf("Database lock failed (is another instance running?): %v", err)
 	}
 	defer db.Close()
+
 	LastViewedSaveDB = db
 
 	aiCfg := cfg.Current().AI
@@ -210,8 +217,10 @@ func main() {
 	// Start serving connections asynchronously
 	if tlsSocket != nil {
 		logger.Infof("Listening on %s (TLS)", rc.TLSBind)
+
 		go func() {
 			defer tlsSocket.Close()
+
 			start(tlsSocket)
 		}()
 	}
@@ -219,8 +228,10 @@ func main() {
 	// Backwards compatible
 	if stdSocket != nil {
 		logger.Infof("Listening on %s", rc.Bind)
+
 		go func() {
 			defer stdSocket.Close()
+
 			start(stdSocket)
 		}()
 	}
@@ -270,6 +281,7 @@ func setupProfilingReloadHook(cfg *config.Config) {
 		if rc.Profiling { //nolint:nestif
 			if profServer != nil && profServer.Addr != bindAddr {
 				logger.Infof("profiling bind address changed, restarting server...")
+
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
 
@@ -277,6 +289,7 @@ func setupProfilingReloadHook(cfg *config.Config) {
 				if err != nil {
 					logger.WithError(err).Error("profiling: Failed to gracefully shutdown old server")
 				}
+
 				profServer = nil
 			}
 
@@ -316,6 +329,7 @@ func setupProfilingReloadHook(cfg *config.Config) {
 			if err != nil {
 				logger.WithError(err).Error("profiling: Failed to gracefully shutdown")
 			}
+
 			profServer = nil
 		}
 	}
@@ -337,7 +351,9 @@ func setupGopsReloadHook(cfg *config.Config) {
 		if rc.Gops { //nolint:nestif
 			if !gopsRunning {
 				logger.Info("enabling gops agent")
-				if err := agent.Listen(agent.Options{}); err != nil {
+
+				err := agent.Listen(agent.Options{})
+				if err != nil {
 					logger.WithError(err).Error("failed to start gops agent")
 				} else {
 					gopsRunning = true
@@ -347,6 +363,7 @@ func setupGopsReloadHook(cfg *config.Config) {
 			if gopsRunning {
 				logger.Info("disabling gops agent")
 				agent.Close()
+
 				gopsRunning = false
 			}
 		}
@@ -421,6 +438,7 @@ func start(socket net.Listener) {
 			logger.Infof("New connection: %s", conn.RemoteAddr())
 
 			user := irckit.NewUserBridge(conn, newsrv, cfg, LastViewedSaveDB)
+
 			err = newsrv.Connect(user)
 			if err != nil {
 				logger.Errorf("Failed to join: %v", err)

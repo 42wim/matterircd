@@ -161,6 +161,7 @@ func login(u *User, toUser *User, args []string, service string) {
 		}
 
 		fmt.Println("login mastodon")
+
 		err := u.loginTo("mastodon")
 		if err != nil {
 			u.MsgUser(toUser, err.Error())
@@ -240,6 +241,7 @@ func login(u *User, toUser *User, args []string, service string) {
 	}
 
 	teamOrServer := ""
+
 	creds := []*string{&cred.Server, &teamOrServer, &cred.Login, &cred.Pass}
 	for argsIdx, credsIdx := datalen, len(creds); argsIdx > 0 && credsIdx > 0; argsIdx-- {
 		*creds[credsIdx-1] = args[argsIdx-1]
@@ -270,6 +272,7 @@ func login(u *User, toUser *User, args []string, service string) {
 	logger.Tracef("args_len: %d", len(args))
 	logger.Tracef("team: %s", cred.Team)
 	logger.Tracef("server: %s", cred.Server)
+
 	if cred.MFAToken != "" {
 		logger.Debug("found MFAToken")
 	}
@@ -280,24 +283,28 @@ func login(u *User, toUser *User, args []string, service string) {
 		u.MsgUser(toUser, "need LOGIN <server> <team> <login> <pass>")
 		u.MsgUser(toUser, "when using a personal token replace <pass> with token=<yourtoken>")
 		u.MsgUser(toUser, "when using a mfa token use LOGIN <server> <team> <login> <pass> MFAToken=<yourmfatoken>")
+
 		return
 	// server missing
 	case cred.Server == "":
 		u.MsgUser(toUser, "need LOGIN <server> <login> <pass>")
 		u.MsgUser(toUser, "when using a personal token replace <pass> with token=<yourtoken>")
 		u.MsgUser(toUser, "when using a mfa token use LOGIN <server> <login> <pass> MFAToken=<yourmfatoken>")
+
 		return
 	// team missing
 	case cred.Team == "":
 		u.MsgUser(toUser, "need LOGIN <team> <login> <pass>")
 		u.MsgUser(toUser, "when using a personal token replace <pass> with token=<yourtoken>")
 		u.MsgUser(toUser, "when using a mfa token use LOGIN <team> <login> <pass> MFAToken=<yourmfatoken>")
+
 		return
 	// login/username or password/token missing
 	case cred.Login == "" || cred.Pass == "":
 		u.MsgUser(toUser, "need LOGIN <login> <pass>")
 		u.MsgUser(toUser, "when using a personal token replace <pass> with token=<yourtoken>")
 		u.MsgUser(toUser, "when using a mfa token use LOGIN <login> <pass> MFAToken=<yourmfatoken>")
+
 		return
 	}
 
@@ -335,14 +342,17 @@ func replay(u *User, toUser *User, args []string, service string) {
 	if len(args) == 0 || len(args) > 2 {
 		u.MsgUser(toUser, "need REPLAY (#<channel>) [duration]")
 		u.MsgUser(toUser, "e.g. REPLAY #bugs 24h")
+
 		return
 	}
 
 	channelName := strings.TrimPrefix(args[0], "#")
 	channelTeamID := u.br.GetMe().TeamID
 
-	var since int64
-	var logSince string
+	var (
+		since    int64
+		logSince string
+	)
 
 	// Parse optional duration argument
 	if len(args) == 2 {
@@ -358,6 +368,7 @@ func replay(u *User, toUser *User, args []string, service string) {
 	}
 
 	channelID := u.br.GetChannelID(u.ctx, channelName, channelTeamID)
+
 	brchannel, err := u.br.GetChannel(u.ctx, channelID)
 	if err != nil {
 		u.MsgUser(toUser, channelName+" not found")
@@ -402,6 +413,7 @@ func details(u *User, toUser *User, args []string, service string) {
 	if len(args) != 1 {
 		u.MsgUser(toUser, "need DETAILS <post/thread ID>")
 		u.MsgUser(toUser, "e.g. DETAILS zhqrffbxupgepj1yquxaftfk4a")
+
 		return
 	}
 
@@ -411,6 +423,7 @@ func details(u *User, toUser *User, args []string, service string) {
 	if u.cfg.Mattermost().Insecure {
 		proto = "http"
 	}
+
 	postlistURL := proto + "://" + u.Credentials.Server + "/" + u.Credentials.Team + "/pl/"
 
 	switch {
@@ -433,6 +446,7 @@ func details(u *User, toUser *User, args []string, service string) {
 	default:
 		u.MsgUser(toUser, "need DETAILS <post/thread ID>")
 		u.MsgUser(toUser, "e.g. DETAILS zhqrffbxupgepj1yquxaftfk4a")
+
 		return
 	}
 
@@ -467,8 +481,10 @@ func details(u *User, toUser *User, args []string, service string) {
 	}
 
 	for _, event := range events {
-		var createAt int64
-		var text, nick, channel string
+		var (
+			createAt            int64
+			text, nick, channel string
+		)
 
 		switch e := event.Data.(type) {
 		case *bridge.ChannelMessageEvent:
@@ -489,6 +505,7 @@ func details(u *User, toUser *User, args []string, service string) {
 			if strings.HasPrefix(line, "\x01ACTION ") && strings.HasSuffix(line, "\x01") {
 				line = "* " + nick + " " + line[8:len(line)-1]
 			}
+
 			u.MsgUser(toUser, prefix+"  "+line)
 		})
 	}
@@ -501,6 +518,7 @@ func search(u *User, toUser *User, args []string, service string) {
 	}
 
 	limit := 0
+
 	if len(args) > 1 {
 		val, err := strconv.Atoi(args[0])
 		if err == nil {
@@ -512,10 +530,12 @@ func search(u *User, toUser *User, args []string, service string) {
 	if len(args) == 0 || args[0] == helpArg {
 		u.MsgUser(toUser, "need SEARCH <limit> <text>")
 		u.MsgUser(toUser, "e.g. SEARCH 10 matterircd")
+
 		return
 	}
 
 	searchStr := strings.Join(args, " ")
+
 	events := u.br.SearchPosts(u.ctx, searchStr)
 	if len(events) == 0 {
 		u.MsgUser(toUser, "no results")
@@ -577,14 +597,17 @@ func part(u *User, toUser *User, args []string, service string) {
 	if len(args) != 1 {
 		u.MsgUser(toUser, "need PART #<channel>")
 		u.MsgUser(toUser, "e.g. PART #bugs")
+
 		return
 	}
 
 	channelName := strings.TrimPrefix(args[0], "#")
+
 	channelTeamID := u.br.GetMe().TeamID
 	if len(args) == 2 {
 		channelTeamID = args[1]
 	}
+
 	channelID := u.br.GetChannelID(u.ctx, channelName, channelTeamID)
 
 	err := u.br.Part(u.ctx, channelID)
@@ -632,6 +655,7 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 	}
 
 	var err error
+
 	limit := 0
 
 	if len(filteredArgs) == 2 {
@@ -641,18 +665,21 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 	if len(filteredArgs) == 0 || len(filteredArgs) > 2 || err != nil {
 		u.MsgUser(toUser, "need SCROLLBACK (#<channel>|<user>|<post/thread ID>) [lines] [server-time]")
 		u.MsgUser(toUser, "e.g. SCROLLBACK #bugs 10, SCROLLBACK @@nkrtrp6ym... server-time")
+
 		return
 	}
 
 	search := filteredArgs[0]
 
 	var channelID, searchPostID string
+
 	scrollbackUser, exists := u.Srv.HasUser(search)
 
 	proto := "https"
 	if u.cfg.Mattermost().Insecure {
 		proto = "http"
 	}
+
 	postlistURL := proto + "://" + u.Credentials.Server + "/" + u.Credentials.Team + "/pl/"
 
 	switch {
@@ -677,6 +704,7 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 	default:
 		u.MsgUser(toUser, "need SCROLLBACK (#<channel>|<user>|<post/thread ID>) <lines>")
 		u.MsgUser(toUser, "e.g. SCROLLBACK #bugs 10 (show last 10 lines from #bugs)")
+
 		return
 	}
 
@@ -709,9 +737,11 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 //
 //nolint:funlen,gocognit,gocyclo,unparam
 func dispatchHistoricalEvent(u *User, toUser *User, event *bridge.Event, searchCtx string, searchRegexes []*regexp.Regexp, reqServerTime bool) {
-	var createAt int64
-	var text, nick, msgID, parentID, channelID string
-	var files []*bridge.File
+	var (
+		createAt                               int64
+		text, nick, msgID, parentID, channelID string
+		files                                  []*bridge.File
+	)
 
 	switch e := event.Data.(type) {
 	case *bridge.ChannelMessageEvent:
@@ -947,36 +977,36 @@ func updatelastviewed(u *User, toUser *User, args []string, service string) {
 		return
 	}
 
-	channelID := ""
-
 	if len(args) != 1 {
 		u.MsgUser(toUser, "need UPDATELASTVIEWED <channel>")
 		u.MsgUser(toUser, "e.g. UPDATELASTVIEWED #bugs")
+
 		return
 	}
 
 	if strings.Contains(args[0], "#") {
 		args[0] = strings.ReplaceAll(args[0], "#", "")
 
-		channelID = u.br.GetChannelID(u.ctx, args[0], u.br.GetMe().TeamID)
+		channelID := u.br.GetChannelID(u.ctx, args[0], u.br.GetMe().TeamID)
 		if channelID == "" {
 			u.MsgUser(toUser, "channel does not exist")
 			return
 		}
+
+		u.br.UpdateLastViewed(u.ctx, channelID)
+		u.MsgUser(toUser, fmt.Sprintf("set viewed for %s", args[0]))
 	} else if updateUser, exists := u.Srv.HasUser(args[0]); exists && updateUser.Ghost {
 		err := u.br.UpdateLastViewedUser(u.ctx, updateUser.User)
 		if err != nil {
 			u.MsgUser(toUser, fmt.Sprintf("updatelastviewed for %#v failed: %s", updateUser.User, err))
 			return
 		}
+
 		return
 	} else {
 		u.MsgUser(toUser, fmt.Sprintf("user %s does not exist", args[0]))
 		return
 	}
-
-	u.br.UpdateLastViewed(u.ctx, channelID)
-	u.MsgUser(toUser, fmt.Sprintf("set viewed for %s", args[0]))
 }
 
 func verify(u *User, toUser *User, args []string, service string) {
@@ -1049,8 +1079,10 @@ func (u *User) handleServiceBot(service string, toUser *User, msg string) {
 		for k := range cmds {
 			keys = append(keys, k)
 		}
+
 		u.MsgUser(toUser, "possible commands: "+strings.Join(keys, ", "))
 		u.MsgUser(toUser, "<command> help for more info")
+
 		return
 	}
 
@@ -1078,6 +1110,7 @@ func (u *User) handleServiceBot(service string, toUser *User, msg string) {
 func parseCommandString(line string) ([]string, error) {
 	args := []string{}
 	buf := ""
+
 	var escaped, doubleQuoted, singleQuoted bool
 
 	got := false
@@ -1087,6 +1120,7 @@ func parseCommandString(line string) ([]string, error) {
 		if escaped {
 			buf += string(r)
 			escaped = false
+
 			continue
 		}
 
@@ -1097,6 +1131,7 @@ func parseCommandString(line string) ([]string, error) {
 			} else {
 				escaped = true
 			}
+
 			continue
 		}
 
@@ -1109,6 +1144,7 @@ func parseCommandString(line string) ([]string, error) {
 				buf = ""
 				got = false
 			}
+
 			continue
 		}
 		// If Quoted
@@ -1124,6 +1160,7 @@ func parseCommandString(line string) ([]string, error) {
 				continue
 			}
 		}
+
 		got = true
 		buf += string(r)
 	}
@@ -1170,10 +1207,12 @@ func channelHeader(u *User, toUser *User, args []string, service string) {
 			showHelp()
 			return
 		}
+
 		args = args[2:]
 	}
 
 	var channelID, channelName string
+
 	DMUser, exists := u.Srv.HasUser(channel)
 
 	switch {
@@ -1193,12 +1232,12 @@ func channelHeader(u *User, toUser *User, args []string, service string) {
 		return
 	}
 
-	switch {
-	case cmd == "get":
+	switch cmd {
+	case "get":
 		currentHeader := u.br.Topic(u.ctx, channelID)
 		u.MsgUser(toUser, channel+"'s channel header is: "+currentHeader)
 
-	case cmd == "set":
+	case "set":
 		err := u.br.SetTopic(u.ctx, channelID, strings.Join(args, " "))
 		if err != nil {
 			u.MsgUser(toUser, "failed to set header: "+err.Error())
@@ -1206,7 +1245,7 @@ func channelHeader(u *User, toUser *User, args []string, service string) {
 			u.MsgUser(toUser, channel+"'s channel header updated successfully.")
 		}
 
-	case cmd == "update":
+	case "update":
 		payload := strings.Join(args, " ")
 
 		// Basic check for the sed-like substitute string (e.g. "s/old/new/")
@@ -1413,6 +1452,7 @@ func (u *User) getSummarizeEvents(target string, query summarizeQuery) (string, 
 	userName := strings.TrimPrefix(target, "@")
 
 	channelID := u.br.GetChannelID(u.ctx, userName, "")
+
 	brchannel, err := u.br.GetChannel(u.ctx, channelID)
 	if err != nil {
 		return "", nil, fmt.Errorf("user '@%s' not found", userName)

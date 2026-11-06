@@ -185,6 +185,7 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 
 		// Configure matterclient base logger
 		mc.SetLogLevel("info")
+
 		if rc.Mattermost.MatterclientLogLevel != "" {
 			logger.Infof("enabling matterclient logging: level: %s", rc.Mattermost.MatterclientLogLevel)
 			mc.SetLogLevel(strings.ToLower(rc.Mattermost.MatterclientLogLevel))
@@ -192,6 +193,7 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 
 		// Configure matterclient API logger
 		mc.SetLogAPICalls("error")
+
 		if rc.Profiling {
 			if rc.Trace {
 				logger.Infof("enabling matterclient API logging: level: trace")
@@ -216,10 +218,12 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 	// Create a unique matterircd instance tag so we don't relay messages sent from it.
 	charset := []byte("abcdefghijklmnopqrstuvwxyz")
 	b := make([]byte, 8)
+
 	r := rand.New(rand.NewSource(time.Now().UnixNano())) //nolint:gosec
 	for i := range b {
 		b[i] = charset[r.Intn(len(charset))]
 	}
+
 	m.instanceTag = string(b)
 
 	return m, mc, nil
@@ -362,7 +366,7 @@ func (m *Mattermost) loginToMattermost(ctx context.Context, onWsConnect func()) 
 
 	mc := matterclient.New(m.credentials.Login, m.credentials.Pass, m.credentials.Team, m.credentials.Server, m.credentials.MFAToken)
 	if rc.Mattermost.Insecure {
-		mc.Credentials.NoTLS = true
+		mc.NoTLS = true
 	}
 
 	mc.AntiIdle = !rc.Mattermost.DisableAutoView || rc.Mattermost.ForceAntiIdle
@@ -394,7 +398,7 @@ func (m *Mattermost) loginToMattermost(ctx context.Context, onWsConnect func()) 
 		mc.SetLogAPICalls("trace")
 	}
 
-	mc.Credentials.SkipTLSVerify = rc.Mattermost.SkipTLSVerify
+	mc.SkipTLSVerify = rc.Mattermost.SkipTLSVerify
 
 	logger.Infof("login as %s (team: %s) on %s", m.credentials.Login, m.credentials.Team, m.credentials.Server)
 
@@ -540,6 +544,7 @@ func (m *Mattermost) Join(ctx context.Context, channelName string) (string, stri
 			if err != nil {
 				return "", "", fmt.Errorf("team not found: %v", err)
 			}
+
 			return "", "", fmt.Errorf("team not found")
 		}
 
@@ -558,6 +563,7 @@ func (m *Mattermost) Join(ctx context.Context, channelName string) (string, stri
 
 	err := m.mc.JoinChannel(ctx, channelID)
 	logger.Debugf("Join channel %s (id: %s), err: %v", channelName, channelID, err)
+
 	if err != nil {
 		return "", "", fmt.Errorf("cannot join channel: %v", err)
 	}
@@ -1145,6 +1151,7 @@ func (m *Mattermost) createUser(mmuser *model.User) *bridge.UserInfo {
 
 	me := false
 	teamID := ""
+
 	if m.mc.User != nil {
 		me = mmuser.Id == m.mc.User.Id
 		if me && m.mc.Team != nil {
@@ -1153,6 +1160,7 @@ func (m *Mattermost) createUser(mmuser *model.User) *bridge.UserInfo {
 	}
 
 	var realName string
+
 	switch {
 	case mmuser.FirstName != "" && mmuser.LastName != "":
 		realName = mmuser.FirstName + " " + mmuser.LastName
@@ -1168,6 +1176,7 @@ func (m *Mattermost) createUser(mmuser *model.User) *bridge.UserInfo {
 
 	// We only care about mentions for ourselves
 	var mentionKeys []string
+
 	if me && m.mc.User != nil && m.mc.User.NotifyProps != nil {
 		if keys := m.mc.User.NotifyProps["mention_keys"]; keys != "" {
 			mentionKeys = strings.Split(keys, ",")
@@ -1284,9 +1293,11 @@ func (m *Mattermost) wsActionPostSkip(ctx context.Context, data *model.Post, rms
 	useUnicode := rc.Mattermost.Formatter.Unicode
 	blockquoteChar := blockquoteCharNonUnicode
 	inlineCode := rc.Mattermost.Formatter.MarkdownInlineCode
+
 	if useUnicode {
 		blockquoteChar = blockquoteCharUnicode
 	}
+
 	shortenMsgLen := rc.Mattermost.ShortenRepliesTo
 
 	if data.UserId != m.GetMe().User {
@@ -1317,6 +1328,7 @@ func (m *Mattermost) wsActionPostSkip(ctx context.Context, data *model.Post, rms
 	}
 
 	msgID := data.Id
+
 	var sbSuffix strings.Builder
 	sbSuffix.Grow(shortenMsgLen + 32)
 
@@ -1387,10 +1399,12 @@ func (m *Mattermost) getCachedPostInfo(ctx context.Context, postID string, newLe
 
 	if !rc.Mattermost.Formatter.DisableMarkdown {
 		msg = markdownReplacer.Replace(msg)
+
 		blockquoteChar := blockquoteCharNonUnicode
 		if unicode {
 			blockquoteChar = blockquoteCharUnicode
 		}
+
 		msg = utils.Markdown2irc(msg, blockquoteChar, rc.Mattermost.Formatter.MarkdownInlineCode)
 	} else {
 		msg = strings.ReplaceAll(msg, "\n", " ")
@@ -1488,7 +1502,9 @@ func (m *Mattermost) handleWsActionLeaveTeam(ctx context.Context, rmsg *model.We
 //nolint:funlen,gocognit,gocyclo,cyclop
 func (m *Mattermost) handleWsActionPost(ctx context.Context, rmsg *model.WebSocketEvent, logger *logrus.Entry) {
 	logger.Trace("in handleWsActionPost")
+
 	wsData := rmsg.GetData()
+
 	postData, ok := wsData["post"].(string)
 	if !ok {
 		return
@@ -1540,6 +1556,7 @@ func (m *Mattermost) handleWsActionPost(ctx context.Context, rmsg *model.WebSock
 	if t, ok := wsData["channel_type"].(string); ok {
 		channelType = t
 	}
+
 	dmchannel := ""
 	if t, ok := wsData["channel_name"].(string); ok {
 		dmchannel = t
@@ -1579,6 +1596,7 @@ func (m *Mattermost) handleWsActionPost(ctx context.Context, rmsg *model.WebSock
 	switch data.Type {
 	case model.PostTypeJoinChannel, model.PostTypeLeaveChannel, model.PostTypeAddToChannel, model.PostTypeRemoveFromChannel:
 		myUser := m.GetMe().User
+
 		addedUserID, _ := data.GetProps()["addedUserId"].(string)
 		switch {
 		case data.UserId != myUser && addedUserID != myUser:
@@ -1595,6 +1613,7 @@ func (m *Mattermost) handleWsActionPost(ctx context.Context, rmsg *model.WebSock
 		}
 
 		m.wsActionPostJoinLeave(ctx, &data, extraProps, logger)
+
 		return
 
 	case model.PostTypeHeaderChange:
@@ -1618,6 +1637,7 @@ func (m *Mattermost) handleWsActionPost(ctx context.Context, rmsg *model.WebSock
 		}
 
 		m.sendEvent(event)
+
 		return
 
 	default:
@@ -1648,6 +1668,7 @@ func (m *Mattermost) handleWsActionPost(ctx context.Context, rmsg *model.WebSock
 		}
 
 		m.sendEvent(event)
+
 		return
 	}
 
@@ -1659,6 +1680,7 @@ func (m *Mattermost) handleWsActionPost(ctx context.Context, rmsg *model.WebSock
 		if m.mc.IsDMChannelName(name) {
 			channelType = "D"
 		}
+
 		dmchannel = name
 
 		// We need to remove it from the cache so that replies use the latest msg.
@@ -1667,8 +1689,8 @@ func (m *Mattermost) handleWsActionPost(ctx context.Context, rmsg *model.WebSock
 
 	formattedMsg := m.formatMessage(ctx, &data, string(eventType), logger)
 
-	switch {
-	case channelType == "D":
+	switch channelType {
+	case "D":
 		event := &bridge.Event{
 			Type: "direct_message",
 		}
@@ -1757,8 +1779,8 @@ func (m *Mattermost) handleFileEvent(ctx context.Context, channelType string, gh
 		return
 	}
 
-	switch {
-	case channelType == "D":
+	switch channelType {
+	case "D":
 		channelName, _ := rmsg.GetData()["channel_name"].(string)
 		if channelName == "" {
 			channelName = m.GetChannelName(ctx, data.ChannelId)
@@ -1790,6 +1812,7 @@ func (m *Mattermost) handleFileEvent(ctx context.Context, channelType string, gh
 //nolint:funlen
 func (m *Mattermost) wsActionPostJoinLeave(ctx context.Context, data *model.Post, extraProps map[string]any, logger *logrus.Entry) {
 	logger.Tracef("wsActionPostJoinLeave: extraProps: %#v", extraProps)
+
 	switch data.Type {
 	case model.PostTypeAddToChannel:
 		if added, ok := extraProps["addedUsername"].(string); ok {
@@ -1855,6 +1878,7 @@ func (m *Mattermost) wsActionPostJoinLeave(ctx context.Context, data *model.Post
 
 func (m *Mattermost) handleWsActionUserAdded(ctx context.Context, rmsg *model.WebSocketEvent, logger *logrus.Entry) {
 	logger.Trace("in handleWsActionUserAdded")
+
 	userID, ok := rmsg.GetData()["user_id"].(string)
 	if !ok {
 		return
@@ -1884,6 +1908,7 @@ func (m *Mattermost) handleWsActionUserAdded(ctx context.Context, rmsg *model.We
 
 func (m *Mattermost) handleWsActionUserRemoved(ctx context.Context, rmsg *model.WebSocketEvent, logger *logrus.Entry) {
 	wsData := rmsg.GetData()
+
 	userID, ok := wsData["user_id"].(string)
 	if !ok {
 		userID = broadcastOf(rmsg).UserId
@@ -1920,6 +1945,7 @@ func (m *Mattermost) handleWsActionUserRemoved(ctx context.Context, rmsg *model.
 
 func (m *Mattermost) handleWsActionUserUpdated(rmsg *model.WebSocketEvent, logger *logrus.Entry) {
 	logger.Trace("in handleWsActionUserUpdated")
+
 	var info model.User
 
 	err := Decode(rmsg.GetData()["user"], &info)
@@ -1942,6 +1968,7 @@ func (m *Mattermost) handleWsActionUserUpdated(rmsg *model.WebSocketEvent, logge
 
 func (m *Mattermost) handleWsActionChannelCreated(rmsg *model.WebSocketEvent, logger *logrus.Entry) {
 	logger.Trace("in handleWsActionChannelCreated")
+
 	channelID, ok := rmsg.GetData()["channel_id"].(string)
 	if !ok || channelID == "" {
 		if broadcast := rmsg.GetBroadcast(); broadcast != nil && broadcast.ChannelId != "" {
@@ -1978,6 +2005,7 @@ func (m *Mattermost) handleWsActionChannelCreated(rmsg *model.WebSocketEvent, lo
 
 func (m *Mattermost) handleWsActionChannelDeleted(rmsg *model.WebSocketEvent, logger *logrus.Entry) {
 	logger.Trace("in handleWsActionChannelDeleted")
+
 	channelID, ok := rmsg.GetData()["channel_id"].(string)
 	if !ok {
 		return
@@ -2068,8 +2096,10 @@ func (m *Mattermost) handleReactionEvent(ctx context.Context, rmsg *model.WebSoc
 		}
 	}
 
-	var parentUser *bridge.UserInfo
-	var sbSuffix strings.Builder
+	var (
+		parentUser *bridge.UserInfo
+		sbSuffix   strings.Builder
+	)
 	sbSuffix.Grow(rc.Mattermost.ShortenRepliesTo + 32)
 
 	parentID := reaction.PostId
@@ -2146,6 +2176,7 @@ func (m *Mattermost) GetPostsSince(ctx context.Context, channelID string, since 
 
 func (m *Mattermost) UpdateLastViewed(ctx context.Context, channelID string) {
 	logger.Tracef("Updatelastviewed %s", channelID)
+
 	err := m.mc.UpdateLastViewed(ctx, channelID)
 	if err != nil {
 		logger.Errorf("updateLastViewed failed: %s", err)
@@ -2500,6 +2531,7 @@ func (m *Mattermost) formatMessage(ctx context.Context, data *model.Post, eventT
 
 	var sbMsg strings.Builder
 	sbMsg.Grow(len(msg) + sbSuffix.Len() + 64)
+
 	attachments := data.Attachments()
 
 	switch {
@@ -2520,17 +2552,20 @@ func (m *Mattermost) formatMessage(ctx context.Context, data *model.Post, eventT
 		if len(msg) > 0 {
 			sbMsg.WriteString(msg)
 		}
+
 		useFallback := len(msg) == 0
 		// https://docs.slack.dev/tools/node-slack-sdk/reference/web-api/interfaces/MessageAttachment/
 		m.parseMessageAttachments(&sbMsg, attachments, useFallback, msg, "")
 	case data.Type == "custom_matterpoll":
 		pollMsg := parseMatterpollToMsg(attachments, useUnicode)
+
 		sbMsg.WriteString(msg)
 		sbMsg.WriteString(pollMsg)
 	case len(attachments) > 0:
 		if len(msg) > 0 {
 			sbMsg.WriteString(msg)
 		}
+
 		useFallback := len(msg) == 0
 		// https://developers.mattermost.com/integrate/reference/message-attachments/
 		m.parseMessageAttachments(&sbMsg, attachments, useFallback, msg, "")
@@ -2585,20 +2620,24 @@ const (
 	messageAttachmentSpaceUnicode = " "
 )
 
-func parseMatterpollToMsg(attachments []*model.SlackAttachment, unicode bool) string {
+func parseMatterpollToMsg(attachments []*model.MessageAttachment, unicode bool) string {
 	var msg strings.Builder
+
 	prefixChar := messageAttachmentCharNonUnicode
 	spaceChar := messageAttachmentSpaceNonUnicode
+
 	if unicode {
 		prefixChar = messageAttachmentCharUnicode
 		spaceChar = messageAttachmentSpaceUnicode
 	}
+
 	for _, attachment := range attachments {
 		prefix := "\x02\x0302" + prefixChar + "\x0f" + spaceChar
 
 		if attachment.AuthorName != "" {
 			msg.WriteString(prefix + "@" + attachment.AuthorName + "\n")
 		}
+
 		if attachment.Title != "" {
 			msg.WriteString(prefix + "\x02" + attachment.Title + "\x02\n")
 		}
@@ -2615,6 +2654,7 @@ func parseMatterpollToMsg(attachments []*model.SlackAttachment, unicode bool) st
 				msg.WriteString(prefix + text + "\n")
 			}
 		}
+
 		if !strings.HasPrefix(attachment.Text, "This poll has ended.") {
 			msg.WriteString(prefix + "\n")
 			msg.WriteString(prefix + "\x1dUse the web UI to cast your vote\x1d")
@@ -2623,6 +2663,7 @@ func parseMatterpollToMsg(attachments []*model.SlackAttachment, unicode bool) st
 		for _, field := range attachment.Fields {
 			msg.WriteString(prefix + "•" + spaceChar + field.Title + ":" + spaceChar)
 			lines := strings.Split(fmt.Sprintf("%s", field.Value), "\n")
+
 			newPrefix := ""
 			for _, text := range lines {
 				msg.WriteString(newPrefix + text + "\n")
@@ -2637,7 +2678,7 @@ func parseMatterpollToMsg(attachments []*model.SlackAttachment, unicode bool) st
 const blockQuoteCharDefault = utils.BlockQuoteCharDefault
 
 //nolint:funlen,gocognit,gocyclo
-func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*model.SlackAttachment, useFallback bool, rootMsg string, additionalPrefix string) {
+func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*model.MessageAttachment, useFallback bool, rootMsg string, additionalPrefix string) {
 	if len(attachments) == 0 {
 		return
 	}
@@ -2672,6 +2713,7 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 	spaceChar := messageAttachmentSpaceNonUnicode
 	blockquoteChar := blockquoteCharNonUnicode
 	inlineCode := rc.Mattermost.Formatter.MarkdownInlineCode
+
 	if useUnicode {
 		prefixChar = messageAttachmentCharUnicode
 		spaceChar = messageAttachmentSpaceUnicode
@@ -2686,6 +2728,7 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 
 	for _, attachment := range attachments {
 		newPrefix := additionalPrefix + "\x02" + prefixChar + "\x0f" + spaceChar
+
 		switch {
 		// https://docs.slack.dev/tools/node-slack-sdk/reference/web-api/interfaces/MessageAttachment/#color
 		case attachment.Color == "danger":
@@ -2717,6 +2760,7 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 			// e.g. https://github.com/fluxcd/notification-controller/pull/1322
 			if fallbackText == "" {
 				fallbackText, _, _ = strings.Cut(attachment.Text, "\n")
+
 				fallbackText = strings.TrimSuffix(fallbackText, "\r")
 				if attachment.AuthorName != "" {
 					fallbackText = attachment.AuthorName + ":" + spaceChar + fallbackText
@@ -2764,17 +2808,21 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 
 		if attachment.AuthorName != "" && !isAuthorDup {
 			b.WriteString(newPrefix)
+
 			authorName := attachment.AuthorName
 			if !disableEmoji {
 				authorName = utils.EmojiReplaceAliases(authorName, rc.Mattermost.Formatter.CustomEmoji)
 			}
+
 			b.WriteString(authorName)
+
 			if attachment.AuthorLink != "" {
 				b.WriteString(spaceChar)
 				b.WriteString("(")
 				b.WriteString(attachment.AuthorLink)
 				b.WriteString(")")
 			}
+
 			b.WriteByte('\n')
 		}
 
@@ -2786,18 +2834,22 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 		if attachment.Title != "" && !isTitleDup {
 			b.WriteString(newPrefix)
 			b.WriteByte('\x02')
+
 			title := attachment.Title
 			if !disableEmoji {
 				title = utils.EmojiReplaceAliases(title, rc.Mattermost.Formatter.CustomEmoji)
 			}
+
 			b.WriteString(title)
 			b.WriteByte('\x02')
+
 			if attachment.TitleLink != "" {
 				b.WriteString(" (\x1d")
 				b.WriteString(attachment.TitleLink)
 				b.WriteByte('\x1d')
 				b.WriteByte(')')
 			}
+
 			b.WriteByte('\n')
 		}
 
@@ -2849,7 +2901,7 @@ type attachmentFieldCandidate struct {
 }
 
 //nolint:funlen,gocognit,gocyclo
-func (m *Mattermost) formatAttachmentFields(b *strings.Builder, fields []*model.SlackAttachmentField, prefix string, prefixChar string, useFallback bool, fallbackText string, opts utils.ProcessMessageOpts, maxLineLength int, omitFieldTitles bool) {
+func (m *Mattermost) formatAttachmentFields(b *strings.Builder, fields []*model.MessageAttachmentField, prefix string, prefixChar string, useFallback bool, fallbackText string, opts utils.ProcessMessageOpts, maxLineLength int, omitFieldTitles bool) {
 	const gutter = 2
 
 	var candidates [3]attachmentFieldCandidate
@@ -2995,7 +3047,7 @@ func (m *Mattermost) formatAttachmentFields(b *strings.Builder, fields []*model.
 }
 
 // fieldsFitColWidth checks if all candidate fields and their multiline values fit within targetColWidth.
-func fieldsFitColWidth(fields []*model.SlackAttachmentField, candidates []attachmentFieldCandidate, targetColWidth int, omitFieldTitles bool) bool {
+func fieldsFitColWidth(fields []*model.MessageAttachmentField, candidates []attachmentFieldCandidate, targetColWidth int, omitFieldTitles bool) bool {
 	for j, field := range fields {
 		if !omitFieldTitles && utils.StringWidth(field.Title) > targetColWidth {
 			return false
@@ -3062,7 +3114,7 @@ func formatLastOnline(lastActivity int64, isOnline ...bool) string {
 }
 
 //nolint:funlen,gocyclo
-func (m *Mattermost) formatSingleAttachmentField(b *strings.Builder, field *model.SlackAttachmentField, prefix string, prefixChar string, useFallback bool, fallbackText string, opts utils.ProcessMessageOpts, omitFieldTitles bool) {
+func (m *Mattermost) formatSingleAttachmentField(b *strings.Builder, field *model.MessageAttachmentField, prefix string, prefixChar string, useFallback bool, fallbackText string, opts utils.ProcessMessageOpts, omitFieldTitles bool) {
 	var valStr string
 
 	if s, ok := field.Value.(string); ok {
@@ -3150,8 +3202,8 @@ func (m *Mattermost) formatSingleAttachmentField(b *strings.Builder, field *mode
 // XXX: Bug in Mattermost itself and PostEmbed Data interface{}
 // extractPreviewData returns (message, userID, channelID, replyCount, lastReplyAt, attachments)
 //
-//nolint:funlen,gocyclo,gocognit
-func extractPreviewData(metadata *model.PostMetadata) (string, string, string, int64, int64, []*model.SlackAttachment) {
+//nolint:funlen,gocognit,gocyclo
+func extractPreviewData(metadata *model.PostMetadata) (string, string, string, int64, int64, []*model.MessageAttachment) {
 	if metadata == nil {
 		return "", "", "", 0, 0, nil
 	}
@@ -3174,7 +3226,7 @@ func extractPreviewData(metadata *model.PostMetadata) (string, string, string, i
 		var (
 			msg, userID, channelID  string
 			replyCount, lastReplyAt int64
-			attachments             []*model.SlackAttachment
+			attachments             []*model.MessageAttachment
 		)
 
 		if val, ok := postMap["message"].(string); ok {
@@ -3223,7 +3275,7 @@ func extractPreviewData(metadata *model.PostMetadata) (string, string, string, i
 }
 
 //nolint:funlen
-func (m *Mattermost) parsePreviewPost(b *strings.Builder, user string, channel string, text string, replyCount int64, lastReplyAt int64, attachments []*model.SlackAttachment) {
+func (m *Mattermost) parsePreviewPost(b *strings.Builder, user string, channel string, text string, replyCount int64, lastReplyAt int64, attachments []*model.MessageAttachment) {
 	rc := m.cfg.Current()
 
 	useUnicode := rc.Mattermost.Formatter.Unicode
@@ -3253,6 +3305,7 @@ func (m *Mattermost) parsePreviewPost(b *strings.Builder, user string, channel s
 	}
 
 	b.Grow(len(text) + 128)
+
 	prefix := prefixChar + spaceChar
 
 	headerWritten := false
@@ -3376,6 +3429,7 @@ func (m *Mattermost) postListToEvents(ctx context.Context, postlist any, eventTy
 	// This fixes the Mattermost API quirk where thread root posts are placed at index 0.
 	sort.Slice(mmPostList.Order, func(i, j int) bool {
 		pI, okI := mmPostList.Posts[mmPostList.Order[i]]
+
 		pJ, okJ := mmPostList.Posts[mmPostList.Order[j]]
 		if !okI || !okJ {
 			return false
@@ -3408,6 +3462,7 @@ func (m *Mattermost) postListToEvents(ctx context.Context, postlist any, eventTy
 			events = append(events, ev)
 		}
 	}
+
 	return events
 }
 
@@ -3418,6 +3473,7 @@ func (m *Mattermost) postToEvent(ctx context.Context, p *model.Post, eventType s
 
 	props := p.GetProps()
 	botname, override := props["override_username"].(string)
+
 	user := m.GetUser(ctx, p.UserId)
 	if override {
 		user.Nick = botname
@@ -3508,6 +3564,7 @@ func (m *Mattermost) postToEvent(ctx context.Context, p *model.Post, eventType s
 				},
 			}
 		}
+
 		return &bridge.Event{
 			Type: "channel_message",
 			Data: &bridge.ChannelMessageEvent{

@@ -17,13 +17,14 @@ import (
 )
 
 type Mastodon struct {
+	sync.RWMutex
+
 	mc          *mastodon.Client
 	connected   bool
 	credentials bridge.Credentials
 	eventChan   chan *bridge.Event
 	eventChanIn chan mastodon.Event
 	onConnect   func()
-	sync.RWMutex
 
 	cfg *config.Config
 }
@@ -39,6 +40,7 @@ func New(cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Eve
 	rc := cfg.Current()
 
 	logger.SetFormatter(&logger.TextFormatter{FullTimestamp: true})
+
 	if rc.Debug {
 		logger.SetLevel(logger.DebugLevel)
 	}
@@ -311,6 +313,7 @@ func (m *Mastodon) loginToMastodon() (*mastodon.Client, error) {
 func (m *Mastodon) handleMastodon() {
 	for event := range m.eventChanIn {
 		logger.Tracef("handleMastodon %s", spew.Sdump(event))
+
 		switch event := event.(type) {
 		case *mastodon.UpdateEvent:
 			m.handleMastodonUpdate(event)
@@ -386,6 +389,7 @@ func (m *Mastodon) createUser(muser *mastodon.Account) *bridge.UserInfo {
 
 	host := "unknown"
 	username := muser.Username
+
 	u, err := url.Parse(m.mc.Config.Server)
 	if err == nil {
 		host = u.Hostname()

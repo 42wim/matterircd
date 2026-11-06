@@ -157,6 +157,7 @@ func (ch *channel) Message(from *User, text string) {
 		if !found {
 			break
 		}
+
 		text = rest
 	}
 }
@@ -190,6 +191,7 @@ func (ch *channel) Part(u *User, text string) {
 	// Only real users see the part. Don't copy all the ghosts (a channel can have
 	// thousands) just to skip them again, that adds up when everybody leaves.
 	var users []*User
+
 	for _, to := range ch.usersIdx {
 		if !to.Ghost {
 			users = append(users, to)
@@ -269,10 +271,12 @@ func (ch *channel) Unlink() {
 // Close will evict all users in the channel.
 func (ch *channel) Close() error {
 	ch.mu.Lock()
+
 	users := make([]*User, 0, len(ch.usersIdx))
 	for _, u := range ch.usersIdx {
 		users = append(users, u)
 	}
+
 	ch.usersIdx = make(map[string]*User)
 	ch.mu.Unlock()
 
@@ -320,6 +324,7 @@ func (ch *channel) Topic(from Prefixer, text string) {
 	}
 
 	var users []*User
+
 	for _, u := range ch.usersIdx {
 		if !u.Ghost {
 			users = append(users, u)
@@ -349,6 +354,7 @@ func (ch *channel) SendNamesResponse(u *User) error {
 			Command:  irc.RPL_ENDOFNAMES,
 			Trailing: "End of /NAMES list.",
 		}
+
 		return u.Encode(end)
 	}
 
@@ -358,12 +364,15 @@ func (ch *channel) SendNamesResponse(u *User) error {
 
 	var line strings.Builder
 	line.Grow(512)
+
 	i := 0
+
 	for _, name := range names {
 		nameLen := len(name) + 1
 		if i+nameLen < 400 {
 			line.WriteString(name)
 			line.WriteByte(' ')
+
 			i += nameLen
 		} else {
 			messages = append(messages, irc.Message{
@@ -375,6 +384,7 @@ func (ch *channel) SendNamesResponse(u *User) error {
 			line.Reset()
 			line.WriteString(name)
 			line.WriteByte(' ')
+
 			i = nameLen
 		}
 	}
@@ -416,6 +426,7 @@ func (ch *channel) BatchJoin(inputusers []*User) error {
 	// We only need to post-process the "Me" user to update their internal map.
 	// A tiny stack buffer is more than enough since there is typically only 1 "Me" user.
 	var inlineBuf [2]*User
+
 	meUsers := inlineBuf[:0]
 
 	for _, u := range inputusers {
@@ -425,7 +436,7 @@ func (ch *channel) BatchJoin(inputusers []*User) error {
 
 			// Only gather the "Me" user(s) for the secondary loop.
 			// This prevents allocating a massive slice for ghost users.
-			if u.UserInfo != nil && u.UserInfo.Me {
+			if u.UserInfo != nil && u.Me {
 				meUsers = append(meUsers, u)
 			}
 		}
@@ -438,6 +449,7 @@ func (ch *channel) BatchJoin(inputusers []*User) error {
 		if u.channels == nil {
 			u.channels = make(map[Channel]struct{}, 2)
 		}
+
 		u.channels[ch] = struct{}{}
 		u.Unlock()
 	}
@@ -448,7 +460,6 @@ func (ch *channel) BatchJoin(inputusers []*User) error {
 // Join introduces a User to the channel (sends relevant messages, stores).
 func (ch *channel) Join(u *User) error {
 	// TODO: Check if user is already here?
-
 	if u.ID() == "" {
 		return nil
 	}
@@ -505,6 +516,7 @@ func (ch *channel) HasUser(u *User) bool {
 	defer ch.mu.RUnlock()
 
 	_, ok := ch.usersIdx[u.ID()]
+
 	return ok
 }
 
@@ -627,6 +639,7 @@ func (ch *channel) SpoofWithPrefix(prefix *irc.Prefix, text string, cmd string, 
 
 	for {
 		line, rest, found := strings.Cut(text, "\n")
+
 		line = strings.TrimSuffix(line, "\r")
 		if isAction {
 			// Encode only trims whitespace after the closing delimiter, so trim it here.
@@ -642,6 +655,7 @@ func (ch *channel) SpoofWithPrefix(prefix *irc.Prefix, text string, cmd string, 
 		if !found {
 			break
 		}
+
 		text = rest
 	}
 }

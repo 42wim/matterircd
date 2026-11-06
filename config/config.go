@@ -816,6 +816,7 @@ func unquoteString(s string) string {
 	if err == nil {
 		return unq
 	}
+
 	return s
 }
 

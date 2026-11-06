@@ -116,15 +116,19 @@ func (c ServerConfig) Server() Server {
 	if c.NewChannel == nil {
 		c.NewChannel = NewChannel
 	}
+
 	if c.Commands == nil {
 		c.Commands = DefaultCommands()
 	}
+
 	if c.Version == "" {
 		c.Version = defaultVersion
 	}
+
 	if c.Name == "" {
 		c.Name = "go-irckit"
 	}
+
 	if c.MaxNickLen == 0 {
 		c.MaxNickLen = 32
 	}
@@ -146,12 +150,13 @@ func NewServer(name string) Server {
 }
 
 type server struct {
+	sync.RWMutex
+
 	config   ServerConfig
 	created  time.Time
 	commands Commands
 
-	u *User
-	sync.RWMutex
+	u        *User
 	users    map[string]*User
 	channels map[string]Channel
 
@@ -187,6 +192,7 @@ func (s *server) Close() error {
 		u.Close()
 	}
 	s.Unlock()
+
 	return nil
 }
 
@@ -199,6 +205,7 @@ func (s *server) Prefix() *irc.Prefix {
 func (s *server) HasUser(nick string) (*User, bool) {
 	s.RLock()
 	defer s.RUnlock()
+
 	for _, u := range s.users {
 		if u.Nick == nick {
 			return u, true
@@ -212,6 +219,7 @@ func (s *server) HasUserID(userID string) (*User, bool) {
 	s.RLock()
 	u, exists := s.users[strings.ToLower(userID)]
 	s.RUnlock()
+
 	return u, exists
 }
 
@@ -225,6 +233,7 @@ func (s *server) RenameUser(u *User, newNick string) bool {
 	if _, exists := s.users[ID(newNick)]; exists {
 		s.Unlock()
 		_ = s.EncodeMessage(u, irc.ERR_NICKNAMEINUSE, []string{newNick}, "Nickname is already in use")
+
 		return false
 	}
 
@@ -244,6 +253,7 @@ func (s *server) RenameUser(u *User, newNick string) bool {
 	for _, other := range u.VisibleTo() {
 		_ = other.Encode(changeMsg)
 	}
+
 	return true
 }
 
@@ -252,6 +262,7 @@ func (s *server) HasChannel(channelID string) (Channel, bool) {
 	s.RLock()
 	ch, exists := s.channels[channelID]
 	s.RUnlock()
+
 	return ch, exists
 }
 
@@ -265,9 +276,11 @@ func (s *server) Channel(channelID string) Channel {
 		return ch
 	}
 
-	var service, name string
-	var info *bridge.ChannelInfo
-	var err error
+	var (
+		service, name string
+		info          *bridge.ChannelInfo
+		err           error
+	)
 
 	// Safely retrieve the global user pointer to prevent concurrent dereference panics
 	s.RLock()
@@ -289,6 +302,7 @@ func (s *server) Channel(channelID string) Channel {
 		if channelID != "" && !strings.HasPrefix(channelID, "&") && u != nil && channelID != u.Nick && channelID != u.Username {
 			logger.Errorf("didn't find channel %s (%s): %s", channelID, name, err)
 		}
+
 		info = &bridge.ChannelInfo{}
 	}
 
@@ -345,7 +359,9 @@ func (s *server) Connect(u *User) error {
 
 		return err
 	}
+
 	go s.handle(u)
+
 	return nil
 }
 
@@ -410,6 +426,7 @@ func (s *server) ClientCount() int {
 func (s *server) Len() int {
 	s.RLock()
 	defer s.RUnlock()
+
 	return len(s.users)
 }
 
@@ -491,6 +508,7 @@ func parseThreadTag(tagStr string) string {
 func (s *server) handle(u *User) {
 	var partMsg string
 	defer s.Quit(u, partMsg)
+
 	for msg := range u.DecodeCh {
 		if msg == nil {
 			// Ignore empty messages
@@ -563,6 +581,7 @@ func (s *server) handle(u *User) {
 			default:
 				logger.Debugf("Executed %#v %#v", msg, err)
 			}
+
 			if err == ErrUnknownCommand {
 				// TODO: Emit event?
 			} else if err != nil {
@@ -594,11 +613,11 @@ func (s *server) BatchAdd(users []*User) {
 	}
 }
 
-func (s *server) Add(u *User) (ok bool) {
+func (s *server) Add(u *User) bool {
 	return s.add(u)
 }
 
-func (s *server) add(u *User) (ok bool) {
+func (s *server) add(u *User) bool {
 	s.Lock()
 	defer s.Unlock()
 
@@ -608,6 +627,7 @@ func (s *server) add(u *User) (ok bool) {
 	}
 
 	s.users[id] = u
+
 	return true
 }
 
@@ -634,6 +654,7 @@ outerloop:
 			if i == 0 {
 				break outerloop
 			}
+
 			if msg == nil {
 				// Empty message, ignore.
 				continue
@@ -644,6 +665,7 @@ outerloop:
 			if (msg.Command == irc.NICK || msg.Command == irc.PASS) && msg.Trailing != "" {
 				msg.Params = append(msg.Params, msg.Trailing)
 			}
+
 			if len(msg.Params) < 1 {
 				continue
 			}
@@ -684,6 +706,7 @@ outerloop:
 				// Wait for both to be set before proceeding
 				continue
 			}
+
 			if len(u.Nick) > s.config.MaxNickLen {
 				u.Nick = u.Nick[:s.config.MaxNickLen]
 			}
@@ -693,6 +716,7 @@ outerloop:
 				_ = s.EncodeMessage(u, irc.ERR_NICKNAMEINUSE, []string{u.Nick}, "Nickname is already in use")
 				continue
 			}
+
 			s.u = u
 
 			err := s.welcome(u)
@@ -765,6 +789,7 @@ outerloop:
 			return ErrHandshakeFailed
 		}
 	}
+
 	return ErrHandshakeFailed
 }
 
@@ -782,10 +807,12 @@ func (s *server) Logout(user *User) {
 func (s *server) sweep(u *User) {
 	// Global Channel Sweep
 	s.RLock()
+
 	uniqueChannels := make(map[Channel]struct{})
 	for _, ch := range s.channels {
 		uniqueChannels[ch] = struct{}{}
 	}
+
 	s.RUnlock()
 
 	var emptied []Channel
@@ -819,6 +846,7 @@ func (s *server) sweep(u *User) {
 
 	// Ghost Sweeper
 	s.RLock()
+
 	activeGhosts := make(map[*User]struct{})
 	seen := make(map[Channel]struct{}, len(s.channels)/2+1)
 	markActive := func(usr *User) {
@@ -847,6 +875,7 @@ func (s *server) sweep(u *User) {
 	}
 
 	var orphaned []string
+
 	for id, ghost := range s.users {
 		if ghost.Conn == nil && ghost.Host != serviceName {
 			if _, isActive := activeGhosts[ghost]; !isActive {
@@ -854,6 +883,7 @@ func (s *server) sweep(u *User) {
 			}
 		}
 	}
+
 	s.RUnlock()
 
 	if len(orphaned) > 0 {
@@ -866,6 +896,7 @@ func (s *server) sweep(u *User) {
 					ghost.cancel()
 				}
 			}
+
 			delete(s.users, id)
 		}
 		s.Unlock()

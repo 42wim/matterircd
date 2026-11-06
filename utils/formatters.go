@@ -797,6 +797,7 @@ func checkWordBoundaryStart(s string, idx int) bool {
 	if idx == 0 {
 		return true
 	}
+
 	return !isWordChar(s[idx-1]) // Must transition from a non-word char
 }
 
@@ -804,6 +805,7 @@ func checkWordBoundaryEnd(s string, idx int) bool {
 	if idx == len(s) {
 		return true
 	}
+
 	return !isWordChar(s[idx]) // Must transition to a non-word char
 }
 
@@ -864,6 +866,7 @@ func replacePattern(s string, delim string, ircStart, ircEnd string, checkWordBo
 	delimByte := delim[0] // '*' or '_'
 
 	var b strings.Builder
+
 	start := 0
 	i := 0
 
@@ -872,6 +875,7 @@ func replacePattern(s string, delim string, ircStart, ircEnd string, checkWordBo
 		if idx == -1 {
 			break
 		}
+
 		absoluteIdx := i + idx
 
 		// Ensure it's exactly the length we want (e.g., "**" shouldn't match "***")
@@ -879,6 +883,7 @@ func replacePattern(s string, delim string, ircStart, ircEnd string, checkWordBo
 			i = absoluteIdx + 1
 			continue
 		}
+
 		if absoluteIdx+delimLen < len(s) && s[absoluteIdx+delimLen] == delimByte {
 			i = absoluteIdx + 1
 			continue
@@ -891,11 +896,13 @@ func replacePattern(s string, delim string, ircStart, ircEnd string, checkWordBo
 
 		// Find the closing delimiter
 		searchStart := absoluteIdx + delimLen
+
 		closeIdx := strings.Index(s[searchStart:], delim)
 		if closeIdx == -1 {
 			i = absoluteIdx + 1
 			continue
 		}
+
 		absoluteCloseIdx := searchStart + closeIdx
 
 		// Ensure closing delimiter is exact length
@@ -933,13 +940,16 @@ func replacePattern(s string, delim string, ircStart, ircEnd string, checkWordBo
 	if start == 0 {
 		return s // Zero allocations if no matches were made
 	}
+
 	b.WriteString(s[start:])
+
 	return b.String()
 }
 
 // replaceCode simulates the `+([^`]+)`+ regex for backticks
 func replaceCode(msg, startCode, endCode string) string {
 	var b strings.Builder
+
 	start := 0
 	i := 0
 
@@ -948,6 +958,7 @@ func replaceCode(msg, startCode, endCode string) string {
 		if idx == -1 {
 			break
 		}
+
 		absoluteIdx := i + idx
 
 		runLen := 1
@@ -956,10 +967,12 @@ func replaceCode(msg, startCode, endCode string) string {
 		}
 
 		searchStart := absoluteIdx + runLen
+
 		closeIdx := strings.IndexByte(msg[searchStart:], '`')
 		if closeIdx == -1 {
 			break
 		}
+
 		absoluteCloseIdx := searchStart + closeIdx
 
 		closeRunLen := 1
@@ -970,6 +983,7 @@ func replaceCode(msg, startCode, endCode string) string {
 		if start == 0 {
 			b.Grow(len(msg) + 32)
 		}
+
 		b.WriteString(msg[start:absoluteIdx])
 		b.WriteString(startCode)
 		b.WriteString(msg[absoluteIdx+runLen : absoluteCloseIdx])
@@ -982,7 +996,9 @@ func replaceCode(msg, startCode, endCode string) string {
 	if start == 0 {
 		return msg
 	}
+
 	b.WriteString(msg[start:])
+
 	return b.String()
 }
 
@@ -1115,11 +1131,13 @@ func Markdown2irc(msg string, blockQuoteChar string, inlineCode string) string {
 		newPrefix.Grow(len(trimmedText)) // Pre-allocate exactly what we need
 
 		idx := 0
+
 	ParseLoop:
 		for idx < len(trimmedText) {
 			switch trimmedText[idx] {
 			case '>':
 				newPrefix.WriteString(blockQuoteChar)
+
 				idx++
 				// Markdown allows one optional space immediately after a '>'
 				if idx < len(trimmedText) && trimmedText[idx] == ' ' {
@@ -1168,19 +1186,21 @@ func WrapMessage(msg string, maxLen int, hardLineSplit ...bool) string {
 
 	i := 0
 	for i < len(msg) {
-		switch {
-		case msg[i] == ' ' || msg[i] == '\t':
+		switch msg[i] {
+		case ' ', '\t':
 			spaceStart = i
 			for i < len(msg) && (msg[i] == ' ' || msg[i] == '\t') {
 				i++
 			}
+
 			spaceLen = i - spaceStart
 
-		case msg[i] == '\n':
+		case '\n':
 			if initialized {
 				b.WriteString(msg[lastWrite : i+1])
 				lastWrite = i + 1
 			}
+
 			lineLen, spaceLen = 0, 0
 			wordsOnLine = 0
 			linePrefix = ""
@@ -1293,6 +1313,7 @@ func WrapMessage(msg string, maxLen int, hardLineSplit ...bool) string {
 
 	// Flush whatever remains of the string
 	b.WriteString(msg[lastWrite:])
+
 	return b.String()
 }
 
@@ -1396,9 +1417,7 @@ func flushEmptyLines(count int, mode string, hasContent bool, yield func(line st
 			yield("")
 		}
 
-	case "all":
-		fallthrough //nolint:gocritic
-	default:
+	default: // "all"
 		for range count {
 			yield("")
 		}
