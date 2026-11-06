@@ -9,6 +9,7 @@ import (
 	"math"
 	"math/rand"
 	"net"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -2142,6 +2143,28 @@ func (u *User) isValidServer(server, protocol string) bool {
 	}
 
 	return false
+}
+
+// serviceForPass picks the bridge for a PASS by matching its first word against
+// each bridge's Restrict list. Mattermost wins when a server is listed in several
+// lists, and an empty result means no Restrict entry matched.
+func (u *User) serviceForPass(pass []string) string {
+	if len(pass) == 0 {
+		return ""
+	}
+
+	switch {
+	case slices.Contains(u.cfg.Mattermost().Bridge.Restrict, pass[0]):
+		return serviceMattermost
+	case slices.Contains(u.cfg.Matrix().Bridge.Restrict, pass[0]):
+		return serviceMatrix
+	case !u.cfg.Slack().Disable && slices.Contains(u.cfg.Slack().Bridge.Restrict, pass[0]):
+		return "slack"
+	case slices.Contains(u.cfg.Mastodon().Bridge.Restrict, pass[0]):
+		return "mastodon"
+	}
+
+	return ""
 }
 
 func (u *User) loginTo(protocol string) error {

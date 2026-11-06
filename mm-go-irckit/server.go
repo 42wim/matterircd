@@ -653,6 +653,17 @@ outerloop:
 				u.Real = msg.Trailing
 			case irc.PASS:
 				u.Pass = msg.Params
+				// A sole trailing PASS (":a b c") arrives as one param, split it like LOGIN args.
+				// With other params present the trailing part is a password and stays verbatim.
+				if len(msg.Params) == 1 && msg.Trailing != "" && strings.ContainsAny(msg.Trailing, " \t") {
+					args, err := parseCommandString(msg.Trailing)
+					if err != nil {
+						// Never fall through with the raw payload, it could be sent to Slack as a token.
+						return fmt.Errorf("invalid PASS: %w", err)
+					}
+
+					u.Pass = args
+				}
 			case irc.JOIN:
 				if len(msg.Params) > 0 {
 					channels := strings.Split(msg.Params[0], ",")
@@ -724,9 +735,12 @@ outerloop:
 			}
 
 			if u.Pass != nil {
-				service := "mattermost"
-				if len(u.Pass) == 1 && !u.cfg.Slack().Disable {
-					service = "slack"
+				service := u.serviceForPass(u.Pass)
+				if service == "" {
+					service = "mattermost"
+					if len(u.Pass) == 1 && !u.cfg.Slack().Disable {
+						service = "slack"
+					}
 				}
 
 				login(u, &User{
