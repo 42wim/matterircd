@@ -18,6 +18,8 @@ import (
 )
 
 type Slack struct {
+	sync.RWMutex
+
 	sc           *slack.Client
 	rtm          *slack.RTM
 	sinfo        *slack.Info
@@ -28,7 +30,6 @@ type Slack struct {
 	eventChan    chan *bridge.Event
 	onConnect    func()
 	msgLast      map[string]string
-	sync.RWMutex //nolint:embeddedstructfieldcheck
 
 	cfg *config.Config
 }
@@ -51,7 +52,8 @@ func New(cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Eve
 		DisableColors: false,
 		FullTimestamp: true,
 	})
-	logger = ourlog.WithFields(logrus.Fields{"prefix": "bridge/slack"}) //nolint:wsl_v5
+
+	logger = ourlog.WithFields(logrus.Fields{"prefix": "bridge/slack"})
 	if rc.Debug {
 		ourlog.SetLevel(logrus.DebugLevel)
 	}
@@ -144,7 +146,8 @@ OUTER:
 
 		for _, channel := range conversations {
 			channelinfo["#"+channel.Name] = strings.ReplaceAll(channel.Topic.Value, "\n", " | ")
-			if nextCursor == "" { //nolint:wsl_v5
+
+			if nextCursor == "" {
 				break OUTER
 			}
 		}
@@ -198,7 +201,8 @@ func (s *Slack) createSlackMsgOption(text string) []slack.MsgOption {
 	// np.Username = u.User
 
 	var opts []slack.MsgOption
-	opts = append(opts, //nolint:wsl_v5
+
+	opts = append(opts,
 		slack.MsgOptionPostMessageParameters(np),
 		// provide regular text field (fallback used in Slack notifications, etc.)
 		slack.MsgOptionText(text, false),
@@ -425,8 +429,10 @@ func (s *Slack) GetChannels() []*bridge.ChannelInfo {
 		if err != nil {
 			logger.Error("GetChannels", err)
 		}
-		params.Cursor = nextCursor             //nolint:wsl_v5
-		for _, mmchannel := range mmchannels { //nolint:wsl_v5
+
+		params.Cursor = nextCursor
+
+		for _, mmchannel := range mmchannels {
 			if !mmchannel.IsMember {
 				continue
 			}
@@ -597,8 +603,10 @@ func (s *Slack) loginToSlack() (*slack.Client, error) {
 	for s.sinfo == nil {
 		time.Sleep(time.Millisecond * 500)
 		logger.Debug("still waiting for sinfo")
-		s.sinfo = s.rtm.GetInfo() //nolint:wsl_v5
-		count++                   //nolint:wsl_v5
+
+		s.sinfo = s.rtm.GetInfo()
+
+		count++
 		if count == 20 {
 			return nil, errors.New("couldn't connect in 10 seconds. Check your credentials")
 		}
@@ -621,7 +629,8 @@ func (s *Slack) loginToSlack() (*slack.Client, error) {
 func (s *Slack) handleSlack(ctx context.Context) {
 	for msg := range s.rtm.IncomingEvents {
 		logger.Tracef("handleSlack %s", spew.Sdump(msg))
-		switch ev := msg.Data.(type) { //nolint:wsl_v5
+
+		switch ev := msg.Data.(type) {
 		case *slack.MessageEvent:
 			switch ev.SubType {
 			case "group_join", "channel_join", "group_leave", "channel_leave":
@@ -646,34 +655,42 @@ func (s *Slack) handleSlack(ctx context.Context) {
 			s.handleActionMisc(ev.User, ev.Item.Channel, msg)
 		case *slack.StarAddedEvent:
 			logger.Debugf("StarAdded msg %#v", ev)
-			if ev.Item.Message == nil { //nolint:wsl_v5
+
+			if ev.Item.Message == nil {
 				continue
 			}
-			ts := formatTS(ev.Item.Message.Timestamp) //nolint:wsl_v5
+
+			ts := formatTS(ev.Item.Message.Timestamp)
 			msg := "[M " + ts + "] Message starred (" + ev.Item.Message.Text + ")"
 			s.handleActionMisc(ev.User, ev.Item.Channel, msg)
 		case *slack.StarRemovedEvent:
 			logger.Debugf("StarRemoved msg %#v", ev)
-			if ev.Item.Message == nil { //nolint:wsl_v5
+
+			if ev.Item.Message == nil {
 				continue
 			}
-			ts := formatTS(ev.Item.Message.Timestamp) //nolint:wsl_v5
+
+			ts := formatTS(ev.Item.Message.Timestamp)
 			msg := "[M " + ts + "] Message unstarred (" + ev.Item.Message.Text + ")"
 			s.handleActionMisc(ev.User, ev.Item.Channel, msg)
 		case *slack.PinAddedEvent:
 			logger.Debugf("PinAdded msg %#v", ev)
-			if ev.Item.Message == nil { //nolint:wsl_v5
+
+			if ev.Item.Message == nil {
 				continue
 			}
-			ts := formatTS(ev.Item.Message.Timestamp) //nolint:wsl_v5
+
+			ts := formatTS(ev.Item.Message.Timestamp)
 			msg := "[M " + ts + "] Message pinned (" + ev.Item.Message.Text + ")"
 			s.handleActionMisc(ev.User, ev.Item.Channel, msg)
 		case *slack.PinRemovedEvent:
 			logger.Debugf("PinRemoved msg %#v", ev)
-			if ev.Item.Message == nil { //nolint:wsl_v5
+
+			if ev.Item.Message == nil {
 				continue
 			}
-			ts := formatTS(ev.Item.Message.Timestamp) //nolint:wsl_v5
+
+			ts := formatTS(ev.Item.Message.Timestamp)
 			msg := "[M " + ts + "] Message unpinned (" + ev.Item.Message.Text + ")"
 			s.handleActionMisc(ev.User, ev.Item.Channel, msg)
 		}
@@ -693,7 +710,8 @@ func (s *Slack) handleActionMisc(userID, channelID, msg string) {
 	switch {
 	case strings.HasPrefix(channelID, "D"):
 		sender := ghost
-		receiver := ghost //nolint:wsl_v5
+
+		receiver := ghost
 		if ghost.Me {
 			members, _, _ := s.sc.GetUsersInConversation(&slack.GetUsersInConversationParameters{
 				ChannelID: channelID,
@@ -845,7 +863,8 @@ func (s *Slack) handleSlackActionPost(rmsg *slack.MessageEvent) {
 		// Slack can be faster in sending new message than replying to POST
 		if lastmsg < rmsg.Timestamp {
 			time.Sleep(100 * time.Millisecond)
-			lastmsg = s.msgLast[rmsg.Channel] //nolint:wsl_v5
+
+			lastmsg = s.msgLast[rmsg.Channel]
 		}
 
 		// Is this really the message we just sent
@@ -920,7 +939,8 @@ func (s *Slack) handleSlackActionPost(rmsg *slack.MessageEvent) {
 		if len(msgs) > 0 {
 			msgs[0] = "[C " + formatTS(rmsg.SubMessage.Timestamp) + "] " + msgs[0]
 		}
-		msghandled = true //nolint:wsl_v5
+
+		msghandled = true
 	}
 
 	channelID := rmsg.Channel
@@ -938,7 +958,8 @@ func (s *Slack) handleSlackActionPost(rmsg *slack.MessageEvent) {
 		switch {
 		case strings.HasPrefix(rmsg.Channel, "D"):
 			sender := ghost
-			receiver := ghost //nolint:wsl_v5
+
+			receiver := ghost
 			if ghost.Me {
 				members, _, _ := s.sc.GetUsersInConversation(&slack.GetUsersInConversationParameters{
 					ChannelID: channelID,
@@ -974,11 +995,7 @@ func (s *Slack) createUser(slackuser *slack.User) *bridge.UserInfo {
 		nick = slackuser.Profile.DisplayName
 	}
 
-	me := false //nolint:staticcheck
-
-	if slackuser.ID == s.sinfo.User.ID {
-		me = true
-	}
+	me := slackuser.ID == s.sinfo.User.ID
 
 	info := &bridge.UserInfo{
 		Nick:        nick,
@@ -1031,7 +1048,8 @@ func (s *Slack) getSlackUser(userID string) *slack.User {
 	}
 
 	logger.Debugf("user %s not in cache, asking slack", userID)
-	user, err := s.sc.GetUserInfo(userID) //nolint:wsl_v5
+
+	user, err := s.sc.GetUserInfo(userID)
 	if err != nil {
 		return nil
 	}

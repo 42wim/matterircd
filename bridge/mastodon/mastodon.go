@@ -17,13 +17,14 @@ import (
 )
 
 type Mastodon struct {
-	mc           *mastodon.Client
-	connected    bool
-	credentials  bridge.Credentials
-	eventChan    chan *bridge.Event
-	eventChanIn  chan mastodon.Event
-	onConnect    func()
-	sync.RWMutex //nolint:embeddedstructfieldcheck
+	sync.RWMutex
+
+	mc          *mastodon.Client
+	connected   bool
+	credentials bridge.Credentials
+	eventChan   chan *bridge.Event
+	eventChanIn chan mastodon.Event
+	onConnect   func()
 
 	cfg *config.Config
 }
@@ -39,7 +40,8 @@ func New(cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Eve
 	rc := cfg.Current()
 
 	logger.SetFormatter(&logger.TextFormatter{FullTimestamp: true})
-	if rc.Debug { //nolint:wsl_v5
+
+	if rc.Debug {
 		logger.SetLevel(logger.DebugLevel)
 	}
 
@@ -311,7 +313,8 @@ func (m *Mastodon) loginToMastodon() (*mastodon.Client, error) {
 func (m *Mastodon) handleMastodon() {
 	for event := range m.eventChanIn {
 		logger.Tracef("handleMastodon %s", spew.Sdump(event))
-		switch event := event.(type) { //nolint:wsl_v5
+
+		switch event := event.(type) {
 		case *mastodon.UpdateEvent:
 			m.handleMastodonUpdate(event)
 		case *mastodon.NotificationEvent:
@@ -386,7 +389,8 @@ func (m *Mastodon) createUser(muser *mastodon.Account) *bridge.UserInfo {
 
 	host := "unknown"
 	username := muser.Username
-	u, err := url.Parse(m.mc.Config.Server) //nolint:wsl_v5
+
+	u, err := url.Parse(m.mc.Config.Server)
 	if err == nil {
 		host = u.Hostname()
 	}

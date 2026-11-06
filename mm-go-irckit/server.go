@@ -116,16 +116,20 @@ func (c ServerConfig) Server() Server {
 	if c.NewChannel == nil {
 		c.NewChannel = NewChannel
 	}
-	if c.Commands == nil { //nolint:wsl_v5
+
+	if c.Commands == nil {
 		c.Commands = DefaultCommands()
 	}
-	if c.Version == "" { //nolint:wsl_v5
+
+	if c.Version == "" {
 		c.Version = defaultVersion
 	}
-	if c.Name == "" { //nolint:wsl_v5
+
+	if c.Name == "" {
 		c.Name = "go-irckit"
 	}
-	if c.MaxNickLen == 0 { //nolint:wsl_v5
+
+	if c.MaxNickLen == 0 {
 		c.MaxNickLen = 32
 	}
 
@@ -146,14 +150,15 @@ func NewServer(name string) Server {
 }
 
 type server struct {
+	sync.RWMutex
+
 	config   ServerConfig
 	created  time.Time
 	commands Commands
 
-	u            *User
-	sync.RWMutex //nolint:embeddedstructfieldcheck
-	users        map[string]*User
-	channels     map[string]Channel
+	u        *User
+	users    map[string]*User
+	channels map[string]Channel
 
 	closeOnce sync.Once
 }
@@ -187,7 +192,8 @@ func (s *server) Close() error {
 		u.Close()
 	}
 	s.Unlock()
-	return nil //nolint:wsl_v5
+
+	return nil
 }
 
 // Prefix returns the server's command prefix string.
@@ -199,7 +205,8 @@ func (s *server) Prefix() *irc.Prefix {
 func (s *server) HasUser(nick string) (*User, bool) {
 	s.RLock()
 	defer s.RUnlock()
-	for _, u := range s.users { //nolint:wsl_v5
+
+	for _, u := range s.users {
 		if u.Nick == nick {
 			return u, true
 		}
@@ -212,7 +219,8 @@ func (s *server) HasUserID(userID string) (*User, bool) {
 	s.RLock()
 	u, exists := s.users[strings.ToLower(userID)]
 	s.RUnlock()
-	return u, exists //nolint:wsl_v5
+
+	return u, exists
 }
 
 // Rename will attempt to rename the given user's Nick if it's available.
@@ -225,7 +233,8 @@ func (s *server) RenameUser(u *User, newNick string) bool {
 	if _, exists := s.users[ID(newNick)]; exists {
 		s.Unlock()
 		_ = s.EncodeMessage(u, irc.ERR_NICKNAMEINUSE, []string{newNick}, "Nickname is already in use")
-		return false //nolint:wsl_v5
+
+		return false
 	}
 
 	delete(s.users, u.ID())
@@ -244,7 +253,8 @@ func (s *server) RenameUser(u *User, newNick string) bool {
 	for _, other := range u.VisibleTo() {
 		_ = other.Encode(changeMsg)
 	}
-	return true //nolint:wsl_v5
+
+	return true
 }
 
 // HasChannel returns whether a given channel already exists.
@@ -252,7 +262,8 @@ func (s *server) HasChannel(channelID string) (Channel, bool) {
 	s.RLock()
 	ch, exists := s.channels[channelID]
 	s.RUnlock()
-	return ch, exists //nolint:wsl_v5
+
+	return ch, exists
 }
 
 // Channel returns an existing or new channel with the give name.
@@ -265,9 +276,11 @@ func (s *server) Channel(channelID string) Channel {
 		return ch
 	}
 
-	var service, name string
-	var info *bridge.ChannelInfo //nolint:wsl_v5
-	var err error                //nolint:wsl_v5
+	var (
+		service, name string
+		info          *bridge.ChannelInfo
+		err           error
+	)
 
 	// Safely retrieve the global user pointer to prevent concurrent dereference panics
 	s.RLock()
@@ -289,6 +302,7 @@ func (s *server) Channel(channelID string) Channel {
 		if channelID != "" && !strings.HasPrefix(channelID, "&") && u != nil && channelID != u.Nick && channelID != u.Username {
 			logger.Errorf("didn't find channel %s (%s): %s", channelID, name, err)
 		}
+
 		info = &bridge.ChannelInfo{}
 	}
 
@@ -345,8 +359,10 @@ func (s *server) Connect(u *User) error {
 
 		return err
 	}
-	go s.handle(u) //nolint:wsl_v5
-	return nil     //nolint:wsl_v5
+
+	go s.handle(u)
+
+	return nil
 }
 
 // Quit will remove the user from all channels and disconnect.
@@ -410,7 +426,8 @@ func (s *server) ClientCount() int {
 func (s *server) Len() int {
 	s.RLock()
 	defer s.RUnlock()
-	return len(s.users) //nolint:wsl_v5
+
+	return len(s.users)
 }
 
 func (s *server) welcome(u *User) error {
@@ -491,7 +508,8 @@ func parseThreadTag(tagStr string) string {
 func (s *server) handle(u *User) {
 	var partMsg string
 	defer s.Quit(u, partMsg)
-	for msg := range u.DecodeCh { //nolint:wsl_v5
+
+	for msg := range u.DecodeCh {
 		if msg == nil {
 			// Ignore empty messages
 			continue
@@ -563,7 +581,8 @@ func (s *server) handle(u *User) {
 			default:
 				logger.Debugf("Executed %#v %#v", msg, err)
 			}
-			if err == ErrUnknownCommand { //nolint:wsl_v5
+
+			if err == ErrUnknownCommand {
 				// TODO: Emit event?
 			} else if err != nil {
 				errMsg := fmt.Sprintf("%s: %#v", err.Error(), msg)
@@ -610,7 +629,8 @@ func (s *server) add(u *User) (ok bool) {
 	}
 
 	s.users[id] = u
-	return true //nolint:wsl_v5
+
+	return true
 }
 
 //nolint:funlen,gocognit,goconst,gocyclo
@@ -636,7 +656,8 @@ outerloop:
 			if i == 0 {
 				break outerloop
 			}
-			if msg == nil { //nolint:wsl_v5
+
+			if msg == nil {
 				// Empty message, ignore.
 				continue
 			}
@@ -646,7 +667,8 @@ outerloop:
 			if (msg.Command == irc.NICK || msg.Command == irc.PASS) && msg.Trailing != "" {
 				msg.Params = append(msg.Params, msg.Trailing)
 			}
-			if len(msg.Params) < 1 { //nolint:wsl_v5
+
+			if len(msg.Params) < 1 {
 				continue
 			}
 
@@ -686,7 +708,8 @@ outerloop:
 				// Wait for both to be set before proceeding
 				continue
 			}
-			if len(u.Nick) > s.config.MaxNickLen { //nolint:wsl_v5
+
+			if len(u.Nick) > s.config.MaxNickLen {
 				u.Nick = u.Nick[:s.config.MaxNickLen]
 			}
 
@@ -695,7 +718,8 @@ outerloop:
 				_ = s.EncodeMessage(u, irc.ERR_NICKNAMEINUSE, []string{u.Nick}, "Nickname is already in use")
 				continue
 			}
-			s.u = u //nolint:wsl_v5
+
+			s.u = u
 
 			err := s.welcome(u)
 			if err != nil {
@@ -767,7 +791,8 @@ outerloop:
 			return ErrHandshakeFailed
 		}
 	}
-	return ErrHandshakeFailed //nolint:wsl_v5
+
+	return ErrHandshakeFailed
 }
 
 func (s *server) Logout(user *User) {
@@ -784,11 +809,13 @@ func (s *server) Logout(user *User) {
 func (s *server) sweep(u *User) {
 	// Global Channel Sweep
 	s.RLock()
-	uniqueChannels := make(map[Channel]struct{}) //nolint:wsl_v5
+
+	uniqueChannels := make(map[Channel]struct{})
 	for _, ch := range s.channels {
 		uniqueChannels[ch] = struct{}{}
 	}
-	s.RUnlock() //nolint:wsl_v5
+
+	s.RUnlock()
 
 	var emptied []Channel
 
@@ -821,7 +848,8 @@ func (s *server) sweep(u *User) {
 
 	// Ghost Sweeper
 	s.RLock()
-	activeGhosts := make(map[*User]struct{}) //nolint:wsl_v5
+
+	activeGhosts := make(map[*User]struct{})
 	seen := make(map[Channel]struct{}, len(s.channels)/2+1)
 	markActive := func(usr *User) {
 		// Deterministic check: No TCP connection + not the service bot = Ghost
@@ -849,14 +877,16 @@ func (s *server) sweep(u *User) {
 	}
 
 	var orphaned []string
-	for id, ghost := range s.users { //nolint:wsl_v5
+
+	for id, ghost := range s.users {
 		if ghost.Conn == nil && ghost.Host != serviceName {
 			if _, isActive := activeGhosts[ghost]; !isActive {
 				orphaned = append(orphaned, id)
 			}
 		}
 	}
-	s.RUnlock() //nolint:wsl_v5
+
+	s.RUnlock()
 
 	if len(orphaned) > 0 {
 		s.Lock()
@@ -868,7 +898,8 @@ func (s *server) sweep(u *User) {
 					ghost.cancel()
 				}
 			}
-			delete(s.users, id) //nolint:wsl_v5
+
+			delete(s.users, id)
 		}
 		s.Unlock()
 	}

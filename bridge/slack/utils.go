@@ -18,14 +18,16 @@ import (
 
 func (s *Slack) getSlackToken() (string, error) {
 	type findTeamResponseFull struct {
-		SSO                 bool   `json:"sso"`
-		TeamID              string `json:"team_id"`
-		slack.SlackResponse        //nolint:embeddedstructfieldcheck
+		slack.SlackResponse
+
+		SSO    bool   `json:"sso"`
+		TeamID string `json:"team_id"`
 	}
 
 	type loginResponseFull struct {
-		Token               string `json:"token"`
-		slack.SlackResponse        //nolint:embeddedstructfieldcheck
+		slack.SlackResponse
+
+		Token string `json:"token"`
 	}
 
 	resp, err := http.PostForm("https://slack.com/api/auth.findTeam", url.Values{"domain": {s.credentials.Team}})
@@ -196,10 +198,12 @@ func passwordToTokenAndCookie(p string) (string, string, error) {
 		if !strings.HasPrefix(parts[0], "xoxc-") {
 			return "", "", errors.New("auth cookie is set, but token does not start with xoxc-")
 		}
-		if parts[1] == "" { //nolint:wsl_v5
+
+		if parts[1] == "" {
 			return "", "", errors.New("auth cookie is empty")
 		}
-		if !strings.HasPrefix(parts[1], "d=") || !strings.HasSuffix(parts[1], ";") { //nolint:wsl_v5
+
+		if !strings.HasPrefix(parts[1], "d=") || !strings.HasSuffix(parts[1], ";") {
 			return "", "", errors.New("auth cookie must have the format 'd=XXX;'")
 		}
 
@@ -223,7 +227,8 @@ type httpClient struct {
 func (hc httpClient) Do(req *http.Request) (*http.Response, error) {
 	if hc.cookie != "" {
 		logrus.Debug("Setting auth cookie")
-		if strings.ToLower(req.URL.Scheme) == "https" { //nolint:wsl_v5
+
+		if strings.ToLower(req.URL.Scheme) == "https" {
 			req.Header.Add("Cookie", hc.cookie)
 		} else {
 			logrus.Warning("Cookie is set but connection is not HTTPS, skipping")

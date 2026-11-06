@@ -40,7 +40,8 @@ func (cmds commands) Run(s Server, u *User, msg *irc.Message) error {
 	if !ok {
 		return ErrUnknownCommand
 	}
-	if len(msg.Params) < cmd.MinParams { //nolint:wsl_v5
+
+	if len(msg.Params) < cmd.MinParams {
 		return u.Encode(&irc.Message{
 			Prefix:  s.Prefix(),
 			Command: irc.ERR_NEEDMOREPARAMS,
@@ -52,5 +53,6 @@ func (cmds commands) Run(s Server, u *User, msg *irc.Message) error {
 	if cmd.LoggedIn && u.br == nil {
 		return nil
 	}
-	return cmd.Call(s, u, msg) //nolint:wsl_v5
+
+	return cmd.Call(s, u, msg)
 }
