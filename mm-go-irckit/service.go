@@ -47,6 +47,9 @@ func logout(u *User, toUser *User, args []string, service string) {
 
 const helpArg = "help"
 
+// matrixReadyTimeout bounds the wait for the initial sync before reporting the verification state.
+const matrixReadyTimeout = 2 * time.Minute
+
 func loginMatrix(u *User, toUser *User, args []string) {
 	wMsg := "Matrix support is very much experimental and a work in progress. Use at your own risk."
 	u.MsgUser(toUser, "WARNING: "+wMsg)
@@ -90,9 +93,44 @@ func loginMatrix(u *User, toUser *User, args []string) {
 	if e, ok := u.currentBridge().(interface{ EncryptionEnabled() bool }); ok && e.EncryptionEnabled() {
 		u.MsgUser(toUser, "end-to-end encryption (e2ee) is enabled")
 
-		if d, ok := u.currentBridge().(interface{ DeviceInfo() (string, string) }); ok {
+		state := "this session is unverified"
+
+		ready := true
+
+		// The verification state is only current once the initial sync was processed.
+		if w, ok := u.currentBridge().(interface {
+			WaitReady(ctx context.Context) bool
+		}); ok {
+			waitCtx, cancel := context.WithTimeout(u.ctx, matrixReadyTimeout)
+			ready = w.WaitReady(waitCtx)
+
+			cancel()
+
+			if !ready && u.ctx.Err() != nil {
+				return
+			}
+		}
+
+		if !ready {
+			state = "could not determine if this session is verified yet"
+		} else if v, ok := u.currentBridge().(interface{ DeviceVerified() (bool, error) }); ok {
+			verified, err := v.DeviceVerified()
+
+			switch {
+			case err != nil:
+				logger.Warnf("could not determine the verification state of this session: %v", err)
+
+				state = "could not determine if this session is verified"
+			case verified:
+				state = ""
+
+				u.MsgUser(toUser, "this session is verified")
+			}
+		}
+
+		if d, ok := u.currentBridge().(interface{ DeviceInfo() (string, string) }); ok && state != "" {
 			deviceID, fingerprint := d.DeviceInfo()
-			u.MsgUser(toUser, "to verify this session, compare in your other client: device ID "+deviceID+", session key "+fingerprint)
+			u.MsgUser(toUser, state+", to verify it compare in your other client: device ID "+deviceID+", session key "+fingerprint)
 			u.MsgUser(toUser, "or use VERIFY START to verify interactively")
 		}
 	}

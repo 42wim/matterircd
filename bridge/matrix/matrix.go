@@ -82,6 +82,7 @@ type Matrix struct {
 	connected atomic.Bool
 	e2ee      atomic.Bool
 	ready     atomic.Bool
+	readyCh   chan struct{} // closed once the initial sync was processed
 
 	// nameResolveTried holds when a room name was last looked up synchronously, see
 	// nameResolveDue, so an unreachable homeserver cannot stall every lookup.
@@ -140,6 +141,7 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 		ctx:       bridgeCtx,
 		cancel:    cancel,
 		initDone:  make(chan struct{}),
+		readyCh:   make(chan struct{}),
 
 		roomUpdateWake: make(chan struct{}, 1),
 		verifyQueue:    make(chan *matrixclient.Verification, verificationQueueSize),
@@ -246,6 +248,7 @@ func (m *Matrix) Ready() {
 	}
 
 	m.ready.Store(true)
+	close(m.readyCh)
 
 	// Started after ready is set, as sendEventCtx drops notices before that.
 	go m.verificationLoop()
@@ -1254,6 +1257,32 @@ func (m *Matrix) EncryptionEnabled() bool {
 // session manually from another client.
 func (m *Matrix) DeviceInfo() (string, string) {
 	return m.mc.DeviceID().String(), m.mc.Fingerprint()
+}
+
+// WaitReady blocks until the initial sync was processed, so the crypto store is
+// up to date. It reports false when ctx or the bridge ends first.
+func (m *Matrix) WaitReady(ctx context.Context) bool {
+	select {
+	case <-m.readyCh:
+		return true
+	case <-ctx.Done():
+	case <-m.ctx.Done():
+	}
+
+	return false
+}
+
+// deviceVerifyTimeout bounds the verification state lookup at login.
+const deviceVerifyTimeout = 10 * time.Second
+
+// DeviceVerified reports whether this session is verified or cross-signed. A
+// non-nil error means the state could not be determined.
+func (m *Matrix) DeviceVerified() (bool, error) {
+	// Optional lookup: a stalled homeserver must not hold the login guard for the HTTP client timeout.
+	ctx, cancel := context.WithTimeout(m.ctx, deviceVerifyTimeout)
+	defer cancel()
+
+	return m.mc.DeviceVerified(ctx)
 }
 
 func (m *Matrix) Connected() bool {

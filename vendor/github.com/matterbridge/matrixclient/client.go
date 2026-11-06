@@ -437,6 +437,23 @@ func (c *Client) Fingerprint() string {
 	return ""
 }
 
+// DeviceVerified reports whether our device is verified or cross-signed and
+// trusted. Trust is resolved from the local crypto store, so verification or
+// revocation done elsewhere is only reflected once sync has stored it. It is
+// false when end-to-end encryption is disabled or the account has no
+// cross-signing.
+// When encryption is enabled, a read-only server request first confirms our
+// device still exists, so connectivity is required. A non-nil error, including
+// a network error, a missing device or an authentication failure, means the
+// state could not be determined, which is not the same as unverified.
+func (c *Client) DeviceVerified(ctx context.Context) (bool, error) {
+	if p, ok := c.crypto.(DeviceVerifier); ok {
+		return p.DeviceVerified(ctx)
+	}
+
+	return false, nil
+}
+
 // UserID is our own user ID.
 func (c *Client) UserID() id.UserID { return c.mc.UserID }
 
