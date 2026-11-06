@@ -88,6 +88,13 @@ func (h helper) Init(ctx context.Context) error {
 		return err
 	}
 
+	// The client builds its room list from sync events only, so resuming from the
+	// persisted next_batch would leave out every room without recent activity.
+	err = h.client.Store.SaveNextBatch(ctx, h.client.UserID, "")
+	if err != nil {
+		return fmt.Errorf("reset next batch: %w", err)
+	}
+
 	m := h.Machine()
 	if m == nil {
 		return nil
