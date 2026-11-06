@@ -3,7 +3,6 @@ package irckit
 import (
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -654,11 +653,12 @@ outerloop:
 				u.Real = msg.Trailing
 			case irc.PASS:
 				u.Pass = msg.Params
-				// A trailing PASS (":a b c") arrives as one param, split it like LOGIN args.
-				if msg.Trailing != "" && strings.ContainsAny(msg.Trailing, " \t") {
+				// A sole trailing PASS (":a b c") arrives as one param, split it like LOGIN args.
+				// With other params present the trailing part is a password and stays verbatim.
+				if len(msg.Params) == 1 && msg.Trailing != "" && strings.ContainsAny(msg.Trailing, " \t") {
 					args, err := parseCommandString(msg.Trailing)
 					if err == nil {
-						u.Pass = slices.Concat(msg.Params[:len(msg.Params)-1], args)
+						u.Pass = args
 					}
 				}
 			case irc.JOIN:
