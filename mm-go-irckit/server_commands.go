@@ -777,7 +777,11 @@ func awayNotice(s Server, u *User, br bridge.Bridger, toUser *User) {
 
 	status = utils.EmojiReplaceAliases(status, br.FormatterConfig().CustomEmoji)
 
-	// Re-checked right before sending; the mutex isn't held across the network write.
+	// Held across the check and the send; logoutFrom waits on it, so no notice goes
+	// out after a logout has returned.
+	u.awaySendMu.Lock()
+	defer u.awaySendMu.Unlock()
+
 	if u.currentBridge() != br {
 		toUser.ResetAwayNotified()
 
