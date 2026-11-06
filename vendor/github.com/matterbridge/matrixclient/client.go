@@ -741,12 +741,16 @@ func (c *Client) SendDirect(ctx context.Context, userID id.UserID, parentID id.E
 
 		roomID = resp.RoomID
 
-		c.recordDirect(ctx, userID, roomID)
-
+		// Classify as a DM before the slow m.direct write so a concurrent
+		// Rooms() does not expose it as a channel; pendingDirect keeps
+		// handleDM from dropping the mark.
 		c.Lock()
 		c.joinedRooms[roomID] = struct{}{}
+		c.pendingDirect[roomID] = pendingAssoc{user: userID}
 		c.addDirectLocked(roomID, userID)
 		c.Unlock()
+
+		c.recordDirect(ctx, userID, roomID)
 	} else {
 		c.retryDirect(ctx, roomID)
 	}
