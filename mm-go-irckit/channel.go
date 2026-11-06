@@ -610,17 +610,22 @@ func (ch *channel) SpoofWithPrefix(prefix *irc.Prefix, text string, cmd string, 
 	}
 
 	// At least one byte per line so wrapping still splits instead of being disabled.
-	limit = max(min(limit, wireTextBudget(prefix, cmd, ch.name)), 1)
+	hardSplit := ch.server.HardLineSplit()
+	isAction := false
 
-	// A CTCP ACTION must keep its envelope on every fragment.
-	isAction := strings.HasPrefix(text, "\x01ACTION ") && strings.HasSuffix(text, "\x01")
-	if isAction {
-		text = text[8 : len(text)-1]
-		limit = max(limit-len("\x01ACTION \x01"), 1)
+	if hardSplit {
+		limit = max(min(limit, wireTextBudget(prefix, cmd, ch.name)), 1)
+
+		// A CTCP ACTION must keep its envelope on every fragment.
+		isAction = strings.HasPrefix(text, "\x01ACTION ") && strings.HasSuffix(text, "\x01")
+		if isAction {
+			text = text[8 : len(text)-1]
+			limit = max(limit-len("\x01ACTION \x01"), 1)
+		}
 	}
 
 	// Hard split at this final transport boundary so a long word can't exceed the wire limit.
-	text = utils.WrapMessage(text, limit, true)
+	text = utils.WrapMessage(text, limit, hardSplit)
 
 	msg := irc.Message{
 		Prefix:        prefix,

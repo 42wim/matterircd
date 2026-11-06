@@ -650,24 +650,29 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		cmd = irc.NOTICE
 	}
 
-	// The line must fit in 512 bytes on the wire. Context is added after wrapping
+	// Without HardLineSplit lines are passed through as is, up to the encoder's limit.
+	// Otherwise the line must fit in 512 bytes on the wire. Context is added after wrapping
 	// when showContext is set, and a CTCP ACTION envelope is restored on every line.
-	wireBudget := wireTextBudget(senderPrefix, cmd, ch.String())
-	if showContext {
-		wireBudget -= len(prefix) + len(suffix)
-	}
+	isAction := false
 
-	isAction := strings.HasPrefix(text, "\x01ACTION ") && strings.HasSuffix(text, "\x01")
-	if isAction {
-		// The context in an ACTION is already part of text, so only the envelope is reserved.
-		text = text[8 : len(text)-1]
-		maxlen = min(460, wireBudget) - len("\x01ACTION \x01")
-	} else {
-		maxlen = min(maxlen, wireBudget)
-	}
+	if hardLineSplit {
+		wireBudget := wireTextBudget(senderPrefix, cmd, ch.String())
+		if showContext {
+			wireBudget -= len(prefix) + len(suffix)
+		}
 
-	// WrapMessage doesn't wrap at zero or below, so keep at least one byte per line.
-	maxlen = max(maxlen, 1)
+		isAction = strings.HasPrefix(text, "\x01ACTION ") && strings.HasSuffix(text, "\x01")
+		if isAction {
+			// The context in an ACTION is already part of text, so only the envelope is reserved.
+			text = text[8 : len(text)-1]
+			maxlen = min(460, wireBudget) - len("\x01ACTION \x01")
+		} else {
+			maxlen = min(maxlen, wireBudget)
+		}
+
+		// WrapMessage doesn't wrap at zero or below, so keep at least one byte per line.
+		maxlen = max(maxlen, 1)
+	}
 
 	text = utils.WrapMessage(text, maxlen, hardLineSplit)
 	addPrefix := false
