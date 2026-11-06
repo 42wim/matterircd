@@ -141,8 +141,8 @@ github.com/matterbridge/logrus-prefixed-formatter v0.5.3-0.20200523233437-d97130
 github.com/matterbridge/logrus-prefixed-formatter v0.5.3-0.20200523233437-d971309a77ba/go.mod h1:iXGEotOvwI1R1SjLxRc+BF5rUORTMtE0iMZBT2lxqAU=
 github.com/matterbridge/matrixclient v0.0.0-20261106020409-9ad7e982be4d h1:sGvoM6UA6WNRH7GrClftj24Hm75xf/QifJvTvOYHmG8=
 github.com/matterbridge/matrixclient v0.0.0-20261106020409-9ad7e982be4d/go.mod h1:14RGANRRPwjJ3OxEs2tHGGdvvBjrP3nWTVONogCkhsw=
-github.com/matterbridge/matterclient v0.0.0-20261106040427-60a56508b320 h1:8nBTUV759Y7WZtxPaj1l45Xl7EGGef0qyHbk6WZpSog=
-github.com/matterbridge/matterclient v0.0.0-20261106040427-60a56508b320/go.mod h1:ZWzKICYtiPg77zcXOPf7CEqqzFYEjkcbr+F20LPTaSs=
+github.com/matterbridge/matterclient v0.0.0-20261106051715-26cffda10389 h1:StZGze4Wo4qC2UVMRuQUtoupY0tPrBfdUTOZ+WqvEq8=
+github.com/matterbridge/matterclient v0.0.0-20261106051715-26cffda10389/go.mod h1:ZWzKICYtiPg77zcXOPf7CEqqzFYEjkcbr+F20LPTaSs=
 github.com/mattermost/go-i18n v1.11.1-0.20211013152124-5c415071e404 h1:Khvh6waxG1cHc4Cz5ef9n3XVCxRWpAKUtqg9PJl5+y8=
 github.com/mattermost/go-i18n v1.11.1-0.20211013152124-5c415071e404/go.mod h1:RyS7FDNQlzF1PsjbJWHRI35exqaKGSO9qD4iv8QjE34=
 github.com/mattermost/ldap v0.0.0-20231116144001-0f480c025956 h1:Y1Tu/swM31pVwwb2BTCsOdamENjjWCI6qmfHLbk6OZI=

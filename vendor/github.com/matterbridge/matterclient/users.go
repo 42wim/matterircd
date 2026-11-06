@@ -169,6 +169,8 @@ func (m *Client) getStatus(ctx context.Context, userID string, force bool) strin
 					m.Users.lastUserActivity[key] = apiActive
 				}
 
+				m.markStatusVerifiedLocked(userID, apiActive)
+
 				m.Users.mu.Unlock()
 
 				break
@@ -556,6 +558,43 @@ func (c *UsersCache) GetUserCustomStatus(userID string) string {
 	}
 
 	return customStatus
+}
+
+// markStatusVerifiedLocked stamps the user only if the cached last activity equals the positive
+// server-provided value, so a retained bulk-loaded or newer value is never marked as confirmed.
+//
+// The users cache has to be locked.
+func (m *Client) markStatusVerifiedLocked(userID string, serverActivity int64) {
+	key := m.Users.userIDKey(userID)
+
+	if serverActivity <= 0 || m.Users.lastUserActivity[key] != serverActivity {
+		return
+	}
+
+	if m.Users.statusVerified == nil {
+		m.Users.statusVerified = make(map[string]statusVerification, 1000)
+	}
+
+	m.Users.statusVerified[key] = statusVerification{at: time.Now().Unix(), activity: serverActivity}
+}
+
+// StatusVerifiedAt returns the unix time the user's status and last activity were last
+// confirmed by the server (a successful status fetch or a status_change event), or 0 if
+// never. Bulk loads and failed fetches that fall back to the cache don't count, so callers
+// can tell whether a last-activity value is trustworthy.
+func (m *Client) StatusVerifiedAt(userID string) int64 {
+	m.Users.mu.RLock()
+	defer m.Users.mu.RUnlock()
+
+	key := m.Users.userIDKey(userID)
+	verified := m.Users.statusVerified[key]
+
+	// A later bulk load may have replaced the confirmed activity.
+	if verified.activity != m.Users.lastUserActivity[key] {
+		return 0
+	}
+
+	return verified.at
 }
 
 // logActivityChange records which path wrote a lastUserActivity value, to trace stale timestamps.

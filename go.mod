@@ -11,7 +11,7 @@ require (
 	github.com/kenshaw/emoji v0.6.2
 	github.com/matterbridge/logrus-prefixed-formatter v0.5.3-0.20200523233437-d971309a77ba
 	github.com/matterbridge/matrixclient v0.0.0-20261106020409-9ad7e982be4d
-	github.com/matterbridge/matterclient v0.0.0-20261106040427-60a56508b320
+	github.com/matterbridge/matterclient v0.0.0-20261106051715-26cffda10389
 	github.com/mattermost/mattermost/server/public v0.3.0
 	github.com/mattn/go-mastodon v0.0.6
 	github.com/mitchellh/mapstructure v1.5.0

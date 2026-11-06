@@ -818,6 +818,17 @@ func (m *Mattermost) StatusUser(ctx context.Context, userID string) (string, err
 
 	lastActivity := m.mc.GetUserLastActivity(userID)
 
+	// Non-online users were just refreshed above; if that failed, the cached value
+	// may be arbitrarily old, so omit it rather than show a misleading "Last online".
+	if prefix != model.StatusOnline && lastActivity > 0 {
+		verified := m.mc.StatusVerifiedAt(userID)
+		if verified == 0 || time.Now().Unix()-verified > 5*60 {
+			logger.Debugf("StatusUser: User: %s (%s) omitting unverified lastOnline (%d, verified %d)", userName, userID, lastActivity, verified)
+
+			lastActivity = 0
+		}
+	}
+
 	var lastOnline string
 
 	if lastActivity > 0 {
