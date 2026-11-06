@@ -515,6 +515,7 @@ func (u *User) createService(nick string, what string) {
 
 // ShouldNotifyAway checks if the away cooldown has elapsed and returns
 // whether to notify, the current timestamp, and the generation snapshot.
+// A true result starts the cooldown so concurrent callers can't both notify.
 func (u *User) ShouldNotifyAway(cooldownSec int64) (bool, int64, uint64) {
 	u.awayNotifyMu.Lock()
 	defer u.awayNotifyMu.Unlock()
@@ -523,6 +524,8 @@ func (u *User) ShouldNotifyAway(cooldownSec int64) (bool, int64, uint64) {
 	if now-u.awayNotifiedAt < cooldownSec {
 		return false, 0, 0
 	}
+
+	u.awayNotifiedAt = now
 
 	return true, now, u.awayNotifiedGen
 }

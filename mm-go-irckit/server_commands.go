@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/42wim/matterircd/bridge"
 	"github.com/42wim/matterircd/utils"
 	"github.com/sorcix/irc"
 )
@@ -706,24 +707,8 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 
 			// If the user is away, DND, offline, or has a custom status, reply with 301 RPL_AWAY
 			// But after reactions as we don't care if we're reacting to an existing message.
-			status, err := u.br.StatusUser(u.ctx, toUser.User)
-			if err == nil && status != "" && !u.br.IsOnline(status) {
-				awayCooldown := int64(20 * 60)
-				if dur := u.cfg.Current().AwayCooldown; dur > 0 {
-					awayCooldown = int64(dur.Seconds())
-				}
-
-				if shouldNotify, now, gen := toUser.ShouldNotifyAway(awayCooldown); shouldNotify {
-					status = utils.EmojiReplaceAliases(status, u.br.FormatterConfig().CustomEmoji)
-
-					err = s.EncodeMessage(u, irc.RPL_AWAY, []string{u.Nick, toUser.Nick}, status)
-					if err == nil {
-						toUser.MarkAwayNotified(now, gen)
-					}
-				}
-			} else if err == nil && u.br.IsOnline(status) {
-				toUser.ResetAwayNotified()
-			}
+			// Looked up in the background so a slow status fetch never delays the message.
+			go awayNotice(s, u, u.br, toUser)
 
 			if threadMsgUser(s, u, msg, toUser.User) {
 				logger.Trace("matched threadMsgUser")
@@ -751,6 +736,43 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 
 	// no channel or user
 	return s.EncodeMessage(u, irc.ERR_NOSUCHNICK, msg.Params, "No such nick/channel")
+}
+
+func awayNotice(s Server, u *User, br bridge.Bridger, toUser *User) {
+	status, err := br.StatusUser(u.ctx, toUser.User)
+	if err != nil || u.ctx.Err() != nil {
+		return
+	}
+
+	if status == "" || br.IsOnline(status) {
+		if status != "" {
+			toUser.ResetAwayNotified()
+		}
+
+		return
+	}
+
+	awayCooldown := int64(20 * 60)
+	if dur := u.cfg.Current().AwayCooldown; dur > 0 {
+		awayCooldown = int64(dur.Seconds())
+	}
+
+	// ShouldNotifyAway reserves the cooldown, so concurrent lookups send one notice.
+	shouldNotify, now, gen := toUser.ShouldNotifyAway(awayCooldown)
+	if !shouldNotify {
+		return
+	}
+
+	status = utils.EmojiReplaceAliases(status, br.FormatterConfig().CustomEmoji)
+
+	err = s.EncodeMessage(u, irc.RPL_AWAY, []string{u.Nick, toUser.Nick}, status)
+	if err != nil {
+		toUser.ResetAwayNotified()
+
+		return
+	}
+
+	toUser.MarkAwayNotified(now, gen)
 }
 
 var (
