@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"regexp"
 	"slices"
@@ -883,6 +884,16 @@ func (m *Matrix) GetUserByUsername(ctx context.Context, username string) *bridge
 	return m.createUser(userID)
 }
 
+// hostWithoutPort drops the port from a server name, as an IRC host can't contain ':'.
+func hostWithoutPort(serverName string) string {
+	host, _, err := net.SplitHostPort(serverName)
+	if err != nil {
+		return serverName
+	}
+
+	return host
+}
+
 func (m *Matrix) createUser(userID id.UserID) *bridge.UserInfo {
 	localpart, homeserver, err := userID.Parse()
 	if err != nil {
@@ -910,7 +921,7 @@ func (m *Matrix) createUser(userID id.UserID) *bridge.UserInfo {
 		Nick:      nick,
 		User:      ident,
 		Real:      displayName,
-		Host:      homeserver,
+		Host:      hostWithoutPort(homeserver),
 		Ghost:     true,
 		Me:        userID == m.mc.UserID(),
 		Username:  nick,

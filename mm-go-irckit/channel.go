@@ -579,13 +579,19 @@ func (ch *channel) Spoof(from string, text string, cmd string, maxlen ...int) {
 		text = utils.WrapMessage(text, maxlen[0])
 	}
 
-	prefix := irc.Prefix{
+	prefix := &irc.Prefix{
 		Name: from,
 		User: from,
-		Host: from,
+		Host: ch.server.Name(),
 	}
+
+	// Match the user/host shown in WHOIS when the sender is a known user.
+	if sender, ok := ch.server.HasUser(from); ok {
+		prefix = sender.Prefix()
+	}
+
 	msg := irc.Message{
-		Prefix:        &prefix,
+		Prefix:        prefix,
 		Command:       cmd,
 		Params:        []string{ch.name},
 		EmptyTrailing: true,

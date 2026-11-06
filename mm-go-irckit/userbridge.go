@@ -1336,7 +1336,7 @@ func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(nick, msg, timeTa
 			} else if usr, okUser := u.Srv.HasUser(nick); okUser {
 				prefix = usr.Prefix()
 			} else {
-				prefix = &irc.Prefix{Name: nick, User: nick, Host: nick}
+				prefix = &irc.Prefix{Name: nick, User: nick, Host: u.Srv.Name()}
 			}
 
 			prefixes[nick] = prefix

@@ -864,7 +864,7 @@ func (u *User) sendScrollback(target, from, msg, timeTag string) {
 	} else if usr, ok := u.Srv.HasUser(from); ok {
 		prefix = usr.Prefix()
 	} else {
-		prefix = &irc.Prefix{Name: from, User: from, Host: from}
+		prefix = &irc.Prefix{Name: from, User: from, Host: u.Srv.Name()}
 	}
 
 	isAction := strings.HasPrefix(msg, "\x01ACTION ") && strings.HasSuffix(msg, "\x01")
