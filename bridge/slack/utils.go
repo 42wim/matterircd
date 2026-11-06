@@ -16,6 +16,7 @@ import (
 	"github.com/slack-go/slack"
 )
 
+//nolint:funlen
 func (s *Slack) getSlackToken() (string, error) {
 	type findTeamResponseFull struct {
 		slack.SlackResponse

@@ -2281,13 +2281,13 @@ func (m *Mattermost) SearchUsers(ctx context.Context, query string) ([]*bridge.U
 }
 
 func Decode(input any, output any) error {
-	config := &mapstructure.DecoderConfig{
+	decoderCfg := &mapstructure.DecoderConfig{
 		Metadata: nil,
 		Result:   output,
 		TagName:  "json",
 	}
 
-	decoder, err := mapstructure.NewDecoder(config)
+	decoder, err := mapstructure.NewDecoder(decoderCfg)
 	if err != nil {
 		return err
 	}

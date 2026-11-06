@@ -36,6 +36,7 @@ type Slack struct {
 
 var logger *logrus.Entry
 
+//nolint:funlen
 func New(cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Event, onConnect func()) (bridge.Bridger, error) {
 	s := &Slack{
 		credentials: cred,

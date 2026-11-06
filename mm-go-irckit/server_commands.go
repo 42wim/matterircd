@@ -430,6 +430,8 @@ func CmdMotd(s Server, u *User, _ *irc.Message) error {
 }
 
 // CmdNames is a handler for the /NAMES command.
+//
+//nolint:funlen
 func CmdNames(s Server, u *User, msg *irc.Message) error {
 	if len(msg.Params) < 1 || msg.Params[0] == "**" {
 		srv, ok := s.(*server)
