@@ -1996,6 +1996,7 @@ func (u *User) syncChannel(id string, name string) error {
 	ch := srv.Channel(id)
 	if u.br.IsChannelMember(id) && !ch.HasUser(u) && u.mayJoin(id) {
 		logger.Tracef("syncChannel adding myself to %s (id: %s)", name, id)
+
 		_ = ch.Join(u)
 		svc, _ := srv.HasUser(u.br.Protocol())
 

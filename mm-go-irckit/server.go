@@ -239,6 +239,7 @@ func (s *server) RenameUser(u *User, newNick string) bool {
 		Command: irc.NICK,
 		Params:  []string{newNick},
 	}
+
 	_ = u.Encode(changeMsg)
 	for _, other := range u.VisibleTo() {
 		_ = other.Encode(changeMsg)
@@ -670,6 +671,7 @@ outerloop:
 				if len(msg.Params) > 0 {
 					channels := strings.Split(msg.Params[0], ",")
 					u.addRequestedChannels(channels)
+
 				}
 				_ = s.EncodeMessage(u, irc.ERR_NOTREGISTERED, []string{"*"}, "Please register first")
 			// https://ircv3.net/specs/extensions/capability-negotiation.html

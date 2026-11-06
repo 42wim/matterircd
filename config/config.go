@@ -811,6 +811,7 @@ func unquoteString(s string) string {
 	if s == "" || !strings.ContainsRune(s, '\\') {
 		return s
 	}
+
 	unq, err := strconv.Unquote(`"` + s + `"`)
 	if err == nil {
 		return unq

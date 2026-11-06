@@ -272,6 +272,7 @@ func setupProfilingReloadHook(cfg *config.Config) {
 				logger.Infof("profiling bind address changed, restarting server...")
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
+
 				err := profServer.Shutdown(ctx)
 				if err != nil {
 					logger.WithError(err).Error("profiling: Failed to gracefully shutdown old server")
@@ -361,6 +362,7 @@ func setupSignalHandling(cfg *config.Config) {
 
 	go func() {
 		for range sighupChan {
+
 			logger.Info("received SIGHUP signal, triggering config reload...")
 			err := cfg.Reload()
 			if err != nil {

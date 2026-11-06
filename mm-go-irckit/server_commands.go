@@ -212,6 +212,7 @@ func CmdJoin(s Server, u *User, msg *irc.Message) error {
 		channelID, _, err := u.br.Join(u.ctx, channelName)
 		if err != nil {
 			logger.Errorf("Cannot join channel %s, id %s, err: %v", channelName, channelID, err)
+
 			_ = s.EncodeMessage(u, irc.ERR_INVITEONLYCHAN, []string{u.Nick, channel}, "Cannot join channel (+i)")
 			continue
 		}
@@ -538,6 +539,7 @@ func CmdPart(s Server, u *User, msg *irc.Message) error {
 func CmdPing(s Server, u *User, msg *irc.Message) error {
 	if len(msg.Params) > 0 {
 		msg.Trailing = msg.Params[0]
+
 	}
 	_ = s.EncodeMessage(u, irc.PONG, []string{s.Name()}, msg.Trailing)
 	return nil

@@ -31,6 +31,7 @@ func NewKeypairReloader(certPath, keyPath string) (*keypairReloader, error) {
 		signal.Notify(c, syscall.SIGHUP)
 		for range c {
 			log.Printf("Received SIGHUP, reloading TLS certificate and key from %q and %q", certPath, keyPath)
+
 			err := result.maybeReload()
 			if err != nil {
 				log.Printf("Keeping old TLS certificate because the new one could not be loaded: %v", err)

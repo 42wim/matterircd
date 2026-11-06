@@ -218,6 +218,8 @@ type httpClient struct {
 }
 
 // taken from https://github.com/insomniacslk/irc-slack/blob/master/pkg/ircslack/irc_server.go
+//
+//nolint:gosec // thin wrapper; the request URL is built by the slack client, not user input
 func (hc httpClient) Do(req *http.Request) (*http.Response, error) {
 	if hc.cookie != "" {
 		logrus.Debug("Setting auth cookie")
@@ -228,5 +230,5 @@ func (hc httpClient) Do(req *http.Request) (*http.Response, error) {
 		}
 	}
 
-	return hc.c.Do(req) //nolint:gosec
+	return hc.c.Do(req)
 }
