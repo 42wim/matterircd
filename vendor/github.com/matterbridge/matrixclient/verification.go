@@ -59,6 +59,12 @@ type VerificationController interface {
 	CancelVerification(ctx context.Context, txnID id.VerificationTransactionID, code event.VerificationCancelCode, reason string) error
 }
 
+// RoomVerificationController is optionally implemented by a
+// VerificationController that can verify a user in a direct message room.
+type RoomVerificationController interface {
+	StartInRoomVerification(ctx context.Context, roomID id.RoomID, userID id.UserID) (id.VerificationTransactionID, error)
+}
+
 // VerificationProvider is optionally implemented by a Crypto. InitVerification
 // is called after Crypto.Init, before syncing, only with a VerificationHandler.
 type VerificationProvider interface {
@@ -78,6 +84,26 @@ func (c *Client) StartVerification(ctx context.Context, userID id.UserID) (id.Ve
 	}
 
 	return c.verification.StartVerification(ctx, userID)
+}
+
+// StartInRoomVerification requests SAS verification from userID by sending the
+// request into roomID, normally a direct message room shared with that user.
+// Use StartVerification for self-verification.
+func (c *Client) StartInRoomVerification(ctx context.Context, roomID id.RoomID, userID id.UserID) (id.VerificationTransactionID, error) {
+	if c.verification == nil {
+		return "", ErrVerificationUnavailable
+	}
+
+	rc, ok := c.verification.(RoomVerificationController)
+	if !ok {
+		return "", ErrVerificationUnavailable
+	}
+
+	if roomID == "" || userID == "" {
+		return "", errors.New("matrixclient: in-room verification requires a room ID and user ID")
+	}
+
+	return rc.StartInRoomVerification(ctx, roomID, userID)
 }
 
 // AcceptVerification accepts an incoming request, but does not trust the device.

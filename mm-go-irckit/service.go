@@ -977,19 +977,24 @@ func updatelastviewed(u *User, toUser *User, args []string, service string) {
 
 func verify(u *User, toUser *User, args []string, service string) {
 	v, ok := u.currentBridge().(interface {
-		Verify(ctx context.Context, action string) (string, error)
+		Verify(ctx context.Context, action, user string) (string, error)
 	})
 	if !ok {
 		u.MsgUser(toUser, "verification is not supported by this service")
 		return
 	}
 
-	if len(args) != 1 || args[0] == helpArg {
-		u.MsgUser(toUser, "usage: VERIFY START|ACCEPT|SAS|CONFIRM|MISMATCH|CANCEL")
+	if len(args) == 0 || len(args) > 2 || args[0] == helpArg || (len(args) == 2 && !strings.EqualFold(args[0], "start")) {
+		u.MsgUser(toUser, "usage: VERIFY START [user]|ACCEPT|SAS|CONFIRM|MISMATCH|CANCEL")
 		return
 	}
 
-	msg, err := v.Verify(u.ctx, strings.ToLower(args[0]))
+	var user string
+	if len(args) == 2 {
+		user = args[1]
+	}
+
+	msg, err := v.Verify(u.ctx, strings.ToLower(args[0]), user)
 	if err != nil {
 		u.MsgUser(toUser, "verify: "+err.Error())
 		return
@@ -1015,7 +1020,7 @@ var cmds = map[string]Command{
 	"summary":          {handler: summarize, login: true, minParams: 1, maxParams: 4},
 	"tldr":             {handler: summarize, login: true, minParams: 1, maxParams: 4},
 	"updatelastviewed": {handler: updatelastviewed, login: true, minParams: 1, maxParams: 1},
-	"verify":           {handler: verify, login: true, minParams: 1, maxParams: 1},
+	"verify":           {handler: verify, login: true, minParams: 1, maxParams: 2},
 }
 
 func (u *User) handleServiceBot(service string, toUser *User, msg string) {
