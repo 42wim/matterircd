@@ -708,7 +708,14 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 			// If the user is away, DND, offline, or has a custom status, reply with 301 RPL_AWAY
 			// But after reactions as we don't care if we're reacting to an existing message.
 			// Looked up in the background so a slow status fetch never delays the message.
-			go awayNotice(s, u, u.br, toUser)
+			// At most one lookup per recipient is in flight; a burst of DMs doesn't spawn more.
+			if toUser.awayLookupBusy.CompareAndSwap(false, true) {
+				go func(br bridge.Bridger) {
+					defer toUser.awayLookupBusy.Store(false)
+
+					awayNotice(s, u, br, toUser)
+				}(u.br)
+			}
 
 			if threadMsgUser(s, u, msg, toUser.User) {
 				logger.Trace("matched threadMsgUser")

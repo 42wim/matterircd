@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/42wim/matterircd/bridge"
@@ -75,6 +76,7 @@ type User struct {
 	awayNotifyMu    sync.Mutex
 	awayNotifiedAt  int64
 	awayNotifiedGen uint64
+	awayLookupBusy  atomic.Bool
 }
 
 func (u *User) ID() string {
