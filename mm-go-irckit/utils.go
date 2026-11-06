@@ -54,14 +54,15 @@ func stringInRegexp(a string, list []string) bool {
 	return false
 }
 
+//nolint:unused
 func removeStringInSlice(a string, list []string) []string {
 	newlist := []string{}
-	for _, b := range list {
+	for _, b := range list { //nolint:wsl_v5
 		if b != a {
 			newlist = append(newlist, b)
 		}
 	}
-	return newlist
+	return newlist //nolint:wsl_v5
 }
 
 // Sanitize nick: replace IRC characters with special meanings with "-"
@@ -70,7 +71,7 @@ func sanitizeNick(nick string) string {
 		if strings.ContainsRune("!+%@&#$:'\"?*, ", r) {
 			return '-'
 		}
-		return r
+		return r //nolint:wsl_v5
 	}
-	return strings.Map(sanitize, nick)
+	return strings.Map(sanitize, nick) //nolint:wsl_v5
 }

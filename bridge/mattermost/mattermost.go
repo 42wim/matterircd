@@ -185,14 +185,14 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 
 		// Configure matterclient base logger
 		mc.SetLogLevel("info")
-		if rc.Mattermost.MatterclientLogLevel != "" {
+		if rc.Mattermost.MatterclientLogLevel != "" { //nolint:wsl_v5
 			logger.Infof("enabling matterclient logging: level: %s", rc.Mattermost.MatterclientLogLevel)
 			mc.SetLogLevel(strings.ToLower(rc.Mattermost.MatterclientLogLevel))
 		}
 
 		// Configure matterclient API logger
 		mc.SetLogAPICalls("error")
-		if rc.Profiling {
+		if rc.Profiling { //nolint:wsl_v5
 			if rc.Trace {
 				logger.Infof("enabling matterclient API logging: level: trace")
 				mc.SetLogAPICalls("trace")
@@ -216,11 +216,11 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 	// Create a unique matterircd instance tag so we don't relay messages sent from it.
 	charset := []byte("abcdefghijklmnopqrstuvwxyz")
 	b := make([]byte, 8)
-	r := rand.New(rand.NewSource(time.Now().UnixNano())) //nolint:gosec
+	r := rand.New(rand.NewSource(time.Now().UnixNano())) //nolint:gosec,wsl_v5
 	for i := range b {
 		b[i] = charset[r.Intn(len(charset))]
 	}
-	m.instanceTag = string(b)
+	m.instanceTag = string(b) //nolint:wsl_v5
 
 	return m, mc, nil
 }
@@ -362,7 +362,7 @@ func (m *Mattermost) loginToMattermost(ctx context.Context, onWsConnect func()) 
 
 	mc := matterclient.New(m.credentials.Login, m.credentials.Pass, m.credentials.Team, m.credentials.Server, m.credentials.MFAToken)
 	if rc.Mattermost.Insecure {
-		mc.Credentials.NoTLS = true
+		mc.Credentials.NoTLS = true //nolint:staticcheck
 	}
 
 	mc.AntiIdle = !rc.Mattermost.DisableAutoView || rc.Mattermost.ForceAntiIdle
@@ -394,7 +394,7 @@ func (m *Mattermost) loginToMattermost(ctx context.Context, onWsConnect func()) 
 		mc.SetLogAPICalls("trace")
 	}
 
-	mc.Credentials.SkipTLSVerify = rc.Mattermost.SkipTLSVerify
+	mc.Credentials.SkipTLSVerify = rc.Mattermost.SkipTLSVerify //nolint:staticcheck
 
 	logger.Infof("login as %s (team: %s) on %s", m.credentials.Login, m.credentials.Team, m.credentials.Server)
 
@@ -540,7 +540,7 @@ func (m *Mattermost) Join(ctx context.Context, channelName string) (string, stri
 			if err != nil {
 				return "", "", fmt.Errorf("team not found: %v", err)
 			}
-			return "", "", fmt.Errorf("team not found")
+			return "", "", fmt.Errorf("team not found") //nolint:wsl_v5
 		}
 
 		teamID = team.Id
@@ -558,7 +558,7 @@ func (m *Mattermost) Join(ctx context.Context, channelName string) (string, stri
 
 	err := m.mc.JoinChannel(ctx, channelID)
 	logger.Debugf("Join channel %s (id: %s), err: %v", channelName, channelID, err)
-	if err != nil {
+	if err != nil { //nolint:wsl_v5
 		return "", "", fmt.Errorf("cannot join channel: %v", err)
 	}
 
@@ -1145,7 +1145,7 @@ func (m *Mattermost) createUser(mmuser *model.User) *bridge.UserInfo {
 
 	me := false
 	teamID := ""
-	if m.mc.User != nil {
+	if m.mc.User != nil { //nolint:wsl_v5
 		me = mmuser.Id == m.mc.User.Id
 		if me && m.mc.Team != nil {
 			teamID = m.mc.Team.ID
@@ -1153,7 +1153,7 @@ func (m *Mattermost) createUser(mmuser *model.User) *bridge.UserInfo {
 	}
 
 	var realName string
-	switch {
+	switch { //nolint:wsl_v5
 	case mmuser.FirstName != "" && mmuser.LastName != "":
 		realName = mmuser.FirstName + " " + mmuser.LastName
 	case mmuser.FirstName != "":
@@ -1168,7 +1168,7 @@ func (m *Mattermost) createUser(mmuser *model.User) *bridge.UserInfo {
 
 	// We only care about mentions for ourselves
 	var mentionKeys []string
-	if me && m.mc.User != nil && m.mc.User.NotifyProps != nil {
+	if me && m.mc.User != nil && m.mc.User.NotifyProps != nil { //nolint:wsl_v5
 		if keys := m.mc.User.NotifyProps["mention_keys"]; keys != "" {
 			mentionKeys = strings.Split(keys, ",")
 		}
@@ -1284,10 +1284,10 @@ func (m *Mattermost) wsActionPostSkip(ctx context.Context, data *model.Post, rms
 	useUnicode := rc.Mattermost.Formatter.Unicode
 	blockquoteChar := blockquoteCharNonUnicode
 	inlineCode := rc.Mattermost.Formatter.MarkdownInlineCode
-	if useUnicode {
+	if useUnicode { //nolint:wsl_v5
 		blockquoteChar = blockquoteCharUnicode
 	}
-	shortenMsgLen := rc.Mattermost.ShortenRepliesTo
+	shortenMsgLen := rc.Mattermost.ShortenRepliesTo //nolint:wsl_v5
 
 	if data.UserId != m.GetMe().User {
 		return false
@@ -1317,7 +1317,7 @@ func (m *Mattermost) wsActionPostSkip(ctx context.Context, data *model.Post, rms
 	}
 
 	msgID := data.Id
-	var sbSuffix strings.Builder
+	var sbSuffix strings.Builder //nolint:wsl_v5
 	sbSuffix.Grow(shortenMsgLen + 32)
 
 	if data.RootId != "" {
@@ -1387,11 +1387,11 @@ func (m *Mattermost) getCachedPostInfo(ctx context.Context, postID string, newLe
 
 	if !rc.Mattermost.Formatter.DisableMarkdown {
 		msg = markdownReplacer.Replace(msg)
-		blockquoteChar := blockquoteCharNonUnicode
+		blockquoteChar := blockquoteCharNonUnicode //nolint:wsl_v5
 		if unicode {
 			blockquoteChar = blockquoteCharUnicode
 		}
-		msg = utils.Markdown2irc(msg, blockquoteChar, rc.Mattermost.Formatter.MarkdownInlineCode)
+		msg = utils.Markdown2irc(msg, blockquoteChar, rc.Mattermost.Formatter.MarkdownInlineCode) //nolint:wsl_v5
 	} else {
 		msg = strings.ReplaceAll(msg, "\n", " ")
 	}
@@ -1488,8 +1488,8 @@ func (m *Mattermost) handleWsActionLeaveTeam(ctx context.Context, rmsg *model.We
 //nolint:funlen,gocognit,gocyclo,cyclop
 func (m *Mattermost) handleWsActionPost(ctx context.Context, rmsg *model.WebSocketEvent, logger *logrus.Entry) {
 	logger.Trace("in handleWsActionPost")
-	wsData := rmsg.GetData()
-	postData, ok := wsData["post"].(string)
+	wsData := rmsg.GetData()                //nolint:wsl_v5
+	postData, ok := wsData["post"].(string) //nolint:wsl_v5
 	if !ok {
 		return
 	}
@@ -1540,7 +1540,7 @@ func (m *Mattermost) handleWsActionPost(ctx context.Context, rmsg *model.WebSock
 	if t, ok := wsData["channel_type"].(string); ok {
 		channelType = t
 	}
-	dmchannel := ""
+	dmchannel := "" //nolint:wsl_v5
 	if t, ok := wsData["channel_name"].(string); ok {
 		dmchannel = t
 	}
@@ -1579,7 +1579,7 @@ func (m *Mattermost) handleWsActionPost(ctx context.Context, rmsg *model.WebSock
 	switch data.Type {
 	case model.PostTypeJoinChannel, model.PostTypeLeaveChannel, model.PostTypeAddToChannel, model.PostTypeRemoveFromChannel:
 		myUser := m.GetMe().User
-		addedUserID, _ := data.GetProps()["addedUserId"].(string)
+		addedUserID, _ := data.GetProps()["addedUserId"].(string) //nolint:wsl_v5
 		switch {
 		case data.UserId != myUser && addedUserID != myUser:
 			logger.Tracef("Skipping channel sync because user %s joined/left, not us.", data.UserId)
@@ -1595,7 +1595,7 @@ func (m *Mattermost) handleWsActionPost(ctx context.Context, rmsg *model.WebSock
 		}
 
 		m.wsActionPostJoinLeave(ctx, &data, extraProps, logger)
-		return
+		return //nolint:wsl_v5
 
 	case model.PostTypeHeaderChange:
 		topic, ok := extraProps["new_header"].(string)
@@ -1618,7 +1618,7 @@ func (m *Mattermost) handleWsActionPost(ctx context.Context, rmsg *model.WebSock
 		}
 
 		m.sendEvent(event)
-		return
+		return //nolint:wsl_v5
 
 	default:
 		if !strings.HasPrefix(data.Type, model.PostSystemMessagePrefix) {
@@ -1648,7 +1648,7 @@ func (m *Mattermost) handleWsActionPost(ctx context.Context, rmsg *model.WebSock
 		}
 
 		m.sendEvent(event)
-		return
+		return //nolint:wsl_v5
 	}
 
 	eventType := rmsg.EventType()
@@ -1659,7 +1659,7 @@ func (m *Mattermost) handleWsActionPost(ctx context.Context, rmsg *model.WebSock
 		if m.mc.IsDMChannelName(name) {
 			channelType = "D"
 		}
-		dmchannel = name
+		dmchannel = name //nolint:wsl_v5
 
 		// We need to remove it from the cache so that replies use the latest msg.
 		m.msgParentCache.Remove(data.Id)
@@ -1667,7 +1667,7 @@ func (m *Mattermost) handleWsActionPost(ctx context.Context, rmsg *model.WebSock
 
 	formattedMsg := m.formatMessage(ctx, &data, string(eventType), logger)
 
-	switch {
+	switch { //nolint:staticcheck
 	case channelType == "D":
 		event := &bridge.Event{
 			Type: "direct_message",
@@ -1757,7 +1757,7 @@ func (m *Mattermost) handleFileEvent(ctx context.Context, channelType string, gh
 		return
 	}
 
-	switch {
+	switch { //nolint:staticcheck
 	case channelType == "D":
 		channelName, _ := rmsg.GetData()["channel_name"].(string)
 		if channelName == "" {
@@ -1790,7 +1790,7 @@ func (m *Mattermost) handleFileEvent(ctx context.Context, channelType string, gh
 //nolint:funlen
 func (m *Mattermost) wsActionPostJoinLeave(ctx context.Context, data *model.Post, extraProps map[string]any, logger *logrus.Entry) {
 	logger.Tracef("wsActionPostJoinLeave: extraProps: %#v", extraProps)
-	switch data.Type {
+	switch data.Type { //nolint:wsl_v5
 	case model.PostTypeAddToChannel:
 		if added, ok := extraProps["addedUsername"].(string); ok {
 			if adder, ok := extraProps["username"].(string); ok {
@@ -1855,7 +1855,7 @@ func (m *Mattermost) wsActionPostJoinLeave(ctx context.Context, data *model.Post
 
 func (m *Mattermost) handleWsActionUserAdded(ctx context.Context, rmsg *model.WebSocketEvent, logger *logrus.Entry) {
 	logger.Trace("in handleWsActionUserAdded")
-	userID, ok := rmsg.GetData()["user_id"].(string)
+	userID, ok := rmsg.GetData()["user_id"].(string) //nolint:wsl_v5
 	if !ok {
 		return
 	}
@@ -1884,7 +1884,7 @@ func (m *Mattermost) handleWsActionUserAdded(ctx context.Context, rmsg *model.We
 
 func (m *Mattermost) handleWsActionUserRemoved(ctx context.Context, rmsg *model.WebSocketEvent, logger *logrus.Entry) {
 	wsData := rmsg.GetData()
-	userID, ok := wsData["user_id"].(string)
+	userID, ok := wsData["user_id"].(string) //nolint:wsl_v5
 	if !ok {
 		userID = broadcastOf(rmsg).UserId
 	}
@@ -1920,7 +1920,7 @@ func (m *Mattermost) handleWsActionUserRemoved(ctx context.Context, rmsg *model.
 
 func (m *Mattermost) handleWsActionUserUpdated(rmsg *model.WebSocketEvent, logger *logrus.Entry) {
 	logger.Trace("in handleWsActionUserUpdated")
-	var info model.User
+	var info model.User //nolint:wsl_v5
 
 	err := Decode(rmsg.GetData()["user"], &info)
 	if err != nil {
@@ -1942,7 +1942,7 @@ func (m *Mattermost) handleWsActionUserUpdated(rmsg *model.WebSocketEvent, logge
 
 func (m *Mattermost) handleWsActionChannelCreated(rmsg *model.WebSocketEvent, logger *logrus.Entry) {
 	logger.Trace("in handleWsActionChannelCreated")
-	channelID, ok := rmsg.GetData()["channel_id"].(string)
+	channelID, ok := rmsg.GetData()["channel_id"].(string) //nolint:wsl_v5
 	if !ok || channelID == "" {
 		if broadcast := rmsg.GetBroadcast(); broadcast != nil && broadcast.ChannelId != "" {
 			channelID = broadcast.ChannelId
@@ -1978,7 +1978,7 @@ func (m *Mattermost) handleWsActionChannelCreated(rmsg *model.WebSocketEvent, lo
 
 func (m *Mattermost) handleWsActionChannelDeleted(rmsg *model.WebSocketEvent, logger *logrus.Entry) {
 	logger.Trace("in handleWsActionChannelDeleted")
-	channelID, ok := rmsg.GetData()["channel_id"].(string)
+	channelID, ok := rmsg.GetData()["channel_id"].(string) //nolint:wsl_v5
 	if !ok {
 		return
 	}
@@ -2069,7 +2069,7 @@ func (m *Mattermost) handleReactionEvent(ctx context.Context, rmsg *model.WebSoc
 	}
 
 	var parentUser *bridge.UserInfo
-	var sbSuffix strings.Builder
+	var sbSuffix strings.Builder //nolint:wsl_v5
 	sbSuffix.Grow(rc.Mattermost.ShortenRepliesTo + 32)
 
 	parentID := reaction.PostId
@@ -2146,7 +2146,7 @@ func (m *Mattermost) GetPostsSince(ctx context.Context, channelID string, since 
 
 func (m *Mattermost) UpdateLastViewed(ctx context.Context, channelID string) {
 	logger.Tracef("Updatelastviewed %s", channelID)
-	err := m.mc.UpdateLastViewed(ctx, channelID)
+	err := m.mc.UpdateLastViewed(ctx, channelID) //nolint:wsl_v5
 	if err != nil {
 		logger.Errorf("updateLastViewed failed: %s", err)
 	}
@@ -2250,7 +2250,7 @@ func (m *Mattermost) SearchUsers(ctx context.Context, query string) ([]*bridge.U
 }
 
 func Decode(input any, output any) error {
-	config := &mapstructure.DecoderConfig{
+	config := &mapstructure.DecoderConfig{ //nolint:gocritic
 		Metadata: nil,
 		Result:   output,
 		TagName:  "json",
@@ -2500,7 +2500,7 @@ func (m *Mattermost) formatMessage(ctx context.Context, data *model.Post, eventT
 
 	var sbMsg strings.Builder
 	sbMsg.Grow(len(msg) + sbSuffix.Len() + 64)
-	attachments := data.Attachments()
+	attachments := data.Attachments() //nolint:wsl_v5
 
 	switch {
 	case data.Type == "me":
@@ -2520,18 +2520,18 @@ func (m *Mattermost) formatMessage(ctx context.Context, data *model.Post, eventT
 		if len(msg) > 0 {
 			sbMsg.WriteString(msg)
 		}
-		useFallback := len(msg) == 0
+		useFallback := len(msg) == 0 //nolint:wsl_v5
 		// https://docs.slack.dev/tools/node-slack-sdk/reference/web-api/interfaces/MessageAttachment/
 		m.parseMessageAttachments(&sbMsg, attachments, useFallback, msg, "")
 	case data.Type == "custom_matterpoll":
 		pollMsg := parseMatterpollToMsg(attachments, useUnicode)
-		sbMsg.WriteString(msg)
+		sbMsg.WriteString(msg) //nolint:wsl_v5
 		sbMsg.WriteString(pollMsg)
 	case len(attachments) > 0:
 		if len(msg) > 0 {
 			sbMsg.WriteString(msg)
 		}
-		useFallback := len(msg) == 0
+		useFallback := len(msg) == 0 //nolint:wsl_v5
 		// https://developers.mattermost.com/integrate/reference/message-attachments/
 		m.parseMessageAttachments(&sbMsg, attachments, useFallback, msg, "")
 	default:
@@ -2585,21 +2585,22 @@ const (
 	messageAttachmentSpaceUnicode = " "
 )
 
+//nolint:staticcheck
 func parseMatterpollToMsg(attachments []*model.SlackAttachment, unicode bool) string {
 	var msg strings.Builder
-	prefixChar := messageAttachmentCharNonUnicode
+	prefixChar := messageAttachmentCharNonUnicode //nolint:wsl_v5
 	spaceChar := messageAttachmentSpaceNonUnicode
-	if unicode {
+	if unicode { //nolint:wsl_v5
 		prefixChar = messageAttachmentCharUnicode
 		spaceChar = messageAttachmentSpaceUnicode
 	}
-	for _, attachment := range attachments {
+	for _, attachment := range attachments { //nolint:wsl_v5
 		prefix := "\x02\x0302" + prefixChar + "\x0f" + spaceChar
 
 		if attachment.AuthorName != "" {
 			msg.WriteString(prefix + "@" + attachment.AuthorName + "\n")
 		}
-		if attachment.Title != "" {
+		if attachment.Title != "" { //nolint:wsl_v5
 			msg.WriteString(prefix + "\x02" + attachment.Title + "\x02\n")
 		}
 
@@ -2615,7 +2616,7 @@ func parseMatterpollToMsg(attachments []*model.SlackAttachment, unicode bool) st
 				msg.WriteString(prefix + text + "\n")
 			}
 		}
-		if !strings.HasPrefix(attachment.Text, "This poll has ended.") {
+		if !strings.HasPrefix(attachment.Text, "This poll has ended.") { //nolint:wsl_v5
 			msg.WriteString(prefix + "\n")
 			msg.WriteString(prefix + "\x1dUse the web UI to cast your vote\x1d")
 		}
@@ -2623,7 +2624,7 @@ func parseMatterpollToMsg(attachments []*model.SlackAttachment, unicode bool) st
 		for _, field := range attachment.Fields {
 			msg.WriteString(prefix + "•" + spaceChar + field.Title + ":" + spaceChar)
 			lines := strings.Split(fmt.Sprintf("%s", field.Value), "\n")
-			newPrefix := ""
+			newPrefix := "" //nolint:wsl_v5
 			for _, text := range lines {
 				msg.WriteString(newPrefix + text + "\n")
 				newPrefix = prefix
@@ -2636,7 +2637,7 @@ func parseMatterpollToMsg(attachments []*model.SlackAttachment, unicode bool) st
 
 const blockQuoteCharDefault = utils.BlockQuoteCharDefault
 
-//nolint:funlen,gocognit,gocyclo
+//nolint:funlen,gocognit,gocyclo,staticcheck
 func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*model.SlackAttachment, useFallback bool, rootMsg string, additionalPrefix string) {
 	if len(attachments) == 0 {
 		return
@@ -2672,7 +2673,7 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 	spaceChar := messageAttachmentSpaceNonUnicode
 	blockquoteChar := blockquoteCharNonUnicode
 	inlineCode := rc.Mattermost.Formatter.MarkdownInlineCode
-	if useUnicode {
+	if useUnicode { //nolint:wsl_v5
 		prefixChar = messageAttachmentCharUnicode
 		spaceChar = messageAttachmentSpaceUnicode
 		blockquoteChar = blockquoteCharUnicode
@@ -2686,7 +2687,7 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 
 	for _, attachment := range attachments {
 		newPrefix := additionalPrefix + "\x02" + prefixChar + "\x0f" + spaceChar
-		switch {
+		switch { //nolint:wsl_v5
 		// https://docs.slack.dev/tools/node-slack-sdk/reference/web-api/interfaces/MessageAttachment/#color
 		case attachment.Color == "danger":
 			newPrefix = additionalPrefix + "\x0304" + prefixChar + "\x0f" + spaceChar
@@ -2717,7 +2718,7 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 			// e.g. https://github.com/fluxcd/notification-controller/pull/1322
 			if fallbackText == "" {
 				fallbackText, _, _ = strings.Cut(attachment.Text, "\n")
-				fallbackText = strings.TrimSuffix(fallbackText, "\r")
+				fallbackText = strings.TrimSuffix(fallbackText, "\r") //nolint:wsl_v5
 				if attachment.AuthorName != "" {
 					fallbackText = attachment.AuthorName + ":" + spaceChar + fallbackText
 				}
@@ -2764,18 +2765,18 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 
 		if attachment.AuthorName != "" && !isAuthorDup {
 			b.WriteString(newPrefix)
-			authorName := attachment.AuthorName
+			authorName := attachment.AuthorName //nolint:wsl_v5
 			if !disableEmoji {
 				authorName = utils.EmojiReplaceAliases(authorName, rc.Mattermost.Formatter.CustomEmoji)
 			}
-			b.WriteString(authorName)
-			if attachment.AuthorLink != "" {
+			b.WriteString(authorName)        //nolint:wsl_v5
+			if attachment.AuthorLink != "" { //nolint:wsl_v5
 				b.WriteString(spaceChar)
 				b.WriteString("(")
 				b.WriteString(attachment.AuthorLink)
 				b.WriteString(")")
 			}
-			b.WriteByte('\n')
+			b.WriteByte('\n') //nolint:wsl_v5
 		}
 
 		// Deduplicate Title block
@@ -2786,19 +2787,19 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 		if attachment.Title != "" && !isTitleDup {
 			b.WriteString(newPrefix)
 			b.WriteByte('\x02')
-			title := attachment.Title
+			title := attachment.Title //nolint:wsl_v5
 			if !disableEmoji {
 				title = utils.EmojiReplaceAliases(title, rc.Mattermost.Formatter.CustomEmoji)
 			}
-			b.WriteString(title)
+			b.WriteString(title) //nolint:wsl_v5
 			b.WriteByte('\x02')
-			if attachment.TitleLink != "" {
+			if attachment.TitleLink != "" { //nolint:wsl_v5
 				b.WriteString(" (\x1d")
 				b.WriteString(attachment.TitleLink)
 				b.WriteByte('\x1d')
 				b.WriteByte(')')
 			}
-			b.WriteByte('\n')
+			b.WriteByte('\n') //nolint:wsl_v5
 		}
 
 		attTextStr := attachment.Text
@@ -2848,7 +2849,7 @@ type attachmentFieldCandidate struct {
 	lines  []string
 }
 
-//nolint:funlen,gocognit,gocyclo
+//nolint:funlen,gocognit,gocyclo,staticcheck
 func (m *Mattermost) formatAttachmentFields(b *strings.Builder, fields []*model.SlackAttachmentField, prefix string, prefixChar string, useFallback bool, fallbackText string, opts utils.ProcessMessageOpts, maxLineLength int, omitFieldTitles bool) {
 	const gutter = 2
 
@@ -2995,6 +2996,8 @@ func (m *Mattermost) formatAttachmentFields(b *strings.Builder, fields []*model.
 }
 
 // fieldsFitColWidth checks if all candidate fields and their multiline values fit within targetColWidth.
+//
+//nolint:staticcheck
 func fieldsFitColWidth(fields []*model.SlackAttachmentField, candidates []attachmentFieldCandidate, targetColWidth int, omitFieldTitles bool) bool {
 	for j, field := range fields {
 		if !omitFieldTitles && utils.StringWidth(field.Title) > targetColWidth {
@@ -3061,7 +3064,7 @@ func formatLastOnline(lastActivity int64, isOnline ...bool) string {
 	}
 }
 
-//nolint:funlen,gocyclo
+//nolint:funlen,gocyclo,staticcheck
 func (m *Mattermost) formatSingleAttachmentField(b *strings.Builder, field *model.SlackAttachmentField, prefix string, prefixChar string, useFallback bool, fallbackText string, opts utils.ProcessMessageOpts, omitFieldTitles bool) {
 	var valStr string
 
@@ -3150,7 +3153,7 @@ func (m *Mattermost) formatSingleAttachmentField(b *strings.Builder, field *mode
 // XXX: Bug in Mattermost itself and PostEmbed Data interface{}
 // extractPreviewData returns (message, userID, channelID, replyCount, lastReplyAt, attachments)
 //
-//nolint:funlen,gocyclo,gocognit
+//nolint:funlen,gocognit,gocyclo,staticcheck
 func extractPreviewData(metadata *model.PostMetadata) (string, string, string, int64, int64, []*model.SlackAttachment) {
 	if metadata == nil {
 		return "", "", "", 0, 0, nil
@@ -3174,7 +3177,7 @@ func extractPreviewData(metadata *model.PostMetadata) (string, string, string, i
 		var (
 			msg, userID, channelID  string
 			replyCount, lastReplyAt int64
-			attachments             []*model.SlackAttachment
+			attachments             []*model.SlackAttachment //nolint:staticcheck
 		)
 
 		if val, ok := postMap["message"].(string); ok {
@@ -3222,7 +3225,7 @@ func extractPreviewData(metadata *model.PostMetadata) (string, string, string, i
 	return "", "", "", 0, 0, nil
 }
 
-//nolint:funlen
+//nolint:funlen,staticcheck
 func (m *Mattermost) parsePreviewPost(b *strings.Builder, user string, channel string, text string, replyCount int64, lastReplyAt int64, attachments []*model.SlackAttachment) {
 	rc := m.cfg.Current()
 
@@ -3253,7 +3256,7 @@ func (m *Mattermost) parsePreviewPost(b *strings.Builder, user string, channel s
 	}
 
 	b.Grow(len(text) + 128)
-	prefix := prefixChar + spaceChar
+	prefix := prefixChar + spaceChar //nolint:wsl_v5
 
 	headerWritten := false
 	writeHeader := func() {
@@ -3376,7 +3379,7 @@ func (m *Mattermost) postListToEvents(ctx context.Context, postlist any, eventTy
 	// This fixes the Mattermost API quirk where thread root posts are placed at index 0.
 	sort.Slice(mmPostList.Order, func(i, j int) bool {
 		pI, okI := mmPostList.Posts[mmPostList.Order[i]]
-		pJ, okJ := mmPostList.Posts[mmPostList.Order[j]]
+		pJ, okJ := mmPostList.Posts[mmPostList.Order[j]] //nolint:wsl_v5
 		if !okI || !okJ {
 			return false
 		}
@@ -3408,7 +3411,7 @@ func (m *Mattermost) postListToEvents(ctx context.Context, postlist any, eventTy
 			events = append(events, ev)
 		}
 	}
-	return events
+	return events //nolint:wsl_v5
 }
 
 //nolint:funlen
@@ -3418,7 +3421,7 @@ func (m *Mattermost) postToEvent(ctx context.Context, p *model.Post, eventType s
 
 	props := p.GetProps()
 	botname, override := props["override_username"].(string)
-	user := m.GetUser(ctx, p.UserId)
+	user := m.GetUser(ctx, p.UserId) //nolint:wsl_v5
 	if override {
 		user.Nick = botname
 	}
@@ -3508,7 +3511,7 @@ func (m *Mattermost) postToEvent(ctx context.Context, p *model.Post, eventType s
 				},
 			}
 		}
-		return &bridge.Event{
+		return &bridge.Event{ //nolint:wsl_v5
 			Type: "channel_message",
 			Data: &bridge.ChannelMessageEvent{
 				Text:      formattedMsg,

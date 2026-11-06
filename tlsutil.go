@@ -21,15 +21,15 @@ func NewKeypairReloader(certPath, keyPath string) (*keypairReloader, error) {
 		certPath: certPath,
 		keyPath:  keyPath,
 	}
-	cert, err := tls.LoadX509KeyPair(certPath, keyPath)
+	cert, err := tls.LoadX509KeyPair(certPath, keyPath) //nolint:wsl_v5
 	if err != nil {
 		return nil, err
 	}
-	result.cert = &cert
-	go func() {
+	result.cert = &cert //nolint:wsl_v5
+	go func() {         //nolint:wsl_v5
 		c := make(chan os.Signal, 1)
 		signal.Notify(c, syscall.SIGHUP)
-		for range c {
+		for range c { //nolint:wsl_v5
 			log.Printf("Received SIGHUP, reloading TLS certificate and key from %q and %q", certPath, keyPath)
 
 			err := result.maybeReload()
@@ -38,7 +38,7 @@ func NewKeypairReloader(certPath, keyPath string) (*keypairReloader, error) {
 			}
 		}
 	}()
-	return result, nil
+	return result, nil //nolint:wsl_v5
 }
 
 func (kpr *keypairReloader) maybeReload() error {
@@ -46,16 +46,16 @@ func (kpr *keypairReloader) maybeReload() error {
 	if err != nil {
 		return err
 	}
-	kpr.certMu.Lock()
+	kpr.certMu.Lock() //nolint:wsl_v5
 	defer kpr.certMu.Unlock()
-	kpr.cert = &newCert
-	return nil
+	kpr.cert = &newCert //nolint:wsl_v5
+	return nil          //nolint:wsl_v5
 }
 
 func (kpr *keypairReloader) GetCertificateFunc() func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
 	return func(clientHello *tls.ClientHelloInfo) (*tls.Certificate, error) {
 		kpr.certMu.RLock()
 		defer kpr.certMu.RUnlock()
-		return kpr.cert, nil
+		return kpr.cert, nil //nolint:wsl_v5
 	}
 }

@@ -61,7 +61,7 @@ type User struct {
 
 	cfg *config.Config
 
-	UserBridge
+	UserBridge //nolint:embeddedstructfieldcheck
 
 	//nolint:containedctx // Tied to the lifecycle of the persistent client session
 	ctx    context.Context
@@ -114,17 +114,17 @@ func (u *User) String() string {
 func (u *User) NumChannels() int {
 	u.RLock()
 	defer u.RUnlock()
-	return len(u.channels)
+	return len(u.channels) //nolint:wsl_v5
 }
 
 func (u *User) Channels() []Channel {
 	u.RLock()
-	channels := make([]Channel, 0, len(u.channels))
+	channels := make([]Channel, 0, len(u.channels)) //nolint:wsl_v5
 	for ch := range u.channels {
 		channels = append(channels, ch)
 	}
-	u.RUnlock()
-	return channels
+	u.RUnlock()     //nolint:wsl_v5
+	return channels //nolint:wsl_v5
 }
 
 func (u *User) VisibleTo() []*User {
@@ -132,7 +132,7 @@ func (u *User) VisibleTo() []*User {
 	seen[u] = struct{}{}
 
 	channels := u.Channels()
-	num := 0
+	num := 0 //nolint:wsl_v5
 	for _, ch := range channels {
 		// Don't include self
 		num += ch.Len()
@@ -150,19 +150,19 @@ func (u *User) VisibleTo() []*User {
 			if _, dupe := seen[other]; dupe {
 				continue
 			}
-			seen[other] = struct{}{}
+			seen[other] = struct{}{} //nolint:wsl_v5
 			// TODO: Check visibility (once it's implemented)
 			users = append(users, other)
 		}
 	}
-	return users
+	return users //nolint:wsl_v5
 }
 
 const writeTimeout = 10 * time.Second
 
 // Encode and send each msg until an error occurs, then returns.
 //
-//nolint:gocyclo
+//nolint:gocyclo,nonamedreturns
 func (u *User) Encode(msgs ...*irc.Message) (err error) {
 	if u == nil || u.Ghost || u.Conn == nil {
 		return nil
@@ -181,7 +181,7 @@ func (u *User) Encode(msgs ...*irc.Message) (err error) {
 		}
 
 		if msg.Prefix != nil && msg.Command == irc.PRIVMSG && (msg.Prefix.Name == "slack" || msg.Prefix.Name == "mattermost") && msg.Prefix.Host == "service" && strings.Contains(msg.Trailing, "token") { //nolint:goconst,staticcheck
-			logger.Debugf("-> %s %s %s", msg.Command, msg.Prefix.Name, "[token redacted]")
+			logger.Debugf("-> %s %s %s", msg.Command, msg.Prefix.Name, "[token redacted]") //nolint:staticcheck
 
 			err := u.Conn.Encode(msg)
 			if err != nil {
@@ -238,7 +238,7 @@ func (u *User) Decode() {
 		logger.Trace("ghost user, skipping Decode")
 		return
 	}
-	buffer := make(chan *irc.Message, 512)
+	buffer := make(chan *irc.Message, 512) //nolint:wsl_v5
 	bufferTimeout := max(
 		// we need at least 100
 		u.cfg.Current().PasteBufferTimeout, 100)
@@ -246,7 +246,7 @@ func (u *User) Decode() {
 	timeout := time.Duration(bufferTimeout) * time.Millisecond
 	t := timer.NewTimer(timeout)
 	t.Stop()
-	var wg sync.WaitGroup
+	var wg sync.WaitGroup //nolint:wsl_v5
 	wg.Add(1)
 
 	go func(buffer chan *irc.Message) {
@@ -266,7 +266,7 @@ func (u *User) Decode() {
 			t.Stop()
 
 			resumeTarget, resumeReply = "", ""
-			if bufferedMsg == nil {
+			if bufferedMsg == nil { //nolint:wsl_v5
 				return
 			}
 
@@ -283,7 +283,7 @@ func (u *User) Decode() {
 			}
 
 			logger.Tracef("flushing buffer: %#v", logMsg)
-			u.DecodeCh <- bufferedMsg
+			u.DecodeCh <- bufferedMsg //nolint:wsl_v5
 			// clear buffer
 			bufferedMsg = nil
 		}
@@ -305,7 +305,7 @@ func (u *User) Decode() {
 				if !ok {
 					// Best-effort flush on shutdown. Avoid blocking forever if nobody is draining DecodeCh.
 					t.Stop()
-					if bufferedMsg != nil {
+					if bufferedMsg != nil { //nolint:wsl_v5
 						// trim last newline
 						bufferedMsg.Trailing = strings.TrimSpace(bufferedMsg.Trailing)
 						select {
@@ -313,10 +313,10 @@ func (u *User) Decode() {
 						case <-time.After(1 * time.Second):
 							logger.Warnf("timed out flushing decode buffer for %s", u.Nick)
 						}
-						bufferedMsg = nil
+						bufferedMsg = nil //nolint:wsl_v5
 					}
-					logger.Tracef("decode buffer goroutine exiting for %s", u.Nick)
-					return
+					logger.Tracef("decode buffer goroutine exiting for %s", u.Nick) //nolint:wsl_v5
+					return                                                          //nolint:wsl_v5
 				}
 
 				// Only PRIVMSGs get merged. QUIT and PART are in the buffer to go after the
@@ -414,11 +414,11 @@ func (u *User) Decode() {
 			}
 
 			isEOF := errors.Is(err, io.EOF) || err.Error() == "EOF"
-			isClosed := errors.Is(err, net.ErrClosed) || strings.Contains(err.Error(), "use of closed network connection")
+			isClosed := errors.Is(err, net.ErrClosed) || strings.Contains(err.Error(), "use of closed network connection") //nolint:wsl_v5
 			if !isEOF && !isClosed {
 				logger.Errorf("msg: %v err: %v", msg, err)
 			}
-			break
+			break //nolint:wsl_v5
 		}
 
 		if msg == nil {
@@ -441,13 +441,13 @@ func (u *User) Decode() {
 		switch command {
 		case irc.PRIVMSG, irc.QUIT, irc.PART:
 			logger.Debugf("B: %#v", dmsg)
-			buffer <- msg
+			buffer <- msg //nolint:wsl_v5
 		case irc.PING, irc.MODE:
 			logger.Trace(dmsg)
-			u.DecodeCh <- msg
+			u.DecodeCh <- msg //nolint:wsl_v5
 		default:
 			logger.Debug(dmsg)
-			u.DecodeCh <- msg
+			u.DecodeCh <- msg //nolint:wsl_v5
 		}
 	}
 

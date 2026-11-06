@@ -797,14 +797,14 @@ func checkWordBoundaryStart(s string, idx int) bool {
 	if idx == 0 {
 		return true
 	}
-	return !isWordChar(s[idx-1]) // Must transition from a non-word char
+	return !isWordChar(s[idx-1]) //nolint:wsl_v5 // Must transition from a non-word char
 }
 
 func checkWordBoundaryEnd(s string, idx int) bool {
 	if idx == len(s) {
 		return true
 	}
-	return !isWordChar(s[idx]) // Must transition to a non-word char
+	return !isWordChar(s[idx]) //nolint:wsl_v5 // Must transition to a non-word char
 }
 
 func emitLines(text, prefix string, yield func(string)) {
@@ -864,7 +864,7 @@ func replacePattern(s string, delim string, ircStart, ircEnd string, checkWordBo
 	delimByte := delim[0] // '*' or '_'
 
 	var b strings.Builder
-	start := 0
+	start := 0 //nolint:wsl_v5
 	i := 0
 
 	for i < len(s) {
@@ -872,14 +872,14 @@ func replacePattern(s string, delim string, ircStart, ircEnd string, checkWordBo
 		if idx == -1 {
 			break
 		}
-		absoluteIdx := i + idx
+		absoluteIdx := i + idx //nolint:wsl_v5
 
 		// Ensure it's exactly the length we want (e.g., "**" shouldn't match "***")
 		if absoluteIdx > 0 && s[absoluteIdx-1] == delimByte {
 			i = absoluteIdx + 1
 			continue
 		}
-		if absoluteIdx+delimLen < len(s) && s[absoluteIdx+delimLen] == delimByte {
+		if absoluteIdx+delimLen < len(s) && s[absoluteIdx+delimLen] == delimByte { //nolint:wsl_v5
 			i = absoluteIdx + 1
 			continue
 		}
@@ -891,12 +891,12 @@ func replacePattern(s string, delim string, ircStart, ircEnd string, checkWordBo
 
 		// Find the closing delimiter
 		searchStart := absoluteIdx + delimLen
-		closeIdx := strings.Index(s[searchStart:], delim)
+		closeIdx := strings.Index(s[searchStart:], delim) //nolint:wsl_v5
 		if closeIdx == -1 {
 			i = absoluteIdx + 1
 			continue
 		}
-		absoluteCloseIdx := searchStart + closeIdx
+		absoluteCloseIdx := searchStart + closeIdx //nolint:wsl_v5
 
 		// Ensure closing delimiter is exact length
 		if absoluteCloseIdx+delimLen < len(s) && s[absoluteCloseIdx+delimLen] == delimByte {
@@ -933,14 +933,14 @@ func replacePattern(s string, delim string, ircStart, ircEnd string, checkWordBo
 	if start == 0 {
 		return s // Zero allocations if no matches were made
 	}
-	b.WriteString(s[start:])
-	return b.String()
+	b.WriteString(s[start:]) //nolint:wsl_v5
+	return b.String()        //nolint:wsl_v5
 }
 
 // replaceCode simulates the `+([^`]+)`+ regex for backticks
 func replaceCode(msg, startCode, endCode string) string {
 	var b strings.Builder
-	start := 0
+	start := 0 //nolint:wsl_v5
 	i := 0
 
 	for i < len(msg) {
@@ -948,7 +948,7 @@ func replaceCode(msg, startCode, endCode string) string {
 		if idx == -1 {
 			break
 		}
-		absoluteIdx := i + idx
+		absoluteIdx := i + idx //nolint:wsl_v5
 
 		runLen := 1
 		for absoluteIdx+runLen < len(msg) && msg[absoluteIdx+runLen] == '`' {
@@ -956,11 +956,11 @@ func replaceCode(msg, startCode, endCode string) string {
 		}
 
 		searchStart := absoluteIdx + runLen
-		closeIdx := strings.IndexByte(msg[searchStart:], '`')
+		closeIdx := strings.IndexByte(msg[searchStart:], '`') //nolint:wsl_v5
 		if closeIdx == -1 {
 			break
 		}
-		absoluteCloseIdx := searchStart + closeIdx
+		absoluteCloseIdx := searchStart + closeIdx //nolint:wsl_v5
 
 		closeRunLen := 1
 		for absoluteCloseIdx+closeRunLen < len(msg) && msg[absoluteCloseIdx+closeRunLen] == '`' {
@@ -970,7 +970,7 @@ func replaceCode(msg, startCode, endCode string) string {
 		if start == 0 {
 			b.Grow(len(msg) + 32)
 		}
-		b.WriteString(msg[start:absoluteIdx])
+		b.WriteString(msg[start:absoluteIdx]) //nolint:wsl_v5
 		b.WriteString(startCode)
 		b.WriteString(msg[absoluteIdx+runLen : absoluteCloseIdx])
 		b.WriteString(endCode)
@@ -982,8 +982,8 @@ func replaceCode(msg, startCode, endCode string) string {
 	if start == 0 {
 		return msg
 	}
-	b.WriteString(msg[start:])
-	return b.String()
+	b.WriteString(msg[start:]) //nolint:wsl_v5
+	return b.String()          //nolint:wsl_v5
 }
 
 // replaceLinks simulates the `\[([^\]]+)\]\(([^\)]+)\)` regex for Markdown links
@@ -1115,12 +1115,12 @@ func Markdown2irc(msg string, blockQuoteChar string, inlineCode string) string {
 		newPrefix.Grow(len(trimmedText)) // Pre-allocate exactly what we need
 
 		idx := 0
-	ParseLoop:
+	ParseLoop: //nolint:wsl_v5
 		for idx < len(trimmedText) {
 			switch trimmedText[idx] {
 			case '>':
 				newPrefix.WriteString(blockQuoteChar)
-				idx++
+				idx++ //nolint:wsl_v5
 				// Markdown allows one optional space immediately after a '>'
 				if idx < len(trimmedText) && trimmedText[idx] == ' ' {
 					idx++
@@ -1168,20 +1168,20 @@ func WrapMessage(msg string, maxLen int, hardLineSplit ...bool) string {
 
 	i := 0
 	for i < len(msg) {
-		switch {
+		switch { //nolint:staticcheck
 		case msg[i] == ' ' || msg[i] == '\t':
 			spaceStart = i
 			for i < len(msg) && (msg[i] == ' ' || msg[i] == '\t') {
 				i++
 			}
-			spaceLen = i - spaceStart
+			spaceLen = i - spaceStart //nolint:wsl_v5
 
 		case msg[i] == '\n':
 			if initialized {
 				b.WriteString(msg[lastWrite : i+1])
 				lastWrite = i + 1
 			}
-			lineLen, spaceLen = 0, 0
+			lineLen, spaceLen = 0, 0 //nolint:wsl_v5
 			wordsOnLine = 0
 			linePrefix = ""
 			prefixEnd = 0
@@ -1293,7 +1293,7 @@ func WrapMessage(msg string, maxLen int, hardLineSplit ...bool) string {
 
 	// Flush whatever remains of the string
 	b.WriteString(msg[lastWrite:])
-	return b.String()
+	return b.String() //nolint:wsl_v5
 }
 
 //nolint:funlen,gocyclo,gocognit

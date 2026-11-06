@@ -161,7 +161,7 @@ func login(u *User, toUser *User, args []string, service string) {
 		}
 
 		fmt.Println("login mastodon")
-		err := u.loginTo("mastodon")
+		err := u.loginTo("mastodon") //nolint:wsl_v5
 		if err != nil {
 			u.MsgUser(toUser, err.Error())
 			return
@@ -240,7 +240,7 @@ func login(u *User, toUser *User, args []string, service string) {
 	}
 
 	teamOrServer := ""
-	creds := []*string{&cred.Server, &teamOrServer, &cred.Login, &cred.Pass}
+	creds := []*string{&cred.Server, &teamOrServer, &cred.Login, &cred.Pass} //nolint:wsl_v5
 	for argsIdx, credsIdx := datalen, len(creds); argsIdx > 0 && credsIdx > 0; argsIdx-- {
 		*creds[credsIdx-1] = args[argsIdx-1]
 		creds = creds[:credsIdx-1]
@@ -270,7 +270,7 @@ func login(u *User, toUser *User, args []string, service string) {
 	logger.Tracef("args_len: %d", len(args))
 	logger.Tracef("team: %s", cred.Team)
 	logger.Tracef("server: %s", cred.Server)
-	if cred.MFAToken != "" {
+	if cred.MFAToken != "" { //nolint:wsl_v5
 		logger.Debug("found MFAToken")
 	}
 
@@ -280,25 +280,25 @@ func login(u *User, toUser *User, args []string, service string) {
 		u.MsgUser(toUser, "need LOGIN <server> <team> <login> <pass>")
 		u.MsgUser(toUser, "when using a personal token replace <pass> with token=<yourtoken>")
 		u.MsgUser(toUser, "when using a mfa token use LOGIN <server> <team> <login> <pass> MFAToken=<yourmfatoken>")
-		return
+		return //nolint:wsl_v5
 	// server missing
 	case cred.Server == "":
 		u.MsgUser(toUser, "need LOGIN <server> <login> <pass>")
 		u.MsgUser(toUser, "when using a personal token replace <pass> with token=<yourtoken>")
 		u.MsgUser(toUser, "when using a mfa token use LOGIN <server> <login> <pass> MFAToken=<yourmfatoken>")
-		return
+		return //nolint:wsl_v5
 	// team missing
 	case cred.Team == "":
 		u.MsgUser(toUser, "need LOGIN <team> <login> <pass>")
 		u.MsgUser(toUser, "when using a personal token replace <pass> with token=<yourtoken>")
 		u.MsgUser(toUser, "when using a mfa token use LOGIN <team> <login> <pass> MFAToken=<yourmfatoken>")
-		return
+		return //nolint:wsl_v5
 	// login/username or password/token missing
 	case cred.Login == "" || cred.Pass == "":
 		u.MsgUser(toUser, "need LOGIN <login> <pass>")
 		u.MsgUser(toUser, "when using a personal token replace <pass> with token=<yourtoken>")
 		u.MsgUser(toUser, "when using a mfa token use LOGIN <login> <pass> MFAToken=<yourmfatoken>")
-		return
+		return //nolint:wsl_v5
 	}
 
 	if !u.isValidServer(cred.Server, service) {
@@ -335,14 +335,14 @@ func replay(u *User, toUser *User, args []string, service string) {
 	if len(args) == 0 || len(args) > 2 {
 		u.MsgUser(toUser, "need REPLAY (#<channel>) [duration]")
 		u.MsgUser(toUser, "e.g. REPLAY #bugs 24h")
-		return
+		return //nolint:wsl_v5
 	}
 
 	channelName := strings.TrimPrefix(args[0], "#")
 	channelTeamID := u.br.GetMe().TeamID
 
 	var since int64
-	var logSince string
+	var logSince string //nolint:wsl_v5
 
 	// Parse optional duration argument
 	if len(args) == 2 {
@@ -358,7 +358,7 @@ func replay(u *User, toUser *User, args []string, service string) {
 	}
 
 	channelID := u.br.GetChannelID(u.ctx, channelName, channelTeamID)
-	brchannel, err := u.br.GetChannel(u.ctx, channelID)
+	brchannel, err := u.br.GetChannel(u.ctx, channelID) //nolint:wsl_v5
 	if err != nil {
 		u.MsgUser(toUser, channelName+" not found")
 		return
@@ -402,7 +402,7 @@ func details(u *User, toUser *User, args []string, service string) {
 	if len(args) != 1 {
 		u.MsgUser(toUser, "need DETAILS <post/thread ID>")
 		u.MsgUser(toUser, "e.g. DETAILS zhqrffbxupgepj1yquxaftfk4a")
-		return
+		return //nolint:wsl_v5
 	}
 
 	postID := args[0]
@@ -411,7 +411,7 @@ func details(u *User, toUser *User, args []string, service string) {
 	if u.cfg.Mattermost().Insecure {
 		proto = "http"
 	}
-	postlistURL := proto + "://" + u.Credentials.Server + "/" + u.Credentials.Team + "/pl/"
+	postlistURL := proto + "://" + u.Credentials.Server + "/" + u.Credentials.Team + "/pl/" //nolint:wsl_v5
 
 	switch {
 	case service == serviceMatrix:
@@ -433,7 +433,7 @@ func details(u *User, toUser *User, args []string, service string) {
 	default:
 		u.MsgUser(toUser, "need DETAILS <post/thread ID>")
 		u.MsgUser(toUser, "e.g. DETAILS zhqrffbxupgepj1yquxaftfk4a")
-		return
+		return //nolint:wsl_v5
 	}
 
 	events := u.br.GetPostThread(u.ctx, postID)
@@ -468,7 +468,7 @@ func details(u *User, toUser *User, args []string, service string) {
 
 	for _, event := range events {
 		var createAt int64
-		var text, nick, channel string
+		var text, nick, channel string //nolint:wsl_v5
 
 		switch e := event.Data.(type) {
 		case *bridge.ChannelMessageEvent:
@@ -489,7 +489,7 @@ func details(u *User, toUser *User, args []string, service string) {
 			if strings.HasPrefix(line, "\x01ACTION ") && strings.HasSuffix(line, "\x01") {
 				line = "* " + nick + " " + line[8:len(line)-1]
 			}
-			u.MsgUser(toUser, prefix+"  "+line)
+			u.MsgUser(toUser, prefix+"  "+line) //nolint:wsl_v5
 		})
 	}
 }
@@ -501,7 +501,7 @@ func search(u *User, toUser *User, args []string, service string) {
 	}
 
 	limit := 0
-	if len(args) > 1 {
+	if len(args) > 1 { //nolint:wsl_v5
 		val, err := strconv.Atoi(args[0])
 		if err == nil {
 			limit = val
@@ -512,11 +512,11 @@ func search(u *User, toUser *User, args []string, service string) {
 	if len(args) == 0 || args[0] == helpArg {
 		u.MsgUser(toUser, "need SEARCH <limit> <text>")
 		u.MsgUser(toUser, "e.g. SEARCH 10 matterircd")
-		return
+		return //nolint:wsl_v5
 	}
 
 	searchStr := strings.Join(args, " ")
-	events := u.br.SearchPosts(u.ctx, searchStr)
+	events := u.br.SearchPosts(u.ctx, searchStr) //nolint:wsl_v5
 	if len(events) == 0 {
 		u.MsgUser(toUser, "no results")
 		return
@@ -577,15 +577,15 @@ func part(u *User, toUser *User, args []string, service string) {
 	if len(args) != 1 {
 		u.MsgUser(toUser, "need PART #<channel>")
 		u.MsgUser(toUser, "e.g. PART #bugs")
-		return
+		return //nolint:wsl_v5
 	}
 
 	channelName := strings.TrimPrefix(args[0], "#")
-	channelTeamID := u.br.GetMe().TeamID
+	channelTeamID := u.br.GetMe().TeamID //nolint:wsl_v5
 	if len(args) == 2 {
 		channelTeamID = args[1]
 	}
-	channelID := u.br.GetChannelID(u.ctx, channelName, channelTeamID)
+	channelID := u.br.GetChannelID(u.ctx, channelName, channelTeamID) //nolint:wsl_v5
 
 	err := u.br.Part(u.ctx, channelID)
 	if err != nil {
@@ -632,7 +632,7 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 	}
 
 	var err error
-	limit := 0
+	limit := 0 //nolint:wsl_v5
 
 	if len(filteredArgs) == 2 {
 		limit, err = strconv.Atoi(filteredArgs[1])
@@ -641,19 +641,19 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 	if len(filteredArgs) == 0 || len(filteredArgs) > 2 || err != nil {
 		u.MsgUser(toUser, "need SCROLLBACK (#<channel>|<user>|<post/thread ID>) [lines] [server-time]")
 		u.MsgUser(toUser, "e.g. SCROLLBACK #bugs 10, SCROLLBACK @@nkrtrp6ym... server-time")
-		return
+		return //nolint:wsl_v5
 	}
 
 	search := filteredArgs[0]
 
 	var channelID, searchPostID string
-	scrollbackUser, exists := u.Srv.HasUser(search)
+	scrollbackUser, exists := u.Srv.HasUser(search) //nolint:wsl_v5
 
 	proto := "https"
 	if u.cfg.Mattermost().Insecure {
 		proto = "http"
 	}
-	postlistURL := proto + "://" + u.Credentials.Server + "/" + u.Credentials.Team + "/pl/"
+	postlistURL := proto + "://" + u.Credentials.Server + "/" + u.Credentials.Team + "/pl/" //nolint:wsl_v5
 
 	switch {
 	case strings.HasPrefix(search, "#"):
@@ -677,7 +677,7 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 	default:
 		u.MsgUser(toUser, "need SCROLLBACK (#<channel>|<user>|<post/thread ID>) <lines>")
 		u.MsgUser(toUser, "e.g. SCROLLBACK #bugs 10 (show last 10 lines from #bugs)")
-		return
+		return //nolint:wsl_v5
 	}
 
 	var events []*bridge.Event
@@ -710,8 +710,8 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 //nolint:funlen,gocognit,gocyclo,unparam
 func dispatchHistoricalEvent(u *User, toUser *User, event *bridge.Event, searchCtx string, searchRegexes []*regexp.Regexp, reqServerTime bool) {
 	var createAt int64
-	var text, nick, msgID, parentID, channelID string
-	var files []*bridge.File
+	var text, nick, msgID, parentID, channelID string //nolint:wsl_v5
+	var files []*bridge.File                          //nolint:wsl_v5
 
 	switch e := event.Data.(type) {
 	case *bridge.ChannelMessageEvent:
@@ -947,12 +947,12 @@ func updatelastviewed(u *User, toUser *User, args []string, service string) {
 		return
 	}
 
-	channelID := ""
+	channelID := "" //nolint:wastedassign
 
 	if len(args) != 1 {
 		u.MsgUser(toUser, "need UPDATELASTVIEWED <channel>")
 		u.MsgUser(toUser, "e.g. UPDATELASTVIEWED #bugs")
-		return
+		return //nolint:wsl_v5
 	}
 
 	if strings.Contains(args[0], "#") {
@@ -969,7 +969,7 @@ func updatelastviewed(u *User, toUser *User, args []string, service string) {
 			u.MsgUser(toUser, fmt.Sprintf("updatelastviewed for %#v failed: %s", updateUser.User, err))
 			return
 		}
-		return
+		return //nolint:wsl_v5
 	} else {
 		u.MsgUser(toUser, fmt.Sprintf("user %s does not exist", args[0]))
 		return
@@ -1012,7 +1012,7 @@ var cmds = map[string]Command{
 	"details":          {handler: details, login: true, minParams: 1, maxParams: 1},
 	"header":           {handler: channelHeader, login: true, minParams: 2, maxParams: -1},
 	"lastsent":         {handler: lastsent, login: true, minParams: 0, maxParams: 0},
-	"login":            {handler: login, minParams: 2, maxParams: 5},
+	"login":            {handler: login, minParams: 2, maxParams: 5}, //nolint:goconst
 	"logout":           {handler: logout, login: true, minParams: 0, maxParams: 0},
 	"part":             {handler: part, login: true, minParams: 1, maxParams: 1},
 	"ping":             {handler: ping, login: true, minParams: 0, maxParams: 0},
@@ -1049,9 +1049,9 @@ func (u *User) handleServiceBot(service string, toUser *User, msg string) {
 		for k := range cmds {
 			keys = append(keys, k)
 		}
-		u.MsgUser(toUser, "possible commands: "+strings.Join(keys, ", "))
+		u.MsgUser(toUser, "possible commands: "+strings.Join(keys, ", ")) //nolint:wsl_v5
 		u.MsgUser(toUser, "<command> help for more info")
-		return
+		return //nolint:wsl_v5
 	}
 
 	if cmd.login {
@@ -1078,7 +1078,7 @@ func (u *User) handleServiceBot(service string, toUser *User, msg string) {
 func parseCommandString(line string) ([]string, error) {
 	args := []string{}
 	buf := ""
-	var escaped, doubleQuoted, singleQuoted bool
+	var escaped, doubleQuoted, singleQuoted bool //nolint:wsl_v5
 
 	got := false
 
@@ -1087,7 +1087,7 @@ func parseCommandString(line string) ([]string, error) {
 		if escaped {
 			buf += string(r)
 			escaped = false
-			continue
+			continue //nolint:wsl_v5
 		}
 
 		// If "\"
@@ -1097,7 +1097,7 @@ func parseCommandString(line string) ([]string, error) {
 			} else {
 				escaped = true
 			}
-			continue
+			continue //nolint:wsl_v5
 		}
 
 		// If it is whitespace
@@ -1109,7 +1109,7 @@ func parseCommandString(line string) ([]string, error) {
 				buf = ""
 				got = false
 			}
-			continue
+			continue //nolint:wsl_v5
 		}
 		// If Quoted
 		switch r {
@@ -1124,7 +1124,7 @@ func parseCommandString(line string) ([]string, error) {
 				continue
 			}
 		}
-		got = true
+		got = true //nolint:wsl_v5
 		buf += string(r)
 	}
 
@@ -1170,11 +1170,11 @@ func channelHeader(u *User, toUser *User, args []string, service string) {
 			showHelp()
 			return
 		}
-		args = args[2:]
+		args = args[2:] //nolint:wsl_v5
 	}
 
 	var channelID, channelName string
-	DMUser, exists := u.Srv.HasUser(channel)
+	DMUser, exists := u.Srv.HasUser(channel) //nolint:wsl_v5
 
 	switch {
 	case strings.HasPrefix(channel, "#"):
@@ -1193,7 +1193,7 @@ func channelHeader(u *User, toUser *User, args []string, service string) {
 		return
 	}
 
-	switch {
+	switch { //nolint:staticcheck
 	case cmd == "get":
 		currentHeader := u.br.Topic(u.ctx, channelID)
 		u.MsgUser(toUser, channel+"'s channel header is: "+currentHeader)
@@ -1413,7 +1413,7 @@ func (u *User) getSummarizeEvents(target string, query summarizeQuery) (string, 
 	userName := strings.TrimPrefix(target, "@")
 
 	channelID := u.br.GetChannelID(u.ctx, userName, "")
-	brchannel, err := u.br.GetChannel(u.ctx, channelID)
+	brchannel, err := u.br.GetChannel(u.ctx, channelID) //nolint:wsl_v5
 	if err != nil {
 		return "", nil, fmt.Errorf("user '@%s' not found", userName)
 	}

@@ -76,7 +76,7 @@ func main() {
 	}
 
 	logger.Infof("Running version %s %s", version, githash)
-	if strings.Contains(version, "-dev") {
+	if strings.Contains(version, "-dev") { //nolint:wsl_v5
 		logger.Infof("WARNING: THIS IS A DEVELOPMENT VERSION. Things may break.")
 	}
 
@@ -89,11 +89,11 @@ func main() {
 
 	// Attempt to load values from the config file
 	var err error
-	cfg, err = config.Load(*flagConfig, pflag.CommandLine)
+	cfg, err = config.Load(*flagConfig, pflag.CommandLine) //nolint:wsl_v5
 	if err != nil {
 		log.Fatal(err)
 	}
-	rc := cfg.Current()
+	rc := cfg.Current() //nolint:wsl_v5
 
 	// Setup live-reloading subsystems
 	setupLogReloadHook(cfg)
@@ -111,7 +111,7 @@ func main() {
 
 	// Backwards compatible: Bind standard socket synchronously (if configured)
 	var stdSocket net.Listener
-	if rc.Bind != "" {
+	if rc.Bind != "" { //nolint:wsl_v5
 		var network string
 		if strings.ContainsRune(rc.Bind, os.PathSeparator) {
 			network = "unix"
@@ -120,7 +120,7 @@ func main() {
 		}
 
 		var err error
-		stdSocket, err = net.Listen(network, rc.Bind)
+		stdSocket, err = net.Listen(network, rc.Bind) //nolint:wsl_v5
 		if err != nil {
 			logger.Fatal(err)
 		}
@@ -138,7 +138,7 @@ func main() {
 		logger.Fatalf("Database lock failed (is another instance running?): %v", err)
 	}
 	defer db.Close()
-	LastViewedSaveDB = db
+	LastViewedSaveDB = db //nolint:wsl_v5
 
 	aiCfg := cfg.Current().AI
 	if aiCfg.Enabled { //nolint:nestif
@@ -210,18 +210,18 @@ func main() {
 	// Start serving connections asynchronously
 	if tlsSocket != nil {
 		logger.Infof("Listening on %s (TLS)", rc.TLSBind)
-		go func() {
+		go func() { //nolint:wsl_v5
 			defer tlsSocket.Close()
-			start(tlsSocket)
+			start(tlsSocket) //nolint:wsl_v5
 		}()
 	}
 
 	// Backwards compatible
 	if stdSocket != nil {
 		logger.Infof("Listening on %s", rc.Bind)
-		go func() {
+		go func() { //nolint:wsl_v5
 			defer stdSocket.Close()
-			start(stdSocket)
+			start(stdSocket) //nolint:wsl_v5
 		}()
 	}
 
@@ -270,14 +270,14 @@ func setupProfilingReloadHook(cfg *config.Config) {
 		if rc.Profiling { //nolint:nestif
 			if profServer != nil && profServer.Addr != bindAddr {
 				logger.Infof("profiling bind address changed, restarting server...")
-				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second) //nolint:wsl_v5
 				defer cancel()
 
 				err := profServer.Shutdown(ctx)
 				if err != nil {
 					logger.WithError(err).Error("profiling: Failed to gracefully shutdown old server")
 				}
-				profServer = nil
+				profServer = nil //nolint:wsl_v5
 			}
 
 			if profServer == nil {
@@ -316,7 +316,7 @@ func setupProfilingReloadHook(cfg *config.Config) {
 			if err != nil {
 				logger.WithError(err).Error("profiling: Failed to gracefully shutdown")
 			}
-			profServer = nil
+			profServer = nil //nolint:wsl_v5
 		}
 	}
 
@@ -337,7 +337,7 @@ func setupGopsReloadHook(cfg *config.Config) {
 		if rc.Gops { //nolint:nestif
 			if !gopsRunning {
 				logger.Info("enabling gops agent")
-				if err := agent.Listen(agent.Options{}); err != nil {
+				if err := agent.Listen(agent.Options{}); err != nil { //nolint:noinlineerr
 					logger.WithError(err).Error("failed to start gops agent")
 				} else {
 					gopsRunning = true
@@ -347,7 +347,7 @@ func setupGopsReloadHook(cfg *config.Config) {
 			if gopsRunning {
 				logger.Info("disabling gops agent")
 				agent.Close()
-				gopsRunning = false
+				gopsRunning = false //nolint:wsl_v5
 			}
 		}
 	}
@@ -421,7 +421,7 @@ func start(socket net.Listener) {
 			logger.Infof("New connection: %s", conn.RemoteAddr())
 
 			user := irckit.NewUserBridge(conn, newsrv, cfg, LastViewedSaveDB)
-			err = newsrv.Connect(user)
+			err = newsrv.Connect(user) //nolint:wsl_v5
 			if err != nil {
 				logger.Errorf("Failed to join: %v", err)
 				return

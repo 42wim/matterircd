@@ -105,7 +105,7 @@ func NewUserBridge(c net.Conn, srv Server, cfg *config.Config, db *bolt.DB) *Use
 	u.createService(serviceMatrix, "loginservice")
 	u.createService("mastodon", "loginservice")
 	u.createService("matterircd", "systemservice")
-	return u
+	return u //nolint:wsl_v5
 }
 
 //nolint:funlen,gocyclo
@@ -272,7 +272,7 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 	}
 
 	var showContext bool
-	var maxlen int
+	var maxlen int //nolint:wsl_v5
 
 	disableMarkdown := u.br.FormatterConfig().DisableMarkdown
 	blockQuoteChar, codeBlockPrefix := u.getMarkdownBlockCodePrefix()
@@ -281,7 +281,7 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 	text := event.Text
 	prefix := ""
 	suffix := ""
-	if event.Event == "dm_topic" {
+	if event.Event == "dm_topic" { //nolint:wsl_v5
 		showContext = false
 		maxlen = 0
 	} else {
@@ -294,7 +294,7 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 		if !disableMarkdown && strings.HasPrefix(trimmedText, blockQuoteCharDefault) && blockQuoteChar != blockQuoteCharDefault {
 			text = strings.Replace(text, blockQuoteCharDefault, blockQuoteChar, 1)
 		}
-		text, prefix, suffix, showContext, maxlen = u.handleMessageThreadContext(prefixUser, event.MessageID, event.ParentID, event.Event, text)
+		text, prefix, suffix, showContext, maxlen = u.handleMessageThreadContext(prefixUser, event.MessageID, event.ParentID, event.Event, text) //nolint:wsl_v5
 	}
 
 	trimmedBlockQuoteDefault := strings.TrimSpace(blockQuoteCharDefault)
@@ -593,7 +593,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		if u.br.BridgeConfig().ShowOnlyJoined {
 			return
 		}
-		nick += "/" + u.Srv.Channel(event.ChannelID).String()
+		nick += "/" + u.Srv.Channel(event.ChannelID).String() //nolint:wsl_v5
 		// The decorated nick isn't a user, so it has no WHOIS identity to match.
 		senderPrefix = &irc.Prefix{Name: nick, User: nick, Host: u.Srv.Name()}
 	}
@@ -764,7 +764,7 @@ func (u *User) handleFileEvent(event *bridge.FileEvent) {
 		}
 
 		fileMsg := fmt.Sprintf("\x1ddownload file - %s (%s, %dKBytes)\x1d", f.URL, f.Name, sizeKB)
-		if u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext {
+		if u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext { //nolint:wsl_v5
 			threadMsgID := u.prefixContext(event.ChannelID, event.MessageID, event.ParentID, "posted_file")
 			fileMsg = u.formatContextMessage("", threadMsgID, fileMsg)
 		}
@@ -985,7 +985,7 @@ func (u *User) handleReactionEvent(event any) {
 		}
 
 		u.handleDirectMessageEvent(e)
-		return
+		return //nolint:wsl_v5
 	}
 
 	e := &bridge.ChannelMessageEvent{
@@ -1027,11 +1027,11 @@ func (u *User) CreateUsersFromInfo(info []*bridge.UserInfo) []*User {
 
 		ghost := NewUser(nil)
 		ghost.UserInfo = userinfo
-		nick := ghost.UserInfo.Nick
+		nick := ghost.UserInfo.Nick //nolint:staticcheck,wsl_v5
 		if nick == "" {
-			nick = ghost.UserInfo.Username
+			nick = ghost.UserInfo.Username //nolint:staticcheck
 		}
-		ghost.Nick = sanitizeNick(nick)
+		ghost.Nick = sanitizeNick(nick) //nolint:wsl_v5
 
 		u.Srv.Add(ghost)
 
@@ -1123,7 +1123,7 @@ func (u *User) addUsersToChannels() {
 	if syncThresh == 0 {
 		syncThresh = 15 * time.Minute
 	}
-	u.eventLoopMutex.Lock()
+	u.eventLoopMutex.Lock() //nolint:wsl_v5
 	lastSyncThreshold := u.lastSync
 	isHeavySync := !u.eventLoopStarted || time.Since(u.lastSync) > syncThresh
 	u.eventLoopMutex.Unlock()
@@ -1174,7 +1174,7 @@ func (u *User) addUsersToChannels() {
 
 	// Fetch, filter, and sort the channels alphabetically
 	var joinChannels []*bridge.ChannelInfo
-	for _, brchannel := range u.br.GetChannels() {
+	for _, brchannel := range u.br.GetChannels() { //nolint:wsl_v5
 		lastPost := time.UnixMilli(brchannel.LastPostAt)
 
 		// In Mattermost, both 1-on-1 DMs and Group DMs have no TeamID
@@ -1247,7 +1247,7 @@ func (u *User) addUsersToChannels() {
 	})
 
 	channels := make(chan *bridge.ChannelInfo, len(joinChannels))
-	var wg sync.WaitGroup
+	var wg sync.WaitGroup //nolint:wsl_v5
 
 	// Use 4 workers instead of the previous 10 to preserve alphabetical pacing
 	for i := range 4 {
@@ -1268,7 +1268,7 @@ func (u *User) addUsersToChannels() {
 	// Feed the sorted channels into the queue
 	for _, brchannel := range joinChannels {
 		logger.Debugf("Adding channel %#v", brchannel)
-		channels <- brchannel
+		channels <- brchannel //nolint:wsl_v5
 	}
 
 	close(channels)
@@ -1446,7 +1446,7 @@ func (u *User) getChannelSince(ctx context.Context, brchannel *bridge.ChannelInf
 	}
 
 	var savedSince int64
-	var inDB bool
+	var inDB bool //nolint:wsl_v5
 
 	// Fetch locally saved BoltDB last viewed if strategy allows
 	if strategy == "saved" || strategy == "hybrid" { //nolint:nestif
@@ -1719,7 +1719,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			if u.hasSharedCfg() && !u.sharedCfg().DisableAutoView && !u.replayHidesHistory(brchannel.ID) {
 				u.updateLastViewed(brchannel.ID)
 			}
-			u.saveLastViewedAt(brchannel.ID)
+			u.saveLastViewedAt(brchannel.ID) //nolint:wsl_v5
 		}
 	}
 }
@@ -1743,7 +1743,7 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 	}
 
 	spoof := u.createSpoof(brchannel)
-	channame := brchannel.Name
+	channame := brchannel.Name //nolint:wsl_v5
 	if !brchannel.DM {
 		channame = "#" + brchannel.Name
 	}
@@ -1786,8 +1786,8 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 
 	for _, event := range events {
 		var createAt int64
-		var text, nick, msgID, parentID string
-		var files []*bridge.File
+		var text, nick, msgID, parentID string //nolint:wsl_v5
+		var files []*bridge.File               //nolint:wsl_v5
 
 		// Extract attributes dynamically based on the event payload type
 		switch e := event.Data.(type) {
@@ -1826,14 +1826,14 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 		// Print the replay header on the very first valid event we process
 		if showReplayHdr && (text != "" || len(files) > 0) {
 			dateStr := time.UnixMilli(createAt).Format("2006-01-02 15:04:05")
-			target := "matterircd"
+			target := "matterircd" //nolint:wsl_v5
 			if u.br.IsDMChannelName(brchannel.Name) {
 				target = nick
 			}
 
 			spoof(target, "\x1d\x02Replaying msgs since "+dateStr+"\x02 ("+logSince+")\x1d", "")
 			logger.Infof("Replaying msgs for %s (%s) since %s (%s)", channame, brchannel.ID, dateStr, logSince)
-			showReplayHdr = false
+			showReplayHdr = false //nolint:wsl_v5
 		}
 
 		wrapLimit := 460
@@ -1959,7 +1959,7 @@ func (u *User) MsgSpoofUser(sender *User, rcvuser string, text string, maxlen ..
 		if !found {
 			break
 		}
-		text = rest
+		text = rest //nolint:wsl_v5
 	}
 }
 
@@ -2042,7 +2042,7 @@ func (u *User) mayJoin(channelID string) bool {
 	case len(ji) == 0 && len(je) != 0:
 		mayjoin := !stringInRegexp(ch.String(), je)
 		logger.Tracef("mayjoin 1 %t ch: %s, match: %s", mayjoin, ch.String(), je)
-		return mayjoin
+		return mayjoin //nolint:wsl_v5
 	// nothing specified, everything may join
 	case len(ji) == 0 && len(je) == 0:
 		logger.Tracef("mayjoin 2 %t ch: %s, both empty", true, ch.String())
@@ -2051,7 +2051,7 @@ func (u *User) mayJoin(channelID string) bool {
 	case len(ji) != 0 && len(je) == 0:
 		mayjoin := stringInRegexp(ch.String(), ji)
 		logger.Tracef("mayjoin 3 %t ch: %s, match: %s", mayjoin, ch.String(), ji)
-		return mayjoin
+		return mayjoin //nolint:wsl_v5
 	// joininclude overrides the joinexclude
 	case len(ji) != 0 && len(je) != 0:
 		// if explicit in ji we also may join
@@ -2063,7 +2063,7 @@ func (u *User) mayJoin(channelID string) bool {
 		// otherwise evaluate against joinexclude
 		mayjoin = !stringInRegexp(ch.String(), je)
 		logger.Tracef("mayjoin 4 %t ch: %s, match: %s", mayjoin, ch.String(), je)
-		return mayjoin
+		return mayjoin //nolint:wsl_v5
 	}
 
 	logger.Tracef("mayjoin default %t ch: %s, ji: %s, je: %s", false, ch.String(), ji, je)
@@ -2188,7 +2188,7 @@ func (u *User) loginTo(protocol string) error {
 	case "mattermost":
 		br, _, err = mattermost.New(u.ctx, u.cfg, u.Credentials, eventChan, u.addUsersToChannels)
 	}
-	if err != nil {
+	if err != nil { //nolint:wsl_v5
 		u.eventLoopMutex.Lock()
 		u.br = nil
 		u.eventLoopMutex.Unlock()
@@ -2273,7 +2273,7 @@ func (u *User) logoutFrom(protocol string) error {
 	}
 
 	u.Srv.Logout(u)
-	return nil
+	return nil //nolint:wsl_v5
 }
 
 func (u *User) getMsgCounterHex(channelID, postID string) string {
@@ -2361,7 +2361,7 @@ func (u *User) updateMsgMapIndex(channelID string, counter int, messageID string
 
 func (u *User) formatContextMessage(ts, threadMsgID, msg string) string {
 	var formattedMsg string
-	switch {
+	switch { //nolint:wsl_v5
 	case u.br.BridgeConfig().PrefixContext && threadMsgID != "":
 		formattedMsg = threadMsgID + " " + msg
 	case u.br.BridgeConfig().SuffixContext && threadMsgID != "":
@@ -2369,10 +2369,10 @@ func (u *User) formatContextMessage(ts, threadMsgID, msg string) string {
 	default:
 		formattedMsg = msg
 	}
-	if ts != "" {
+	if ts != "" { //nolint:wsl_v5
 		formattedMsg = "[" + ts + "] " + formattedMsg
 	}
-	return formattedMsg
+	return formattedMsg //nolint:wsl_v5
 }
 
 func (u *User) prefixContext(channelID, messageID, parentID, event string) string {
@@ -2398,7 +2398,7 @@ func (u *User) prefixContext(channelID, messageID, parentID, event string) strin
 		if tc == "mattermost" || tc == serviceMatrix || parentID == messageID {
 			return "[" + prefixChar + "@@" + parentID + "]"
 		}
-		return "[" + prefixChar + "@@" + parentID + ",@@" + messageID + "]"
+		return "[" + prefixChar + "@@" + parentID + ",@@" + messageID + "]" //nolint:wsl_v5
 	}
 
 	u.msgMapMutex.Lock()
@@ -2482,7 +2482,7 @@ func (u *User) updateLastViewed(channelID string) {
 
 	u.updateCounterMutex.Lock()
 	defer u.updateCounterMutex.Unlock()
-	if t, ok := u.updateCounter[channelID]; ok {
+	if t, ok := u.updateCounter[channelID]; ok { //nolint:wsl_v5
 		if time.Since(t) < time.Second*5 {
 			return
 		}
@@ -2611,7 +2611,7 @@ func (u *User) saveLastViewedAt(channelID string, ts ...int64) {
 		targetTime := max(newTime, existingTime)
 
 		currentTime := make([]byte, 8)
-		binary.LittleEndian.PutUint64(currentTime, uint64(targetTime))
+		binary.LittleEndian.PutUint64(currentTime, uint64(targetTime)) //nolint:gosec
 
 		return b.Put([]byte(channelID), currentTime)
 	})

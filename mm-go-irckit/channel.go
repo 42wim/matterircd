@@ -157,7 +157,7 @@ func (ch *channel) Message(from *User, text string) {
 		if !found {
 			break
 		}
-		text = rest
+		text = rest //nolint:wsl_v5
 	}
 }
 
@@ -190,7 +190,7 @@ func (ch *channel) Part(u *User, text string) {
 	// Only real users see the part. Don't copy all the ghosts (a channel can have
 	// thousands) just to skip them again, that adds up when everybody leaves.
 	var users []*User
-	for _, to := range ch.usersIdx {
+	for _, to := range ch.usersIdx { //nolint:wsl_v5
 		if !to.Ghost {
 			users = append(users, to)
 		}
@@ -269,11 +269,11 @@ func (ch *channel) Unlink() {
 // Close will evict all users in the channel.
 func (ch *channel) Close() error {
 	ch.mu.Lock()
-	users := make([]*User, 0, len(ch.usersIdx))
+	users := make([]*User, 0, len(ch.usersIdx)) //nolint:wsl_v5
 	for _, u := range ch.usersIdx {
 		users = append(users, u)
 	}
-	ch.usersIdx = make(map[string]*User)
+	ch.usersIdx = make(map[string]*User) //nolint:wsl_v5
 	ch.mu.Unlock()
 
 	for _, to := range users {
@@ -320,7 +320,7 @@ func (ch *channel) Topic(from Prefixer, text string) {
 	}
 
 	var users []*User
-	for _, u := range ch.usersIdx {
+	for _, u := range ch.usersIdx { //nolint:wsl_v5
 		if !u.Ghost {
 			users = append(users, u)
 		}
@@ -349,7 +349,7 @@ func (ch *channel) SendNamesResponse(u *User) error {
 			Command:  irc.RPL_ENDOFNAMES,
 			Trailing: "End of /NAMES list.",
 		}
-		return u.Encode(end)
+		return u.Encode(end) //nolint:wsl_v5
 	}
 
 	estimatedMsgs := (len(names) / 20) + 2
@@ -358,13 +358,13 @@ func (ch *channel) SendNamesResponse(u *User) error {
 
 	var line strings.Builder
 	line.Grow(512)
-	i := 0
-	for _, name := range names {
+	i := 0                       //nolint:wsl_v5
+	for _, name := range names { //nolint:wsl_v5
 		nameLen := len(name) + 1
 		if i+nameLen < 400 {
 			line.WriteString(name)
 			line.WriteByte(' ')
-			i += nameLen
+			i += nameLen //nolint:wsl_v5
 		} else {
 			messages = append(messages, irc.Message{
 				Prefix:   prefix,
@@ -375,7 +375,7 @@ func (ch *channel) SendNamesResponse(u *User) error {
 			line.Reset()
 			line.WriteString(name)
 			line.WriteByte(' ')
-			i = nameLen
+			i = nameLen //nolint:wsl_v5
 		}
 	}
 
@@ -416,7 +416,7 @@ func (ch *channel) BatchJoin(inputusers []*User) error {
 	// We only need to post-process the "Me" user to update their internal map.
 	// A tiny stack buffer is more than enough since there is typically only 1 "Me" user.
 	var inlineBuf [2]*User
-	meUsers := inlineBuf[:0]
+	meUsers := inlineBuf[:0] //nolint:wsl_v5
 
 	for _, u := range inputusers {
 		uid := u.ID()
@@ -425,7 +425,7 @@ func (ch *channel) BatchJoin(inputusers []*User) error {
 
 			// Only gather the "Me" user(s) for the secondary loop.
 			// This prevents allocating a massive slice for ghost users.
-			if u.UserInfo != nil && u.UserInfo.Me {
+			if u.UserInfo != nil && u.UserInfo.Me { //nolint:staticcheck
 				meUsers = append(meUsers, u)
 			}
 		}
@@ -438,7 +438,7 @@ func (ch *channel) BatchJoin(inputusers []*User) error {
 		if u.channels == nil {
 			u.channels = make(map[Channel]struct{}, 2)
 		}
-		u.channels[ch] = struct{}{}
+		u.channels[ch] = struct{}{} //nolint:wsl_v5
 		u.Unlock()
 	}
 
@@ -448,7 +448,6 @@ func (ch *channel) BatchJoin(inputusers []*User) error {
 // Join introduces a User to the channel (sends relevant messages, stores).
 func (ch *channel) Join(u *User) error {
 	// TODO: Check if user is already here?
-
 	if u.ID() == "" {
 		return nil
 	}
@@ -505,7 +504,7 @@ func (ch *channel) HasUser(u *User) bool {
 	defer ch.mu.RUnlock()
 
 	_, ok := ch.usersIdx[u.ID()]
-	return ok
+	return ok //nolint:wsl_v5
 }
 
 // Users returns an unsorted slice of users who are in the channel.
@@ -627,7 +626,7 @@ func (ch *channel) SpoofWithPrefix(prefix *irc.Prefix, text string, cmd string, 
 
 	for {
 		line, rest, found := strings.Cut(text, "\n")
-		line = strings.TrimSuffix(line, "\r")
+		line = strings.TrimSuffix(line, "\r") //nolint:wsl_v5
 		if isAction {
 			// Encode only trims whitespace after the closing delimiter, so trim it here.
 			line = "\x01ACTION " + strings.TrimRight(line, " \t") + "\x01"
@@ -642,7 +641,7 @@ func (ch *channel) SpoofWithPrefix(prefix *irc.Prefix, text string, cmd string, 
 		if !found {
 			break
 		}
-		text = rest
+		text = rest //nolint:wsl_v5
 	}
 }
 

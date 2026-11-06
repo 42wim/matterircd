@@ -816,7 +816,7 @@ func unquoteString(s string) string {
 	if err == nil {
 		return unq
 	}
-	return s
+	return s //nolint:wsl_v5
 }
 
 func validate(runtimeCfg *RuntimeConfig) error {

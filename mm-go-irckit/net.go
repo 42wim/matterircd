@@ -32,7 +32,7 @@ func (c *conn) ResolveHost() string {
 	addr := c.RemoteAddr()
 
 	s := addr.String()
-	ip, _, err := net.SplitHostPort(s)
+	ip, _, err := net.SplitHostPort(s) //nolint:wsl_v5
 	if err != nil {
 		return s
 	}

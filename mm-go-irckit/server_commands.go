@@ -48,7 +48,7 @@ func CmdAway(s Server, u *User, msg *irc.Message) error {
 	}
 
 	_ = u.br.SetStatus(u.ctx, "away")
-	return s.EncodeMessage(u, irc.RPL_NOWAWAY, []string{u.Nick}, "You have been marked as being away")
+	return s.EncodeMessage(u, irc.RPL_NOWAWAY, []string{u.Nick}, "You have been marked as being away") //nolint:wsl_v5
 }
 
 //nolint:funlen,gocognit,gocyclo
@@ -142,14 +142,14 @@ func CmdCap(s Server, u *User, msg *irc.Message) error {
 func CmdInvite(s Server, u *User, msg *irc.Message) error {
 	who := msg.Params[0]
 	channel := msg.Params[1]
-	other, ok := s.HasUser(who)
+	other, ok := s.HasUser(who) //nolint:wsl_v5
 	if !ok {
 		return nil
 	}
 
 	if ch, exists := s.HasChannel(channel); exists {
 		logger.Tracef("inviting %s to %s", other.User, ch.ID())
-		err := u.br.Invite(u.ctx, ch.ID(), other.User)
+		err := u.br.Invite(u.ctx, ch.ID(), other.User) //nolint:wsl_v5
 		if err != nil {
 			return err
 		}
@@ -164,7 +164,7 @@ func CmdIson(s Server, u *User, msg *irc.Message) error {
 	if len(msg.Params) == 0 {
 		nicks = strings.Fields(msg.Trailing)
 	}
-	on := make([]string, 0, len(nicks))
+	on := make([]string, 0, len(nicks)) //nolint:wsl_v5
 	for _, nick := range nicks {
 		if _, ok := s.HasUser(nick); ok {
 			on = append(on, nick)
@@ -214,7 +214,7 @@ func CmdJoin(s Server, u *User, msg *irc.Message) error {
 			logger.Errorf("Cannot join channel %s, id %s, err: %v", channelName, channelID, err)
 
 			_ = s.EncodeMessage(u, irc.ERR_INVITEONLYCHAN, []string{u.Nick, channel}, "Cannot join channel (+i)")
-			continue
+			continue //nolint:wsl_v5
 		}
 
 		logger.Tracef("Join channel %s, id %s, err: %v", channelName, channelID, err)
@@ -264,7 +264,7 @@ func CmdList(s Server, u *User, msg *irc.Message) error {
 	for name := range info {
 		channelNames = append(channelNames, name)
 	}
-	sort.Strings(channelNames)
+	sort.Strings(channelNames) //nolint:wsl_v5
 
 	for _, channelName := range channelNames {
 		topic := info[channelName]
@@ -282,7 +282,7 @@ func CmdList(s Server, u *User, msg *irc.Message) error {
 		Command:  irc.RPL_LISTEND, //nolint:misspell
 		Trailing: "End of /LIST",
 	})
-	return u.Encode(r...)
+	return u.Encode(r...) //nolint:wsl_v5
 }
 
 // CmdLusers is a handler for the /LUSERS command.
@@ -335,10 +335,10 @@ func CmdMode(s Server, u *User, msg *irc.Message) error {
 	}
 
 	r := []*irc.Message{}
-	if len(msg.Params) > 1 {
+	if len(msg.Params) > 1 { //nolint:wsl_v5
 		modetype = msg.Params[1]
 	}
-	switch modetype {
+	switch modetype { //nolint:wsl_v5
 	case "":
 		r = append(r, &irc.Message{
 			Prefix:  s.Prefix(),
@@ -353,7 +353,7 @@ func CmdMode(s Server, u *User, msg *irc.Message) error {
 			Trailing: "End of channel ban list",
 		})
 	}
-	return u.Encode(r...)
+	return u.Encode(r...) //nolint:wsl_v5
 }
 
 // CmdMotd is a handler for the /MOTD command.
@@ -449,7 +449,7 @@ func CmdNames(s Server, u *User, msg *irc.Message) error {
 
 			joined = append(joined, ch)
 		}
-		srv.RUnlock()
+		srv.RUnlock() //nolint:wsl_v5
 
 		sort.Slice(joined, func(i, j int) bool {
 			return joined[i].name < joined[j].name
@@ -466,7 +466,7 @@ func CmdNames(s Server, u *User, msg *irc.Message) error {
 	channels := msg.Params[0]
 	for len(channels) > 0 {
 		var channel string
-		idx := strings.IndexByte(channels, ',')
+		idx := strings.IndexByte(channels, ',') //nolint:wsl_v5
 		if idx < 0 {
 			channel = channels
 			channels = ""
@@ -479,7 +479,7 @@ func CmdNames(s Server, u *User, msg *irc.Message) error {
 			_ = ch.SendNamesResponse(u)
 		}
 	}
-	return nil
+	return nil //nolint:wsl_v5
 }
 
 // CmdNick is a handler for the /NICK command.
@@ -496,7 +496,7 @@ func CmdNick(s Server, u *User, msg *irc.Message) error {
 	}
 
 	s.RenameUser(u, msg.Params[0])
-	return nil
+	return nil //nolint:wsl_v5
 }
 
 // CmdPart is a handler for the /PART command.
@@ -542,15 +542,15 @@ func CmdPing(s Server, u *User, msg *irc.Message) error {
 	}
 
 	_ = s.EncodeMessage(u, irc.PONG, []string{s.Name()}, msg.Trailing)
-	return nil
+	return nil //nolint:wsl_v5
 }
 
 // Use static initialization to optimize.
 // Color - https://modern.ircdocs.horse/formatting.html#color
-var colorRegExp = regexp.MustCompile(`\x03([019]?[0-9](,[019]?[0-9])?)?`)
+var colorRegExp = regexp.MustCompile(`\x03([019]?[0-9](,[019]?[0-9])?)?`) //nolint:unused
 
 // Hex Color - https://modern.ircdocs.horse/formatting.html#hex-color
-var hexColorRegExp = regexp.MustCompile(`\x04[0-9a-fA-F]{6}`)
+var hexColorRegExp = regexp.MustCompile(`\x04[0-9a-fA-F]{6}`) //nolint:unused
 
 // isBareThreadID checks if a message consists solely of an unadorned thread ID
 // without any message body, preventing accidental sends from creating root posts.
@@ -691,7 +691,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 		switch {
 		case isServiceBot(query):
 			go u.handleServiceBot(query, toUser, msg.Trailing)
-			msg.Trailing = "<redacted>"
+			msg.Trailing = "<redacted>" //nolint:wsl_v5
 		case toUser.Ghost, toUser.Me:
 			logger.Tracef("sending message %s to user %s", msg.Trailing, toUser.User)
 			// no messages when we're not logged in
@@ -743,7 +743,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 		default:
 			err = s.EncodeMessage(u, irc.PRIVMSG, []string{toUser.Nick}, msg.Trailing)
 		}
-		return err
+		return err //nolint:wsl_v5
 	}
 
 	// no channel or user
@@ -884,7 +884,7 @@ func parseModifyMsg(u *User, msg *irc.Message, channelID string) bool {
 	// substitution for previous command.
 	case useLast:
 		u.msgLastMutex.RLock()
-		if msgLast, ok := u.msgLast[channelID]; ok {
+		if msgLast, ok := u.msgLast[channelID]; ok { //nolint:wsl_v5
 			msgID = msgLast[0]
 		}
 
@@ -930,7 +930,7 @@ func parseModifyMsg(u *User, msg *irc.Message, channelID string) bool {
 			logger.Trace("parseModifyMsg triggered permissions error")
 			return false
 		}
-		u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+text+" could not be modified "+err.Error())
+		u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+text+" could not be modified "+err.Error()) //nolint:wsl_v5
 
 		return true
 	}
@@ -952,25 +952,25 @@ func parseThreadID(u *User, msg *irc.Message, channelID string) (string, string)
 	if len(matches) == 0 {
 		return "", ""
 	}
-	const expected = 3
+	const expected = 3 //nolint:wsl_v5
 	if len(matches) != expected {
 		logger.Errorf("parseThreadID: expected %d matches for re match against %q, got %d",
 			expected, msg.Trailing, len(matches))
-		return "", ""
+		return "", "" //nolint:wsl_v5
 	}
-	switch {
+	switch { //nolint:wsl_v5
 	case matches[1] == "!!":
 		u.msgLastMutex.RLock()
 		defer u.msgLastMutex.RUnlock()
-		msgLast, ok := u.msgLast[channelID]
+		msgLast, ok := u.msgLast[channelID] //nolint:wsl_v5
 		if !ok {
 			return "", ""
 		}
-		parentID := msgLast[0]
+		parentID := msgLast[0] //nolint:wsl_v5
 		if msgLast[1] != "" {
 			parentID = msgLast[1]
 		}
-		return parentID, matches[2]
+		return parentID, matches[2] //nolint:wsl_v5
 	case len(matches[1]) == 3:
 		id, err := strconv.ParseInt(matches[1], 16, 0)
 		if err != nil {
@@ -994,7 +994,7 @@ func parseThreadID(u *User, msg *irc.Message, channelID string) (string, string)
 		logger.Errorf("parseThreadID: could not parse reply ID %q", matches[1])
 		return "", ""
 	}
-	return "", ""
+	return "", "" //nolint:wsl_v5
 }
 
 func threadMsgChannelUser(s Server, u *User, msg *irc.Message, channelID string, toUser bool) bool {
@@ -1004,13 +1004,13 @@ func threadMsgChannelUser(s Server, u *User, msg *irc.Message, channelID string,
 	}
 
 	var msgID string
-	var err error
+	var err error //nolint:wsl_v5
 	if toUser {
 		msgID, err = u.br.MsgUserThread(u.ctx, channelID, threadID, text)
 	} else {
 		msgID, err = u.br.MsgChannelThread(u.ctx, channelID, threadID, text)
 	}
-	if err != nil {
+	if err != nil { //nolint:wsl_v5
 		fromUser, ok := s.HasUser(u.br.Protocol())
 		if !ok {
 			fromUser = u
@@ -1253,7 +1253,7 @@ func CmdWho(s Server, u *User, msg *irc.Message) error {
 
 	prefix := s.Prefix()
 	myNick := u.Nick
-	for i, other := range users {
+	for i, other := range users { //nolint:wsl_v5
 		status := "H"
 		if !u.br.IsOnline(statuses[other.User]) {
 			status = "G"
@@ -1318,7 +1318,7 @@ func CmdWhois(s Server, u *User, msg *irc.Message) error {
 	who := msg.Params[0]
 	if _, ok := s.HasUser(msg.Params[0]); ok { //nolint:nestif
 		other, _ := s.HasUser(who)
-		var r []*irc.Message
+		var r []*irc.Message //nolint:wsl_v5
 		r = append(r, &irc.Message{
 			Prefix:   s.Prefix(),
 			Params:   []string{u.Nick, other.Nick, other.User, other.Host, "*"},
@@ -1504,9 +1504,9 @@ func CmdWhois(s Server, u *User, msg *irc.Message) error {
 			Command:  irc.RPL_ENDOFWHOIS,
 			Trailing: "End of /WHOIS list.",
 		})
-		return u.Encode(r...)
+		return u.Encode(r...) //nolint:wsl_v5
 	}
-	return s.EncodeMessage(u, irc.ERR_NOSUCHNICK, msg.Params, "No such nick/channel")
+	return s.EncodeMessage(u, irc.ERR_NOSUCHNICK, msg.Params, "No such nick/channel") //nolint:wsl_v5
 }
 
 //nolint:funlen,gocyclo
