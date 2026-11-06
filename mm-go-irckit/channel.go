@@ -596,13 +596,11 @@ func (ch *channel) Spoof(from string, text string, cmd string, maxlen ...int) {
 	ch.SpoofWithPrefix(ch.SpoofPrefix(from), text, cmd, maxlen...)
 }
 
-// minWireText keeps text wrapping sane when the prefix alone nearly fills a line.
-const minWireText = 50
-
 // wireTextBudget returns how many bytes of text fit in a ":prefix CMD target :text\r\n"
-// line within IRC's 512 bytes limit.
+// line within IRC's 512 bytes limit. It can be zero or negative when the prefix and target
+// leave no room.
 func wireTextBudget(prefix *irc.Prefix, cmd, target string) int {
-	return max(505-prefix.Len()-len(cmd)-len(target), minWireText)
+	return 505 - prefix.Len() - len(cmd) - len(target)
 }
 
 func (ch *channel) SpoofWithPrefix(prefix *irc.Prefix, text string, cmd string, maxlen ...int) {
@@ -611,16 +609,18 @@ func (ch *channel) SpoofWithPrefix(prefix *irc.Prefix, text string, cmd string, 
 		limit = maxlen[0]
 	}
 
-	limit = min(limit, wireTextBudget(prefix, cmd, ch.name))
+	// At least one byte per line so wrapping still splits instead of being disabled.
+	limit = max(min(limit, wireTextBudget(prefix, cmd, ch.name)), 1)
 
 	// A CTCP ACTION must keep its envelope on every fragment.
 	isAction := strings.HasPrefix(text, "\x01ACTION ") && strings.HasSuffix(text, "\x01")
 	if isAction {
 		text = text[8 : len(text)-1]
-		limit -= len("\x01ACTION \x01")
+		limit = max(limit-len("\x01ACTION \x01"), 1)
 	}
 
-	text = utils.WrapMessage(text, limit)
+	// Hard split at this final transport boundary so a long word can't exceed the wire limit.
+	text = utils.WrapMessage(text, limit, true)
 
 	msg := irc.Message{
 		Prefix:        prefix,

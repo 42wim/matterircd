@@ -654,7 +654,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 	// when showContext is set, and a CTCP ACTION envelope is restored on every line.
 	wireBudget := wireTextBudget(senderPrefix, cmd, ch.String())
 	if showContext {
-		wireBudget = max(wireBudget-len(prefix)-len(suffix), minWireText)
+		wireBudget -= len(prefix) + len(suffix)
 	}
 
 	isAction := strings.HasPrefix(text, "\x01ACTION ") && strings.HasSuffix(text, "\x01")
@@ -665,6 +665,9 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 	} else {
 		maxlen = min(maxlen, wireBudget)
 	}
+
+	// WrapMessage doesn't wrap at zero or below, so keep at least one byte per line.
+	maxlen = max(maxlen, 1)
 
 	text = utils.WrapMessage(text, maxlen, hardLineSplit)
 	addPrefix := false
