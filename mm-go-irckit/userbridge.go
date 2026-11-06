@@ -532,6 +532,13 @@ func (u *User) handleChannelRemoveEvent(event *bridge.ChannelRemoveEvent) {
 }
 
 func (u *User) getMessageChannel(channelID string, sender *bridge.UserInfo) Channel {
+	ch, _ := u.getMessageChannelUser(channelID, sender)
+
+	return ch
+}
+
+// getMessageChannelUser also returns the resolved sender, so callers don't need to look it up again.
+func (u *User) getMessageChannelUser(channelID string, sender *bridge.UserInfo) (Channel, *User) {
 	ch := u.Srv.Channel(channelID)
 	ghost := u.createUserFromInfo(sender)
 
@@ -545,7 +552,7 @@ func (u *User) getMessageChannel(channelID string, sender *bridge.UserInfo) Chan
 
 	// if we are already in the channel, route message directly to it
 	if ch.HasUser(u) {
-		return ch
+		return ch, ghost
 	}
 
 	// check if we mayjoin this channel
@@ -553,10 +560,10 @@ func (u *User) getMessageChannel(channelID string, sender *bridge.UserInfo) Chan
 		// otherwise first sync it
 		u.syncChannel(channelID, u.br.GetChannelName(u.ctx, channelID))
 
-		return ch
+		return ch, ghost
 	}
 
-	return u.Srv.Channel("&messages")
+	return u.Srv.Channel("&messages"), ghost
 }
 
 func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
@@ -568,9 +575,15 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 	*/
 	nick := sanitizeNick(event.Sender.Nick)
 	logger.Tracef("in handleChannelMessageEvent from %s", nick)
-	ch := u.getMessageChannel(event.ChannelID, event.Sender)
+
+	ch, ghost := u.getMessageChannelUser(event.ChannelID, event.Sender)
 	if event.Sender.Me {
 		nick = u.Nick
+	}
+
+	senderPrefix := &irc.Prefix{Name: nick, User: ghost.User, Host: ghost.Host}
+	if event.Sender.Me {
+		senderPrefix = u.Prefix()
 	}
 
 	if event.ChannelType != "D" && ch.ID() == "&messages" {
@@ -578,6 +591,8 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 			return
 		}
 		nick += "/" + u.Srv.Channel(event.ChannelID).String()
+		// The decorated nick isn't a user, so it has no WHOIS identity to match.
+		senderPrefix = &irc.Prefix{Name: nick, User: nick, Host: u.Srv.Name()}
 	}
 
 	if u.hasSharedCfg() && u.sharedCfg().ShowMentions {
@@ -629,6 +644,22 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 	preserveNewLines := u.br.FormatterConfig().PreserveNewLines
 	hardLineSplit := u.cfg.Current().HardLineSplit
 
+	cmd := irc.PRIVMSG
+
+	if event.MessageType == "notice" {
+		cmd = irc.NOTICE
+	}
+
+	// Context is added after wrapping, so reserve it or the line gets split again when sent.
+	if hardLineSplit && showContext {
+		maxlen = max(min(maxlen, wireTextBudget(senderPrefix, cmd, ch.String())-len(prefix)-len(suffix)), 1)
+	}
+
+	// Keep a CTCP ACTION whole here, SpoofWithPrefix splits it keeping the envelope.
+	if strings.HasPrefix(text, "\x01ACTION ") && strings.HasSuffix(text, "\x01") {
+		maxlen = len(text)
+	}
+
 	text = utils.WrapMessage(text, maxlen, hardLineSplit)
 	addPrefix := false
 
@@ -668,12 +699,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 			addPrefix = false
 		}
 
-		switch event.MessageType {
-		case "notice":
-			ch.SpoofNotice(nick, line, len(line))
-		default:
-			ch.SpoofMessage(nick, line, len(line))
-		}
+		ch.SpoofWithPrefix(senderPrefix, line, cmd, len(line))
 	}
 
 	var (
@@ -1336,7 +1362,7 @@ func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(nick, msg, timeTa
 			} else if usr, okUser := u.Srv.HasUser(nick); okUser {
 				prefix = usr.Prefix()
 			} else {
-				prefix = &irc.Prefix{Name: nick, User: nick, Host: nick}
+				prefix = &irc.Prefix{Name: nick, User: nick, Host: u.Srv.Name()}
 			}
 
 			prefixes[nick] = prefix
@@ -2467,7 +2493,9 @@ func (u *User) dbBucketName() []byte {
 		// The IRC user of Matrix accounts has the homeserver, the bucket doesn't to
 		// keep the replay cursors saved before that.
 		if br.Protocol() == serviceMatrix {
-			user = strings.TrimSuffix(user, "/"+br.GetMe().Host)
+			if i := strings.LastIndexByte(user, '/'); i >= 0 {
+				user = user[:i]
+			}
 		}
 
 		return []byte(br.Protocol() + ":" + user)

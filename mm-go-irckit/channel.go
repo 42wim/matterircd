@@ -71,6 +71,9 @@ type Channel interface {
 	// Spoof notice
 	SpoofNotice(from string, text string, maxlen ...int)
 
+	// SpoofWithPrefix is like SpoofMessage/SpoofNotice (cmd) with an already resolved prefix.
+	SpoofWithPrefix(prefix *irc.Prefix, text string, cmd string, maxlen ...int)
+
 	IsPrivate() bool
 }
 
@@ -573,19 +576,46 @@ func (ch *channel) Len() int {
 }
 
 func (ch *channel) Spoof(from string, text string, cmd string, maxlen ...int) {
-	if len(maxlen) == 0 {
-		text = utils.WrapMessage(text, 460)
-	} else {
-		text = utils.WrapMessage(text, maxlen[0])
+	// Match the user/host shown in WHOIS when the sender is a known user.
+	prefix := &irc.Prefix{Name: from, User: from, Host: ch.server.Name()}
+	if sender, ok := ch.server.HasUser(from); ok {
+		prefix = sender.Prefix()
 	}
 
-	prefix := irc.Prefix{
-		Name: from,
-		User: from,
-		Host: from,
+	ch.SpoofWithPrefix(prefix, text, cmd, maxlen...)
+}
+
+// wireTextBudget returns how many bytes of text fit in a ":prefix CMD target :text\r\n"
+// line within IRC's 512 bytes limit.
+func wireTextBudget(prefix *irc.Prefix, cmd, target string) int {
+	return 505 - prefix.Len() - len(cmd) - len(target)
+}
+
+func (ch *channel) SpoofWithPrefix(prefix *irc.Prefix, text string, cmd string, maxlen ...int) {
+	limit := 460
+	if len(maxlen) > 0 {
+		limit = maxlen[0]
 	}
+
+	hardSplit := ch.server.HardLineSplit()
+	isAction := false
+
+	if hardSplit {
+		// At least one byte per line, as WrapMessage doesn't wrap at zero or below.
+		limit = max(min(limit, wireTextBudget(prefix, cmd, ch.name)), 1)
+
+		// A CTCP ACTION must keep its envelope on every fragment.
+		isAction = strings.HasPrefix(text, "\x01ACTION ") && strings.HasSuffix(text, "\x01")
+		if isAction {
+			text = text[8 : len(text)-1]
+			limit = max(limit-len("\x01ACTION \x01"), 1)
+		}
+	}
+
+	text = utils.WrapMessage(text, limit, hardSplit)
+
 	msg := irc.Message{
-		Prefix:        &prefix,
+		Prefix:        prefix,
 		Command:       cmd,
 		Params:        []string{ch.name},
 		EmptyTrailing: true,
@@ -596,6 +626,11 @@ func (ch *channel) Spoof(from string, text string, cmd string, maxlen ...int) {
 	for {
 		line, rest, found := strings.Cut(text, "\n")
 		line = strings.TrimSuffix(line, "\r")
+		if isAction {
+			// Encode only trims whitespace after the closing delimiter, so trim it here.
+			line = "\x01ACTION " + strings.TrimRight(line, " \t") + "\x01"
+		}
+
 		msg.Trailing = line
 
 		for _, to := range users {

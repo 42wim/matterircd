@@ -41,6 +41,9 @@ type Server interface {
 	// Motd is the Message of the Day for the server.
 	Motd() []string
 
+	// HardLineSplit returns whether lines exceeding IRC's line length limit are split.
+	HardLineSplit() bool
+
 	// Connect starts the handshake for a new user, blocks until it's completed or failed with an error.
 	Connect(*User) error
 
@@ -159,6 +162,19 @@ func (s *server) Name() string {
 
 func (s *server) Motd() []string {
 	return s.config.Motd
+}
+
+// HardLineSplit defaults to true while no user is connected, like the config default.
+func (s *server) HardLineSplit() bool {
+	s.RLock()
+	u := s.u
+	s.RUnlock()
+
+	if u == nil || u.cfg == nil {
+		return true
+	}
+
+	return u.cfg.Current().HardLineSplit
 }
 
 func (s *server) Close() error {
