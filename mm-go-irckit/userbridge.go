@@ -629,6 +629,16 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 	preserveNewLines := u.br.FormatterConfig().PreserveNewLines
 	hardLineSplit := u.cfg.Current().HardLineSplit
 
+	// The wire line is ":prefix CMD target :text\r\n" and must fit in 512 bytes.
+	senderPrefix := ch.SpoofPrefix(nick)
+	cmd := irc.PRIVMSG
+
+	if event.MessageType == "notice" {
+		cmd = irc.NOTICE
+	}
+
+	maxlen = max(min(maxlen, 505-senderPrefix.Len()-len(cmd)-len(ch.String())), 50)
+
 	text = utils.WrapMessage(text, maxlen, hardLineSplit)
 	addPrefix := false
 
@@ -668,12 +678,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 			addPrefix = false
 		}
 
-		switch event.MessageType {
-		case "notice":
-			ch.SpoofNotice(nick, line, len(line))
-		default:
-			ch.SpoofMessage(nick, line, len(line))
-		}
+		ch.SpoofWithPrefix(senderPrefix, line, cmd, len(line))
 	}
 
 	var (
@@ -2467,7 +2472,9 @@ func (u *User) dbBucketName() []byte {
 		// The IRC user of Matrix accounts has the homeserver, the bucket doesn't to
 		// keep the replay cursors saved before that.
 		if br.Protocol() == serviceMatrix {
-			user = strings.TrimSuffix(user, "/"+br.GetMe().Host)
+			if i := strings.LastIndexByte(user, '/'); i >= 0 {
+				user = user[:i]
+			}
 		}
 
 		return []byte(br.Protocol() + ":" + user)

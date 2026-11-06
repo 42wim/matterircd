@@ -71,6 +71,12 @@ type Channel interface {
 	// Spoof notice
 	SpoofNotice(from string, text string, maxlen ...int)
 
+	// SpoofPrefix returns the prefix messages from the nick are sent with.
+	SpoofPrefix(from string) *irc.Prefix
+
+	// SpoofWithPrefix is like SpoofMessage/SpoofNotice (cmd) with an already resolved prefix.
+	SpoofWithPrefix(prefix *irc.Prefix, text string, cmd string, maxlen ...int)
+
 	IsPrivate() bool
 }
 
@@ -572,22 +578,29 @@ func (ch *channel) Len() int {
 	return len(ch.usersIdx)
 }
 
-func (ch *channel) Spoof(from string, text string, cmd string, maxlen ...int) {
-	if len(maxlen) == 0 {
-		text = utils.WrapMessage(text, 460)
-	} else {
-		text = utils.WrapMessage(text, maxlen[0])
+// SpoofPrefix matches the user/host shown in WHOIS when the sender is a known user,
+// otherwise it falls back to the server name as host.
+func (ch *channel) SpoofPrefix(from string) *irc.Prefix {
+	if sender, ok := ch.server.HasUser(from); ok {
+		return sender.Prefix()
 	}
 
-	prefix := &irc.Prefix{
+	return &irc.Prefix{
 		Name: from,
 		User: from,
 		Host: ch.server.Name(),
 	}
+}
 
-	// Match the user/host shown in WHOIS when the sender is a known user.
-	if sender, ok := ch.server.HasUser(from); ok {
-		prefix = sender.Prefix()
+func (ch *channel) Spoof(from string, text string, cmd string, maxlen ...int) {
+	ch.SpoofWithPrefix(ch.SpoofPrefix(from), text, cmd, maxlen...)
+}
+
+func (ch *channel) SpoofWithPrefix(prefix *irc.Prefix, text string, cmd string, maxlen ...int) {
+	if len(maxlen) == 0 {
+		text = utils.WrapMessage(text, 460)
+	} else {
+		text = utils.WrapMessage(text, maxlen[0])
 	}
 
 	msg := irc.Message{
