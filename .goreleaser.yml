@@ -3,7 +3,8 @@ release:
   name_template: "{{.ProjectName}} v{{.Version}}"
 
 builds:
-- env:
+- id: matterircd
+  env:
     - CGO_ENABLED=0
   goos:
     - freebsd
@@ -18,6 +19,34 @@ builds:
     - arm
     - arm64
     - 386
+  ignore:
+    # built with Matrix E2EE support by matterircd-e2ee
+    - goos: linux
+      goarch: amd64
+    - goos: linux
+      goarch: arm64
+  ldflags:
+    - -s -w -X main.githash={{.ShortCommit}}
+
+# Matrix end-to-end encryption needs cgo (sqlite) and the goolm tag.
+- id: matterircd-e2ee
+  binary: matterircd
+  env:
+    - CGO_ENABLED=1
+  flags:
+    - -tags=goolm
+  goos:
+    - linux
+  goarch:
+    - amd64
+    - arm64
+  overrides:
+    - goos: linux
+      goarch: arm64
+      env:
+        - CGO_ENABLED=1
+        - CC=aarch64-linux-gnu-gcc
+        - CXX=aarch64-linux-gnu-g++
   ldflags:
     - -s -w -X main.githash={{.ShortCommit}}
 
@@ -26,6 +55,7 @@ archives:
     id: matterircd
     builds:
     - matterircd
+    - matterircd-e2ee
     name_template: "{{ .Binary }}-{{ .Version }}-{{ .Os }}-{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}"
     format: binary
     files:
