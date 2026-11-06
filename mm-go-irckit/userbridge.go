@@ -2247,6 +2247,10 @@ func (u *User) logoutFrom(protocol string) error {
 			u.br = nil
 		}
 		u.eventLoopMutex.Unlock()
+
+		// Wait for an away notice already past its bridge check; later ones see u.br == nil.
+		u.awaySendMu.Lock()
+		u.awaySendMu.Unlock() //nolint:staticcheck
 	}
 
 	u.Srv.Logout(u)

@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/42wim/matterircd/bridge"
@@ -75,6 +76,8 @@ type User struct {
 	awayNotifyMu    sync.Mutex
 	awayNotifiedAt  int64
 	awayNotifiedGen uint64
+	awayLookupBusy  atomic.Bool
+	awaySendMu      sync.Mutex
 }
 
 func (u *User) ID() string {
@@ -515,6 +518,7 @@ func (u *User) createService(nick string, what string) {
 
 // ShouldNotifyAway checks if the away cooldown has elapsed and returns
 // whether to notify, the current timestamp, and the generation snapshot.
+// A true result starts the cooldown so concurrent callers can't both notify.
 func (u *User) ShouldNotifyAway(cooldownSec int64) (bool, int64, uint64) {
 	u.awayNotifyMu.Lock()
 	defer u.awayNotifyMu.Unlock()
@@ -524,7 +528,17 @@ func (u *User) ShouldNotifyAway(cooldownSec int64) (bool, int64, uint64) {
 		return false, 0, 0
 	}
 
+	u.awayNotifiedAt = now
+
 	return true, now, u.awayNotifiedGen
+}
+
+// awayGenCurrent reports whether no reset happened since the generation was snapshotted.
+func (u *User) awayGenCurrent(gen uint64) bool {
+	u.awayNotifyMu.Lock()
+	defer u.awayNotifyMu.Unlock()
+
+	return u.awayNotifiedGen == gen
 }
 
 // MarkAwayNotified records that an away notification was delivered if no reset

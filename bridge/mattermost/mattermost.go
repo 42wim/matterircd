@@ -799,7 +799,7 @@ func (m *Mattermost) IsOnline(status string) bool {
 func (m *Mattermost) StatusUser(ctx context.Context, userID string) (string, error) {
 	userName := m.mc.GetCachedUserName(userID)
 
-	status := m.mc.GetStatus(ctx, userID)
+	status := m.mc.GetStatusFresh(ctx, userID)
 	if status == "" {
 		return status, nil
 	}
@@ -807,7 +807,20 @@ func (m *Mattermost) StatusUser(ctx context.Context, userID string) (string, err
 	localTime := m.mc.GetUserLocalTime(userID)
 	prefix, custom, hasCustom := strings.Cut(status, ": ")
 
+	// The two reads aren't atomic: if the verification changed in between, a concurrent
+	// refresh replaced the activity, so treat the pair as unverified.
+	verified := m.mc.StatusVerifiedAt(userID)
 	lastActivity := m.mc.GetUserLastActivity(userID)
+
+	// If the refresh above failed, the cached value may be arbitrarily old, so omit
+	// it rather than show a misleading "Last online".
+	if prefix != model.StatusOnline && lastActivity > 0 {
+		if verified == 0 || verified != m.mc.StatusVerifiedAt(userID) || time.Now().Unix()-verified > 5*60 {
+			logger.Debugf("StatusUser: User: %s (%s) omitting unverified lastOnline (%d, verified %d)", userName, userID, lastActivity, verified)
+
+			lastActivity = 0
+		}
+	}
 
 	var lastOnline string
 

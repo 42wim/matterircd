@@ -77,6 +77,12 @@ type Message struct {
 	UserID   string
 }
 
+// statusVerification records when the server confirmed a last activity value, and that value.
+type statusVerification struct {
+	at       int64
+	activity int64
+}
+
 type UsersCache struct {
 	mu       sync.RWMutex
 	users    map[string]*model.User
@@ -97,6 +103,8 @@ type UsersCache struct {
 	customStatusExpiresAt map[string]int64
 	lastUserActivity      map[string]int64
 	statusLastUpdated     map[string]int64
+	statusRESTFetched     map[string]int64
+	statusVerified        map[string]statusVerification
 
 	timezones map[string]map[string]string
 
@@ -2358,7 +2366,10 @@ func (m *Client) maintainUsersCache(ctx context.Context, event *model.WebSocketE
 		}
 
 		if lastActivity > 0 {
-			m.SetUserStatus(userID, statusRaw, false, lastActivity)
+			m.Users.mu.Lock()
+			m.setUserStatus(userID, statusRaw, true, "websocket "+string(model.WebsocketEventStatusChange), lastActivity)
+			m.markStatusVerifiedLocked(userID, lastActivity)
+			m.Users.mu.Unlock()
 		} else {
 			m.SetUserStatus(userID, statusRaw, false)
 		}
