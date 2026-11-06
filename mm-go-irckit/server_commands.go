@@ -33,7 +33,7 @@ func DefaultCommands() Commands {
 	cmds.Add(Handler{Command: irc.PING, Call: CmdPing})
 	cmds.Add(Handler{Command: irc.PRIVMSG, Call: CmdPrivMsg, MinParams: 1})
 	cmds.Add(Handler{Command: irc.QUIT, Call: CmdQuit})
-	cmds.Add(Handler{Command: "TAGMSG", Call: CmdTagMsg, MinParams: 1, LoggedIn: true})
+	cmds.Add(Handler{Command: "TAGMSG", Call: CmdTagMsg, MinParams: 1, LoggedIn: true}) //nolint:goconst
 	cmds.Add(Handler{Command: irc.TOPIC, Call: CmdTopic, MinParams: 1, LoggedIn: true})
 	cmds.Add(Handler{Command: irc.WHO, Call: CmdWho, MinParams: 1, LoggedIn: true})
 	cmds.Add(Handler{Command: irc.WHOIS, Call: CmdWhois, MinParams: 1, LoggedIn: true})
@@ -51,6 +51,7 @@ func CmdAway(s Server, u *User, msg *irc.Message) error {
 	return s.EncodeMessage(u, irc.RPL_NOWAWAY, []string{u.Nick}, "You have been marked as being away")
 }
 
+//nolint:funlen,gocognit,gocyclo
 func CmdCap(s Server, u *User, msg *irc.Message) error {
 	if len(msg.Params) < 1 {
 		return nil
@@ -201,8 +202,8 @@ func CmdKick(s Server, u *User, msg *irc.Message) error {
 
 // CmdJoin is a handler for the /JOIN command.
 func CmdJoin(s Server, u *User, msg *irc.Message) error {
-	channels := strings.Split(msg.Params[0], ",")
-	for _, channel := range channels {
+	channels := strings.SplitSeq(msg.Params[0], ",")
+	for channel := range channels {
 		channelName := strings.Replace(channel, "#", "", 1)
 		if channelName == "&messages" || channelName == "&users" { //nolint:goconst
 			continue
@@ -211,7 +212,8 @@ func CmdJoin(s Server, u *User, msg *irc.Message) error {
 		channelID, _, err := u.br.Join(u.ctx, channelName)
 		if err != nil {
 			logger.Errorf("Cannot join channel %s, id %s, err: %v", channelName, channelID, err)
-			s.EncodeMessage(u, irc.ERR_INVITEONLYCHAN, []string{u.Nick, channel}, "Cannot join channel (+i)")
+
+			_ = s.EncodeMessage(u, irc.ERR_INVITEONLYCHAN, []string{u.Nick, channel}, "Cannot join channel (+i)")
 			continue
 		}
 
@@ -277,7 +279,7 @@ func CmdList(s Server, u *User, msg *irc.Message) error {
 	r = append(r, &irc.Message{
 		Prefix:   s.Prefix(),
 		Params:   []string{u.Nick},
-		Command:  irc.RPL_LISTEND, // nolint:misspell
+		Command:  irc.RPL_LISTEND, //nolint:misspell
 		Trailing: "End of /LIST",
 	})
 	return u.Encode(r...)
@@ -489,7 +491,7 @@ func CmdNick(s Server, u *User, msg *irc.Message) error {
 	// only update mattermost nick if we're logged in
 	err := u.br.Nick(u.ctx, msg.Params[0])
 	if err != nil {
-		s.EncodeMessage(u, irc.ERR_ERRONEUSNICKNAME, []string{u.Nick}, "Erroneus nickname")
+		_ = s.EncodeMessage(u, irc.ERR_ERRONEUSNICKNAME, []string{u.Nick}, "Erroneus nickname")
 		return err
 	}
 
@@ -501,8 +503,8 @@ func CmdNick(s Server, u *User, msg *irc.Message) error {
 func CmdPart(s Server, u *User, msg *irc.Message) error {
 	var err error
 
-	channels := strings.Split(msg.Params[0], ",")
-	for _, chName := range channels {
+	channels := strings.SplitSeq(msg.Params[0], ",")
+	for chName := range channels {
 		// we can not leave & channels
 		if strings.HasPrefix(chName, "&") {
 			continue
@@ -538,7 +540,8 @@ func CmdPing(s Server, u *User, msg *irc.Message) error {
 	if len(msg.Params) > 0 {
 		msg.Trailing = msg.Params[0]
 	}
-	s.EncodeMessage(u, irc.PONG, []string{s.Name()}, msg.Trailing)
+
+	_ = s.EncodeMessage(u, irc.PONG, []string{s.Name()}, msg.Trailing)
 	return nil
 }
 
@@ -591,6 +594,8 @@ func isBareThreadID(msg string) bool {
 }
 
 // CmdPrivMsg is a handler for the /PRIVMSG command.
+//
+//nolint:funlen,gocognit,gocyclo
 func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 	var err error
 
@@ -642,7 +647,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 	}
 
 	// are we sending to a channel
-	if ch, exists := s.HasChannel(query); exists {
+	if ch, exists := s.HasChannel(query); exists { //nolint:nestif
 		if ch.ID() == "&messages" || ch.ID() == "&users" {
 			return nil
 		}
@@ -682,7 +687,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 	}
 
 	// or a user
-	if toUser, exists := s.HasUser(query); exists {
+	if toUser, exists := s.HasUser(query); exists { //nolint:nestif
 		switch {
 		case isServiceBot(query):
 			go u.handleServiceBot(query, toUser, msg.Trailing)
@@ -851,6 +856,7 @@ func parseReactionToMsg(u *User, msg *irc.Message, channelID string) bool {
 	return true
 }
 
+//nolint:funlen,gocyclo
 func parseModifyMsg(u *User, msg *irc.Message, channelID string) bool {
 	matches := parseModifyMsgRegExp.FindStringSubmatch(msg.Trailing)
 	text := msg.Trailing
@@ -1045,8 +1051,8 @@ func threadMsgUser(s Server, u *User, msg *irc.Message, toUser string) bool {
 func CmdQuit(s Server, u *User, msg *irc.Message) error {
 	partMsg := msg.Trailing
 
-	s.EncodeMessage(u, irc.QUIT, []string{}, partMsg)
-	s.EncodeMessage(u, irc.ERROR, []string{}, "You will be missed.")
+	_ = s.EncodeMessage(u, irc.QUIT, []string{}, partMsg)
+	_ = s.EncodeMessage(u, irc.ERROR, []string{}, "You will be missed.")
 
 	s.Quit(u, partMsg)
 
@@ -1222,7 +1228,7 @@ func CmdTopic(s Server, u *User, msg *irc.Message) error {
 // CmdWho is a handler for the /WHO command.
 func CmdWho(s Server, u *User, msg *irc.Message) error {
 	// TODO: Use opFilter
-	// opFilter := len(msg.Params) >= 2 && msg.Params[1] == "o"
+	// := len(msg.Params) >= 2 && msg.Params[1] == "o"
 	mask := msg.Params[0]
 
 	// TODO: Handle arbitrary masks, not just channels
@@ -1306,9 +1312,11 @@ func sanitizeIRCTrailing(s string) string {
 }
 
 // CmdWhois is a handler for the /WHOIS command.
+//
+//nolint:funlen,gocognit,gocyclo
 func CmdWhois(s Server, u *User, msg *irc.Message) error {
 	who := msg.Params[0]
-	if _, ok := s.HasUser(msg.Params[0]); ok {
+	if _, ok := s.HasUser(msg.Params[0]); ok { //nolint:nestif
 		other, _ := s.HasUser(who)
 		var r []*irc.Message
 		r = append(r, &irc.Message{
@@ -1465,7 +1473,7 @@ func CmdWhois(s Server, u *User, msg *irc.Message) error {
 					Command:  irc.RPL_AWAY,
 					Trailing: utils.EmojiReplaceAliases(status, u.br.FormatterConfig().CustomEmoji),
 				})
-			} else if status != "online" {
+			} else if status != "online" { //nolint:goconst
 				r = append(r, &irc.Message{
 					Prefix:   s.Prefix(),
 					Params:   []string{u.Nick, other.Nick},

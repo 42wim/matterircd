@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"html"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -35,7 +35,7 @@ func (s *Slack) getSlackToken() (string, error) {
 
 	defer resp.Body.Close()
 
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", err
 	}
@@ -59,7 +59,7 @@ func (s *Slack) getSlackToken() (string, error) {
 
 	defer resp.Body.Close()
 
-	body, err = ioutil.ReadAll(resp.Body)
+	body, err = io.ReadAll(resp.Body)
 	if err != nil {
 		return "", err
 	}
@@ -117,7 +117,7 @@ func isValidNick(s string) bool {
 func formatTS(unixts string) string {
 	var targetts, targetus int64
 
-	fmt.Sscanf(unixts, "%d.%d", &targetts, &targetus)
+	_, _ = fmt.Sscanf(unixts, "%d.%d", &targetts, &targetus)
 	ts := time.Unix(targetts, targetus*1000)
 
 	if ts.YearDay() != time.Now().YearDay() {
@@ -218,6 +218,8 @@ type httpClient struct {
 }
 
 // taken from https://github.com/insomniacslk/irc-slack/blob/master/pkg/ircslack/irc_server.go
+//
+//nolint:gosec // thin wrapper; the request URL is built by the slack client, not user input
 func (hc httpClient) Do(req *http.Request) (*http.Response, error) {
 	if hc.cookie != "" {
 		logrus.Debug("Setting auth cookie")

@@ -161,6 +161,8 @@ func (u *User) VisibleTo() []*User {
 const writeTimeout = 10 * time.Second
 
 // Encode and send each msg until an error occurs, then returns.
+//
+//nolint:gocyclo
 func (u *User) Encode(msgs ...*irc.Message) (err error) {
 	if u == nil || u.Ghost || u.Conn == nil {
 		return nil
@@ -173,7 +175,8 @@ func (u *User) Encode(msgs ...*irc.Message) (err error) {
 
 		msg.Trailing = strings.TrimRight(msg.Trailing, " \t\r\n")
 
-		if err := u.Conn.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil {
+		err := u.SetWriteDeadline(time.Now().Add(writeTimeout))
+		if err != nil {
 			logger.Warnf("failed to set write deadline for %s: %v", u.Nick, err)
 		}
 
@@ -204,7 +207,7 @@ func (u *User) Encode(msgs ...*irc.Message) (err error) {
 			}
 		}
 
-		err := u.Conn.Encode(msg)
+		err = u.Conn.Encode(msg)
 		if err != nil {
 			return err
 		}
@@ -228,18 +231,17 @@ func threadPrefix(text string) string {
 }
 
 // Decode will receive and return a decoded message, or an error.
-// nolint:funlen,gocognit,gocyclo
+//
+//nolint:funlen,gocognit,gocyclo
 func (u *User) Decode() {
 	if u.Ghost {
 		logger.Trace("ghost user, skipping Decode")
 		return
 	}
 	buffer := make(chan *irc.Message, 512)
-	bufferTimeout := u.cfg.Current().PasteBufferTimeout
-	// we need at least 100
-	if bufferTimeout < 100 {
-		bufferTimeout = 100
-	}
+	bufferTimeout := max(
+		// we need at least 100
+		u.cfg.Current().PasteBufferTimeout, 100)
 	logger.Tracef("using paste buffer timeout: %#v", bufferTimeout)
 	timeout := time.Duration(bufferTimeout) * time.Millisecond
 	t := timer.NewTimer(timeout)
@@ -345,7 +347,7 @@ func (u *User) Decode() {
 				}
 
 				// are we starting a new buffer ?
-				if bufferedMsg == nil {
+				if bufferedMsg == nil { //nolint:nestif
 					// A paste that is still going after its message was sent for having been held for
 					// the full timeout (the line follows less than that after the previous one) carries
 					// on in the thread of that message, instead of ending up in the channel.

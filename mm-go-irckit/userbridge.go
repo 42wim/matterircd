@@ -257,6 +257,7 @@ func (u *User) getMarkdownBlockCodePrefix() (string, string) {
 	return blockQuoteChar, codeBlockPrefix
 }
 
+//nolint:funlen,gocognit,gocyclo
 func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 	if u.hasSharedCfg() && u.sharedCfg().ShowMentions {
 		for _, m := range u.MentionKeys {
@@ -545,7 +546,7 @@ func (u *User) getMessageChannelUser(channelID string, sender *bridge.UserInfo) 
 
 	// if it's another user, let them join
 	if !ghost.Me && !ch.HasUser(ghost) {
-		if u.br.Protocol() != "mastodon" {
+		if u.br.Protocol() != "mastodon" { //nolint:goconst
 			logger.Tracef("User %s is not in channel %s. Joining now", ghost.Nick, ch.String())
 			ch.Join(ghost) //nolint:errcheck
 		}
@@ -559,7 +560,7 @@ func (u *User) getMessageChannelUser(channelID string, sender *bridge.UserInfo) 
 	// check if we mayjoin this channel
 	if u.mayJoin(channelID) {
 		// otherwise first sync it
-		u.syncChannel(channelID, u.br.GetChannelName(u.ctx, channelID))
+		_ = u.syncChannel(channelID, u.br.GetChannelName(u.ctx, channelID))
 
 		return ch, ghost
 	}
@@ -567,6 +568,7 @@ func (u *User) getMessageChannelUser(channelID string, sender *bridge.UserInfo) 
 	return u.Srv.Channel("&messages"), ghost
 }
 
+//nolint:funlen,gocognit,gocyclo
 func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 	/*
 		CHANNEL_OPEN                   = "O"
@@ -587,7 +589,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		senderPrefix = u.Prefix()
 	}
 
-	if event.ChannelType != "D" && ch.ID() == "&messages" {
+	if event.ChannelType != "D" && ch.ID() == "&messages" { //nolint:goconst
 		if u.br.BridgeConfig().ShowOnlyJoined {
 			return
 		}
@@ -803,7 +805,7 @@ func (u *User) handleChannelCreateEvent(event *bridge.ChannelCreateEvent) {
 
 	logger.Debugf("ACTION_CHANNEL_CREATED syncing channel %s (%s)", u.br.GetChannelName(u.ctx, event.ChannelID), event.ChannelID)
 
-	u.syncChannel(event.ChannelID, u.br.GetChannelName(u.ctx, event.ChannelID))
+	_ = u.syncChannel(event.ChannelID, u.br.GetChannelName(u.ctx, event.ChannelID))
 }
 
 func (u *User) handleChannelDeleteEvent(event *bridge.ChannelDeleteEvent) {
@@ -829,7 +831,6 @@ func (u *User) handleChannelDeleteEvent(event *bridge.ChannelDeleteEvent) {
 	ch.Unlink()
 }
 
-//nolint:funlen
 func (u *User) handleChannelUpdateEvent(e *bridge.ChannelUpdateEvent) {
 	newIRCChanStr := "#" + e.Name
 
@@ -888,7 +889,7 @@ func (u *User) handleUserUpdateEvent(event *bridge.UserUpdateEvent) {
 func (u *User) handleStatusChangeEvent(event *bridge.StatusChangeEvent) {
 	if event.UserID == u.br.GetMe().User {
 		switch event.Status {
-		case "online":
+		case "online": //nolint:goconst
 			if u.away.Load() {
 				logger.Debug("setting myself online")
 				u.away.Store(false)
@@ -927,7 +928,8 @@ func (u *User) handleStatusChangeEvent(event *bridge.StatusChangeEvent) {
 	}
 }
 
-func (u *User) handleReactionEvent(event interface{}) {
+//nolint:funlen
+func (u *User) handleReactionEvent(event any) {
 	var (
 		text, channelID, messageID, parentID, channelType, reaction string
 		receiver, sender                                            *bridge.UserInfo
@@ -960,7 +962,7 @@ func (u *User) handleReactionEvent(event interface{}) {
 
 	defer u.saveLastViewedAt(channelID)
 
-	if u.br.Protocol() == "mattermost" && u.cfg.Mattermost().HideReactions {
+	if u.br.Protocol() == "mattermost" && u.cfg.Mattermost().HideReactions { //nolint:goconst
 		logger.Debug("Not showing reaction: " + text + reaction)
 		return
 	}
@@ -1054,7 +1056,7 @@ func (u *User) updateUserFromInfo(info *bridge.UserInfo) *User {
 				Command: irc.NICK,
 				Params:  []string{newNick},
 			}
-			u.Encode(changeMsg)
+			_ = u.Encode(changeMsg)
 
 			if ghost.UserInfo != nil {
 				ghost.Nick = newNick
@@ -1096,9 +1098,10 @@ func (u *User) addUsersToChannel(users []*User, channel string, channelID string
 
 	ch := u.Srv.Channel(channelID)
 
-	ch.BatchJoin(users)
+	_ = ch.BatchJoin(users)
 }
 
+//nolint:funlen,gocognit,gocyclo
 func (u *User) addUsersToChannels() {
 	if !sleepContext(u.ctx, time.Millisecond*500) {
 		return
@@ -1167,7 +1170,7 @@ func (u *User) addUsersToChannels() {
 
 	// channel that receives messages from channels not joined on irc
 	ch = srv.Channel("&messages")
-	ch.Join(u)
+	_ = ch.Join(u)
 
 	// Fetch, filter, and sort the channels alphabetically
 	var joinChannels []*bridge.ChannelInfo
@@ -1257,11 +1260,9 @@ func (u *User) addUsersToChannels() {
 		// Create a new logger instance for this specific worker
 		workerLogger := logger.WithField("prefix", fmt.Sprintf("%saddUserToChannelWorker%d", currentPrefix, i))
 
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			u.addUserToChannelWorker(channels, throttle, workerLogger)
-		}()
+		})
 	}
 
 	// Feed the sorted channels into the queue
@@ -1406,7 +1407,7 @@ func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(nick, msg, timeTa
 
 // getChannelSince calculates the 'since' timestamp for a channel based on the configured strategy.
 //
-//nolint:funlen,gocyclo
+//nolint:funlen,gocognit,gocyclo
 func (u *User) getChannelSince(ctx context.Context, brchannel *bridge.ChannelInfo, replayCutoff int64) (int64, string, bool) {
 	// Fetch server-side last viewed if strategy allows
 	strategy := u.sharedCfg().ReplayStrategy
@@ -1418,7 +1419,7 @@ func (u *User) getChannelSince(ctx context.Context, brchannel *bridge.ChannelInf
 	switch strategy {
 	case "saved+server", "server+saved", "stored+server", "server+stored":
 		strategy = "hybrid"
-	case "stored": //nolint:goconst
+	case "stored":
 		strategy = "saved" //nolint:goconst
 	}
 
@@ -1434,21 +1435,21 @@ func (u *User) getChannelSince(ctx context.Context, brchannel *bridge.ChannelInf
 				return brchannel.LastPostAt, "lastpost-fallback", false
 			}
 
-			return replayCutoff, "cutoff-fallback", false
+			return replayCutoff, "cutoff-fallback", false //nolint:goconst
 		}
 
 		if replayCutoff > 0 && serverSince < replayCutoff {
 			return replayCutoff, "server-clamped", false
 		}
 
-		return serverSince, "server", false
+		return serverSince, "server", false //nolint:goconst
 	}
 
 	var savedSince int64
 	var inDB bool
 
 	// Fetch locally saved BoltDB last viewed if strategy allows
-	if strategy == "saved" || strategy == "hybrid" {
+	if strategy == "saved" || strategy == "hybrid" { //nolint:nestif
 		_ = u.lastViewedAtDB.View(func(tx *bolt.Tx) error {
 			var v []byte
 
@@ -1491,7 +1492,7 @@ func (u *User) getChannelSince(ctx context.Context, brchannel *bridge.ChannelInf
 		return replayCutoff, "cutoff-fallback", false
 	}
 
-	if bestSince == 0 || (isDM && !inDB) {
+	if bestSince == 0 || (isDM && !inDB) { //nolint:nestif
 		// If Mattermost gave us a valid LastPostAt, use it (if it's newer than the cutoff)
 		if brchannel.LastPostAt > 0 {
 			if replayCutoff > 0 && brchannel.LastPostAt < replayCutoff {
@@ -1709,12 +1710,10 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 
 			if u.isReplayExcluded(brchannel, channelName) {
 				logger.Debugf("Skipping history replay for excluded channel %s (%s)", channelName, brchannel.ID)
-			} else {
-				if !u.replayHistory(brchannel, since, sinceStr) {
-					logger.Warnf("Replay of %s failed, keeping its saved position for the next startup", channelName)
+			} else if !u.replayHistory(brchannel, since, sinceStr) {
+				logger.Warnf("Replay of %s failed, keeping its saved position for the next startup", channelName)
 
-					continue
-				}
+				continue
 			}
 
 			if u.hasSharedCfg() && !u.sharedCfg().DisableAutoView && !u.replayHidesHistory(brchannel.ID) {
@@ -1921,7 +1920,7 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 }
 
 func (u *User) MsgUser(toUser *User, msg string) {
-	u.Encode(&irc.Message{
+	_ = u.Encode(&irc.Message{
 		Prefix:        toUser.Prefix(),
 		Command:       irc.PRIVMSG,
 		Params:        []string{u.Nick},
@@ -1997,7 +1996,8 @@ func (u *User) syncChannel(id string, name string) error {
 	ch := srv.Channel(id)
 	if u.br.IsChannelMember(id) && !ch.HasUser(u) && u.mayJoin(id) {
 		logger.Tracef("syncChannel adding myself to %s (id: %s)", name, id)
-		ch.Join(u)
+
+		_ = ch.Join(u)
 		svc, _ := srv.HasUser(u.br.Protocol())
 
 		rawTopic := u.br.Topic(u.ctx, ch.ID())
@@ -2016,6 +2016,7 @@ func (u *User) syncChannel(id string, name string) error {
 	return nil
 }
 
+//nolint:gocyclo
 func (u *User) mayJoin(channelID string) bool {
 	ch := u.Srv.Channel(channelID)
 
@@ -2117,7 +2118,7 @@ func (u *User) isValidServer(server, protocol string) bool {
 	case "mattermost":
 		restrict = u.cfg.Mattermost().Bridge.Restrict
 
-	case "slack":
+	case "slack": //nolint:goconst
 		restrict = u.cfg.Slack().Bridge.Restrict
 
 	case serviceMatrix:
@@ -2136,13 +2137,7 @@ func (u *User) isValidServer(server, protocol string) bool {
 
 	logger.Debugf("restrict: %v", restrict)
 
-	for _, srv := range restrict {
-		if srv == server {
-			return true
-		}
-	}
-
-	return false
+	return slices.Contains(restrict, server)
 }
 
 // serviceForPass picks the bridge for a PASS by matching its first word against
@@ -2167,6 +2162,7 @@ func (u *User) serviceForPass(pass []string) string {
 	return ""
 }
 
+//nolint:funlen
 func (u *User) loginTo(protocol string) error {
 	var (
 		br  bridge.Bridger
@@ -2234,7 +2230,7 @@ func (u *User) loginTo(protocol string) error {
 
 	status, _ := br.StatusUser(u.ctx, br.GetMe().User)
 	if status == "away" {
-		u.Srv.EncodeMessage(u, irc.RPL_NOWAWAY, []string{u.Nick}, "You have been marked as being away")
+		_ = u.Srv.EncodeMessage(u, irc.RPL_NOWAWAY, []string{u.Nick}, "You have been marked as being away")
 	}
 
 	info := br.GetMe()
@@ -2253,7 +2249,7 @@ func (u *User) loginTo(protocol string) error {
 	return nil
 }
 
-// nolint:unparam
+//nolint:unparam
 func (u *User) logoutFrom(protocol string) error {
 	logger.Debug("logging out from", protocol)
 
@@ -2408,9 +2404,7 @@ func (u *User) prefixContext(channelID, messageID, parentID, event string) strin
 	u.msgMapMutex.Lock()
 	defer u.msgMapMutex.Unlock()
 
-	var (
-		currentcount, parentcount int
-	)
+	var currentcount, parentcount int
 
 	if parentID == "" {
 		currentcount := u.getOrCreateMsgCounterLocked(channelID, messageID, 0)
@@ -2617,7 +2611,6 @@ func (u *User) saveLastViewedAt(channelID string, ts ...int64) {
 		targetTime := max(newTime, existingTime)
 
 		currentTime := make([]byte, 8)
-		//nolint:gosec // targetTime is positive (post-1970)
 		binary.LittleEndian.PutUint64(currentTime, uint64(targetTime))
 
 		return b.Put([]byte(channelID), currentTime)

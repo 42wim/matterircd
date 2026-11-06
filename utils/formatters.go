@@ -216,7 +216,7 @@ func FormatAndShortenSummary(text string, opts SummaryOpts) string {
 
 // FormatFullCodeBlock handles syntax highlighting entirely in-memory and yields lines
 //
-//nolint:funlen
+//nolint:funlen,gocyclo
 func FormatFullCodeBlock(text, lexer, indent string, opts ProcessMessageOpts, yield func(string)) {
 	// Prepend the block's leading markdown indentation to the IRC prefix
 	prefix := indent + opts.CodeBlockPrefix
@@ -259,7 +259,7 @@ func FormatFullCodeBlock(text, lexer, indent string, opts ProcessMessageOpts, yi
 	}()
 
 	err := quick.Highlight(buf, text, lexer, formatter, style)
-	if err == nil {
+	if err == nil { //nolint:nestif
 		bs := buf.Bytes()
 
 		// Determine which reset sequence to look for based on the formatter
@@ -1062,6 +1062,7 @@ func replaceLinks(msg string) string {
 
 const BlockQuoteCharDefault = ">"
 
+//nolint:funlen,gocyclo
 func Markdown2irc(msg string, blockQuoteChar string, inlineCode string) string {
 	if !strings.ContainsAny(msg, "*_`>~[") {
 		return msg
@@ -1420,15 +1421,15 @@ func matchDefaultMention(text string, start int) int {
 }
 
 // SanitizeDefaultMentions defangs @channel, @all, @here, and Matrix @room mentions to prevent
-// unwanted highlights in IRC clients. When unicode is enabled, it inserts a
+// unwanted highlights in IRC clients. When useUnicode is enabled, it inserts a
 // Zero-Width Non-Joiner (ZWNJ) after the '@'. When disabled, it inserts a hyphen.
-func SanitizeDefaultMentions(text string, unicode bool) string {
+func SanitizeDefaultMentions(text string, useUnicode bool) string {
 	if !strings.Contains(text, "@channel") && !strings.Contains(text, "@all") && !strings.Contains(text, "@here") && !strings.Contains(text, "@room") {
 		return text
 	}
 
 	separator := "@-"
-	if unicode {
+	if useUnicode {
 		separator = "@\u200c"
 	}
 

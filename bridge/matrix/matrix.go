@@ -131,6 +131,7 @@ type Matrix struct {
 	verifyQueue chan *matrixclient.Verification
 }
 
+//nolint:funlen
 func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Event, onConnect func()) (bridge.Bridger, *matrixclient.Client, error) {
 	// The lifetime of this bridge, so Logout can release goroutines blocked on eventChan.
 	bridgeCtx, cancel := context.WithCancel(ctx)
@@ -439,7 +440,7 @@ func (m *Matrix) Join(ctx context.Context, channelName string) (string, string, 
 
 	// CmdJoin strips the leading '#' of an alias like "#room:server".
 	target := channelName
-	if !strings.HasPrefix(target, "!") && !strings.HasPrefix(target, "#") {
+	if !strings.HasPrefix(target, "!") && !strings.HasPrefix(target, "#") { //nolint:nestif
 		// A listed name can contain a colon (a homeserver with a port), so known rooms come first.
 		if channelID := m.GetChannelID(ctx, target, ""); channelID != "" {
 			target = channelID

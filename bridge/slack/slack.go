@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -215,8 +216,8 @@ func (s *Slack) MsgUser(ctx context.Context, username, text string) (string, err
 	}
 
 	// CTCP ACTION (/me)
-	if strings.HasPrefix(text, "\x01ACTION ") {
-		text = strings.TrimPrefix(text, "\x01ACTION ")
+	if after, ok := strings.CutPrefix(text, "\x01ACTION "); ok {
+		text = after
 		text = strings.TrimSuffix(text, "\x01")
 		text = "*" + text + "*"
 	}
@@ -237,8 +238,8 @@ func (s *Slack) MsgUser(ctx context.Context, username, text string) (string, err
 
 func (s *Slack) MsgChannel(ctx context.Context, channelID, text string) (string, error) {
 	// CTCP ACTION (/me)
-	if strings.HasPrefix(text, "\x01ACTION ") {
-		text = strings.TrimPrefix(text, "\x01ACTION ")
+	if after, ok := strings.CutPrefix(text, "\x01ACTION "); ok {
+		text = after
 		text = strings.TrimSuffix(text, "\x01")
 		text = "*" + text + "*"
 	}
@@ -401,7 +402,6 @@ func (s *Slack) GetUsers() []*bridge.UserInfo {
 	s.RLock()
 
 	for _, user := range s.susers {
-		user := user
 		users = append(users, s.createUser(&user))
 	}
 
@@ -540,30 +540,18 @@ func (s *Slack) allowedLogin() error {
 	// we only know which server we are connecting to when we actually are connected.
 	// disconnect if we're not allowed
 	if len(rc.Slack.Bridge.Restrict) > 0 {
-		ok := false
-		for _, domain := range rc.Slack.Bridge.Restrict {
-			if domain == s.sinfo.Team.Domain {
-				ok = true
-				break
-			}
-		}
+		ok := slices.Contains(rc.Slack.Bridge.Restrict, s.sinfo.Team.Domain)
 		if !ok {
-			s.rtm.Disconnect()
+			_ = s.rtm.Disconnect()
 			return errors.New("Not allowed to connect to " + s.sinfo.Team.Domain + " slack")
 		}
 	}
 	// we only know which user we are when we actually are connected.
 	// disconnect if we're not allowed
 	if len(rc.Slack.DenyUsers) > 0 {
-		ok := false
-		for _, user := range rc.Slack.DenyUsers {
-			if user == s.sinfo.User.Name {
-				ok = true
-				break
-			}
-		}
+		ok := slices.Contains(rc.Slack.DenyUsers, s.sinfo.User.Name)
 		if ok {
-			s.rtm.Disconnect()
+			_ = s.rtm.Disconnect()
 			return errors.New("not allowed to connect")
 		}
 	}
@@ -786,7 +774,7 @@ func (s *Slack) getSlackUserFromMessage(rmsg *slack.MessageEvent) (*slack.User, 
 			ID:     rmsg.BotID,
 			TeamID: s.sinfo.Team.ID,
 			Profile: slack.UserProfile{
-				FirstName: "bot",
+				FirstName: "bot", //nolint:goconst
 				LastName:  "bot",
 				RealName:  "bot",
 			},
@@ -846,7 +834,7 @@ func (s *Slack) sendPublicMessage(ghost *bridge.UserInfo, msg, channelID string)
 	s.eventChan <- event
 }
 
-// nolint:funlen,gocognit,gocyclo
+//nolint:funlen,gocognit,gocyclo
 func (s *Slack) handleSlackActionPost(rmsg *slack.MessageEvent) {
 	logger.Debugf("handleSlackActionPost: receiving msg %#v", rmsg)
 
@@ -1054,7 +1042,7 @@ func (s *Slack) getSlackUser(userID string) *slack.User {
 	return user
 }
 
-// nolint:unused
+//nolint:unused
 func (s *Slack) ratelimitCheck(err error) {
 	if rateLimitedError, ok := err.(*slack.RateLimitedError); ok {
 		time.Sleep(rateLimitedError.RetryAfter)

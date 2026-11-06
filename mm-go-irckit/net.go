@@ -11,7 +11,7 @@ import (
 // Conn abstracts the encoding/decoding and sending/receiving when speaking IRC.
 type Conn interface {
 	Close() error
-	Encode(*irc.Message) error
+	Encode(*irc.Message) error //nolint:inamedparam
 	Decode() (*irc.Message, error)
 
 	// ResolveHost returns the resolved host of the RemoteAddr

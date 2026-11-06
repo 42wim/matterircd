@@ -244,7 +244,7 @@ func (c *Client) Summarize(ctx context.Context, prompt string, thinking string) 
 	reqBody := generateRequest{
 		Contents: []content{
 			{
-				Role:  "user",
+				Role:  "user", //nolint:goconst
 				Parts: []part{{Text: prompt}},
 			},
 		},

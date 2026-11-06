@@ -7,7 +7,7 @@ import (
 	"github.com/42wim/matterircd/config"
 )
 
-type Bridger interface {
+type Bridger interface { //nolint:interfacebloat
 	Invite(ctx context.Context, channelID, username string) error
 	Join(ctx context.Context, channelName string) (string, string, error)
 	List(ctx context.Context) (map[string]string, error)
@@ -143,7 +143,7 @@ type BannerChangeEvent struct {
 
 type Event struct {
 	Type string
-	Data interface{}
+	Data any
 }
 
 type ChannelAddEvent struct {
@@ -276,5 +276,5 @@ type Message struct {
 	ParentID  string    `json:"parent_id"`
 	Timestamp time.Time `json:"timestamp"`
 	ID        string    `json:"id"`
-	Extra     map[string][]interface{}
+	Extra     map[string][]any
 }

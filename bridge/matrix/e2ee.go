@@ -11,11 +11,12 @@ import (
 	"path/filepath"
 	"time"
 
+	"maunium.net/go/mautrix"
+	"maunium.net/go/mautrix/event"
+
 	"github.com/42wim/matterircd/bridge"
 	"github.com/matterbridge/matrixclient"
 	"github.com/matterbridge/matrixclient/e2ee"
-	"maunium.net/go/mautrix"
-	"maunium.net/go/mautrix/event"
 )
 
 func storeHash(s string) string {

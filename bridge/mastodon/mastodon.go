@@ -116,7 +116,7 @@ func (m *Mastodon) MsgUser(ctx context.Context, username, text string) (string, 
 }
 
 func (m *Mastodon) MsgChannel(ctx context.Context, channelID, text string) (string, error) {
-	s, err := m.mc.PostStatus(context.Background(), &mastodon.Toot{
+	s, err := m.mc.PostStatus(ctx, &mastodon.Toot{
 		Status: text,
 	})
 	if err != nil {
@@ -143,7 +143,7 @@ func (m *Mastodon) StatusUsers(ctx context.Context) (map[string]string, error) {
 }
 
 func (m *Mastodon) Protocol() string {
-	return "mastodon" //nolint:goconst
+	return "mastodon"
 }
 
 func (m *Mastodon) Kick(ctx context.Context, channelID, username string) error {
