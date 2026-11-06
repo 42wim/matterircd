@@ -751,6 +751,11 @@ func awayNotice(s Server, u *User, br bridge.Bridger, toUser *User) {
 		return
 	}
 
+	// u.ctx outlives a bridge logout, so drop the result if this bridge was replaced meanwhile.
+	if u.currentBridge() != br {
+		return
+	}
+
 	if status == "" || br.IsOnline(status) {
 		if status != "" {
 			toUser.ResetAwayNotified()
@@ -771,6 +776,13 @@ func awayNotice(s Server, u *User, br bridge.Bridger, toUser *User) {
 	}
 
 	status = utils.EmojiReplaceAliases(status, br.FormatterConfig().CustomEmoji)
+
+	// Re-checked right before sending; the mutex isn't held across the network write.
+	if u.currentBridge() != br {
+		toUser.ResetAwayNotified()
+
+		return
+	}
 
 	err = s.EncodeMessage(u, irc.RPL_AWAY, []string{u.Nick, toUser.Nick}, status)
 	if err != nil {

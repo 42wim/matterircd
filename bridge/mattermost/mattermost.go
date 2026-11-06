@@ -799,30 +799,23 @@ func (m *Mattermost) IsOnline(status string) bool {
 func (m *Mattermost) StatusUser(ctx context.Context, userID string) (string, error) {
 	userName := m.mc.GetCachedUserName(userID)
 
-	status := m.mc.GetStatus(ctx, userID)
+	status := m.mc.GetStatusFresh(ctx, userID)
 	if status == "" {
 		return status, nil
-	}
-
-	// Online users are kept current by websocket events; only force a refresh
-	// for the others, whose last-online info goes stale.
-	if prefix, _, _ := strings.Cut(status, ": "); prefix != model.StatusOnline {
-		status = m.mc.GetStatusFresh(ctx, userID)
-		if status == "" {
-			return status, nil
-		}
 	}
 
 	localTime := m.mc.GetUserLocalTime(userID)
 	prefix, custom, hasCustom := strings.Cut(status, ": ")
 
+	// The two reads aren't atomic: if the verification changed in between, a concurrent
+	// refresh replaced the activity, so treat the pair as unverified.
+	verified := m.mc.StatusVerifiedAt(userID)
 	lastActivity := m.mc.GetUserLastActivity(userID)
 
-	// Non-online users were just refreshed above; if that failed, the cached value
-	// may be arbitrarily old, so omit it rather than show a misleading "Last online".
+	// If the refresh above failed, the cached value may be arbitrarily old, so omit
+	// it rather than show a misleading "Last online".
 	if prefix != model.StatusOnline && lastActivity > 0 {
-		verified := m.mc.StatusVerifiedAt(userID)
-		if verified == 0 || time.Now().Unix()-verified > 5*60 {
+		if verified == 0 || verified != m.mc.StatusVerifiedAt(userID) || time.Now().Unix()-verified > 5*60 {
 			logger.Debugf("StatusUser: User: %s (%s) omitting unverified lastOnline (%d, verified %d)", userName, userID, lastActivity, verified)
 
 			lastActivity = 0
