@@ -655,6 +655,11 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		maxlen = max(min(maxlen, wireTextBudget(senderPrefix, cmd, ch.String())-len(prefix)-len(suffix)), 1)
 	}
 
+	// Keep a CTCP ACTION whole here, SpoofWithPrefix splits it keeping the envelope.
+	if strings.HasPrefix(text, "\x01ACTION ") && strings.HasSuffix(text, "\x01") {
+		maxlen = len(text)
+	}
+
 	text = utils.WrapMessage(text, maxlen, hardLineSplit)
 	addPrefix := false
 
