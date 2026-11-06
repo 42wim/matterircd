@@ -154,6 +154,14 @@ func (h helper) DeviceVerified(ctx context.Context) (bool, error) {
 		return false, nil
 	}
 
+	// Mirrors the resolver's "Own master key has changed" check, using the
+	// locally held keys rather than the machine's unsynchronized pubkey cache.
+	// mautrix only ever replaces the CrossSigningKeys pointer (import/generate),
+	// never mutates it, so a single read yields a consistent snapshot.
+	if own := m.CrossSigningKeys; own != nil && own.MasterKey.PublicKey() != msk.Key {
+		return false, nil
+	}
+
 	user := h.client.UserID
 
 	signed, err := m.CryptoStore.IsKeySignedBy(ctx, user, ssk.Key, user, msk.Key)
