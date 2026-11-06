@@ -788,6 +788,11 @@ func awayNotice(s Server, u *User, br bridge.Bridger, toUser *User) {
 		return
 	}
 
+	// The wait for the lock may have outlasted a reset (user seen online); don't send a stale notice.
+	if !toUser.awayGenCurrent(gen) {
+		return
+	}
+
 	err = s.EncodeMessage(u, irc.RPL_AWAY, []string{u.Nick, toUser.Nick}, status)
 	if err != nil {
 		toUser.ResetAwayNotified()

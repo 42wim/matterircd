@@ -533,6 +533,14 @@ func (u *User) ShouldNotifyAway(cooldownSec int64) (bool, int64, uint64) {
 	return true, now, u.awayNotifiedGen
 }
 
+// awayGenCurrent reports whether no reset happened since the generation was snapshotted.
+func (u *User) awayGenCurrent(gen uint64) bool {
+	u.awayNotifyMu.Lock()
+	defer u.awayNotifyMu.Unlock()
+
+	return u.awayNotifiedGen == gen
+}
+
 // MarkAwayNotified records that an away notification was delivered if no reset
 // occurred while the message was in-flight.
 func (u *User) MarkAwayNotified(now int64, expectedGen uint64) {
