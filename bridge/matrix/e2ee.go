@@ -74,7 +74,7 @@ func (m *Matrix) encryptionOptions(cred bridge.Credentials) ([]matrixclient.Opti
 		DBPath:    dbPath,
 		PickleKey: []byte(mxCfg.EncryptionPickleKey),
 		OnDecryptError: func(ev *event.Event, err error) {
-			logger.Warnf("matrix: cannot decrypt %s in %s: %s", ev.ID, ev.RoomID, err)
+			logger.Warnf("matrix: cannot decrypt %s in %s: %s", ev.ID, m.roomLabel(ev.RoomID), err)
 		},
 	})}, nil
 }
