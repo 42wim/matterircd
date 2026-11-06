@@ -226,6 +226,7 @@ func (c *Client) handleRoomName(_ context.Context, ev *event.Event) {
 // setNameLocked sets the room name, ch must be locked.
 func (ch *Channel) setNameLocked(name string) {
 	ch.RawName = name
+
 	ch.Name = ""
 	if name != "" {
 		ch.Name = "#" + strings.ReplaceAll(name, " ", "")
@@ -297,7 +298,7 @@ func (c *Client) noteTimeline(res *mautrix.RespSync) {
 	defer c.Unlock()
 
 	for roomID, room := range res.Rooms.Join {
-		if room != nil {
+		if room != nil { //nolint:nestif
 			c.noteTimelineLocked(roomID, room.Timeline.Events)
 
 			// An omitted field keeps the heroes, an empty array clears them.
@@ -450,7 +451,7 @@ func (c *Client) handleMessage(_ context.Context, ev *event.Event) {
 
 	c.noteActivity(ev.RoomID, ev.ID, ev.Timestamp)
 
-	if targetID := content.RelatesTo.GetReplaceID(); targetID != "" {
+	if targetID := content.RelatesTo.GetReplaceID(); targetID != "" { //nolint:nestif
 		if h, ok := c.handler.(EditHandler); ok {
 			if !c.synced.Load() {
 				return
