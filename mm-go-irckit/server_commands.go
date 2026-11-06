@@ -1155,7 +1155,13 @@ func CmdTagMsg(s Server, u *User, msg *irc.Message) error {
 	target := msg.Params[0]
 
 	if len(msg.Params) > 1 {
-		target = resolveThreadTarget(s, u, target, msg.Params[1])
+		channelName := target
+
+		target = resolveThreadTarget(s, u, channelName, msg.Params[1])
+		if target == "" {
+			// Unresolvable thread root (e.g. evicted from a cache): typing is still valid for the channel.
+			target = channelName
+		}
 	} else if strings.HasPrefix(target, "@@") {
 		target = resolveThreadTarget(s, u, "", target)
 	}
