@@ -653,6 +653,13 @@ outerloop:
 				u.Real = msg.Trailing
 			case irc.PASS:
 				u.Pass = msg.Params
+				// A trailing PASS (":a b c") arrives as one param, split it like LOGIN args.
+				if msg.Trailing != "" && strings.ContainsAny(msg.Trailing, " \t") {
+					args, err := parseCommandString(msg.Trailing)
+					if err == nil {
+						u.Pass = append(msg.Params[:len(msg.Params)-1:len(msg.Params)-1], args...)
+					}
+				}
 			case irc.JOIN:
 				if len(msg.Params) > 0 {
 					channels := strings.Split(msg.Params[0], ",")
