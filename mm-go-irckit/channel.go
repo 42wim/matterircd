@@ -71,9 +71,6 @@ type Channel interface {
 	// Spoof notice
 	SpoofNotice(from string, text string, maxlen ...int)
 
-	// SpoofPrefix returns the prefix messages from the nick are sent with.
-	SpoofPrefix(from string) *irc.Prefix
-
 	// SpoofWithPrefix is like SpoofMessage/SpoofNotice (cmd) with an already resolved prefix.
 	SpoofWithPrefix(prefix *irc.Prefix, text string, cmd string, maxlen ...int)
 
@@ -578,27 +575,18 @@ func (ch *channel) Len() int {
 	return len(ch.usersIdx)
 }
 
-// SpoofPrefix matches the user/host shown in WHOIS when the sender is a known user,
-// otherwise it falls back to the server name as host.
-func (ch *channel) SpoofPrefix(from string) *irc.Prefix {
-	if sender, ok := ch.server.HasUser(from); ok {
-		return sender.Prefix()
-	}
-
-	return &irc.Prefix{
-		Name: from,
-		User: from,
-		Host: ch.server.Name(),
-	}
-}
-
 func (ch *channel) Spoof(from string, text string, cmd string, maxlen ...int) {
-	ch.SpoofWithPrefix(ch.SpoofPrefix(from), text, cmd, maxlen...)
+	// Match the user/host shown in WHOIS when the sender is a known user.
+	prefix := &irc.Prefix{Name: from, User: from, Host: ch.server.Name()}
+	if sender, ok := ch.server.HasUser(from); ok {
+		prefix = sender.Prefix()
+	}
+
+	ch.SpoofWithPrefix(prefix, text, cmd, maxlen...)
 }
 
 // wireTextBudget returns how many bytes of text fit in a ":prefix CMD target :text\r\n"
-// line within IRC's 512 bytes limit. It can be zero or negative when the prefix and target
-// leave no room.
+// line within IRC's 512 bytes limit.
 func wireTextBudget(prefix *irc.Prefix, cmd, target string) int {
 	return 505 - prefix.Len() - len(cmd) - len(target)
 }
@@ -609,11 +597,11 @@ func (ch *channel) SpoofWithPrefix(prefix *irc.Prefix, text string, cmd string, 
 		limit = maxlen[0]
 	}
 
-	// At least one byte per line so wrapping still splits instead of being disabled.
 	hardSplit := ch.server.HardLineSplit()
 	isAction := false
 
 	if hardSplit {
+		// At least one byte per line, as WrapMessage doesn't wrap at zero or below.
 		limit = max(min(limit, wireTextBudget(prefix, cmd, ch.name)), 1)
 
 		// A CTCP ACTION must keep its envelope on every fragment.
@@ -624,7 +612,6 @@ func (ch *channel) SpoofWithPrefix(prefix *irc.Prefix, text string, cmd string, 
 		}
 	}
 
-	// Hard split at this final transport boundary so a long word can't exceed the wire limit.
 	text = utils.WrapMessage(text, limit, hardSplit)
 
 	msg := irc.Message{
