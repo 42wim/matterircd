@@ -799,9 +799,18 @@ func (m *Mattermost) IsOnline(status string) bool {
 func (m *Mattermost) StatusUser(ctx context.Context, userID string) (string, error) {
 	userName := m.mc.GetCachedUserName(userID)
 
-	status := m.mc.GetStatusFresh(ctx, userID)
+	status := m.mc.GetStatus(ctx, userID)
 	if status == "" {
 		return status, nil
+	}
+
+	// Online users are kept current by websocket events; only force a refresh
+	// for the others, whose last-online info goes stale.
+	if prefix, _, _ := strings.Cut(status, ": "); prefix != model.StatusOnline {
+		status = m.mc.GetStatusFresh(ctx, userID)
+		if status == "" {
+			return status, nil
+		}
 	}
 
 	localTime := m.mc.GetUserLocalTime(userID)
