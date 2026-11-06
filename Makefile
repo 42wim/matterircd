@@ -22,7 +22,8 @@ docker:
 
 release:
 	goreleaser release --skip publish
-	cd dist; for i in $$(awk '{ print $$2 }' checksums.txt); do \
-		dist_arch=$$(echo $$i | cut -d'-' -f3,4 | sed -e 's/-/_/g' -e 's/.exe//g' -e 's/armv6/arm_6/g'); \
+	cd dist && set -e; \
+	for i in $$(awk '{ print $$2 }' checksums.txt); do \
+		dist_arch=$$(echo $$i | awk -F- '{ print $$(NF-1) "-" $$NF }' | sed -e 's/-/_/g' -e 's/.exe//g' -e 's/armv6/arm_6/g'); \
 		mv matterircd_$${dist_arch}*/matterircd* $$i; \
-	done; rm -f artifacts.json config.yaml
+	done && rm -f artifacts.json config.yaml
