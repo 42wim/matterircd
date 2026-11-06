@@ -3,6 +3,7 @@ package irckit
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -657,7 +658,7 @@ outerloop:
 				if msg.Trailing != "" && strings.ContainsAny(msg.Trailing, " \t") {
 					args, err := parseCommandString(msg.Trailing)
 					if err == nil {
-						u.Pass = append(msg.Params[:len(msg.Params)-1:len(msg.Params)-1], args...)
+						u.Pass = slices.Concat(msg.Params[:len(msg.Params)-1], args)
 					}
 				}
 			case irc.JOIN:
