@@ -219,3 +219,10 @@ func (c *Client) expirePresence(now time.Time) {
 		}
 	}
 }
+
+// logSyncSummary explains what woke a sync up, to tell short back to back syncs apart.
+func (c *Client) logSyncSummary(res *mautrix.RespSync) {
+	c.apiLogger.Tracef("sync content: joined=%d invited=%d left=%d presence=%d to_device=%d account_data=%d devices_changed=%d otk=%v",
+		len(res.Rooms.Join), len(res.Rooms.Invite), len(res.Rooms.Leave), len(res.Presence.Events),
+		len(res.ToDevice.Events), len(res.AccountData.Events), len(res.DeviceLists.Changed), res.DeviceOTKCount)
+}

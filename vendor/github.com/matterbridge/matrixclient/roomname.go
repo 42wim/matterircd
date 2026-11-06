@@ -57,6 +57,22 @@ func (c *Client) displayNameLocked(roomID id.RoomID, ch *Channel) string {
 	return "#unnamed-" + shortRoomID(roomID)
 }
 
+// roomLabel returns the channel name of a room for logging, the room ID if it is unknown.
+func (c *Client) roomLabel(roomID id.RoomID) string {
+	c.RLock()
+	defer c.RUnlock()
+
+	ch, ok := c.channels[roomID]
+	if !ok {
+		return string(roomID)
+	}
+
+	ch.Lock()
+	defer ch.Unlock()
+
+	return c.displayNameLocked(roomID, ch)
+}
+
 // memberNameLocked names a room after its other members, preferring the heroes the
 // server picked for it. It returns "" if there are none. c must be read locked
 // and ch locked.

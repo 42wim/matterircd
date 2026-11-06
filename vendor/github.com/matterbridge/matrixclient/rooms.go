@@ -63,7 +63,7 @@ func (c *Client) RoomUsers(ctx context.Context, roomID id.RoomID) ([]id.UserID, 
 func (c *Client) UsernamesInRoom(ctx context.Context, roomID id.RoomID) []string {
 	ids, err := c.RoomUsers(ctx, roomID)
 	if err != nil {
-		c.logger.Errorf("failed to get users of %s: %s", roomID, err)
+		c.logger.Errorf("failed to get users of %s (%s): %s", c.roomLabel(roomID), roomID, err)
 
 		return nil
 	}

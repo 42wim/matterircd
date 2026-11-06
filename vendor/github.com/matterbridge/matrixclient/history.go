@@ -37,7 +37,7 @@ func (c *Client) messageFromEvent(ctx context.Context, ev *event.Event) *Message
 		// Undecryptable history, e.g. a missing room key, is skipped like any non-message.
 		dec, err := c.crypto.Decrypt(ctx, ev)
 		if err != nil {
-			c.logger.Debugf("failed to decrypt event %s in %s: %s", ev.ID, ev.RoomID, err)
+			c.logger.Debugf("failed to decrypt event %s in %s (%s): %s", ev.ID, c.roomLabel(ev.RoomID), ev.RoomID, err)
 
 			return nil
 		}

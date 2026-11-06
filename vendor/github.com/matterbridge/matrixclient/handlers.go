@@ -403,8 +403,8 @@ func (c *Client) dropPending(roomID id.RoomID, eventID id.EventID) {
 
 // noteDecryptFailure drops the position of a message the Crypto gave up on, as
 // it is never delivered.
-func (c *Client) noteDecryptFailure(ev *event.Event, err error) {
-	c.logger.Warnf("failed to decrypt event %s in %s: %s", ev.ID, ev.RoomID, err)
+// The failure itself is logged by the caller's handler.
+func (c *Client) noteDecryptFailure(ev *event.Event, _ error) {
 	c.dropPending(ev.RoomID, ev.ID)
 }
 
