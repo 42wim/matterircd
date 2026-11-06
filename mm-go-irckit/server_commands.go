@@ -1433,6 +1433,28 @@ func CmdWhois(s Server, u *User, msg *irc.Message) error {
 			})
 		}
 
+		if detailer, ok := u.br.(bridge.UserDetailer); ok {
+			photo, secure := detailer.UserDetails(u.ctx, other.User)
+
+			if photo != "" {
+				r = append(r, &irc.Message{
+					Prefix:   s.Prefix(),
+					Params:   []string{u.Nick, other.Nick},
+					Command:  RPL_WHOISSPECIAL,
+					Trailing: "photo: " + photo,
+				})
+			}
+
+			if secure {
+				r = append(r, &irc.Message{
+					Prefix:   s.Prefix(),
+					Params:   []string{u.Nick, other.Nick},
+					Command:  RPL_WHOISSPECIAL,
+					Trailing: "secure: verified",
+				})
+			}
+		}
+
 		status, _ := u.br.StatusUser(u.ctx, other.User)
 
 		if status != "" {

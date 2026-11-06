@@ -37,6 +37,12 @@ type DeviceVerifier interface {
 	DeviceVerified(ctx context.Context) (bool, error)
 }
 
+// UserVerifier is optionally implemented by a Crypto that can report whether
+// another user is cross-signing verified by us, see Client.UserVerified.
+type UserVerifier interface {
+	UserVerified(ctx context.Context, userID id.UserID) (bool, error)
+}
+
 // CryptoFactory creates a Crypto for mc. The returned Crypto is responsible for
 // logging in with login, so that the device that owns the stored keys is reused.
 type CryptoFactory func(mc *mautrix.Client, login *mautrix.ReqLogin) (Crypto, error)

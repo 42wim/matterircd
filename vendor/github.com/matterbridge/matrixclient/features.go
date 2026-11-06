@@ -293,17 +293,31 @@ func (c *Client) UpdateStatus(ctx context.Context, userID id.UserID) error {
 	return nil
 }
 
-// GetUserLocalTime returns the current time of a user formatted as HH:MM in
-// their timezone (profile field m.tz), or "" if unknown.
-func (c *Client) GetUserLocalTime(ctx context.Context, userID id.UserID) string {
-	var tz string
-
-	err := c.mc.GetProfileField(ctx, userID, "m.tz", &tz)
-	if err != nil || tz == "" {
+// GetUserAvatarURL returns the HTTP URL of the avatar of a user, see PublicLink,
+// or "" if the user has none.
+func (c *Client) GetUserAvatarURL(ctx context.Context, userID id.UserID) string {
+	uri, err := c.mc.GetAvatarURL(ctx, userID)
+	if err != nil || uri.IsEmpty() {
 		return ""
 	}
 
-	loc, err := time.LoadLocation(tz)
+	return c.PublicLink(uri.CUString())
+}
+
+// GetUserLocalTime returns the current time of a user formatted as HH:MM in
+// their timezone (profile field m.tz), or "" if unknown.
+func (c *Client) GetUserLocalTime(ctx context.Context, userID id.UserID) string {
+	// The homeserver returns {"m.tz": "..."}, not a bare string.
+	var p struct {
+		TZ string `json:"m.tz"`
+	}
+
+	err := c.mc.GetProfileField(ctx, userID, "m.tz", &p)
+	if err != nil || p.TZ == "" {
+		return ""
+	}
+
+	loc, err := time.LoadLocation(p.TZ)
 	if err != nil {
 		return ""
 	}

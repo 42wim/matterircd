@@ -697,7 +697,7 @@ func (m *Matrix) StatusUsers(ctx context.Context) (map[string]string, error) {
 }
 
 func (m *Matrix) IsOnline(status string) bool {
-	return status == "online"
+	return status == "online" || strings.HasPrefix(status, "online (")
 }
 
 func (m *Matrix) Protocol() string {
@@ -887,6 +887,18 @@ func (m *Matrix) GetUserByUsername(ctx context.Context, username string) *bridge
 	return m.createUser(userID)
 }
 
+// UserDetails returns the avatar URL and whether the user is verified, for WHOIS.
+func (m *Matrix) UserDetails(ctx context.Context, userID string) (string, bool) {
+	uid, ok := m.resolveUserID(userID)
+	if !ok {
+		return "", false
+	}
+
+	secure, err := m.mc.UserVerified(ctx, uid)
+
+	return m.mc.GetUserAvatarURL(ctx, uid), err == nil && secure
+}
+
 // hostWithoutPort drops the port from a server name, as an IRC host can't contain ':'.
 func hostWithoutPort(serverName string) string {
 	host, _, err := net.SplitHostPort(serverName)
@@ -929,6 +941,10 @@ func (m *Matrix) createUser(userID id.UserID) *bridge.UserInfo {
 		Me:        userID == m.mc.UserID(),
 		Username:  nick,
 		Directory: m.directoryURL(nick, localpart),
+	}
+
+	if m.mc.IsBot(userID) {
+		info.Roles = "bot"
 	}
 
 	if info.Me {
