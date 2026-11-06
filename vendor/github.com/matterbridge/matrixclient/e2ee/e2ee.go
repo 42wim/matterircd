@@ -88,6 +88,13 @@ func (h helper) Init(ctx context.Context) error {
 		return err
 	}
 
+	// Room state is only kept in memory, so resuming from a persisted
+	// next_batch would deliver no rooms. Keys and sessions are unaffected.
+	err = h.client.Store.SaveNextBatch(ctx, h.client.UserID, "")
+	if err != nil {
+		return fmt.Errorf("reset sync token: %w", err)
+	}
+
 	m := h.Machine()
 	if m == nil {
 		return nil
