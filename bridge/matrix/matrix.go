@@ -1272,10 +1272,17 @@ func (m *Matrix) WaitReady(ctx context.Context) bool {
 	return false
 }
 
+// deviceVerifyTimeout bounds the verification state lookup at login.
+const deviceVerifyTimeout = 10 * time.Second
+
 // DeviceVerified reports whether this session is verified or cross-signed. A
 // non-nil error means the state could not be determined.
 func (m *Matrix) DeviceVerified() (bool, error) {
-	return m.mc.DeviceVerified(m.ctx)
+	// Optional lookup: a stalled homeserver must not hold the login guard for the HTTP client timeout.
+	ctx, cancel := context.WithTimeout(m.ctx, deviceVerifyTimeout)
+	defer cancel()
+
+	return m.mc.DeviceVerified(ctx)
 }
 
 func (m *Matrix) Connected() bool {
