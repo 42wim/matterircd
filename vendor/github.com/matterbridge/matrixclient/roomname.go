@@ -239,6 +239,16 @@ func (c *Client) ResolveRoomName(ctx context.Context, roomID id.RoomID) string {
 		return ""
 	}
 
+	if c.creatingDirectRoom(ch) {
+		c.RLock()
+		defer c.RUnlock()
+
+		ch.RLock()
+		defer ch.RUnlock()
+
+		return c.displayNameLocked(roomID, ch)
+	}
+
 	ch.RLock()
 	unresolved := ch.nameUnresolvedLocked()
 	ch.RUnlock()

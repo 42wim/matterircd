@@ -772,6 +772,22 @@ func (c *Client) creatingDirectRoomLocked(ch *Channel) bool {
 	return true
 }
 
+// creatingDirectRoom is creatingDirectRoomLocked for callers that hold no lock. Such a room must
+// not be reported to the consumer as a channel, as that cannot be undone once SendDirect marks it.
+func (c *Client) creatingDirectRoom(ch *Channel) bool {
+	c.RLock()
+	defer c.RUnlock()
+
+	if len(c.creatingDirect) == 0 {
+		return false
+	}
+
+	ch.RLock()
+	defer ch.RUnlock()
+
+	return !ch.IsDirect && c.creatingDirectRoomLocked(ch)
+}
+
 // mayBeNewDirectLocked reports whether nothing known about ch rules out a freshly created
 // direct room. ch must be locked.
 func (ch *Channel) mayBeNewDirectLocked() bool {

@@ -127,6 +127,16 @@ func (c *Client) inferredDirectLocked(ch *Channel) (id.UserID, bool) {
 	return peer, peer != ""
 }
 
+// memberInFlight reports whether roomID may be a DM that SendDirect is still creating, which
+// the consumer must not learn of as a channel.
+func (c *Client) memberInFlight(roomID id.RoomID) bool {
+	c.RLock()
+	ch, ok := c.channels[roomID]
+	c.RUnlock()
+
+	return ok && c.creatingDirectRoom(ch)
+}
+
 func (c *Client) handleMember(_ context.Context, ev *event.Event) {
 	member := ev.Content.AsMember()
 	if member == nil || ev.StateKey == nil {
@@ -143,7 +153,7 @@ func (c *Client) handleMember(_ context.Context, ev *event.Event) {
 		c.applyMember(ev, member, targetID)
 	}
 
-	if h, ok := c.handler.(MemberHandler); ok && c.synced.Load() {
+	if h, ok := c.handler.(MemberHandler); ok && c.synced.Load() && !c.memberInFlight(ev.RoomID) {
 		h.OnMember(&MemberChange{
 			RoomID:     ev.RoomID,
 			UserID:     targetID,
