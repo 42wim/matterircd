@@ -724,9 +724,12 @@ outerloop:
 			}
 
 			if u.Pass != nil {
-				service := "mattermost"
-				if len(u.Pass) == 1 && !u.cfg.Slack().Disable {
-					service = "slack"
+				service := u.serviceForPass(u.Pass)
+				if service == "" {
+					service = "mattermost"
+					if len(u.Pass) == 1 && !u.cfg.Slack().Disable {
+						service = "slack"
+					}
 				}
 
 				login(u, &User{
