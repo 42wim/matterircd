@@ -161,7 +161,9 @@ func (u *User) VisibleTo() []*User {
 const writeTimeout = 10 * time.Second
 
 // Encode and send each msg until an error occurs, then returns.
-func (u *User) Encode(msgs ...*irc.Message) (err error) { //nolint:gocyclo
+//
+//nolint:gocyclo
+func (u *User) Encode(msgs ...*irc.Message) (err error) {
 	if u == nil || u.Ghost || u.Conn == nil {
 		return nil
 	}
@@ -173,7 +175,8 @@ func (u *User) Encode(msgs ...*irc.Message) (err error) { //nolint:gocyclo
 
 		msg.Trailing = strings.TrimRight(msg.Trailing, " \t\r\n")
 
-		if err := u.Conn.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil { //nolint:noinlineerr
+		err := u.Conn.SetWriteDeadline(time.Now().Add(writeTimeout))
+		if err != nil {
 			logger.Warnf("failed to set write deadline for %s: %v", u.Nick, err)
 		}
 
@@ -204,7 +207,7 @@ func (u *User) Encode(msgs ...*irc.Message) (err error) { //nolint:gocyclo
 			}
 		}
 
-		err := u.Conn.Encode(msg)
+		err = u.Conn.Encode(msg)
 		if err != nil {
 			return err
 		}

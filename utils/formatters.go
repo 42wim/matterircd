@@ -216,8 +216,8 @@ func FormatAndShortenSummary(text string, opts SummaryOpts) string {
 
 // FormatFullCodeBlock handles syntax highlighting entirely in-memory and yields lines
 //
-//nolint:funlen
-func FormatFullCodeBlock(text, lexer, indent string, opts ProcessMessageOpts, yield func(string)) { //nolint:gocyclo
+//nolint:funlen,gocyclo
+func FormatFullCodeBlock(text, lexer, indent string, opts ProcessMessageOpts, yield func(string)) {
 	// Prepend the block's leading markdown indentation to the IRC prefix
 	prefix := indent + opts.CodeBlockPrefix
 
@@ -1062,7 +1062,8 @@ func replaceLinks(msg string) string {
 
 const BlockQuoteCharDefault = ">"
 
-func Markdown2irc(msg string, blockQuoteChar string, inlineCode string) string { //nolint:gocyclo,funlen
+//nolint:funlen,gocyclo
+func Markdown2irc(msg string, blockQuoteChar string, inlineCode string) string {
 	if !strings.ContainsAny(msg, "*_`>~[") {
 		return msg
 	}

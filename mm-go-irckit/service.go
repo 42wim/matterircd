@@ -50,7 +50,8 @@ const helpArg = "help"
 // matrixReadyTimeout bounds the wait for the initial sync before reporting the verification state.
 const matrixReadyTimeout = 2 * time.Minute
 
-func loginMatrix(u *User, toUser *User, args []string) { //nolint:gocyclo,funlen
+//nolint:funlen,gocyclo
+func loginMatrix(u *User, toUser *User, args []string) {
 	wMsg := "Matrix support is very much experimental and a work in progress. Use at your own risk."
 	u.MsgUser(toUser, "WARNING: "+wMsg)
 	logger.Warn(wMsg)
@@ -136,7 +137,8 @@ func loginMatrix(u *User, toUser *User, args []string) { //nolint:gocyclo,funlen
 	}
 }
 
-func login(u *User, toUser *User, args []string, service string) { //nolint:gocognit,gocyclo,funlen
+//nolint:funlen,gocognit,gocyclo
+func login(u *User, toUser *User, args []string, service string) {
 	if u.inprogress.Load() {
 		u.MsgUser(toUser, "login or logout in progress. Please wait")
 		return
@@ -344,7 +346,8 @@ func replay(u *User, toUser *User, args []string, service string) {
 
 	// Parse optional duration argument
 	if len(args) == 2 {
-		if d, err := time.ParseDuration(args[1]); err == nil { //nolint:noinlineerr
+		d, err := time.ParseDuration(args[1])
+		if err == nil {
 			// Bridges use Unix milliseconds
 			since = time.Now().Add(-d).UnixMilli()
 			logSince = fmt.Sprintf("user requested: %s", args[1])
@@ -389,7 +392,8 @@ func replay(u *User, toUser *User, args []string, service string) {
 	u.replayHistory(brchannel, since, logSince)
 }
 
-func details(u *User, toUser *User, args []string, service string) { //nolint:gocyclo,funlen
+//nolint:funlen,gocyclo
+func details(u *User, toUser *User, args []string, service string) {
 	if service != serviceMattermost && service != serviceMatrix {
 		u.MsgUser(toUser, "not implemented")
 		return
@@ -498,7 +502,8 @@ func search(u *User, toUser *User, args []string, service string) {
 
 	limit := 0
 	if len(args) > 1 {
-		if val, err := strconv.Atoi(args[0]); err == nil { //nolint:noinlineerr
+		val, err := strconv.Atoi(args[0])
+		if err == nil {
 			limit = val
 			args = args[1:]
 		}
@@ -1069,7 +1074,8 @@ func (u *User) handleServiceBot(service string, toUser *User, msg string) {
 	cmd.handler(u, toUser, commands[1:], service)
 }
 
-func parseCommandString(line string) ([]string, error) { //nolint:gocyclo
+//nolint:gocyclo
+func parseCommandString(line string) ([]string, error) {
 	args := []string{}
 	buf := ""
 	var escaped, doubleQuoted, singleQuoted bool
@@ -1139,8 +1145,8 @@ func lastsent(u *User, toUser *User, args []string, service string) {
 	}
 }
 
-//nolint:funlen
-func channelHeader(u *User, toUser *User, args []string, service string) { //nolint:gocyclo
+//nolint:funlen,gocyclo
+func channelHeader(u *User, toUser *User, args []string, service string) {
 	showHelp := func() {
 		u.MsgUser(toUser, "need HEADER GET (#<channel>|<user>)")
 		u.MsgUser(toUser, "e.g. HEADER GET #bugs")
@@ -1452,8 +1458,8 @@ func parseSummarizeAIThinkingMode(arg string) (string, bool) {
 	}
 }
 
-//nolint:funlen
-func parseSummarizeLimit(extraArgs []string, defaultLimit, maxLimit int) (summarizeQuery, error) { //nolint:gocyclo
+//nolint:funlen,gocyclo
+func parseSummarizeLimit(extraArgs []string, defaultLimit, maxLimit int) (summarizeQuery, error) {
 	if maxLimit == 0 {
 		maxLimit = 100
 	}
@@ -1529,8 +1535,8 @@ func parseSummarizeLimit(extraArgs []string, defaultLimit, maxLimit int) (summar
 	return query, nil
 }
 
-//nolint:funlen,gocyclo
-func summarize(u *User, toUser *User, args []string, service string) { //nolint:gocognit
+//nolint:funlen,gocognit,gocyclo
+func summarize(u *User, toUser *User, args []string, service string) {
 	cfg := u.cfg.Current().AI
 	if !cfg.Enabled {
 		u.MsgUser(toUser, "AI summarization is not enabled.")

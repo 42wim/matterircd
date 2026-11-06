@@ -335,7 +335,9 @@ func (ch *channel) Topic(from Prefixer, text string) {
 }
 
 // SendNamesResponse sends a User messages indicating the current members of the Channel.
-func (ch *channel) SendNamesResponse(u *User) error { //nolint:funlen
+//
+//nolint:funlen
+func (ch *channel) SendNamesResponse(u *User) error {
 	names := ch.Names()
 	sort.Strings(names)
 

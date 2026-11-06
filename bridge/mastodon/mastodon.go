@@ -116,7 +116,7 @@ func (m *Mastodon) MsgUser(ctx context.Context, username, text string) (string, 
 }
 
 func (m *Mastodon) MsgChannel(ctx context.Context, channelID, text string) (string, error) {
-	s, err := m.mc.PostStatus(context.Background(), &mastodon.Toot{ //nolint:contextcheck
+	s, err := m.mc.PostStatus(ctx, &mastodon.Toot{
 		Status: text,
 	})
 	if err != nil {

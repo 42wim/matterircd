@@ -51,7 +51,8 @@ func CmdAway(s Server, u *User, msg *irc.Message) error {
 	return s.EncodeMessage(u, irc.RPL_NOWAWAY, []string{u.Nick}, "You have been marked as being away")
 }
 
-func CmdCap(s Server, u *User, msg *irc.Message) error { //nolint:gocognit,gocyclo,funlen
+//nolint:funlen,gocognit,gocyclo
+func CmdCap(s Server, u *User, msg *irc.Message) error {
 	if len(msg.Params) < 1 {
 		return nil
 	}
@@ -591,7 +592,9 @@ func isBareThreadID(msg string) bool {
 }
 
 // CmdPrivMsg is a handler for the /PRIVMSG command.
-func CmdPrivMsg(s Server, u *User, msg *irc.Message) error { //nolint:gocognit,gocyclo,funlen
+//
+//nolint:funlen,gocognit,gocyclo
+func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 	var err error
 
 	if len(msg.Params) > 1 {
@@ -851,7 +854,8 @@ func parseReactionToMsg(u *User, msg *irc.Message, channelID string) bool {
 	return true
 }
 
-func parseModifyMsg(u *User, msg *irc.Message, channelID string) bool { //nolint:gocyclo,funlen
+//nolint:funlen,gocyclo
+func parseModifyMsg(u *User, msg *irc.Message, channelID string) bool {
 	matches := parseModifyMsgRegExp.FindStringSubmatch(msg.Trailing)
 	text := msg.Trailing
 
@@ -1306,7 +1310,9 @@ func sanitizeIRCTrailing(s string) string {
 }
 
 // CmdWhois is a handler for the /WHOIS command.
-func CmdWhois(s Server, u *User, msg *irc.Message) error { //nolint:gocognit,gocyclo,funlen
+//
+//nolint:funlen,gocognit,gocyclo
+func CmdWhois(s Server, u *User, msg *irc.Message) error {
 	who := msg.Params[0]
 	if _, ok := s.HasUser(msg.Params[0]); ok { //nolint:nestif
 		other, _ := s.HasUser(who)

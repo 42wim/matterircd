@@ -257,7 +257,8 @@ func (u *User) getMarkdownBlockCodePrefix() (string, string) {
 	return blockQuoteChar, codeBlockPrefix
 }
 
-func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) { //nolint:gocognit,gocyclo,funlen
+//nolint:funlen,gocognit,gocyclo
+func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 	if u.hasSharedCfg() && u.sharedCfg().ShowMentions {
 		for _, m := range u.MentionKeys {
 			if m == u.Nick || m == "" {
@@ -567,7 +568,8 @@ func (u *User) getMessageChannelUser(channelID string, sender *bridge.UserInfo) 
 	return u.Srv.Channel("&messages"), ghost
 }
 
-func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) { //nolint:gocognit,gocyclo,funlen
+//nolint:funlen,gocognit,gocyclo
+func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 	/*
 		CHANNEL_OPEN                   = "O"
 		CHANNEL_PRIVATE                = "P"
@@ -926,7 +928,8 @@ func (u *User) handleStatusChangeEvent(event *bridge.StatusChangeEvent) {
 	}
 }
 
-func (u *User) handleReactionEvent(event any) { //nolint:funlen
+//nolint:funlen
+func (u *User) handleReactionEvent(event any) {
 	var (
 		text, channelID, messageID, parentID, channelType, reaction string
 		receiver, sender                                            *bridge.UserInfo
@@ -1098,7 +1101,8 @@ func (u *User) addUsersToChannel(users []*User, channel string, channelID string
 	_ = ch.BatchJoin(users)
 }
 
-func (u *User) addUsersToChannels() { //nolint:gocognit,gocyclo,funlen
+//nolint:funlen,gocognit,gocyclo
+func (u *User) addUsersToChannels() {
 	if !sleepContext(u.ctx, time.Millisecond*500) {
 		return
 	}
@@ -1403,8 +1407,8 @@ func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(nick, msg, timeTa
 
 // getChannelSince calculates the 'since' timestamp for a channel based on the configured strategy.
 //
-//nolint:funlen,gocyclo
-func (u *User) getChannelSince(ctx context.Context, brchannel *bridge.ChannelInfo, replayCutoff int64) (int64, string, bool) { //nolint:gocognit
+//nolint:funlen,gocognit,gocyclo
+func (u *User) getChannelSince(ctx context.Context, brchannel *bridge.ChannelInfo, replayCutoff int64) (int64, string, bool) {
 	// Fetch server-side last viewed if strategy allows
 	strategy := u.sharedCfg().ReplayStrategy
 	if strategy == "" {
@@ -2011,7 +2015,8 @@ func (u *User) syncChannel(id string, name string) error {
 	return nil
 }
 
-func (u *User) mayJoin(channelID string) bool { //nolint:gocyclo
+//nolint:gocyclo
+func (u *User) mayJoin(channelID string) bool {
 	ch := u.Srv.Channel(channelID)
 
 	jo := u.br.BridgeConfig().JoinOnly
@@ -2156,7 +2161,8 @@ func (u *User) serviceForPass(pass []string) string {
 	return ""
 }
 
-func (u *User) loginTo(protocol string) error { //nolint:funlen
+//nolint:funlen
+func (u *User) loginTo(protocol string) error {
 	var (
 		br  bridge.Bridger
 		err error

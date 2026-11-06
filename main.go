@@ -39,7 +39,8 @@ var (
 	LastViewedSaveDB *bolt.DB
 )
 
-func main() { //nolint:gocognit,gocyclo,funlen
+//nolint:funlen,gocognit,gocyclo
+func main() {
 	ourlog := logrus.New()
 	ourlog.Formatter = &prefixed.TextFormatter{
 		PrefixPadding: 11,
@@ -271,7 +272,8 @@ func setupProfilingReloadHook(cfg *config.Config) {
 				logger.Infof("profiling bind address changed, restarting server...")
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
-				if err := profServer.Shutdown(ctx); err != nil { //nolint:noinlineerr
+				err := profServer.Shutdown(ctx)
+				if err != nil {
 					logger.WithError(err).Error("profiling: Failed to gracefully shutdown old server")
 				}
 				profServer = nil
@@ -295,7 +297,8 @@ func setupProfilingReloadHook(cfg *config.Config) {
 				}
 
 				go func() {
-					if err := profServer.ListenAndServe(); err != nil && err != http.ErrServerClosed { //nolint:noinlineerr
+					err := profServer.ListenAndServe()
+					if err != nil && err != http.ErrServerClosed {
 						logger.WithError(err).Error("profiling: Failed to start HTTP server")
 					}
 				}()
@@ -308,7 +311,8 @@ func setupProfilingReloadHook(cfg *config.Config) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 
-			if err := profServer.Shutdown(ctx); err != nil { //nolint:noinlineerr
+			err := profServer.Shutdown(ctx)
+			if err != nil {
 				logger.WithError(err).Error("profiling: Failed to gracefully shutdown")
 			}
 			profServer = nil
@@ -358,7 +362,8 @@ func setupSignalHandling(cfg *config.Config) {
 	go func() {
 		for range sighupChan {
 			logger.Info("received SIGHUP signal, triggering config reload...")
-			if err := cfg.Reload(); err != nil { //nolint:noinlineerr
+			err := cfg.Reload()
+			if err != nil {
 				logger.WithError(err).Error("SIGHUP config reload failed")
 			}
 		}

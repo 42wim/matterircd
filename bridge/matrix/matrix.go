@@ -131,7 +131,8 @@ type Matrix struct {
 	verifyQueue chan *matrixclient.Verification
 }
 
-func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Event, onConnect func()) (bridge.Bridger, *matrixclient.Client, error) { //nolint:funlen
+//nolint:funlen
+func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Event, onConnect func()) (bridge.Bridger, *matrixclient.Client, error) {
 	// The lifetime of this bridge, so Logout can release goroutines blocked on eventChan.
 	bridgeCtx, cancel := context.WithCancel(ctx)
 

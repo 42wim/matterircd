@@ -486,7 +486,8 @@ func parseThreadTag(tagStr string) string {
 	return ""
 }
 
-func (s *server) handle(u *User) { //nolint:gocognit,gocyclo,funlen
+//nolint:funlen,gocognit,gocyclo
+func (s *server) handle(u *User) {
 	var partMsg string
 	defer s.Quit(u, partMsg)
 	for msg := range u.DecodeCh {
@@ -609,8 +610,8 @@ func (s *server) add(u *User) (ok bool) {
 	return true
 }
 
-//nolint:goconst
-func (s *server) handshake(u *User) error { //nolint:gocognit,gocyclo,funlen
+//nolint:funlen,gocognit,goconst,gocyclo
+func (s *server) handshake(u *User) error {
 	// Assign host
 	u.Host = u.ResolveHost()
 	go u.Decode()

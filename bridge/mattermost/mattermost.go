@@ -267,7 +267,8 @@ func (m *Mattermost) Ping(ctx context.Context, proto ...string) error {
 	}
 }
 
-func (m *Mattermost) SendTyping(ctx context.Context, channelName string) { //nolint:gocyclo,funlen
+//nolint:funlen,gocyclo
+func (m *Mattermost) SendTyping(ctx context.Context, channelName string) {
 	rc := m.cfg.Current()
 	if !rc.EnableTyping || rc.DisableSendTyping {
 		return
@@ -353,7 +354,8 @@ func (m *Mattermost) SendTyping(ctx context.Context, channelName string) { //nol
 	_ = m.mc.WsSendTyping(channelID, "")
 }
 
-func (m *Mattermost) loginToMattermost(ctx context.Context, onWsConnect func()) (*matterclient.Client, error) { //nolint:funlen
+//nolint:funlen
+func (m *Mattermost) loginToMattermost(ctx context.Context, onWsConnect func()) (*matterclient.Client, error) {
 	rc := m.cfg.Current()
 
 	matterclient.Matterircd = true
@@ -396,7 +398,8 @@ func (m *Mattermost) loginToMattermost(ctx context.Context, onWsConnect func()) 
 
 	logger.Infof("login as %s (team: %s) on %s", m.credentials.Login, m.credentials.Team, m.credentials.Server)
 
-	if err := mc.Login(ctx); err != nil { //nolint:noinlineerr
+	err := mc.Login(ctx)
+	if err != nil {
 		logger.Error("login failed: ", err)
 		return nil, err
 	}
@@ -797,7 +800,8 @@ func (m *Mattermost) IsOnline(status string) bool {
 	return strings.HasPrefix(status, model.StatusOnline+" (") && !strings.Contains(status, "): ")
 }
 
-func (m *Mattermost) StatusUser(ctx context.Context, userID string) (string, error) { //nolint:gocyclo
+//nolint:gocyclo
+func (m *Mattermost) StatusUser(ctx context.Context, userID string) (string, error) {
 	userName := m.mc.GetCachedUserName(userID)
 
 	status := m.mc.GetStatusFresh(ctx, userID)
@@ -880,7 +884,8 @@ func (m *Mattermost) Nick(ctx context.Context, name string) error {
 	return m.mc.UpdateUserNick(ctx, name)
 }
 
-func (m *Mattermost) GetChannelName(ctx context.Context, channelID string) string { //nolint:gocyclo
+//nolint:gocyclo
+func (m *Mattermost) GetChannelName(ctx context.Context, channelID string) string {
 	var name string
 
 	if channelID == "" || strings.HasPrefix(channelID, "&") || strings.HasPrefix(channelID, "#") || channelID == m.mc.User.Nickname || channelID == m.mc.User.Username {
@@ -1125,7 +1130,8 @@ func (m *Mattermost) IsDMChannelName(channelName string) bool {
 	return m.mc.IsDMChannelName(channelName)
 }
 
-func (m *Mattermost) createUser(mmuser *model.User) *bridge.UserInfo { //nolint:gocyclo,funlen
+//nolint:funlen,gocyclo
+func (m *Mattermost) createUser(mmuser *model.User) *bridge.UserInfo {
 	if mmuser == nil {
 		return &bridge.UserInfo{}
 	}
@@ -1351,7 +1357,8 @@ var markdownReplacer = strings.NewReplacer(
 	"~~~", "`",
 )
 
-func (m *Mattermost) getCachedPostInfo(ctx context.Context, postID string, newLen int, uncounted string, unicode bool, logger *logrus.Entry) (CachedPost, error) { //nolint:funlen
+//nolint:funlen
+func (m *Mattermost) getCachedPostInfo(ctx context.Context, postID string, newLen int, uncounted string, unicode bool, logger *logrus.Entry) (CachedPost, error) {
 	rc := m.cfg.Current()
 
 	// Search and use cached reply if it exists.
@@ -1573,14 +1580,18 @@ func (m *Mattermost) handleWsActionPost(ctx context.Context, rmsg *model.WebSock
 	case model.PostTypeJoinChannel, model.PostTypeLeaveChannel, model.PostTypeAddToChannel, model.PostTypeRemoveFromChannel:
 		myUser := m.GetMe().User
 		addedUserID, _ := data.GetProps()["addedUserId"].(string)
-		if data.UserId != myUser && addedUserID != myUser {
+		switch {
+		case data.UserId != myUser && addedUserID != myUser:
 			logger.Tracef("Skipping channel sync because user %s joined/left, not us.", data.UserId)
-		} else if data.Type == model.PostTypeLeaveChannel {
+		case data.Type == model.PostTypeLeaveChannel:
 			logger.Tracef("Left channel %s, skipping full channel sync", data.ChannelId)
-		} else if _, err := m.GetChannel(ctx, data.ChannelId); err != nil { //nolint:noinlineerr
-			logger.Errorf("Failed to fetch new channel %s: %v", data.ChannelId, err)
-		} else {
-			logger.Debugf("Successfully synced single channel %s", data.ChannelId)
+		default:
+			_, err := m.GetChannel(ctx, data.ChannelId)
+			if err != nil {
+				logger.Errorf("Failed to fetch new channel %s: %v", data.ChannelId, err)
+			} else {
+				logger.Debugf("Successfully synced single channel %s", data.ChannelId)
+			}
 		}
 
 		m.wsActionPostJoinLeave(ctx, &data, extraProps, logger)
@@ -1776,7 +1787,8 @@ func (m *Mattermost) handleFileEvent(ctx context.Context, channelType string, gh
 	logger.Debugf("handleFileEvent: user %s sent %d files %#v", ghost.Nick, len(fileEvent.Files), data.FileIds)
 }
 
-func (m *Mattermost) wsActionPostJoinLeave(ctx context.Context, data *model.Post, extraProps map[string]any, logger *logrus.Entry) { //nolint:funlen
+//nolint:funlen
+func (m *Mattermost) wsActionPostJoinLeave(ctx context.Context, data *model.Post, extraProps map[string]any, logger *logrus.Entry) {
 	logger.Tracef("wsActionPostJoinLeave: extraProps: %#v", extraProps)
 	switch data.Type {
 	case model.PostTypeAddToChannel:
@@ -2434,8 +2446,8 @@ func (m *Mattermost) getDMChannelID(ctx context.Context, userID string) (string,
 	return dchannel.Id, nil
 }
 
-//nolint:funlen,gocyclo
-func (m *Mattermost) formatMessage(ctx context.Context, data *model.Post, eventType string, logger *logrus.Entry) string { //nolint:gocognit
+//nolint:funlen,gocognit,gocyclo
+func (m *Mattermost) formatMessage(ctx context.Context, data *model.Post, eventType string, logger *logrus.Entry) string {
 	rc := m.cfg.Current()
 	useUnicode := rc.Mattermost.Formatter.Unicode
 
@@ -3049,7 +3061,8 @@ func formatLastOnline(lastActivity int64, isOnline ...bool) string {
 	}
 }
 
-func (m *Mattermost) formatSingleAttachmentField(b *strings.Builder, field *model.SlackAttachmentField, prefix string, prefixChar string, useFallback bool, fallbackText string, opts utils.ProcessMessageOpts, omitFieldTitles bool) { //nolint:gocyclo,funlen
+//nolint:funlen,gocyclo
+func (m *Mattermost) formatSingleAttachmentField(b *strings.Builder, field *model.SlackAttachmentField, prefix string, prefixChar string, useFallback bool, fallbackText string, opts utils.ProcessMessageOpts, omitFieldTitles bool) {
 	var valStr string
 
 	if s, ok := field.Value.(string); ok {
@@ -3346,7 +3359,8 @@ func (m *Mattermost) parsePreviewPost(b *strings.Builder, user string, channel s
 	}
 }
 
-func (m *Mattermost) postListToEvents(ctx context.Context, postlist any, eventType string, since int64) []*bridge.Event { //nolint:gocyclo
+//nolint:gocyclo
+func (m *Mattermost) postListToEvents(ctx context.Context, postlist any, eventType string, since int64) []*bridge.Event {
 	if postlist == nil {
 		return nil
 	}
