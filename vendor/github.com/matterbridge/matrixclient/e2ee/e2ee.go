@@ -93,34 +93,53 @@ func (h helper) Init(ctx context.Context) error {
 		return nil
 	}
 
+	// The remaining steps only prime state for DeviceVerified, which reports
+	// the real error later, so failures must not abort login.
+	h.primeOwnKeys(ctx, m)
+
+	return nil
+}
+
+func (h helper) primeOwnKeys(ctx context.Context, m *crypto.OlmMachine) {
+	log := h.client.Log
+
 	tracked, err := m.CryptoStore.FilterTrackedUsers(ctx, []id.UserID{h.client.UserID})
 	if err != nil {
-		return fmt.Errorf("check own user tracking: %w", err)
+		log.Warn().Err(err).Msg("Failed to check own user tracking")
+
+		return
 	}
 
 	if len(tracked) > 0 {
-		return nil
+		return
 	}
 
 	// Safe here: the sync loop has not started, so nothing else writes the keys.
 	_, err = m.FetchKeys(ctx, []id.UserID{h.client.UserID}, true)
 	if err != nil {
-		return fmt.Errorf("fetch own keys: %w", err)
+		log.Warn().Err(err).Msg("Failed to fetch own keys")
+
+		return
 	}
 
 	// FetchKeys logs per-server and storage failures without returning them.
 	tracked, err = m.CryptoStore.FilterTrackedUsers(ctx, []id.UserID{h.client.UserID})
 	if err != nil {
-		return fmt.Errorf("check own user tracking: %w", err)
+		log.Warn().Err(err).Msg("Failed to check own user tracking")
+
+		return
 	}
 
 	if len(tracked) == 0 {
-		return fmt.Errorf("own user %s not tracked after fetching keys", h.client.UserID)
+		log.Warn().Stringer("user_id", h.client.UserID).Msg("Own user not tracked after fetching keys")
+
+		return
 	}
 
 	_, err = h.ownDevice(ctx, m)
-
-	return err
+	if err != nil {
+		log.Warn().Err(err).Msg("Own device check failed")
+	}
 }
 
 // DeviceVerified implements matrixclient.DeviceVerifier. It resolves trust from
