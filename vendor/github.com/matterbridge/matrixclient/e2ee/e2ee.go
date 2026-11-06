@@ -156,6 +156,13 @@ func (h helper) DeviceVerified(ctx context.Context) (bool, error) {
 		return false, err
 	}
 
+	// The local store can retain a device (and its trust) that was deleted
+	// server-side. This read-only request does not touch the crypto store.
+	_, err = h.client.GetDeviceInfo(ctx, h.client.DeviceID)
+	if err != nil {
+		return false, fmt.Errorf("get own device %s from server: %w", h.client.DeviceID, err)
+	}
+
 	switch dev.Trust {
 	case id.TrustStateVerified:
 		return true, nil
