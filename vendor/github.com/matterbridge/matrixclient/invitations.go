@@ -34,6 +34,7 @@ func (c *Client) syncInvitations(_ context.Context, res *mautrix.RespSync, _ str
 
 	for roomID := range res.Rooms.Join {
 		delete(c.leftRooms, roomID)
+		c.joinedRooms[roomID] = struct{}{}
 
 		if invite, ok := c.invitations[roomID]; ok && invite.Direct {
 			c.acceptedDirect[roomID] = invite.Sender
@@ -49,6 +50,7 @@ func (c *Client) syncInvitations(_ context.Context, res *mautrix.RespSync, _ str
 
 	for roomID := range res.Rooms.Leave {
 		c.leftRooms[roomID] = struct{}{}
+		delete(c.joinedRooms, roomID)
 	}
 
 	c.Unlock()

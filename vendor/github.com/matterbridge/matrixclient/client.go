@@ -58,6 +58,7 @@ type Client struct {
 	acceptedDirect map[id.RoomID]id.UserID
 	pendingDirect  map[id.RoomID]pendingAssoc // associations not yet seen in m.direct, see recordDirect
 	leftRooms      map[id.RoomID]struct{}     // excludes departed rooms from selection, not DM classification
+	joinedRooms    map[id.RoomID]struct{}     // rooms seen in a sync join section or created here, m.direct may list others
 
 	// directWriteMu serializes the m.direct snapshot, write and cache update, as each write
 	// replaces the whole account data. It is never held with the client lock over network I/O.
@@ -120,6 +121,7 @@ func New(ctx context.Context, cred Credentials, h Handler, opts ...Option) (*Cli
 		acceptedDirect: make(map[id.RoomID]id.UserID),
 		pendingDirect:  make(map[id.RoomID]pendingAssoc),
 		leftRooms:      make(map[id.RoomID]struct{}),
+		joinedRooms:    make(map[id.RoomID]struct{}),
 
 		nameResolved: o.nameResolved,
 		nameLookups:  make(chan struct{}, maxNameLookups),
@@ -533,6 +535,11 @@ func (c *Client) DirectRoom(userID id.UserID) id.RoomID {
 			continue
 		}
 
+		// m.direct can list rooms we never joined or left earlier, c.channels has entries for those too.
+		if _, joined := c.joinedRooms[roomID]; !joined {
+			continue
+		}
+
 		if len(users) == 1 && users[0] == userID {
 			return roomID
 		}
@@ -737,6 +744,7 @@ func (c *Client) SendDirect(ctx context.Context, userID id.UserID, parentID id.E
 		c.recordDirect(ctx, userID, roomID)
 
 		c.Lock()
+		c.joinedRooms[roomID] = struct{}{}
 		c.addDirectLocked(roomID, userID)
 		c.Unlock()
 	} else {
