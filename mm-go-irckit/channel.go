@@ -627,7 +627,8 @@ func (ch *channel) SpoofWithPrefix(prefix *irc.Prefix, text string, cmd string, 
 		line, rest, found := strings.Cut(text, "\n")
 		line = strings.TrimSuffix(line, "\r")
 		if isAction {
-			line = "\x01ACTION " + line + "\x01"
+			// Encode only trims whitespace after the closing delimiter, so trim it here.
+			line = "\x01ACTION " + strings.TrimRight(line, " \t") + "\x01"
 		}
 
 		msg.Trailing = line
