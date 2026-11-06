@@ -122,6 +122,12 @@ type UserInfo struct {
 	MentionKeys []string
 }
 
+// UserDetailer is optionally implemented by bridges providing extra WHOIS details
+// that are too costly to fetch on every user lookup.
+type UserDetailer interface {
+	UserDetails(ctx context.Context, userID string) (photo string, secure bool)
+}
+
 type Credentials struct {
 	Login    string
 	Team     string

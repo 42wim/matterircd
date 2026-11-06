@@ -668,16 +668,85 @@ func (m *Matrix) StatusUser(ctx context.Context, userID string) (string, error) 
 		return "", err
 	}
 
-	status := m.mc.GetStatus(uid)
+	prefix := m.mc.GetStatus(uid)
+	localTime := m.mc.GetUserLocalTime(ctx, uid)
+
+	// Presence activity is in milliseconds.
+	lastActivity := m.mc.GetUserLastActivity(uid) / 1000
+
+	var lastOnline string
+
+	if lastActivity > 0 {
+		diff := max(0, time.Now().Unix()-lastActivity)
+		if prefix == matrixclient.StatusOnline {
+			lastOnline = formatLastOnline(lastActivity, true)
+		} else if diff >= 20*60 {
+			lastOnline = formatLastOnline(lastActivity)
+		}
+	}
+
+	var details string
+
+	switch {
+	case lastOnline != "" && localTime != "":
+		details = lastOnline + ", local time: " + localTime
+	case lastOnline != "":
+		details = lastOnline
+	case localTime != "":
+		details = "local time: " + localTime
+	}
+
+	status := prefix
+	if details != "" {
+		status += " (" + details + ")"
+	}
+
 	if custom := m.mc.GetUserCustomStatus(uid); custom != "" {
 		status += ": " + custom
 	}
 
-	if localTime := m.mc.GetUserLocalTime(ctx, uid); localTime != "" {
-		status += " (local time: " + localTime + ")"
+	return status, nil
+}
+
+func formatLastOnline(lastActivity int64, isOnline ...bool) string {
+	if lastActivity <= 0 {
+		return ""
 	}
 
-	return status, nil
+	label := "Last online"
+	if len(isOnline) > 0 && isOnline[0] {
+		label = "Last activity"
+	}
+
+	diff := max(0, time.Now().Unix()-lastActivity)
+
+	switch {
+	case diff < 45:
+		return label + " just now"
+	case diff < 3300: // < 55 minutes
+		mins := max(1, (diff+30)/60)
+		if mins == 1 {
+			return label + " 1 min. ago"
+		}
+
+		return fmt.Sprintf("%s %d mins. ago", label, mins)
+	case diff < 84600: // < 23.5 hours
+		hours := (diff + 1800) / 3600
+		if hours == 1 {
+			return label + " 1 hr. ago"
+		}
+
+		return fmt.Sprintf("%s %d hr. ago", label, hours)
+	case diff < 30*86400:
+		days := (diff + 43200) / 86400
+		if days == 1 {
+			return label + " 1 day ago"
+		}
+
+		return fmt.Sprintf("%s %d days ago", label, days)
+	default:
+		return fmt.Sprintf("%s %s", label, time.Unix(lastActivity, 0).Format("2006-01-02"))
+	}
 }
 
 func (m *Matrix) HasCustomStatus(userID string) bool {
@@ -697,7 +766,7 @@ func (m *Matrix) StatusUsers(ctx context.Context) (map[string]string, error) {
 }
 
 func (m *Matrix) IsOnline(status string) bool {
-	return status == "online"
+	return status == "online" || (strings.HasPrefix(status, "online (") && !strings.Contains(status, "): "))
 }
 
 func (m *Matrix) Protocol() string {
@@ -887,6 +956,18 @@ func (m *Matrix) GetUserByUsername(ctx context.Context, username string) *bridge
 	return m.createUser(userID)
 }
 
+// UserDetails returns the avatar URL and whether the user is verified, for WHOIS.
+func (m *Matrix) UserDetails(ctx context.Context, userID string) (string, bool) {
+	uid, ok := m.resolveUserID(userID)
+	if !ok {
+		return "", false
+	}
+
+	secure, err := m.mc.UserVerified(ctx, uid)
+
+	return m.mc.GetUserAvatarURL(ctx, uid), err == nil && secure
+}
+
 // hostWithoutPort drops the port from a server name, as an IRC host can't contain ':'.
 func hostWithoutPort(serverName string) string {
 	host, _, err := net.SplitHostPort(serverName)
@@ -929,6 +1010,10 @@ func (m *Matrix) createUser(userID id.UserID) *bridge.UserInfo {
 		Me:        userID == m.mc.UserID(),
 		Username:  nick,
 		Directory: m.directoryURL(nick, localpart),
+	}
+
+	if m.mc.IsBot(userID) {
+		info.Roles = "bot"
 	}
 
 	if info.Me {

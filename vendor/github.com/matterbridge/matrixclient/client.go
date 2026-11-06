@@ -456,6 +456,23 @@ func (c *Client) DeviceVerified(ctx context.Context) (bool, error) {
 	return false, nil
 }
 
+// UserVerified reports whether userID is verified, which is the "secure" state
+// of a WHOIS. For our own user it is DeviceVerified, for others their
+// cross-signing master key must be signed by our user-signing key. Trust is
+// resolved from the local crypto store. It is false when end-to-end encryption
+// is disabled or the user has no known cross-signing keys.
+func (c *Client) UserVerified(ctx context.Context, userID id.UserID) (bool, error) {
+	if userID == c.mc.UserID {
+		return c.DeviceVerified(ctx)
+	}
+
+	if p, ok := c.crypto.(UserVerifier); ok {
+		return p.UserVerified(ctx, userID)
+	}
+
+	return false, nil
+}
+
 // UserID is our own user ID.
 func (c *Client) UserID() id.UserID { return c.mc.UserID }
 

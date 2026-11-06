@@ -236,6 +236,85 @@ func (h helper) DeviceVerified(ctx context.Context) (bool, error) {
 	return trusted || msk.Key == msk.First, nil
 }
 
+// ownMasterTrusted reports whether our master key msk is trusted, signatures
+// under it prove nothing otherwise: it is the locally held one, the first one
+// seen, or signed by our device. A locally held key that differs means it was
+// replaced.
+func (h helper) ownMasterTrusted(ctx context.Context, m *crypto.OlmMachine, msk id.CrossSigningKey) (bool, error) {
+	if cur := m.CrossSigningKeys; cur != nil {
+		return cur.MasterKey.PublicKey() == msk.Key, nil
+	}
+
+	if msk.Key == msk.First {
+		return true, nil
+	}
+
+	dev, err := h.ownDevice(ctx, m)
+	if err != nil {
+		return false, err
+	}
+
+	signed, err := m.CryptoStore.IsKeySignedBy(ctx, h.client.UserID, msk.Key, h.client.UserID, dev.SigningKey)
+	if err != nil {
+		return false, fmt.Errorf("check own master key signature: %w", err)
+	}
+
+	return signed, nil
+}
+
+// UserVerified implements matrixclient.UserVerifier. Like DeviceVerified it
+// reads the crypto store only. Another user is verified when their master key
+// is signed by our user-signing key, which our master key must have signed.
+func (h helper) UserVerified(ctx context.Context, userID id.UserID) (bool, error) {
+	m := h.Machine()
+	if m == nil {
+		return false, nil
+	}
+
+	own := h.client.UserID
+
+	ownKeys, err := m.CryptoStore.GetCrossSigningKeys(ctx, own)
+	if err != nil {
+		return false, fmt.Errorf("get own cross-signing keys: %w", err)
+	}
+
+	omsk, ousk := ownKeys[id.XSUsageMaster], ownKeys[id.XSUsageUserSigning]
+	if omsk.Key == "" || ousk.Key == "" {
+		return false, nil
+	}
+
+	trusted, err := h.ownMasterTrusted(ctx, m, omsk)
+	if err != nil || !trusted {
+		return false, err
+	}
+
+	signed, err := m.CryptoStore.IsKeySignedBy(ctx, own, ousk.Key, own, omsk.Key)
+	if err != nil {
+		return false, fmt.Errorf("check user-signing key signature: %w", err)
+	}
+
+	if !signed {
+		return false, nil
+	}
+
+	keys, err := m.CryptoStore.GetCrossSigningKeys(ctx, userID)
+	if err != nil {
+		return false, fmt.Errorf("get cross-signing keys of %s: %w", userID, err)
+	}
+
+	msk := keys[id.XSUsageMaster]
+	if msk.Key == "" {
+		return false, nil
+	}
+
+	signed, err = m.CryptoStore.IsKeySignedBy(ctx, userID, msk.Key, own, ousk.Key)
+	if err != nil {
+		return false, fmt.Errorf("check master key signature of %s: %w", userID, err)
+	}
+
+	return signed, nil
+}
+
 // Factory returns the option to pass to matrixclient.New.
 func Factory(cfg Config) matrixclient.Option {
 	return matrixclient.WithCrypto(func(mc *mautrix.Client, login *mautrix.ReqLogin) (matrixclient.Crypto, error) {
