@@ -606,7 +606,7 @@ func (m *Matrix) MsgChannel(ctx context.Context, channelID, text string) (string
 }
 
 func (m *Matrix) MsgChannelThread(ctx context.Context, channelID, parentID, text string) (string, error) {
-	logger.Debugf("msgchannelthread: sending message thread '%s' '%s' '%s'", channelID, parentID, text)
+	logger.Debugf("msgchannelthread: sending message thread '%s' '%s' '%s'", m.roomLabel(id.RoomID(channelID)), parentID, text)
 
 	m.beginSend(text)
 
@@ -761,7 +761,7 @@ func (m *Matrix) GetChannelUsers(ctx context.Context, channelID string) ([]*brid
 		return nil, err
 	}
 
-	logger.Debugf("GetChannelUsers %s %d", channelID, len(ids))
+	logger.Debugf("GetChannelUsers %s %d", m.roomLabel(id.RoomID(channelID)), len(ids))
 
 	for _, userID := range ids {
 		if u := m.createUser(userID); u != nil {
@@ -1039,7 +1039,7 @@ func (m *Matrix) GetPostsSince(ctx context.Context, channelID string, since int6
 func (m *Matrix) historySince(ctx context.Context, channelID string, since int64, eventType string) []*bridge.Event {
 	msgs, err := m.mc.GetMessagesSince(ctx, id.RoomID(channelID), since)
 	if err != nil {
-		logger.Errorf("matrix: fetching messages of %s: %s", channelID, err)
+		logger.Errorf("matrix: fetching messages of %s: %s", m.roomLabel(id.RoomID(channelID)), err)
 
 		// nil, unlike an empty result, tells replay that the fetch failed.
 		return nil
@@ -1059,7 +1059,7 @@ func (m *Matrix) GetPosts(ctx context.Context, channelID string, limit int) []*b
 
 	msgs, err := m.mc.GetMessages(ctx, id.RoomID(channelID), limit)
 	if err != nil {
-		logger.Errorf("matrix: fetching messages of %s: %s", channelID, err)
+		logger.Errorf("matrix: fetching messages of %s: %s", m.roomLabel(id.RoomID(channelID)), err)
 
 		return []*bridge.Event{}
 	}

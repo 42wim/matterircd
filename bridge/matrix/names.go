@@ -141,6 +141,20 @@ func (m *Matrix) roomsWithNames() ([]matrixclient.RoomInfo, map[id.RoomID]string
 	return rooms, m.assignRoomNames(rooms)
 }
 
+// roomLabel describes a room for logs as "#name (ID)", or just the ID while it has no
+// name yet. It only reads the cache, so it never blocks on the network.
+func (m *Matrix) roomLabel(roomID id.RoomID) string {
+	m.roomNamesMu.Lock()
+	rn, ok := m.roomNames[roomID]
+	m.roomNamesMu.Unlock()
+
+	if !ok {
+		return roomID.String()
+	}
+
+	return "#" + rn.name + " (" + roomID.String() + ")"
+}
+
 // nameResolveDue reports whether the room should be looked up now, and records it.
 // A room is looked up again after roomNameResolveRetry, as long as it has no name.
 func (m *Matrix) nameResolveDue(roomID id.RoomID) bool {
