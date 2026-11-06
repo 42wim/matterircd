@@ -172,14 +172,19 @@ func formatSAS(v *matrixclient.Verification) string {
 	return sb.String()
 }
 
-// Verify runs one verification step of this session: start, accept, sas,
-// confirm, mismatch or cancel. Progress and completion are reported as
+// Verify runs one verification step: start, accept, sas, confirm, mismatch or
+// cancel. For start, a non-empty user verifies that user in a direct message
+// room instead of this session. Progress and completion are reported as
 // notices from OnVerification, not by the return value.
-func (m *Matrix) Verify(ctx context.Context, action string) (string, error) {
+func (m *Matrix) Verify(ctx context.Context, action, user string) (string, error) {
 	if action == "start" {
-		err := m.startVerification(ctx)
+		err := m.startVerification(ctx, user)
 		if err != nil {
 			return "", err
+		}
+
+		if user != "" {
+			return "verification requested, wait for " + user + " to accept it, then use VERIFY SAS to begin the comparison", nil
 		}
 
 		return "verification requested, accept it on your other device, then use VERIFY SAS to begin the comparison", nil
@@ -212,11 +217,21 @@ func (m *Matrix) Verify(ctx context.Context, action string) (string, error) {
 
 // startVerification holds verifyMu across the request, so verificationLoop
 // processes the updates of the new transaction only once it is registered.
-func (m *Matrix) startVerification(ctx context.Context) error {
+func (m *Matrix) startVerification(ctx context.Context, user string) error {
 	m.verifyMu.Lock()
 	defer m.verifyMu.Unlock()
 
-	txn, err := m.mc.StartVerification(ctx, m.mc.UserID())
+	var (
+		txn id.VerificationTransactionID
+		err error
+	)
+
+	if user == "" {
+		txn, err = m.mc.StartVerification(ctx, m.mc.UserID())
+	} else {
+		txn, err = m.startUserVerification(ctx, user)
+	}
+
 	if err != nil {
 		return err
 	}
@@ -225,6 +240,20 @@ func (m *Matrix) startVerification(ctx context.Context) error {
 	m.verifySAS = false
 
 	return nil
+}
+
+func (m *Matrix) startUserVerification(ctx context.Context, user string) (id.VerificationTransactionID, error) {
+	uid, ok := m.resolveUserID(user)
+	if !ok {
+		return "", errors.New("unknown user " + user)
+	}
+
+	roomID := m.mc.DirectRoom(uid)
+	if roomID == "" {
+		return "", errors.New("no direct message room with " + user)
+	}
+
+	return m.mc.StartInRoomVerification(ctx, roomID, uid)
 }
 
 func (m *Matrix) cancelVerification(ctx context.Context, txn id.VerificationTransactionID, code event.VerificationCancelCode, reason string) error {

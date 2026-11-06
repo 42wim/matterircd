@@ -237,16 +237,12 @@ func (h helper) DeviceVerified(ctx context.Context) (bool, error) {
 }
 
 // ownMasterTrusted reports whether our master key msk is trusted, signatures
-// under it prove nothing otherwise: it is the locally held one, the first one
-// seen, or signed by our device. A locally held key that differs means it was
+// under it prove nothing otherwise: it is the locally held one, or signed by
+// our device. A locally held key that differs means it was
 // replaced.
 func (h helper) ownMasterTrusted(ctx context.Context, m *crypto.OlmMachine, msk id.CrossSigningKey) (bool, error) {
 	if cur := m.CrossSigningKeys; cur != nil {
 		return cur.MasterKey.PublicKey() == msk.Key, nil
-	}
-
-	if msk.Key == msk.First {
-		return true, nil
 	}
 
 	dev, err := h.ownDevice(ctx, m)

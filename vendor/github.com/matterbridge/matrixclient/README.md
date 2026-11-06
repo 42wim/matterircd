@@ -82,6 +82,10 @@ first device accepting is identified in `VerificationReady.DeviceID`. Keep the
 request's user/device information for later updates, which carry the transaction
 ID but do not repeat all peer information.
 
+To verify another user, call `StartInRoomVerification(ctx, roomID, userID)`
+with a direct message room shared with that user. The request is sent in the
+room rather than to-device; the remaining steps are identical.
+
 Reject or cancel with `CancelVerification(ctx, txnID,
 event.VerificationCancelCodeUser, reason)`; use
 `event.VerificationCancelCodeSASMismatch` if the SAS differs. Surface every API
