@@ -44,6 +44,11 @@ func (m *Client) GetStatus(ctx context.Context, userID string) string {
 		activeThreshold  = 20 * time.Minute
 		offlineThreshold = 2 * time.Hour
 		statusTTL        = 5 * time.Minute
+		// Offline/away users send no websocket activity, so their cached
+		// last_activity_at goes stale; re-fetch sooner.
+		inactiveStatusTTL = 30 * time.Second
+		// Bound the extra latency a refresh can add to a DM.
+		inactiveFetchTimeout = 3 * time.Second
 	)
 
 	m.Users.mu.RLock()
@@ -71,21 +76,41 @@ func (m *Client) GetStatus(ctx context.Context, userID string) string {
 	}
 
 	userName := m.GetCachedUserName(userID)
-	isStale := !ok || lastFetched == 0 || time.Since(time.Unix(lastFetched, 0)) > statusTTL
+
+	ttl := statusTTL
+	if status != model.StatusOnline {
+		ttl = inactiveStatusTTL
+	}
+
+	isStale := !ok || lastFetched == 0 || time.Since(time.Unix(lastFetched, 0)) > ttl
 
 	if isStale {
+		fetchCtx := ctx
+		maxRetries := 10
+
+		// Refreshing an already cached inactive user is best effort: one attempt
+		// with a short timeout, falling back to the cached value.
+		if ok && lastFetched != 0 && ttl == inactiveStatusTTL {
+			var cancel context.CancelFunc
+
+			fetchCtx, cancel = context.WithTimeout(ctx, inactiveFetchTimeout)
+			defer cancel()
+
+			maxRetries = 0
+		}
+
 		retryCount := 0
 		for {
 			m.apiLogger.Warnf("GetStatus: GetUserStatus: User: %s (%s) #%d", userName, userID, retryCount)
 
-			res, resp, err := m.Client.GetUserStatus(ctx, userID, "")
+			res, resp, err := m.Client.GetUserStatus(fetchCtx, userID, "")
 			if err == nil {
 				status = m.SetUserStatus(userID, res.Status, false, res.LastActivityAt/1000)
 
 				break
 			}
 
-			shouldRetry, hErr := m.HandleRetry(ctx, "GetUserStatus", err, retryCount, 10, resp)
+			shouldRetry, hErr := m.HandleRetry(fetchCtx, "GetUserStatus", err, retryCount, maxRetries, resp)
 			if hErr == nil && shouldRetry {
 				retryCount++
 
