@@ -70,11 +70,13 @@ func (c *Client) handleEncryption(_ context.Context, ev *event.Event) {
 	ch.Lock()
 	first := !ch.Encrypted
 	ch.Encrypted = true
-	ch.Unlock()
 
 	if first && c.crypto == nil {
-		c.logger.Warnf("room %s is encrypted but end-to-end encryption is not enabled, its messages are unreadable", ev.RoomID)
+		// c is already locked, so roomLabel would deadlock.
+		c.logger.Warnf("room %s (%s) is encrypted but end-to-end encryption is not enabled, its messages are unreadable", c.displayNameLocked(ev.RoomID, ch), ev.RoomID)
 	}
+
+	ch.Unlock()
 }
 
 // IsEncrypted reports whether roomID is end-to-end encrypted.
