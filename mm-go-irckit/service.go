@@ -50,7 +50,7 @@ const helpArg = "help"
 // matrixReadyTimeout bounds the wait for the initial sync before reporting the verification state.
 const matrixReadyTimeout = 2 * time.Minute
 
-func loginMatrix(u *User, toUser *User, args []string) {
+func loginMatrix(u *User, toUser *User, args []string) { //nolint:gocyclo,funlen
 	wMsg := "Matrix support is very much experimental and a work in progress. Use at your own risk."
 	u.MsgUser(toUser, "WARNING: "+wMsg)
 	logger.Warn(wMsg)
@@ -90,7 +90,7 @@ func loginMatrix(u *User, toUser *User, args []string) {
 
 	u.MsgUser(toUser, "login OK")
 
-	if e, ok := u.currentBridge().(interface{ EncryptionEnabled() bool }); ok && e.EncryptionEnabled() {
+	if e, ok := u.currentBridge().(interface{ EncryptionEnabled() bool }); ok && e.EncryptionEnabled() { //nolint:nestif
 		u.MsgUser(toUser, "end-to-end encryption (e2ee) is enabled")
 
 		state := "this session is unverified"
@@ -136,7 +136,7 @@ func loginMatrix(u *User, toUser *User, args []string) {
 	}
 }
 
-func login(u *User, toUser *User, args []string, service string) {
+func login(u *User, toUser *User, args []string, service string) { //nolint:gocognit,gocyclo,funlen
 	if u.inprogress.Load() {
 		u.MsgUser(toUser, "login or logout in progress. Please wait")
 		return
@@ -148,7 +148,7 @@ func login(u *User, toUser *User, args []string, service string) {
 		return
 	}
 
-	if service == "mastodon" {
+	if service == "mastodon" { //nolint:goconst
 		u.inprogress.Store(true)
 		defer u.inprogress.Store(false)
 
@@ -170,7 +170,7 @@ func login(u *User, toUser *User, args []string, service string) {
 		return
 	}
 
-	if service == "slack" {
+	if service == "slack" { //nolint:goconst,nestif
 		var err error
 
 		if len(args) != 1 && len(args) != 3 {
@@ -344,7 +344,7 @@ func replay(u *User, toUser *User, args []string, service string) {
 
 	// Parse optional duration argument
 	if len(args) == 2 {
-		if d, err := time.ParseDuration(args[1]); err == nil {
+		if d, err := time.ParseDuration(args[1]); err == nil { //nolint:noinlineerr
 			// Bridges use Unix milliseconds
 			since = time.Now().Add(-d).UnixMilli()
 			logSince = fmt.Sprintf("user requested: %s", args[1])
@@ -389,8 +389,7 @@ func replay(u *User, toUser *User, args []string, service string) {
 	u.replayHistory(brchannel, since, logSince)
 }
 
-//nolint:forcetypeassert,goconst
-func details(u *User, toUser *User, args []string, service string) {
+func details(u *User, toUser *User, args []string, service string) { //nolint:gocyclo,funlen
 	if service != serviceMattermost && service != serviceMatrix {
 		u.MsgUser(toUser, "not implemented")
 		return
@@ -499,7 +498,7 @@ func search(u *User, toUser *User, args []string, service string) {
 
 	limit := 0
 	if len(args) > 1 {
-		if val, err := strconv.Atoi(args[0]); err == nil {
+		if val, err := strconv.Atoi(args[0]); err == nil { //nolint:noinlineerr
 			limit = val
 			args = args[1:]
 		}
@@ -607,7 +606,7 @@ func ping(u *User, toUser *User, args []string, service string) {
 	u.MsgUser(toUser, fmt.Sprintf("PONG (HTTP REST): status=OK, latency=%s", duration))
 }
 
-//nolint:funlen,gocognit,gocyclo,cyclop
+//nolint:funlen,gocyclo,cyclop
 func scrollback(u *User, toUser *User, args []string, service string) {
 	if service != serviceMattermost && service != serviceMatrix {
 		u.MsgUser(toUser, "not implemented")
@@ -1070,7 +1069,7 @@ func (u *User) handleServiceBot(service string, toUser *User, msg string) {
 	cmd.handler(u, toUser, commands[1:], service)
 }
 
-func parseCommandString(line string) ([]string, error) {
+func parseCommandString(line string) ([]string, error) { //nolint:gocyclo
 	args := []string{}
 	buf := ""
 	var escaped, doubleQuoted, singleQuoted bool
@@ -1141,7 +1140,7 @@ func lastsent(u *User, toUser *User, args []string, service string) {
 }
 
 //nolint:funlen
-func channelHeader(u *User, toUser *User, args []string, service string) {
+func channelHeader(u *User, toUser *User, args []string, service string) { //nolint:gocyclo
 	showHelp := func() {
 		u.MsgUser(toUser, "need HEADER GET (#<channel>|<user>)")
 		u.MsgUser(toUser, "e.g. HEADER GET #bugs")
@@ -1454,7 +1453,7 @@ func parseSummarizeAIThinkingMode(arg string) (string, bool) {
 }
 
 //nolint:funlen
-func parseSummarizeLimit(extraArgs []string, defaultLimit, maxLimit int) (summarizeQuery, error) {
+func parseSummarizeLimit(extraArgs []string, defaultLimit, maxLimit int) (summarizeQuery, error) { //nolint:gocyclo
 	if maxLimit == 0 {
 		maxLimit = 100
 	}
@@ -1531,7 +1530,7 @@ func parseSummarizeLimit(extraArgs []string, defaultLimit, maxLimit int) (summar
 }
 
 //nolint:funlen,gocyclo
-func summarize(u *User, toUser *User, args []string, service string) {
+func summarize(u *User, toUser *User, args []string, service string) { //nolint:gocognit
 	cfg := u.cfg.Current().AI
 	if !cfg.Enabled {
 		u.MsgUser(toUser, "AI summarization is not enabled.")

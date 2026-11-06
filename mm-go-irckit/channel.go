@@ -11,7 +11,7 @@ import (
 )
 
 // Channel is a representation of a room in our server
-type Channel interface {
+type Channel interface { //nolint:interfacebloat
 	Prefixer
 
 	// ID is a normalized unique identifier for the channel
@@ -27,7 +27,7 @@ type Channel interface {
 	Users() []*User
 
 	// HasUser returns whether a User is in the channel.
-	HasUser(*User) bool
+	HasUser(*User) bool //nolint:inamedparam
 
 	// Invite prompts the User to join the Channel on behalf of Prefixer.
 	Invite(from Prefixer, u *User) error
@@ -175,7 +175,7 @@ func (ch *channel) Part(u *User, text string) {
 	if _, ok := ch.usersIdx[u.ID()]; !ok {
 		ch.mu.Unlock()
 
-		u.Encode(&irc.Message{
+		_ = u.Encode(&irc.Message{
 			Prefix:   ch.Prefix(),
 			Command:  irc.ERR_NOTONCHANNEL,
 			Params:   []string{ch.name},
@@ -277,7 +277,7 @@ func (ch *channel) Close() error {
 	ch.mu.Unlock()
 
 	for _, to := range users {
-		to.Encode(&irc.Message{
+		_ = to.Encode(&irc.Message{
 			Prefix:  to.Prefix(),
 			Command: irc.PART,
 			Params:  []string{ch.name},
@@ -335,7 +335,7 @@ func (ch *channel) Topic(from Prefixer, text string) {
 }
 
 // SendNamesResponse sends a User messages indicating the current members of the Channel.
-func (ch *channel) SendNamesResponse(u *User) error {
+func (ch *channel) SendNamesResponse(u *User) error { //nolint:funlen
 	names := ch.Names()
 	sort.Strings(names)
 
@@ -478,7 +478,7 @@ func (ch *channel) Join(u *User) error {
 	u.Unlock()
 
 	// speed up &users join
-	if ch.name == "&users" && u.Ghost {
+	if ch.name == "&users" && u.Ghost { //nolint:goconst
 		return nil
 	}
 
@@ -493,7 +493,7 @@ func (ch *channel) Join(u *User) error {
 		to.Encode(msg) //nolint:errcheck
 	}
 
-	ch.SendNamesResponse(u)
+	_ = ch.SendNamesResponse(u)
 
 	return nil
 }

@@ -18,25 +18,25 @@ var loginTests = []ParseTest{
 	{
 		Desc:    "base simple case",
 		Value:   "login user password",
-		Results: []string{"login", "user", "password"},
+		Results: []string{"login", "user", "password"}, //nolint:goconst
 		IsGood:  true,
 	},
 	{
 		Desc:    "Simple with server",
 		Value:   "login server user password",
-		Results: []string{"login", "server", "user", "password"},
+		Results: []string{"login", "server", "user", "password"}, //nolint:goconst
 		IsGood:  true,
 	},
 	{
 		Desc:    "Simple with server and team",
 		Value:   "login server team user password",
-		Results: []string{"login", "server", "team", "user", "password"},
+		Results: []string{"login", "server", "team", "user", "password"}, //nolint:goconst
 		IsGood:  true,
 	},
 	{
 		Desc:    "Simple Long Password Login Single Quote",
 		Value:   "login user 'long password'",
-		Results: []string{"login", "user", "long password"},
+		Results: []string{"login", "user", "long password"}, //nolint:goconst
 		IsGood:  true,
 	},
 	{

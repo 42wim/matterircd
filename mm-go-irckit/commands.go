@@ -22,8 +22,8 @@ type Handler struct {
 }
 
 type Commands interface {
-	Add(Handler)
-	Run(Server, *User, *irc.Message) error
+	Add(Handler)                           //nolint:inamedparam
+	Run(Server, *User, *irc.Message) error //nolint:inamedparam
 }
 
 // Commands is a registry for command handlers

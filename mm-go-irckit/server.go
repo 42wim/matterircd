@@ -32,7 +32,7 @@ type Prefixer interface {
 	Prefix() *irc.Prefix
 }
 
-type Server interface {
+type Server interface { //nolint:interfacebloat
 	Prefixer
 
 	// Name of the server (usually hostname).
@@ -45,32 +45,32 @@ type Server interface {
 	HardLineSplit() bool
 
 	// Connect starts the handshake for a new user, blocks until it's completed or failed with an error.
-	Connect(*User) error
+	Connect(*User) error //nolint:inamedparam
 
 	// Quit removes the user from all the channels and disconnects.
-	Quit(*User, string)
+	Quit(*User, string) //nolint:inamedparam
 
 	// HasUser returns an existing User with a given Nick.
-	HasUser(string) (*User, bool)
+	HasUser(string) (*User, bool) //nolint:inamedparam
 
 	// HasUserID returns an existing User with a given ID
-	HasUserID(string) (*User, bool)
+	HasUserID(string) (*User, bool) //nolint:inamedparam
 
 	// RenameUser changes the Nick of a User if the new name is available.
-	// Returns whether the rename was was successful.
-	RenameUser(*User, string) bool
+	// Returns whether the rename was successful.
+	RenameUser(*User, string) bool //nolint:inamedparam
 
 	// Channel gets or creates a new channel with the given name and Id.
-	Channel(string) Channel
+	Channel(string) Channel //nolint:inamedparam
 
 	// HasChannel returns an existing Channel with a given name.
-	HasChannel(string) (Channel, bool)
+	HasChannel(string) (Channel, bool) //nolint:inamedparam
 
 	// UnlinkChannel removes the channel from the server's storage if it
 	// exists. Once removed, the server is free to create a fresh channel with
 	// the same ID. The server is not responsible for evicting members of an
 	// unlinked channel.
-	UnlinkChannel(Channel)
+	UnlinkChannel(Channel) //nolint:inamedparam
 
 	Add(u *User) bool
 	BatchAdd(users []*User)
@@ -105,8 +105,10 @@ type ServerConfig struct {
 	Commands Commands
 }
 
-var serviceName = "service"
-var activeClients atomic.Int64
+var (
+	serviceName   = "service"
+	activeClients atomic.Int64
+)
 
 func (c ServerConfig) Server() Server {
 	activeClients.Add(1)
@@ -198,7 +200,6 @@ func (s *server) HasUser(nick string) (*User, bool) {
 	s.RLock()
 	defer s.RUnlock()
 	for _, u := range s.users {
-		u := u
 		if u.Nick == nick {
 			return u, true
 		}
@@ -223,7 +224,7 @@ func (s *server) RenameUser(u *User, newNick string) bool {
 	s.Lock()
 	if _, exists := s.users[ID(newNick)]; exists {
 		s.Unlock()
-		s.EncodeMessage(u, irc.ERR_NICKNAMEINUSE, []string{newNick}, "Nickname is already in use")
+		_ = s.EncodeMessage(u, irc.ERR_NICKNAMEINUSE, []string{newNick}, "Nickname is already in use")
 		return false
 	}
 
@@ -238,9 +239,9 @@ func (s *server) RenameUser(u *User, newNick string) bool {
 		Command: irc.NICK,
 		Params:  []string{newNick},
 	}
-	u.Encode(changeMsg)
+	_ = u.Encode(changeMsg)
 	for _, other := range u.VisibleTo() {
-		other.Encode(changeMsg)
+		_ = other.Encode(changeMsg)
 	}
 	return true
 }
@@ -485,7 +486,7 @@ func parseThreadTag(tagStr string) string {
 	return ""
 }
 
-func (s *server) handle(u *User) {
+func (s *server) handle(u *User) { //nolint:gocognit,gocyclo,funlen
 	var partMsg string
 	defer s.Quit(u, partMsg)
 	for msg := range u.DecodeCh {
@@ -609,7 +610,7 @@ func (s *server) add(u *User) (ok bool) {
 }
 
 //nolint:goconst
-func (s *server) handshake(u *User) error {
+func (s *server) handshake(u *User) error { //nolint:gocognit,gocyclo,funlen
 	// Assign host
 	u.Host = u.ResolveHost()
 	go u.Decode()
@@ -669,7 +670,7 @@ outerloop:
 					channels := strings.Split(msg.Params[0], ",")
 					u.addRequestedChannels(channels)
 				}
-				s.EncodeMessage(u, irc.ERR_NOTREGISTERED, []string{"*"}, "Please register first")
+				_ = s.EncodeMessage(u, irc.ERR_NOTREGISTERED, []string{"*"}, "Please register first")
 			// https://ircv3.net/specs/extensions/capability-negotiation.html
 			case irc.CAP:
 				_ = CmdCap(s, u, msg)
@@ -686,7 +687,7 @@ outerloop:
 
 			ok := s.add(u)
 			if !ok {
-				s.EncodeMessage(u, irc.ERR_NICKNAMEINUSE, []string{u.Nick}, "Nickname is already in use")
+				_ = s.EncodeMessage(u, irc.ERR_NICKNAMEINUSE, []string{u.Nick}, "Nickname is already in use")
 				continue
 			}
 			s.u = u

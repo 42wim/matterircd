@@ -687,23 +687,23 @@ func Load(cfgfile string, flags *pflag.FlagSet) (*Config, error) {
 		v: v,
 	}
 
-	if err := c.v.BindPFlags(flags); err != nil {
+	if err := c.v.BindPFlags(flags); err != nil { //nolint:noinlineerr
 		return nil, err
 	}
 
-	if _, err := os.Stat(cfgfile); err != nil {
+	if _, err := os.Stat(cfgfile); err != nil { //nolint:noinlineerr
 		if !os.IsNotExist(err) {
 			return nil, fmt.Errorf("unable to access config file %q: %w", cfgfile, err)
 		}
 
-		if err := c.publishRuntimeConfig(); err != nil {
+		if err := c.publishRuntimeConfig(); err != nil { //nolint:noinlineerr
 			return nil, err
 		}
 
 		return c, nil
 	}
 
-	if err := c.Reload(); err != nil {
+	if err := c.Reload(); err != nil { //nolint:noinlineerr
 		return nil, fmt.Errorf("error reading config file: %w", err)
 	}
 
@@ -715,7 +715,7 @@ func Load(cfgfile string, flags *pflag.FlagSet) (*Config, error) {
 func (c *Config) publishRuntimeConfig() error {
 	runtimeCfg := c.buildRuntimeCfg()
 
-	if err := validate(runtimeCfg); err != nil {
+	if err := validate(runtimeCfg); err != nil { //nolint:noinlineerr
 		return err
 	}
 
@@ -762,11 +762,11 @@ func (c *Config) Reload() error {
 	// If the atomic pointer is currently nil, this is the initial startup load
 	isFirstLoad := c.Current() == nil
 
-	if err := c.v.ReadInConfig(); err != nil {
+	if err := c.v.ReadInConfig(); err != nil { //nolint:noinlineerr
 		return err
 	}
 
-	if err := c.publishRuntimeConfig(); err != nil {
+	if err := c.publishRuntimeConfig(); err != nil { //nolint:noinlineerr
 		return err
 	}
 
@@ -804,7 +804,7 @@ func unquoteString(s string) string {
 	if s == "" || !strings.ContainsRune(s, '\\') {
 		return s
 	}
-	if unq, err := strconv.Unquote(`"` + s + `"`); err == nil {
+	if unq, err := strconv.Unquote(`"` + s + `"`); err == nil { //nolint:noinlineerr
 		return unq
 	}
 	return s
@@ -836,7 +836,7 @@ func (c *Config) watch() {
 
 		// Wait 500ms after the last filesystem event before reloading
 		timer = time.AfterFunc(500*time.Millisecond, func() {
-			if err := c.Reload(); err != nil && logger != nil {
+			if err := c.Reload(); err != nil && logger != nil { //nolint:noinlineerr
 				logger.WithError(err).Error("config reload failed")
 			}
 		})

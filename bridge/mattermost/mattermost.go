@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -266,7 +267,7 @@ func (m *Mattermost) Ping(ctx context.Context, proto ...string) error {
 	}
 }
 
-func (m *Mattermost) SendTyping(ctx context.Context, channelName string) {
+func (m *Mattermost) SendTyping(ctx context.Context, channelName string) { //nolint:gocyclo,funlen
 	rc := m.cfg.Current()
 	if !rc.EnableTyping || rc.DisableSendTyping {
 		return
@@ -352,7 +353,7 @@ func (m *Mattermost) SendTyping(ctx context.Context, channelName string) {
 	_ = m.mc.WsSendTyping(channelID, "")
 }
 
-func (m *Mattermost) loginToMattermost(ctx context.Context, onWsConnect func()) (*matterclient.Client, error) {
+func (m *Mattermost) loginToMattermost(ctx context.Context, onWsConnect func()) (*matterclient.Client, error) { //nolint:funlen
 	rc := m.cfg.Current()
 
 	matterclient.Matterircd = true
@@ -395,7 +396,7 @@ func (m *Mattermost) loginToMattermost(ctx context.Context, onWsConnect func()) 
 
 	logger.Infof("login as %s (team: %s) on %s", m.credentials.Login, m.credentials.Team, m.credentials.Server)
 
-	if err := mc.Login(ctx); err != nil {
+	if err := mc.Login(ctx); err != nil { //nolint:noinlineerr
 		logger.Error("login failed: ", err)
 		return nil, err
 	}
@@ -695,14 +696,14 @@ func (m *Mattermost) MsgChannel(ctx context.Context, channelID, text string) (st
 }
 
 func (m *Mattermost) MsgChannelThread(ctx context.Context, channelID, parentID, text string) (string, error) {
-	props := map[string]interface{}{
+	props := map[string]any{
 		"matterircd_" + m.mc.User.Id: m.instanceTag,
 	}
 
 	msgType := ""
 	// CTCP ACTION (/me)
-	if strings.HasPrefix(text, "\x01ACTION ") {
-		text = strings.TrimPrefix(text, "\x01ACTION ")
+	if after, ok := strings.CutPrefix(text, "\x01ACTION "); ok {
+		text = after
 		text = strings.TrimSuffix(text, "\x01")
 		msgType = "me"
 	}
@@ -796,7 +797,7 @@ func (m *Mattermost) IsOnline(status string) bool {
 	return strings.HasPrefix(status, model.StatusOnline+" (") && !strings.Contains(status, "): ")
 }
 
-func (m *Mattermost) StatusUser(ctx context.Context, userID string) (string, error) {
+func (m *Mattermost) StatusUser(ctx context.Context, userID string) (string, error) { //nolint:gocyclo
 	userName := m.mc.GetCachedUserName(userID)
 
 	status := m.mc.GetStatusFresh(ctx, userID)
@@ -879,7 +880,7 @@ func (m *Mattermost) Nick(ctx context.Context, name string) error {
 	return m.mc.UpdateUserNick(ctx, name)
 }
 
-func (m *Mattermost) GetChannelName(ctx context.Context, channelID string) string {
+func (m *Mattermost) GetChannelName(ctx context.Context, channelID string) string { //nolint:gocyclo
 	var name string
 
 	if channelID == "" || strings.HasPrefix(channelID, "&") || strings.HasPrefix(channelID, "#") || channelID == m.mc.User.Nickname || channelID == m.mc.User.Username {
@@ -1124,7 +1125,7 @@ func (m *Mattermost) IsDMChannelName(channelName string) bool {
 	return m.mc.IsDMChannelName(channelName)
 }
 
-func (m *Mattermost) createUser(mmuser *model.User) *bridge.UserInfo {
+func (m *Mattermost) createUser(mmuser *model.User) *bridge.UserInfo { //nolint:gocyclo,funlen
 	if mmuser == nil {
 		return &bridge.UserInfo{}
 	}
@@ -1350,7 +1351,7 @@ var markdownReplacer = strings.NewReplacer(
 	"~~~", "`",
 )
 
-func (m *Mattermost) getCachedPostInfo(ctx context.Context, postID string, newLen int, uncounted string, unicode bool, logger *logrus.Entry) (CachedPost, error) {
+func (m *Mattermost) getCachedPostInfo(ctx context.Context, postID string, newLen int, uncounted string, unicode bool, logger *logrus.Entry) (CachedPost, error) { //nolint:funlen
 	rc := m.cfg.Current()
 
 	// Search and use cached reply if it exists.
@@ -1477,7 +1478,7 @@ func (m *Mattermost) handleWsActionLeaveTeam(ctx context.Context, rmsg *model.We
 	}
 }
 
-//nolint:funlen,gocognit,gocyclo,cyclop,forcetypeassert
+//nolint:funlen,gocognit,gocyclo,cyclop
 func (m *Mattermost) handleWsActionPost(ctx context.Context, rmsg *model.WebSocketEvent, logger *logrus.Entry) {
 	logger.Trace("in handleWsActionPost")
 	wsData := rmsg.GetData()
@@ -1562,7 +1563,7 @@ func (m *Mattermost) handleWsActionPost(ctx context.Context, rmsg *model.WebSock
 		}
 
 		event := &bridge.Event{
-			Type: "direct_message",
+			Type: "direct_message", //nolint:goconst
 			Data: d,
 		}
 		m.sendEvent(event)
@@ -1576,7 +1577,7 @@ func (m *Mattermost) handleWsActionPost(ctx context.Context, rmsg *model.WebSock
 			logger.Tracef("Skipping channel sync because user %s joined/left, not us.", data.UserId)
 		} else if data.Type == model.PostTypeLeaveChannel {
 			logger.Tracef("Left channel %s, skipping full channel sync", data.ChannelId)
-		} else if _, err := m.GetChannel(ctx, data.ChannelId); err != nil {
+		} else if _, err := m.GetChannel(ctx, data.ChannelId); err != nil { //nolint:noinlineerr
 			logger.Errorf("Failed to fetch new channel %s: %v", data.ChannelId, err)
 		} else {
 			logger.Debugf("Successfully synced single channel %s", data.ChannelId)
@@ -1623,7 +1624,7 @@ func (m *Mattermost) handleWsActionPost(ctx context.Context, rmsg *model.WebSock
 		}
 
 		event := &bridge.Event{
-			Type: "channel_message",
+			Type: "channel_message", //nolint:goconst
 			Data: &bridge.ChannelMessageEvent{
 				Text:        data.Message,
 				ChannelID:   data.ChannelId,
@@ -1775,14 +1776,14 @@ func (m *Mattermost) handleFileEvent(ctx context.Context, channelType string, gh
 	logger.Debugf("handleFileEvent: user %s sent %d files %#v", ghost.Nick, len(fileEvent.Files), data.FileIds)
 }
 
-func (m *Mattermost) wsActionPostJoinLeave(ctx context.Context, data *model.Post, extraProps map[string]interface{}, logger *logrus.Entry) {
+func (m *Mattermost) wsActionPostJoinLeave(ctx context.Context, data *model.Post, extraProps map[string]any, logger *logrus.Entry) { //nolint:funlen
 	logger.Tracef("wsActionPostJoinLeave: extraProps: %#v", extraProps)
 	switch data.Type {
 	case model.PostTypeAddToChannel:
 		if added, ok := extraProps["addedUsername"].(string); ok {
 			if adder, ok := extraProps["username"].(string); ok {
 				event := &bridge.Event{
-					Type: "channel_add",
+					Type: "channel_add", //nolint:goconst
 					Data: &bridge.ChannelAddEvent{
 						Added: []*bridge.UserInfo{
 							m.GetUserByUsername(ctx, added),
@@ -2236,7 +2237,7 @@ func (m *Mattermost) SearchUsers(ctx context.Context, query string) ([]*bridge.U
 	return brusers, nil
 }
 
-func Decode(input interface{}, output interface{}) error {
+func Decode(input any, output any) error {
 	config := &mapstructure.DecoderConfig{
 		Metadata: nil,
 		Result:   output,
@@ -2434,7 +2435,7 @@ func (m *Mattermost) getDMChannelID(ctx context.Context, userID string) (string,
 }
 
 //nolint:funlen,gocyclo
-func (m *Mattermost) formatMessage(ctx context.Context, data *model.Post, eventType string, logger *logrus.Entry) string {
+func (m *Mattermost) formatMessage(ctx context.Context, data *model.Post, eventType string, logger *logrus.Entry) string { //nolint:gocognit
 	rc := m.cfg.Current()
 	useUnicode := rc.Mattermost.Formatter.Unicode
 
@@ -2573,7 +2574,7 @@ const (
 )
 
 func parseMatterpollToMsg(attachments []*model.SlackAttachment, unicode bool) string {
-	msg := ""
+	var msg strings.Builder
 	prefixChar := messageAttachmentCharNonUnicode
 	spaceChar := messageAttachmentSpaceNonUnicode
 	if unicode {
@@ -2584,41 +2585,41 @@ func parseMatterpollToMsg(attachments []*model.SlackAttachment, unicode bool) st
 		prefix := "\x02\x0302" + prefixChar + "\x0f" + spaceChar
 
 		if attachment.AuthorName != "" {
-			msg += prefix + "@" + attachment.AuthorName + "\n"
+			msg.WriteString(prefix + "@" + attachment.AuthorName + "\n")
 		}
 		if attachment.Title != "" {
-			msg += prefix + "\x02" + attachment.Title + "\x02\n"
+			msg.WriteString(prefix + "\x02" + attachment.Title + "\x02\n")
 		}
 
 		for _, action := range attachment.Actions {
 			if strings.HasPrefix(action.Id, "vote") {
-				msg += prefix + "•" + spaceChar + action.Name + "\n"
+				msg.WriteString(prefix + "•" + spaceChar + action.Name + "\n")
 			}
 		}
 
 		if attachment.Text != "" {
-			lines := strings.Split(attachment.Text, "\n")
-			for _, text := range lines {
-				msg += prefix + text + "\n"
+			lines := strings.SplitSeq(attachment.Text, "\n")
+			for text := range lines {
+				msg.WriteString(prefix + text + "\n")
 			}
 		}
 		if !strings.HasPrefix(attachment.Text, "This poll has ended.") {
-			msg += prefix + "\n"
-			msg += prefix + "\x1dUse the web UI to cast your vote\x1d"
+			msg.WriteString(prefix + "\n")
+			msg.WriteString(prefix + "\x1dUse the web UI to cast your vote\x1d")
 		}
 
 		for _, field := range attachment.Fields {
-			msg += prefix + "•" + spaceChar + field.Title + ":" + spaceChar
+			msg.WriteString(prefix + "•" + spaceChar + field.Title + ":" + spaceChar)
 			lines := strings.Split(fmt.Sprintf("%s", field.Value), "\n")
 			newPrefix := ""
 			for _, text := range lines {
-				msg += newPrefix + text + "\n"
+				msg.WriteString(newPrefix + text + "\n")
 				newPrefix = prefix
 			}
 		}
 	}
 
-	return strings.TrimRight(msg, "\n")
+	return strings.TrimRight(msg.String(), "\n")
 }
 
 const blockQuoteCharDefault = utils.BlockQuoteCharDefault
@@ -2696,7 +2697,7 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 
 		var fallbackText, printedFallback string
 
-		if useFallback {
+		if useFallback { //nolint:nestif
 			fallbackText, _, _ = strings.Cut(attachment.Fallback, "\n")
 			fallbackText = strings.TrimSuffix(fallbackText, "\r")
 
@@ -3048,7 +3049,7 @@ func formatLastOnline(lastActivity int64, isOnline ...bool) string {
 	}
 }
 
-func (m *Mattermost) formatSingleAttachmentField(b *strings.Builder, field *model.SlackAttachmentField, prefix string, prefixChar string, useFallback bool, fallbackText string, opts utils.ProcessMessageOpts, omitFieldTitles bool) {
+func (m *Mattermost) formatSingleAttachmentField(b *strings.Builder, field *model.SlackAttachmentField, prefix string, prefixChar string, useFallback bool, fallbackText string, opts utils.ProcessMessageOpts, omitFieldTitles bool) { //nolint:gocyclo,funlen
 	var valStr string
 
 	if s, ok := field.Value.(string); ok {
@@ -3345,7 +3346,7 @@ func (m *Mattermost) parsePreviewPost(b *strings.Builder, user string, channel s
 	}
 }
 
-func (m *Mattermost) postListToEvents(ctx context.Context, postlist interface{}, eventType string, since int64) []*bridge.Event {
+func (m *Mattermost) postListToEvents(ctx context.Context, postlist any, eventType string, since int64) []*bridge.Event { //nolint:gocyclo
 	if postlist == nil {
 		return nil
 	}
@@ -3370,8 +3371,8 @@ func (m *Mattermost) postListToEvents(ctx context.Context, postlist interface{},
 	})
 
 	// traverse the order in reverse
-	for i := len(mmPostList.Order) - 1; i >= 0; i-- {
-		p := mmPostList.Posts[mmPostList.Order[i]]
+	for _, v := range slices.Backward(mmPostList.Order) {
+		p := mmPostList.Posts[v]
 		if p == nil {
 			continue
 		}
