@@ -1174,11 +1174,19 @@ func resolveThreadTarget(s Server, u *User, channelName, threadID string) string
 		}
 
 		targetChannelID := getTargetChannelID(s, u, channelName)
-		if targetChannelID != "" && u.br.GetPostChannelID(u.ctx, postID) == targetChannelID {
+		postChannelID := u.br.GetPostChannelID(u.ctx, postID)
+
+		if targetChannelID != "" && postChannelID == targetChannelID {
 			return "@@" + postID
 		}
 
-		logger.Tracef("resolveThreadTarget: post %s does not belong to channel %s (%s)", threadID, channelName, targetChannelID)
+		if postChannelID == "" {
+			logger.Tracef("resolveThreadTarget: channel of post %s unknown (not cached?), cannot verify it belongs to channel %s (%s)", threadID, channelName, targetChannelID)
+
+			return ""
+		}
+
+		logger.Tracef("resolveThreadTarget: post %s is in channel %s, not channel %s (%s)", threadID, postChannelID, channelName, targetChannelID)
 	}
 
 	return ""
@@ -1195,6 +1203,11 @@ func CmdTagMsg(s Server, u *User, msg *irc.Message) error {
 		channelName := target
 
 		target = resolveThreadTarget(s, u, channelName, msg.Params[1])
+		if target == "" && u.br != nil && u.br.Protocol() == "matrix" {
+			// Matrix typing is room-scoped; falling back to the channel would show phantom typing in the main room.
+			return nil
+		}
+
 		if target == "" {
 			// Unresolvable thread root (e.g. evicted from a cache): typing is still valid for the channel.
 			target = channelName
