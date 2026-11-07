@@ -382,7 +382,8 @@ PrefixContext = false
 #PrefixContext = false
 #Separates localpart and homeserver in nicks of users on other homeservers, instead of
 #Matrix's ':'. "/" gives hloeung/matrix.org, "|" gives hloeung|matrix.org and the
-#default "[]" gives hloeung[matrix.org]. Avoid reserved IRC characters such as '@'.
+#default "[]" gives hloeung[matrix.org]. Only punctuation is accepted, not letters, digits or any of ^.-_ and
+#the reserved IRC characters such as '@'; an invalid value logs a warning and uses "[]".
 #":" gives Matrix's own hloeung:matrix.org, but is not valid in IRC nicks and may break
 #some clients or bouncers; use at your own risk (a warning is logged).
 #ReplaceColonChar = "[]"

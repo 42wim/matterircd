@@ -141,6 +141,12 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 	// Fixed for the session: config reloads would otherwise change nicks without renaming existing ghosts.
 	nickSep := cmp.Or(cfg.Matrix().ReplaceColonChar, "[]")
 
+	if !validNickSep(nickSep) {
+		logger.Warnf("matrix.ReplaceColonChar %q is invalid (only punctuation that is not valid in a user ID or reserved in IRC nicks is allowed), using \"[]\"", nickSep)
+
+		nickSep = "[]"
+	}
+
 	if strings.Contains(nickSep, ":") {
 		logger.Warnf("matrix.ReplaceColonChar contains ':', which is not valid in IRC nicks and may break some IRC clients or bouncers. Use at your own risk")
 	}
@@ -997,6 +1003,24 @@ func nickAffixes(sep string) (string, string) {
 	}
 
 	return sep, ""
+}
+
+// validNickSep reports whether sep can safely separate localpart and homeserver in a nick.
+// Letters and digits are rejected as nick lookups are case-insensitive, '^' is the escape
+// marker, '.', '-', '_' can occur in homeservers and localparts, and the characters that
+// sanitizeNick replaces would collapse into '-'. Escaping can't separate any of those.
+func validNickSep(sep string) bool {
+	for _, r := range sep {
+		if r > '~' || r <= ' ' || strings.ContainsRune("^.-_!+%@&#$'\"?*,~", r) {
+			return false
+		}
+
+		if r >= '0' && r <= '9' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' {
+			return false
+		}
+	}
+
+	return sep != ""
 }
 
 // escapeNickLocalpart percent-style escapes ('^' plus two hex digits) the escape
