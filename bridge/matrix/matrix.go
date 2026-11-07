@@ -1656,15 +1656,16 @@ func (m *Matrix) NormalizePostID(msgID string) string {
 
 func (m *Matrix) SendTyping(ctx context.Context, channelName string) {
 	rc := m.cfg.Current()
-	if !rc.EnableTyping || rc.DisableSendTyping || strings.HasPrefix(channelName, "&") {
+	// Matrix typing is room-scoped; sending it for a thread reply would show
+	// phantom typing in the main room timeline.
+	if !rc.EnableTyping || rc.DisableSendTyping || strings.HasPrefix(channelName, "&") ||
+		strings.HasPrefix(channelName, "@@") {
 		return
 	}
 
 	var roomID id.RoomID
 
-	if postID, ok := strings.CutPrefix(channelName, "@@"); ok {
-		roomID, _ = m.roomOf(postID)
-	} else if roomID = id.RoomID(m.GetChannelID(ctx, channelName, "")); roomID == "" {
+	if roomID = id.RoomID(m.GetChannelID(ctx, channelName, "")); roomID == "" {
 		if userID, found := m.resolveUserID(channelName); found {
 			roomID = m.mc.DirectRoom(userID)
 		}
