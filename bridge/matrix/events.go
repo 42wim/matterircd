@@ -48,7 +48,7 @@ func (m *Matrix) formatPinSuffix(pinned bool) string {
 	}
 }
 
-// cacheText remembers the start of the first line, enough to recognise the message when it is
+// cacheText remembers the start of the first line, enough to recognize the message when it is
 // deleted or pinned, without holding whole messages in memory.
 func (m *Matrix) cacheText(eventID id.EventID, text string) {
 	text, _, _ = strings.Cut(text, "\n")
@@ -56,8 +56,14 @@ func (m *Matrix) cacheText(eventID id.EventID, text string) {
 		return
 	}
 
-	if len(text) > msgTextMaxLen*4 {
-		text = strings.ToValidUTF8(text[:msgTextMaxLen*4], "")
+	// A summary of ShortenRepliesTo characters needs at most 4 bytes per character.
+	limit := msgTextMaxBytes
+	if n := m.cfg.Matrix().ShortenRepliesTo; n > 0 {
+		limit = min(n*4, msgTextMaxBytes)
+	}
+
+	if len(text) > limit {
+		text = strings.ToValidUTF8(text[:limit], "")
 	}
 
 	m.msgTextCache.Add(eventID, text)
@@ -69,7 +75,7 @@ func (m *Matrix) cachedSummary(text string) string {
 		return ""
 	}
 
-	return m.formatSummary(text, msgTextMaxLen, "")
+	return m.formatSummary(text, m.cfg.Matrix().ShortenRepliesTo, "")
 }
 
 // OnEdit implements matrixclient.EditHandler.

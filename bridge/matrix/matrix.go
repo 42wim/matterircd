@@ -56,8 +56,8 @@ const (
 
 	searchUsersLimit   = 50
 	msgRoomCacheSize   = 2000
-	msgTextCacheSize   = 100
-	msgTextMaxLen      = 80
+	msgTextCacheSize   = 2000
+	msgTextMaxBytes    = 1024 // bound per cached message when ShortenRepliesTo is unlimited
 	reactionCacheSize  = 100
 	sentCacheSize      = 100
 	sentReactionWindow = time.Minute
