@@ -58,6 +58,7 @@ func (m *Matrix) formatSuffix(kind suffixKind) string {
 func (m *Matrix) shortText(text string) string {
 	// Replies start with the quoted parent as plaintext fallback.
 	text = event.TrimReplyFallbackText(text)
+
 	text, rest, multiline := strings.Cut(text, "\n")
 	if text == "" {
 		return ""
