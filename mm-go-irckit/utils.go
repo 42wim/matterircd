@@ -67,15 +67,27 @@ func removeStringInSlice(a string, list []string) []string {
 	return newlist
 }
 
-// Sanitize nick: replace IRC characters with special meanings with "-"
-func sanitizeNick(nick string) string {
+// Sanitize nick: replace IRC characters with special meanings with "-".
+// allowColon keeps a non-leading ':' for Matrix, which uses localpart:homeserver.
+func sanitizeNick(nick string, allowColon bool) string {
 	sanitize := func(r rune) rune {
-		if strings.ContainsRune("!+%@&#$:'\"?*, ", r) {
+		if strings.ContainsRune("!+%@&#$'\"?*, ", r) || (r == ':' && !allowColon) {
 			return '-'
 		}
 
 		return r
 	}
 
-	return strings.Map(sanitize, nick)
+	nick = strings.Map(sanitize, nick)
+
+	// A leading ':' would start the trailing parameter.
+	if strings.HasPrefix(nick, ":") {
+		nick = "-" + nick[1:]
+	}
+
+	return nick
+}
+
+func (u *User) sanitizeNick(nick string) string {
+	return sanitizeNick(nick, u.br != nil && u.br.Protocol() == serviceMatrix)
 }
