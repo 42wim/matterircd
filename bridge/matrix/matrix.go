@@ -991,7 +991,9 @@ func (m *Matrix) createUser(userID id.UserID) *bridge.UserInfo {
 	}
 
 	// Drop the homeserver/host part if it's a user on the same homeserver as us.
-	nick := localpart + "/" + homeserver
+	// '/' separates the homeserver in the nick, so it must not appear in the localpart.
+	safeLocalpart := strings.ReplaceAll(localpart, "/", "-")
+	nick := safeLocalpart + "/" + homeserver
 
 	// The IRC user is the key of a ghost. It always has the homeserver, as '/' is
 	// legal in a localpart and would otherwise collide with a remote user.
@@ -999,7 +1001,7 @@ func (m *Matrix) createUser(userID id.UserID) *bridge.UserInfo {
 
 	_, myHomeserver, err := m.mc.UserID().Parse()
 	if err == nil && homeserver == myHomeserver {
-		nick = localpart
+		nick = safeLocalpart
 	}
 
 	info := &bridge.UserInfo{
