@@ -138,24 +138,55 @@ type Matrix struct {
 	verifyQueue chan *matrixclient.Verification
 }
 
+// resolveNickSep returns the configured separator and the one to use: an invalid
+// separator falls back to "[]", and ':' is allowed with a warning.
+func resolveNickSep(configured string) (string, string) {
+	requested := cmp.Or(configured, "[]")
+	sep := requested
+
+	if !validNickSep(sep) {
+		logger.Warnf("matrix.ReplaceColonChar %q is invalid (only punctuation that is not valid in a user ID or reserved in IRC nicks is allowed), using \"[]\"", sep)
+
+		sep = "[]"
+	}
+
+	if strings.Contains(sep, ":") {
+		logger.Warnf("matrix.ReplaceColonChar contains ':', which is not valid in IRC nicks and may break some IRC clients or bouncers. Use at your own risk")
+	}
+
+	return requested, sep
+}
+
+// sessionSettingsHook sets the log levels on reload and logs, once per new value, that
+// settings fixed for the session changed and need a reconnect to take effect.
+func sessionSettingsHook(sep, provider string, setLogLevels func(rc *config.RuntimeConfig)) func(rc *config.RuntimeConfig) {
+	var lastSep, lastProvider atomic.Value
+
+	lastSep.Store(sep)
+	lastProvider.Store(provider)
+
+	return func(rc *config.RuntimeConfig) {
+		setLogLevels(rc)
+
+		newSep := cmp.Or(rc.Matrix.ReplaceColonChar, "[]")
+		if lastSep.Swap(newSep) != newSep && newSep != sep {
+			logger.Infof("matrix.ReplaceColonChar changed from %q to %q, a reconnect (disconnect + connect) is required for it to take effect", sep, newSep)
+		}
+
+		newProvider := rc.Matrix.DefaultProvider
+		if lastProvider.Swap(newProvider) != newProvider && newProvider != provider {
+			logger.Infof("matrix.DefaultProvider changed from %q to %q, a reconnect (disconnect + connect) is required for it to take effect", provider, newProvider)
+		}
+	}
+}
+
 //nolint:funlen
 func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Event, onConnect func()) (bridge.Bridger, *matrixclient.Client, error) {
 	// The lifetime of this bridge, so Logout can release goroutines blocked on eventChan.
 	bridgeCtx, cancel := context.WithCancel(ctx)
 
 	// Fixed for the session: config reloads would otherwise change nicks without renaming existing ghosts.
-	requestedSep := cmp.Or(cfg.Matrix().ReplaceColonChar, "[]")
-	nickSep := requestedSep
-
-	if !validNickSep(nickSep) {
-		logger.Warnf("matrix.ReplaceColonChar %q is invalid (only punctuation that is not valid in a user ID or reserved in IRC nicks is allowed), using \"[]\"", nickSep)
-
-		nickSep = "[]"
-	}
-
-	if strings.Contains(nickSep, ":") {
-		logger.Warnf("matrix.ReplaceColonChar contains ':', which is not valid in IRC nicks and may break some IRC clients or bouncers. Use at your own risk")
-	}
+	requestedSep, nickSep := resolveNickSep(cfg.Matrix().ReplaceColonChar)
 
 	defaultProvider := cfg.Matrix().DefaultProvider
 
@@ -256,24 +287,7 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 
 	// The hook keeps this client alive for as long as it is registered, so Logout
 	// has to remove it again.
-	var lastNotifiedSep, lastNotifiedProvider atomic.Value
-
-	lastNotifiedSep.Store(requestedSep)
-	lastNotifiedProvider.Store(defaultProvider)
-
-	m.unregisterReloadHook = cfg.RegisterReloadHook(func(rc *config.RuntimeConfig) {
-		setLogLevels(rc)
-
-		newSep := cmp.Or(rc.Matrix.ReplaceColonChar, "[]")
-		if lastNotifiedSep.Swap(newSep) != newSep && newSep != requestedSep {
-			logger.Infof("matrix.ReplaceColonChar changed from %q to %q, a reconnect (disconnect + connect) is required for it to take effect", requestedSep, newSep)
-		}
-
-		newProvider := rc.Matrix.DefaultProvider
-		if lastNotifiedProvider.Swap(newProvider) != newProvider && newProvider != defaultProvider {
-			logger.Infof("matrix.DefaultProvider changed from %q to %q, a reconnect (disconnect + connect) is required for it to take effect", defaultProvider, newProvider)
-		}
-	})
+	m.unregisterReloadHook = cfg.RegisterReloadHook(sessionSettingsHook(requestedSep, defaultProvider, setLogLevels))
 	m.connected.Store(true)
 
 	return m, mc, nil
