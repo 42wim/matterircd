@@ -33,6 +33,21 @@ func (m *Matrix) formatSuffix(isEdited, isDeleted, isEncrypted bool) string {
 	}
 }
 
+func (m *Matrix) formatPinSuffix(pinned bool) string {
+	useUnicode := m.cfg.Matrix().Formatter.Unicode
+
+	switch {
+	case pinned && useUnicode:
+		return "\x1d(📌pinned)\x1d"
+	case pinned:
+		return "\x1d(pinned)\x1d"
+	case useUnicode:
+		return "\x1d(📌unpinned)\x1d"
+	default:
+		return "\x1d(unpinned)\x1d"
+	}
+}
+
 // cacheText remembers text so the message can be shown again when it is deleted.
 func (m *Matrix) cacheText(eventID id.EventID, text string) {
 	if text != "" {
@@ -61,9 +76,15 @@ func (m *Matrix) OnEdit(e *matrixclient.Edit) {
 
 // OnRedaction implements matrixclient.RedactionHandler.
 func (m *Matrix) OnRedaction(r *matrixclient.Redaction) {
-	// The caches only hold messages, which skips redacted reactions.
+	if r.TargetType == event.EventReaction {
+		return
+	}
+
 	text, hasText := m.msgTextCache.Get(r.TargetID)
-	if _, ok := m.msgRoomCache.Get(r.TargetID); !ok && !hasText {
+	_, inRoomCache := m.msgRoomCache.Get(r.TargetID)
+
+	// An unknown type, as the lookup failed, must not report a removed reaction as a deleted message.
+	if r.TargetType.Type == "" && !inRoomCache && !hasText {
 		return
 	}
 
@@ -85,6 +106,24 @@ func (m *Matrix) OnRedaction(r *matrixclient.Redaction) {
 	}
 
 	m.sendText(ghost, r.RoomID, r.Direct, r.TargetID, "", suffix, "post_deleted", m.messageType(text), 0)
+}
+
+// OnPin implements matrixclient.PinHandler.
+func (m *Matrix) OnPin(p *matrixclient.PinChange) {
+	ghost := m.createUser(p.Sender)
+	if ghost == nil {
+		return
+	}
+
+	text, _ := m.msgTextCache.Get(p.EventID)
+	suffix := m.formatPinSuffix(p.Pinned)
+
+	if text != "" {
+		suffix = text + " " + suffix
+	}
+
+	m.msgRoomCache.Add(p.EventID, p.RoomID)
+	m.sendText(ghost, p.RoomID, m.mc.IsDirect(p.RoomID), p.EventID, "", suffix, "post_edited", m.messageType(text), 0)
 }
 
 // OnTyping implements matrixclient.TypingHandler.

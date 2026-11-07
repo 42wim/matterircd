@@ -34,6 +34,10 @@ type Client struct {
 	connected atomic.Bool
 	synced    atomic.Bool // set once the initial sync was processed
 
+	// lookupUntil is the deadline in unix nanoseconds for redaction type lookups
+	// of the sync response being processed, reset for every response.
+	lookupUntil atomic.Int64
+
 	cred Credentials
 
 	// stateLock guards the debounce maps and is never held across API calls.
@@ -150,7 +154,7 @@ func New(ctx context.Context, cred Credentials, h Handler, opts ...Option) (*Cli
 
 	// Ready is called from the sync goroutine, after the events of the first
 	// sync response were processed, so handler calls stay serialized.
-	mc.Syncer = &readySyncer{DefaultSyncer: syncer, ready: h.Ready, synced: c.onSynced, named: c.noteRoomNames, track: c.noteTimeline, summary: c.logSyncSummary, leftInvites: c.removeLeftInvitations, decrypted: c.noteDecrypted, failed: c.onSyncFailed}
+	mc.Syncer = &readySyncer{DefaultSyncer: syncer, ready: h.Ready, synced: c.onSynced, named: c.noteRoomNames, track: c.noteTimeline, summary: c.logSyncSummary, leftInvites: c.removeLeftInvitations, decrypted: c.noteDecrypted, failed: c.onSyncFailed, begin: c.beginLookups}
 
 	err = c.login(ctx, o.crypto)
 	if err != nil {
@@ -301,6 +305,7 @@ func (c *Client) register(s *mautrix.DefaultSyncer) {
 	s.OnEventType(event.EventRedaction, c.handleRedaction)
 	s.OnEventType(event.EphemeralEventTyping, c.handleTyping)
 	onState(event.StateTopic, c.handleTopic)
+	onState(event.StatePinnedEvents, c.handlePinnedEvents)
 	onState(event.StateCreate, c.handleCreate)
 	onState(event.StateEncryption, c.handleEncryption)
 	onState(event.StateSpaceChild, c.handleSpaceChild)
@@ -359,12 +364,14 @@ type readySyncer struct {
 	decrypted func(*event.Event)
 	failed    func(err error, wait time.Duration)
 
+	begin       func()
 	leftInvites func(*mautrix.RespSync)
 
 	failures int // consecutive failed syncs, only used from the sync goroutine
 }
 
 func (r *readySyncer) ProcessResponse(ctx context.Context, res *mautrix.RespSync, since string) error {
+	r.begin()
 	r.summary(res)
 	r.track(res)
 
