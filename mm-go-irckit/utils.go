@@ -70,12 +70,20 @@ func removeStringInSlice(a string, list []string) []string {
 // Sanitize nick: replace IRC characters with special meanings with "-"
 func sanitizeNick(nick string) string {
 	sanitize := func(r rune) rune {
-		if strings.ContainsRune("!+%@&#$:'\"?*, ", r) {
+		if strings.ContainsRune("!+%@&#$'\"?*, ", r) {
 			return '-'
 		}
 
 		return r
 	}
 
-	return strings.Map(sanitize, nick)
+	nick = strings.Map(sanitize, nick)
+
+	// A leading ':' would start the trailing parameter. Elsewhere it is kept as
+	// Matrix uses it as the localpart:homeserver separator.
+	if strings.HasPrefix(nick, ":") {
+		nick = "-" + nick[1:]
+	}
+
+	return nick
 }
