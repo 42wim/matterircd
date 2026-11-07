@@ -57,6 +57,7 @@ const (
 	searchUsersLimit   = 50
 	msgRoomCacheSize   = 2000
 	msgTextCacheSize   = 2000
+	fetchTextTimeout   = 3 * time.Second
 	msgTextMaxBytes    = 1024 // bound per cached message when ShortenRepliesTo is unlimited
 	reactionCacheSize  = 100
 	sentCacheSize      = 100
@@ -359,6 +360,9 @@ func (m *Matrix) OnMessage(msg *matrixclient.Message) {
 		return
 	}
 
+	// Cached before the echo check, as messages sent from IRC can be deleted or pinned too.
+	m.cacheText(msg.EventID, msg.Text)
+
 	if ghost.Me {
 		if m.isSentEcho(msg.EventID, msg.Text) {
 			return
@@ -366,7 +370,6 @@ func (m *Matrix) OnMessage(msg *matrixclient.Message) {
 	}
 
 	m.msgRoomCache.Add(msg.EventID, msg.RoomID)
-	m.cacheText(msg.EventID, msg.Text)
 
 	text := msg.Text
 

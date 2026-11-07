@@ -57,6 +57,8 @@ func (m *Matrix) formatSuffix(kind suffixKind) string {
 func (m *Matrix) cacheText(eventID id.EventID, text string) {
 	text, rest, multiline := strings.Cut(text, "\n")
 	if text == "" {
+		m.msgTextCache.Remove(eventID)
+
 		return
 	}
 
@@ -72,6 +74,9 @@ func (m *Matrix) cacheText(eventID id.EventID, text string) {
 		text = strings.ToValidUTF8(text[:limit], "")
 		truncated = true
 	}
+
+	// Detach from the backing array of the whole message.
+	text = strings.Clone(text)
 
 	if truncated {
 		if m.cfg.Matrix().Formatter.Unicode {
@@ -100,6 +105,9 @@ func (m *Matrix) OnEdit(e *matrixclient.Edit) {
 		return
 	}
 
+	// Cached before the echo check, as edits sent from IRC must update the text too.
+	m.cacheText(e.TargetID, e.Text)
+
 	if ghost.Me && m.isSentEcho(e.EventID, e.Text) {
 		return
 	}
@@ -107,14 +115,14 @@ func (m *Matrix) OnEdit(e *matrixclient.Edit) {
 	// Replies to the edited message must show the new text.
 	m.msgParentCache.Remove(e.TargetID)
 	m.msgRoomCache.Add(e.TargetID, e.RoomID)
-	m.cacheText(e.TargetID, e.Text)
 
 	m.sendText(ghost, e.RoomID, e.Direct, e.TargetID, "", e.Text+m.formatSuffix(suffixEdited), "post_edited", m.messageType(e.Text), e.Timestamp)
 }
 
 // OnRedaction implements matrixclient.RedactionHandler.
 func (m *Matrix) OnRedaction(r *matrixclient.Redaction) {
-	if r.TargetType == event.EventReaction {
+	// Redactions of other events, such as topics or pins, are not deleted messages.
+	if r.TargetType.Type != "" && r.TargetType != event.EventMessage && r.TargetType != event.EventEncrypted {
 		return
 	}
 
@@ -141,6 +149,27 @@ func (m *Matrix) OnRedaction(r *matrixclient.Redaction) {
 	m.sendText(ghost, r.RoomID, r.Direct, r.TargetID, "", m.cachedSummary(text)+m.formatSuffix(suffixDeleted), "post_deleted", m.messageType(text), 0)
 }
 
+// fetchText looks up and caches the text of a message missing from the cache. It returns
+// an empty string if the lookup fails, so that callers fall back to showing no text.
+func (m *Matrix) fetchText(roomID id.RoomID, eventID id.EventID) string {
+	ctx, cancel := context.WithTimeout(m.ctx, fetchTextTimeout)
+	defer cancel()
+
+	ev, err := m.mc.Event(ctx, roomID, eventID)
+	if err != nil {
+		logger.Debugf("Unable to get post %s for pin: %s", eventID, err)
+
+		return ""
+	}
+
+	body, _ := ev.Content.Raw["body"].(string)
+	m.cacheText(eventID, body)
+
+	text, _ := m.msgTextCache.Get(eventID)
+
+	return text
+}
+
 // OnPin implements matrixclient.PinHandler.
 func (m *Matrix) OnPin(p *matrixclient.PinChange) {
 	ghost := m.createUser(p.Sender)
@@ -148,7 +177,10 @@ func (m *Matrix) OnPin(p *matrixclient.PinChange) {
 		return
 	}
 
-	text, _ := m.msgTextCache.Get(p.EventID)
+	text, ok := m.msgTextCache.Get(p.EventID)
+	if !ok {
+		text = m.fetchText(p.RoomID, p.EventID)
+	}
 
 	kind := suffixUnpinned
 	if p.Pinned {
