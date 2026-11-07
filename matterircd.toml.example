@@ -386,6 +386,8 @@ PrefixContext = false
 #the reserved IRC characters such as '@'; an invalid value logs a warning and uses "[]".
 #":" gives Matrix's own hloeung:matrix.org, but is not valid in IRC nicks and may break
 #some clients or bouncers; use at your own risk (a warning is logged).
+#The value is fixed for the session: after changing it, disconnect and reconnect (an INFO
+#message is logged when a changed value is detected) for it to take effect.
 #ReplaceColonChar = "[]"
 #These options work as their [mattermost] counterparts:
 #DirectoryURL = "https://directory.mydomain.local/people/{nick}"  # {nick} and {username}

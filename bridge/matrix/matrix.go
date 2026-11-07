@@ -139,7 +139,8 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 	bridgeCtx, cancel := context.WithCancel(ctx)
 
 	// Fixed for the session: config reloads would otherwise change nicks without renaming existing ghosts.
-	nickSep := cmp.Or(cfg.Matrix().ReplaceColonChar, "[]")
+	requestedSep := cmp.Or(cfg.Matrix().ReplaceColonChar, "[]")
+	nickSep := requestedSep
 
 	if !validNickSep(nickSep) {
 		logger.Warnf("matrix.ReplaceColonChar %q is invalid (only punctuation that is not valid in a user ID or reserved in IRC nicks is allowed), using \"[]\"", nickSep)
@@ -247,7 +248,18 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 
 	// The hook keeps this client alive for as long as it is registered, so Logout
 	// has to remove it again.
-	m.unregisterReloadHook = cfg.RegisterReloadHook(setLogLevels)
+	var lastNotifiedSep atomic.Value
+
+	lastNotifiedSep.Store(requestedSep)
+
+	m.unregisterReloadHook = cfg.RegisterReloadHook(func(rc *config.RuntimeConfig) {
+		setLogLevels(rc)
+
+		newSep := cmp.Or(rc.Matrix.ReplaceColonChar, "[]")
+		if lastNotifiedSep.Swap(newSep) != newSep && newSep != requestedSep {
+			logger.Infof("matrix.ReplaceColonChar changed from %q to %q, a reconnect (disconnect + connect) is required for it to take effect", requestedSep, newSep)
+		}
+	})
 	m.connected.Store(true)
 
 	return m, mc, nil
