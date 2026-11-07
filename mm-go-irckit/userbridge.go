@@ -457,8 +457,8 @@ func (u *User) handleChannelAddEvent(event *bridge.ChannelAddEvent) {
 			_ = ch.Join(ghost)
 		}
 
-		if event.Adder != nil && added.Nick != event.Adder.Nick && event.Adder.Nick != systemUser {
-			ch.SpoofMessage(systemUser, "\x1dadded "+added.Nick+" to the channel by "+event.Adder.Nick+"\x1d")
+		if event.Adder != nil && sanitizeNick(added.Nick) != sanitizeNick(event.Adder.Nick) && event.Adder.Nick != systemUser {
+			ch.SpoofMessage(systemUser, "\x1dadded "+sanitizeNick(added.Nick)+" to the channel by "+sanitizeNick(event.Adder.Nick)+"\x1d")
 		}
 	}
 
@@ -496,7 +496,7 @@ func (u *User) handleChannelInviteEvent(event *bridge.ChannelInviteEvent) {
 		what += " " + name
 	}
 
-	text := fmt.Sprintf("%s invited you to %s", inviter.Nick, what)
+	text := fmt.Sprintf("%s invited you to %s", sanitizeNick(inviter.Nick), what)
 	if event.Reason != "" {
 		text += ": " + event.Reason
 	}
@@ -530,8 +530,8 @@ func (u *User) handleChannelRemoveEvent(event *bridge.ChannelRemoveEvent) {
 			ch.Part(ghost, event.Text)
 		}
 
-		if event.Remover != nil && removed.Nick != event.Remover.Nick && event.Remover.Nick != systemUser {
-			ch.SpoofMessage(systemUser, "\x1dremoved "+removed.Nick+" from the channel by "+event.Remover.Nick+"\x1d")
+		if event.Remover != nil && sanitizeNick(removed.Nick) != sanitizeNick(event.Remover.Nick) && event.Remover.Nick != systemUser {
+			ch.SpoofMessage(systemUser, "\x1dremoved "+sanitizeNick(removed.Nick)+" from the channel by "+sanitizeNick(event.Remover.Nick)+"\x1d")
 		}
 	}
 
@@ -795,7 +795,7 @@ func (u *User) handleFileEvent(event *bridge.FileEvent) {
 			if event.Sender.Me {
 				ch.SpoofMessage(u.Nick, fileMsg)
 			} else {
-				ch.SpoofMessage(event.Sender.Nick, fileMsg)
+				ch.SpoofMessage(sanitizeNick(event.Sender.Nick), fileMsg)
 			}
 		}
 	}
@@ -1210,7 +1210,7 @@ func (u *User) addUsersToChannels() {
 
 			formatChannelDesc := func() string {
 				if mUser := u.br.GetDMUser(u.ctx, brchannel.Name); mUser != nil {
-					return fmt.Sprintf("DM with %s (%s)", mUser.Nick, mUser.User)
+					return fmt.Sprintf("DM with %s (%s)", sanitizeNick(mUser.Nick), mUser.User)
 				}
 
 				if u.br.IsDMChannelName(brchannel.Name) {
@@ -1347,7 +1347,7 @@ func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(nick, msg, timeTa
 	// Resolve the other participant's IRC nick for DMs
 	if isDM {
 		if dmUser := u.br.GetDMUser(u.ctx, mmchannel.Name); dmUser != nil {
-			otherNick = dmUser.Nick
+			otherNick = sanitizeNick(dmUser.Nick)
 		}
 	} else {
 		channelTarget = u.Srv.Channel(mmchannel.ID).String()
@@ -1812,9 +1812,9 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 		// Extract attributes dynamically based on the event payload type
 		switch e := event.Data.(type) {
 		case *bridge.ChannelMessageEvent:
-			createAt, text, nick, msgID, parentID, files = e.CreateAt, e.Text, e.Sender.Nick, e.MessageID, e.ParentID, e.Files
+			createAt, text, nick, msgID, parentID, files = e.CreateAt, e.Text, sanitizeNick(e.Sender.Nick), e.MessageID, e.ParentID, e.Files
 		case *bridge.DirectMessageEvent:
-			createAt, text, nick, msgID, parentID, files = e.CreateAt, e.Text, e.Sender.Nick, e.MessageID, e.ParentID, e.Files
+			createAt, text, nick, msgID, parentID, files = e.CreateAt, e.Text, sanitizeNick(e.Sender.Nick), e.MessageID, e.ParentID, e.Files
 		case *bridge.ChannelAddEvent:
 			createAt, text, nick = e.CreateAt, e.Text, systemUser
 			if len(e.Added) > 0 && !e.Added[0].Me && e.Added[0].User != u.User {
@@ -2794,7 +2794,8 @@ func (u *User) handleTyping(e *bridge.TypingEvent) {
 	}
 
 	// Construct the ghost user's IRC prefix safely from the Bridge event
-	nick := e.Sender.Nick
+	// Use the ghost's nick so it matches the (sanitized) nick in the channel's user list.
+	nick := u.createUserFromInfo(e.Sender).Nick
 	user := e.Sender.User
 
 	if user == "" {
