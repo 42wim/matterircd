@@ -79,6 +79,7 @@ type Matrix struct {
 	mc        *matrixclient.Client
 	eventChan chan *bridge.Event
 	cfg       *config.Config
+	nickSep   string
 	onConnect func()
 
 	connected atomic.Bool
@@ -137,11 +138,15 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 	// The lifetime of this bridge, so Logout can release goroutines blocked on eventChan.
 	bridgeCtx, cancel := context.WithCancel(ctx)
 
-	if strings.Contains(cfg.Matrix().ReplaceColonChar, ":") {
+	// Fixed for the session: config reloads would otherwise change nicks without renaming existing ghosts.
+	nickSep := cmp.Or(cfg.Matrix().ReplaceColonChar, "[]")
+
+	if strings.Contains(nickSep, ":") {
 		logger.Warnf("matrix.ReplaceColonChar contains ':', which is not valid in IRC nicks and may break some IRC clients or bouncers. Use at your own risk")
 	}
 
 	m := &Matrix{
+		nickSep:   nickSep,
 		eventChan: eventChan,
 		cfg:       cfg,
 		onConnect: onConnect,
@@ -1018,6 +1023,11 @@ func escapeNickLocalpart(localpart, sep string) string {
 	return b.String()
 }
 
+// NickAllowsColon reports whether nicks may contain ':', so sanitizeNick must keep it.
+func (m *Matrix) NickAllowsColon() bool {
+	return strings.Contains(m.nickSep, ":")
+}
+
 func (m *Matrix) createUser(userID id.UserID) *bridge.UserInfo {
 	localpart, homeserver, err := userID.Parse()
 	if err != nil {
@@ -1031,9 +1041,8 @@ func (m *Matrix) createUser(userID id.UserID) *bridge.UserInfo {
 
 	// Drop the homeserver/host part if it's a user on the same homeserver as us.
 	// The separator can't appear in the localpart, so it is escaped.
-	sep := cmp.Or(m.cfg.Matrix().ReplaceColonChar, "[]")
-	prefix, suffix := nickAffixes(sep)
-	safeLocalpart := escapeNickLocalpart(localpart, sep)
+	prefix, suffix := nickAffixes(m.nickSep)
+	safeLocalpart := escapeNickLocalpart(localpart, m.nickSep)
 	nick := safeLocalpart + prefix + homeserver + suffix
 
 	// The IRC user is the key of a ghost. It always has the homeserver, as '/' is

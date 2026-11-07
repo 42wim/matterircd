@@ -89,8 +89,10 @@ func sanitizeNick(nick string, allowColon bool) string {
 }
 
 func (u *User) sanitizeNick(nick string) string {
-	allowColon := u.br != nil && u.cfg != nil && u.br.Protocol() == serviceMatrix &&
-		strings.Contains(u.cfg.Matrix().ReplaceColonChar, ":")
+	br := u.currentBridge()
 
-	return sanitizeNick(nick, allowColon)
+	// The bridge decides once per session, so nicks stay stable across config reloads.
+	c, ok := br.(interface{ NickAllowsColon() bool })
+
+	return sanitizeNick(nick, ok && c.NickAllowsColon())
 }
