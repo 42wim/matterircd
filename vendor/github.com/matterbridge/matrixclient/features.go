@@ -34,6 +34,7 @@ func (c *Client) SetLogLevel(level string) {
 }
 
 // SetLogAPICalls sets the log level of the Matrix API calls.
+// Set to "warn" to log API requests, matching matterclient ("debug" also logs /sync).
 func (c *Client) SetLogAPICalls(level string) {
 	setLevel(c.rootAPILogger, level)
 }

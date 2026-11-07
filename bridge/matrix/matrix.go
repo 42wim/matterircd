@@ -295,14 +295,13 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 
 		mc.SetLogAPICalls("error")
 
-		// Successful API calls are logged at info, only failures at warn.
 		if rc.Profiling {
 			if rc.Trace {
 				logger.Infof("enabling matrixclient API logging: level: trace")
 				mc.SetLogAPICalls("trace")
 			} else if rc.Debug {
-				logger.Infof("enabling matrixclient API logging: level: info")
-				mc.SetLogAPICalls("info")
+				logger.Infof("enabling matrixclient API logging: level: warn")
+				mc.SetLogAPICalls("warn")
 			}
 		}
 	}

@@ -2,6 +2,7 @@ package matrixclient
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -38,7 +39,15 @@ func (t *apiLogTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		return resp, nil
 	}
 
-	t.logger.Infof("%s %s: %d (%s)", req.Method, req.URL.Path, resp.StatusCode, time.Since(start).Round(time.Millisecond))
+	// Like matterclient, "warn" shows the API calls. The /sync long poll runs
+	// continuously and would flood that level, so it is only logged at debug.
+	if strings.HasSuffix(req.URL.Path, "/sync") {
+		t.logger.Debugf("%s %s: %d (%s)", req.Method, req.URL.Path, resp.StatusCode, time.Since(start).Round(time.Millisecond))
+
+		return resp, nil
+	}
+
+	t.logger.Warnf("%s %s: %d (%s)", req.Method, req.URL.Path, resp.StatusCode, time.Since(start).Round(time.Millisecond))
 
 	return resp, nil
 }
