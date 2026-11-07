@@ -33,6 +33,13 @@ func (m *Matrix) formatSuffix(isEdited, isDeleted, isEncrypted bool) string {
 	}
 }
 
+// cacheText remembers text so the message can be shown again when it is deleted.
+func (m *Matrix) cacheText(eventID id.EventID, text string) {
+	if text != "" {
+		m.msgTextCache.Add(eventID, text)
+	}
+}
+
 // OnEdit implements matrixclient.EditHandler.
 func (m *Matrix) OnEdit(e *matrixclient.Edit) {
 	ghost := m.createUser(e.Sender)
@@ -47,14 +54,16 @@ func (m *Matrix) OnEdit(e *matrixclient.Edit) {
 	// Replies to the edited message must show the new text.
 	m.msgParentCache.Remove(e.TargetID)
 	m.msgRoomCache.Add(e.TargetID, e.RoomID)
+	m.cacheText(e.TargetID, e.Text)
 
 	m.sendText(ghost, e.RoomID, e.Direct, e.TargetID, "", e.Text+m.formatSuffix(true, false, false), "post_edited", m.messageType(e.Text), e.Timestamp)
 }
 
 // OnRedaction implements matrixclient.RedactionHandler.
 func (m *Matrix) OnRedaction(r *matrixclient.Redaction) {
-	// The cache only holds messages, which skips redacted reactions.
-	if _, ok := m.msgRoomCache.Get(r.TargetID); !ok {
+	// The caches only hold messages, which skips redacted reactions.
+	text, hasText := m.msgTextCache.Get(r.TargetID)
+	if _, ok := m.msgRoomCache.Get(r.TargetID); !ok && !hasText {
 		return
 	}
 
@@ -68,8 +77,14 @@ func (m *Matrix) OnRedaction(r *matrixclient.Redaction) {
 	}
 
 	m.msgParentCache.Remove(r.TargetID)
+	m.msgTextCache.Remove(r.TargetID)
 
-	m.sendText(ghost, r.RoomID, r.Direct, r.TargetID, "", m.formatSuffix(false, true, false), "post_deleted", "", 0)
+	suffix := m.formatSuffix(false, true, false)
+	if text != "" {
+		suffix = text + " " + suffix
+	}
+
+	m.sendText(ghost, r.RoomID, r.Direct, r.TargetID, "", suffix, "post_deleted", m.messageType(text), 0)
 }
 
 // OnTyping implements matrixclient.TypingHandler.
@@ -387,6 +402,7 @@ func (m *Matrix) msgToEvent(msg *matrixclient.Message, eventType string) *bridge
 	}
 
 	m.msgRoomCache.Add(msg.EventID, msg.RoomID)
+	m.cacheText(msg.EventID, msg.Text)
 
 	text := msg.Text
 
