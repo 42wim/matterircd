@@ -148,7 +148,7 @@ func (m *Matrix) OnEdit(e *matrixclient.Edit) {
 
 	// Cached before the echo check, as edits sent from IRC must update the text too.
 	m.cacheText(e.TargetID, e.Text)
-	m.editEventIDs.Add(e.EventID, struct{}{})
+	m.editEventIDs.Add(e.EventID, e.TargetID)
 
 	if ghost.Me && m.isSentEcho(e.EventID, e.Text) {
 		return
@@ -169,7 +169,11 @@ func (m *Matrix) OnRedaction(r *matrixclient.Redaction) {
 	}
 
 	// An edit is a message event too, but redacting it leaves the original message in place.
-	if m.editEventIDs.Contains(r.TargetID) {
+	if target, ok := m.editEventIDs.Get(r.TargetID); ok {
+		// The cached text is that of the removed edit, so drop it rather than show it later.
+		m.msgTextCache.Remove(target)
+		m.editEventIDs.Remove(r.TargetID)
+
 		return
 	}
 
