@@ -23,7 +23,6 @@ const (
 	WebsocketEventChannelDeleted                      WebsocketEventType = "channel_deleted"
 	WebsocketEventChannelRestored                     WebsocketEventType = "channel_restored"
 	WebsocketEventChannelUpdated                      WebsocketEventType = "channel_updated"
-	WebsocketEventChannelViewed                       WebsocketEventType = "channel_viewed"
 	WebsocketEventChannelMemberUpdated                WebsocketEventType = "channel_member_updated"
 	WebsocketEventChannelSchemeUpdated                WebsocketEventType = "channel_scheme_updated"
 	WebsocketEventDirectAdded                         WebsocketEventType = "direct_added"
