@@ -1174,11 +1174,19 @@ func resolveThreadTarget(s Server, u *User, channelName, threadID string) string
 		}
 
 		targetChannelID := getTargetChannelID(s, u, channelName)
-		if targetChannelID != "" && u.br.GetPostChannelID(u.ctx, postID) == targetChannelID {
+		postChannelID := u.br.GetPostChannelID(u.ctx, postID)
+
+		if targetChannelID != "" && postChannelID == targetChannelID {
 			return "@@" + postID
 		}
 
-		logger.Tracef("resolveThreadTarget: post %s does not belong to channel %s (%s)", threadID, channelName, targetChannelID)
+		if postChannelID == "" {
+			logger.Tracef("resolveThreadTarget: channel of post %s unknown (not cached?), cannot verify it belongs to channel %s (%s)", threadID, channelName, targetChannelID)
+
+			return ""
+		}
+
+		logger.Tracef("resolveThreadTarget: post %s is in channel %s, not channel %s (%s)", threadID, postChannelID, channelName, targetChannelID)
 	}
 
 	return ""
