@@ -8,17 +8,20 @@ CGO_ENABLED ?= 1
 endif
 endif
 
-.PHONY: build lint docker release
+# Direct bypassing caches to ensure we don't get stale or out-of-date versions
+export GOPROXY=direct
+
+.PHONY: build docker docker release updatedeps
 
 build:
 	CGO_ENABLED=$(or $(CGO_ENABLED),0) go build -tags goolm -ldflags="-X main.githash=$(GITHASH)"
 	@echo $(GITHASH)
 
-lint:
-	golangci-lint run -v --new-from-rev HEAD~5
-
 docker:
 	docker build -t 42wim/matterircd .
+
+lint:
+	golangci-lint run -v --new-from-rev HEAD~5
 
 release:
 	goreleaser release --skip publish
@@ -28,3 +31,13 @@ release:
 		mv matterircd_$${dist_arch}*/matterircd* $$i; \
 	done; \
 	rm -f artifacts.json config.yaml
+
+updatedeps:
+	go get github.com/matterbridge/matterclient@master
+	go get github.com/matterbridge/matrixclient@master
+	go mod tidy && go mod vendor
+	# https://github.com/alecthomas/chroma/pull/1344
+	git checkout -q vendor/github.com/alecthomas/chroma/v2/formatters/mirc.go
+	# github.com/sorcix deprecated, restore our own local changes
+	@rm -f vendor/github.com/sorcix/irc/message.go
+	git checkout -q vendor/github.com/sorcix/irc/message.go
