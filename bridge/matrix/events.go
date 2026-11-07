@@ -12,11 +12,26 @@ import (
 	"github.com/matterbridge/matrixclient"
 )
 
-const (
-	editedSuffix  = " \x1d(edited)\x1d"
-	deletedText   = "\x1d(deleted)\x1d"
-	encryptedNote = " (encrypted)"
-)
+func (m *Matrix) formatSuffix(isEdited, isDeleted, isEncrypted bool) string {
+	useUnicode := m.cfg.Matrix().Formatter.Unicode
+
+	switch {
+	case isEdited && useUnicode:
+		return " \x1d(✏️edited)\x1d"
+	case isEdited:
+		return " \x1d(edited)\x1d"
+	case isDeleted && useUnicode:
+		return "\x1d(🗑️deleted)\x1d"
+	case isDeleted:
+		return "\x1d(deleted)\x1d"
+	case isEncrypted && useUnicode:
+		return " \x1d(🔒encrypted)\x1d"
+	case isEncrypted:
+		return " \x1d(encrypted)\x1d"
+	default:
+		return ""
+	}
+}
 
 // OnEdit implements matrixclient.EditHandler.
 func (m *Matrix) OnEdit(e *matrixclient.Edit) {
@@ -33,7 +48,7 @@ func (m *Matrix) OnEdit(e *matrixclient.Edit) {
 	m.msgParentCache.Remove(e.TargetID)
 	m.msgRoomCache.Add(e.TargetID, e.RoomID)
 
-	m.sendText(ghost, e.RoomID, e.Direct, e.TargetID, "", e.Text+editedSuffix, "post_edited", m.messageType(e.Text), e.Timestamp)
+	m.sendText(ghost, e.RoomID, e.Direct, e.TargetID, "", e.Text+m.formatSuffix(true, false, false), "post_edited", m.messageType(e.Text), e.Timestamp)
 }
 
 // OnRedaction implements matrixclient.RedactionHandler.
@@ -54,7 +69,7 @@ func (m *Matrix) OnRedaction(r *matrixclient.Redaction) {
 
 	m.msgParentCache.Remove(r.TargetID)
 
-	m.sendText(ghost, r.RoomID, r.Direct, r.TargetID, "", deletedText, "post_deleted", "", 0)
+	m.sendText(ghost, r.RoomID, r.Direct, r.TargetID, "", m.formatSuffix(false, true, false), "post_deleted", "", 0)
 }
 
 // OnTyping implements matrixclient.TypingHandler.
@@ -339,7 +354,7 @@ func (m *Matrix) fileFromMessage(msg *matrixclient.Message) *bridge.File {
 
 	if mxc == "" && msg.File != nil {
 		mxc = msg.File.URL
-		note = encryptedNote
+		note = m.formatSuffix(false, false, true)
 	}
 
 	if mxc == "" {
