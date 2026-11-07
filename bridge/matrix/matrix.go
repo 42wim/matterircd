@@ -56,7 +56,8 @@ const (
 
 	searchUsersLimit   = 50
 	msgRoomCacheSize   = 2000
-	msgTextCacheSize   = 2000
+	msgTextCacheSize   = 100
+	msgTextMaxLen      = 80
 	reactionCacheSize  = 100
 	sentCacheSize      = 100
 	sentReactionWindow = time.Minute
@@ -121,7 +122,7 @@ type Matrix struct {
 	msgParentCache   *lru.Cache[id.EventID, string]
 	msgLastSentCache *lru.Cache[string, string]
 	msgRoomCache     *lru.Cache[id.EventID, id.RoomID]
-	msgTextCache     *lru.Cache[id.EventID, string] // latest text of messages, shown when they are deleted
+	msgTextCache     *lru.Cache[id.EventID, string] // first line of recent messages, shown when they are deleted
 	reactionCache    *lru.Cache[string, id.EventID]
 	sentReactions    *lru.Cache[string, time.Time]    // reactions added from IRC, whose echo is dropped
 	sentRedactions   *lru.Cache[id.EventID, struct{}] // messages deleted from IRC, whose echo is dropped

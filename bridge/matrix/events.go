@@ -48,11 +48,28 @@ func (m *Matrix) formatPinSuffix(pinned bool) string {
 	}
 }
 
-// cacheText remembers text so the message can be shown again when it is deleted.
+// cacheText remembers the start of the first line, enough to recognise the message when it is
+// deleted or pinned, without holding whole messages in memory.
 func (m *Matrix) cacheText(eventID id.EventID, text string) {
-	if text != "" {
-		m.msgTextCache.Add(eventID, text)
+	text, _, _ = strings.Cut(text, "\n")
+	if text == "" {
+		return
 	}
+
+	if len(text) > msgTextMaxLen*4 {
+		text = strings.ToValidUTF8(text[:msgTextMaxLen*4], "")
+	}
+
+	m.msgTextCache.Add(eventID, text)
+}
+
+// cachedSummary returns the cached text of a message, shortened for display.
+func (m *Matrix) cachedSummary(text string) string {
+	if text == "" {
+		return ""
+	}
+
+	return m.formatSummary(text, msgTextMaxLen, "")
 }
 
 // OnEdit implements matrixclient.EditHandler.
@@ -100,6 +117,8 @@ func (m *Matrix) OnRedaction(r *matrixclient.Redaction) {
 	m.msgParentCache.Remove(r.TargetID)
 	m.msgTextCache.Remove(r.TargetID)
 
+	text = m.cachedSummary(text)
+
 	suffix := m.formatSuffix(false, true, false)
 	if text != "" {
 		suffix = text + " " + suffix
@@ -116,6 +135,7 @@ func (m *Matrix) OnPin(p *matrixclient.PinChange) {
 	}
 
 	text, _ := m.msgTextCache.Get(p.EventID)
+	text = m.cachedSummary(text)
 	suffix := m.formatPinSuffix(p.Pinned)
 
 	if text != "" {
