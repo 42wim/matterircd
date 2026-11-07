@@ -57,7 +57,10 @@ const (
 	searchUsersLimit   = 50
 	msgRoomCacheSize   = 2000
 	msgTextCacheSize   = 2000
-	fetchTextTimeout   = 3 * time.Second
+	fetchTextTimeout   = 2 * time.Second
+	pinFetchMax        = 3
+	pinFetchWindow     = 10 * time.Second
+	editIDCacheSize    = 500
 	msgTextMaxBytes    = 1024 // bound per cached message when ShortenRepliesTo is unlimited
 	reactionCacheSize  = 100
 	sentCacheSize      = 100
@@ -123,10 +126,15 @@ type Matrix struct {
 	msgParentCache   *lru.Cache[id.EventID, string]
 	msgLastSentCache *lru.Cache[string, string]
 	msgRoomCache     *lru.Cache[id.EventID, id.RoomID]
-	msgTextCache     *lru.Cache[id.EventID, string] // first line of recent messages, shown when they are deleted
+	msgTextCache     *lru.Cache[id.EventID, string]   // first line of recent messages, shown when they are deleted
+	editEventIDs     *lru.Cache[id.EventID, struct{}] // replacement events, whose redaction is not a deleted message
 	reactionCache    *lru.Cache[string, id.EventID]
 	sentReactions    *lru.Cache[string, time.Time]    // reactions added from IRC, whose echo is dropped
 	sentRedactions   *lru.Cache[id.EventID, struct{}] // messages deleted from IRC, whose echo is dropped
+
+	pinFetchMu    sync.Mutex
+	pinFetchStart time.Time
+	pinFetchCount int
 
 	// sentMu is never held across network I/O. It guards sentCache and pendingSends,
 	// which together recognize the echo of a message sent from IRC, also when the
@@ -216,6 +224,7 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 	m.msgLastSentCache, _ = lru.New[string, string](10)
 	m.msgRoomCache, _ = lru.New[id.EventID, id.RoomID](msgRoomCacheSize)
 	m.msgTextCache, _ = lru.New[id.EventID, string](msgTextCacheSize)
+	m.editEventIDs, _ = lru.New[id.EventID, struct{}](editIDCacheSize)
 	m.pendingSends = make(map[string]int)
 	m.sentCache, _ = lru.New[id.EventID, struct{}](sentCacheSize)
 	m.sentReactions, _ = lru.New[string, time.Time](reactionCacheSize)
