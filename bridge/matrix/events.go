@@ -56,6 +56,8 @@ func (m *Matrix) formatSuffix(kind suffixKind) string {
 // shortText returns the start of the first line, enough to recognize a message when it is
 // deleted or pinned, without holding whole messages in memory.
 func (m *Matrix) shortText(text string) string {
+	// Replies start with the quoted parent as plaintext fallback.
+	text = event.TrimReplyFallbackText(text)
 	text, rest, multiline := strings.Cut(text, "\n")
 	if text == "" {
 		return ""
@@ -178,6 +180,9 @@ func (m *Matrix) OnRedaction(r *matrixclient.Redaction) {
 	}
 
 	text, hasText := m.msgTextCache.Get(r.TargetID)
+	// Evicted before any early return, so echoes of our own deletions do not leave the text behind.
+	m.msgTextCache.Remove(r.TargetID)
+
 	_, inRoomCache := m.msgRoomCache.Get(r.TargetID)
 
 	// An unknown type, as the lookup failed, must not report a removed reaction as a deleted message.
@@ -195,7 +200,6 @@ func (m *Matrix) OnRedaction(r *matrixclient.Redaction) {
 	}
 
 	m.msgParentCache.Remove(r.TargetID)
-	m.msgTextCache.Remove(r.TargetID)
 
 	m.sendText(ghost, r.RoomID, r.Direct, r.TargetID, "", m.cachedSummary(text)+m.formatSuffix(suffixDeleted), "post_deleted", m.messageType(text), 0)
 }
