@@ -287,6 +287,12 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 		}
 
 		mc.SetLogLevel("info")
+
+		if rc.Matrix.MatrixclientLogLevel != "" {
+			logger.Infof("enabling matrixclient logging: level: %s", rc.Matrix.MatrixclientLogLevel)
+			mc.SetLogLevel(strings.ToLower(rc.Matrix.MatrixclientLogLevel))
+		}
+
 		mc.SetLogAPICalls("error")
 
 		if rc.Profiling {

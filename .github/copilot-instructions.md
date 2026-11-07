@@ -30,6 +30,18 @@
 - Comments: Document only intent, invariants, protocol quirks, and non-obvious constraints. Do not restate obvious code.
 - Consistency: Match the existing package conventions for naming, options, error handling, and method signatures.
 
+## Bridge Consistency (Mattermost as Reference)
+
+- `bridge/mattermost` is the reference bridge. `bridge/matrix` and `bridge/slack` should follow it for structure, behaviour, logging, and config options as closely as possible.
+- `bridge/mastodon` is inherently different, but should still aim for consistency with the other bridges and chat protocols wherever the protocol allows.
+- When adding or changing a feature, check the other bridges and keep them aligned; document any intentional divergence.
+
+## Matrix / Mattermost Consistency
+
+- [matterclient](https://github.com/matterbridge/matterclient) is the reference implementation. `matrixclient` and `bridge/matrix` should mirror its API, semantics, logging levels, and config options as closely as possible.
+- Keep `bridge/matrix` consistent with `bridge/mattermost` (e.g. `MatrixclientLogLevel` vs `MatterclientLogLevel`, `SetLogLevel` / `SetLogAPICalls` usage).
+- When behaviour differs, prefer fixing `matrixclient` upstream to match `matterclient` rather than working around it in matterircd.
+
 ## When Reviewing Pull Requests
 
 - Lead with the most critical issue first. Do not bury blockers under minor nits or formatting notes.
