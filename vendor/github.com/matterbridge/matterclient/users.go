@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"strconv"
 	"strings"
@@ -130,7 +131,7 @@ func (m *Client) getStatus(ctx context.Context, userID string, force bool) strin
 
 	m.Users.mu.Unlock()
 
-	if isStale {
+	if isStale { //nolint:nestif
 		fetchCtx := ctx
 		maxRetries := 10
 
@@ -249,6 +250,7 @@ func (m *Client) getStatus(ctx context.Context, userID string, force bool) strin
 	return status
 }
 
+//nolint:funlen,gocognit,gocyclo
 func (m *Client) GetStatuses(ctx context.Context) map[string]string {
 	const (
 		activeThreshold  = 20 * time.Minute
@@ -259,6 +261,7 @@ func (m *Client) GetStatuses(ctx context.Context) map[string]string {
 
 	m.Users.mu.RLock()
 	statuses := make(map[string]string, len(m.Users.users))
+
 	var missingIDs []string
 
 	for id := range m.Users.users {
@@ -289,6 +292,7 @@ func (m *Client) GetStatuses(ctx context.Context) map[string]string {
 			missingIDs = append(missingIDs, id)
 		}
 	}
+
 	m.Users.mu.RUnlock()
 
 	if len(missingIDs) == 0 {
@@ -302,6 +306,7 @@ func (m *Client) GetStatuses(ctx context.Context) map[string]string {
 		batch := missingIDs[i:end]
 
 		retryCount := 0
+
 		for {
 			if len(batch) <= 8 {
 				m.apiLogger.Warnf("GetStatuses: GetUsersStatusesByIds: Batch: %d %v #%d", len(batch), batch, retryCount)
@@ -419,6 +424,7 @@ func (m *Client) GetUserByUserID(ctx context.Context, userID string) *model.User
 		}
 
 		m.logger.Debugf("GetUser failed to fetch missing user %s: %s", userID, err)
+
 		return nil
 	}
 
@@ -657,9 +663,7 @@ func (m *Client) GetUsers() map[string]*model.User {
 	m.Users.mu.RLock()
 	defer m.Users.mu.RUnlock()
 
-	for k, v := range m.Users.users {
-		users[k] = v
-	}
+	maps.Copy(users, m.Users.users)
 
 	return users
 }
@@ -874,6 +878,7 @@ func (m *Client) SetUserStatus(userID string, rawStatus string, batchLock bool, 
 // setUserStatus is SetUserStatus with the origin of lastActivityAt recorded for debug logging.
 func (m *Client) setUserStatus(userID string, rawStatus string, batchLock bool, source string, lastActivityAt ...int64) string {
 	statusStr := model.StatusOffline
+
 	switch rawStatus {
 	case model.StatusOnline:
 		statusStr = model.StatusOnline
@@ -918,12 +923,12 @@ func (m *Client) setUserStatus(userID string, rawStatus string, batchLock bool, 
 	return statusStr
 }
 
-//nolint:funlen,gocognit,gocyclo
 func (m *Client) UpdateUsers(ctx context.Context) error {
 	const batchSize = mattermostPerPageMax
 
 	idx := 0
 	retryCount := 0
+
 	for {
 		if m.IsAborted(ctx) {
 			return errors.New("login aborted")
@@ -931,20 +936,25 @@ func (m *Client) UpdateUsers(ctx context.Context) error {
 
 		query := "/users?page=" + strconv.Itoa(idx) + "&per_page=" + strconv.Itoa(batchSize)
 		m.apiLogger.Warnf("UpdateUsers: DoAPIGet: query %s #%d", query, retryCount)
+
 		resp, err := m.Client.DoAPIGet(ctx, query, "")
 		if err != nil {
 			var mResp *model.Response
 			if resp != nil {
 				mResp = model.BuildResponse(resp)
 			}
+
 			shouldRetry, hErr := m.HandleRetry(ctx, "GetUsers", err, retryCount, 10, mResp)
 			if hErr == nil && shouldRetry {
 				retryCount++
 				continue
 			}
+
 			m.logger.Errorf("UpdateUsers failed at batch %d: %v", idx, err)
+
 			return err
 		}
+
 		retryCount = 0
 
 		count, jsonErr := m.updateUsersFromJSON(resp.Body, nil)
@@ -983,6 +993,7 @@ func (m *Client) updateUsersFromJSON(r io.Reader, fn func(*model.User)) (int, er
 
 func (m *Client) UpdateUserNick(ctx context.Context, nick string) error {
 	m.RLock()
+
 	if m.User == nil {
 		m.RUnlock()
 
@@ -991,6 +1002,7 @@ func (m *Client) UpdateUserNick(ctx context.Context, nick string) error {
 
 	userClone := *m.User
 	m.RUnlock()
+
 	userClone.Nickname = nick
 
 	retryCount := 0
@@ -1027,9 +1039,11 @@ func (m *Client) UsernamesInChannel(ctx context.Context, channelID string) []str
 	channelName := m.GetCachedChannelName(channelID)
 
 	idx := 0
+
 	retryCount := 0
 	for {
 		m.apiLogger.Warnf("UsernamesInChannel: GetChannelMembers: Channel: %s (%s), Page: %d, PerPage: %d #%d", channelName, channelID, idx, batchSize, retryCount)
+
 		res, resp, err := m.Client.GetChannelMembers(ctx, channelID, idx, batchSize, "")
 		if err != nil {
 			shouldRetry, hErr := m.HandleRetry(ctx, "UsernamesInChannel", err, retryCount, 10, resp)
@@ -1039,8 +1053,10 @@ func (m *Client) UsernamesInChannel(ctx context.Context, channelID string) []str
 			}
 
 			m.logger.Errorf("UsernamesInChannel %s (%s) failed: %s", channelName, channelID, err)
+
 			return result
 		}
+
 		retryCount = 0
 
 		for _, member := range res {
@@ -1225,7 +1241,7 @@ func (c *UsersCache) userIDKey(userID string) string {
 	return userID
 }
 
-//nolint:funlen,gocyclo
+//nolint:funlen,gocognit,gocyclo
 func (m *Client) updateUserLocked(id string, updateAt int64, deleteAt int64, username, email, firstName, lastName, nickname, position, roles string, props map[string]string, timezone map[string]string, isBot bool, lastActivityAt ...int64) *model.User {
 	switch roles {
 	case "system_user":
@@ -1240,7 +1256,7 @@ func (m *Client) updateUserLocked(id string, updateAt int64, deleteAt int64, use
 	}
 
 	cachedUser, exists := m.Users.users[id]
-	if !exists {
+	if !exists { //nolint:nestif
 		cachedUser = &model.User{
 			Id:             id,
 			UpdateAt:       max(0, updateAt),

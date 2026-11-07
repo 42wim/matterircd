@@ -2,7 +2,7 @@ package matterclient
 
 import (
 	"context"
-	"crypto/md5"
+	"crypto/md5" //nolint:gosec // used for non-cryptographic hashing
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -13,6 +13,7 @@ import (
 	"github.com/mattermost/mattermost/server/public/model"
 )
 
+//nolint:gocyclo
 func (m *Client) CreatePost(ctx context.Context, post *model.Post) (*model.Post, error) {
 	if post.UserId == "" && m.User != nil {
 		post.UserId = m.User.Id
@@ -77,6 +78,7 @@ func (m *Client) DeleteMessage(ctx context.Context, postID string) error {
 		}
 
 		m.logger.Errorf("DeleteMessage failed for %s: %v", postID, err)
+
 		return err
 	}
 }
@@ -215,7 +217,7 @@ func (m *Client) GetFileLinks(ctx context.Context, filenames []string) []string 
 			output = append(output, link)
 		} else {
 			// public links is probably disabled or failed, create the link ourselves
-			output = append(output, uriScheme+m.Credentials.Server+model.APIURLSuffix+"/files/"+f)
+			output = append(output, uriScheme+m.Server+model.APIURLSuffix+"/files/"+f)
 		}
 	}
 
@@ -249,10 +251,12 @@ func (m *Client) GetPost(ctx context.Context, postID string) (*model.Post, error
 		}
 
 		m.logger.Errorf("GetPost failed for %s: %v", postID, err)
+
 		return nil, err
 	}
 }
 
+//nolint:funlen
 func (m *Client) GetPosts(ctx context.Context, channelID string, limit int) *model.PostList {
 	const batchSize = mattermostPerPageMax
 
@@ -273,12 +277,10 @@ func (m *Client) GetPosts(ctx context.Context, channelID string, limit int) *mod
 	for fetched < limit {
 		// Figure out how many posts to fetch in this batch.
 		// It will be 200, unless we are close to the limit.
-		currentBatchSize := batchSize
-		if limit-fetched < batchSize {
-			currentBatchSize = limit - fetched
-		}
+		currentBatchSize := min(limit-fetched, batchSize)
 
 		m.apiLogger.Warnf("GetPosts: Channel: %s (%s), Page: %d, PerPage: %d #%d", channelName, channelID, idx, currentBatchSize, retryCount)
+
 		res, resp, err := m.Client.GetPostsForChannel(ctx, channelID, idx, currentBatchSize, "", false, false)
 		if err != nil {
 			shouldRetry, hErr := m.HandleRetry(ctx, "GetPostsForChannel", err, retryCount, 10, resp)
@@ -288,11 +290,14 @@ func (m *Client) GetPosts(ctx context.Context, channelID string, limit int) *mod
 			}
 
 			m.logger.Errorf("GetPostsForChannel failed for %s (%s) at page %d: %v", channelName, channelID, idx, err)
+
 			if len(finalPostList.Order) == 0 {
 				return nil
 			}
+
 			return finalPostList
 		}
+
 		retryCount = 0
 
 		if res != nil {
@@ -328,6 +333,7 @@ func (m *Client) GetPostThread(ctx context.Context, postID string) *model.PostLi
 	retryCount := 0
 	for {
 		m.apiLogger.Warnf("GetPostThread: PostID: %s #%d", postID, retryCount)
+
 		res, resp, err := m.Client.GetPostThreadWithOpts(ctx, postID, "", opts)
 		if err == nil {
 			if res == nil || m.postCache == nil {
@@ -350,6 +356,7 @@ func (m *Client) GetPostThread(ctx context.Context, postID string) *model.PostLi
 		}
 
 		m.logger.Errorf("GetPostThread failed for %s: %v", postID, err)
+
 		return nil
 	}
 }
@@ -374,6 +381,7 @@ func (m *Client) GetPostsSince(ctx context.Context, channelID string, time int64
 
 	for {
 		m.apiLogger.Warnf("GetPostsSince: Channel: %s (%s), Since: %d #%d", channelName, channelID, time, retryCount)
+
 		res, resp, err := m.Client.GetPostsSince(ctx, channelID, time, false)
 		if err == nil {
 			if res == nil || m.postCache == nil {
@@ -396,6 +404,7 @@ func (m *Client) GetPostsSince(ctx context.Context, channelID string, time int64
 		}
 
 		m.logger.Errorf("GetPostsSince failed for %s (%s): %v", channelName, channelID, err)
+
 		return nil
 	}
 }
@@ -446,6 +455,7 @@ func (m *Client) PatchPost(ctx context.Context, postID string, patch *model.Post
 			if m.postCache != nil {
 				m.postCache.Add(post.Id, post)
 			}
+
 			return post, nil
 		}
 
@@ -456,6 +466,7 @@ func (m *Client) PatchPost(ctx context.Context, postID string, patch *model.Post
 		}
 
 		m.logger.Errorf("PatchPost failed for %s: %v", postID, err)
+
 		return nil, err
 	}
 }
@@ -472,11 +483,13 @@ func (m *Client) PostMessage(ctx context.Context, channelID string, text string,
 
 	for {
 		m.apiLogger.Warnf("PostMessage: Channel: %s (%s), RootID: %s #%d", channelName, channelID, rootID, retryCount)
+
 		res, resp, err := m.Client.CreatePost(ctx, post)
 		if err == nil {
 			if m.postCache != nil {
 				m.postCache.Add(res.Id, res)
 			}
+
 			return res.Id, nil
 		}
 
@@ -505,11 +518,13 @@ func (m *Client) PostMessageWithFiles(ctx context.Context, channelID string, tex
 
 	for {
 		m.apiLogger.Warnf("PostMessageWithFiles: Channel: %s (%s), RootID %s #%d", channelName, channelID, rootID, retryCount)
+
 		res, resp, err := m.Client.CreatePost(ctx, post)
 		if err == nil {
 			if m.postCache != nil {
 				m.postCache.Add(res.Id, res)
 			}
+
 			return res.Id, nil
 		}
 
@@ -529,6 +544,7 @@ func (m *Client) SearchPosts(ctx context.Context, query string) *model.PostList 
 	retryCount := 0
 	for {
 		m.apiLogger.Warnf("SearchPosts: query: %s #%d", query, retryCount)
+
 		res, resp, err := m.Client.SearchPosts(ctx, m.Team.ID, query, false)
 		if err == nil {
 			if res == nil || m.postCache == nil {
@@ -559,7 +575,7 @@ func (m *Client) SendDirectMessage(ctx context.Context, toUserID string, msg str
 	return m.SendDirectMessageProps(ctx, toUserID, msg, rootID, nil)
 }
 
-func (m *Client) SendDirectMessageProps(ctx context.Context, toUserID string, msg string, rootID string, props map[string]interface{}) error {
+func (m *Client) SendDirectMessageProps(ctx context.Context, toUserID string, msg string, rootID string, props map[string]any) error {
 	m.logger.Debugf("SendDirectMessage to %s, msg %s", toUserID, msg)
 
 	dchannel, err := m.CreateDirectChannel(ctx, m.User.Id, toUserID)
@@ -589,6 +605,7 @@ func (m *Client) SendDirectMessageProps(ctx context.Context, toUserID string, ms
 			if m.postCache != nil {
 				m.postCache.Add(res.Id, res)
 			}
+
 			return nil
 		}
 
@@ -599,6 +616,7 @@ func (m *Client) SendDirectMessageProps(ctx context.Context, toUserID string, ms
 		}
 
 		m.logger.Errorf("CreatePost failed for channel %s: %v", post.ChannelId, err)
+
 		return err
 	}
 }
@@ -678,9 +696,12 @@ func (m *Client) UploadFile(ctx context.Context, data []byte, channelID string, 
 	}
 }
 
+//nolint:funlen
 func (m *Client) parseActionPost(ctx context.Context, rmsg *Message) {
-	var data *model.Post
-	var postStr string
+	var (
+		data    *model.Post
+		postStr string
+	)
 
 	if pPtr, ok := rmsg.Raw.GetData()["post"].(*model.Post); ok {
 		data = pPtr
@@ -710,7 +731,9 @@ func (m *Client) parseActionPost(ctx context.Context, rmsg *Message) {
 
 	if ok, _ := m.lruCache.ContainsOrAdd(dedupKey, true); ok {
 		m.logger.Debugf("message %s in cache, not processing again", dedupKey)
+
 		rmsg.Text = ""
+
 		return
 	}
 
@@ -756,7 +779,8 @@ func (m *Client) parseMessage(ctx context.Context, rmsg *Message) {
 			m.UpdateUser(user)
 		}
 	case "group_added":
-		if err := m.UpdateChannels(ctx); err != nil {
+		err := m.UpdateChannels(ctx)
+		if err != nil {
 			m.logger.Errorf("failed to update channels: %#v", err)
 		}
 	}
@@ -790,5 +814,6 @@ func digestString(s string) string {
 	}
 
 	sum := md5.Sum([]byte(s)) //nolint:gosec
+
 	return hex.EncodeToString(sum[:])
 }
