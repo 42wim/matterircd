@@ -126,7 +126,7 @@ type Matrix struct {
 	msgParentCache   *lru.Cache[id.EventID, string]
 	msgLastSentCache *lru.Cache[string, string]
 	msgRoomCache     *lru.Cache[id.EventID, id.RoomID]
-	msgTextCache     *lru.Cache[id.EventID, string]   // first line of recent messages, shown when they are deleted
+	msgTextCache     *lru.Cache[id.EventID, string]     // first line of recent messages, shown when they are deleted
 	editEventIDs     *lru.Cache[id.EventID, id.EventID] // replacement event to edited message, whose redaction is not a deleted message
 	reactionCache    *lru.Cache[string, id.EventID]
 	sentReactions    *lru.Cache[string, time.Time]    // reactions added from IRC, whose echo is dropped
