@@ -1038,8 +1038,9 @@ const (
 	maxIdentLen = 96
 )
 
-// capLen shortens s to at most limit bytes, ending in a hash of the user ID so that
-// distinct users keep distinct values.
+// capLen shortens s to at most limit bytes, ending in "^h" and a hash of the user ID so that
+// distinct users keep distinct values. 'h' isn't a hex digit, so the suffix can't equal an
+// escape sequence ('^' plus two hex digits) and a capped value never matches an uncapped one.
 func capLen(s string, userID id.UserID, limit int) string {
 	if len(s) <= limit {
 		return s
@@ -1048,7 +1049,7 @@ func capLen(s string, userID id.UserID, limit int) string {
 	sum := sha256.Sum256([]byte(userID))
 
 	// Don't split an escape sequence ('^' plus two digits).
-	cut := limit - 13
+	cut := limit - 14
 	for cut > 0 && strings.LastIndexByte(s[max(cut-2, 0):cut], '^') >= 0 {
 		cut--
 	}
@@ -1056,7 +1057,7 @@ func capLen(s string, userID id.UserID, limit int) string {
 	// Drops a rune that the cut left incomplete.
 	head := strings.ToValidUTF8(s[:cut], "")
 
-	return head + "^" + hex.EncodeToString(sum[:6])
+	return head + "^h" + hex.EncodeToString(sum[:6])
 }
 
 // validNickSep reports whether sep can safely separate localpart and homeserver in a nick.
