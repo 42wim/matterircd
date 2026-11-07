@@ -380,6 +380,10 @@ PrefixContext = false
 #Homeserver left out of channel names, so #room/ubuntu.com becomes #room
 #DefaultProvider = "ubuntu.com"
 #PrefixContext = false
+#Separates localpart and homeserver in nicks of users on other homeservers, instead of
+#Matrix's ':'. "/" gives hloeung/matrix.org, "|" gives hloeung|matrix.org and the
+#default "[]" gives hloeung[matrix.org]. Avoid reserved IRC characters such as ':' or '@'.
+#ReplaceColonChar = "[]"
 #These options work as their [mattermost] counterparts:
 #DirectoryURL = "https://directory.mydomain.local/people/{nick}"  # {nick} and {username}
 #CollapseScrollback = false

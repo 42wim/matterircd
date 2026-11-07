@@ -1,6 +1,7 @@
 package matrix
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -979,7 +980,39 @@ func hostWithoutPort(serverName string) string {
 	return host
 }
 
-var nickLocalpartEscaper = strings.NewReplacer("^", "^t", ":", "^c")
+// nickAffixes returns the text placed before the homeserver and after it in a
+// remote user's nick. "[]" is special and wraps it as localpart[homeserver].
+func nickAffixes(sep string) (string, string) {
+	if sep == "[]" {
+		return "[", "]"
+	}
+
+	return sep, ""
+}
+
+// escapeNickLocalpart percent-style escapes ('^' plus two hex digits) the escape
+// marker and every character of the separator, so the separator can't appear in
+// the localpart and distinct users never share a nick. '^' isn't a legal localpart
+// character, and unlike '~' it doesn't mark an ident in resolveUserID.
+func escapeNickLocalpart(localpart, sep string) string {
+	if !strings.ContainsAny(localpart, "^"+sep) {
+		return localpart
+	}
+
+	var b strings.Builder
+
+	for _, r := range localpart {
+		if r == '^' || strings.ContainsRune(sep, r) {
+			fmt.Fprintf(&b, "^%02x", r)
+
+			continue
+		}
+
+		b.WriteRune(r)
+	}
+
+	return b.String()
+}
 
 func (m *Matrix) createUser(userID id.UserID) *bridge.UserInfo {
 	localpart, homeserver, err := userID.Parse()
@@ -993,12 +1026,11 @@ func (m *Matrix) createUser(userID id.UserID) *bridge.UserInfo {
 	}
 
 	// Drop the homeserver/host part if it's a user on the same homeserver as us.
-	// ':' separates the homeserver in the nick, so it must not appear in the localpart.
-	// '^' isn't a legal localpart character; it is the escape marker and is escaped
-	// itself, keeping the mapping injective so distinct users never share a nick.
-	// It is not '~' as that prefix marks idents in resolveUserID.
-	safeLocalpart := nickLocalpartEscaper.Replace(localpart)
-	nick := safeLocalpart + ":" + homeserver
+	// The separator can't appear in the localpart, so it is escaped.
+	sep := cmp.Or(m.cfg.Matrix().ReplaceColonChar, "[]")
+	prefix, suffix := nickAffixes(sep)
+	safeLocalpart := escapeNickLocalpart(localpart, sep)
+	nick := safeLocalpart + prefix + homeserver + suffix
 
 	// The IRC user is the key of a ghost. It always has the homeserver, as '/' is
 	// legal in a localpart and would otherwise collide with a remote user.

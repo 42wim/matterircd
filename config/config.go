@@ -231,6 +231,11 @@ type MatrixConfig struct {
 	// DefaultProvider is left out of channel names, e.g. "ubuntu.com".
 	DefaultProvider string
 
+	// ReplaceColonChar separates localpart and homeserver in the nick of remote
+	// users instead of Matrix's ':', e.g. "/" gives hloeung/matrix.org. The
+	// special value "[]" gives hloeung[matrix.org].
+	ReplaceColonChar string
+
 	// Encrypted rooms, needs a build with -tags goolm and cgo.
 	EncryptionDir       string
 	EncryptionPickleKey string
@@ -546,6 +551,7 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 			HideReplies:      c.v.GetBool("matrix.HideReplies"),
 			ShortenRepliesTo: c.v.GetInt("matrix.ShortenRepliesTo"),
 			DefaultProvider:  c.v.GetString("matrix.DefaultProvider"),
+			ReplaceColonChar: c.v.GetString("matrix.ReplaceColonChar"),
 
 			EncryptionDir:       c.v.GetString("matrix.EncryptionDir"),
 			EncryptionPickleKey: c.v.GetString("matrix.EncryptionPickleKey"),
@@ -682,6 +688,7 @@ func Load(cfgfile string, flags *pflag.FlagSet) (*Config, error) {
 
 	v.SetDefault("mattermost.JoinReplayDuration", "15m")
 	v.SetDefault("matrix.JoinReplayDuration", "15m")
+	v.SetDefault("matrix.ReplaceColonChar", "[]")
 
 	c := &Config{
 		v: v,
