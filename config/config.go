@@ -222,6 +222,8 @@ type MatrixConfig struct {
 	Bridge    BridgeConfig
 	Formatter FormatterConfig
 
+	MatrixclientLogLevel string
+
 	// Only used when mattermost.LastViewedSaveFile is unset, there is one file for all bridges.
 	LastViewedSaveFile string
 
@@ -545,6 +547,8 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 			Bridge:       mxBridge,
 			Formatter:    mxFormatter,
 			SharedConfig: c.buildSharedConfig("matrix"),
+
+			MatrixclientLogLevel: c.v.GetString("matrix.MatrixclientLogLevel"),
 
 			LastViewedSaveFile: c.v.GetString("matrix.LastViewedSaveFile"),
 
