@@ -1195,6 +1195,11 @@ func CmdTagMsg(s Server, u *User, msg *irc.Message) error {
 		channelName := target
 
 		target = resolveThreadTarget(s, u, channelName, msg.Params[1])
+		if target == "" && u.br != nil && u.br.Protocol() == "matrix" {
+			// Matrix typing is room-scoped; falling back to the channel would show phantom typing in the main room.
+			return nil
+		}
+
 		if target == "" {
 			// Unresolvable thread root (e.g. evicted from a cache): typing is still valid for the channel.
 			target = channelName
