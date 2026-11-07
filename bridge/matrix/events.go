@@ -22,6 +22,7 @@ const (
 	suffixUnpinned
 )
 
+//nolint:gocyclo
 func (m *Matrix) formatSuffix(kind suffixKind) string {
 	useUnicode := m.cfg.Matrix().Formatter.Unicode
 
@@ -148,6 +149,7 @@ func (m *Matrix) OnPin(p *matrixclient.PinChange) {
 	}
 
 	text, _ := m.msgTextCache.Get(p.EventID)
+
 	kind := suffixUnpinned
 	if p.Pinned {
 		kind = suffixPinned
