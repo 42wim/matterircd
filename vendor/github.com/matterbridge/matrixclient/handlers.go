@@ -11,6 +11,17 @@ import (
 	"maunium.net/go/mautrix/id"
 )
 
+const (
+	redactedTypeTimeout = 5 * time.Second
+	// redactedTypeBudget bounds all redaction lookups of one sync response, so a stalled
+	// server cannot hold up the serialized callbacks and the next sync.
+	redactedTypeBudget = 10 * time.Second
+)
+
+func (c *Client) beginLookups() {
+	c.lookupUntil.Store(time.Now().Add(redactedTypeBudget).UnixNano())
+}
+
 func (c *Client) channelLocked(roomID id.RoomID) *Channel {
 	ch, ok := c.channels[roomID]
 	if !ok {
@@ -533,7 +544,7 @@ func (c *Client) handleReaction(_ context.Context, ev *event.Event) {
 	})
 }
 
-func (c *Client) handleRedaction(_ context.Context, ev *event.Event) {
+func (c *Client) handleRedaction(ctx context.Context, ev *event.Event) {
 	h, ok := c.handler.(RedactionHandler)
 	if !ok || !c.synced.Load() {
 		return
@@ -549,11 +560,33 @@ func (c *Client) handleRedaction(_ context.Context, ev *event.Event) {
 	}
 
 	h.OnRedaction(&Redaction{
-		RoomID:   ev.RoomID,
-		TargetID: targetID,
-		Sender:   ev.Sender,
-		Direct:   c.IsDirect(ev.RoomID),
+		RoomID:     ev.RoomID,
+		TargetID:   targetID,
+		Sender:     ev.Sender,
+		Direct:     c.IsDirect(ev.RoomID),
+		TargetType: c.redactedType(ctx, ev.RoomID, targetID),
 	})
+}
+
+// redactedType returns the type of a redacted event, "" if it cannot be fetched or
+// the lookup budget of the sync response is used up.
+// Redaction keeps the event type, so it tells a message from a reaction even for
+// events this client never saw.
+func (c *Client) redactedType(ctx context.Context, roomID id.RoomID, eventID id.EventID) event.Type {
+	remaining := time.Until(time.Unix(0, c.lookupUntil.Load()))
+	if remaining <= 0 {
+		return event.Type{}
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, min(redactedTypeTimeout, remaining))
+	defer cancel()
+
+	target, err := c.mc.GetEvent(ctx, roomID, eventID)
+	if err != nil || target == nil {
+		return event.Type{}
+	}
+
+	return target.Type
 }
 
 func (c *Client) handleTyping(_ context.Context, ev *event.Event) {

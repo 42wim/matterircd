@@ -2,6 +2,7 @@ package matrixclient
 
 import (
 	"context"
+	"slices"
 	"time"
 
 	"maunium.net/go/mautrix"
@@ -352,6 +353,39 @@ func (c *Client) handlePresence(_ context.Context, ev *event.Event) {
 	}
 
 	c.setPresence(ev.Sender, content.Presence, content.StatusMessage, content.LastActiveAgo)
+}
+
+func (c *Client) handlePinnedEvents(_ context.Context, ev *event.Event) {
+	content := ev.Content.AsPinnedEvents()
+	if content == nil || ev.StateKey == nil || *ev.StateKey != "" {
+		return
+	}
+
+	c.Lock()
+	ch := c.channelLocked(ev.RoomID)
+
+	ch.Lock()
+	prev := ch.pinned
+	ch.pinned = content.Pinned
+	ch.Unlock()
+	c.Unlock()
+
+	h, ok := c.handler.(PinHandler)
+	if !ok || !c.synced.Load() {
+		return
+	}
+
+	for _, eventID := range content.Pinned {
+		if !slices.Contains(prev, eventID) {
+			h.OnPin(&PinChange{RoomID: ev.RoomID, EventID: eventID, Sender: ev.Sender, Pinned: true})
+		}
+	}
+
+	for _, eventID := range prev {
+		if !slices.Contains(content.Pinned, eventID) {
+			h.OnPin(&PinChange{RoomID: ev.RoomID, EventID: eventID, Sender: ev.Sender})
+		}
+	}
 }
 
 func (c *Client) handleTopic(_ context.Context, ev *event.Event) {
