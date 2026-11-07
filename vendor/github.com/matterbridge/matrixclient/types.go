@@ -137,6 +137,10 @@ type Redaction struct {
 	// TargetType is the type of the redacted event, which a redaction keeps. It is
 	// event.EventReaction for a removed reaction, and empty when the lookup failed.
 	TargetType event.Type
+	// IsEdit is true when the redacted event was an edit (m.replace), so the
+	// original message still exists. Best effort: homeservers normally prune the
+	// relation from a redacted event, false does not guarantee it was not an edit.
+	IsEdit bool
 }
 
 // Typing is the full list of users currently typing in a room, excluding ourselves.

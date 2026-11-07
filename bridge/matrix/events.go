@@ -175,11 +175,14 @@ func (m *Matrix) OnRedaction(r *matrixclient.Redaction) {
 	}
 
 	// An edit is a message event too, but redacting it leaves the original message in place.
+	// IsEdit is best effort, as homeservers usually prune the relation from a redacted event,
+	// so the edits seen by OnEdit are tracked as well.
 	m.editMu.Lock()
 
-	if target, ok := m.editEventIDs.Get(r.TargetID); ok {
+	target, tracked := m.editEventIDs.Get(r.TargetID)
+	if tracked || r.IsEdit {
 		// Only the text of the latest edit is cached, an older edit being removed leaves it valid.
-		if latest, _ := m.latestEditIDs.Get(target); latest == r.TargetID {
+		if latest, _ := m.latestEditIDs.Get(target); tracked && latest == r.TargetID {
 			m.msgTextCache.Remove(target)
 			m.latestEditIDs.Remove(target)
 		}

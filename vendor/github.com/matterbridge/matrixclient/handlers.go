@@ -559,23 +559,28 @@ func (c *Client) handleRedaction(ctx context.Context, ev *event.Event) {
 		return
 	}
 
+	targetType, isEdit := c.redactedTarget(ctx, ev.RoomID, targetID)
+
 	h.OnRedaction(&Redaction{
 		RoomID:     ev.RoomID,
 		TargetID:   targetID,
 		Sender:     ev.Sender,
 		Direct:     c.IsDirect(ev.RoomID),
-		TargetType: c.redactedType(ctx, ev.RoomID, targetID),
+		TargetType: targetType,
+		IsEdit:     isEdit,
 	})
 }
 
-// redactedType returns the type of a redacted event, "" if it cannot be fetched or
-// the lookup budget of the sync response is used up.
+// redactedTarget returns the type of a redacted event, empty if it cannot be fetched
+// or the lookup budget of the sync response is used up, and whether it was an edit.
 // Redaction keeps the event type, so it tells a message from a reaction even for
-// events this client never saw.
-func (c *Client) redactedType(ctx context.Context, roomID id.RoomID, eventID id.EventID) event.Type {
+// events this client never saw. The m.replace relation is only reported when the
+// homeserver still returns it on the redacted event, most prune it with the rest
+// of the content, so isEdit false does not prove the target was not an edit.
+func (c *Client) redactedTarget(ctx context.Context, roomID id.RoomID, eventID id.EventID) (event.Type, bool) {
 	remaining := time.Until(time.Unix(0, c.lookupUntil.Load()))
 	if remaining <= 0 {
-		return event.Type{}
+		return event.Type{}, false
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, min(redactedTypeTimeout, remaining))
@@ -583,10 +588,13 @@ func (c *Client) redactedType(ctx context.Context, roomID id.RoomID, eventID id.
 
 	target, err := c.mc.GetEvent(ctx, roomID, eventID)
 	if err != nil || target == nil {
-		return event.Type{}
+		return event.Type{}, false
 	}
 
-	return target.Type
+	rel, _ := target.Content.Raw["m.relates_to"].(map[string]any)
+	relType, _ := rel["rel_type"].(string)
+
+	return target.Type, event.RelationType(relType) == event.RelReplace
 }
 
 func (c *Client) handleTyping(_ context.Context, ev *event.Event) {
