@@ -3,6 +3,8 @@ package matrix
 import (
 	"cmp"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
@@ -13,6 +15,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"maunium.net/go/mautrix/id"
 
@@ -1017,6 +1020,31 @@ func nickAffixes(sep string) (string, string) {
 	return sep, ""
 }
 
+// Matrix IDs can be 255 bytes and escaping can triple a nick, which would push the
+// nick!ident@host prefix past the 512 byte IRC line limit and truncate the command.
+const (
+	maxNickLen  = 64
+	maxIdentLen = 96
+)
+
+// capLen shortens s to at most limit bytes, ending in a hash of the user ID so that
+// distinct users keep distinct values.
+func capLen(s string, userID id.UserID, limit int) string {
+	if len(s) <= limit {
+		return s
+	}
+
+	sum := sha256.Sum256([]byte(userID))
+
+	// Cut on a rune boundary, and don't split an escape sequence ('^' plus two digits).
+	cut := limit - 13
+	for cut > 0 && (!utf8.RuneStart(s[cut]) || strings.LastIndexByte(s[max(cut-2, 0):cut], '^') >= 0) {
+		cut--
+	}
+
+	return s[:cut] + "^" + hex.EncodeToString(sum[:6])
+}
+
 // validNickSep reports whether sep can safely separate localpart and homeserver in a nick.
 // Letters and digits are rejected as nick lookups are case-insensitive, '^' is the escape
 // marker, '.', '-', '_' can occur in homeservers and localparts, and the characters that
@@ -1083,15 +1111,15 @@ func (m *Matrix) createUser(userID id.UserID) *bridge.UserInfo {
 	// The separator can't appear in the localpart, so it is escaped.
 	prefix, suffix := nickAffixes(m.nickSep)
 	safeLocalpart := escapeNickPart(localpart, m.nickSep)
-	nick := safeLocalpart + prefix + escapeNickPart(homeserver, m.nickSep) + suffix
+	nick := capLen(safeLocalpart+prefix+escapeNickPart(homeserver, m.nickSep)+suffix, userID, maxNickLen)
 
 	// The IRC user is the key of a ghost. It always has the homeserver, as '/' is
 	// legal in a localpart and would otherwise collide with a remote user.
-	ident := "~" + localpart + "/" + homeserver
+	ident := capLen("~"+localpart+"/"+homeserver, userID, maxIdentLen)
 
 	_, myHomeserver, err := m.mc.UserID().Parse()
 	if err == nil && homeserver == myHomeserver {
-		nick = safeLocalpart
+		nick = capLen(safeLocalpart, userID, maxNickLen)
 	}
 
 	info := &bridge.UserInfo{
