@@ -137,6 +137,10 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 	// The lifetime of this bridge, so Logout can release goroutines blocked on eventChan.
 	bridgeCtx, cancel := context.WithCancel(ctx)
 
+	if strings.Contains(cfg.Matrix().ReplaceColonChar, ":") {
+		logger.Warnf("matrix.ReplaceColonChar contains ':', which is not valid in IRC nicks and may break some IRC clients or bouncers. Use at your own risk")
+	}
+
 	m := &Matrix{
 		eventChan: eventChan,
 		cfg:       cfg,
