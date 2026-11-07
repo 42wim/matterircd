@@ -1036,12 +1036,13 @@ func validNickSep(sep string) bool {
 }
 
 // escapeNickPart percent-style escapes ('^' plus two hex digits) the escape marker, every
-// character of the separator and every character sanitizeNick would later turn into '-'
-// (all ASCII, so always two digits). Otherwise distinct users could share a nick, e.g.
+// character of the separator, every character sanitizeNick would later turn into '-' and the
+// rfc1459 case-mapped characters (all ASCII, so always two digits). Otherwise distinct users could share a nick, e.g.
 // alice+bob and alice-bob. '^' isn't a legal localpart character, and unlike '~' it
 // doesn't mark an ident in resolveUserID. Used for both the localpart and homeserver.
 func escapeNickPart(part, sep string) string {
-	const reserved = "^!+%@&#$:'\"?*, "
+	// "[]\\~" fold to "{}|^" under IRC's rfc1459 case mapping, so all of them are escaped.
+	const reserved = "^!+%@&#$:'\"?*, []\\{}|~"
 
 	if !strings.ContainsAny(part, reserved+sep) {
 		return part
