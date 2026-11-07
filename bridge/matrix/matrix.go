@@ -15,7 +15,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	"unicode/utf8"
 
 	"maunium.net/go/mautrix/id"
 
@@ -1036,13 +1035,16 @@ func capLen(s string, userID id.UserID, limit int) string {
 
 	sum := sha256.Sum256([]byte(userID))
 
-	// Cut on a rune boundary, and don't split an escape sequence ('^' plus two digits).
+	// Don't split an escape sequence ('^' plus two digits).
 	cut := limit - 13
-	for cut > 0 && (!utf8.RuneStart(s[cut]) || strings.LastIndexByte(s[max(cut-2, 0):cut], '^') >= 0) {
+	for cut > 0 && strings.LastIndexByte(s[max(cut-2, 0):cut], '^') >= 0 {
 		cut--
 	}
 
-	return s[:cut] + "^" + hex.EncodeToString(sum[:6])
+	// Drops a rune that the cut left incomplete.
+	head := strings.ToValidUTF8(s[:cut], "")
+
+	return head + "^" + hex.EncodeToString(sum[:6])
 }
 
 // validNickSep reports whether sep can safely separate localpart and homeserver in a nick.
