@@ -150,8 +150,11 @@ func (m *Matrix) OnEdit(e *matrixclient.Edit) {
 	}
 
 	// Cached before the echo check, as edits sent from IRC must update the text too.
+	m.editMu.Lock()
 	m.cacheText(e.TargetID, e.Text)
 	m.editEventIDs.Add(e.EventID, e.TargetID)
+	m.latestEditIDs.Add(e.TargetID, e.EventID)
+	m.editMu.Unlock()
 
 	if ghost.Me && m.isSentEcho(e.EventID, e.Text) {
 		return
@@ -172,13 +175,22 @@ func (m *Matrix) OnRedaction(r *matrixclient.Redaction) {
 	}
 
 	// An edit is a message event too, but redacting it leaves the original message in place.
+	m.editMu.Lock()
+
 	if target, ok := m.editEventIDs.Get(r.TargetID); ok {
-		// The cached text is that of the removed edit, so drop it rather than show it later.
-		m.msgTextCache.Remove(target)
+		// Only the text of the latest edit is cached, an older edit being removed leaves it valid.
+		if latest, _ := m.latestEditIDs.Get(target); latest == r.TargetID {
+			m.msgTextCache.Remove(target)
+			m.latestEditIDs.Remove(target)
+		}
+
 		m.editEventIDs.Remove(r.TargetID)
+		m.editMu.Unlock()
 
 		return
 	}
+
+	m.editMu.Unlock()
 
 	text, hasText := m.msgTextCache.Get(r.TargetID)
 	// Evicted before any early return, so echoes of our own deletions do not leave the text behind.

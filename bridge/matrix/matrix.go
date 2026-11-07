@@ -128,6 +128,8 @@ type Matrix struct {
 	msgRoomCache     *lru.Cache[id.EventID, id.RoomID]
 	msgTextCache     *lru.Cache[id.EventID, string]     // first line of recent messages, shown when they are deleted
 	editEventIDs     *lru.Cache[id.EventID, id.EventID] // replacement event to edited message, whose redaction is not a deleted message
+	latestEditIDs    *lru.Cache[id.EventID, id.EventID] // edited message to the edit its cached text comes from
+	editMu           sync.Mutex                         // keeps text and edit tracking consistent between edits and redactions
 	reactionCache    *lru.Cache[string, id.EventID]
 	sentReactions    *lru.Cache[string, time.Time]    // reactions added from IRC, whose echo is dropped
 	sentRedactions   *lru.Cache[id.EventID, struct{}] // messages deleted from IRC, whose echo is dropped
@@ -225,6 +227,7 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 	m.msgRoomCache, _ = lru.New[id.EventID, id.RoomID](msgRoomCacheSize)
 	m.msgTextCache, _ = lru.New[id.EventID, string](msgTextCacheSize)
 	m.editEventIDs, _ = lru.New[id.EventID, id.EventID](editIDCacheSize)
+	m.latestEditIDs, _ = lru.New[id.EventID, id.EventID](editIDCacheSize)
 	m.pendingSends = make(map[string]int)
 	m.sentCache, _ = lru.New[id.EventID, struct{}](sentCacheSize)
 	m.sentReactions, _ = lru.New[string, time.Time](reactionCacheSize)
