@@ -40,9 +40,9 @@ func (t *apiLogTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 
 	// Like matterclient, "warn" shows the API calls. The /sync long poll runs
-	// continuously and would flood that level, so it is only logged at debug.
+	// continuously and would flood that level, so it is only logged at trace.
 	if strings.HasSuffix(req.URL.Path, "/sync") {
-		t.logger.Debugf("%s %s: %d (%s)", req.Method, req.URL.Path, resp.StatusCode, time.Since(start).Round(time.Millisecond))
+		t.logger.Tracef("%s %s: %d (%s)", req.Method, req.URL.Path, resp.StatusCode, time.Since(start).Round(time.Millisecond))
 
 		return resp, nil
 	}
