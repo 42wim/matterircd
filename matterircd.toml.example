@@ -378,6 +378,8 @@ PrefixContext = false
 #Threads are shown using Matrix event IDs
 #ThreadContext = "matrix"
 #Homeserver left out of channel names, so #room/ubuntu.com becomes #room
+#The value is fixed for the session: after changing it, disconnect and reconnect (an INFO
+#message is logged when a changed value is detected) for it to take effect.
 #DefaultProvider = "ubuntu.com"
 #PrefixContext = false
 #Separates localpart and homeserver in nicks of users on other homeservers, instead of

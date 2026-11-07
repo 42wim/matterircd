@@ -82,7 +82,10 @@ type Matrix struct {
 	eventChan chan *bridge.Event
 	cfg       *config.Config
 	nickSep   string
-	onConnect func()
+
+	// Fixed for the session, like nickSep: matrixclient is started with it.
+	defaultProvider string
+	onConnect       func()
 
 	connected atomic.Bool
 	e2ee      atomic.Bool
@@ -154,15 +157,18 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 		logger.Warnf("matrix.ReplaceColonChar contains ':', which is not valid in IRC nicks and may break some IRC clients or bouncers. Use at your own risk")
 	}
 
+	defaultProvider := cfg.Matrix().DefaultProvider
+
 	m := &Matrix{
-		nickSep:   nickSep,
-		eventChan: eventChan,
-		cfg:       cfg,
-		onConnect: onConnect,
-		ctx:       bridgeCtx,
-		cancel:    cancel,
-		initDone:  make(chan struct{}),
-		readyCh:   make(chan struct{}),
+		nickSep:         nickSep,
+		defaultProvider: defaultProvider,
+		eventChan:       eventChan,
+		cfg:             cfg,
+		onConnect:       onConnect,
+		ctx:             bridgeCtx,
+		cancel:          cancel,
+		initDone:        make(chan struct{}),
+		readyCh:         make(chan struct{}),
 
 		roomUpdateWake: make(chan struct{}, 1),
 		verifyQueue:    make(chan *matrixclient.Verification, verificationQueueSize),
@@ -193,7 +199,7 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 		return nil, nil, err
 	}
 
-	if provider := m.cfg.Matrix().DefaultProvider; provider != "" {
+	if provider := m.defaultProvider; provider != "" {
 		opts = append(opts, matrixclient.WithDefaultProvider(provider))
 	}
 
@@ -250,9 +256,10 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 
 	// The hook keeps this client alive for as long as it is registered, so Logout
 	// has to remove it again.
-	var lastNotifiedSep atomic.Value
+	var lastNotifiedSep, lastNotifiedProvider atomic.Value
 
 	lastNotifiedSep.Store(requestedSep)
+	lastNotifiedProvider.Store(defaultProvider)
 
 	m.unregisterReloadHook = cfg.RegisterReloadHook(func(rc *config.RuntimeConfig) {
 		setLogLevels(rc)
@@ -260,6 +267,11 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 		newSep := cmp.Or(rc.Matrix.ReplaceColonChar, "[]")
 		if lastNotifiedSep.Swap(newSep) != newSep && newSep != requestedSep {
 			logger.Infof("matrix.ReplaceColonChar changed from %q to %q, a reconnect (disconnect + connect) is required for it to take effect", requestedSep, newSep)
+		}
+
+		newProvider := rc.Matrix.DefaultProvider
+		if lastNotifiedProvider.Swap(newProvider) != newProvider && newProvider != defaultProvider {
+			logger.Infof("matrix.DefaultProvider changed from %q to %q, a reconnect (disconnect + connect) is required for it to take effect", defaultProvider, newProvider)
 		}
 	})
 	m.connected.Store(true)
@@ -477,7 +489,7 @@ func (m *Matrix) Join(ctx context.Context, channelName string) (string, string, 
 		} else {
 			// Clients rejoin saved names that still carry the default provider. Keep it
 			// explicit, as matrixclient appends the provider it was started with.
-			if provider := m.cfg.Matrix().DefaultProvider; provider != "" {
+			if provider := m.defaultProvider; provider != "" {
 				if name, ok := strings.CutSuffix(target, "/"+provider); ok {
 					target = name + ":" + provider
 				}
