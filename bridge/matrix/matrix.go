@@ -991,7 +991,7 @@ func (m *Matrix) createUser(userID id.UserID) *bridge.UserInfo {
 	}
 
 	// Drop the homeserver/host part if it's a user on the same homeserver as us.
-	nick := localpart + "@" + homeserver
+	nick := localpart + "/" + homeserver
 
 	// The IRC user is the key of a ghost. It always has the homeserver, as '/' is
 	// legal in a localpart and would otherwise collide with a remote user.

@@ -489,9 +489,9 @@ func details(u *User, toUser *User, args []string, service string) {
 
 		switch e := event.Data.(type) {
 		case *bridge.ChannelMessageEvent:
-			createAt, text, nick, channel = e.CreateAt, e.Text, e.Sender.Nick, u.br.GetChannelName(u.ctx, e.ChannelID)
+			createAt, text, nick, channel = e.CreateAt, e.Text, sanitizeNick(e.Sender.Nick), u.br.GetChannelName(u.ctx, e.ChannelID)
 		case *bridge.DirectMessageEvent:
-			createAt, text, nick, channel = e.CreateAt, e.Text, e.Sender.Nick, u.br.GetChannelName(u.ctx, e.ChannelID)
+			createAt, text, nick, channel = e.CreateAt, e.Text, sanitizeNick(e.Sender.Nick), u.br.GetChannelName(u.ctx, e.ChannelID)
 		default:
 			continue
 		}
@@ -587,7 +587,7 @@ func getChannelTargetName(u *User, channelID string) string {
 
 	if u.br.IsDMChannelName(channelName) {
 		if dmUser := u.br.GetDMUser(u.ctx, channelName); dmUser != nil && dmUser.Nick != "" {
-			return dmUser.Nick
+			return sanitizeNick(dmUser.Nick)
 		}
 	}
 
@@ -746,9 +746,9 @@ func dispatchHistoricalEvent(u *User, toUser *User, event *bridge.Event, searchC
 
 	switch e := event.Data.(type) {
 	case *bridge.ChannelMessageEvent:
-		createAt, text, nick, msgID, parentID, files, channelID = e.CreateAt, e.Text, e.Sender.Nick, e.MessageID, e.ParentID, e.Files, e.ChannelID
+		createAt, text, nick, msgID, parentID, files, channelID = e.CreateAt, e.Text, sanitizeNick(e.Sender.Nick), e.MessageID, e.ParentID, e.Files, e.ChannelID
 	case *bridge.DirectMessageEvent:
-		createAt, text, nick, msgID, parentID, files, channelID = e.CreateAt, e.Text, e.Sender.Nick, e.MessageID, e.ParentID, e.Files, e.ChannelID
+		createAt, text, nick, msgID, parentID, files, channelID = e.CreateAt, e.Text, sanitizeNick(e.Sender.Nick), e.MessageID, e.ParentID, e.Files, e.ChannelID
 
 		// The IRC nick can differ from the account's, own messages must route as ours.
 		if e.Sender.Me {
@@ -879,7 +879,7 @@ func formatScrollbackMsg(u *User, channelID string, channel string, user *User, 
 	)
 
 	if user != nil {
-		otherNick = user.Nick
+		otherNick = sanitizeNick(user.Nick)
 	}
 
 	switch {
@@ -1694,11 +1694,11 @@ func summarize(u *User, toUser *User, args []string, service string) {
 		switch e := event.Data.(type) {
 		case *bridge.ChannelMessageEvent:
 			if e.Sender != nil && e.Text != "" {
-				fmt.Fprintf(&transcript, "%s: %s\n", e.Sender.Nick, e.Text)
+				fmt.Fprintf(&transcript, "%s: %s\n", sanitizeNick(e.Sender.Nick), e.Text)
 			}
 		case *bridge.DirectMessageEvent:
 			if e.Sender != nil && e.Text != "" {
-				fmt.Fprintf(&transcript, "%s: %s\n", e.Sender.Nick, e.Text)
+				fmt.Fprintf(&transcript, "%s: %s\n", sanitizeNick(e.Sender.Nick), e.Text)
 			}
 		}
 	}
