@@ -31,21 +31,21 @@ func (m *Matrix) formatSuffix(kind suffixKind) string {
 	case kind == suffixEdited:
 		return " \x1d(edited)\x1d"
 	case kind == suffixDeleted && useUnicode:
-		return "\x1d(🗑️deleted)\x1d"
+		return " \x1d(🗑️deleted)\x1d"
 	case kind == suffixDeleted:
-		return "\x1d(deleted)\x1d"
+		return " \x1d(deleted)\x1d"
 	case kind == suffixEncrypted && useUnicode:
 		return " \x1d(🔒encrypted)\x1d"
 	case kind == suffixEncrypted:
 		return " \x1d(encrypted)\x1d"
 	case kind == suffixPinned && useUnicode:
-		return "\x1d(📌pinned)\x1d"
+		return " \x1d(📌pinned)\x1d"
 	case kind == suffixPinned:
-		return "\x1d(pinned)\x1d"
+		return " \x1d(pinned)\x1d"
 	case kind == suffixUnpinned && useUnicode:
-		return "\x1d(📌unpinned)\x1d"
+		return " \x1d(📌unpinned)\x1d"
 	case kind == suffixUnpinned:
-		return "\x1d(unpinned)\x1d"
+		return " \x1d(unpinned)\x1d"
 	default:
 		return ""
 	}
@@ -54,10 +54,12 @@ func (m *Matrix) formatSuffix(kind suffixKind) string {
 // cacheText remembers the start of the first line, enough to recognize the message when it is
 // deleted or pinned, without holding whole messages in memory.
 func (m *Matrix) cacheText(eventID id.EventID, text string) {
-	text, _, _ = strings.Cut(text, "\n")
+	text, rest, multiline := strings.Cut(text, "\n")
 	if text == "" {
 		return
 	}
+
+	truncated := multiline && strings.TrimSpace(rest) != ""
 
 	// A summary of ShortenRepliesTo characters needs at most 4 bytes per character.
 	limit := msgTextMaxBytes
@@ -67,6 +69,15 @@ func (m *Matrix) cacheText(eventID id.EventID, text string) {
 
 	if len(text) > limit {
 		text = strings.ToValidUTF8(text[:limit], "")
+		truncated = true
+	}
+
+	if truncated {
+		if m.cfg.Matrix().Formatter.Unicode {
+			text += "…"
+		} else {
+			text += "..."
+		}
 	}
 
 	m.msgTextCache.Add(eventID, text)
@@ -126,14 +137,7 @@ func (m *Matrix) OnRedaction(r *matrixclient.Redaction) {
 	m.msgParentCache.Remove(r.TargetID)
 	m.msgTextCache.Remove(r.TargetID)
 
-	text = m.cachedSummary(text)
-
-	suffix := m.formatSuffix(suffixDeleted)
-	if text != "" {
-		suffix = text + " " + suffix
-	}
-
-	m.sendText(ghost, r.RoomID, r.Direct, r.TargetID, "", suffix, "post_deleted", m.messageType(text), 0)
+	m.sendText(ghost, r.RoomID, r.Direct, r.TargetID, "", m.cachedSummary(text)+m.formatSuffix(suffixDeleted), "post_deleted", m.messageType(text), 0)
 }
 
 // OnPin implements matrixclient.PinHandler.
@@ -144,20 +148,13 @@ func (m *Matrix) OnPin(p *matrixclient.PinChange) {
 	}
 
 	text, _ := m.msgTextCache.Get(p.EventID)
-	text = m.cachedSummary(text)
 	kind := suffixUnpinned
 	if p.Pinned {
 		kind = suffixPinned
 	}
 
-	suffix := m.formatSuffix(kind)
-
-	if text != "" {
-		suffix = text + " " + suffix
-	}
-
 	m.msgRoomCache.Add(p.EventID, p.RoomID)
-	m.sendText(ghost, p.RoomID, m.mc.IsDirect(p.RoomID), p.EventID, "", suffix, "post_edited", m.messageType(text), 0)
+	m.sendText(ghost, p.RoomID, m.mc.IsDirect(p.RoomID), p.EventID, "", m.cachedSummary(text)+m.formatSuffix(kind), "post_edited", m.messageType(text), 0)
 }
 
 // OnTyping implements matrixclient.TypingHandler.
