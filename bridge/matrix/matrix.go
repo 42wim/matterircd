@@ -979,6 +979,8 @@ func hostWithoutPort(serverName string) string {
 	return host
 }
 
+var nickLocalpartEscaper = strings.NewReplacer("~", "~t", "/", "~s")
+
 func (m *Matrix) createUser(userID id.UserID) *bridge.UserInfo {
 	localpart, homeserver, err := userID.Parse()
 	if err != nil {
@@ -992,7 +994,9 @@ func (m *Matrix) createUser(userID id.UserID) *bridge.UserInfo {
 
 	// Drop the homeserver/host part if it's a user on the same homeserver as us.
 	// '/' separates the homeserver in the nick, so it must not appear in the localpart.
-	safeLocalpart := strings.ReplaceAll(localpart, "/", "-")
+	// '~' isn't a legal localpart character; it is the escape marker and is escaped
+	// itself, keeping the mapping injective so distinct users never share a nick.
+	safeLocalpart := nickLocalpartEscaper.Replace(localpart)
 	nick := safeLocalpart + "/" + homeserver
 
 	// The IRC user is the key of a ghost. It always has the homeserver, as '/' is
