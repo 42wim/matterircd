@@ -12,39 +12,42 @@ import (
 	"github.com/matterbridge/matrixclient"
 )
 
-func (m *Matrix) formatSuffix(isEdited, isDeleted, isEncrypted bool) string {
+type suffixKind int
+
+const (
+	suffixEdited suffixKind = iota
+	suffixDeleted
+	suffixEncrypted
+	suffixPinned
+	suffixUnpinned
+)
+
+func (m *Matrix) formatSuffix(kind suffixKind) string {
 	useUnicode := m.cfg.Matrix().Formatter.Unicode
 
 	switch {
-	case isEdited && useUnicode:
+	case kind == suffixEdited && useUnicode:
 		return " \x1d(✏️edited)\x1d"
-	case isEdited:
+	case kind == suffixEdited:
 		return " \x1d(edited)\x1d"
-	case isDeleted && useUnicode:
+	case kind == suffixDeleted && useUnicode:
 		return "\x1d(🗑️deleted)\x1d"
-	case isDeleted:
+	case kind == suffixDeleted:
 		return "\x1d(deleted)\x1d"
-	case isEncrypted && useUnicode:
+	case kind == suffixEncrypted && useUnicode:
 		return " \x1d(🔒encrypted)\x1d"
-	case isEncrypted:
+	case kind == suffixEncrypted:
 		return " \x1d(encrypted)\x1d"
+	case kind == suffixPinned && useUnicode:
+		return "\x1d(📌pinned)\x1d"
+	case kind == suffixPinned:
+		return "\x1d(pinned)\x1d"
+	case kind == suffixUnpinned && useUnicode:
+		return "\x1d(📌unpinned)\x1d"
+	case kind == suffixUnpinned:
+		return "\x1d(unpinned)\x1d"
 	default:
 		return ""
-	}
-}
-
-func (m *Matrix) formatPinSuffix(pinned bool) string {
-	useUnicode := m.cfg.Matrix().Formatter.Unicode
-
-	switch {
-	case pinned && useUnicode:
-		return "\x1d(📌pinned)\x1d"
-	case pinned:
-		return "\x1d(pinned)\x1d"
-	case useUnicode:
-		return "\x1d(📌unpinned)\x1d"
-	default:
-		return "\x1d(unpinned)\x1d"
 	}
 }
 
@@ -94,7 +97,7 @@ func (m *Matrix) OnEdit(e *matrixclient.Edit) {
 	m.msgRoomCache.Add(e.TargetID, e.RoomID)
 	m.cacheText(e.TargetID, e.Text)
 
-	m.sendText(ghost, e.RoomID, e.Direct, e.TargetID, "", e.Text+m.formatSuffix(true, false, false), "post_edited", m.messageType(e.Text), e.Timestamp)
+	m.sendText(ghost, e.RoomID, e.Direct, e.TargetID, "", e.Text+m.formatSuffix(suffixEdited), "post_edited", m.messageType(e.Text), e.Timestamp)
 }
 
 // OnRedaction implements matrixclient.RedactionHandler.
@@ -125,7 +128,7 @@ func (m *Matrix) OnRedaction(r *matrixclient.Redaction) {
 
 	text = m.cachedSummary(text)
 
-	suffix := m.formatSuffix(false, true, false)
+	suffix := m.formatSuffix(suffixDeleted)
 	if text != "" {
 		suffix = text + " " + suffix
 	}
@@ -142,7 +145,12 @@ func (m *Matrix) OnPin(p *matrixclient.PinChange) {
 
 	text, _ := m.msgTextCache.Get(p.EventID)
 	text = m.cachedSummary(text)
-	suffix := m.formatPinSuffix(p.Pinned)
+	kind := suffixUnpinned
+	if p.Pinned {
+		kind = suffixPinned
+	}
+
+	suffix := m.formatSuffix(kind)
 
 	if text != "" {
 		suffix = text + " " + suffix
@@ -434,7 +442,7 @@ func (m *Matrix) fileFromMessage(msg *matrixclient.Message) *bridge.File {
 
 	if mxc == "" && msg.File != nil {
 		mxc = msg.File.URL
-		note = m.formatSuffix(false, false, true)
+		note = m.formatSuffix(suffixEncrypted)
 	}
 
 	if mxc == "" {
