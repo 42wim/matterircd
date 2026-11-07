@@ -205,10 +205,19 @@ func ParseMessage(raw string) (m *Message) {
 	// Skip space after command
 	j++
 
-	// Find prefix for trailer
-	i = indexByte(raw[j:], prefix)
+	// Find prefix for trailer: a colon starting a parameter, skipping colons inside
+	// one (e.g. a nick like "user:matrix.org").
+	i = -1
 
-	if i < 0 || raw[j+i-1] != space {
+	for k := j; k < len(raw); k++ {
+		if raw[k] == prefix && raw[k-1] == space {
+			i = k - j
+
+			break
+		}
+	}
+
+	if i < 0 {
 
 		// There is no trailing argument!
 		m.Params = strings.Split(raw[j:], string(space))

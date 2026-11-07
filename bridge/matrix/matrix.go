@@ -1,7 +1,10 @@
 package matrix
 
 import (
+	"cmp"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
@@ -78,7 +81,11 @@ type Matrix struct {
 	mc        *matrixclient.Client
 	eventChan chan *bridge.Event
 	cfg       *config.Config
-	onConnect func()
+	nickSep   string
+
+	// Fixed for the session, like nickSep: matrixclient is started with it.
+	defaultProvider string
+	onConnect       func()
 
 	connected atomic.Bool
 	e2ee      atomic.Bool
@@ -131,19 +138,68 @@ type Matrix struct {
 	verifyQueue chan *matrixclient.Verification
 }
 
+// resolveNickSep returns the configured separator and the one to use: an invalid
+// separator falls back to "[]", and ':' is allowed with a warning.
+func resolveNickSep(configured string) (string, string) {
+	requested := cmp.Or(configured, "[]")
+	sep := requested
+
+	if !validNickSep(sep) {
+		logger.Warnf("matrix.ReplaceColonChar %q is invalid (only punctuation that is not valid in a user ID or reserved in IRC nicks is allowed), using \"[]\"", sep)
+
+		sep = "[]"
+	}
+
+	if strings.Contains(sep, ":") {
+		logger.Warnf("matrix.ReplaceColonChar contains ':', which is not valid in IRC nicks and may break some IRC clients or bouncers. Use at your own risk")
+	}
+
+	return requested, sep
+}
+
+// sessionSettingsHook sets the log levels on reload and logs, once per new value, that
+// settings fixed for the session changed and need a reconnect to take effect.
+func sessionSettingsHook(sep, provider string, setLogLevels func(rc *config.RuntimeConfig)) func(rc *config.RuntimeConfig) {
+	var lastSep, lastProvider atomic.Value
+
+	lastSep.Store(sep)
+	lastProvider.Store(provider)
+
+	return func(rc *config.RuntimeConfig) {
+		setLogLevels(rc)
+
+		newSep := cmp.Or(rc.Matrix.ReplaceColonChar, "[]")
+		if lastSep.Swap(newSep) != newSep && newSep != sep {
+			logger.Infof("matrix.ReplaceColonChar changed from %q to %q, a reconnect (disconnect + connect) is required for it to take effect", sep, newSep)
+		}
+
+		newProvider := rc.Matrix.DefaultProvider
+		if lastProvider.Swap(newProvider) != newProvider && newProvider != provider {
+			logger.Infof("matrix.DefaultProvider changed from %q to %q, a reconnect (disconnect + connect) is required for it to take effect", provider, newProvider)
+		}
+	}
+}
+
 //nolint:funlen
 func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Event, onConnect func()) (bridge.Bridger, *matrixclient.Client, error) {
 	// The lifetime of this bridge, so Logout can release goroutines blocked on eventChan.
 	bridgeCtx, cancel := context.WithCancel(ctx)
 
+	// Fixed for the session: config reloads would otherwise change nicks without renaming existing ghosts.
+	requestedSep, nickSep := resolveNickSep(cfg.Matrix().ReplaceColonChar)
+
+	defaultProvider := cfg.Matrix().DefaultProvider
+
 	m := &Matrix{
-		eventChan: eventChan,
-		cfg:       cfg,
-		onConnect: onConnect,
-		ctx:       bridgeCtx,
-		cancel:    cancel,
-		initDone:  make(chan struct{}),
-		readyCh:   make(chan struct{}),
+		nickSep:         nickSep,
+		defaultProvider: defaultProvider,
+		eventChan:       eventChan,
+		cfg:             cfg,
+		onConnect:       onConnect,
+		ctx:             bridgeCtx,
+		cancel:          cancel,
+		initDone:        make(chan struct{}),
+		readyCh:         make(chan struct{}),
 
 		roomUpdateWake: make(chan struct{}, 1),
 		verifyQueue:    make(chan *matrixclient.Verification, verificationQueueSize),
@@ -174,7 +230,7 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 		return nil, nil, err
 	}
 
-	if provider := m.cfg.Matrix().DefaultProvider; provider != "" {
+	if provider := m.defaultProvider; provider != "" {
 		opts = append(opts, matrixclient.WithDefaultProvider(provider))
 	}
 
@@ -231,7 +287,7 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 
 	// The hook keeps this client alive for as long as it is registered, so Logout
 	// has to remove it again.
-	m.unregisterReloadHook = cfg.RegisterReloadHook(setLogLevels)
+	m.unregisterReloadHook = cfg.RegisterReloadHook(sessionSettingsHook(requestedSep, defaultProvider, setLogLevels))
 	m.connected.Store(true)
 
 	return m, mc, nil
@@ -447,7 +503,7 @@ func (m *Matrix) Join(ctx context.Context, channelName string) (string, string, 
 		} else {
 			// Clients rejoin saved names that still carry the default provider. Keep it
 			// explicit, as matrixclient appends the provider it was started with.
-			if provider := m.cfg.Matrix().DefaultProvider; provider != "" {
+			if provider := m.defaultProvider; provider != "" {
 				if name, ok := strings.CutSuffix(target, "/"+provider); ok {
 					target = name + ":" + provider
 				}
@@ -979,7 +1035,95 @@ func hostWithoutPort(serverName string) string {
 	return host
 }
 
-var nickLocalpartEscaper = strings.NewReplacer("^", "^t", "/", "^s")
+// nickAffixes returns the text placed before the homeserver and after it in a
+// remote user's nick. "[]" is special and wraps it as localpart[homeserver].
+func nickAffixes(sep string) (string, string) {
+	if sep == "[]" {
+		return "[", "]"
+	}
+
+	return sep, ""
+}
+
+// Matrix IDs can be 255 bytes and escaping can triple a nick, which would push the
+// nick!ident@host prefix past the 512 byte IRC line limit and truncate the command.
+const (
+	maxNickLen  = 64
+	maxIdentLen = 96
+)
+
+// capLen shortens s to at most limit bytes, ending in "^h" and a hash of the user ID so that
+// distinct users keep distinct values. 'h' isn't a hex digit, so the suffix can't equal an
+// escape sequence ('^' plus two hex digits) and a capped value never matches an uncapped one.
+func capLen(s string, userID id.UserID, limit int) string {
+	if len(s) <= limit {
+		return s
+	}
+
+	sum := sha256.Sum256([]byte(userID))
+
+	// Don't split an escape sequence ('^' plus two digits).
+	cut := limit - 14
+	for cut > 0 && strings.LastIndexByte(s[max(cut-2, 0):cut], '^') >= 0 {
+		cut--
+	}
+
+	// Drops a rune that the cut left incomplete.
+	head := strings.ToValidUTF8(s[:cut], "")
+
+	return head + "^h" + hex.EncodeToString(sum[:6])
+}
+
+// validNickSep reports whether sep can safely separate localpart and homeserver in a nick.
+// Letters and digits are rejected as nick lookups are case-insensitive, '^' is the escape
+// marker, '.', '-', '_' can occur in homeservers and localparts, and the characters that
+// sanitizeNick replaces would collapse into '-'. Escaping can't separate any of those.
+func validNickSep(sep string) bool {
+	for _, r := range sep {
+		if r > '~' || r <= ' ' || strings.ContainsRune("^.-_!+%@&#$'\"?*,~", r) {
+			return false
+		}
+
+		if r >= '0' && r <= '9' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' {
+			return false
+		}
+	}
+
+	return sep != ""
+}
+
+// escapeNickPart percent-style escapes ('^' plus two hex digits) the escape marker, every
+// character of the separator, every character sanitizeNick would later turn into '-' and the
+// rfc1459 case-mapped characters (all ASCII, so always two digits). Otherwise distinct users could share a nick, e.g.
+// alice+bob and alice-bob. '^' isn't a legal localpart character, and unlike '~' it
+// doesn't mark an ident in resolveUserID. Used for both the localpart and homeserver.
+func escapeNickPart(part, sep string) string {
+	// "[]\\~" fold to "{}|^" under IRC's rfc1459 case mapping, so all of them are escaped.
+	const reserved = "^!+%@&#$:'\"?*, []\\{}|~"
+
+	if !strings.ContainsAny(part, reserved+sep) {
+		return part
+	}
+
+	var b strings.Builder
+
+	for _, r := range part {
+		if strings.ContainsRune(reserved, r) || strings.ContainsRune(sep, r) {
+			fmt.Fprintf(&b, "^%02x", r)
+
+			continue
+		}
+
+		b.WriteRune(r)
+	}
+
+	return b.String()
+}
+
+// NickAllowsColon reports whether nicks may contain ':', so sanitizeNick must keep it.
+func (m *Matrix) NickAllowsColon() bool {
+	return strings.Contains(m.nickSep, ":")
+}
 
 func (m *Matrix) createUser(userID id.UserID) *bridge.UserInfo {
 	localpart, homeserver, err := userID.Parse()
@@ -993,20 +1137,18 @@ func (m *Matrix) createUser(userID id.UserID) *bridge.UserInfo {
 	}
 
 	// Drop the homeserver/host part if it's a user on the same homeserver as us.
-	// '/' separates the homeserver in the nick, so it must not appear in the localpart.
-	// '^' isn't a legal localpart character; it is the escape marker and is escaped
-	// itself, keeping the mapping injective so distinct users never share a nick.
-	// It is not '~' as that prefix marks idents in resolveUserID.
-	safeLocalpart := nickLocalpartEscaper.Replace(localpart)
-	nick := safeLocalpart + "/" + homeserver
+	// The separator can't appear in the localpart, so it is escaped.
+	prefix, suffix := nickAffixes(m.nickSep)
+	safeLocalpart := escapeNickPart(localpart, m.nickSep)
+	nick := capLen(safeLocalpart+prefix+escapeNickPart(homeserver, m.nickSep)+suffix, userID, maxNickLen)
 
 	// The IRC user is the key of a ghost. It always has the homeserver, as '/' is
 	// legal in a localpart and would otherwise collide with a remote user.
-	ident := "~" + localpart + "/" + homeserver
+	ident := capLen("~"+localpart+"/"+homeserver, userID, maxIdentLen)
 
 	_, myHomeserver, err := m.mc.UserID().Parse()
 	if err == nil && homeserver == myHomeserver {
-		nick = safeLocalpart
+		nick = capLen(safeLocalpart, userID, maxNickLen)
 	}
 
 	info := &bridge.UserInfo{
