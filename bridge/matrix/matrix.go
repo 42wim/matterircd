@@ -1035,19 +1035,22 @@ func validNickSep(sep string) bool {
 	return sep != ""
 }
 
-// escapeNickLocalpart percent-style escapes ('^' plus two hex digits) the escape
-// marker and every character of the separator, so the separator can't appear in
-// the localpart and distinct users never share a nick. '^' isn't a legal localpart
-// character, and unlike '~' it doesn't mark an ident in resolveUserID.
-func escapeNickLocalpart(localpart, sep string) string {
-	if !strings.ContainsAny(localpart, "^"+sep) {
-		return localpart
+// escapeNickPart percent-style escapes ('^' plus two hex digits) the escape marker, every
+// character of the separator and every character sanitizeNick would later turn into '-'
+// (all ASCII, so always two digits). Otherwise distinct users could share a nick, e.g.
+// alice+bob and alice-bob. '^' isn't a legal localpart character, and unlike '~' it
+// doesn't mark an ident in resolveUserID. Used for both the localpart and homeserver.
+func escapeNickPart(part, sep string) string {
+	const reserved = "^!+%@&#$:'\"?*, "
+
+	if !strings.ContainsAny(part, reserved+sep) {
+		return part
 	}
 
 	var b strings.Builder
 
-	for _, r := range localpart {
-		if r == '^' || strings.ContainsRune(sep, r) {
+	for _, r := range part {
+		if strings.ContainsRune(reserved, r) || strings.ContainsRune(sep, r) {
 			fmt.Fprintf(&b, "^%02x", r)
 
 			continue
@@ -1078,8 +1081,8 @@ func (m *Matrix) createUser(userID id.UserID) *bridge.UserInfo {
 	// Drop the homeserver/host part if it's a user on the same homeserver as us.
 	// The separator can't appear in the localpart, so it is escaped.
 	prefix, suffix := nickAffixes(m.nickSep)
-	safeLocalpart := escapeNickLocalpart(localpart, m.nickSep)
-	nick := safeLocalpart + prefix + homeserver + suffix
+	safeLocalpart := escapeNickPart(localpart, m.nickSep)
+	nick := safeLocalpart + prefix + escapeNickPart(homeserver, m.nickSep) + suffix
 
 	// The IRC user is the key of a ghost. It always has the homeserver, as '/' is
 	// legal in a localpart and would otherwise collide with a remote user.
