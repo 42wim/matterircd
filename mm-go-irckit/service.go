@@ -1043,7 +1043,7 @@ var cmds = map[string]Command{
 	"details":          {handler: details, login: true, minParams: 1, maxParams: 1},
 	"header":           {handler: channelHeader, login: true, minParams: 2, maxParams: -1},
 	"lastsent":         {handler: lastsent, login: true, minParams: 0, maxParams: 0},
-	"login":            {handler: login, minParams: 2, maxParams: 5}, //nolint:goconst
+	"login":            {handler: login, minParams: 2, maxParams: 5},
 	"logout":           {handler: logout, login: true, minParams: 0, maxParams: 0},
 	"part":             {handler: part, login: true, minParams: 1, maxParams: 1},
 	"ping":             {handler: ping, login: true, minParams: 0, maxParams: 0},
