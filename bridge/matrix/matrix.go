@@ -154,11 +154,11 @@ type Matrix struct {
 
 	// eventQueue holds the synced events for eventLoop, see enqueueEvent.
 	eventQueue chan *queuedEvent
-	// eventsPending counts the events queued or being handled, and eventsDelivered holds
-	// the last message handled per room, see UpdateLastViewed.
-	eventsPending   atomic.Int64
-	eventsDelivered sync.Map  // id.RoomID to id.EventID
-	eventPeer       id.UserID // peer of the event eventLoop is handling, see dmReceiver
+	eventPeer  id.UserID // peer of the event eventLoop is handling, see dmReceiver
+
+	// roomProgressMu guards roomProgress, see UpdateLastViewed.
+	roomProgressMu sync.Mutex
+	roomProgress   map[id.RoomID]*roomProgress
 }
 
 // resolveNickSep returns the configured separator and the one to use: an invalid
@@ -239,6 +239,7 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 	m.editEventIDs, _ = lru.New[id.EventID, id.EventID](editIDCacheSize)
 	m.latestEditIDs, _ = lru.New[id.EventID, id.EventID](editIDCacheSize)
 	m.pendingSends = make(map[string]int)
+	m.roomProgress = make(map[id.RoomID]*roomProgress)
 	m.sentCache, _ = lru.New[id.EventID, struct{}](sentCacheSize)
 	m.sentReactions, _ = lru.New[string, time.Time](reactionCacheSize)
 	m.sentRedactions, _ = lru.New[id.EventID, struct{}](sentCacheSize)
@@ -391,17 +392,25 @@ func (m *Matrix) eventLoop() {
 		select {
 		case ev := <-m.eventQueue:
 			m.handleEvent(ev)
-			m.eventsPending.Add(-1)
+			m.eventHandled(ev)
 		case <-m.ctx.Done():
 			return
 		}
 	}
 }
 
+// roomProgress is what eventLoop still has to do for a room and the last message or
+// edit it showed on IRC, which UpdateLastViewed may acknowledge.
+type roomProgress struct {
+	pending   int
+	delivered id.EventID
+}
+
 // queuedEvent is an event with the room state it was synced with, as the live state
 // may have moved on by the time eventLoop gets to it: a room can turn into a DM or
 // get another member.
 type queuedEvent struct {
+	room   id.RoomID // empty for events that are not tied to a room's read marker
 	ev     any
 	direct bool
 	peer   id.UserID // the other user of a direct room, for our own events
@@ -415,7 +424,6 @@ func (m *Matrix) handleEvent(q *queuedEvent) {
 	switch e := q.ev.(type) {
 	case *matrixclient.Message:
 		m.handleMessage(e, q.echo)
-		m.eventsDelivered.Store(e.RoomID, e.EventID)
 	case *matrixclient.Edit:
 		m.handleEdit(e, q.echo)
 	case *matrixclient.Reaction:
@@ -462,6 +470,8 @@ func (m *Matrix) snapshot(ev any) *queuedEvent {
 		return q
 	}
 
+	q.room = roomID
+
 	if q.direct {
 		if users := m.mc.DirectUsers(roomID); len(users) == 1 {
 			q.peer = users[0]
@@ -471,6 +481,48 @@ func (m *Matrix) snapshot(ev any) *queuedEvent {
 	return q
 }
 
+func (m *Matrix) roomPending(roomID id.RoomID, delta int) {
+	if roomID == "" {
+		return
+	}
+
+	m.roomProgressMu.Lock()
+	defer m.roomProgressMu.Unlock()
+
+	p := m.roomProgress[roomID]
+	if p == nil {
+		p = &roomProgress{}
+		m.roomProgress[roomID] = p
+	}
+
+	p.pending += delta
+}
+
+// eventHandled records that eventLoop showed q on IRC. Messages and edits are the
+// events that matrixclient reports as the latest of a room.
+func (m *Matrix) eventHandled(q *queuedEvent) {
+	if q.room == "" {
+		return
+	}
+
+	m.roomProgressMu.Lock()
+	defer m.roomProgressMu.Unlock()
+
+	p := m.roomProgress[q.room]
+	if p == nil {
+		return
+	}
+
+	p.pending--
+
+	switch e := q.ev.(type) {
+	case *matrixclient.Message:
+		p.delivered = e.EventID
+	case *matrixclient.Edit:
+		p.delivered = e.EventID
+	}
+}
+
 // enqueueEvent hands ev to eventLoop. The sync goroutine blocks only when the queue
 // is full, as dropping a chat event is worse than delaying the sync, except for
 // typing notifications, which are dropped. Everything goes through the queue, also
@@ -478,7 +530,7 @@ func (m *Matrix) snapshot(ev any) *queuedEvent {
 func (m *Matrix) enqueueEvent(ev any) {
 	q := m.snapshot(ev)
 
-	m.eventsPending.Add(1)
+	m.roomPending(q.room, 1)
 
 	select {
 	case m.eventQueue <- q:
@@ -487,7 +539,7 @@ func (m *Matrix) enqueueEvent(ev any) {
 	}
 
 	if _, ok := ev.(*matrixclient.Typing); ok {
-		m.eventsPending.Add(-1)
+		m.roomPending(q.room, -1)
 		logger.Debug("matrix: event queue full, dropping typing event")
 
 		return
@@ -496,7 +548,7 @@ func (m *Matrix) enqueueEvent(ev any) {
 	select {
 	case m.eventQueue <- q:
 	case <-m.ctx.Done():
-		m.eventsPending.Add(-1)
+		m.roomPending(q.room, -1)
 	}
 }
 
@@ -1514,15 +1566,16 @@ func (m *Matrix) UpdateLastViewed(ctx context.Context, channelID string) {
 	roomID := id.RoomID(channelID)
 
 	// The client orders events by timeline position, unlike arrival or decryption order.
-	// While events are queued, its latest one may not have been shown on IRC yet, so
-	// only the last message that was is acknowledged.
-	var evID id.EventID
+	// It advances before the handlers are called, so its latest event is only
+	// acknowledged when nothing is queued for the room and it is the last one shown.
+	m.roomProgressMu.Lock()
 
-	if m.eventsPending.Load() == 0 {
-		evID = m.mc.LastEventID(roomID)
-	} else if v, ok := m.eventsDelivered.Load(roomID); ok {
-		evID, _ = v.(id.EventID)
+	evID := m.mc.LastEventID(roomID)
+	if p := m.roomProgress[roomID]; p != nil && (p.pending > 0 || (p.delivered != "" && p.delivered != evID)) {
+		evID = ""
 	}
+
+	m.roomProgressMu.Unlock()
 
 	if evID == "" {
 		return
