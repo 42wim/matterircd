@@ -2,7 +2,9 @@ package irckit
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net"
 	"regexp"
 	"sort"
 	"strconv"
@@ -1045,6 +1047,14 @@ func threadMsgChannelUser(s Server, u *User, msg *irc.Message, channelID string,
 		fromUser, ok := s.HasUser(u.br.Protocol())
 		if !ok {
 			fromUser = u
+		}
+
+		var netErr net.Error
+
+		if errors.As(err, &netErr) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			u.MsgSpoofUser(fromUser, msg.Params[0], "could not reply to thread "+threadID+": "+err.Error())
+
+			return true
 		}
 
 		u.MsgSpoofUser(fromUser, msg.Params[0], "could not reply to thread "+threadID+" ("+err.Error()+"), sending as regular message")
