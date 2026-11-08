@@ -63,6 +63,10 @@ type Server interface { //nolint:interfacebloat
 	// Channel gets or creates a new channel with the given name and Id.
 	Channel(string) Channel //nolint:inamedparam
 
+	// ChannelWithName is Channel, but a channel that has to be created gets name instead
+	// of the current name of channelID.
+	ChannelWithName(channelID, name string) Channel
+
 	// HasChannel returns an existing Channel with a given name.
 	HasChannel(string) (Channel, bool) //nolint:inamedparam
 
@@ -266,8 +270,22 @@ func (s *server) HasChannel(channelID string) (Channel, bool) {
 	return ch, exists
 }
 
+// channelNameOr returns name, or the current name of the channel if it is empty, which
+// the bridge may have to look up.
+func channelNameOr(u *User, channelID, name string) string {
+	if name != "" {
+		return name
+	}
+
+	return u.br.GetChannelName(u.ctx, channelID)
+}
+
 // Channel returns an existing or new channel with the give name.
 func (s *server) Channel(channelID string) Channel {
+	return s.ChannelWithName(channelID, "")
+}
+
+func (s *server) ChannelWithName(channelID, nameOverride string) Channel {
 	s.RLock()
 	ch, ok := s.channels[channelID]
 	s.RUnlock()
@@ -289,7 +307,7 @@ func (s *server) Channel(channelID string) Channel {
 
 	if u != nil && u.br != nil {
 		service = u.br.Protocol()
-		name = u.br.GetChannelName(u.ctx, channelID)
+		name = channelNameOr(u, channelID, nameOverride)
 		info, err = u.br.GetChannel(u.ctx, channelID)
 	} else {
 		service = serviceName

@@ -156,7 +156,6 @@ type Matrix struct {
 	// eventQueue holds the synced events for eventLoop, see enqueueEvent.
 	eventQueue    chan *queuedEvent
 	typingDropped atomic.Uint64
-	eventPeer     id.UserID // peer of the event eventLoop is handling, see dmReceiver
 
 	// roomProgressMu guards roomProgress, see UpdateLastViewed.
 	roomProgressMu sync.Mutex
@@ -421,20 +420,17 @@ type queuedEvent struct {
 }
 
 func (m *Matrix) handleEvent(q *queuedEvent) {
-	// Only eventLoop runs the handlers, so no lock is needed.
-	m.eventPeer = q.peer
-
 	switch e := q.ev.(type) {
 	case *matrixclient.Message:
-		m.handleMessage(e, q.echo)
+		m.handleMessage(e, q.echo, q.peer)
 	case *matrixclient.Edit:
-		m.handleEdit(e, q.echo)
+		m.handleEdit(e, q.echo, q.peer)
 	case *matrixclient.Reaction:
-		m.handleReaction(e, q.echo)
+		m.handleReaction(e, q.echo, q.peer)
 	case *matrixclient.Redaction:
-		m.handleRedaction(e, q.echo)
+		m.handleRedaction(e, q.echo, q.peer)
 	case *matrixclient.PinChange:
-		m.handlePin(e, q.direct)
+		m.handlePin(e, q.direct, q.peer)
 	case *matrixclient.Typing:
 		m.handleTyping(e)
 	case *matrixclient.TopicChange:
@@ -577,7 +573,7 @@ func (m *Matrix) OnMessage(msg *matrixclient.Message) {
 	m.enqueueEvent(msg)
 }
 
-func (m *Matrix) handleMessage(msg *matrixclient.Message, echo bool) {
+func (m *Matrix) handleMessage(msg *matrixclient.Message, echo bool, peer id.UserID) {
 	ghost := m.createUser(msg.Sender)
 	if ghost == nil {
 		return
@@ -596,7 +592,7 @@ func (m *Matrix) handleMessage(msg *matrixclient.Message, echo bool) {
 
 	file := m.fileFromMessage(msg)
 	if file != nil {
-		m.sendFile(ghost, msg, file)
+		m.sendFile(ghost, msg, file, peer)
 
 		if !hasCaption(msg) {
 			return
@@ -613,16 +609,16 @@ func (m *Matrix) handleMessage(msg *matrixclient.Message, echo bool) {
 		text = message
 	}
 
-	m.sendText(ghost, msg.RoomID, msg.Direct, msg.EventID, msg.ParentID, text, "", m.messageType(text), msg.Timestamp)
+	m.sendText(ghost, msg.RoomID, msg.Direct, peer, msg.EventID, msg.ParentID, text, "", m.messageType(text), msg.Timestamp)
 }
 
-func (m *Matrix) sendFile(ghost *bridge.UserInfo, msg *matrixclient.Message, file *bridge.File) {
+func (m *Matrix) sendFile(ghost *bridge.UserInfo, msg *matrixclient.Message, file *bridge.File, peer id.UserID) {
 	channelType := ""
 	if msg.Direct {
 		channelType = "D"
 	}
 
-	receiver := m.dmReceiver(ghost, msg.Direct)
+	receiver := m.dmReceiver(ghost, msg.Direct, peer)
 	if receiver == nil {
 		return
 	}
@@ -646,7 +642,7 @@ func (m *Matrix) OnReaction(r *matrixclient.Reaction) {
 	m.enqueueEvent(r)
 }
 
-func (m *Matrix) handleReaction(r *matrixclient.Reaction, echo bool) {
+func (m *Matrix) handleReaction(r *matrixclient.Reaction, echo bool, peer id.UserID) {
 	m.msgRoomCache.Add(r.ParentID, r.RoomID)
 
 	ghost := m.createUser(r.Sender)
@@ -675,7 +671,7 @@ func (m *Matrix) handleReaction(r *matrixclient.Reaction, echo bool) {
 		channelType = "D"
 	}
 
-	receiver := m.dmReceiver(ghost, r.Direct)
+	receiver := m.dmReceiver(ghost, r.Direct, peer)
 	if receiver == nil {
 		return
 	}

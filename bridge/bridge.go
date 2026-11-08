@@ -173,6 +173,10 @@ type ChannelRemoveEvent struct {
 
 type ChannelCreateEvent struct {
 	ChannelID string
+	// Name is the IRC channel name as of the event, for bridges whose rooms can change
+	// between event and handling (a restored room that is a DM again by then). Empty
+	// means the current name is looked up.
+	Name string
 }
 
 type ChannelDeleteEvent struct {

@@ -147,7 +147,7 @@ func (m *Matrix) OnEdit(e *matrixclient.Edit) {
 	m.enqueueEvent(e)
 }
 
-func (m *Matrix) handleEdit(e *matrixclient.Edit, echo bool) {
+func (m *Matrix) handleEdit(e *matrixclient.Edit, echo bool, peer id.UserID) {
 	ghost := m.createUser(e.Sender)
 	if ghost == nil {
 		return
@@ -168,7 +168,7 @@ func (m *Matrix) handleEdit(e *matrixclient.Edit, echo bool) {
 	m.msgParentCache.Remove(e.TargetID)
 	m.msgRoomCache.Add(e.TargetID, e.RoomID)
 
-	m.sendText(ghost, e.RoomID, e.Direct, e.TargetID, "", e.Text+m.formatSuffix(suffixEdited), "post_edited", m.messageType(e.Text), e.Timestamp)
+	m.sendText(ghost, e.RoomID, e.Direct, peer, e.TargetID, "", e.Text+m.formatSuffix(suffixEdited), "post_edited", m.messageType(e.Text), e.Timestamp)
 }
 
 // OnRedaction implements matrixclient.RedactionHandler.
@@ -176,7 +176,7 @@ func (m *Matrix) OnRedaction(r *matrixclient.Redaction) {
 	m.enqueueEvent(r)
 }
 
-func (m *Matrix) handleRedaction(r *matrixclient.Redaction, echo bool) {
+func (m *Matrix) handleRedaction(r *matrixclient.Redaction, echo bool, peer id.UserID) {
 	// Redactions of other events, such as topics or pins, are not deleted messages.
 	if r.TargetType.Type != "" && r.TargetType != event.EventMessage && r.TargetType != event.EventEncrypted {
 		return
@@ -227,7 +227,7 @@ func (m *Matrix) handleRedaction(r *matrixclient.Redaction, echo bool) {
 
 	m.msgParentCache.Remove(r.TargetID)
 
-	m.sendText(ghost, r.RoomID, r.Direct, r.TargetID, "", m.cachedSummary(text)+m.formatSuffix(suffixDeleted), "post_deleted", m.messageType(text), 0)
+	m.sendText(ghost, r.RoomID, r.Direct, peer, r.TargetID, "", m.cachedSummary(text)+m.formatSuffix(suffixDeleted), "post_deleted", m.messageType(text), 0)
 }
 
 // fetchText looks up and caches the text of a message missing from the cache. It returns
@@ -261,7 +261,7 @@ func (m *Matrix) OnPin(p *matrixclient.PinChange) {
 	m.enqueueEvent(p)
 }
 
-func (m *Matrix) handlePin(p *matrixclient.PinChange, direct bool) {
+func (m *Matrix) handlePin(p *matrixclient.PinChange, direct bool, peer id.UserID) {
 	ghost := m.createUser(p.Sender)
 	if ghost == nil {
 		return
@@ -278,7 +278,7 @@ func (m *Matrix) handlePin(p *matrixclient.PinChange, direct bool) {
 	}
 
 	m.msgRoomCache.Add(p.EventID, p.RoomID)
-	m.sendText(ghost, p.RoomID, direct, p.EventID, "", m.cachedSummary(text)+m.formatSuffix(kind), "post_edited", m.messageType(text), 0)
+	m.sendText(ghost, p.RoomID, direct, peer, p.EventID, "", m.cachedSummary(text)+m.formatSuffix(kind), "post_edited", m.messageType(text), 0)
 }
 
 // OnTyping implements matrixclient.TypingHandler.
@@ -440,16 +440,27 @@ func (m *Matrix) sendRoomUpdate(ctx context.Context, update *roomUpdate) {
 			Data: &bridge.ChannelDeleteEvent{ChannelID: ev.ChannelID},
 		})
 	case matrixclient.RoomRestored:
-		// A later transition may have made it a DM again, whose channel name is the raw room ID.
-		// That drop is queued behind this one, so the channel is not created in between.
+		// Created with the name of the transition even if the room is a DM again by now: the
+		// messages synced in between are for this channel, and the drop queued behind this
+		// one removes it again. The live name is a raw room ID then.
+		name := ""
+		if ev.Name != "" {
+			name = "#" + ev.Name
+		}
+
 		info, err := m.GetChannel(ctx, ev.ChannelID)
-		if err == nil && info.DM {
+
+		switch {
+		case err != nil:
+		case !info.DM:
+			name = "#" + info.Name
+		case name == "":
 			return
 		}
 
 		m.sendEventCtx(ctx, &bridge.Event{
 			Type: "channel_create",
-			Data: &bridge.ChannelCreateEvent{ChannelID: ev.ChannelID},
+			Data: &bridge.ChannelCreateEvent{ChannelID: ev.ChannelID, Name: name},
 		})
 	case matrixclient.RoomRenamed:
 		// The name may have been given a suffix to keep it unique.
@@ -536,9 +547,9 @@ func (m *Matrix) handleMember(c *matrixclient.MemberChange) {
 
 // sendText emits a direct or channel message event. DMs are always shown as
 // coming from the other side, as handled by the IRC layer.
-func (m *Matrix) sendText(ghost *bridge.UserInfo, roomID id.RoomID, direct bool, eventID, parentID id.EventID, text, eventType, messageType string, ts int64) {
+func (m *Matrix) sendText(ghost *bridge.UserInfo, roomID id.RoomID, direct bool, peer id.UserID, eventID, parentID id.EventID, text, eventType, messageType string, ts int64) {
 	if direct {
-		receiver := m.dmReceiver(ghost, true)
+		receiver := m.dmReceiver(ghost, true, peer)
 		if receiver == nil {
 			return
 		}
@@ -683,14 +694,14 @@ func (m *Matrix) dmPeer(roomID id.RoomID) *bridge.UserInfo {
 
 // dmReceiver returns the receiver of a message: the peer for our own messages
 // in a DM, as they are sent from another client, otherwise ourselves. The peer is
-// the one synced with the event, see queuedEvent, so only eventLoop may call it.
-func (m *Matrix) dmReceiver(ghost *bridge.UserInfo, direct bool) *bridge.UserInfo {
+// the one synced with the event, see queuedEvent.
+func (m *Matrix) dmReceiver(ghost *bridge.UserInfo, direct bool, peer id.UserID) *bridge.UserInfo {
 	if direct && ghost.Me {
-		if m.eventPeer == "" {
+		if peer == "" {
 			return nil
 		}
 
-		return m.createUser(m.eventPeer)
+		return m.createUser(peer)
 	}
 
 	return m.GetMe()
