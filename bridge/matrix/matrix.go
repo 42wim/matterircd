@@ -400,7 +400,7 @@ type queuedEvent struct {
 	ev     any
 	direct bool
 	peer   id.UserID // the other user of a direct room, for our own events
-	echo   bool      // our own message or edit was sent from IRC, see isSentEcho
+	echo   bool      // our own message, edit or reaction was sent from IRC, see isSentEcho
 }
 
 func (m *Matrix) handleEvent(q *queuedEvent) {
@@ -413,7 +413,7 @@ func (m *Matrix) handleEvent(q *queuedEvent) {
 	case *matrixclient.Edit:
 		m.handleEdit(e, q.echo)
 	case *matrixclient.Reaction:
-		m.handleReaction(e)
+		m.handleReaction(e, q.echo)
 	case *matrixclient.Redaction:
 		m.handleRedaction(e)
 	case *matrixclient.PinChange:
@@ -446,6 +446,7 @@ func (m *Matrix) snapshot(ev any) *queuedEvent {
 		q.echo = e.Sender == m.mc.UserID() && m.isSentEcho(e.EventID, e.Text)
 	case *matrixclient.Reaction:
 		roomID, q.direct = e.RoomID, e.Direct
+		q.echo = e.Sender == m.mc.UserID() && m.isSentReaction(e.ParentID, e.Key)
 	case *matrixclient.Redaction:
 		roomID, q.direct = e.RoomID, e.Direct
 	case *matrixclient.PinChange:
@@ -562,7 +563,7 @@ func (m *Matrix) OnReaction(r *matrixclient.Reaction) {
 	m.enqueueEvent(r)
 }
 
-func (m *Matrix) handleReaction(r *matrixclient.Reaction) {
+func (m *Matrix) handleReaction(r *matrixclient.Reaction, echo bool) {
 	m.msgRoomCache.Add(r.ParentID, r.RoomID)
 
 	ghost := m.createUser(r.Sender)
@@ -570,7 +571,7 @@ func (m *Matrix) handleReaction(r *matrixclient.Reaction) {
 		return
 	}
 
-	if ghost.Me && (!m.cfg.Matrix().ShowOwnReactions || m.isSentReaction(r.ParentID, r.Key)) {
+	if ghost.Me && (!m.cfg.Matrix().ShowOwnReactions || echo) {
 		return
 	}
 
