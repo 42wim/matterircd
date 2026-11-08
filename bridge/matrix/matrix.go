@@ -110,6 +110,7 @@ type Matrix struct {
 
 	// roomUpdateMu guards the renames waiting for roomUpdateLoop, see queueRoomUpdate.
 	roomUpdateMu     sync.Mutex
+	roomUpdateSendMu sync.Mutex // serializes the flushes of roomUpdates, held while sending
 	roomUpdates      []*roomUpdate
 	roomUpdateWake   chan struct{}
 	roomUpdateCancel context.CancelFunc
@@ -153,7 +154,8 @@ type Matrix struct {
 	verifyQueue chan *matrixclient.Verification
 
 	// eventQueue holds the synced events for eventLoop, see enqueueEvent.
-	eventQueue chan any
+	eventQueue chan *queuedEvent
+	eventPeer  id.UserID // peer of the event eventLoop is handling, see dmReceiver
 }
 
 // resolveNickSep returns the configured separator and the one to use: an invalid
@@ -221,7 +223,7 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 
 		roomUpdateWake: make(chan struct{}, 1),
 		verifyQueue:    make(chan *matrixclient.Verification, verificationQueueSize),
-		eventQueue:     make(chan any, eventQueueSize),
+		eventQueue:     make(chan *queuedEvent, eventQueueSize),
 	}
 
 	// Also unblocks a Ready that is waiting for a failed New.
@@ -392,8 +394,24 @@ func (m *Matrix) eventLoop() {
 	}
 }
 
-func (m *Matrix) handleEvent(ev any) {
-	switch e := ev.(type) {
+// queuedEvent is an event with the room state it was synced with, as the live state
+// may have moved on by the time eventLoop gets to it: a room can turn into a DM or
+// get another member.
+type queuedEvent struct {
+	ev     any
+	direct bool
+	peer   id.UserID // the other user of a direct room, for our own events
+}
+
+// roomBarrier marks the point in the event order where the room updates queued so far
+// must have been sent, so a drop does not overtake the messages synced before it.
+type roomBarrier struct{}
+
+func (m *Matrix) handleEvent(q *queuedEvent) {
+	// Only eventLoop runs the handlers, so no lock is needed.
+	m.eventPeer = q.peer
+
+	switch e := q.ev.(type) {
 	case *matrixclient.Message:
 		m.handleMessage(e)
 	case *matrixclient.Edit:
@@ -403,7 +421,7 @@ func (m *Matrix) handleEvent(ev any) {
 	case *matrixclient.Redaction:
 		m.handleRedaction(e)
 	case *matrixclient.PinChange:
-		m.handlePin(e)
+		m.handlePin(e, q.direct)
 	case *matrixclient.Typing:
 		m.handleTyping(e)
 	case *matrixclient.TopicChange:
@@ -412,7 +430,39 @@ func (m *Matrix) handleEvent(ev any) {
 		m.handleMember(e)
 	case *matrixclient.Invitation:
 		m.sendInvite(e)
+	case roomBarrier:
+		m.flushRoomUpdates(m.ctx)
 	}
+}
+
+// snapshot captures the room state of ev at sync time.
+func (m *Matrix) snapshot(ev any) *queuedEvent {
+	q := &queuedEvent{ev: ev}
+
+	var roomID id.RoomID
+
+	switch e := ev.(type) {
+	case *matrixclient.Message:
+		roomID, q.direct = e.RoomID, e.Direct
+	case *matrixclient.Edit:
+		roomID, q.direct = e.RoomID, e.Direct
+	case *matrixclient.Reaction:
+		roomID, q.direct = e.RoomID, e.Direct
+	case *matrixclient.Redaction:
+		roomID, q.direct = e.RoomID, e.Direct
+	case *matrixclient.PinChange:
+		roomID, q.direct = e.RoomID, m.mc.IsDirect(e.RoomID)
+	default:
+		return q
+	}
+
+	if q.direct {
+		if users := m.mc.DirectUsers(roomID); len(users) == 1 {
+			q.peer = users[0]
+		}
+	}
+
+	return q
 }
 
 // enqueueEvent hands ev to eventLoop. The sync goroutine blocks only when the queue
@@ -420,8 +470,10 @@ func (m *Matrix) handleEvent(ev any) {
 // typing notifications, which are dropped. Everything goes through the queue, also
 // before Ready, so handlers never run concurrently with eventLoop.
 func (m *Matrix) enqueueEvent(ev any) {
+	q := m.snapshot(ev)
+
 	select {
-	case m.eventQueue <- ev:
+	case m.eventQueue <- q:
 		return
 	default:
 	}
@@ -433,7 +485,7 @@ func (m *Matrix) enqueueEvent(ev any) {
 	}
 
 	select {
-	case m.eventQueue <- ev:
+	case m.eventQueue <- q:
 	case <-m.ctx.Done():
 	}
 }
@@ -490,7 +542,7 @@ func (m *Matrix) sendFile(ghost *bridge.UserInfo, msg *matrixclient.Message, fil
 		channelType = "D"
 	}
 
-	receiver := m.dmReceiver(ghost, msg.RoomID, msg.Direct)
+	receiver := m.dmReceiver(ghost, msg.Direct)
 	if receiver == nil {
 		return
 	}
@@ -543,7 +595,7 @@ func (m *Matrix) handleReaction(r *matrixclient.Reaction) {
 		channelType = "D"
 	}
 
-	receiver := m.dmReceiver(ghost, r.RoomID, r.Direct)
+	receiver := m.dmReceiver(ghost, r.Direct)
 	if receiver == nil {
 		return
 	}
