@@ -527,7 +527,9 @@ func (m *Matrix) eventHandled(q *queuedEvent) {
 	}
 
 	retry := p.pending == 0 && p.readWish
-	p.readWish = false
+	if retry {
+		p.readWish = false
+	}
 
 	m.roomProgressMu.Unlock()
 
