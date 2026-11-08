@@ -280,6 +280,8 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 	loopCtx, m.roomUpdateCancel = context.WithCancel(ctx)
 
 	go m.roomUpdateLoop(loopCtx)
+	// The handlers use the bridge context, which also ends the loop.
+	//nolint:contextcheck
 	go m.eventLoop()
 
 	setLogLevels := func(rc *config.RuntimeConfig) {
