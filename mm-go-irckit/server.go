@@ -270,6 +270,16 @@ func (s *server) HasChannel(channelID string) (Channel, bool) {
 	return ch, exists
 }
 
+// channelNameOr returns name, or the current name of the channel if it is empty, which
+// the bridge may have to look up.
+func channelNameOr(u *User, channelID, name string) string {
+	if name != "" {
+		return name
+	}
+
+	return u.br.GetChannelName(u.ctx, channelID)
+}
+
 // Channel returns an existing or new channel with the give name.
 func (s *server) Channel(channelID string) Channel {
 	return s.ChannelWithName(channelID, "")
@@ -297,12 +307,7 @@ func (s *server) ChannelWithName(channelID, nameOverride string) Channel {
 
 	if u != nil && u.br != nil {
 		service = u.br.Protocol()
-		name = nameOverride
-
-		if name == "" {
-			name = u.br.GetChannelName(u.ctx, channelID)
-		}
-
+		name = channelNameOr(u, channelID, nameOverride)
 		info, err = u.br.GetChannel(u.ctx, channelID)
 	} else {
 		service = serviceName
