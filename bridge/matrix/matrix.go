@@ -406,6 +406,7 @@ func (m *Matrix) eventLoop() {
 type roomProgress struct {
 	pending   int
 	delivered id.EventID
+	readWish  bool // UpdateLastViewed was refused, retry once the room's queue is drained
 }
 
 // queuedEvent is an event with the room state it was synced with, as the live state
@@ -508,10 +509,11 @@ func (m *Matrix) eventHandled(q *queuedEvent) {
 	}
 
 	m.roomProgressMu.Lock()
-	defer m.roomProgressMu.Unlock()
 
 	p := m.roomProgress[q.room]
 	if p == nil {
+		m.roomProgressMu.Unlock()
+
 		return
 	}
 
@@ -522,6 +524,16 @@ func (m *Matrix) eventHandled(q *queuedEvent) {
 		p.delivered = e.EventID
 	case *matrixclient.Edit:
 		p.delivered = e.EventID
+	}
+
+	retry := p.pending == 0 && p.readWish
+	p.readWish = false
+
+	m.roomProgressMu.Unlock()
+
+	if retry {
+		// Not on eventLoop, a network call must not delay the next event.
+		go m.UpdateLastViewed(m.ctx, q.room.String())
 	}
 }
 
@@ -1581,6 +1593,7 @@ func (m *Matrix) UpdateLastViewed(ctx context.Context, channelID string) {
 	m.roomProgressMu.Lock()
 
 	if p := m.roomProgress[roomID]; p != nil && (p.pending > 0 || (p.delivered != "" && p.delivered != evID)) {
+		p.readWish = true
 		evID = ""
 	}
 
