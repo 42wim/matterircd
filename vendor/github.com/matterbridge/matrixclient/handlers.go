@@ -189,9 +189,14 @@ func (c *Client) applyMember(ev *event.Event, member *event.MemberEventContent, 
 	if c.synced.Load() && (u.MemberEventContent == nil || u.Displayname != member.Displayname) {
 		for roomID, other := range c.channels {
 			other.RLock()
-			_, in := other.Members[targetID]
-			// A hero names the room even when it is not among the members.
-			in = in || slices.Contains(other.heroes, targetID)
+
+			var in bool
+			if other.Name == "" && other.Alias == "" {
+				_, in = other.Members[targetID]
+				// A hero names the room even when it is not among the members.
+				in = in || slices.Contains(other.heroes, targetID)
+			}
+
 			other.RUnlock()
 
 			if in {

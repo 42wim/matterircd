@@ -96,6 +96,7 @@ type pendingSeq struct {
 type pendingAssoc struct {
 	user    id.UserID
 	written bool // the write succeeded, it stays pending until a sync confirms it
+	writing bool // a write is queued or in flight, so callers do not queue another
 }
 
 // Message is an incoming room or direct message. Messages sent by ourselves
