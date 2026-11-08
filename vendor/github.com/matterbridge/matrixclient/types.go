@@ -81,7 +81,12 @@ type Channel struct {
 	LastActivity int64      // timestamp in milliseconds of the newest message seen, 0 if none
 	LastEventID  id.EventID // newest message event seen, set during the initial sync as well
 
+	// DeliveredEventID is the newest message event whose handler call has returned, see
+	// Client.LastDeliveredEventID. It trails LastEventID by the events being delivered.
+	DeliveredEventID id.EventID
+
 	nextSeq, lastSeq uint64                    // sync timeline positions, lastSeq belongs to LastEventID
+	deliveredSeq     uint64                    // timeline position of DeliveredEventID
 	pruneAt          int                       // eventSeq size that triggers the next prune
 	eventSeq         map[id.EventID]pendingSeq // positions of messages not yet delivered to handleMessage
 }
