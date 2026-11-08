@@ -298,6 +298,7 @@ func (s *server) ChannelWithName(channelID, nameOverride string) Channel {
 	if u != nil && u.br != nil {
 		service = u.br.Protocol()
 		name = nameOverride
+
 		if name == "" {
 			name = u.br.GetChannelName(u.ctx, channelID)
 		}
