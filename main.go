@@ -284,6 +284,7 @@ func setupDBReloadHook(cfg *config.Config) {
 	cfg.RegisterReloadHook(func(newRC *config.RuntimeConfig) {
 		newMM := newRC.Mattermost.LastViewedSaveFile
 		lastMM := lastMMFile.Swap(newMM)
+
 		if lastMM != newMM {
 			logger.Warnf("mattermost.LastViewedSaveFile changed from %q to %q, a matterircd restart is required for it to take effect", lastMM, newMM)
 		}
