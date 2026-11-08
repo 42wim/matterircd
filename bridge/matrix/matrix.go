@@ -400,6 +400,7 @@ type queuedEvent struct {
 	ev     any
 	direct bool
 	peer   id.UserID // the other user of a direct room, for our own events
+	echo   bool      // our own message or edit was sent from IRC, see isSentEcho
 }
 
 func (m *Matrix) handleEvent(q *queuedEvent) {
@@ -408,9 +409,9 @@ func (m *Matrix) handleEvent(q *queuedEvent) {
 
 	switch e := q.ev.(type) {
 	case *matrixclient.Message:
-		m.handleMessage(e)
+		m.handleMessage(e, q.echo)
 	case *matrixclient.Edit:
-		m.handleEdit(e)
+		m.handleEdit(e, q.echo)
 	case *matrixclient.Reaction:
 		m.handleReaction(e)
 	case *matrixclient.Redaction:
@@ -439,8 +440,10 @@ func (m *Matrix) snapshot(ev any) *queuedEvent {
 	switch e := ev.(type) {
 	case *matrixclient.Message:
 		roomID, q.direct = e.RoomID, e.Direct
+		q.echo = e.Sender == m.mc.UserID() && m.isSentEcho(e.EventID, e.Text)
 	case *matrixclient.Edit:
 		roomID, q.direct = e.RoomID, e.Direct
+		q.echo = e.Sender == m.mc.UserID() && m.isSentEcho(e.EventID, e.Text)
 	case *matrixclient.Reaction:
 		roomID, q.direct = e.RoomID, e.Direct
 	case *matrixclient.Redaction:
@@ -490,7 +493,7 @@ func (m *Matrix) OnMessage(msg *matrixclient.Message) {
 	m.enqueueEvent(msg)
 }
 
-func (m *Matrix) handleMessage(msg *matrixclient.Message) {
+func (m *Matrix) handleMessage(msg *matrixclient.Message, echo bool) {
 	ghost := m.createUser(msg.Sender)
 	if ghost == nil {
 		return
@@ -499,10 +502,8 @@ func (m *Matrix) handleMessage(msg *matrixclient.Message) {
 	// Cached before the echo check, as messages sent from IRC can be deleted or pinned too.
 	m.cacheText(msg.EventID, msg.Text)
 
-	if ghost.Me {
-		if m.isSentEcho(msg.EventID, msg.Text) {
-			return
-		}
+	if ghost.Me && echo {
+		return
 	}
 
 	m.msgRoomCache.Add(msg.EventID, msg.RoomID)

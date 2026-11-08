@@ -147,7 +147,7 @@ func (m *Matrix) OnEdit(e *matrixclient.Edit) {
 	m.enqueueEvent(e)
 }
 
-func (m *Matrix) handleEdit(e *matrixclient.Edit) {
+func (m *Matrix) handleEdit(e *matrixclient.Edit, echo bool) {
 	ghost := m.createUser(e.Sender)
 	if ghost == nil {
 		return
@@ -160,7 +160,7 @@ func (m *Matrix) handleEdit(e *matrixclient.Edit) {
 	m.latestEditIDs.Add(e.TargetID, e.EventID)
 	m.editMu.Unlock()
 
-	if ghost.Me && m.isSentEcho(e.EventID, e.Text) {
+	if ghost.Me && echo {
 		return
 	}
 
