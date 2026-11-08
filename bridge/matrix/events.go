@@ -220,6 +220,8 @@ func (m *Matrix) handleRedaction(r *matrixclient.Redaction, echo bool) {
 	}
 
 	if ghost.Me && echo {
+		m.sentRedactions.Remove(r.TargetID)
+
 		return
 	}
 

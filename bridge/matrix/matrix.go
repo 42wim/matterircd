@@ -463,7 +463,7 @@ func (m *Matrix) snapshot(ev any) *queuedEvent {
 		q.echo = e.Sender == m.mc.UserID() && m.isSentReaction(e.ParentID, e.Key)
 	case *matrixclient.Redaction:
 		roomID, q.direct = e.RoomID, e.Direct
-		q.echo = e.Sender == m.mc.UserID() && m.sentRedactions.Remove(e.TargetID)
+		q.echo = e.Sender == m.mc.UserID() && m.sentRedactions.Contains(e.TargetID)
 	case *matrixclient.PinChange:
 		roomID, q.direct = e.RoomID, m.mc.IsDirect(e.RoomID)
 	default:
@@ -1568,9 +1568,12 @@ func (m *Matrix) UpdateLastViewed(ctx context.Context, channelID string) {
 	// The client orders events by timeline position, unlike arrival or decryption order.
 	// It advances before the handlers are called, so its latest event is only
 	// acknowledged when nothing is queued for the room and it is the last one shown.
+	// Read before the lock: an event delivered or queued in between only makes the
+	// check below refuse, never acknowledge too much.
+	evID := m.mc.LastEventID(roomID)
+
 	m.roomProgressMu.Lock()
 
-	evID := m.mc.LastEventID(roomID)
 	if p := m.roomProgress[roomID]; p != nil && (p.pending > 0 || (p.delivered != "" && p.delivered != evID)) {
 		evID = ""
 	}
