@@ -64,6 +64,7 @@ const (
 	msgTextMaxBytes    = 1024 // bound per cached message when ShortenRepliesTo is unlimited
 	reactionCacheSize  = 100
 	sentCacheSize      = 100
+	eventQueueSize     = 1024
 	sentReactionWindow = time.Minute
 
 	roomNameResolveTimeout = 5 * time.Second
@@ -150,6 +151,9 @@ type Matrix struct {
 	verifyTxn   id.VerificationTransactionID
 	verifySAS   bool // the SAS of verifyTxn was shown, which VERIFY CONFIRM requires
 	verifyQueue chan *matrixclient.Verification
+
+	// eventQueue holds the synced events for eventLoop, see enqueueEvent.
+	eventQueue chan any
 }
 
 // resolveNickSep returns the configured separator and the one to use: an invalid
@@ -217,6 +221,7 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 
 		roomUpdateWake: make(chan struct{}, 1),
 		verifyQueue:    make(chan *matrixclient.Verification, verificationQueueSize),
+		eventQueue:     make(chan any, eventQueueSize),
 	}
 
 	// Also unblocks a Ready that is waiting for a failed New.
@@ -333,6 +338,7 @@ func (m *Matrix) Ready() {
 
 	// Started after ready is set, as sendEventCtx drops notices before that.
 	go m.verificationLoop()
+	go m.eventLoop()
 
 	// Invitations of the initial sync are not delivered to OnInvite. The snapshot
 	// is taken here, on the sync goroutine, so a later invite cannot be missed or
@@ -371,8 +377,77 @@ func (m *Matrix) sendEventCtx(ctx context.Context, ev *bridge.Event) {
 	}
 }
 
+// eventLoop runs the queued events one at a time, so IRC sees them in the order of
+// the sync, while the sync goroutine is free to fetch the next batch.
+func (m *Matrix) eventLoop() {
+	for {
+		select {
+		case ev := <-m.eventQueue:
+			m.handleEvent(ev)
+		case <-m.ctx.Done():
+			return
+		}
+	}
+}
+
+func (m *Matrix) handleEvent(ev any) {
+	switch e := ev.(type) {
+	case *matrixclient.Message:
+		m.handleMessage(e)
+	case *matrixclient.Edit:
+		m.handleEdit(e)
+	case *matrixclient.Reaction:
+		m.handleReaction(e)
+	case *matrixclient.Redaction:
+		m.handleRedaction(e)
+	case *matrixclient.PinChange:
+		m.handlePin(e)
+	case *matrixclient.Typing:
+		m.handleTyping(e)
+	case *matrixclient.TopicChange:
+		m.handleTopic(e)
+	case *matrixclient.MemberChange:
+		m.handleMember(e)
+	case *matrixclient.Invitation:
+		m.sendInvite(e)
+	}
+}
+
+// enqueueEvent hands ev to eventLoop. The sync goroutine blocks only when the queue
+// is full, as dropping a chat event is worse than delaying the sync, except for
+// typing notifications, which are dropped. Before Ready the events are handled
+// inline, as eventLoop only starts then and sendEventCtx drops their output anyway.
+func (m *Matrix) enqueueEvent(ev any) {
+	if !m.ready.Load() {
+		m.handleEvent(ev)
+
+		return
+	}
+
+	select {
+	case m.eventQueue <- ev:
+		return
+	default:
+	}
+
+	if _, ok := ev.(*matrixclient.Typing); ok {
+		logger.Debug("matrix: event queue full, dropping typing event")
+
+		return
+	}
+
+	select {
+	case m.eventQueue <- ev:
+	case <-m.ctx.Done():
+	}
+}
+
 // OnMessage implements matrixclient.Handler.
 func (m *Matrix) OnMessage(msg *matrixclient.Message) {
+	m.enqueueEvent(msg)
+}
+
+func (m *Matrix) handleMessage(msg *matrixclient.Message) {
 	ghost := m.createUser(msg.Sender)
 	if ghost == nil {
 		return
@@ -440,6 +515,10 @@ func (m *Matrix) sendFile(ghost *bridge.UserInfo, msg *matrixclient.Message, fil
 
 // OnReaction implements matrixclient.Handler.
 func (m *Matrix) OnReaction(r *matrixclient.Reaction) {
+	m.enqueueEvent(r)
+}
+
+func (m *Matrix) handleReaction(r *matrixclient.Reaction) {
 	m.msgRoomCache.Add(r.ParentID, r.RoomID)
 
 	ghost := m.createUser(r.Sender)

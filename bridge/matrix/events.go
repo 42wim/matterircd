@@ -144,6 +144,10 @@ func (m *Matrix) cachedSummary(text string) string {
 
 // OnEdit implements matrixclient.EditHandler.
 func (m *Matrix) OnEdit(e *matrixclient.Edit) {
+	m.enqueueEvent(e)
+}
+
+func (m *Matrix) handleEdit(e *matrixclient.Edit) {
 	ghost := m.createUser(e.Sender)
 	if ghost == nil {
 		return
@@ -169,6 +173,10 @@ func (m *Matrix) OnEdit(e *matrixclient.Edit) {
 
 // OnRedaction implements matrixclient.RedactionHandler.
 func (m *Matrix) OnRedaction(r *matrixclient.Redaction) {
+	m.enqueueEvent(r)
+}
+
+func (m *Matrix) handleRedaction(r *matrixclient.Redaction) {
 	// Redactions of other events, such as topics or pins, are not deleted messages.
 	if r.TargetType.Type != "" && r.TargetType != event.EventMessage && r.TargetType != event.EventEncrypted {
 		return
@@ -248,6 +256,10 @@ func (m *Matrix) fetchText(roomID id.RoomID, eventID id.EventID) string {
 
 // OnPin implements matrixclient.PinHandler.
 func (m *Matrix) OnPin(p *matrixclient.PinChange) {
+	m.enqueueEvent(p)
+}
+
+func (m *Matrix) handlePin(p *matrixclient.PinChange) {
 	ghost := m.createUser(p.Sender)
 	if ghost == nil {
 		return
@@ -269,6 +281,10 @@ func (m *Matrix) OnPin(p *matrixclient.PinChange) {
 
 // OnTyping implements matrixclient.TypingHandler.
 func (m *Matrix) OnTyping(t *matrixclient.Typing) {
+	m.enqueueEvent(t)
+}
+
+func (m *Matrix) handleTyping(t *matrixclient.Typing) {
 	channelType := ""
 	if t.Direct {
 		channelType = "D"
@@ -294,6 +310,10 @@ func (m *Matrix) OnTyping(t *matrixclient.Typing) {
 
 // OnTopic implements matrixclient.TopicHandler.
 func (m *Matrix) OnTopic(t *matrixclient.TopicChange) {
+	m.enqueueEvent(t)
+}
+
+func (m *Matrix) handleTopic(t *matrixclient.TopicChange) {
 	ghost := m.createUser(t.Sender)
 	if ghost == nil {
 		return
@@ -436,7 +456,7 @@ func (m *Matrix) sendRoomUpdate(ctx context.Context, update *roomUpdate) {
 
 // OnInvite implements matrixclient.InviteHandler.
 func (m *Matrix) OnInvite(invite *matrixclient.Invitation) {
-	m.sendInvite(invite)
+	m.enqueueEvent(invite)
 }
 
 // sendInvite reports an invitation to the IRC layer. Joining the room by its
@@ -462,6 +482,10 @@ func (m *Matrix) sendInvite(invite *matrixclient.Invitation) {
 
 // OnMember implements matrixclient.MemberHandler.
 func (m *Matrix) OnMember(c *matrixclient.MemberChange) {
+	m.enqueueEvent(c)
+}
+
+func (m *Matrix) handleMember(c *matrixclient.MemberChange) {
 	if c.UserID == m.mc.UserID() && c.Membership != event.MembershipJoin {
 		m.nameResolveTried.Delete(c.RoomID)
 	}
