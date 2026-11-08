@@ -144,6 +144,10 @@ func (m *Matrix) cachedSummary(text string) string {
 
 // OnEdit implements matrixclient.EditHandler.
 func (m *Matrix) OnEdit(e *matrixclient.Edit) {
+	m.enqueueEvent(e)
+}
+
+func (m *Matrix) handleEdit(e *matrixclient.Edit, echo bool) {
 	ghost := m.createUser(e.Sender)
 	if ghost == nil {
 		return
@@ -156,7 +160,7 @@ func (m *Matrix) OnEdit(e *matrixclient.Edit) {
 	m.latestEditIDs.Add(e.TargetID, e.EventID)
 	m.editMu.Unlock()
 
-	if ghost.Me && m.isSentEcho(e.EventID, e.Text) {
+	if ghost.Me && echo {
 		return
 	}
 
@@ -169,6 +173,10 @@ func (m *Matrix) OnEdit(e *matrixclient.Edit) {
 
 // OnRedaction implements matrixclient.RedactionHandler.
 func (m *Matrix) OnRedaction(r *matrixclient.Redaction) {
+	m.enqueueEvent(r)
+}
+
+func (m *Matrix) handleRedaction(r *matrixclient.Redaction, echo bool) {
 	// Redactions of other events, such as topics or pins, are not deleted messages.
 	if r.TargetType.Type != "" && r.TargetType != event.EventMessage && r.TargetType != event.EventEncrypted {
 		return
@@ -211,7 +219,9 @@ func (m *Matrix) OnRedaction(r *matrixclient.Redaction) {
 		return
 	}
 
-	if ghost.Me && m.sentRedactions.Remove(r.TargetID) {
+	if ghost.Me && echo {
+		m.sentRedactions.Remove(r.TargetID)
+
 		return
 	}
 
@@ -248,6 +258,10 @@ func (m *Matrix) fetchText(roomID id.RoomID, eventID id.EventID) string {
 
 // OnPin implements matrixclient.PinHandler.
 func (m *Matrix) OnPin(p *matrixclient.PinChange) {
+	m.enqueueEvent(p)
+}
+
+func (m *Matrix) handlePin(p *matrixclient.PinChange, direct bool) {
 	ghost := m.createUser(p.Sender)
 	if ghost == nil {
 		return
@@ -264,11 +278,15 @@ func (m *Matrix) OnPin(p *matrixclient.PinChange) {
 	}
 
 	m.msgRoomCache.Add(p.EventID, p.RoomID)
-	m.sendText(ghost, p.RoomID, m.mc.IsDirect(p.RoomID), p.EventID, "", m.cachedSummary(text)+m.formatSuffix(kind), "post_edited", m.messageType(text), 0)
+	m.sendText(ghost, p.RoomID, direct, p.EventID, "", m.cachedSummary(text)+m.formatSuffix(kind), "post_edited", m.messageType(text), 0)
 }
 
 // OnTyping implements matrixclient.TypingHandler.
 func (m *Matrix) OnTyping(t *matrixclient.Typing) {
+	m.enqueueEvent(t)
+}
+
+func (m *Matrix) handleTyping(t *matrixclient.Typing) {
 	channelType := ""
 	if t.Direct {
 		channelType = "D"
@@ -294,6 +312,10 @@ func (m *Matrix) OnTyping(t *matrixclient.Typing) {
 
 // OnTopic implements matrixclient.TopicHandler.
 func (m *Matrix) OnTopic(t *matrixclient.TopicChange) {
+	m.enqueueEvent(t)
+}
+
+func (m *Matrix) handleTopic(t *matrixclient.TopicChange) {
 	ghost := m.createUser(t.Sender)
 	if ghost == nil {
 		return
@@ -311,7 +333,9 @@ func (m *Matrix) OnTopic(t *matrixclient.TopicChange) {
 
 // OnRoomName implements matrixclient.RoomNameHandler.
 func (m *Matrix) OnRoomName(r *matrixclient.RoomRename) {
-	m.queueRoomUpdate(r.RoomID, r.Name, r.DisplayName, r.Kind)
+	// Queued with the messages, not with roomUpdateLoop, so that a drop does not
+	// unlink the channel before the messages synced ahead of it are delivered.
+	m.enqueueEvent(newRoomUpdate(r.RoomID, r.Name, r.DisplayName, r.Kind))
 }
 
 // onRoomNameResolved is the matrixclient.WithRoomNameResolved callback, which
@@ -321,20 +345,13 @@ func (m *Matrix) onRoomNameResolved(roomID id.RoomID, name string) {
 	m.queueRoomUpdate(roomID, name, "", matrixclient.RoomRenamed)
 }
 
-// queueRoomUpdate hands a rename to roomUpdateLoop. matrixclient serializes its
-// callbacks, so queueing in call order and keeping only the newest name of
-// consecutive renames of a room stops a stale name from being applied last.
-// Drops and restores are never merged, the IRC side has to see each transition
-// in order to part, unlink and recreate the channel. It never blocks.
-func (m *Matrix) queueRoomUpdate(roomID id.RoomID, name, displayName string, kind matrixclient.RoomRenameKind) {
+func newRoomUpdate(roomID id.RoomID, name, displayName string, kind matrixclient.RoomRenameKind) *roomUpdate {
 	name = strings.TrimPrefix(name, "#")
 	if displayName == "" {
 		displayName = name
 	}
 
-	m.roomUpdateMu.Lock()
-
-	update := &roomUpdate{
+	return &roomUpdate{
 		kind: kind,
 		ev: &bridge.ChannelUpdateEvent{
 			ChannelID:   roomID.String(),
@@ -342,6 +359,17 @@ func (m *Matrix) queueRoomUpdate(roomID id.RoomID, name, displayName string, kin
 			DisplayName: displayName,
 		},
 	}
+}
+
+// queueRoomUpdate hands a rename to roomUpdateLoop. matrixclient serializes its
+// callbacks, so queueing in call order and keeping only the newest name of
+// consecutive renames of a room stops a stale name from being applied last.
+// Drops and restores are never merged, the IRC side has to see each transition
+// in order to part, unlink and recreate the channel. It never blocks.
+func (m *Matrix) queueRoomUpdate(roomID id.RoomID, name, displayName string, kind matrixclient.RoomRenameKind) {
+	update := newRoomUpdate(roomID, name, displayName, kind)
+
+	m.roomUpdateMu.Lock()
 
 	merged := false
 
@@ -436,7 +464,7 @@ func (m *Matrix) sendRoomUpdate(ctx context.Context, update *roomUpdate) {
 
 // OnInvite implements matrixclient.InviteHandler.
 func (m *Matrix) OnInvite(invite *matrixclient.Invitation) {
-	m.sendInvite(invite)
+	m.enqueueEvent(invite)
 }
 
 // sendInvite reports an invitation to the IRC layer. Joining the room by its
@@ -466,10 +494,16 @@ func (m *Matrix) OnMember(c *matrixclient.MemberChange) {
 		m.nameResolveTried.Delete(c.RoomID)
 	}
 
+	// Decided here, as the room may have turned into a channel or a DM by the time the
+	// event is handled.
 	if m.mc.IsDirect(c.RoomID) {
 		return
 	}
 
+	m.enqueueEvent(c)
+}
+
+func (m *Matrix) handleMember(c *matrixclient.MemberChange) {
 	target := m.createUser(c.UserID)
 	actor := m.createUser(c.Sender)
 
@@ -504,7 +538,7 @@ func (m *Matrix) OnMember(c *matrixclient.MemberChange) {
 // coming from the other side, as handled by the IRC layer.
 func (m *Matrix) sendText(ghost *bridge.UserInfo, roomID id.RoomID, direct bool, eventID, parentID id.EventID, text, eventType, messageType string, ts int64) {
 	if direct {
-		receiver := m.dmReceiver(ghost, roomID, true)
+		receiver := m.dmReceiver(ghost, true)
 		if receiver == nil {
 			return
 		}
@@ -648,10 +682,15 @@ func (m *Matrix) dmPeer(roomID id.RoomID) *bridge.UserInfo {
 }
 
 // dmReceiver returns the receiver of a message: the peer for our own messages
-// in a DM, as they are sent from another client, otherwise ourselves.
-func (m *Matrix) dmReceiver(ghost *bridge.UserInfo, roomID id.RoomID, direct bool) *bridge.UserInfo {
+// in a DM, as they are sent from another client, otherwise ourselves. The peer is
+// the one synced with the event, see queuedEvent, so only eventLoop may call it.
+func (m *Matrix) dmReceiver(ghost *bridge.UserInfo, direct bool) *bridge.UserInfo {
 	if direct && ghost.Me {
-		return m.dmPeer(roomID)
+		if m.eventPeer == "" {
+			return nil
+		}
+
+		return m.createUser(m.eventPeer)
 	}
 
 	return m.GetMe()
