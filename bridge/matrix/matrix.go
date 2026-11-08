@@ -280,6 +280,7 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 	loopCtx, m.roomUpdateCancel = context.WithCancel(ctx)
 
 	go m.roomUpdateLoop(loopCtx)
+	go m.eventLoop()
 
 	setLogLevels := func(rc *config.RuntimeConfig) {
 		switch {
@@ -338,7 +339,6 @@ func (m *Matrix) Ready() {
 
 	// Started after ready is set, as sendEventCtx drops notices before that.
 	go m.verificationLoop()
-	go m.eventLoop()
 
 	// Invitations of the initial sync are not delivered to OnInvite. The snapshot
 	// is taken here, on the sync goroutine, so a later invite cannot be missed or
@@ -415,15 +415,9 @@ func (m *Matrix) handleEvent(ev any) {
 
 // enqueueEvent hands ev to eventLoop. The sync goroutine blocks only when the queue
 // is full, as dropping a chat event is worse than delaying the sync, except for
-// typing notifications, which are dropped. Before Ready the events are handled
-// inline, as eventLoop only starts then and sendEventCtx drops their output anyway.
+// typing notifications, which are dropped. Everything goes through the queue, also
+// before Ready, so handlers never run concurrently with eventLoop.
 func (m *Matrix) enqueueEvent(ev any) {
-	if !m.ready.Load() {
-		m.handleEvent(ev)
-
-		return
-	}
-
 	select {
 	case m.eventQueue <- ev:
 		return
