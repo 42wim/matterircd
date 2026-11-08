@@ -592,6 +592,27 @@ func (c *Client) LastEventID(roomID id.RoomID) id.EventID {
 	return ch.LastEventID
 }
 
+// LastDeliveredEventID returns the newest message event, by timeline position, whose
+// handler call has returned, "" if none. Unlike LastEventID, which advances before the
+// handler is called, it never includes an event the handler has not seen yet, so a
+// consumer that hands events on asynchronously can acknowledge up to it once it has
+// handed over everything the handler returned for. Messages of the initial sync count
+// as delivered, as they are never passed to the handler.
+func (c *Client) LastDeliveredEventID(roomID id.RoomID) id.EventID {
+	c.RLock()
+	ch, ok := c.channels[roomID]
+	c.RUnlock()
+
+	if !ok {
+		return ""
+	}
+
+	ch.RLock()
+	defer ch.RUnlock()
+
+	return ch.DeliveredEventID
+}
+
 // RoomInfo is a snapshot of a room.
 type RoomInfo struct {
 	ID       id.RoomID

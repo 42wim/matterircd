@@ -444,8 +444,9 @@ func (c *Client) noteDecrypted(ev *event.Event) {
 }
 
 // noteActivity records the newest message of a room, including
-// those of the initial sync which are not delivered to the handler.
-func (c *Client) noteActivity(roomID id.RoomID, eventID id.EventID, ts int64) {
+// those of the initial sync which are not delivered to the handler. It returns the
+// timeline position of the message, 0 if it is unknown, for noteDelivered.
+func (c *Client) noteActivity(roomID id.RoomID, eventID id.EventID, ts int64) uint64 {
 	c.Lock()
 	defer c.Unlock()
 
@@ -454,14 +455,45 @@ func (c *Client) noteActivity(roomID id.RoomID, eventID id.EventID, ts int64) {
 	ch.Lock()
 	ch.LastActivity = max(ch.LastActivity, ts)
 
+	var seq uint64
+
 	// The timeline position, not the arrival or decryption order, decides the
 	// newest event, as origin_server_ts is not monotonic either.
 	if p, ok := ch.eventSeq[eventID]; ok {
 		delete(ch.eventSeq, eventID)
 
+		seq = p.seq
+
 		if p.seq > ch.lastSeq {
 			ch.lastSeq, ch.LastEventID = p.seq, eventID
 		}
+	}
+
+	ch.Unlock()
+
+	return seq
+}
+
+// noteDelivered records that the handler call for a message has returned, or that
+// the message needs none, as for the initial sync. Like noteActivity it keeps the
+// event with the newest timeline position.
+func (c *Client) noteDelivered(roomID id.RoomID, eventID id.EventID, seq uint64) {
+	if seq == 0 {
+		return
+	}
+
+	c.RLock()
+	ch, ok := c.channels[roomID]
+	c.RUnlock()
+
+	if !ok {
+		return
+	}
+
+	ch.Lock()
+
+	if seq > ch.deliveredSeq {
+		ch.deliveredSeq, ch.DeliveredEventID = seq, eventID
 	}
 
 	ch.Unlock()
@@ -475,7 +507,8 @@ func (c *Client) handleMessage(_ context.Context, ev *event.Event) {
 		return
 	}
 
-	c.noteActivity(ev.RoomID, ev.ID, ev.Timestamp)
+	// Also on the early returns below, where nothing is delivered.
+	defer c.noteDelivered(ev.RoomID, ev.ID, c.noteActivity(ev.RoomID, ev.ID, ev.Timestamp))
 
 	if targetID := content.RelatesTo.GetReplaceID(); targetID != "" { //nolint:nestif
 		if h, ok := c.handler.(EditHandler); ok {
