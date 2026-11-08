@@ -802,17 +802,27 @@ func (u *User) handleFileEvent(event *bridge.FileEvent) {
 }
 
 func (u *User) handleChannelCreateEvent(event *bridge.ChannelCreateEvent) {
-	// The event may have been queued while the room became a DM again, whose channel name is not joinable.
-	info, err := u.br.GetChannel(u.ctx, event.ChannelID)
-	if err == nil && info.DM {
-		logger.Debugf("ACTION_CHANNEL_CREATED skipping %s, it is a DM", event.ChannelID)
+	name := event.Name
 
-		return
+	if name == "" {
+		// The event may have been queued while the room became a DM again, whose channel name is not joinable.
+		info, err := u.br.GetChannel(u.ctx, event.ChannelID)
+		if err == nil && info.DM {
+			logger.Debugf("ACTION_CHANNEL_CREATED skipping %s, it is a DM", event.ChannelID)
+
+			return
+		}
+
+		name = u.br.GetChannelName(u.ctx, event.ChannelID)
+	} else {
+		// A name given by the bridge is the one of the transition, which later events of
+		// the room, queued before the next transition, are delivered to.
+		u.Srv.ChannelWithName(event.ChannelID, name)
 	}
 
-	logger.Debugf("ACTION_CHANNEL_CREATED syncing channel %s (%s)", u.br.GetChannelName(u.ctx, event.ChannelID), event.ChannelID)
+	logger.Debugf("ACTION_CHANNEL_CREATED syncing channel %s (%s)", name, event.ChannelID)
 
-	_ = u.syncChannel(event.ChannelID, u.br.GetChannelName(u.ctx, event.ChannelID))
+	_ = u.syncChannel(event.ChannelID, name)
 }
 
 func (u *User) handleChannelDeleteEvent(event *bridge.ChannelDeleteEvent) {

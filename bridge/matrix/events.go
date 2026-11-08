@@ -440,16 +440,27 @@ func (m *Matrix) sendRoomUpdate(ctx context.Context, update *roomUpdate) {
 			Data: &bridge.ChannelDeleteEvent{ChannelID: ev.ChannelID},
 		})
 	case matrixclient.RoomRestored:
-		// A later transition may have made it a DM again, whose channel name is the raw room ID.
-		// That drop is queued behind this one, so the channel is not created in between.
+		// Created with the name of the transition even if the room is a DM again by now: the
+		// messages synced in between are for this channel, and the drop queued behind this
+		// one removes it again. The live name is a raw room ID then.
+		name := ""
+		if ev.Name != "" {
+			name = "#" + ev.Name
+		}
+
 		info, err := m.GetChannel(ctx, ev.ChannelID)
-		if err == nil && info.DM {
+
+		switch {
+		case err != nil:
+		case !info.DM:
+			name = "#" + info.Name
+		case name == "":
 			return
 		}
 
 		m.sendEventCtx(ctx, &bridge.Event{
 			Type: "channel_create",
-			Data: &bridge.ChannelCreateEvent{ChannelID: ev.ChannelID},
+			Data: &bridge.ChannelCreateEvent{ChannelID: ev.ChannelID, Name: name},
 		})
 	case matrixclient.RoomRenamed:
 		// The name may have been given a suffix to keep it unique.
