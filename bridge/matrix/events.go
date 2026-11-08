@@ -331,8 +331,9 @@ func (m *Matrix) handleTopic(t *matrixclient.TopicChange) {
 
 // OnRoomName implements matrixclient.RoomNameHandler.
 func (m *Matrix) OnRoomName(r *matrixclient.RoomRename) {
-	m.queueRoomUpdate(r.RoomID, r.Name, r.DisplayName, r.Kind)
-	m.enqueueEvent(roomBarrier{})
+	// Queued with the messages, not with roomUpdateLoop, so that a drop does not
+	// unlink the channel before the messages synced ahead of it are delivered.
+	m.enqueueEvent(newRoomUpdate(r.RoomID, r.Name, r.DisplayName, r.Kind))
 }
 
 // onRoomNameResolved is the matrixclient.WithRoomNameResolved callback, which
@@ -342,20 +343,13 @@ func (m *Matrix) onRoomNameResolved(roomID id.RoomID, name string) {
 	m.queueRoomUpdate(roomID, name, "", matrixclient.RoomRenamed)
 }
 
-// queueRoomUpdate hands a rename to roomUpdateLoop. matrixclient serializes its
-// callbacks, so queueing in call order and keeping only the newest name of
-// consecutive renames of a room stops a stale name from being applied last.
-// Drops and restores are never merged, the IRC side has to see each transition
-// in order to part, unlink and recreate the channel. It never blocks.
-func (m *Matrix) queueRoomUpdate(roomID id.RoomID, name, displayName string, kind matrixclient.RoomRenameKind) {
+func newRoomUpdate(roomID id.RoomID, name, displayName string, kind matrixclient.RoomRenameKind) *roomUpdate {
 	name = strings.TrimPrefix(name, "#")
 	if displayName == "" {
 		displayName = name
 	}
 
-	m.roomUpdateMu.Lock()
-
-	update := &roomUpdate{
+	return &roomUpdate{
 		kind: kind,
 		ev: &bridge.ChannelUpdateEvent{
 			ChannelID:   roomID.String(),
@@ -363,6 +357,17 @@ func (m *Matrix) queueRoomUpdate(roomID id.RoomID, name, displayName string, kin
 			DisplayName: displayName,
 		},
 	}
+}
+
+// queueRoomUpdate hands a rename to roomUpdateLoop. matrixclient serializes its
+// callbacks, so queueing in call order and keeping only the newest name of
+// consecutive renames of a room stops a stale name from being applied last.
+// Drops and restores are never merged, the IRC side has to see each transition
+// in order to part, unlink and recreate the channel. It never blocks.
+func (m *Matrix) queueRoomUpdate(roomID id.RoomID, name, displayName string, kind matrixclient.RoomRenameKind) {
+	update := newRoomUpdate(roomID, name, displayName, kind)
+
+	m.roomUpdateMu.Lock()
 
 	merged := false
 
@@ -402,31 +407,22 @@ func (m *Matrix) roomUpdateLoop(ctx context.Context) {
 		case <-m.roomUpdateWake:
 		}
 
-		m.flushRoomUpdates(ctx)
-	}
-}
+		for {
+			m.roomUpdateMu.Lock()
 
-// flushRoomUpdates sends all queued room updates. roomUpdateSendMu keeps them in
-// order when eventLoop and roomUpdateLoop flush at the same time.
-func (m *Matrix) flushRoomUpdates(ctx context.Context) {
-	m.roomUpdateSendMu.Lock()
-	defer m.roomUpdateSendMu.Unlock()
+			if len(m.roomUpdates) == 0 {
+				m.roomUpdateMu.Unlock()
 
-	for {
-		m.roomUpdateMu.Lock()
+				break
+			}
 
-		if len(m.roomUpdates) == 0 {
+			update := m.roomUpdates[0]
+			m.roomUpdates[0] = nil
+			m.roomUpdates = m.roomUpdates[1:]
 			m.roomUpdateMu.Unlock()
 
-			return
+			m.sendRoomUpdate(ctx, update)
 		}
-
-		update := m.roomUpdates[0]
-		m.roomUpdates[0] = nil
-		m.roomUpdates = m.roomUpdates[1:]
-		m.roomUpdateMu.Unlock()
-
-		m.sendRoomUpdate(ctx, update)
 	}
 }
 

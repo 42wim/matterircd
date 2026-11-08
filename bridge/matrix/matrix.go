@@ -110,7 +110,6 @@ type Matrix struct {
 
 	// roomUpdateMu guards the renames waiting for roomUpdateLoop, see queueRoomUpdate.
 	roomUpdateMu     sync.Mutex
-	roomUpdateSendMu sync.Mutex // serializes the flushes of roomUpdates, held while sending
 	roomUpdates      []*roomUpdate
 	roomUpdateWake   chan struct{}
 	roomUpdateCancel context.CancelFunc
@@ -403,10 +402,6 @@ type queuedEvent struct {
 	peer   id.UserID // the other user of a direct room, for our own events
 }
 
-// roomBarrier marks the point in the event order where the room updates queued so far
-// must have been sent, so a drop does not overtake the messages synced before it.
-type roomBarrier struct{}
-
 func (m *Matrix) handleEvent(q *queuedEvent) {
 	// Only eventLoop runs the handlers, so no lock is needed.
 	m.eventPeer = q.peer
@@ -430,8 +425,8 @@ func (m *Matrix) handleEvent(q *queuedEvent) {
 		m.handleMember(e)
 	case *matrixclient.Invitation:
 		m.sendInvite(e)
-	case roomBarrier:
-		m.flushRoomUpdates(m.ctx)
+	case *roomUpdate:
+		m.sendRoomUpdate(m.ctx, e)
 	}
 }
 
