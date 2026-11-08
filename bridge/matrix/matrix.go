@@ -65,6 +65,7 @@ const (
 	reactionCacheSize  = 100
 	sentCacheSize      = 100
 	eventQueueSize     = 1024
+	typingDropLogEvery = 100
 	sentReactionWindow = time.Minute
 
 	roomNameResolveTimeout = 5 * time.Second
@@ -153,8 +154,9 @@ type Matrix struct {
 	verifyQueue chan *matrixclient.Verification
 
 	// eventQueue holds the synced events for eventLoop, see enqueueEvent.
-	eventQueue chan *queuedEvent
-	eventPeer  id.UserID // peer of the event eventLoop is handling, see dmReceiver
+	eventQueue    chan *queuedEvent
+	typingDropped atomic.Uint64
+	eventPeer     id.UserID // peer of the event eventLoop is handling, see dmReceiver
 
 	// roomProgressMu guards roomProgress, see UpdateLastViewed.
 	roomProgressMu sync.Mutex
@@ -540,7 +542,11 @@ func (m *Matrix) enqueueEvent(ev any) {
 
 	if _, ok := ev.(*matrixclient.Typing); ok {
 		m.roomPending(q.room, -1)
-		logger.Debug("matrix: event queue full, dropping typing event")
+
+		// Logged once per typingDropLogEvery drops, as typing events are frequent.
+		if n := m.typingDropped.Add(1); n%typingDropLogEvery == 1 {
+			logger.Debugf("matrix: event queue full, dropping typing events (%d dropped so far)", n)
+		}
 
 		return
 	}
