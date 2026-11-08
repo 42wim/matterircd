@@ -154,7 +154,11 @@ type Matrix struct {
 
 	// eventQueue holds the synced events for eventLoop, see enqueueEvent.
 	eventQueue chan *queuedEvent
-	eventPeer  id.UserID // peer of the event eventLoop is handling, see dmReceiver
+	// eventsPending counts the events queued or being handled, and eventsDelivered holds
+	// the last message handled per room, see UpdateLastViewed.
+	eventsPending   atomic.Int64
+	eventsDelivered sync.Map  // id.RoomID to id.EventID
+	eventPeer       id.UserID // peer of the event eventLoop is handling, see dmReceiver
 }
 
 // resolveNickSep returns the configured separator and the one to use: an invalid
@@ -387,6 +391,7 @@ func (m *Matrix) eventLoop() {
 		select {
 		case ev := <-m.eventQueue:
 			m.handleEvent(ev)
+			m.eventsPending.Add(-1)
 		case <-m.ctx.Done():
 			return
 		}
@@ -400,7 +405,7 @@ type queuedEvent struct {
 	ev     any
 	direct bool
 	peer   id.UserID // the other user of a direct room, for our own events
-	echo   bool      // our own message, edit or reaction was sent from IRC, see isSentEcho
+	echo   bool      // our own message, edit, reaction or deletion was sent from IRC, see isSentEcho
 }
 
 func (m *Matrix) handleEvent(q *queuedEvent) {
@@ -410,12 +415,13 @@ func (m *Matrix) handleEvent(q *queuedEvent) {
 	switch e := q.ev.(type) {
 	case *matrixclient.Message:
 		m.handleMessage(e, q.echo)
+		m.eventsDelivered.Store(e.RoomID, e.EventID)
 	case *matrixclient.Edit:
 		m.handleEdit(e, q.echo)
 	case *matrixclient.Reaction:
 		m.handleReaction(e, q.echo)
 	case *matrixclient.Redaction:
-		m.handleRedaction(e)
+		m.handleRedaction(e, q.echo)
 	case *matrixclient.PinChange:
 		m.handlePin(e, q.direct)
 	case *matrixclient.Typing:
@@ -449,6 +455,7 @@ func (m *Matrix) snapshot(ev any) *queuedEvent {
 		q.echo = e.Sender == m.mc.UserID() && m.isSentReaction(e.ParentID, e.Key)
 	case *matrixclient.Redaction:
 		roomID, q.direct = e.RoomID, e.Direct
+		q.echo = e.Sender == m.mc.UserID() && m.sentRedactions.Remove(e.TargetID)
 	case *matrixclient.PinChange:
 		roomID, q.direct = e.RoomID, m.mc.IsDirect(e.RoomID)
 	default:
@@ -471,6 +478,8 @@ func (m *Matrix) snapshot(ev any) *queuedEvent {
 func (m *Matrix) enqueueEvent(ev any) {
 	q := m.snapshot(ev)
 
+	m.eventsPending.Add(1)
+
 	select {
 	case m.eventQueue <- q:
 		return
@@ -478,6 +487,7 @@ func (m *Matrix) enqueueEvent(ev any) {
 	}
 
 	if _, ok := ev.(*matrixclient.Typing); ok {
+		m.eventsPending.Add(-1)
 		logger.Debug("matrix: event queue full, dropping typing event")
 
 		return
@@ -486,6 +496,7 @@ func (m *Matrix) enqueueEvent(ev any) {
 	select {
 	case m.eventQueue <- q:
 	case <-m.ctx.Done():
+		m.eventsPending.Add(-1)
 	}
 }
 
@@ -1503,7 +1514,16 @@ func (m *Matrix) UpdateLastViewed(ctx context.Context, channelID string) {
 	roomID := id.RoomID(channelID)
 
 	// The client orders events by timeline position, unlike arrival or decryption order.
-	evID := m.mc.LastEventID(roomID)
+	// While events are queued, its latest one may not have been shown on IRC yet, so
+	// only the last message that was is acknowledged.
+	var evID id.EventID
+
+	if m.eventsPending.Load() == 0 {
+		evID = m.mc.LastEventID(roomID)
+	} else if v, ok := m.eventsDelivered.Load(roomID); ok {
+		evID, _ = v.(id.EventID)
+	}
+
 	if evID == "" {
 		return
 	}

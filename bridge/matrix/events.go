@@ -176,7 +176,7 @@ func (m *Matrix) OnRedaction(r *matrixclient.Redaction) {
 	m.enqueueEvent(r)
 }
 
-func (m *Matrix) handleRedaction(r *matrixclient.Redaction) {
+func (m *Matrix) handleRedaction(r *matrixclient.Redaction, echo bool) {
 	// Redactions of other events, such as topics or pins, are not deleted messages.
 	if r.TargetType.Type != "" && r.TargetType != event.EventMessage && r.TargetType != event.EventEncrypted {
 		return
@@ -219,7 +219,7 @@ func (m *Matrix) handleRedaction(r *matrixclient.Redaction) {
 		return
 	}
 
-	if ghost.Me && m.sentRedactions.Remove(r.TargetID) {
+	if ghost.Me && echo {
 		return
 	}
 
