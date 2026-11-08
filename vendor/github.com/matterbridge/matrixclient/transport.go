@@ -8,10 +8,7 @@ import (
 	"time"
 )
 
-const (
-	defaultDialTimeout = 5 * time.Second
-	defaultTimeout     = 10 * time.Second
-)
+const defaultDialTimeout = 5 * time.Second
 
 type splitTransport struct {
 	api  *http.Transport
@@ -22,11 +19,9 @@ type splitTransport struct {
 // TLS handshake are bounded by timeout, so an unreachable server fails fast.
 func newBaseTransport(o *options, responseTimeout time.Duration) *http.Transport {
 	timeout := o.timeout
-	dialTimeout := o.timeout
 
 	if timeout <= 0 {
-		timeout = defaultTimeout
-		dialTimeout = defaultDialTimeout
+		timeout = defaultDialTimeout
 	}
 
 	return &http.Transport{
@@ -37,18 +32,18 @@ func newBaseTransport(o *options, responseTimeout time.Duration) *http.Transport
 
 		// https://github.com/golang/go/issues/39299
 		DialContext: (&net.Dialer{
-			Timeout:   dialTimeout,
+			Timeout:   timeout,
 			KeepAlive: 30 * time.Second,
 		}).DialContext,
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          100,
 		MaxIdleConnsPerHost:   10,
-		IdleConnTimeout:       90 * time.Second,
+		IdleConnTimeout:       120 * time.Second,
 		TLSHandshakeTimeout:   timeout,
 		ExpectContinueTimeout: 1 * time.Second,
 		ResponseHeaderTimeout: responseTimeout,
 		HTTP2: &http.HTTP2Config{
-			SendPingTimeout: 15 * time.Second,
+			SendPingTimeout: 45 * time.Second,
 			PingTimeout:     15 * time.Second,
 		},
 	}
