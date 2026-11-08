@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -36,7 +37,7 @@ var (
 	logger  *logrus.Entry
 	cfg     *config.Config
 
-	LastViewedSaveDB *bolt.DB
+	LastViewedSaveDBs map[string]*bolt.DB
 )
 
 //nolint:funlen,gocognit,gocyclo
@@ -102,6 +103,7 @@ func main() {
 	setupLogReloadHook(cfg)
 	setupProfilingReloadHook(cfg)
 	setupGopsReloadHook(cfg)
+	setupDBReloadHook(cfg)
 	setupSignalHandling(cfg)
 
 	irckit.SetLogger(logger)
@@ -131,21 +133,53 @@ func main() {
 		}
 	}
 
-	// Now that ports are secured, open the database
-	mmLastViewedFile := project + "-lastsaved.db"
-	if statePath := rc.Mattermost.LastViewedSaveFile; statePath != "" {
-		mmLastViewedFile = statePath
-	} else if statePath := rc.Matrix.LastViewedSaveFile; statePath != "" {
-		mmLastViewedFile = statePath
+	// Determine the database file path for each protocol.
+	// Fall back to mattermost's setting or default if unset.
+	defaultFile := project + "-lastsaved.db"
+
+	mmFile := rc.Mattermost.LastViewedSaveFile
+	if mmFile == "" {
+		mmFile = defaultFile
 	}
 
-	db, err := bolt.Open(mmLastViewedFile, 0o600, &bolt.Options{Timeout: 1 * time.Second})
-	if err != nil {
-		logger.Fatalf("Database lock failed (is another instance running?): %v", err)
+	mxFile := rc.Matrix.LastViewedSaveFile
+	if mxFile == "" {
+		mxFile = mmFile
 	}
-	defer db.Close()
 
-	LastViewedSaveDB = db
+	protoFiles := map[string]string{
+		"mattermost": mmFile,
+		"matrix":     mxFile,
+	}
+
+	openedDBs := make(map[string]*bolt.DB)
+	protoDBs := make(map[string]*bolt.DB)
+
+	for proto, filePath := range protoFiles {
+		db, ok := openedDBs[filePath]
+		if !ok {
+			var openErr error
+
+			db, openErr = bolt.Open(filePath, 0o600, &bolt.Options{Timeout: 1 * time.Second})
+			if openErr != nil {
+				logger.Fatalf("Database lock failed for %s (%s): %v", filePath, proto, openErr)
+			}
+
+			openedDBs[filePath] = db
+		}
+
+		protoDBs[proto] = db
+	}
+
+	protoDBs["default"] = protoDBs["mattermost"]
+
+	defer func() {
+		for _, db := range openedDBs {
+			_ = db.Close()
+		}
+	}()
+
+	LastViewedSaveDBs = protoDBs
 
 	aiCfg := cfg.Current().AI
 	if aiCfg.Enabled { //nolint:nestif
@@ -237,6 +271,30 @@ func main() {
 	}
 
 	select {}
+}
+
+func setupDBReloadHook(cfg *config.Config) {
+	rc := cfg.Current()
+
+	var lastMMFile, lastMXFile atomic.Value
+
+	lastMMFile.Store(rc.Mattermost.LastViewedSaveFile)
+	lastMXFile.Store(rc.Matrix.LastViewedSaveFile)
+
+	cfg.RegisterReloadHook(func(newRC *config.RuntimeConfig) {
+		newMM := newRC.Mattermost.LastViewedSaveFile
+		lastMM := lastMMFile.Swap(newMM)
+		if lastMM != newMM {
+			logger.Warnf("mattermost.LastViewedSaveFile changed from %q to %q, a matterircd restart is required for it to take effect", lastMM, newMM)
+		}
+
+		newMX := newRC.Matrix.LastViewedSaveFile
+		lastMX := lastMXFile.Swap(newMX)
+
+		if lastMX != newMX {
+			logger.Warnf("matrix.LastViewedSaveFile changed from %q to %q, a matterircd restart is required for it to take effect", lastMX, newMX)
+		}
+	})
 }
 
 func setupLogReloadHook(cfg *config.Config) {
@@ -437,7 +495,7 @@ func start(socket net.Listener) {
 
 			logger.Infof("New connection: %s", conn.RemoteAddr())
 
-			user := irckit.NewUserBridge(conn, newsrv, cfg, LastViewedSaveDB)
+			user := irckit.NewUserBridge(conn, newsrv, cfg, LastViewedSaveDBs)
 
 			err = newsrv.Connect(user)
 			if err != nil {
