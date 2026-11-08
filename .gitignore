@@ -1,4 +1,6 @@
 matterircd
 matterircd.toml
 matterircd-lastsaved.db
+matterircd-lastsaved-*.db
+matterircd-*-lastsaved.db
 TODO*

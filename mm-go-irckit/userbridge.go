@@ -50,8 +50,8 @@ type UserBridge struct {
 	eventLoopStop    context.CancelFunc
 	eventLoopDone    chan struct{}
 
-	lastEventTime  atomic.Int64
-	lastViewedAtDB *bolt.DB
+	lastEventTime atomic.Int64
+	lastViewedDBs map[string]*bolt.DB
 
 	msgChanLockMutex sync.Mutex
 	msgChanLocks     map[string]chan struct{}
@@ -76,7 +76,7 @@ type UserBridge struct {
 	updateCounter      map[string]time.Time
 }
 
-func NewUserBridge(c net.Conn, srv Server, cfg *config.Config, db *bolt.DB) *User {
+func NewUserBridge(c net.Conn, srv Server, cfg *config.Config, dbs map[string]*bolt.DB) *User {
 	u := NewUser(&conn{
 		Conn:    c,
 		Encoder: irc.NewEncoder(c),
@@ -85,7 +85,7 @@ func NewUserBridge(c net.Conn, srv Server, cfg *config.Config, db *bolt.DB) *Use
 
 	u.Srv = srv
 	u.cfg = cfg
-	u.lastViewedAtDB = db
+	u.lastViewedDBs = dbs
 
 	u.msgChanLocks = make(map[string]chan struct{})
 	u.msgLast = make(map[string][2]string)
@@ -1164,7 +1164,8 @@ func (u *User) addUsersToChannels() {
 
 	globalSince := u.getGlobalLastEventTime()
 	if globalSince > 0 {
-		logger.Infof("Loaded global last event timestamp: %s", time.UnixMilli(globalSince).Format("2006-01-02 15:04:05"))
+		logger.Infof("Loaded global last event timestamp for %s: %s", u.currentProtocol(), time.UnixMilli(globalSince).Format("2006-01-02 15:04:05"))
+		u.updateLastEventTime(globalSince)
 	}
 
 	srv := u.Srv
@@ -1476,31 +1477,34 @@ func (u *User) getChannelSince(ctx context.Context, brchannel *bridge.ChannelInf
 
 	// Fetch locally saved BoltDB last viewed if strategy allows
 	if strategy == "saved" || strategy == "hybrid" { //nolint:nestif
-		_ = u.lastViewedAtDB.View(func(tx *bolt.Tx) error {
-			var v []byte
+		db := u.getDB()
+		if db != nil {
+			_ = db.View(func(tx *bolt.Tx) error {
+				var v []byte
 
-			b := tx.Bucket(u.dbBucketName())
-			if b != nil {
-				v = b.Get([]byte(brchannel.ID))
-			}
-
-			if v == nil {
-				legacyBucket := tx.Bucket([]byte(u.User))
-				if legacyBucket != nil {
-					v = legacyBucket.Get([]byte(brchannel.ID))
+				b := tx.Bucket(u.dbBucketName())
+				if b != nil {
+					v = b.Get([]byte(brchannel.ID))
 				}
-			}
 
-			if v != nil {
-				val := binary.LittleEndian.Uint64(v)
-				if val <= math.MaxInt64 {
-					savedSince = int64(val)
-					inDB = true
+				if v == nil {
+					legacyBucket := tx.Bucket([]byte(u.User))
+					if legacyBucket != nil {
+						v = legacyBucket.Get([]byte(brchannel.ID))
+					}
 				}
-			}
 
-			return nil
-		})
+				if v != nil {
+					val := binary.LittleEndian.Uint64(v)
+					if val <= math.MaxInt64 {
+						savedSince = int64(val)
+						inDB = true
+					}
+				}
+
+				return nil
+			})
+		}
 	}
 
 	bestSince := serverSince
@@ -2274,13 +2278,23 @@ func (u *User) loginTo(protocol string) error {
 	u.Me = true
 	u.User = info.User
 	u.MentionKeys = info.MentionKeys
+	u.lastEventTime.Store(0)
 
-	err = u.lastViewedAtDB.Update(func(tx *bolt.Tx) error {
-		_, err2 := tx.CreateBucketIfNotExists(u.dbBucketName())
-		return err2
-	})
-	if err != nil {
-		return abort(err)
+	db := u.getDB(protocol)
+	if db != nil {
+		err = db.Update(func(tx *bolt.Tx) error {
+			_, err2 := tx.CreateBucketIfNotExists(u.dbBucketName())
+			if err2 != nil {
+				return err2
+			}
+
+			u.migrateGlobalLastEvent(tx)
+
+			return nil
+		})
+		if err != nil {
+			return abort(err)
+		}
 	}
 
 	return nil
@@ -2621,12 +2635,17 @@ func (u *User) saveLastViewedAt(channelID string, ts ...int64) {
 		return
 	}
 
+	db := u.getDB()
+	if db == nil {
+		return
+	}
+
 	newTime := time.Now().UnixMilli()
 	if len(ts) > 0 && ts[0] > 0 {
 		newTime = ts[0]
 	}
 
-	err := u.lastViewedAtDB.Update(func(tx *bolt.Tx) error {
+	err := db.Update(func(tx *bolt.Tx) error {
 		b, err := tx.CreateBucketIfNotExists(u.dbBucketName())
 		if err != nil {
 			return err
@@ -2670,7 +2689,15 @@ func (u *User) saveGlobalLastEventTime(timestamp int64) {
 		return
 	}
 
-	_ = u.lastViewedAtDB.Update(func(tx *bolt.Tx) error {
+	db := u.getDB()
+	if db == nil {
+		return
+	}
+
+	proto := u.currentProtocol()
+	protoKey := []byte("__global_last_event_" + proto + "__")
+
+	_ = db.Update(func(tx *bolt.Tx) error {
 		b, err := tx.CreateBucketIfNotExists(u.dbBucketName())
 		if err != nil {
 			return err
@@ -2682,25 +2709,39 @@ func (u *User) saveGlobalLastEventTime(timestamp int64) {
 		//nolint:gosec // timestamp is strictly positive UnixMilli, safe to convert
 		binary.LittleEndian.PutUint64(buf, uint64(timestamp))
 
-		return b.Put([]byte("__global_last_event__"), buf)
+		return b.Put(protoKey, buf)
 	})
 }
 
 func (u *User) getGlobalLastEventTime() int64 {
 	var timestamp int64
 
-	_ = u.lastViewedAtDB.View(func(tx *bolt.Tx) error {
+	db := u.getDB()
+	if db == nil {
+		return 0
+	}
+
+	proto := u.currentProtocol()
+	protoKey := []byte("__global_last_event_" + proto + "__")
+
+	_ = db.View(func(tx *bolt.Tx) error {
 		var v []byte
 
 		b := tx.Bucket(u.dbBucketName())
 		if b != nil {
-			v = b.Get([]byte("__global_last_event__"))
+			v = b.Get(protoKey)
+			if v == nil && (proto == "mattermost" || proto == serviceMattermost) {
+				v = b.Get([]byte("__global_last_event__"))
+			}
 		}
 
-		if v == nil {
+		if v == nil && (proto == "mattermost" || proto == serviceMattermost) {
 			legacyBucket := tx.Bucket([]byte(u.User))
 			if legacyBucket != nil {
-				v = legacyBucket.Get([]byte("__global_last_event__"))
+				v = legacyBucket.Get(protoKey)
+				if v == nil {
+					v = legacyBucket.Get([]byte("__global_last_event__"))
+				}
 			}
 		}
 
@@ -2978,4 +3019,75 @@ func (u *UserBridge) getMsgChanLocks(targets ...string) ([]<-chan struct{}, chan
 	}
 
 	return prevs, next
+}
+
+func (u *User) currentProtocol() string {
+	if br := u.currentBridge(); br != nil && br.Protocol() != "" {
+		return br.Protocol()
+	}
+
+	return "mattermost"
+}
+
+func (u *User) getDB(protocol ...string) *bolt.DB {
+	if len(u.lastViewedDBs) == 0 {
+		return nil
+	}
+
+	proto := ""
+	if len(protocol) > 0 && protocol[0] != "" {
+		proto = protocol[0]
+	} else if br := u.currentBridge(); br != nil {
+		proto = br.Protocol()
+	}
+
+	if proto != "" {
+		if db, ok := u.lastViewedDBs[proto]; ok && db != nil {
+			return db
+		}
+	}
+
+	if db, ok := u.lastViewedDBs["default"]; ok && db != nil {
+		return db
+	}
+
+	return u.lastViewedDBs["mattermost"]
+}
+
+func (u *User) migrateGlobalLastEvent(tx *bolt.Tx) {
+	proto := u.currentProtocol()
+	if proto != serviceMattermost && proto != "mattermost" {
+		return
+	}
+
+	b := tx.Bucket(u.dbBucketName())
+	if b == nil {
+		return
+	}
+
+	targetKey := []byte("__global_last_event_mattermost__")
+	legacyKey := []byte("__global_last_event__")
+
+	v := b.Get(legacyKey)
+	if v != nil {
+		if b.Get(targetKey) == nil {
+			_ = b.Put(targetKey, v)
+		}
+
+		_ = b.Delete(legacyKey)
+		logger.Infof("Migrated %s in bucket %s to %s", string(legacyKey), string(u.dbBucketName()), string(targetKey))
+	}
+
+	legacyBucket := tx.Bucket([]byte(u.User))
+	if legacyBucket != nil && string(u.dbBucketName()) != u.User {
+		lv := legacyBucket.Get(legacyKey)
+		if lv != nil {
+			if b.Get(targetKey) == nil {
+				_ = b.Put(targetKey, lv)
+			}
+
+			_ = legacyBucket.Delete(legacyKey)
+			logger.Infof("Migrated %s from legacy bucket %s to %s in bucket %s", string(legacyKey), u.User, string(targetKey), string(u.dbBucketName()))
+		}
+	}
 }

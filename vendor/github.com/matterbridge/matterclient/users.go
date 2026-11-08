@@ -609,7 +609,7 @@ func (m *Client) logActivityChange(userID string, oldSec, newSec int64, source s
 		return
 	}
 
-	m.logger.Debugf("lastUserActivity: %s: %d -> %d via %s", userID, oldSec, newSec, source)
+	m.logger.Tracef("lastUserActivity: %s: %d -> %d via %s", userID, oldSec, newSec, source)
 }
 
 // GetUserLastActivity returns the unix timestamp (in seconds) of the user's last activity.
