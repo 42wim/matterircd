@@ -79,7 +79,7 @@ type openAIRequest struct {
 func isOpenAIReasoningModel(model string) bool {
 	m := strings.ToLower(strings.TrimSpace(model))
 
-	return strings.HasPrefix(m, "o1") || strings.HasPrefix(m, "o3") || strings.HasPrefix(m, "o4") || strings.HasPrefix(m, "gpt-5") || strings.HasPrefix(m, "deepseek-reasoner") || strings.HasPrefix(m, "deepseek-r1")
+	return strings.HasPrefix(m, "o1") || strings.HasPrefix(m, "o3") || strings.HasPrefix(m, "o4") || strings.HasPrefix(m, "gpt-5") || strings.HasPrefix(m, "deepseek-reasoner") || strings.HasPrefix(m, "deepseek-r1") || strings.HasPrefix(m, "grok-reasoner")
 }
 
 type thinkingConfig struct {
@@ -110,35 +110,45 @@ type generateResponse struct {
 }
 
 const (
-	AIGeminiProvider    = "gemini"
+	AIAnthropicProvider = "anthropic"
+	AIClaudeProvider    = "claude"
 	AICopilotProvider   = "copilot"
+	AIDeepSeekProvider  = "deepseek"
+	AIGeminiProvider    = "gemini"
 	AIGitHubProvider    = "github"
 	AIOpenAIProvider    = "openai"
-	AIDeepSeekProvider  = "deepseek"
-	AIClaudeProvider    = "claude"
-	AIAnthropicProvider = "anthropic"
+	AIGrokProvider      = "grok"
 	AIHetznerProvider   = "hetzner"
-	AIOllamaProvider    = "ollama"
 	AILocalProvider     = "local"
+	AIMetaProvider      = "meta"
+	AIMuseProvider      = "muse"
+	AIOllamaProvider    = "ollama"
 	AIvLLMProvider      = "vllm"
+	AIXAIProvider       = "xai"
 
-	DefaultGeminiModel   = "gemini-3.8-flash"
-	DefaultCopilotModel  = "gpt-4o"
-	DefaultOpenAIModel   = "gpt-4o"
-	DefaultDeepSeekModel = "deepseek-chat"
 	DefaultClaudeModel   = "claude-sonnet-5"
+	DefaultCopilotModel  = "gpt-4o"
+	DefaultDeepSeekModel = "deepseek-chat"
+	DefaultGeminiModel   = "gemini-3.8-flash"
 	DefaultHetznerModel  = "meta-llama/Meta-Llama-3.1-70B-Instruct"
 	DefaultLocalModel    = "llama3.2"
+	DefaultMuseModel     = "muse"
+	DefaultOpenAIModel   = "gpt-4o"
+	DefaultXAIModel      = "grok-2"
 
-	DefaultOpenAIBaseURL   = "https://api.openai.com/v1"
-	DefaultDeepSeekBaseURL = "https://api.deepseek.com"
 	DefaultClaudeBaseURL   = "https://api.anthropic.com/v1"
+	DefaultDeepSeekBaseURL = "https://api.deepseek.com"
 	DefaultHetznerBaseURL  = "https://inference.hetzner.com/api/v1"
+	DefaultOpenAIBaseURL   = "https://api.openai.com/v1"
+	DefaultMuseBaseURL     = "https://api.muse.meta.com/v1"
+	DefaultXAIBaseURL      = "https://api.x.ai/v1"
 
 	AnthropicAPIVersion = "2023-06-01"
 )
 
 // GetModel resolves the AI model to use based on provider, fallback model, and the models map.
+//
+//nolint:gocyclo
 func GetModel(provider, fallbackModel string, models map[string]string) string {
 	p := strings.ToLower(strings.TrimSpace(provider))
 
@@ -159,18 +169,22 @@ func GetModel(provider, fallbackModel string, models map[string]string) string {
 	}
 
 	switch p {
+	case AIClaudeProvider, AIAnthropicProvider:
+		return DefaultClaudeModel
 	case AICopilotProvider, AIGitHubProvider:
 		return DefaultCopilotModel
 	case AIDeepSeekProvider:
 		return DefaultDeepSeekModel
-	case AIClaudeProvider, AIAnthropicProvider:
-		return DefaultClaudeModel
 	case AIHetznerProvider:
 		return DefaultHetznerModel
+	case AIMuseProvider, AIMetaProvider:
+		return DefaultMuseModel
 	case AIOpenAIProvider:
 		return DefaultOpenAIModel
 	case AIOllamaProvider, AILocalProvider, AIvLLMProvider:
 		return DefaultLocalModel
+	case AIXAIProvider, AIGrokProvider:
+		return DefaultXAIModel
 	default:
 		return DefaultGeminiModel
 	}
