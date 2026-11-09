@@ -128,7 +128,7 @@ type Matrix struct {
 	msgParentCache     *lru.Cache[id.EventID, string]
 	msgLastSentCache   *lru.Cache[string, string]
 	msgRoomCache       *lru.Cache[id.EventID, id.RoomID]
-	msgTextCache       *lru.Cache[id.EventID, string]     // first line of recent messages, shown when they are deleted
+	msgTextCache       *lru.Cache[id.EventID, string] // first line of recent messages, shown when they are deleted
 	msgThreadRootCache *lru.Cache[id.EventID, id.EventID]
 	editEventIDs       *lru.Cache[id.EventID, id.EventID] // replacement event to edited message, whose redaction is not a deleted message
 	latestEditIDs      *lru.Cache[id.EventID, id.EventID] // edited message to the edit its cached text comes from
@@ -824,6 +824,7 @@ func (m *Matrix) MsgUserThread(ctx context.Context, userID, parentID, text strin
 	}
 
 	roomID := m.mc.DirectRoom(uid)
+
 	var rootID id.EventID
 	if parentID != "" {
 		rootID = m.resolveThreadRoot(ctx, roomID, id.EventID(parentID))
@@ -943,6 +944,7 @@ func (m *Matrix) MsgChannelThread(ctx context.Context, channelID, parentID, text
 	logger.Debugf("msgchannelthread: sending message thread '%s' '%s' '%s'", m.roomLabel(id.RoomID(channelID)), parentID, text)
 
 	roomID := id.RoomID(channelID)
+
 	var rootID id.EventID
 	if parentID != "" {
 		rootID = m.resolveThreadRoot(ctx, roomID, id.EventID(parentID))
@@ -1988,6 +1990,7 @@ func (m *Matrix) formatSummary(msg string, maxLen int, uncounted string) string 
 	})
 }
 
+//nolint:funlen,gocognit,gocyclo
 func (m *Matrix) resolveThreadRoot(ctx context.Context, roomID id.RoomID, eventID id.EventID) id.EventID {
 	curr := eventID
 
@@ -2023,6 +2026,7 @@ func (m *Matrix) resolveThreadRoot(ctx context.Context, roomID id.RoomID, eventI
 		relatesTo, ok := resp.Content.Raw["m.relates_to"].(map[string]any)
 		if !ok {
 			m.msgThreadRootCache.Add(curr, curr)
+
 			if curr != eventID {
 				m.msgThreadRootCache.Add(eventID, curr)
 			}
@@ -2050,6 +2054,7 @@ func (m *Matrix) resolveThreadRoot(ctx context.Context, roomID id.RoomID, eventI
 		}
 
 		m.msgThreadRootCache.Add(curr, curr)
+
 		if curr != eventID {
 			m.msgThreadRootCache.Add(eventID, curr)
 		}
