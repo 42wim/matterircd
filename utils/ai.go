@@ -132,14 +132,14 @@ const (
 	DefaultGeminiModel   = "gemini-3.8-flash"
 	DefaultHetznerModel  = "meta-llama/Meta-Llama-3.1-70B-Instruct"
 	DefaultLocalModel    = "llama3.2"
-	DefaultMuseModel     = "muse"
+	DefaultMuseModel     = "muse-spark-1.3"
 	DefaultOpenAIModel   = "gpt-4o"
 	DefaultXAIModel      = "grok-2"
 
 	DefaultClaudeBaseURL   = "https://api.anthropic.com/v1"
 	DefaultDeepSeekBaseURL = "https://api.deepseek.com"
 	DefaultHetznerBaseURL  = "https://inference.hetzner.com/api/v1"
-	DefaultMuseBaseURL     = "https://api.muse.meta.com/v1"
+	DefaultMuseBaseURL     = "https://api.meta.ai/v1"
 	DefaultOpenAIBaseURL   = "https://api.openai.com/v1"
 	DefaultXAIBaseURL      = "https://api.x.ai/v1"
 

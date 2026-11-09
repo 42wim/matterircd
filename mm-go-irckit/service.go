@@ -1477,7 +1477,11 @@ func parseSummarizeAIProvider(arg string) (string, bool) {
 		return utils.AICopilotProvider, true
 	case utils.AIGeminiProvider, "google":
 		return utils.AIGeminiProvider, true
-	case utils.AIOpenAIProvider, utils.AIDeepSeekProvider, utils.AIXAIProvider, utils.AIGrokProvider, utils.AIMuseProvider, utils.AIMetaProvider, utils.AIHetznerProvider, utils.AIOllamaProvider, utils.AILocalProvider, utils.AIvLLMProvider:
+	case utils.AIXAIProvider, utils.AIGrokProvider:
+		return utils.AIXAIProvider, true
+	case utils.AIMuseProvider, utils.AIMetaProvider:
+		return utils.AIMuseProvider, true
+	case utils.AIOpenAIProvider, utils.AIDeepSeekProvider, utils.AIHetznerProvider, utils.AIOllamaProvider, utils.AILocalProvider, utils.AIvLLMProvider:
 		return strings.ToLower(strings.TrimSpace(arg)), true
 	default:
 		return "", false
@@ -1655,7 +1659,7 @@ func summarize(u *User, toUser *User, args []string, service string) {
 			return
 		}
 
-		if token == "" && (strings.Contains(baseURL, "api.deepseek.com") || strings.Contains(baseURL, "api.openai.com") || strings.Contains(baseURL, "api.x.ai") || strings.Contains(baseURL, "inference.hetzner.com") || strings.Contains(baseURL, "muse.meta.com")) {
+		if token == "" && (strings.Contains(baseURL, "api.deepseek.com") || strings.Contains(baseURL, "api.meta.ai") || strings.Contains(baseURL, "api.openai.com") || strings.Contains(baseURL, "api.x.ai") || strings.Contains(baseURL, "inference.hetzner.com")) {
 			u.MsgUser(toUser, fmt.Sprintf("%s AI is not configured (missing token).", provider))
 
 			return

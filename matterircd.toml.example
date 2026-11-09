@@ -94,6 +94,7 @@ token = "ghu_..." # GitHub token for Copilot, or API key for OpenAI / Hetzner
 #deepseek_token = "sk-..."
 #hetzner_token = "..."
 #openai_token = "sk-..."
+#muse_token = "..."
 #xai_token = "xai-..."
 
 service_account_file = "/etc/matterircd/sa.json"
