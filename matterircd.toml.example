@@ -79,7 +79,7 @@ AwayCooldown = "20m"
 # *** WARNING: Information fed through will more than likely be used to train these models. ***
 [ai]
 enabled = true
-provider = "gemini" # default provider when not specified on IRC - "gemini" (default), "copilot", or "openai"
+provider = "gemini" # default provider when not specified on IRC - "gemini" (default), "claude", "copilot", "deepseek", "muse", "openai", or "xai"
 default_post_limit = 30
 max_post_limit = 100
 # Optional additional instructions appended to the summarizer prompt.
@@ -89,11 +89,12 @@ max_post_limit = 100
 # Default token for the configured provider:
 token = "ghu_..." # GitHub token for Copilot, or API key for OpenAI / Hetzner
 # Or specify provider-scoped tokens to safely switch between providers on IRC without leaking keys:
-#copilot_token = "ghu_..."
 #claude_token = "sk-..."
-#openai_token = "sk-..."
+#copilot_token = "ghu_..."
 #deepseek_token = "sk-..."
 #hetzner_token = "..."
+#openai_token = "sk-..."
+#xai_token = "xai-..."
 
 service_account_file = "/etc/matterircd/sa.json"
 project = "myproject-req-10375"
