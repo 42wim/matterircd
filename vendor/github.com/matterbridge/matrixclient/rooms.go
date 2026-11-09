@@ -33,6 +33,60 @@ func (c *Client) CreateRoom(ctx context.Context, name, topic string, public bool
 	return resp.RoomID, nil
 }
 
+// Room returns a snapshot of a single room, or false if unknown, departed or an invitation.
+func (c *Client) Room(roomID id.RoomID) (RoomInfo, bool) {
+	c.RLock()
+	defer c.RUnlock()
+
+	if _, invited := c.invitations[roomID]; invited {
+		return RoomInfo{}, false
+	}
+
+	if _, left := c.leftRooms[roomID]; left {
+		return RoomInfo{}, false
+	}
+
+	ch, ok := c.channels[roomID]
+	if !ok {
+		return RoomInfo{}, false
+	}
+
+	ch.Lock()
+
+	display := c.displayNameLocked(roomID, ch)
+	_, inferred := c.inferredDirectLocked(ch)
+	unresolved, direct, members, last := ch.nameUnresolvedLocked(), ch.IsDirect || inferred, len(ch.Members), ch.LastActivity
+
+	if !direct && c.creatingDirectRoomLocked(ch) {
+		ch.Unlock()
+
+		return RoomInfo{}, false
+	}
+
+	if !direct {
+		ch.reportNameLocked(display)
+	}
+
+	ch.noteListedLocked(direct)
+	ch.Unlock()
+
+	if unresolved {
+		c.logger.Debugf("room %s has no name or alias, listing it as %s", roomID, display)
+		c.healRoomName(c.ctx, roomID, ch)
+	}
+
+	if direct && members <= 1 {
+		return RoomInfo{}, false
+	}
+
+	return RoomInfo{
+		ID:           roomID,
+		Name:         display,
+		IsDirect:     direct,
+		LastActivity: last,
+	}, true
+}
+
 // RoomUsers returns the users of a room. The cached members are used when
 // known, otherwise the joined members are fetched from the homeserver.
 func (c *Client) RoomUsers(ctx context.Context, roomID id.RoomID) ([]id.UserID, error) {
@@ -73,7 +127,8 @@ func (c *Client) UsernamesInRoom(ctx context.Context, roomID id.RoomID) []string
 	for _, userID := range ids {
 		name := c.DisplayName(userID)
 		if name == "" {
-			name = strings.TrimPrefix(strings.SplitN(string(userID), ":", 2)[0], "@")
+			local, _, _ := strings.Cut(string(userID), ":")
+			name = strings.TrimPrefix(local, "@")
 		}
 
 		names = append(names, name)

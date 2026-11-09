@@ -136,6 +136,7 @@ type Matrix struct {
 	reactionCache      *lru.Cache[string, id.EventID]
 	sentReactions      *lru.Cache[string, time.Time]    // reactions added from IRC, whose echo is dropped
 	sentRedactions     *lru.Cache[id.EventID, struct{}] // messages deleted from IRC, whose echo is dropped
+	userResolveCache   *lru.Cache[string, id.UserID]
 
 	pinFetchMu    sync.Mutex
 	pinFetchStart time.Time
@@ -243,10 +244,11 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 	m.latestEditIDs, _ = lru.New[id.EventID, id.EventID](editIDCacheSize)
 	m.pendingSends = make(map[string]int)
 	m.roomProgress = make(map[id.RoomID]*roomProgress)
+	m.reactionCache, _ = lru.New[string, id.EventID](reactionCacheSize)
 	m.sentCache, _ = lru.New[id.EventID, struct{}](sentCacheSize)
 	m.sentReactions, _ = lru.New[string, time.Time](reactionCacheSize)
 	m.sentRedactions, _ = lru.New[id.EventID, struct{}](sentCacheSize)
-	m.reactionCache, _ = lru.New[string, id.EventID](reactionCacheSize)
+	m.userResolveCache, _ = lru.New[string, id.UserID](2048)
 
 	if cred.Token != "" && cred.Server == "" {
 		cancel()
@@ -804,6 +806,7 @@ func (m *Matrix) Logout(ctx context.Context) error {
 		m.unregisterReloadHook()
 	}
 
+	m.userResolveCache.Purge()
 	m.mc.Logout()
 	m.roomUpdateCancel()
 	m.cancel()
@@ -1171,17 +1174,18 @@ func (m *Matrix) resolveRoomName(ctx context.Context, roomID id.RoomID) {
 }
 
 func (m *Matrix) GetChannelUsers(ctx context.Context, channelID string) ([]*bridge.UserInfo, error) {
-	var users []*bridge.UserInfo
-
-	ids, err := m.mc.JoinedMembers(ctx, id.RoomID(channelID))
+	ids, err := m.mc.RoomUsers(ctx, id.RoomID(channelID))
 	if err != nil {
 		return nil, err
 	}
 
 	logger.Debugf("GetChannelUsers %s %d", m.roomLabel(id.RoomID(channelID)), len(ids))
 
+	users := make([]*bridge.UserInfo, 0, len(ids))
+
 	for _, userID := range ids {
-		if u := m.createUser(userID); u != nil {
+		u := m.createUser(userID)
+		if u != nil {
 			users = append(users, u)
 		}
 	}
@@ -1190,14 +1194,15 @@ func (m *Matrix) GetChannelUsers(ctx context.Context, channelID string) ([]*brid
 }
 
 func (m *Matrix) GetUsers() []*bridge.UserInfo {
-	var users []*bridge.UserInfo
-
 	userIDs := m.mc.KnownUsers()
 
 	logger.Debugf("GetUsers %d", len(userIDs))
 
+	users := make([]*bridge.UserInfo, 0, len(userIDs))
+
 	for _, userID := range userIDs {
-		if u := m.createUser(userID); u != nil {
+		u := m.createUser(userID)
+		if u != nil {
 			users = append(users, u)
 		}
 	}
@@ -1239,15 +1244,28 @@ func (m *Matrix) channelInfo(room matrixclient.RoomInfo, name string) *bridge.Ch
 }
 
 func (m *Matrix) GetChannel(ctx context.Context, channelID string) (*bridge.ChannelInfo, error) {
-	rooms, names := m.roomsWithNames()
+	roomID := id.RoomID(channelID)
 
-	for _, room := range rooms {
-		if room.ID.String() == channelID {
-			return m.channelInfo(room, names[room.ID]), nil
-		}
+	room, ok := m.mc.Room(roomID)
+	if !ok {
+		return nil, errors.New("channel not found")
 	}
 
-	return nil, errors.New("channel not found")
+	base := strings.TrimPrefix(room.Name, "#")
+
+	m.roomNamesMu.Lock()
+	rn, ok := m.roomNames[roomID]
+	m.roomNamesMu.Unlock()
+
+	var name string
+	if ok && rn.base == base {
+		name = rn.name
+	} else {
+		_, names := m.roomsWithNames()
+		name = names[roomID]
+	}
+
+	return m.channelInfo(room, name), nil
 }
 
 func (m *Matrix) GetChannelCount() int {
