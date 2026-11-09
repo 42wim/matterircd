@@ -159,7 +159,7 @@ func GetModel(provider, fallbackModel string, models map[string]string) string {
 // NewCopilotClient creates a client targeting the native GitHub Copilot API.
 func NewCopilotClient(token, model string) (*CopilotClient, error) {
 	if token == "" {
-		return nil, fmt.Errorf("github token is required for copilot summarizer")
+		return nil, fmt.Errorf("gitHub token is required for Copilot summarizer")
 	}
 
 	if model == "" {
@@ -273,7 +273,7 @@ func (c *Client) Summarize(ctx context.Context, prompt string, thinking string) 
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("gemini api request failed: %w", err)
+		return "", fmt.Errorf("gemini API request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -309,6 +309,7 @@ func (c *Client) Summarize(ctx context.Context, prompt string, thinking string) 
 	return "", fmt.Errorf("no summary generated")
 }
 
+//nolint:funlen
 func (c *CopilotClient) Summarize(ctx context.Context, prompt string, _ string) (string, error) {
 	sessionToken, err := c.getGitHubSessionToken(ctx)
 	if err != nil {
@@ -346,9 +347,20 @@ func (c *CopilotClient) Summarize(ctx context.Context, prompt string, _ string) 
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("copilot api request failed: %w", err)
+		return "", fmt.Errorf("copilot API request failed: %w", err)
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+
+		errMsg := strings.TrimSpace(string(body))
+		if errMsg != "" {
+			return "", fmt.Errorf("copilot API returned status %s: %s", resp.Status, errMsg)
+		}
+
+		return "", fmt.Errorf("copilot API returned status %s", resp.Status)
+	}
 
 	var chatResp copilotResponse
 
@@ -358,7 +370,9 @@ func (c *CopilotClient) Summarize(ctx context.Context, prompt string, _ string) 
 	}
 
 	if chatResp.Error != nil {
-		return "", fmt.Errorf("copilot error: %s", chatResp.Error.Message)
+		errMsg := strings.Join(strings.Fields(chatResp.Error.Message), " ")
+
+		return "", fmt.Errorf("copilot error: %s", errMsg)
 	}
 
 	if len(chatResp.Choices) > 0 {
@@ -396,7 +410,7 @@ func (c *CopilotClient) getGitHubSessionToken(ctx context.Context) (string, erro
 
 	err = json.NewDecoder(resp.Body).Decode(&tokenResp)
 	if err != nil {
-		return "", fmt.Errorf("failed to decode copilot token: %w", err)
+		return "", fmt.Errorf("failed to decode Copilot token: %w", err)
 	}
 
 	return tokenResp.Token, nil
@@ -471,7 +485,7 @@ func (c *OpenAIClient) Summarize(ctx context.Context, prompt string, _ string) (
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("openai api request failed: %w", err)
+		return "", fmt.Errorf("OpenAI API request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -496,7 +510,7 @@ func (c *OpenAIClient) Summarize(ctx context.Context, prompt string, _ string) (
 
 		errMsg = strings.Join(strings.Fields(errMsg), " ")
 
-		return "", fmt.Errorf("openai api returned status %s: %s", resp.Status, errMsg)
+		return "", fmt.Errorf("OpenAI API returned status %s: %s", resp.Status, errMsg)
 	}
 
 	var chatResp copilotResponse
@@ -509,7 +523,7 @@ func (c *OpenAIClient) Summarize(ctx context.Context, prompt string, _ string) (
 	if chatResp.Error != nil {
 		errMsg := strings.Join(strings.Fields(chatResp.Error.Message), " ")
 
-		return "", fmt.Errorf("openai error: %s", errMsg)
+		return "", fmt.Errorf("OpenAI error: %s", errMsg)
 	}
 
 	if len(chatResp.Choices) > 0 {
