@@ -64,6 +64,6 @@ func (s *splitTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 func newTransport(o *options) http.RoundTripper {
 	return &splitTransport{
 		api:  newBaseTransport(o, 20*time.Second),
-		sync: newBaseTransport(o, 45*time.Second),
+		sync: newBaseTransport(o, 90*time.Second),
 	}
 }

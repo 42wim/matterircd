@@ -481,6 +481,66 @@ func (m *Client) Reconnect(ctx context.Context) {
 	m.logger.Info("reconnect successful")
 }
 
+type timedError struct {
+	err      error
+	duration time.Duration
+}
+
+func (e *timedError) Error() string {
+	return fmt.Sprintf("%s (%s)", e.err.Error(), e.duration.Round(time.Millisecond))
+}
+
+func (e *timedError) Unwrap() error {
+	return e.err
+}
+
+func (e *timedError) Timeout() bool {
+	if netErr, ok := errors.AsType[net.Error](e.err); ok {
+		return netErr.Timeout()
+	}
+
+	return false
+}
+
+func (e *timedError) Temporary() bool {
+	if netErr, ok := errors.AsType[net.Error](e.err); ok {
+		return netErr.Temporary() //nolint:staticcheck
+	}
+
+	return false
+}
+
+type timedTransport struct {
+	base   http.RoundTripper
+	logger *logrus.Entry
+}
+
+func (t *timedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	start := time.Now()
+
+	resp, err := t.base.RoundTrip(req)
+
+	duration := time.Since(start)
+
+	if t.logger != nil {
+		// Only the path is logged, the query string can carry credentials.
+		if err != nil {
+			t.logger.Warnf("%s %s: %s (%s)", req.Method, req.URL.Path, err, duration.Round(time.Millisecond))
+		} else {
+			t.logger.Warnf("%s %s: %d (%s)", req.Method, req.URL.Path, resp.StatusCode, duration.Round(time.Millisecond))
+		}
+	}
+
+	if err != nil {
+		return nil, &timedError{
+			err:      err,
+			duration: duration,
+		}
+	}
+
+	return resp, nil
+}
+
 func (m *Client) initClient(ctx context.Context, b *backoff.Backoff) error {
 	uriScheme := schemeHTTPS
 	if m.NoTLS {
@@ -517,7 +577,10 @@ func (m *Client) initClient(ctx context.Context, b *backoff.Backoff) error {
 		DisableCompression: true,
 	}
 
-	m.Client.HTTPClient.Transport = baseTransport
+	m.Client.HTTPClient.Transport = &timedTransport{
+		base:   baseTransport,
+		logger: m.apiLogger,
+	}
 	m.Client.HTTPClient.Timeout = time.Second * time.Duration(m.Timeout)
 
 	if m.UserAgent != "" {

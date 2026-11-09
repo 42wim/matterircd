@@ -16,6 +16,7 @@ linters:
     - errorlint
     - exhaustive
     - exhaustruct
+    - exhaustruct_v5
     - forbidigo
     - funcorder
     - gochecknoglobals

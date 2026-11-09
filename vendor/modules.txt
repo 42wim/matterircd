@@ -117,11 +117,11 @@ github.com/kenshaw/emoji
 # github.com/matterbridge/logrus-prefixed-formatter v0.5.3-0.20200523233437-d971309a77ba
 ## explicit
 github.com/matterbridge/logrus-prefixed-formatter
-# github.com/matterbridge/matrixclient v0.0.0-20261108193229-eb6cc4c8cbc7
+# github.com/matterbridge/matrixclient v0.0.0-20261109052846-94d83ac5d6e5
 ## explicit; go 1.26.0
 github.com/matterbridge/matrixclient
 github.com/matterbridge/matrixclient/e2ee
-# github.com/matterbridge/matterclient v0.0.0-20261107212528-ef1dfcc10593
+# github.com/matterbridge/matterclient v0.0.0-20261109052235-95ccbaa7508e
 ## explicit; go 1.26.2
 github.com/matterbridge/matterclient
 # github.com/mattermost/go-i18n v1.11.1-0.20211013152124-5c415071e404
