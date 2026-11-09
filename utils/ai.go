@@ -79,7 +79,7 @@ type openAIRequest struct {
 func isOpenAIReasoningModel(model string) bool {
 	m := strings.ToLower(strings.TrimSpace(model))
 
-	return strings.HasPrefix(m, "o1") || strings.HasPrefix(m, "o3") || strings.HasPrefix(m, "o4") || strings.HasPrefix(m, "gpt-5")
+	return strings.HasPrefix(m, "o1") || strings.HasPrefix(m, "o3") || strings.HasPrefix(m, "o4") || strings.HasPrefix(m, "gpt-5") || strings.HasPrefix(m, "deepseek-reasoner") || strings.HasPrefix(m, "deepseek-r1")
 }
 
 type thinkingConfig struct {
@@ -110,23 +110,26 @@ type generateResponse struct {
 }
 
 const (
-	AIGeminiProvider  = "gemini"
-	AICopilotProvider = "copilot"
-	AIGitHubProvider  = "github"
-	AIOpenAIProvider  = "openai"
-	AIHetznerProvider = "hetzner"
-	AIOllamaProvider  = "ollama"
-	AILocalProvider   = "local"
-	AIvLLMProvider    = "vllm"
+	AIGeminiProvider   = "gemini"
+	AICopilotProvider  = "copilot"
+	AIGitHubProvider   = "github"
+	AIOpenAIProvider   = "openai"
+	AIDeepSeekProvider = "deepseek"
+	AIHetznerProvider  = "hetzner"
+	AIOllamaProvider   = "ollama"
+	AILocalProvider    = "local"
+	AIvLLMProvider     = "vllm"
 
-	DefaultGeminiModel  = "gemini-3.8-flash"
-	DefaultCopilotModel = "gpt-4o"
-	DefaultOpenAIModel  = "gpt-4o"
-	DefaultHetznerModel = "meta-llama/Meta-Llama-3.1-70B-Instruct"
-	DefaultLocalModel   = "llama3.2"
+	DefaultGeminiModel   = "gemini-3.8-flash"
+	DefaultCopilotModel  = "gpt-4o"
+	DefaultOpenAIModel   = "gpt-4o"
+	DefaultDeepSeekModel = "deepseek-chat"
+	DefaultHetznerModel  = "meta-llama/Meta-Llama-3.1-70B-Instruct"
+	DefaultLocalModel    = "llama3.2"
 
-	DefaultOpenAIBaseURL  = "https://api.openai.com/v1"
-	DefaultHetznerBaseURL = "https://inference.hetzner.com/api/v1"
+	DefaultOpenAIBaseURL   = "https://api.openai.com/v1"
+	DefaultDeepSeekBaseURL = "https://api.deepseek.com"
+	DefaultHetznerBaseURL  = "https://inference.hetzner.com/api/v1"
 )
 
 // GetModel resolves the AI model to use based on provider, fallback model, and the models map.
@@ -145,6 +148,8 @@ func GetModel(provider, fallbackModel string, models map[string]string) string {
 	switch p {
 	case AICopilotProvider, AIGitHubProvider:
 		return DefaultCopilotModel
+	case AIDeepSeekProvider:
+		return DefaultDeepSeekModel
 	case AIHetznerProvider:
 		return DefaultHetznerModel
 	case AIOpenAIProvider:
