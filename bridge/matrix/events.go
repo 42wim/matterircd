@@ -721,7 +721,21 @@ func (m *Matrix) msgsToEvents(msgs []*matrixclient.Message, eventType string) []
 
 // roomOf resolves the room of an event ID seen earlier.
 func (m *Matrix) roomOf(eventID string) (id.RoomID, bool) {
-	return m.msgRoomCache.Get(id.EventID(eventID))
+	evID := id.EventID(eventID)
+	if roomID, ok := m.msgRoomCache.Get(evID); ok && roomID != "" {
+		return roomID, true
+	}
+
+	for _, r := range m.mc.Rooms() {
+		ev, err := m.mc.Event(m.ctx, r.ID, evID)
+		if err == nil && ev != nil {
+			m.msgRoomCache.Add(evID, r.ID)
+
+			return r.ID, true
+		}
+	}
+
+	return "", false
 }
 
 // resolveUserID maps a Matrix ID, the "~localpart" IRC user of a ghost, a nick

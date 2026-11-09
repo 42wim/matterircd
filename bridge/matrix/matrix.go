@@ -1615,7 +1615,14 @@ func (m *Matrix) GetPostThread(ctx context.Context, postID string) []*bridge.Eve
 		return []*bridge.Event{}
 	}
 
-	msgs, err := m.mc.GetThread(ctx, roomID, id.EventID(postID))
+	evID := id.EventID(postID)
+
+	rootID := m.resolveThreadRoot(ctx, roomID, evID)
+	if rootID != "" {
+		evID = rootID
+	}
+
+	msgs, err := m.mc.GetThread(ctx, roomID, evID)
 	if err != nil {
 		logger.Errorf("matrix: fetching thread %s: %s", postID, err)
 
