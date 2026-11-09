@@ -722,14 +722,15 @@ func (m *Matrix) msgsToEvents(msgs []*matrixclient.Message, eventType string) []
 // roomOf resolves the room of an event ID seen earlier.
 func (m *Matrix) roomOf(eventID string) (id.RoomID, bool) {
 	evID := id.EventID(eventID)
-	if roomID, ok := m.msgRoomCache.Get(evID); ok {
+	if roomID, ok := m.msgRoomCache.Get(evID); ok && roomID != "" {
 		return roomID, true
 	}
 
-	// Fallback: search known rooms
 	for _, r := range m.mc.Rooms() {
-		if ev, err := m.mc.Event(m.ctx, r.ID, evID); err == nil && ev != nil {
+		ev, err := m.mc.Event(m.ctx, r.ID, evID)
+		if err == nil && ev != nil {
 			m.msgRoomCache.Add(evID, r.ID)
+
 			return r.ID, true
 		}
 	}

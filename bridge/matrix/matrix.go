@@ -1616,6 +1616,7 @@ func (m *Matrix) GetPostThread(ctx context.Context, postID string) []*bridge.Eve
 	}
 
 	evID := id.EventID(postID)
+
 	rootID := m.resolveThreadRoot(ctx, roomID, evID)
 	if rootID != "" {
 		evID = rootID
