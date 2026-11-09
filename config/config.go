@@ -28,11 +28,13 @@ type AIConfig struct {
 	Enabled            bool
 	Provider           string            // "gemini" (default), "copilot", or "openai"
 	Token              string            // Default token for configured Provider
-	CopilotToken       string            // GitHub token for Copilot
-	OpenAIToken        string            // API key for OpenAI
-	DeepSeekToken      string            // API key for DeepSeek
 	ClaudeToken        string            // API key for Anthropic Claude
+	CopilotToken       string            // GitHub token for Copilot
+	DeepSeekToken      string            // API key for DeepSeek
 	HetznerToken       string            // API key for Hetzner
+	MuseToken          string            // API key for Meta Muse
+	OpenAIToken        string            // API key for OpenAI
+	XAIToken           string            // API key for xAI (Grok)
 	URL                string            // Fallback base URL for configured Provider
 	URLs               map[string]string // Provider-specific base URLs
 	ServiceAccountFile string            // Gemini / Vertex AI
@@ -290,15 +292,27 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 		claudeToken = c.v.GetString("ai.anthropic_token")
 	}
 
+	museToken := c.v.GetString("ai.muse_token")
+	if museToken == "" {
+		museToken = c.v.GetString("ai.meta_token")
+	}
+
+	xaiToken := c.v.GetString("ai.xai_token")
+	if xaiToken == "" {
+		xaiToken = c.v.GetString("ai.grok_token")
+	}
+
 	aiCfg := AIConfig{
 		Enabled:            c.v.GetBool("ai.enabled"),
 		Provider:           c.v.GetString("ai.provider"),
 		Token:              c.v.GetString("ai.token"),
-		CopilotToken:       c.v.GetString("ai.copilot_token"),
-		OpenAIToken:        c.v.GetString("ai.openai_token"),
-		DeepSeekToken:      c.v.GetString("ai.deepseek_token"),
 		ClaudeToken:        claudeToken,
+		CopilotToken:       c.v.GetString("ai.copilot_token"),
+		DeepSeekToken:      c.v.GetString("ai.deepseek_token"),
 		HetznerToken:       c.v.GetString("ai.hetzner_token"),
+		MuseToken:          museToken,
+		OpenAIToken:        c.v.GetString("ai.openai_token"),
+		XAIToken:           xaiToken,
 		URL:                unquoteString(aiURL),
 		URLs:               c.v.GetStringMapString("ai.urls"),
 		ServiceAccountFile: unquoteString(c.v.GetString("ai.service_account_file")),
@@ -590,7 +604,7 @@ func (c *Config) AI() *AIConfig {
 // GetBaseURL resolves the endpoint base URL for the requested provider, ensuring
 // credentials and requests are not dispatched to unrelated endpoints.
 //
-//nolint:gocyclo
+//nolint:funlen,gocyclo,gocognit
 func (c *AIConfig) GetBaseURL(provider string) string {
 	p := strings.ToLower(strings.TrimSpace(provider))
 
@@ -615,12 +629,6 @@ func (c *AIConfig) GetBaseURL(provider string) string {
 		}
 
 		return utils.DefaultClaudeBaseURL
-	case utils.AIOpenAIProvider:
-		if cfgP == utils.AIOpenAIProvider && c.URL != "" {
-			return strings.TrimRight(c.URL, "/")
-		}
-
-		return utils.DefaultOpenAIBaseURL
 	case utils.AIDeepSeekProvider:
 		if cfgP == utils.AIDeepSeekProvider && c.URL != "" {
 			return strings.TrimRight(c.URL, "/")
@@ -633,12 +641,30 @@ func (c *AIConfig) GetBaseURL(provider string) string {
 		}
 
 		return utils.DefaultHetznerBaseURL
+	case utils.AIMuseProvider, utils.AIMetaProvider:
+		if (cfgP == utils.AIMuseProvider || cfgP == utils.AIMetaProvider) && c.URL != "" {
+			return strings.TrimRight(c.URL, "/")
+		}
+
+		return utils.DefaultMuseBaseURL
+	case utils.AIOpenAIProvider:
+		if cfgP == utils.AIOpenAIProvider && c.URL != "" {
+			return strings.TrimRight(c.URL, "/")
+		}
+
+		return utils.DefaultOpenAIBaseURL
 	case utils.AIOllamaProvider, utils.AILocalProvider, utils.AIvLLMProvider:
 		if (cfgP == p || cfgP == utils.AILocalProvider || cfgP == utils.AIOllamaProvider || cfgP == utils.AIvLLMProvider || cfgP == "" || cfgP == utils.AIGeminiProvider) && c.URL != "" {
 			return strings.TrimRight(c.URL, "/")
 		}
 
 		return ""
+	case utils.AIXAIProvider, utils.AIGrokProvider:
+		if (cfgP == utils.AIXAIProvider || cfgP == utils.AIGrokProvider) && c.URL != "" {
+			return strings.TrimRight(c.URL, "/")
+		}
+
+		return utils.DefaultXAIBaseURL
 	default:
 		return ""
 	}
@@ -647,20 +673,11 @@ func (c *AIConfig) GetBaseURL(provider string) string {
 // GetToken resolves the token for the requested provider, ensuring credentials
 // do not cross provider or endpoint boundaries while preserving the legacy Copilot token fallback.
 //
-//nolint:gocyclo
+//nolint:funlen,gocyclo,gocognit
 func (c *AIConfig) GetToken(provider string) string {
 	p := strings.ToLower(strings.TrimSpace(provider))
 
 	switch p {
-	case utils.AICopilotProvider, utils.AIGitHubProvider:
-		if c.CopilotToken != "" {
-			return c.CopilotToken
-		}
-
-		cfgP := strings.ToLower(c.Provider)
-		if cfgP == "" || cfgP == utils.AIGeminiProvider || cfgP == utils.AICopilotProvider || cfgP == utils.AIGitHubProvider {
-			return c.Token
-		}
 	case utils.AIClaudeProvider, utils.AIAnthropicProvider:
 		if c.ClaudeToken != "" {
 			return c.ClaudeToken
@@ -669,12 +686,13 @@ func (c *AIConfig) GetToken(provider string) string {
 		if strings.EqualFold(c.Provider, utils.AIClaudeProvider) || strings.EqualFold(c.Provider, utils.AIAnthropicProvider) {
 			return c.Token
 		}
-	case utils.AIOpenAIProvider:
-		if c.OpenAIToken != "" {
-			return c.OpenAIToken
+	case utils.AICopilotProvider, utils.AIGitHubProvider:
+		if c.CopilotToken != "" {
+			return c.CopilotToken
 		}
 
-		if strings.EqualFold(c.Provider, utils.AIOpenAIProvider) {
+		cfgP := strings.ToLower(c.Provider)
+		if cfgP == "" || cfgP == utils.AIGeminiProvider || cfgP == utils.AICopilotProvider || cfgP == utils.AIGitHubProvider {
 			return c.Token
 		}
 	case utils.AIDeepSeekProvider:
@@ -693,8 +711,32 @@ func (c *AIConfig) GetToken(provider string) string {
 		if strings.EqualFold(c.Provider, utils.AIHetznerProvider) {
 			return c.Token
 		}
+	case utils.AIMuseProvider, utils.AIMetaProvider:
+		if c.MuseToken != "" {
+			return c.MuseToken
+		}
+
+		if strings.EqualFold(c.Provider, utils.AIMuseProvider) || strings.EqualFold(c.Provider, utils.AIMetaProvider) {
+			return c.Token
+		}
+	case utils.AIOpenAIProvider:
+		if c.OpenAIToken != "" {
+			return c.OpenAIToken
+		}
+
+		if strings.EqualFold(c.Provider, utils.AIOpenAIProvider) {
+			return c.Token
+		}
 	case utils.AIOllamaProvider, utils.AILocalProvider, utils.AIvLLMProvider:
 		if strings.EqualFold(c.Provider, p) {
+			return c.Token
+		}
+	case utils.AIXAIProvider, utils.AIGrokProvider:
+		if c.XAIToken != "" {
+			return c.XAIToken
+		}
+
+		if strings.EqualFold(c.Provider, utils.AIXAIProvider) || strings.EqualFold(c.Provider, utils.AIGrokProvider) {
 			return c.Token
 		}
 	}
