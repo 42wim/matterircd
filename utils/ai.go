@@ -126,7 +126,7 @@ const (
 	DefaultCopilotModel  = "gpt-4o"
 	DefaultOpenAIModel   = "gpt-4o"
 	DefaultDeepSeekModel = "deepseek-chat"
-	DefaultClaudeModel   = "claude-3-7-sonnet-latest"
+	DefaultClaudeModel   = "claude-sonnet-5"
 	DefaultHetznerModel  = "meta-llama/Meta-Llama-3.1-70B-Instruct"
 	DefaultLocalModel    = "llama3.2"
 
@@ -444,11 +444,10 @@ type ClaudeClient struct {
 }
 
 type claudeRequest struct {
-	Model       string           `json:"model"`
-	MaxTokens   int              `json:"max_tokens"`
-	Messages    []copilotMessage `json:"messages"`
-	Thinking    *claudeThinking  `json:"thinking,omitempty"`
-	Temperature *float64         `json:"temperature,omitempty"`
+	Model     string           `json:"model"`
+	MaxTokens int              `json:"max_tokens"`
+	Messages  []copilotMessage `json:"messages"`
+	Thinking  *claudeThinking  `json:"thinking,omitempty"`
 }
 
 type claudeThinking struct {
@@ -521,9 +520,6 @@ func (c *ClaudeClient) Summarize(ctx context.Context, prompt string, thinking st
 		if *budget >= maxTokens {
 			reqBody.MaxTokens = *budget + 2048
 		}
-	} else {
-		temp := 0.2
-		reqBody.Temperature = &temp
 	}
 
 	rawJSON, err := json.Marshal(reqBody)
