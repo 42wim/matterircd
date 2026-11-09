@@ -125,16 +125,17 @@ type Matrix struct {
 	// before it returns and Ready may be called by then.
 	initDone chan struct{}
 
-	msgParentCache   *lru.Cache[id.EventID, string]
-	msgLastSentCache *lru.Cache[string, string]
-	msgRoomCache     *lru.Cache[id.EventID, id.RoomID]
-	msgTextCache     *lru.Cache[id.EventID, string]     // first line of recent messages, shown when they are deleted
-	editEventIDs     *lru.Cache[id.EventID, id.EventID] // replacement event to edited message, whose redaction is not a deleted message
-	latestEditIDs    *lru.Cache[id.EventID, id.EventID] // edited message to the edit its cached text comes from
-	editMu           sync.Mutex                         // keeps text and edit tracking consistent between edits and redactions
-	reactionCache    *lru.Cache[string, id.EventID]
-	sentReactions    *lru.Cache[string, time.Time]    // reactions added from IRC, whose echo is dropped
-	sentRedactions   *lru.Cache[id.EventID, struct{}] // messages deleted from IRC, whose echo is dropped
+	msgParentCache     *lru.Cache[id.EventID, string]
+	msgLastSentCache   *lru.Cache[string, string]
+	msgRoomCache       *lru.Cache[id.EventID, id.RoomID]
+	msgTextCache       *lru.Cache[id.EventID, string] // first line of recent messages, shown when they are deleted
+	msgThreadRootCache *lru.Cache[id.EventID, id.EventID]
+	editEventIDs       *lru.Cache[id.EventID, id.EventID] // replacement event to edited message, whose redaction is not a deleted message
+	latestEditIDs      *lru.Cache[id.EventID, id.EventID] // edited message to the edit its cached text comes from
+	editMu             sync.Mutex                         // keeps text and edit tracking consistent between edits and redactions
+	reactionCache      *lru.Cache[string, id.EventID]
+	sentReactions      *lru.Cache[string, time.Time]    // reactions added from IRC, whose echo is dropped
+	sentRedactions     *lru.Cache[id.EventID, struct{}] // messages deleted from IRC, whose echo is dropped
 
 	pinFetchMu    sync.Mutex
 	pinFetchStart time.Time
@@ -237,6 +238,7 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 	m.msgLastSentCache, _ = lru.New[string, string](10)
 	m.msgRoomCache, _ = lru.New[id.EventID, id.RoomID](msgRoomCacheSize)
 	m.msgTextCache, _ = lru.New[id.EventID, string](msgTextCacheSize)
+	m.msgThreadRootCache, _ = lru.New[id.EventID, id.EventID](msgRoomCacheSize)
 	m.editEventIDs, _ = lru.New[id.EventID, id.EventID](editIDCacheSize)
 	m.latestEditIDs, _ = lru.New[id.EventID, id.EventID](editIDCacheSize)
 	m.pendingSends = make(map[string]int)
@@ -582,6 +584,17 @@ func (m *Matrix) handleMessage(msg *matrixclient.Message, echo bool, peer id.Use
 	// Cached before the echo check, as messages sent from IRC can be deleted or pinned too.
 	m.cacheText(msg.EventID, msg.Text)
 
+	if msg.ParentID != "" {
+		rootID := msg.ParentID
+		if r, ok := m.msgThreadRootCache.Get(msg.ParentID); ok && r != "" {
+			rootID = r
+		}
+
+		m.msgThreadRootCache.Add(msg.EventID, rootID)
+	} else {
+		m.msgThreadRootCache.Add(msg.EventID, msg.EventID)
+	}
+
 	if ghost.Me && echo {
 		return
 	}
@@ -810,21 +823,36 @@ func (m *Matrix) MsgUserThread(ctx context.Context, userID, parentID, text strin
 		return "", errors.New("unknown user " + userID)
 	}
 
+	roomID := m.mc.DirectRoom(uid)
+
+	var rootID id.EventID
+	if parentID != "" {
+		rootID = m.resolveThreadRoot(ctx, roomID, id.EventID(parentID))
+	}
+
 	m.beginSend(text)
 
-	eventID, err := m.mc.SendDirect(ctx, uid, id.EventID(parentID), text)
+	eventID, err := m.mc.SendDirect(ctx, uid, rootID, text)
 	m.endSend(text, eventID, err)
 
 	if err != nil {
 		logger.Error("msguserthread sending message: error ", err)
+
 		return "", err
 	}
 
-	if roomID := m.mc.DirectRoom(uid); roomID != "" {
+	roomID = m.mc.DirectRoom(uid)
+	if roomID != "" {
 		m.msgRoomCache.Add(eventID, roomID)
+
+		if rootID != "" {
+			m.msgThreadRootCache.Add(eventID, rootID)
+		} else {
+			m.msgThreadRootCache.Add(eventID, eventID)
+		}
 	}
 
-	return m.recordSent(ctx, "", eventID, parentID, text), nil
+	return m.recordSent(ctx, "", eventID, rootID.String(), text), nil
 }
 
 // isSentReaction reports, once, whether our own reaction was added from IRC.
@@ -915,18 +943,31 @@ func (m *Matrix) MsgChannel(ctx context.Context, channelID, text string) (string
 func (m *Matrix) MsgChannelThread(ctx context.Context, channelID, parentID, text string) (string, error) {
 	logger.Debugf("msgchannelthread: sending message thread '%s' '%s' '%s'", m.roomLabel(id.RoomID(channelID)), parentID, text)
 
+	roomID := id.RoomID(channelID)
+
+	var rootID id.EventID
+	if parentID != "" {
+		rootID = m.resolveThreadRoot(ctx, roomID, id.EventID(parentID))
+	}
+
 	m.beginSend(text)
 
-	eventID, err := m.mc.Send(ctx, id.RoomID(channelID), id.EventID(parentID), text)
+	eventID, err := m.mc.Send(ctx, roomID, rootID, text)
 	m.endSend(text, eventID, err)
 
 	if err != nil {
 		return "", err
 	}
 
-	m.msgRoomCache.Add(eventID, id.RoomID(channelID))
+	m.msgRoomCache.Add(eventID, roomID)
 
-	return m.recordSent(ctx, channelID, eventID, parentID, text), nil
+	if rootID != "" {
+		m.msgThreadRootCache.Add(eventID, rootID)
+	} else {
+		m.msgThreadRootCache.Add(eventID, eventID)
+	}
+
+	return m.recordSent(ctx, channelID, eventID, rootID.String(), text), nil
 }
 
 func (m *Matrix) ModifyPost(ctx context.Context, msgID, text string) error {
@@ -1947,4 +1988,79 @@ func (m *Matrix) formatSummary(msg string, maxLen int, uncounted string) string 
 		UncountedPrefix: uncounted,
 		Unicode:         unicode,
 	})
+}
+
+//nolint:funlen,gocognit,gocyclo
+func (m *Matrix) resolveThreadRoot(ctx context.Context, roomID id.RoomID, eventID id.EventID) id.EventID {
+	curr := eventID
+
+	for range 5 {
+		if curr == "" {
+			return ""
+		}
+
+		if rootID, ok := m.msgThreadRootCache.Get(curr); ok && rootID != "" {
+			if curr != eventID {
+				m.msgThreadRootCache.Add(eventID, rootID)
+			}
+
+			return rootID
+		}
+
+		targetRoom := roomID
+		if targetRoom == "" {
+			if r, ok := m.roomOf(curr.String()); ok {
+				targetRoom = r
+			}
+		}
+
+		if targetRoom == "" {
+			return curr
+		}
+
+		resp, err := m.mc.Event(ctx, targetRoom, curr)
+		if err != nil || resp == nil {
+			return curr
+		}
+
+		relatesTo, ok := resp.Content.Raw["m.relates_to"].(map[string]any)
+		if !ok {
+			m.msgThreadRootCache.Add(curr, curr)
+
+			if curr != eventID {
+				m.msgThreadRootCache.Add(eventID, curr)
+			}
+
+			return curr
+		}
+
+		if relType, _ := relatesTo["rel_type"].(string); relType == "m.thread" {
+			if threadRoot, _ := relatesTo["event_id"].(string); threadRoot != "" {
+				rootID := id.EventID(threadRoot)
+				m.msgThreadRootCache.Add(curr, rootID)
+				m.msgThreadRootCache.Add(eventID, rootID)
+
+				return rootID
+			}
+		}
+
+		if inReplyTo, ok := relatesTo["m.in_reply_to"].(map[string]any); ok {
+			if replyRoot, _ := inReplyTo["event_id"].(string); replyRoot != "" {
+				m.msgThreadRootCache.Add(curr, id.EventID(replyRoot))
+				curr = id.EventID(replyRoot)
+
+				continue
+			}
+		}
+
+		m.msgThreadRootCache.Add(curr, curr)
+
+		if curr != eventID {
+			m.msgThreadRootCache.Add(eventID, curr)
+		}
+
+		return curr
+	}
+
+	return curr
 }
