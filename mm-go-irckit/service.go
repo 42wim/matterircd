@@ -1475,7 +1475,7 @@ func parseSummarizeAIProvider(arg string) (string, bool) {
 		return utils.AIGeminiProvider, true
 	case utils.AICopilotProvider, utils.AIGitHubProvider:
 		return utils.AICopilotProvider, true
-	case utils.AIOpenAIProvider, utils.AIHetznerProvider, utils.AIOllamaProvider, utils.AILocalProvider, utils.AIvLLMProvider:
+	case utils.AIOpenAIProvider, utils.AIDeepSeekProvider, utils.AIHetznerProvider, utils.AIOllamaProvider, utils.AILocalProvider, utils.AIvLLMProvider:
 		return strings.ToLower(strings.TrimSpace(arg)), true
 	default:
 		return "", false
@@ -1586,7 +1586,7 @@ func summarize(u *User, toUser *User, args []string, service string) {
 	}
 
 	if len(args) == 0 || len(args) > 4 {
-		u.MsgUser(toUser, "Usage: SUMMARIZE <#channel | user | @@thread_id> [post_count | duration] [thinking] [gemini | copilot | openai]")
+		u.MsgUser(toUser, "Usage: SUMMARIZE <#channel | user | @@thread_id> [post_count | duration] [thinking] [gemini | copilot | openai | deepseek]")
 		u.MsgUser(toUser, "e.g. SUMMARIZE #dev 50, SUMMARIZE #dev 24h gemini high, SUMMARIZE @@q3kz9... openai, SUMMARIZE someuser 30m")
 
 		return
@@ -1630,7 +1630,7 @@ func summarize(u *User, toUser *User, args []string, service string) {
 
 			return
 		}
-	case utils.AIOpenAIProvider, utils.AIHetznerProvider, utils.AIOllamaProvider, utils.AILocalProvider, utils.AIvLLMProvider:
+	case utils.AIOpenAIProvider, utils.AIDeepSeekProvider, utils.AIHetznerProvider, utils.AIOllamaProvider, utils.AILocalProvider, utils.AIvLLMProvider:
 		baseURL := cfg.GetBaseURL(provider)
 		if baseURL == "" {
 			u.MsgUser(toUser, fmt.Sprintf("%s AI is not configured (missing url).", provider))
@@ -1638,7 +1638,7 @@ func summarize(u *User, toUser *User, args []string, service string) {
 			return
 		}
 
-		if token == "" && (strings.Contains(baseURL, "api.openai.com") || strings.Contains(baseURL, "inference.hetzner.com")) {
+		if token == "" && (strings.Contains(baseURL, "api.openai.com") || strings.Contains(baseURL, "inference.hetzner.com") || strings.Contains(baseURL, "api.deepseek.com")) {
 			u.MsgUser(toUser, fmt.Sprintf("%s AI is not configured (missing token).", provider))
 
 			return
@@ -1725,7 +1725,7 @@ func summarize(u *User, toUser *User, args []string, service string) {
 	switch strings.ToLower(provider) {
 	case utils.AICopilotProvider, utils.AIGitHubProvider:
 		logger.Debugf("AI summarization for %s (provider: %s, model: %s, thinking: %s)", contextLabel, provider, model, thinking)
-	case utils.AIOpenAIProvider, utils.AIHetznerProvider, utils.AIOllamaProvider, utils.AILocalProvider, utils.AIvLLMProvider:
+	case utils.AIOpenAIProvider, utils.AIDeepSeekProvider, utils.AIHetznerProvider, utils.AIOllamaProvider, utils.AILocalProvider, utils.AIvLLMProvider:
 		baseURL := cfg.GetBaseURL(provider)
 
 		logger.Debugf("AI summarization for %s (provider: %s, model: %s, thinking: %s, url: %s)", contextLabel, provider, model, thinking, baseURL)

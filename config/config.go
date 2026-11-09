@@ -30,6 +30,7 @@ type AIConfig struct {
 	Token              string            // Default token for configured Provider
 	CopilotToken       string            // GitHub token for Copilot
 	OpenAIToken        string            // API key for OpenAI
+	DeepSeekToken      string            // API key for DeepSeek
 	HetznerToken       string            // API key for Hetzner
 	URL                string            // Fallback base URL for configured Provider
 	URLs               map[string]string // Provider-specific base URLs
@@ -289,6 +290,7 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 		Token:              c.v.GetString("ai.token"),
 		CopilotToken:       c.v.GetString("ai.copilot_token"),
 		OpenAIToken:        c.v.GetString("ai.openai_token"),
+		DeepSeekToken:      c.v.GetString("ai.deepseek_token"),
 		HetznerToken:       c.v.GetString("ai.hetzner_token"),
 		URL:                unquoteString(aiURL),
 		URLs:               c.v.GetStringMapString("ai.urls"),
@@ -600,6 +602,12 @@ func (c *AIConfig) GetBaseURL(provider string) string {
 		}
 
 		return utils.DefaultOpenAIBaseURL
+	case utils.AIDeepSeekProvider:
+		if cfgP == utils.AIDeepSeekProvider && c.URL != "" {
+			return strings.TrimRight(c.URL, "/")
+		}
+
+		return utils.DefaultDeepSeekBaseURL
 	case utils.AIHetznerProvider:
 		if cfgP == utils.AIHetznerProvider && c.URL != "" {
 			return strings.TrimRight(c.URL, "/")
@@ -619,6 +627,8 @@ func (c *AIConfig) GetBaseURL(provider string) string {
 
 // GetToken resolves the token for the requested provider, ensuring credentials
 // do not cross provider or endpoint boundaries while preserving the legacy Copilot token fallback.
+//
+//nolint:gocyclo
 func (c *AIConfig) GetToken(provider string) string {
 	p := strings.ToLower(strings.TrimSpace(provider))
 
@@ -638,6 +648,14 @@ func (c *AIConfig) GetToken(provider string) string {
 		}
 
 		if strings.EqualFold(c.Provider, utils.AIOpenAIProvider) {
+			return c.Token
+		}
+	case utils.AIDeepSeekProvider:
+		if c.DeepSeekToken != "" {
+			return c.DeepSeekToken
+		}
+
+		if strings.EqualFold(c.Provider, utils.AIDeepSeekProvider) {
 			return c.Token
 		}
 	case utils.AIHetznerProvider:
