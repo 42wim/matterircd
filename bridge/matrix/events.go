@@ -745,6 +745,11 @@ func (m *Matrix) resolveUserID(name string) (id.UserID, bool) {
 		return id.UserID(name), true
 	}
 
+	lookupKey := strings.ToLower(name)
+	if cachedID, ok := m.userResolveCache.Get(lookupKey); ok {
+		return cachedID, true
+	}
+
 	isIdent := strings.HasPrefix(name, "~")
 
 	for _, userID := range m.mc.KnownUsers() {
@@ -754,10 +759,14 @@ func (m *Matrix) resolveUserID(name string) (id.UserID, bool) {
 		}
 
 		if isIdent && strings.EqualFold(u.User, name) {
+			m.userResolveCache.Add(lookupKey, userID)
+
 			return userID, true
 		}
 
 		if !isIdent && (strings.EqualFold(u.Nick, name) || strings.EqualFold(u.Real, name)) {
+			m.userResolveCache.Add(lookupKey, userID)
+
 			return userID, true
 		}
 	}
