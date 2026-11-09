@@ -824,7 +824,7 @@ func (m *Matrix) MsgUserThread(ctx context.Context, userID, parentID, text strin
 		m.msgRoomCache.Add(eventID, roomID)
 	}
 
-	return m.recordSent(ctx, "", eventID, text), nil
+	return m.recordSent(ctx, "", eventID, parentID, text), nil
 }
 
 // isSentReaction reports, once, whether our own reaction was added from IRC.
@@ -875,14 +875,35 @@ func (m *Matrix) isSentEcho(eventID id.EventID, text string) bool {
 	return m.pendingSends[text] > 0
 }
 
-func (m *Matrix) recordSent(ctx context.Context, channelID string, eventID id.EventID, text string) string {
+func (m *Matrix) recordSent(ctx context.Context, channelID string, eventID id.EventID, parentID, text string) string {
 	name := channelID
 	if channelID != "" {
 		name = m.GetChannelName(ctx, channelID)
 	}
 
 	summary := m.formatSummary(text, lastSentSummaryLen, "@")
-	m.msgLastSentCache.Add(eventID.String(), name+": "+summary)
+
+	if parentID == "" {
+		m.msgLastSentCache.Add(eventID.String(), name+": "+summary)
+
+		return eventID.String()
+	}
+
+	roomID := id.RoomID(channelID)
+	if roomID == "" {
+		roomID, _ = m.roomOf(parentID)
+	}
+
+	if !m.cfg.Matrix().HideReplies && roomID != "" {
+		parentMsg, err := m.addParentMsg(ctx, roomID, id.EventID(parentID), summary, m.cfg.Matrix().ShortenRepliesTo, "@")
+		if err != nil {
+			logger.Errorf("recordSent: unable to get parent post for %s: %s", parentID, err)
+		} else {
+			summary = parentMsg
+		}
+	}
+
+	m.msgLastSentCache.Add(parentID, name+": "+summary)
 
 	return eventID.String()
 }
@@ -905,7 +926,7 @@ func (m *Matrix) MsgChannelThread(ctx context.Context, channelID, parentID, text
 
 	m.msgRoomCache.Add(eventID, id.RoomID(channelID))
 
-	return m.recordSent(ctx, channelID, eventID, text), nil
+	return m.recordSent(ctx, channelID, eventID, parentID, text), nil
 }
 
 func (m *Matrix) ModifyPost(ctx context.Context, msgID, text string) error {
