@@ -31,6 +31,7 @@ type AIConfig struct {
 	CopilotToken       string            // GitHub token for Copilot
 	OpenAIToken        string            // API key for OpenAI
 	DeepSeekToken      string            // API key for DeepSeek
+	ClaudeToken        string            // API key for Anthropic Claude
 	HetznerToken       string            // API key for Hetzner
 	URL                string            // Fallback base URL for configured Provider
 	URLs               map[string]string // Provider-specific base URLs
@@ -284,6 +285,11 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 		aiURL = c.v.GetString("ai.base_url")
 	}
 
+	claudeToken := c.v.GetString("ai.claude_token")
+	if claudeToken == "" {
+		claudeToken = c.v.GetString("ai.anthropic_token")
+	}
+
 	aiCfg := AIConfig{
 		Enabled:            c.v.GetBool("ai.enabled"),
 		Provider:           c.v.GetString("ai.provider"),
@@ -291,6 +297,7 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 		CopilotToken:       c.v.GetString("ai.copilot_token"),
 		OpenAIToken:        c.v.GetString("ai.openai_token"),
 		DeepSeekToken:      c.v.GetString("ai.deepseek_token"),
+		ClaudeToken:        claudeToken,
 		HetznerToken:       c.v.GetString("ai.hetzner_token"),
 		URL:                unquoteString(aiURL),
 		URLs:               c.v.GetStringMapString("ai.urls"),
@@ -591,11 +598,23 @@ func (c *AIConfig) GetBaseURL(provider string) string {
 		if u, ok := c.URLs[p]; ok && u != "" {
 			return strings.TrimRight(u, "/")
 		}
+
+		if p == utils.AIClaudeProvider && c.URLs[utils.AIAnthropicProvider] != "" {
+			return strings.TrimRight(c.URLs[utils.AIAnthropicProvider], "/")
+		} else if p == utils.AIAnthropicProvider && c.URLs[utils.AIClaudeProvider] != "" {
+			return strings.TrimRight(c.URLs[utils.AIClaudeProvider], "/")
+		}
 	}
 
 	cfgP := strings.ToLower(strings.TrimSpace(c.Provider))
 
 	switch p {
+	case utils.AIClaudeProvider, utils.AIAnthropicProvider:
+		if (cfgP == utils.AIClaudeProvider || cfgP == utils.AIAnthropicProvider) && c.URL != "" {
+			return strings.TrimRight(c.URL, "/")
+		}
+
+		return utils.DefaultClaudeBaseURL
 	case utils.AIOpenAIProvider:
 		if cfgP == utils.AIOpenAIProvider && c.URL != "" {
 			return strings.TrimRight(c.URL, "/")
@@ -640,6 +659,14 @@ func (c *AIConfig) GetToken(provider string) string {
 
 		cfgP := strings.ToLower(c.Provider)
 		if cfgP == "" || cfgP == utils.AIGeminiProvider || cfgP == utils.AICopilotProvider || cfgP == utils.AIGitHubProvider {
+			return c.Token
+		}
+	case utils.AIClaudeProvider, utils.AIAnthropicProvider:
+		if c.ClaudeToken != "" {
+			return c.ClaudeToken
+		}
+
+		if strings.EqualFold(c.Provider, utils.AIClaudeProvider) || strings.EqualFold(c.Provider, utils.AIAnthropicProvider) {
 			return c.Token
 		}
 	case utils.AIOpenAIProvider:

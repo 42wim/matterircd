@@ -1475,6 +1475,8 @@ func parseSummarizeAIProvider(arg string) (string, bool) {
 		return utils.AIGeminiProvider, true
 	case utils.AICopilotProvider, utils.AIGitHubProvider:
 		return utils.AICopilotProvider, true
+	case utils.AIClaudeProvider, utils.AIAnthropicProvider:
+		return utils.AIClaudeProvider, true
 	case utils.AIOpenAIProvider, utils.AIDeepSeekProvider, utils.AIHetznerProvider, utils.AIOllamaProvider, utils.AILocalProvider, utils.AIvLLMProvider:
 		return strings.ToLower(strings.TrimSpace(arg)), true
 	default:
@@ -1558,7 +1560,7 @@ func parseSummarizeLimit(extraArgs []string, defaultLimit, maxLimit int) (summar
 		// Fall back to parsing as an integer count (e.g. 50)
 		val, err := strconv.Atoi(arg)
 		if err != nil || val <= 0 {
-			return summarizeQuery{}, errors.New("invalid option: expected post count (e.g. 50), duration (e.g. 24h), thinking mode (off, low, medium, high), or provider (gemini, copilot, openai)")
+			return summarizeQuery{}, errors.New("invalid option: expected post count (e.g. 50), duration (e.g. 24h), thinking mode (off, low, medium, high), or provider (gemini, copilot, claude, openai, deepseek)")
 		}
 
 		if hasLimit {
@@ -1586,7 +1588,7 @@ func summarize(u *User, toUser *User, args []string, service string) {
 	}
 
 	if len(args) == 0 || len(args) > 4 {
-		u.MsgUser(toUser, "Usage: SUMMARIZE <#channel | user | @@thread_id> [post_count | duration] [thinking] [gemini | copilot | openai | deepseek]")
+		u.MsgUser(toUser, "Usage: SUMMARIZE <#channel | user | @@thread_id> [post_count | duration] [thinking] [gemini | copilot | claude | openai | deepseek]")
 		u.MsgUser(toUser, "e.g. SUMMARIZE #dev 50, SUMMARIZE #dev 24h gemini high, SUMMARIZE @@q3kz9... openai, SUMMARIZE someuser 30m")
 
 		return
@@ -1627,6 +1629,21 @@ func summarize(u *User, toUser *User, args []string, service string) {
 		aiClient, err = utils.NewCopilotClient(token, model)
 		if err != nil {
 			u.MsgUser(toUser, fmt.Sprintf("Failed to initialize Copilot AI: %v", err))
+
+			return
+		}
+	case utils.AIClaudeProvider, utils.AIAnthropicProvider:
+		if token == "" {
+			u.MsgUser(toUser, "Claude AI is not configured (missing token).")
+
+			return
+		}
+
+		baseURL := cfg.GetBaseURL(provider)
+
+		aiClient, err = utils.NewClaudeClient(token, baseURL, model)
+		if err != nil {
+			u.MsgUser(toUser, fmt.Sprintf("Failed to initialize Claude client: %v", err))
 
 			return
 		}
@@ -1725,6 +1742,10 @@ func summarize(u *User, toUser *User, args []string, service string) {
 	switch strings.ToLower(provider) {
 	case utils.AICopilotProvider, utils.AIGitHubProvider:
 		logger.Debugf("AI summarization for %s (provider: %s, model: %s, thinking: %s)", contextLabel, provider, model, thinking)
+	case utils.AIClaudeProvider, utils.AIAnthropicProvider:
+		baseURL := cfg.GetBaseURL(provider)
+
+		logger.Debugf("AI summarization for %s (provider: %s, model: %s, thinking: %s, url: %s)", contextLabel, provider, model, thinking, baseURL)
 	case utils.AIOpenAIProvider, utils.AIDeepSeekProvider, utils.AIHetznerProvider, utils.AIOllamaProvider, utils.AILocalProvider, utils.AIvLLMProvider:
 		baseURL := cfg.GetBaseURL(provider)
 

@@ -90,6 +90,7 @@ max_post_limit = 100
 token = "ghu_..." # GitHub token for Copilot, or API key for OpenAI / Hetzner
 # Or specify provider-scoped tokens to safely switch between providers on IRC without leaking keys:
 #copilot_token = "ghu_..."
+#claude_token = "sk-..."
 #openai_token = "sk-..."
 #deepseek_token = "sk-..."
 #hetzner_token = "..."
