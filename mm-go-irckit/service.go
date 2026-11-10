@@ -53,23 +53,23 @@ const matrixReadyTimeout = 2 * time.Minute
 //nolint:funlen,gocyclo
 func loginMatrix(u *User, toUser *User, args []string) {
 	wMsg := "Matrix support is very much experimental and a work in progress. Use at your own risk."
-	u.MsgUser(toUser, "WARNING: "+wMsg)
+	u.respondService(toUser, "WARNING: "+wMsg)
 	logger.Warn(wMsg)
 
 	if len(args) != 2 && len(args) != 3 {
-		u.MsgUser(toUser, "need LOGIN <server> <login> <pass> or LOGIN <server> <token>")
+		u.respondService(toUser, "need LOGIN <server> <login> <pass> or LOGIN <server> <token>")
 		return
 	}
 
 	// Atomically claim the login so concurrent logins cannot both proceed.
 	if !u.inprogress.CompareAndSwap(false, true) {
-		u.MsgUser(toUser, "login or logout in progress. Please wait")
+		u.respondService(toUser, "login or logout in progress. Please wait")
 		return
 	}
 	defer u.inprogress.Store(false)
 
 	if br := u.currentBridge(); br != nil && br.Connected() {
-		u.MsgUser(toUser, "already logged in to matrix. Please log out first")
+		u.respondService(toUser, "already logged in to matrix. Please log out first")
 		return
 	}
 
@@ -85,14 +85,14 @@ func loginMatrix(u *User, toUser *User, args []string) {
 
 	err := u.loginTo(serviceMatrix)
 	if err != nil {
-		u.MsgUser(toUser, err.Error())
+		u.respondService(toUser, err.Error())
 		return
 	}
 
-	u.MsgUser(toUser, "login OK")
+	u.respondService(toUser, "login OK")
 
 	if e, ok := u.currentBridge().(interface{ EncryptionEnabled() bool }); ok && e.EncryptionEnabled() { //nolint:nestif
-		u.MsgUser(toUser, "end-to-end encryption (e2ee) is enabled")
+		u.respondService(toUser, "end-to-end encryption (e2ee) is enabled")
 
 		state := "this session is unverified"
 
@@ -125,14 +125,14 @@ func loginMatrix(u *User, toUser *User, args []string) {
 			case verified:
 				state = ""
 
-				u.MsgUser(toUser, "this session is verified")
+				u.respondService(toUser, "this session is verified")
 			}
 		}
 
 		if d, ok := u.currentBridge().(interface{ DeviceInfo() (string, string) }); ok && state != "" {
 			deviceID, fingerprint := d.DeviceInfo()
-			u.MsgUser(toUser, state+", to verify it compare in your other client: device ID "+deviceID+", session key "+fingerprint)
-			u.MsgUser(toUser, "or use VERIFY START to verify interactively")
+			u.respondService(toUser, state+", to verify it compare in your other client: device ID "+deviceID+", session key "+fingerprint)
+			u.respondService(toUser, "or use VERIFY START to verify interactively")
 		}
 	}
 }
@@ -155,7 +155,7 @@ func login(u *User, toUser *User, args []string, service string) {
 		defer u.inprogress.Store(false)
 
 		if u.br != nil && u.br.Connected() {
-			u.MsgUser(toUser, "already logged in to mastodon. Please log out first")
+			u.respondService(toUser, "already logged in to mastodon. Please log out first")
 
 			return
 		}
@@ -164,11 +164,11 @@ func login(u *User, toUser *User, args []string, service string) {
 
 		err := u.loginTo("mastodon")
 		if err != nil {
-			u.MsgUser(toUser, err.Error())
+			u.respondService(toUser, err.Error())
 			return
 		}
 
-		u.MsgUser(toUser, "login OK")
+		u.respondService(toUser, "login OK")
 
 		return
 	}
@@ -177,7 +177,7 @@ func login(u *User, toUser *User, args []string, service string) {
 		var err error
 
 		if len(args) != 1 && len(args) != 3 {
-			u.MsgUser(toUser, "need LOGIN <team> <login> <pass> or LOGIN <token>")
+			u.respondService(toUser, "need LOGIN <team> <login> <pass> or LOGIN <token>")
 			return
 		}
 
@@ -186,7 +186,7 @@ func login(u *User, toUser *User, args []string, service string) {
 		}
 
 		if u.Credentials.Token == helpArg {
-			u.MsgUser(toUser, "need LOGIN <team> <login> <pass> or LOGIN <token>")
+			u.respondService(toUser, "need LOGIN <team> <login> <pass> or LOGIN <token>")
 			return
 		}
 
@@ -208,7 +208,7 @@ func login(u *User, toUser *User, args []string, service string) {
 		}
 
 		if u.br != nil && u.br.Connected() {
-			u.MsgUser(toUser, "already logged in to slack. Please log out first")
+			u.respondService(toUser, "already logged in to slack. Please log out first")
 
 			return
 		}
@@ -218,14 +218,14 @@ func login(u *User, toUser *User, args []string, service string) {
 
 		err = u.loginTo("slack")
 		if err != nil {
-			u.MsgUser(toUser, err.Error())
+			u.respondService(toUser, err.Error())
 			return
 		}
 
-		u.MsgUser(toUser, "login OK")
+		u.respondService(toUser, "login OK")
 
 		if u.Credentials.Token != "" {
-			u.MsgUser(toUser, "token used: "+u.Credentials.Token)
+			u.respondService(toUser, "token used: "+u.Credentials.Token)
 		}
 
 		return
@@ -280,41 +280,41 @@ func login(u *User, toUser *User, args []string, service string) {
 	switch {
 	// Both server and team missing
 	case cred.Team == "" && cred.Server == "":
-		u.MsgUser(toUser, "need LOGIN <server> <team> <login> <pass>")
-		u.MsgUser(toUser, "when using a personal token replace <pass> with token=<yourtoken>")
-		u.MsgUser(toUser, "when using a mfa token use LOGIN <server> <team> <login> <pass> MFAToken=<yourmfatoken>")
+		u.respondService(toUser, "need LOGIN <server> <team> <login> <pass>")
+		u.respondService(toUser, "when using a personal token replace <pass> with token=<yourtoken>")
+		u.respondService(toUser, "when using a mfa token use LOGIN <server> <team> <login> <pass> MFAToken=<yourmfatoken>")
 
 		return
 	// server missing
 	case cred.Server == "":
-		u.MsgUser(toUser, "need LOGIN <server> <login> <pass>")
-		u.MsgUser(toUser, "when using a personal token replace <pass> with token=<yourtoken>")
-		u.MsgUser(toUser, "when using a mfa token use LOGIN <server> <login> <pass> MFAToken=<yourmfatoken>")
+		u.respondService(toUser, "need LOGIN <server> <login> <pass>")
+		u.respondService(toUser, "when using a personal token replace <pass> with token=<yourtoken>")
+		u.respondService(toUser, "when using a mfa token use LOGIN <server> <login> <pass> MFAToken=<yourmfatoken>")
 
 		return
 	// team missing
 	case cred.Team == "":
-		u.MsgUser(toUser, "need LOGIN <team> <login> <pass>")
-		u.MsgUser(toUser, "when using a personal token replace <pass> with token=<yourtoken>")
-		u.MsgUser(toUser, "when using a mfa token use LOGIN <team> <login> <pass> MFAToken=<yourmfatoken>")
+		u.respondService(toUser, "need LOGIN <team> <login> <pass>")
+		u.respondService(toUser, "when using a personal token replace <pass> with token=<yourtoken>")
+		u.respondService(toUser, "when using a mfa token use LOGIN <team> <login> <pass> MFAToken=<yourmfatoken>")
 
 		return
 	// login/username or password/token missing
 	case cred.Login == "" || cred.Pass == "":
-		u.MsgUser(toUser, "need LOGIN <login> <pass>")
-		u.MsgUser(toUser, "when using a personal token replace <pass> with token=<yourtoken>")
-		u.MsgUser(toUser, "when using a mfa token use LOGIN <login> <pass> MFAToken=<yourmfatoken>")
+		u.respondService(toUser, "need LOGIN <login> <pass>")
+		u.respondService(toUser, "when using a personal token replace <pass> with token=<yourtoken>")
+		u.respondService(toUser, "when using a mfa token use LOGIN <login> <pass> MFAToken=<yourmfatoken>")
 
 		return
 	}
 
 	if !u.isValidServer(cred.Server, service) {
-		u.MsgUser(toUser, "not allowed to connect to "+cred.Server)
+		u.respondService(toUser, "not allowed to connect to "+cred.Server)
 		return
 	}
 
 	if u.br != nil && u.br.Connected() {
-		u.MsgUser(toUser, "already logged in to mattermost. Please log out first")
+		u.respondService(toUser, "already logged in to mattermost. Please log out first")
 
 		return
 	}
@@ -326,11 +326,11 @@ func login(u *User, toUser *User, args []string, service string) {
 
 	err := u.loginTo("mattermost")
 	if err != nil {
-		u.MsgUser(toUser, err.Error())
+		u.respondService(toUser, err.Error())
 		return
 	}
 
-	u.MsgUser(toUser, "login OK")
+	u.respondService(toUser, "login OK")
 }
 
 //nolint:funlen
@@ -1580,6 +1580,16 @@ func parseSummarizeLimit(extraArgs []string, defaultLimit, maxLimit int) (summar
 	}
 
 	return query, nil
+}
+
+func (u *User) respondService(toUser *User, text string) {
+	if toUser == nil {
+		u.sendServerNotice(text)
+
+		return
+	}
+
+	u.MsgUser(toUser, text)
 }
 
 //nolint:funlen,gocognit,gocyclo

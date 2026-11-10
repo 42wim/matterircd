@@ -789,17 +789,7 @@ outerloop:
 					}
 				}
 
-				login(u, &User{
-					UserInfo: &bridge.UserInfo{
-						Nick: service,
-						User: service,
-						Real: service,
-						Host: serviceName,
-					},
-					channels: map[Channel]struct{}{},
-				},
-					u.Pass,
-					service)
+				login(u, nil, u.Pass, service)
 			}
 
 			return nil

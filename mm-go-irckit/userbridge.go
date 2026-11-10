@@ -37,13 +37,14 @@ const systemUser = "system"
 const maxInviteTextLen = 400
 
 type UserBridge struct {
-	Srv         Server
-	Credentials bridge.Credentials
-	br          bridge.Bridger
-	inprogress  atomic.Bool
-	eventChan   chan *bridge.Event
-	away        atomic.Bool
-	quitting    atomic.Bool
+	Srv          Server
+	Credentials  bridge.Credentials
+	br           bridge.Bridger
+	inprogress   atomic.Bool
+	eventChan    chan *bridge.Event
+	away         atomic.Bool
+	quitting     atomic.Bool
+	disconnected atomic.Bool
 
 	eventLoopMutex   sync.Mutex
 	eventLoopStarted bool
@@ -1154,12 +1155,12 @@ func (u *User) addUsersToChannels() {
 		ellipsis = "…"
 	}
 
+	u.handleBridgeReconnect()
+
 	// Announce if this is initial login OR a long-offline reconnect
 	if isHeavySync {
-		if svc, ok := u.Srv.HasUser(u.br.Protocol()); ok {
-			logger.Info("starting channel synchronization and history replays")
-			u.MsgUser(svc, fmt.Sprintf("starting channel synchronization and history replays%s (this could be a while)%s", ellipsis, ellipsis))
-		}
+		logger.Info("starting channel synchronization and history replays")
+		u.sendServerNotice(fmt.Sprintf("starting channel synchronization and history replays%s (this could be a while)%s", ellipsis, ellipsis))
 	}
 
 	globalSince := u.getGlobalLastEventTime()
@@ -1317,9 +1318,7 @@ func (u *User) addUsersToChannels() {
 
 			// We could have logged out in the meantime.
 			if br := u.currentBridge(); br != nil {
-				if svc, ok := u.Srv.HasUser(br.Protocol()); ok {
-					u.MsgUser(svc, fmt.Sprintf("channel synchronization completed and history replayed (took %s).", duration))
-				}
+				u.sendServerNotice(fmt.Sprintf("channel synchronization completed and history replayed (took %s).", duration))
 			}
 		}
 	}()
@@ -1725,10 +1724,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			// Do NOT replay history invisibly, and do NOT update the BoltDB.
 			if !success {
 				logger.Errorf("Giving up on syncing %s. Skipping replay to PRESERVE history for next startup.", channelName)
-
-				if svc, ok := u.Srv.HasUser(u.br.Protocol()); ok {
-					u.MsgUser(svc, fmt.Sprintf("replay failed for %s, use REPLAY service", channelName))
-				}
+				u.sendServerNotice(fmt.Sprintf("replay failed for %s, use REPLAY service", channelName))
 
 				continue
 			}
@@ -2226,7 +2222,15 @@ func (u *User) loginTo(protocol string) error {
 	case "slack":
 		br, err = slack.New(u.cfg, u.Credentials, eventChan, u.addUsersToChannels)
 	case "mattermost":
-		br, _, err = mattermost.New(u.ctx, u.cfg, u.Credentials, eventChan, u.addUsersToChannels)
+		br, _, err = mattermost.New(u.ctx, u.cfg, u.Credentials, eventChan, u.addUsersToChannels, func(err error) {
+			if err != nil {
+				u.handleBridgeDisconnect(err.Error())
+
+				return
+			}
+
+			u.handleBridgeDisconnect("")
+		})
 	}
 
 	if err != nil {
@@ -3054,6 +3058,33 @@ func (u *User) getDB(protocol ...string) *bolt.DB {
 	return u.lastViewedDBs["mattermost"]
 }
 
+func (u *User) handleBridgeDisconnect(reason string) {
+	if !u.disconnected.CompareAndSwap(false, true) {
+		return
+	}
+
+	proto := u.currentProtocol()
+	protoName := strings.ToUpper(proto[:1]) + proto[1:]
+
+	detail := ""
+	if reason != "" {
+		detail = " (" + sanitizeIRCTrailing(reason) + ")"
+	}
+
+	u.sendServerNotice(fmt.Sprintf("Disconnected from %s%s, reconnecting...", protoName, detail))
+}
+
+func (u *User) handleBridgeReconnect() {
+	if !u.disconnected.CompareAndSwap(true, false) {
+		return
+	}
+
+	proto := u.currentProtocol()
+	protoName := strings.ToUpper(proto[:1]) + proto[1:]
+
+	u.sendServerNotice(fmt.Sprintf("Reconnected to %s", protoName))
+}
+
 func (u *User) migrateGlobalLastEvent(tx *bolt.Tx) {
 	proto := u.currentProtocol()
 	if proto != serviceMattermost && proto != "mattermost" {
@@ -3090,4 +3121,15 @@ func (u *User) migrateGlobalLastEvent(tx *bolt.Tx) {
 			logger.Infof("Migrated %s from legacy bucket %s to %s in bucket %s", string(legacyKey), u.User, string(targetKey), string(u.dbBucketName()))
 		}
 	}
+}
+
+func (u *User) sendServerNotice(text string) {
+	msg := &irc.Message{
+		Prefix:   u.Srv.Prefix(),
+		Command:  irc.NOTICE,
+		Params:   []string{"*"},
+		Trailing: "*** " + text,
+	}
+
+	_ = u.Encode(msg)
 }

@@ -124,7 +124,7 @@ func (m *Mattermost) GetReplayEvents(ctx context.Context, channelID string, sinc
 }
 
 //nolint:funlen
-func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Event, onWsConnect func()) (bridge.Bridger, *matterclient.Client, error) {
+func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Event, onWsConnect func(), onWsDisconnect func(error)) (bridge.Bridger, *matterclient.Client, error) {
 	rc := cfg.Current()
 
 	// All users share one logger. Creating (and assigning) a new one on every login
@@ -167,7 +167,7 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 	m.msgParentCache, _ = lru.New[string, CachedPost](128)
 	m.msgLastSentCache, _ = lru.New[string, string](128)
 
-	mc, err := m.loginToMattermost(ctx, onWsConnect)
+	mc, err := m.loginToMattermost(ctx, onWsConnect, onWsDisconnect)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -359,7 +359,7 @@ func (m *Mattermost) SendTyping(ctx context.Context, channelName string) {
 }
 
 //nolint:funlen
-func (m *Mattermost) loginToMattermost(ctx context.Context, onWsConnect func()) (*matterclient.Client, error) {
+func (m *Mattermost) loginToMattermost(ctx context.Context, onWsConnect func(), onWsDisconnect func(error)) (*matterclient.Client, error) {
 	rc := m.cfg.Current()
 
 	matterclient.Matterircd = true
@@ -382,6 +382,7 @@ func (m *Mattermost) loginToMattermost(ctx context.Context, onWsConnect func()) 
 
 	mc.Ctx = ctx
 	mc.OnWsConnect = onWsConnect
+	mc.OnWsDisconnect = onWsDisconnect
 
 	mc.Timeout = rc.ClientTimeout
 	if mc.Timeout == 0 {
