@@ -693,7 +693,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 		if err2 != nil {
 			sendDeliveryError(s, u, query, "msg \""+shortenMsg(u, msg.Trailing)+"\" could not be sent: "+err2.Error())
 
-			return err2
+			return nil //nolint:nilerr
 		}
 
 		u.setMsgLast(ch.ID(), msgID, "")
@@ -752,7 +752,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 			if err2 != nil {
 				sendDeliveryError(s, u, query, "msg \""+shortenMsg(u, msg.Trailing)+"\" could not be sent: "+err2.Error())
 
-				return err2
+				return nil //nolint:nilerr
 			}
 
 			u.setMsgLast(toUser.User, msgID, "")
@@ -969,7 +969,11 @@ func parseModifyMsg(s Server, u *User, msg *irc.Message, channelID string) bool 
 			return false
 		}
 
-		sendDeliveryError(s, u, query, "msg \""+shortenMsg(u, text)+"\" could not be modified: "+err.Error())
+		if text == "" {
+			sendDeliveryError(s, u, query, "could not delete message: "+err.Error())
+		} else {
+			sendDeliveryError(s, u, query, "msg \""+shortenMsg(u, text)+"\" could not be modified: "+err.Error())
+		}
 
 		return true
 	}
@@ -1695,7 +1699,7 @@ func parseCTCP(s Server, u *User, target string, text string) bool {
 }
 
 func sendDeliveryError(s Server, u *User, target, reason string) {
-	if strings.HasPrefix(target, "#") || strings.HasPrefix(target, "&") {
+	if _, ok := s.HasChannel(target); ok || strings.HasPrefix(target, "#") || strings.HasPrefix(target, "&") || strings.HasPrefix(target, "!") {
 		_ = s.EncodeMessage(u, irc.ERR_CANNOTSENDTOCHAN, []string{u.Nick, target}, reason)
 
 		return
