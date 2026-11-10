@@ -154,7 +154,19 @@ func New(ctx context.Context, cred Credentials, h Handler, opts ...Option) (*Cli
 
 	// Ready is called from the sync goroutine, after the events of the first
 	// sync response were processed, so handler calls stay serialized.
-	mc.Syncer = &readySyncer{DefaultSyncer: syncer, ready: h.Ready, synced: c.onSynced, named: c.noteRoomNames, track: c.noteTimeline, summary: c.logSyncSummary, leftInvites: c.removeLeftInvitations, decrypted: c.noteDecrypted, failed: c.onSyncFailed, begin: c.beginLookups}
+	mc.Syncer = &readySyncer{
+		DefaultSyncer: syncer,
+		logger:        c.logger,
+		ready:         h.Ready,
+		synced:        c.onSynced,
+		named:         c.noteRoomNames,
+		track:         c.noteTimeline,
+		summary:       c.logSyncSummary,
+		leftInvites:   c.removeLeftInvitations,
+		decrypted:     c.noteDecrypted,
+		failed:        c.onSyncFailed,
+		begin:         c.beginLookups,
+	}
 
 	err = c.login(ctx, o.crypto)
 	if err != nil {
@@ -355,6 +367,8 @@ func (c *Client) syncLoop() {
 type readySyncer struct {
 	*mautrix.DefaultSyncer
 
+	logger *logrus.Entry
+
 	once      sync.Once
 	ready     func()
 	synced    func()
@@ -371,17 +385,57 @@ type readySyncer struct {
 }
 
 func (r *readySyncer) ProcessResponse(ctx context.Context, res *mautrix.RespSync, since string) error {
+	start := time.Now()
+
 	r.begin()
 	r.summary(res)
 	r.track(res)
 
+	prepDuration := time.Since(start)
+	syncerStart := time.Now()
+
 	err := r.DefaultSyncer.ProcessResponse(ctx, res, since)
 	if err == nil {
+		syncerDuration := time.Since(syncerStart)
 		r.failures = 0
+
+		postStart := time.Now()
+
 		r.leftInvites(res)
 		r.synced()
+
+		postDuration := time.Since(postStart)
+		namedStart := time.Now()
+
 		r.named(res)
+
+		namedDuration := time.Since(namedStart)
+		readyStart := time.Now()
+
 		r.once.Do(r.ready)
+
+		readyDuration := time.Since(readyStart)
+		totalDuration := time.Since(start)
+
+		if since == "" {
+			r.logger.Infof("initial sync processed in %s (prep: %s, syncer: %s, named: %s, post: %s, ready: %s)",
+				totalDuration.Round(time.Millisecond),
+				prepDuration.Round(time.Millisecond),
+				syncerDuration.Round(time.Millisecond),
+				namedDuration.Round(time.Millisecond),
+				postDuration.Round(time.Millisecond),
+				readyDuration.Round(time.Millisecond),
+			)
+		} else if totalDuration > 500*time.Millisecond {
+			r.logger.Debugf("sync processed in %s (prep: %s, syncer: %s, named: %s, post: %s, ready: %s)",
+				totalDuration.Round(time.Millisecond),
+				prepDuration.Round(time.Millisecond),
+				syncerDuration.Round(time.Millisecond),
+				namedDuration.Round(time.Millisecond),
+				postDuration.Round(time.Millisecond),
+				readyDuration.Round(time.Millisecond),
+			)
+		}
 	}
 
 	return err
