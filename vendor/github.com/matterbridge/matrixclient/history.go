@@ -185,12 +185,21 @@ func (c *Client) messagesPage(ctx context.Context, roomID id.RoomID, from string
 
 	filter := &mautrix.FilterPart{Types: types}
 
-	resp, err := c.mc.Messages(ctx, roomID, from, "", mautrix.DirectionBackward, filter, limit)
-	if err != nil {
-		return nil, "", err
-	}
+	for attempt := 0; ; attempt++ {
+		resp, err := c.mc.Messages(ctx, roomID, from, "", mautrix.DirectionBackward, filter, limit)
+		if err == nil {
+			return resp.Chunk, resp.End, nil
+		}
 
-	return resp.Chunk, resp.End, nil
+		retry, herr := c.HandleRetry(ctx, "Messages", err, attempt, maxAPIRetries)
+		if herr != nil {
+			return nil, "", herr
+		}
+
+		if !retry {
+			return nil, "", err
+		}
+	}
 }
 
 // GetThread returns the root message of a thread followed by its replies, oldest first.
@@ -208,14 +217,32 @@ func (c *Client) GetThread(ctx context.Context, roomID id.RoomID, rootID id.Even
 	token := ""
 
 	for range historyMaxPages {
-		resp, err := c.mc.GetRelations(ctx, roomID, rootID, &mautrix.ReqGetRelations{
+		req := &mautrix.ReqGetRelations{
 			RelationType: event.RelThread,
 			Dir:          mautrix.DirectionForward,
 			From:         token,
 			Limit:        historyPageSize,
-		})
-		if err != nil {
-			return nil, err
+		}
+
+		var (
+			resp *mautrix.RespGetRelations
+			err  error
+		)
+
+		for attempt := 0; ; attempt++ {
+			resp, err = c.mc.GetRelations(ctx, roomID, rootID, req)
+			if err == nil {
+				break
+			}
+
+			retry, herr := c.HandleRetry(ctx, "GetRelations", err, attempt, maxAPIRetries)
+			if herr != nil {
+				return nil, herr
+			}
+
+			if !retry {
+				return nil, err
+			}
 		}
 
 		for _, ev := range resp.Chunk {
@@ -238,9 +265,27 @@ func (c *Client) GetThread(ctx context.Context, roomID id.RoomID, rootID id.Even
 
 // SearchMessages does a full text search over the messages of the joined rooms, best match first.
 func (c *Client) SearchMessages(ctx context.Context, query string) ([]*Message, error) {
-	resp, err := c.mc.Search(ctx, &mautrix.ReqSearch{SearchTerm: query, OrderBy: "rank"})
-	if err != nil {
-		return nil, err
+	req := &mautrix.ReqSearch{SearchTerm: query, OrderBy: "rank"}
+
+	var (
+		resp *mautrix.RespSearch
+		err  error
+	)
+
+	for attempt := 0; ; attempt++ {
+		resp, err = c.mc.Search(ctx, req)
+		if err == nil {
+			break
+		}
+
+		retry, herr := c.HandleRetry(ctx, "SearchMessages", err, attempt, maxAPIRetries)
+		if herr != nil {
+			return nil, herr
+		}
+
+		if !retry {
+			return nil, err
+		}
 	}
 
 	if resp == nil {
@@ -257,15 +302,25 @@ func (c *Client) SearchMessages(ctx context.Context, query string) ([]*Message, 
 
 // SearchUsers searches the homeserver user directory.
 func (c *Client) SearchUsers(ctx context.Context, query string, limit int) ([]UserInfo, error) {
-	resp, err := c.mc.SearchUserDirectory(ctx, query, limit)
-	if err != nil {
-		return nil, err
-	}
+	for attempt := 0; ; attempt++ {
+		resp, err := c.mc.SearchUserDirectory(ctx, query, limit)
+		if err == nil {
+			users := make([]UserInfo, 0, len(resp.Results))
 
-	users := make([]UserInfo, 0, len(resp.Results))
-	for _, u := range resp.Results {
-		users = append(users, UserInfo{ID: u.UserID, DisplayName: u.DisplayName})
-	}
+			for _, u := range resp.Results {
+				users = append(users, UserInfo{ID: u.UserID, DisplayName: u.DisplayName})
+			}
 
-	return users, nil
+			return users, nil
+		}
+
+		retry, herr := c.HandleRetry(ctx, "SearchUsers", err, attempt, maxAPIRetries)
+		if herr != nil {
+			return nil, herr
+		}
+
+		if !retry {
+			return nil, err
+		}
+	}
 }

@@ -96,23 +96,33 @@ type apiLogTransport struct {
 	next          http.RoundTripper
 	logger        *logrus.Entry
 	initialSynced atomic.Bool
+	syncFailed    atomic.Bool
+	syncDuration  *atomic.Int64
 }
 
-func newAPILogTransport(next http.RoundTripper, logger *logrus.Entry) http.RoundTripper {
+func newAPILogTransport(next http.RoundTripper, logger *logrus.Entry, syncDuration *atomic.Int64) http.RoundTripper {
 	if next == nil {
 		next = http.DefaultTransport
 	}
 
-	return &apiLogTransport{next: next, logger: logger}
+	return &apiLogTransport{
+		next:         next,
+		logger:       logger,
+		syncDuration: syncDuration,
+	}
 }
 
-//nolint:funlen
+//nolint:funlen,gocyclo
 func (t *apiLogTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	start := time.Now()
 
 	resp, err := t.next.RoundTrip(req)
 	if err != nil {
 		duration := time.Since(start)
+
+		if strings.HasSuffix(req.URL.Path, "/sync") {
+			t.syncFailed.Store(true)
+		}
 
 		t.logger.Warnf("%s %s: %s (%s)", req.Method, req.URL.Path, err, duration.Round(time.Millisecond))
 
@@ -126,6 +136,10 @@ func (t *apiLogTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	isInitialSync := isSync && !t.initialSynced.Load()
 
 	duration := time.Since(start).Round(time.Millisecond)
+
+	if isSync && t.syncDuration != nil {
+		t.syncDuration.Store(int64(duration))
+	}
 
 	// Only wrap sync responses to measure body download and JSON decode times.
 	// For recurring syncs, only wrap if trace logging is active.
@@ -164,6 +178,10 @@ func (t *apiLogTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 	// Only the path is logged, the query string can carry credentials.
 	if resp.StatusCode >= http.StatusBadRequest {
+		if isSync {
+			t.syncFailed.Store(true)
+		}
+
 		t.logger.Warnf("%s %s: %d (%s)", req.Method, req.URL.Path, resp.StatusCode, duration)
 
 		return resp, nil
@@ -177,6 +195,12 @@ func (t *apiLogTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 			t.initialSynced.Store(true)
 
 			t.logger.Warnf("%s %s (initial sync headers): %d (%s)", req.Method, req.URL.Path, resp.StatusCode, duration)
+
+			return resp, nil
+		}
+
+		if t.syncFailed.Swap(false) && resp.StatusCode == http.StatusOK {
+			t.logger.Infof("%s %s: %d (%s)", req.Method, req.URL.Path, resp.StatusCode, duration)
 
 			return resp, nil
 		}

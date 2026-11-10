@@ -25,12 +25,21 @@ func (c *Client) CreateRoom(ctx context.Context, name, topic string, public bool
 		req.Visibility = "public"
 	}
 
-	resp, err := c.mc.CreateRoom(ctx, req)
-	if err != nil {
-		return "", err
-	}
+	for attempt := 0; ; attempt++ {
+		resp, err := c.mc.CreateRoom(ctx, req)
+		if err == nil {
+			return resp.RoomID, nil
+		}
 
-	return resp.RoomID, nil
+		retry, herr := c.HandleRetry(ctx, "CreateRoom", err, attempt, maxAPIRetries)
+		if herr != nil {
+			return "", herr
+		}
+
+		if !retry {
+			return "", err
+		}
+	}
 }
 
 // Room returns a snapshot of a single room, or false if unknown, departed or an invitation.

@@ -14,6 +14,7 @@ const (
 	maxSyncBackoff   = time.Minute
 	maxSyncRetryWait = 30 * time.Second
 	maxLoginRetries  = 10
+	maxAPIRetries    = 10
 	defaultRateLimit = 3 * time.Second
 
 	// Users not seen active for this long are reported offline, matching matterclient.
@@ -155,16 +156,44 @@ func (c *Client) Ping(ctx context.Context) error {
 		return nil
 	}
 
-	_, err := c.mc.Whoami(ctx)
+	for attempt := 0; ; attempt++ {
+		_, err := c.mc.Whoami(ctx)
+		if err == nil {
+			return nil
+		}
 
-	return err
+		retry, herr := c.HandleRetry(ctx, "Ping", err, attempt, maxAPIRetries)
+		if herr != nil {
+			return herr
+		}
+
+		if !retry {
+			return err
+		}
+	}
 }
 
 // ServerVersions returns the Matrix spec versions supported by the homeserver.
 func (c *Client) ServerVersions(ctx context.Context) ([]string, error) {
-	resp, err := c.mc.Versions(ctx)
-	if err != nil {
-		return nil, err
+	var (
+		resp *mautrix.RespVersions
+		err  error
+	)
+
+	for attempt := 0; ; attempt++ {
+		resp, err = c.mc.Versions(ctx)
+		if err == nil {
+			break
+		}
+
+		retry, herr := c.HandleRetry(ctx, "ServerVersions", err, attempt, maxAPIRetries)
+		if herr != nil {
+			return nil, herr
+		}
+
+		if !retry {
+			return nil, err
+		}
 	}
 
 	versions := make([]string, 0, len(resp.Versions))

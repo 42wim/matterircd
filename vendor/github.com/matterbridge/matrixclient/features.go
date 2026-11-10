@@ -72,9 +72,21 @@ func (c *Client) SendTyping(ctx context.Context, roomID id.RoomID) error {
 	c.lastTyping[roomID] = now
 	c.stateLock.Unlock()
 
-	_, err := c.mc.UserTyping(ctx, roomID, true, typingTimeout)
+	for attempt := 0; ; attempt++ {
+		_, err := c.mc.UserTyping(ctx, roomID, true, typingTimeout)
+		if err == nil {
+			return nil
+		}
 
-	return err
+		retry, herr := c.HandleRetry(ctx, "SendTyping", err, attempt, maxAPIRetries)
+		if herr != nil {
+			return herr
+		}
+
+		if !retry {
+			return err
+		}
+	}
 }
 
 // UpdateLastViewed marks roomID as read up to eventID. Repeated calls for the
@@ -102,14 +114,29 @@ func (c *Client) UpdateLastViewed(ctx context.Context, roomID id.RoomID, eventID
 	c.lastViewed[roomID] = viewedMark{eventID: eventID, at: now}
 	c.stateLock.Unlock()
 
-	err := c.mc.SetReadMarkers(ctx, roomID, &mautrix.ReqSetReadMarkers{Read: eventID, FullyRead: eventID})
-	if err != nil {
-		c.stateLock.Lock()
-		delete(c.lastViewed, roomID)
-		c.stateLock.Unlock()
-	}
+	for attempt := 0; ; attempt++ {
+		err := c.mc.SetReadMarkers(ctx, roomID, &mautrix.ReqSetReadMarkers{Read: eventID, FullyRead: eventID})
+		if err == nil {
+			return nil
+		}
 
-	return err
+		retry, herr := c.HandleRetry(ctx, "UpdateLastViewed", err, attempt, maxAPIRetries)
+		if herr != nil {
+			c.stateLock.Lock()
+			delete(c.lastViewed, roomID)
+			c.stateLock.Unlock()
+
+			return herr
+		}
+
+		if !retry {
+			c.stateLock.Lock()
+			delete(c.lastViewed, roomID)
+			c.stateLock.Unlock()
+
+			return err
+		}
+	}
 }
 
 // Edit replaces the text of an event we sent.
@@ -117,12 +144,21 @@ func (c *Client) Edit(ctx context.Context, roomID id.RoomID, eventID id.EventID,
 	content := event.MessageEventContent{MsgType: event.MsgText, Body: text}
 	content.SetEdit(eventID)
 
-	resp, err := c.mc.SendMessageEvent(ctx, roomID, event.EventMessage, &content)
-	if err != nil {
-		return "", err
-	}
+	for attempt := 0; ; attempt++ {
+		resp, err := c.mc.SendMessageEvent(ctx, roomID, event.EventMessage, &content)
+		if err == nil {
+			return resp.EventID, nil
+		}
 
-	return resp.EventID, nil
+		retry, herr := c.HandleRetry(ctx, "Edit", err, attempt, maxAPIRetries)
+		if herr != nil {
+			return "", herr
+		}
+
+		if !retry {
+			return "", err
+		}
+	}
 }
 
 // EditHTML is like Edit with an HTML formatted body next to the plain text.
@@ -135,29 +171,59 @@ func (c *Client) EditHTML(ctx context.Context, roomID id.RoomID, eventID id.Even
 	}
 	content.SetEdit(eventID)
 
-	resp, err := c.mc.SendMessageEvent(ctx, roomID, event.EventMessage, &content)
-	if err != nil {
-		return "", err
-	}
+	for attempt := 0; ; attempt++ {
+		resp, err := c.mc.SendMessageEvent(ctx, roomID, event.EventMessage, &content)
+		if err == nil {
+			return resp.EventID, nil
+		}
 
-	return resp.EventID, nil
+		retry, herr := c.HandleRetry(ctx, "EditHTML", err, attempt, maxAPIRetries)
+		if herr != nil {
+			return "", herr
+		}
+
+		if !retry {
+			return "", err
+		}
+	}
 }
 
 // Delete redacts an event.
 func (c *Client) Delete(ctx context.Context, roomID id.RoomID, eventID id.EventID) error {
-	_, err := c.mc.RedactEvent(ctx, roomID, eventID)
+	for attempt := 0; ; attempt++ {
+		_, err := c.mc.RedactEvent(ctx, roomID, eventID)
+		if err == nil {
+			return nil
+		}
 
-	return err
+		retry, herr := c.HandleRetry(ctx, "Delete", err, attempt, maxAPIRetries)
+		if herr != nil {
+			return herr
+		}
+
+		if !retry {
+			return err
+		}
+	}
 }
 
 // React adds a reaction to an event and returns the reaction event ID.
 func (c *Client) React(ctx context.Context, roomID id.RoomID, eventID id.EventID, key string) (id.EventID, error) {
-	resp, err := c.mc.SendReaction(ctx, roomID, eventID, key)
-	if err != nil {
-		return "", err
-	}
+	for attempt := 0; ; attempt++ {
+		resp, err := c.mc.SendReaction(ctx, roomID, eventID, key)
+		if err == nil {
+			return resp.EventID, nil
+		}
 
-	return resp.EventID, nil
+		retry, herr := c.HandleRetry(ctx, "React", err, attempt, maxAPIRetries)
+		if herr != nil {
+			return "", herr
+		}
+
+		if !retry {
+			return "", err
+		}
+	}
 }
 
 // DeleteReaction removes a reaction, given the reaction event ID.
@@ -167,16 +233,42 @@ func (c *Client) DeleteReaction(ctx context.Context, roomID id.RoomID, reactionI
 
 // Leave leaves a room or rejects a pending invitation.
 func (c *Client) Leave(ctx context.Context, roomID id.RoomID) error {
-	_, err := c.mc.LeaveRoom(ctx, roomID)
+	for attempt := 0; ; attempt++ {
+		_, err := c.mc.LeaveRoom(ctx, roomID)
+		if err == nil {
+			return nil
+		}
 
-	return err
+		retry, herr := c.HandleRetry(ctx, "Leave", err, attempt, maxAPIRetries)
+		if herr != nil {
+			return herr
+		}
+
+		if !retry {
+			return err
+		}
+	}
 }
 
 // Kick removes userID from a room.
 func (c *Client) Kick(ctx context.Context, roomID id.RoomID, userID id.UserID, reason string) error {
-	_, err := c.mc.KickUser(ctx, roomID, &mautrix.ReqKickUser{UserID: userID, Reason: reason})
+	req := &mautrix.ReqKickUser{UserID: userID, Reason: reason}
 
-	return err
+	for attempt := 0; ; attempt++ {
+		_, err := c.mc.KickUser(ctx, roomID, req)
+		if err == nil {
+			return nil
+		}
+
+		retry, herr := c.HandleRetry(ctx, "Kick", err, attempt, maxAPIRetries)
+		if herr != nil {
+			return herr
+		}
+
+		if !retry {
+			return err
+		}
+	}
 }
 
 // LastViewedAt returns the timestamp in milliseconds of the event our read
@@ -199,9 +291,23 @@ func (c *Client) LastViewedAt(ctx context.Context, roomID id.RoomID) int64 {
 
 // Invite invites userID to a room.
 func (c *Client) Invite(ctx context.Context, roomID id.RoomID, userID id.UserID) error {
-	_, err := c.mc.InviteUser(ctx, roomID, &mautrix.ReqInviteUser{UserID: userID})
+	req := &mautrix.ReqInviteUser{UserID: userID}
 
-	return err
+	for attempt := 0; ; attempt++ {
+		_, err := c.mc.InviteUser(ctx, roomID, req)
+		if err == nil {
+			return nil
+		}
+
+		retry, herr := c.HandleRetry(ctx, "Invite", err, attempt, maxAPIRetries)
+		if herr != nil {
+			return herr
+		}
+
+		if !retry {
+			return err
+		}
+	}
 }
 
 // Topic returns the cached topic of a room, or "".
@@ -222,14 +328,42 @@ func (c *Client) Topic(roomID id.RoomID) string {
 
 // SetTopic changes the topic of a room.
 func (c *Client) SetTopic(ctx context.Context, roomID id.RoomID, topic string) error {
-	_, err := c.mc.SendStateEvent(ctx, roomID, event.StateTopic, "", &event.TopicEventContent{Topic: topic})
+	content := &event.TopicEventContent{Topic: topic}
 
-	return err
+	for attempt := 0; ; attempt++ {
+		_, err := c.mc.SendStateEvent(ctx, roomID, event.StateTopic, "", content)
+		if err == nil {
+			return nil
+		}
+
+		retry, herr := c.HandleRetry(ctx, "SetTopic", err, attempt, maxAPIRetries)
+		if herr != nil {
+			return herr
+		}
+
+		if !retry {
+			return err
+		}
+	}
 }
 
 // SetDisplayName changes our own display name.
 func (c *Client) SetDisplayName(ctx context.Context, name string) error {
-	return c.mc.SetDisplayName(ctx, name)
+	for attempt := 0; ; attempt++ {
+		err := c.mc.SetDisplayName(ctx, name)
+		if err == nil {
+			return nil
+		}
+
+		retry, herr := c.HandleRetry(ctx, "SetDisplayName", err, attempt, maxAPIRetries)
+		if herr != nil {
+			return herr
+		}
+
+		if !retry {
+			return err
+		}
+	}
 }
 
 // SetStatus sets our own presence ("online", "away" or "offline") and status message.
@@ -243,7 +377,23 @@ func (c *Client) SetStatus(ctx context.Context, status, msg string) error {
 		p = event.PresenceOffline
 	}
 
-	return c.mc.SetPresence(ctx, mautrix.ReqPresence{Presence: p, StatusMsg: msg})
+	req := mautrix.ReqPresence{Presence: p, StatusMsg: msg}
+
+	for attempt := 0; ; attempt++ {
+		err := c.mc.SetPresence(ctx, req)
+		if err == nil {
+			return nil
+		}
+
+		retry, herr := c.HandleRetry(ctx, "SetStatus", err, attempt, maxAPIRetries)
+		if herr != nil {
+			return herr
+		}
+
+		if !retry {
+			return err
+		}
+	}
 }
 
 // GetStatus returns the cached status of a user, "offline" when unknown.
@@ -285,9 +435,25 @@ func (c *Client) GetUserLastActivity(userID id.UserID) int64 {
 
 // UpdateStatus refreshes the cached presence of a user from the homeserver.
 func (c *Client) UpdateStatus(ctx context.Context, userID id.UserID) error {
-	resp, err := c.mc.GetPresence(ctx, userID)
-	if err != nil {
-		return err
+	var (
+		resp *mautrix.RespPresence
+		err  error
+	)
+
+	for attempt := 0; ; attempt++ {
+		resp, err = c.mc.GetPresence(ctx, userID)
+		if err == nil {
+			break
+		}
+
+		retry, herr := c.HandleRetry(ctx, "UpdateStatus", err, attempt, maxAPIRetries)
+		if herr != nil {
+			return herr
+		}
+
+		if !retry {
+			return err
+		}
 	}
 
 	c.setPresence(userID, resp.Presence, resp.StatusMsg, int64(resp.LastActiveAgo))

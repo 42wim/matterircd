@@ -77,6 +77,7 @@ type Client struct {
 	defaultProvider string
 
 	lastSync     atomic.Int64 // unix nanoseconds of the last processed sync response
+	syncDuration atomic.Int64 // duration in nanoseconds of the last /sync HTTP request
 	forceRelogin atomic.Bool
 
 	nameResolved func(roomID id.RoomID, name string) // see WithRoomNameResolved
@@ -143,7 +144,7 @@ func New(ctx context.Context, cred Credentials, h Handler, opts ...Option) (*Cli
 		mc.UserAgent = o.userAgent
 	}
 
-	mc.Client.Transport = newAPILogTransport(newTransport(&o), c.apiLogger)
+	mc.Client.Transport = newAPILogTransport(newTransport(&o), c.apiLogger, &c.syncDuration)
 
 	syncer, ok := mc.Syncer.(*mautrix.DefaultSyncer)
 	if !ok {
@@ -166,6 +167,7 @@ func New(ctx context.Context, cred Credentials, h Handler, opts ...Option) (*Cli
 		decrypted:     c.noteDecrypted,
 		failed:        c.onSyncFailed,
 		begin:         c.beginLookups,
+		syncDuration:  &c.syncDuration,
 	}
 
 	err = c.login(ctx, o.crypto)
@@ -369,14 +371,15 @@ type readySyncer struct {
 
 	logger *logrus.Entry
 
-	once      sync.Once
-	ready     func()
-	synced    func()
-	named     func(*mautrix.RespSync)
-	track     func(*mautrix.RespSync)
-	summary   func(*mautrix.RespSync)
-	decrypted func(*event.Event)
-	failed    func(err error, wait time.Duration)
+	once         sync.Once
+	ready        func()
+	synced       func()
+	named        func(*mautrix.RespSync)
+	track        func(*mautrix.RespSync)
+	summary      func(*mautrix.RespSync)
+	decrypted    func(*event.Event)
+	failed       func(err error, wait time.Duration)
+	syncDuration *atomic.Int64
 
 	begin       func()
 	leftInvites func(*mautrix.RespSync)
@@ -384,6 +387,7 @@ type readySyncer struct {
 	failures int // consecutive failed syncs, only used from the sync goroutine
 }
 
+//nolint:funlen
 func (r *readySyncer) ProcessResponse(ctx context.Context, res *mautrix.RespSync, since string) error {
 	start := time.Now()
 
@@ -395,50 +399,66 @@ func (r *readySyncer) ProcessResponse(ctx context.Context, res *mautrix.RespSync
 	syncerStart := time.Now()
 
 	err := r.DefaultSyncer.ProcessResponse(ctx, res, since)
-	if err == nil {
-		syncerDuration := time.Since(syncerStart)
-		r.failures = 0
+	if err != nil {
+		return err
+	}
 
-		postStart := time.Now()
+	syncerDuration := time.Since(syncerStart)
 
-		r.leftInvites(res)
-		r.synced()
+	if r.failures > 0 {
+		var reqDuration time.Duration
+		if r.syncDuration != nil {
+			reqDuration = time.Duration(r.syncDuration.Load())
+		}
 
-		postDuration := time.Since(postStart)
-		namedStart := time.Now()
-
-		r.named(res)
-
-		namedDuration := time.Since(namedStart)
-		readyStart := time.Now()
-
-		r.once.Do(r.ready)
-
-		readyDuration := time.Since(readyStart)
-		totalDuration := time.Since(start)
-
-		if since == "" {
-			r.logger.Infof("initial sync processed in %s (prep: %s, syncer: %s, named: %s, post: %s, ready: %s)",
-				totalDuration.Round(time.Millisecond),
-				prepDuration.Round(time.Millisecond),
-				syncerDuration.Round(time.Millisecond),
-				namedDuration.Round(time.Millisecond),
-				postDuration.Round(time.Millisecond),
-				readyDuration.Round(time.Millisecond),
-			)
-		} else if totalDuration > 500*time.Millisecond {
-			r.logger.Debugf("sync processed in %s (prep: %s, syncer: %s, named: %s, post: %s, ready: %s)",
-				totalDuration.Round(time.Millisecond),
-				prepDuration.Round(time.Millisecond),
-				syncerDuration.Round(time.Millisecond),
-				namedDuration.Round(time.Millisecond),
-				postDuration.Round(time.Millisecond),
-				readyDuration.Round(time.Millisecond),
-			)
+		if reqDuration > 0 {
+			r.logger.Infof("sync recovered after %d failure(s) (request: %s)", r.failures, reqDuration)
+		} else {
+			r.logger.Infof("sync recovered after %d failure(s)", r.failures)
 		}
 	}
 
-	return err
+	r.failures = 0
+
+	postStart := time.Now()
+
+	r.leftInvites(res)
+	r.synced()
+
+	postDuration := time.Since(postStart)
+	namedStart := time.Now()
+
+	r.named(res)
+
+	namedDuration := time.Since(namedStart)
+	readyStart := time.Now()
+
+	r.once.Do(r.ready)
+
+	readyDuration := time.Since(readyStart)
+	totalDuration := time.Since(start)
+
+	if since == "" {
+		r.logger.Infof("initial sync processed in %s (prep: %s, syncer: %s, named: %s, post: %s, ready: %s)",
+			totalDuration.Round(time.Millisecond),
+			prepDuration.Round(time.Millisecond),
+			syncerDuration.Round(time.Millisecond),
+			namedDuration.Round(time.Millisecond),
+			postDuration.Round(time.Millisecond),
+			readyDuration.Round(time.Millisecond),
+		)
+	} else if totalDuration > 500*time.Millisecond {
+		r.logger.Debugf("sync processed in %s (prep: %s, syncer: %s, named: %s, post: %s, ready: %s)",
+			totalDuration.Round(time.Millisecond),
+			prepDuration.Round(time.Millisecond),
+			syncerDuration.Round(time.Millisecond),
+			namedDuration.Round(time.Millisecond),
+			postDuration.Round(time.Millisecond),
+			readyDuration.Round(time.Millisecond),
+		)
+	}
+
+	return nil
 }
 
 // OnFailedSync retries quickly at first, then backs off exponentially with
@@ -774,9 +794,25 @@ func (c *Client) KnownUsers() []id.UserID {
 
 // JoinedMembers returns the joined members of a room.
 func (c *Client) JoinedMembers(ctx context.Context, roomID id.RoomID) ([]id.UserID, error) {
-	resp, err := c.mc.JoinedMembers(ctx, roomID)
-	if err != nil {
-		return nil, err
+	var (
+		resp *mautrix.RespJoinedMembers
+		err  error
+	)
+
+	for attempt := 0; ; attempt++ {
+		resp, err = c.mc.JoinedMembers(ctx, roomID)
+		if err == nil {
+			break
+		}
+
+		retry, herr := c.HandleRetry(ctx, "JoinedMembers", err, attempt, maxAPIRetries)
+		if herr != nil {
+			return nil, herr
+		}
+
+		if !retry {
+			return nil, err
+		}
 	}
 
 	ids := make([]id.UserID, 0, len(resp.Joined))
@@ -793,9 +829,25 @@ func (c *Client) Join(ctx context.Context, roomIDOrAlias string) (id.RoomID, err
 		roomIDOrAlias += ":" + c.defaultProvider
 	}
 
-	resp, err := c.mc.JoinRoom(ctx, roomIDOrAlias, nil)
-	if err != nil {
-		return "", err
+	var (
+		resp *mautrix.RespJoinRoom
+		err  error
+	)
+
+	for attempt := 0; ; attempt++ {
+		resp, err = c.mc.JoinRoom(ctx, roomIDOrAlias, nil)
+		if err == nil {
+			break
+		}
+
+		retry, herr := c.HandleRetry(ctx, "Join", err, attempt, maxAPIRetries)
+		if herr != nil {
+			return "", herr
+		}
+
+		if !retry {
+			return "", err
+		}
 	}
 
 	c.persistAcceptedDirect(ctx, resp.RoomID)
@@ -810,12 +862,21 @@ func (c *Client) Send(ctx context.Context, roomID id.RoomID, parentID id.EventID
 		content.RelatesTo = &event.RelatesTo{Type: event.RelThread, EventID: parentID}
 	}
 
-	resp, err := c.mc.SendMessageEvent(ctx, roomID, event.EventMessage, &content)
-	if err != nil {
-		return "", err
-	}
+	for attempt := 0; ; attempt++ {
+		resp, err := c.mc.SendMessageEvent(ctx, roomID, event.EventMessage, &content)
+		if err == nil {
+			return resp.EventID, nil
+		}
 
-	return resp.EventID, nil
+		retry, herr := c.HandleRetry(ctx, "Send", err, attempt, maxAPIRetries)
+		if herr != nil {
+			return "", herr
+		}
+
+		if !retry {
+			return "", err
+		}
+	}
 }
 
 func (c *Client) doneCreatingDirectLocked(userID id.UserID) {
@@ -926,17 +987,39 @@ func (c *Client) SendDirect(ctx context.Context, userID id.UserID, parentID id.E
 		c.creatingDirect[userID]++
 		c.Unlock()
 
-		resp, err := c.mc.CreateRoom(ctx, &mautrix.ReqCreateRoom{
+		req := &mautrix.ReqCreateRoom{
 			Preset:   "trusted_private_chat",
 			Invite:   []id.UserID{userID},
 			IsDirect: true,
-		})
-		if err != nil {
-			c.Lock()
-			c.doneCreatingDirectLocked(userID)
-			c.Unlock()
+		}
 
-			return "", err
+		var (
+			resp *mautrix.RespCreateRoom
+			err  error
+		)
+
+		for attempt := 0; ; attempt++ {
+			resp, err = c.mc.CreateRoom(ctx, req)
+			if err == nil {
+				break
+			}
+
+			retry, herr := c.HandleRetry(ctx, "CreateRoom", err, attempt, maxAPIRetries)
+			if herr != nil {
+				c.Lock()
+				c.doneCreatingDirectLocked(userID)
+				c.Unlock()
+
+				return "", herr
+			}
+
+			if !retry {
+				c.Lock()
+				c.doneCreatingDirectLocked(userID)
+				c.Unlock()
+
+				return "", err
+			}
 		}
 
 		roomID = resp.RoomID
@@ -960,12 +1043,21 @@ func (c *Client) SendDirect(ctx context.Context, userID id.UserID, parentID id.E
 	return c.Send(ctx, roomID, parentID, text)
 }
 
-// Event fetches a single event, retrying once.
+// Event fetches a single event.
 func (c *Client) Event(ctx context.Context, roomID id.RoomID, eventID id.EventID) (*event.Event, error) {
-	ev, err := c.mc.GetEvent(ctx, roomID, eventID)
-	if err != nil {
-		ev, err = c.mc.GetEvent(ctx, roomID, eventID)
-	}
+	for attempt := 0; ; attempt++ {
+		ev, err := c.mc.GetEvent(ctx, roomID, eventID)
+		if err == nil {
+			return ev, nil
+		}
 
-	return ev, err
+		retry, herr := c.HandleRetry(ctx, "Event", err, attempt, maxAPIRetries)
+		if herr != nil {
+			return nil, herr
+		}
+
+		if !retry {
+			return nil, err
+		}
+	}
 }
