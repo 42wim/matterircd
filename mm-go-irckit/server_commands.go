@@ -831,7 +831,7 @@ func awayNotice(s Server, u *User, br bridge.Bridger, toUser *User) {
 
 var (
 	parseModifyMsgRegExp     = regexp.MustCompile(`^s(\/(?:!!|[0-9a-f]{3}|[0-9a-z]{26}|\$[0-9A-Za-z\-_\.\+\/]{43})?\/)(.*)`)
-	parseReactionToMsgRegExp = regexp.MustCompile(`^\@\@([0-9a-f]{3}|[0-9a-z]{26}|\$[0-9A-Za-z\-_\.\+\/]{43})\s+([\-\+]):(\S+):\s*$`)
+	parseReactionToMsgRegExp = regexp.MustCompile(`^\@\@(!!|[0-9a-f]{3}|[0-9a-z]{26}|\$[0-9A-Za-z\-_\.\+\/]{43})\s+([\-\+]):(\S+):\s*$`)
 	parseThreadIDRegExp      = regexp.MustCompile(`(?s)^\@\@(?:(!!|[0-9a-f]{3}|[0-9a-z]{26}|\$[0-9A-Za-z\-_\.\+\/]{43})\s)(.*)`)
 )
 
@@ -844,6 +844,14 @@ func parseReactionToMsg(u *User, msg *irc.Message, channelID string) bool {
 	msgID := matches[1]
 	action := matches[2]
 	emoji := matches[3]
+
+	if msgID == "!!" {
+		u.msgLastMutex.RLock()
+		if msgLast, ok := u.msgLast[channelID]; ok {
+			msgID = msgLast[0]
+		}
+		u.msgLastMutex.RUnlock()
+	}
 
 	// matterircd style prefix/suffix contexts (e.g. 001 and fa2).
 	if len(msgID) == 3 {
