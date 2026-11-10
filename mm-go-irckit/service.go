@@ -52,7 +52,7 @@ const matrixReadyTimeout = 2 * time.Minute
 
 //nolint:funlen,gocyclo
 func loginMatrix(u *User, toUser *User, args []string) {
-	wMsg := "Matrix support is very much experimental and a work in progress. Use at your own risk."
+	wMsg := "Matrix support is very much EXPERIMENTAL and a work in progress. Use at your own risk."
 	u.respondService(toUser, "WARNING: "+wMsg, serviceMatrix)
 	logger.Warn(wMsg)
 
