@@ -677,11 +677,11 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 			return nil
 		}
 
-		if parseReactionToMsg(u, msg, ch.ID()) {
+		if parseReactionToMsg(s, u, msg, ch.ID()) {
 			return nil
 		}
 
-		if parseModifyMsg(u, msg, ch.ID()) {
+		if parseModifyMsg(s, u, msg, ch.ID()) {
 			return nil
 		}
 
@@ -691,8 +691,9 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 
 		msgID, err2 := u.br.MsgChannel(u.ctx, ch.ID(), msg.Trailing)
 		if err2 != nil {
-			u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+msg.Trailing+" could not be sent "+err2.Error())
-			return err2
+			sendDeliveryError(s, u, query, "msg \""+shortenMsg(u, msg.Trailing)+"\" could not be sent: "+err2.Error())
+
+			return nil //nolint:nilerr
 		}
 
 		u.setMsgLast(ch.ID(), msgID, "")
@@ -720,12 +721,12 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 				return nil
 			}
 
-			if parseReactionToMsg(u, msg, toUser.User) {
+			if parseReactionToMsg(s, u, msg, toUser.User) {
 				logger.Trace("matched parseReactionToMsg")
 				return nil
 			}
 
-			if parseModifyMsg(u, msg, toUser.User) {
+			if parseModifyMsg(s, u, msg, toUser.User) {
 				logger.Trace("matched parseModifyMsg")
 				return nil
 			}
@@ -749,8 +750,9 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 
 			msgID, err2 := u.br.MsgUser(u.ctx, toUser.User, msg.Trailing)
 			if err2 != nil {
-				u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+msg.Trailing+" could not be sent "+err2.Error())
-				return err2
+				sendDeliveryError(s, u, query, "msg \""+shortenMsg(u, msg.Trailing)+"\" could not be sent: "+err2.Error())
+
+				return nil //nolint:nilerr
 			}
 
 			u.setMsgLast(toUser.User, msgID, "")
@@ -835,7 +837,9 @@ var (
 	parseThreadIDRegExp      = regexp.MustCompile(`(?s)^\@\@(?:(!!|[0-9a-f]{3}|[0-9a-z]{26}|\$[0-9A-Za-z\-_\.\+\/]{43})\s)(.*)`)
 )
 
-func parseReactionToMsg(u *User, msg *irc.Message, channelID string) bool {
+func parseReactionToMsg(s Server, u *User, msg *irc.Message, channelID string) bool {
+	query := msg.Params[0]
+
 	matches := parseReactionToMsgRegExp.FindStringSubmatch(msg.Trailing)
 	if len(matches) != 4 {
 		return false
@@ -873,7 +877,7 @@ func parseReactionToMsg(u *User, msg *irc.Message, channelID string) bool {
 	if action == "-" {
 		err := u.br.RemoveReaction(u.ctx, msgID, emoji)
 		if err != nil {
-			u.MsgSpoofUser(u, u.br.Protocol(), "reaction: "+emoji+" could not be removed: "+err.Error())
+			sendDeliveryError(s, u, query, "reaction: "+emoji+" could not be removed: "+err.Error())
 		}
 
 		return true
@@ -881,14 +885,16 @@ func parseReactionToMsg(u *User, msg *irc.Message, channelID string) bool {
 
 	err := u.br.AddReaction(u.ctx, msgID, emoji)
 	if err != nil {
-		u.MsgSpoofUser(u, u.br.Protocol(), "reaction: "+emoji+" could not be added: "+err.Error())
+		sendDeliveryError(s, u, query, "reaction: "+emoji+" could not be added: "+err.Error())
 	}
 
 	return true
 }
 
 //nolint:funlen,gocyclo
-func parseModifyMsg(u *User, msg *irc.Message, channelID string) bool {
+func parseModifyMsg(s Server, u *User, msg *irc.Message, channelID string) bool {
+	query := msg.Params[0]
+
 	matches := parseModifyMsgRegExp.FindStringSubmatch(msg.Trailing)
 	text := msg.Trailing
 
@@ -944,9 +950,9 @@ func parseModifyMsg(u *User, msg *irc.Message, channelID string) bool {
 	if msgID == "" {
 		if useLast {
 			if text == "" {
-				u.MsgSpoofUser(u, u.br.Protocol(), "could not delete: no previous message found")
+				sendDeliveryError(s, u, query, "could not delete: no previous message found")
 			} else {
-				u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+text+" could not be modified: no previous message found to modify")
+				sendDeliveryError(s, u, query, "msg \""+shortenMsg(u, text)+"\" could not be modified: no previous message found to modify")
 			}
 
 			return true
@@ -963,7 +969,11 @@ func parseModifyMsg(u *User, msg *irc.Message, channelID string) bool {
 			return false
 		}
 
-		u.MsgSpoofUser(u, u.br.Protocol(), "msg: "+text+" could not be modified "+err.Error())
+		if text == "" {
+			sendDeliveryError(s, u, query, "could not delete message: "+err.Error())
+		} else {
+			sendDeliveryError(s, u, query, "msg \""+shortenMsg(u, text)+"\" could not be modified: "+err.Error())
+		}
 
 		return true
 	}
@@ -1054,20 +1064,15 @@ func threadMsgChannelUser(s Server, u *User, msg *irc.Message, channelID string,
 	}
 
 	if err != nil {
-		fromUser, ok := s.HasUser(u.br.Protocol())
-		if !ok {
-			fromUser = u
-		}
-
 		var netErr net.Error
 
 		if errors.As(err, &netErr) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-			u.MsgSpoofUser(fromUser, msg.Params[0], "could not reply to thread "+threadID+": "+err.Error())
+			sendDeliveryError(s, u, msg.Params[0], "could not reply to thread "+threadID+": "+err.Error())
 
 			return true
 		}
 
-		u.MsgSpoofUser(fromUser, msg.Params[0], "could not reply to thread "+threadID+" ("+err.Error()+"), sending as regular message")
+		sendDeliveryError(s, u, msg.Params[0], "could not reply to thread "+threadID+" ("+err.Error()+"), sending as regular message")
 
 		msg.Trailing = text
 
@@ -1691,4 +1696,42 @@ func parseCTCP(s Server, u *User, target string, text string) bool {
 		// Silently drop unhandled queries (CLIENTINFO, DCC, etc.)
 		return true
 	}
+}
+
+func sendDeliveryError(s Server, u *User, target, reason string) {
+	reason = sanitizeIRCTrailing(reason)
+
+	if _, ok := s.HasChannel(target); ok || strings.HasPrefix(target, "#") || strings.HasPrefix(target, "&") || strings.HasPrefix(target, "!") {
+		_ = s.EncodeMessage(u, irc.ERR_CANNOTSENDTOCHAN, []string{u.Nick, target}, reason)
+
+		return
+	}
+
+	fromUser := u
+
+	br := u.currentBridge()
+	if br != nil {
+		svc, ok := s.HasUser(br.Protocol())
+		if ok {
+			fromUser = svc
+		}
+	}
+
+	u.MsgSpoofUser(fromUser, target, reason)
+}
+
+func shortenMsg(u *User, text string) string {
+	useUnicode := false
+
+	br := u.currentBridge()
+	if br != nil {
+		useUnicode = br.FormatterConfig().Unicode
+	}
+
+	return utils.FormatAndShortenSummary(text, utils.SummaryOpts{
+		DisableMarkdown: true,
+		DisableEmoji:    true,
+		MaxLength:       30,
+		Unicode:         useUnicode,
+	})
 }
