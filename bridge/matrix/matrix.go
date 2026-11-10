@@ -134,8 +134,6 @@ type Matrix struct {
 	latestEditIDs      *lru.Cache[id.EventID, id.EventID] // edited message to the edit its cached text comes from
 	editMu             sync.Mutex                         // keeps text and edit tracking consistent between edits and redactions
 	reactionCache      *lru.Cache[string, id.EventID]
-	sentReactions      *lru.Cache[string, time.Time]    // reactions added from IRC, whose echo is dropped
-	sentRedactions     *lru.Cache[id.EventID, struct{}] // messages deleted from IRC, whose echo is dropped
 	userResolveCache   *lru.Cache[string, id.UserID]
 
 	pinFetchMu    sync.Mutex
@@ -246,8 +244,6 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 	m.roomProgress = make(map[id.RoomID]*roomProgress)
 	m.reactionCache, _ = lru.New[string, id.EventID](reactionCacheSize)
 	m.sentCache, _ = lru.New[id.EventID, struct{}](sentCacheSize)
-	m.sentReactions, _ = lru.New[string, time.Time](reactionCacheSize)
-	m.sentRedactions, _ = lru.New[id.EventID, struct{}](sentCacheSize)
 	m.userResolveCache, _ = lru.New[string, id.UserID](2048)
 
 	if cred.Token != "" && cred.Server == "" {
@@ -428,11 +424,11 @@ func (m *Matrix) handleEvent(q *queuedEvent) {
 	case *matrixclient.Message:
 		m.handleMessage(e, q.echo, q.peer)
 	case *matrixclient.Edit:
-		m.handleEdit(e, q.echo, q.peer)
+		m.handleEdit(e, q.peer)
 	case *matrixclient.Reaction:
-		m.handleReaction(e, q.echo, q.peer)
+		m.handleReaction(e, q.peer)
 	case *matrixclient.Redaction:
-		m.handleRedaction(e, q.echo, q.peer)
+		m.handleRedaction(e, q.peer)
 	case *matrixclient.PinChange:
 		m.handlePin(e, q.direct, q.peer)
 	case *matrixclient.Typing:
@@ -460,13 +456,10 @@ func (m *Matrix) snapshot(ev any) *queuedEvent {
 		q.echo = e.Sender == m.mc.UserID() && m.isSentEcho(e.EventID, e.Text)
 	case *matrixclient.Edit:
 		roomID, q.direct = e.RoomID, e.Direct
-		q.echo = e.Sender == m.mc.UserID() && m.isSentEcho(e.EventID, e.Text)
 	case *matrixclient.Reaction:
 		roomID, q.direct = e.RoomID, e.Direct
-		q.echo = e.Sender == m.mc.UserID() && m.isSentReaction(e.ParentID, e.Key)
 	case *matrixclient.Redaction:
 		roomID, q.direct = e.RoomID, e.Direct
-		q.echo = e.Sender == m.mc.UserID() && m.sentRedactions.Contains(e.TargetID)
 	case *matrixclient.PinChange:
 		roomID, q.direct = e.RoomID, m.mc.IsDirect(e.RoomID)
 	default:
@@ -657,7 +650,7 @@ func (m *Matrix) OnReaction(r *matrixclient.Reaction) {
 	m.enqueueEvent(r)
 }
 
-func (m *Matrix) handleReaction(r *matrixclient.Reaction, echo bool, peer id.UserID) {
+func (m *Matrix) handleReaction(r *matrixclient.Reaction, peer id.UserID) {
 	m.msgRoomCache.Add(r.ParentID, r.RoomID)
 
 	ghost := m.createUser(r.Sender)
@@ -665,7 +658,7 @@ func (m *Matrix) handleReaction(r *matrixclient.Reaction, echo bool, peer id.Use
 		return
 	}
 
-	if ghost.Me && (!m.cfg.Matrix().ShowOwnReactions || echo) {
+	if ghost.Me && !m.cfg.Matrix().ShowOwnReactions {
 		return
 	}
 
@@ -676,9 +669,9 @@ func (m *Matrix) handleReaction(r *matrixclient.Reaction, echo bool, peer id.Use
 		message, err := m.addParentMsg(m.ctx, r.RoomID, r.ParentID, text, mxCfg.ShortenRepliesTo, "@")
 		if err != nil {
 			logger.Errorf("Unable to get parent post for %s: %s", r.ParentID, err)
+		} else {
+			text = message
 		}
-
-		text = message
 	}
 
 	channelType := ""
@@ -847,6 +840,7 @@ func (m *Matrix) MsgUserThread(ctx context.Context, userID, parentID, text strin
 	roomID = m.mc.DirectRoom(uid)
 	if roomID != "" {
 		m.msgRoomCache.Add(eventID, roomID)
+		m.cacheText(eventID, text)
 
 		if rootID != "" {
 			m.msgThreadRootCache.Add(eventID, rootID)
@@ -856,20 +850,6 @@ func (m *Matrix) MsgUserThread(ctx context.Context, userID, parentID, text strin
 	}
 
 	return m.recordSent(ctx, "", eventID, rootID.String(), text), nil
-}
-
-// isSentReaction reports, once, whether our own reaction was added from IRC.
-func (m *Matrix) isSentReaction(parentID id.EventID, key string) bool {
-	sentKey := parentID.String() + "\x00" + key
-
-	at, ok := m.sentReactions.Get(sentKey)
-	if !ok {
-		return false
-	}
-
-	m.sentReactions.Remove(sentKey)
-
-	return time.Since(at) < sentReactionWindow
 }
 
 func (m *Matrix) beginSend(text string) {
@@ -963,6 +943,7 @@ func (m *Matrix) MsgChannelThread(ctx context.Context, channelID, parentID, text
 	}
 
 	m.msgRoomCache.Add(eventID, roomID)
+	m.cacheText(eventID, text)
 
 	if rootID != "" {
 		m.msgThreadRootCache.Add(eventID, rootID)
@@ -982,22 +963,17 @@ func (m *Matrix) ModifyPost(ctx context.Context, msgID, text string) error {
 	m.msgParentCache.Remove(id.EventID(msgID))
 
 	if text == "" {
-		m.sentRedactions.Add(id.EventID(msgID), struct{}{})
+		return m.mc.Delete(ctx, roomID, id.EventID(msgID))
+	}
 
-		err := m.mc.Delete(ctx, roomID, id.EventID(msgID))
-		if err != nil {
-			m.sentRedactions.Remove(id.EventID(msgID))
-		}
-
+	_, err := m.mc.Edit(ctx, roomID, id.EventID(msgID), text)
+	if err != nil {
 		return err
 	}
 
-	m.beginSend(text)
+	m.cacheText(id.EventID(msgID), text)
 
-	eventID, err := m.mc.Edit(ctx, roomID, id.EventID(msgID), text)
-	m.endSend(text, eventID, err)
-
-	return err
+	return nil
 }
 
 func (m *Matrix) Topic(ctx context.Context, channelID string) string {
@@ -1519,6 +1495,7 @@ func (m *Matrix) messageType(text string) string {
 	return ""
 }
 
+//nolint:unparam
 func (m *Matrix) addParentMsg(ctx context.Context, roomID id.RoomID, parentID id.EventID, msg string, newLen int, uncounted string) (string, error) {
 	// Search and use cached reply if it exists.
 	replyMessage, ok := m.msgParentCache.Get(parentID)
@@ -1883,14 +1860,8 @@ func (m *Matrix) AddReaction(ctx context.Context, msgID, emoji string) error {
 
 	key := m.reactionKey(emoji)
 
-	// The reaction has no event ID to match its echo, so the echo is expected for a while.
-	sentKey := msgID + "\x00" + key
-	m.sentReactions.Add(sentKey, time.Now())
-
 	reactionID, err := m.mc.React(ctx, roomID, id.EventID(msgID), key)
 	if err != nil {
-		m.sentReactions.Remove(sentKey)
-
 		return err
 	}
 
