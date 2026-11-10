@@ -1228,7 +1228,7 @@ func CmdTagMsg(s Server, u *User, msg *irc.Message) error {
 		channelName := target
 
 		target = resolveThreadTarget(s, u, channelName, msg.Params[1])
-		if target == "" && u.br != nil && u.br.Protocol() == "matrix" {
+		if target == "" && u.br != nil && u.br.Protocol() == serviceMatrix {
 			// Matrix typing is room-scoped; falling back to the channel would show phantom typing in the main room.
 			return nil
 		}

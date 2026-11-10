@@ -101,10 +101,10 @@ func NewUserBridge(c net.Conn, srv Server, cfg *config.Config, dbs map[string]*b
 	u.requestedChannels.Store(&initialMap)
 
 	// used for login
-	u.createService("mattermost", "loginservice")
-	u.createService("slack", "loginservice")
+	u.createService(serviceMattermost, "loginservice")
+	u.createService(serviceSlack, "loginservice")
 	u.createService(serviceMatrix, "loginservice")
-	u.createService("mastodon", "loginservice")
+	u.createService(serviceMastodon, "loginservice")
 	u.createService("matterircd", "systemservice")
 
 	return u
@@ -552,7 +552,7 @@ func (u *User) getMessageChannelUser(channelID string, sender *bridge.UserInfo) 
 
 	// if it's another user, let them join
 	if !ghost.Me && !ch.HasUser(ghost) {
-		if u.br.Protocol() != "mastodon" { //nolint:goconst
+		if u.br.Protocol() != serviceMastodon {
 			logger.Tracef("User %s is not in channel %s. Joining now", ghost.Nick, ch.String())
 			ch.Join(ghost) //nolint:errcheck
 		}
@@ -980,7 +980,7 @@ func (u *User) handleReactionEvent(event any) {
 
 	defer u.saveLastViewedAt(channelID)
 
-	if u.br.Protocol() == "mattermost" && u.cfg.Mattermost().HideReactions { //nolint:goconst
+	if u.br.Protocol() == serviceMattermost && u.cfg.Mattermost().HideReactions {
 		logger.Debug("Not showing reaction: " + text + reaction)
 		return
 	}
@@ -1186,8 +1186,8 @@ func (u *User) addUsersToChannels() {
 		ch.Join(u) //nolint:errcheck
 	}
 
-	if u.br.Protocol() == "mastodon" {
-		ch = srv.Channel("mastodon")
+	if u.br.Protocol() == serviceMastodon {
+		ch = srv.Channel(serviceMastodon)
 		ch.Join(u) //nolint:errcheck
 	}
 
@@ -1202,7 +1202,7 @@ func (u *User) addUsersToChannels() {
 		lastPost := time.UnixMilli(brchannel.LastPostAt)
 
 		// In Mattermost, both 1-on-1 DMs and Group DMs have no TeamID
-		isAnyDM := brchannel.DM || (u.br.Protocol() == "mattermost" && brchannel.TeamID == "")
+		isAnyDM := brchannel.DM || (u.br.Protocol() == serviceMattermost && brchannel.TeamID == "")
 
 		if isAnyDM && !u.br.BridgeConfig().JoinDM { //nolint:nestif
 			// Skip channels with no activity or older than 1 year (~365 days)
@@ -1610,7 +1610,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 				if name := u.br.GetChannelName(u.ctx, brchannel.ID); name != "" {
 					channelName = strings.TrimPrefix(name, "#")
 				}
-			} else if brchannel.TeamID != "" && (brchannel.TeamID != u.br.GetMe().TeamID || (u.br.Protocol() == "mattermost" && u.cfg.Mattermost().PrefixMainTeam)) {
+			} else if brchannel.TeamID != "" && (brchannel.TeamID != u.br.GetMe().TeamID || (u.br.Protocol() == serviceMattermost && u.cfg.Mattermost().PrefixMainTeam)) {
 				channelName = u.br.GetTeamName(u.ctx, brchannel.TeamID) + "/" + brchannel.Name
 			}
 
@@ -2109,7 +2109,7 @@ func (u *User) mayJoin(channelID string) bool {
 
 // hasSharedCfg reports whether the bridge takes the options of config.SharedConfig.
 func (u *User) hasSharedCfg() bool {
-	return u.br != nil && (u.br.Protocol() == "mattermost" || u.br.Protocol() == serviceMatrix)
+	return u.br != nil && (u.br.Protocol() == serviceMattermost || u.br.Protocol() == serviceMatrix)
 }
 
 // sharedCfg returns the shared options of the bridge's protocol, Mattermost's for the others.
@@ -2151,16 +2151,16 @@ func (u *User) isValidServer(server, protocol string) bool {
 	var restrict []string
 
 	switch protocol {
-	case "mattermost":
+	case serviceMattermost:
 		restrict = u.cfg.Mattermost().Bridge.Restrict
 
-	case "slack": //nolint:goconst
+	case serviceSlack:
 		restrict = u.cfg.Slack().Bridge.Restrict
 
 	case serviceMatrix:
 		restrict = u.cfg.Matrix().Bridge.Restrict
 
-	case "mastodon":
+	case serviceMastodon:
 		restrict = u.cfg.Mastodon().Bridge.Restrict
 
 	default:
@@ -2190,9 +2190,9 @@ func (u *User) serviceForPass(pass []string) string {
 	case slices.Contains(u.cfg.Matrix().Bridge.Restrict, pass[0]):
 		return serviceMatrix
 	case !u.cfg.Slack().Disable && slices.Contains(u.cfg.Slack().Bridge.Restrict, pass[0]):
-		return "slack"
+		return serviceSlack
 	case slices.Contains(u.cfg.Mastodon().Bridge.Restrict, pass[0]):
-		return "mastodon"
+		return serviceMastodon
 	}
 
 	return ""
@@ -2215,13 +2215,13 @@ func (u *User) loginTo(protocol string) error {
 	u.eventLoopMutex.Unlock()
 
 	switch protocol {
-	case "mastodon":
+	case serviceMastodon:
 		br, err = mastodon.New(u.cfg, u.Credentials, eventChan, u.addUsersToChannels)
 	case serviceMatrix:
 		br, _, err = matrix.New(u.ctx, u.cfg, u.Credentials, eventChan, u.addUsersToChannels)
-	case "slack":
+	case serviceSlack:
 		br, err = slack.New(u.cfg, u.Credentials, eventChan, u.addUsersToChannels)
-	case "mattermost":
+	case serviceMattermost:
 		br, _, err = mattermost.New(u.ctx, u.cfg, u.Credentials, eventChan, u.addUsersToChannels, func(err error) {
 			if err != nil {
 				u.handleBridgeDisconnect(err.Error())
@@ -2451,12 +2451,12 @@ func (u *User) prefixContext(channelID, messageID, parentID, event string) strin
 	}
 
 	tc := u.br.BridgeConfig().ThreadContext
-	if tc == "mattermost" || tc == "mattermost+post" || tc == serviceMatrix || tc == serviceMatrix+"+post" {
+	if tc == serviceMattermost || tc == serviceMattermost+"+post" || tc == serviceMatrix || tc == serviceMatrix+"+post" {
 		if parentID == "" {
 			return "[@@" + messageID + "]"
 		}
 
-		if tc == "mattermost" || tc == serviceMatrix || parentID == messageID {
+		if tc == serviceMattermost || tc == serviceMatrix || parentID == messageID {
 			return "[" + prefixChar + "@@" + parentID + "]"
 		}
 
@@ -2734,12 +2734,12 @@ func (u *User) getGlobalLastEventTime() int64 {
 		b := tx.Bucket(u.dbBucketName())
 		if b != nil {
 			v = b.Get(protoKey)
-			if v == nil && (proto == "mattermost" || proto == serviceMattermost) {
+			if v == nil && proto == serviceMattermost {
 				v = b.Get([]byte("__global_last_event__"))
 			}
 		}
 
-		if v == nil && (proto == "mattermost" || proto == serviceMattermost) {
+		if v == nil && proto == serviceMattermost {
 			legacyBucket := tx.Bucket([]byte(u.User))
 			if legacyBucket != nil {
 				v = legacyBucket.Get(protoKey)
@@ -2884,7 +2884,7 @@ func (u *User) handleTyping(e *bridge.TypingEvent) {
 	parentID := e.ParentID
 	if parentID != "" {
 		tc := u.br.BridgeConfig().ThreadContext
-		if tc != "mattermost" && tc != "mattermost+post" && tc != serviceMatrix && tc != serviceMatrix+"+post" {
+		if tc != serviceMattermost && tc != serviceMattermost+"+post" && tc != serviceMatrix && tc != serviceMatrix+"+post" {
 			parentID = u.getMsgCounterHex(e.ChannelID, parentID)
 		}
 
@@ -3030,7 +3030,7 @@ func (u *User) currentProtocol() string {
 		return br.Protocol()
 	}
 
-	return "mattermost"
+	return serviceMattermost
 }
 
 func (u *User) getDB(protocol ...string) *bolt.DB {
@@ -3055,7 +3055,7 @@ func (u *User) getDB(protocol ...string) *bolt.DB {
 		return db
 	}
 
-	return u.lastViewedDBs["mattermost"]
+	return u.lastViewedDBs[serviceMattermost]
 }
 
 func (u *User) handleBridgeDisconnect(reason string) {
@@ -3063,8 +3063,7 @@ func (u *User) handleBridgeDisconnect(reason string) {
 		return
 	}
 
-	proto := u.currentProtocol()
-	protoName := strings.ToUpper(proto[:1]) + proto[1:]
+	protoName := u.protocolServerName()
 
 	detail := ""
 	if reason != "" {
@@ -3079,15 +3078,14 @@ func (u *User) handleBridgeReconnect() {
 		return
 	}
 
-	proto := u.currentProtocol()
-	protoName := strings.ToUpper(proto[:1]) + proto[1:]
+	protoName := u.protocolServerName()
 
 	u.sendServerNotice(fmt.Sprintf("Reconnected to %s", protoName))
 }
 
 func (u *User) migrateGlobalLastEvent(tx *bolt.Tx) {
 	proto := u.currentProtocol()
-	if proto != serviceMattermost && proto != "mattermost" {
+	if proto != serviceMattermost {
 		return
 	}
 
@@ -3123,9 +3121,35 @@ func (u *User) migrateGlobalLastEvent(tx *bolt.Tx) {
 	}
 }
 
-func (u *User) sendServerNotice(text string) {
+func (u *User) protocolServerName(service ...string) string {
+	proto := ""
+	if len(service) > 0 && service[0] != "" {
+		proto = service[0]
+	} else if br := u.currentBridge(); br != nil {
+		proto = br.Protocol()
+	}
+
+	switch proto {
+	case serviceMatrix:
+		return "[matrix]"
+	case serviceMattermost:
+		return "Mattermost"
+	case serviceSlack:
+		return "Slack"
+	case serviceMastodon:
+		return "Mastodon"
+	default:
+		if proto != "" {
+			return strings.ToUpper(proto[:1]) + proto[1:]
+		}
+
+		return u.Srv.Name()
+	}
+}
+
+func (u *User) sendServerNotice(text string, service ...string) {
 	msg := &irc.Message{
-		Prefix:   u.Srv.Prefix(),
+		Prefix:   &irc.Prefix{Name: u.protocolServerName(service...)},
 		Command:  irc.NOTICE,
 		Params:   []string{"*"},
 		Trailing: "*** " + text,

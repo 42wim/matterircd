@@ -186,7 +186,7 @@ func (u *User) Encode(msgs ...*irc.Message) error {
 			logger.Warnf("failed to set write deadline for %s: %v", u.Nick, err)
 		}
 
-		if msg.Prefix != nil && msg.Command == irc.PRIVMSG && (msg.Name == "slack" || msg.Name == "mattermost") && msg.Host == "service" && strings.Contains(msg.Trailing, "token") { //nolint:goconst
+		if msg.Prefix != nil && msg.Command == irc.PRIVMSG && (msg.Name == serviceSlack || msg.Name == serviceMattermost) && msg.Host == "service" && strings.Contains(msg.Trailing, "token") {
 			logger.Debugf("-> %s %s %s", msg.Command, msg.Name, "[token redacted]")
 
 			err := u.Conn.Encode(msg)
@@ -480,10 +480,10 @@ func (u *User) Decode() {
 }
 
 const (
-	serviceSlack      = "slack"
 	serviceMattermost = "mattermost"
-	serviceMastodon   = "mastodon"
 	serviceMatrix     = "matrix"
+	serviceSlack      = "slack"
+	serviceMastodon   = "mastodon"
 )
 
 // isServiceBot tells if nick is one of the service bots (the ones to login to and to send commands to).
