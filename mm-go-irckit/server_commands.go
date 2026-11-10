@@ -1699,6 +1699,8 @@ func parseCTCP(s Server, u *User, target string, text string) bool {
 }
 
 func sendDeliveryError(s Server, u *User, target, reason string) {
+	reason = sanitizeIRCTrailing(reason)
+
 	if _, ok := s.HasChannel(target); ok || strings.HasPrefix(target, "#") || strings.HasPrefix(target, "&") || strings.HasPrefix(target, "!") {
 		_ = s.EncodeMessage(u, irc.ERR_CANNOTSENDTOCHAN, []string{u.Nick, target}, reason)
 
