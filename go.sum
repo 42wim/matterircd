@@ -141,8 +141,8 @@ github.com/matterbridge/logrus-prefixed-formatter v0.5.3-0.20200523233437-d97130
 github.com/matterbridge/logrus-prefixed-formatter v0.5.3-0.20200523233437-d971309a77ba/go.mod h1:iXGEotOvwI1R1SjLxRc+BF5rUORTMtE0iMZBT2lxqAU=
 github.com/matterbridge/matrixclient v0.0.0-20261110100411-fdaa0cda8a8f h1:j1QMonR3w9JgTQsRFyjEbhNBHG+S5QeGiCO1Ow9khHw=
 github.com/matterbridge/matrixclient v0.0.0-20261110100411-fdaa0cda8a8f/go.mod h1:14RGANRRPwjJ3OxEs2tHGGdvvBjrP3nWTVONogCkhsw=
-github.com/matterbridge/matterclient v0.0.0-20261109052235-95ccbaa7508e h1:xq3PbpmiQTWHNK4sbucRiBadNUvLlm5IKqNButCy9DE=
-github.com/matterbridge/matterclient v0.0.0-20261109052235-95ccbaa7508e/go.mod h1:69rJRgvrpV13ZyoA7q1HjHwaM6CSkXQPhCdDFRxwNj0=
+github.com/matterbridge/matterclient v0.0.0-20261110223745-0514c105a67e h1:pHHXQU/8+BdBMFeR9ugMwLBFY9DHWv65rXqbK2oPbG8=
+github.com/matterbridge/matterclient v0.0.0-20261110223745-0514c105a67e/go.mod h1:69rJRgvrpV13ZyoA7q1HjHwaM6CSkXQPhCdDFRxwNj0=
 github.com/mattermost/go-i18n v1.11.1-0.20211013152124-5c415071e404 h1:Khvh6waxG1cHc4Cz5ef9n3XVCxRWpAKUtqg9PJl5+y8=
 github.com/mattermost/go-i18n v1.11.1-0.20211013152124-5c415071e404/go.mod h1:RyS7FDNQlzF1PsjbJWHRI35exqaKGSO9qD4iv8QjE34=
 github.com/mattermost/ldap v0.0.0-20231116144001-0f480c025956 h1:Y1Tu/swM31pVwwb2BTCsOdamENjjWCI6qmfHLbk6OZI=

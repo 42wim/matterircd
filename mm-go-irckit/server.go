@@ -649,7 +649,7 @@ func (s *server) add(u *User) bool {
 	return true
 }
 
-//nolint:funlen,gocognit,goconst,gocyclo
+//nolint:funlen,gocognit,gocyclo
 func (s *server) handshake(u *User) error {
 	// Assign host
 	u.Host = u.ResolveHost()
@@ -783,23 +783,13 @@ outerloop:
 			if u.Pass != nil {
 				service := u.serviceForPass(u.Pass)
 				if service == "" {
-					service = "mattermost"
+					service = serviceMattermost
 					if len(u.Pass) == 1 && !u.cfg.Slack().Disable {
-						service = "slack"
+						service = serviceSlack
 					}
 				}
 
-				login(u, &User{
-					UserInfo: &bridge.UserInfo{
-						Nick: service,
-						User: service,
-						Real: service,
-						Host: serviceName,
-					},
-					channels: map[Channel]struct{}{},
-				},
-					u.Pass,
-					service)
+				login(u, nil, u.Pass, service)
 			}
 
 			return nil

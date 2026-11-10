@@ -143,21 +143,22 @@ type Client struct {
 	sync.RWMutex
 	*Credentials
 
-	Team          *Team
-	OtherTeams    map[string]*Team
-	Client        *model.Client4
-	User          *model.User
-	Users         *UsersCache
-	MessageChan   chan *Message
-	WsClient      *model.WebSocketClient
-	AntiIdle      bool
-	AntiIdleChan  string
-	AntiIdleIntvl int
-	WsQuit        bool
-	WsConnected   bool
-	OnWsConnect   func()
-	reconnectBusy bool
-	Timeout       int
+	Team           *Team
+	OtherTeams     map[string]*Team
+	Client         *model.Client4
+	User           *model.User
+	Users          *UsersCache
+	MessageChan    chan *Message
+	WsClient       *model.WebSocketClient
+	AntiIdle       bool
+	AntiIdleChan   string
+	AntiIdleIntvl  int
+	WsQuit         bool
+	WsConnected    bool
+	OnWsConnect    func()
+	OnWsDisconnect func(err error)
+	reconnectBusy  bool
+	Timeout        int
 
 	// wsReconnectMu serializes in-place websocket replacement between WsReceiver and checkConnection.
 	wsReconnectMu sync.Mutex
@@ -451,6 +452,11 @@ func (m *Client) Reconnect(ctx context.Context) {
 	}
 
 	m.logger.Info("reconnect: logout")
+
+	if m.OnWsDisconnect != nil {
+		go m.OnWsDisconnect(errors.New("connection lost, reconnecting"))
+	}
+
 	m.reconnectLogout(sessionCtx)
 
 	for {
@@ -1474,6 +1480,10 @@ func (m *Client) checkConnection(ctx context.Context) {
 				ws, _ := m.wsSnapshot()
 
 				if m.doCheckAlive(ctx) != nil {
+					if m.OnWsDisconnect != nil {
+						go m.OnWsDisconnect(errors.New("connection alive check failed"))
+					}
+
 					m.recoverWs(ctx, ws)
 				}
 			}
@@ -1503,6 +1513,10 @@ func (m *Client) WsReceiver(ctx context.Context) {
 		select {
 		case event := <-ws.EventChannel:
 			if event == nil {
+				if m.OnWsDisconnect != nil {
+					go m.OnWsDisconnect(errors.New("websocket closed"))
+				}
+
 				// The reader closes its channels when the connection dies.
 				if m.recoverWs(ctx, ws) {
 					continue
@@ -1597,6 +1611,10 @@ func (m *Client) WsReceiver(ctx context.Context) {
 		case <-ws.PingTimeoutChannel:
 			m.logger.Error("got a ping timeout")
 
+			if m.OnWsDisconnect != nil {
+				go m.OnWsDisconnect(errors.New("websocket ping timeout"))
+			}
+
 			if m.recoverWs(ctx, ws) {
 				continue
 			}
@@ -1605,6 +1623,10 @@ func (m *Client) WsReceiver(ctx context.Context) {
 		case <-ticker.C:
 			if ws.ListenError != nil {
 				m.logger.Errorf("%#v", ws.ListenError)
+
+				if m.OnWsDisconnect != nil {
+					go m.OnWsDisconnect(ws.ListenError)
+				}
 
 				if m.recoverWs(ctx, ws) {
 					continue
