@@ -452,6 +452,7 @@ func (m *Client) Reconnect(ctx context.Context) {
 	}
 
 	m.logger.Info("reconnect: logout")
+
 	if m.OnWsDisconnect != nil {
 		go m.OnWsDisconnect(errors.New("connection lost, reconnecting"))
 	}
