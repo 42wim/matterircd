@@ -11,12 +11,21 @@ import (
 
 // Upload uploads data to the media repository and returns its mxc:// URI.
 func (c *Client) Upload(ctx context.Context, data []byte, filename, contentType string) (id.ContentURI, error) {
-	resp, err := c.mc.UploadBytesWithName(ctx, data, contentType, filename)
-	if err != nil {
-		return id.ContentURI{}, err
-	}
+	for attempt := 0; ; attempt++ {
+		resp, err := c.mc.UploadBytesWithName(ctx, data, contentType, filename)
+		if err == nil {
+			return resp.ContentURI, nil
+		}
 
-	return resp.ContentURI, nil
+		retry, herr := c.HandleRetry(ctx, "Upload", err, attempt, maxAPIRetries)
+		if herr != nil {
+			return id.ContentURI{}, herr
+		}
+
+		if !retry {
+			return id.ContentURI{}, err
+		}
+	}
 }
 
 // SendFile uploads data and sends it as a file message, with caption as the
@@ -58,7 +67,21 @@ func (c *Client) Download(ctx context.Context, mxc id.ContentURIString) ([]byte,
 		return nil, err
 	}
 
-	return c.mc.DownloadBytes(ctx, uri)
+	for attempt := 0; ; attempt++ {
+		data, err := c.mc.DownloadBytes(ctx, uri)
+		if err == nil {
+			return data, nil
+		}
+
+		retry, herr := c.HandleRetry(ctx, "Download", err, attempt, maxAPIRetries)
+		if herr != nil {
+			return nil, herr
+		}
+
+		if !retry {
+			return nil, err
+		}
+	}
 }
 
 // DownloadEncrypted fetches and decrypts the media of an encrypted file message.

@@ -139,8 +139,8 @@ github.com/lunixbochs/vtclean v1.0.0/go.mod h1:pHhQNgMf3btfWnGBVipUOjRYhoOsdGqdm
 github.com/mailru/easyjson v0.0.0-20190312143242-1de009706dbe/go.mod h1:C1wdFJiN94OJF2b5HbByQZoLdCWB1Yqtg26g4irojpc=
 github.com/matterbridge/logrus-prefixed-formatter v0.5.3-0.20200523233437-d971309a77ba h1:XleOY4IjAEIcxAh+IFwT5JT5Ze3RHiYz6m+4ZfZ0rc0=
 github.com/matterbridge/logrus-prefixed-formatter v0.5.3-0.20200523233437-d971309a77ba/go.mod h1:iXGEotOvwI1R1SjLxRc+BF5rUORTMtE0iMZBT2lxqAU=
-github.com/matterbridge/matrixclient v0.0.0-20261109231355-1f25e57b5004 h1:a+VZ/S/NxxcBdWFsDmNIk6JC9ITwm7s/SlGjFD27/ec=
-github.com/matterbridge/matrixclient v0.0.0-20261109231355-1f25e57b5004/go.mod h1:14RGANRRPwjJ3OxEs2tHGGdvvBjrP3nWTVONogCkhsw=
+github.com/matterbridge/matrixclient v0.0.0-20261110100411-fdaa0cda8a8f h1:j1QMonR3w9JgTQsRFyjEbhNBHG+S5QeGiCO1Ow9khHw=
+github.com/matterbridge/matrixclient v0.0.0-20261110100411-fdaa0cda8a8f/go.mod h1:14RGANRRPwjJ3OxEs2tHGGdvvBjrP3nWTVONogCkhsw=
 github.com/matterbridge/matterclient v0.0.0-20261109052235-95ccbaa7508e h1:xq3PbpmiQTWHNK4sbucRiBadNUvLlm5IKqNButCy9DE=
 github.com/matterbridge/matterclient v0.0.0-20261109052235-95ccbaa7508e/go.mod h1:69rJRgvrpV13ZyoA7q1HjHwaM6CSkXQPhCdDFRxwNj0=
 github.com/mattermost/go-i18n v1.11.1-0.20211013152124-5c415071e404 h1:Khvh6waxG1cHc4Cz5ef9n3XVCxRWpAKUtqg9PJl5+y8=

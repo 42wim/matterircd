@@ -189,12 +189,21 @@ func (c *Client) CreateTeam(ctx context.Context, name, topic string, public bool
 		req.Visibility = "public"
 	}
 
-	resp, err := c.mc.CreateRoom(ctx, req)
-	if err != nil {
-		return "", err
-	}
+	for attempt := 0; ; attempt++ {
+		resp, err := c.mc.CreateRoom(ctx, req)
+		if err == nil {
+			return resp.RoomID, nil
+		}
 
-	return resp.RoomID, nil
+		retry, herr := c.HandleRetry(ctx, "CreateTeam", err, attempt, maxAPIRetries)
+		if herr != nil {
+			return "", herr
+		}
+
+		if !retry {
+			return "", err
+		}
+	}
 }
 
 // AddToTeam adds a room to a space.
@@ -204,16 +213,44 @@ func (c *Client) AddToTeam(ctx context.Context, spaceID, roomID id.RoomID) error
 		server = c.mc.UserID.Homeserver()
 	}
 
-	_, err := c.mc.SendStateEvent(ctx, spaceID, event.StateSpaceChild, string(roomID), &event.SpaceChildEventContent{Via: []string{server}})
+	content := &event.SpaceChildEventContent{Via: []string{server}}
 
-	return err
+	for attempt := 0; ; attempt++ {
+		_, err := c.mc.SendStateEvent(ctx, spaceID, event.StateSpaceChild, string(roomID), content)
+		if err == nil {
+			return nil
+		}
+
+		retry, herr := c.HandleRetry(ctx, "AddToTeam", err, attempt, maxAPIRetries)
+		if herr != nil {
+			return herr
+		}
+
+		if !retry {
+			return err
+		}
+	}
 }
 
 // RemoveFromTeam removes a room from a space.
 func (c *Client) RemoveFromTeam(ctx context.Context, spaceID, roomID id.RoomID) error {
-	_, err := c.mc.SendStateEvent(ctx, spaceID, event.StateSpaceChild, string(roomID), &event.SpaceChildEventContent{})
+	content := &event.SpaceChildEventContent{}
 
-	return err
+	for attempt := 0; ; attempt++ {
+		_, err := c.mc.SendStateEvent(ctx, spaceID, event.StateSpaceChild, string(roomID), content)
+		if err == nil {
+			return nil
+		}
+
+		retry, herr := c.HandleRetry(ctx, "RemoveFromTeam", err, attempt, maxAPIRetries)
+		if herr != nil {
+			return herr
+		}
+
+		if !retry {
+			return err
+		}
+	}
 }
 
 // noteSender records whether a user looks like a bot. Matrix has no bot flag,
