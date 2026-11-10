@@ -847,9 +847,11 @@ func parseReactionToMsg(u *User, msg *irc.Message, channelID string) bool {
 
 	if msgID == "!!" {
 		u.msgLastMutex.RLock()
+
 		if msgLast, ok := u.msgLast[channelID]; ok {
 			msgID = msgLast[0]
 		}
+
 		u.msgLastMutex.RUnlock()
 	}
 
