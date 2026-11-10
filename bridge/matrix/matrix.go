@@ -134,6 +134,7 @@ type Matrix struct {
 	latestEditIDs      *lru.Cache[id.EventID, id.EventID] // edited message to the edit its cached text comes from
 	editMu             sync.Mutex                         // keeps text and edit tracking consistent between edits and redactions
 	reactionCache      *lru.Cache[string, id.EventID]
+	reactionMetaCache  *lru.Cache[id.EventID, reactionMeta]
 	userResolveCache   *lru.Cache[string, id.UserID]
 
 	pinFetchMu    sync.Mutex
@@ -243,6 +244,7 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 	m.pendingSends = make(map[string]int)
 	m.roomProgress = make(map[id.RoomID]*roomProgress)
 	m.reactionCache, _ = lru.New[string, id.EventID](reactionCacheSize)
+	m.reactionMetaCache, _ = lru.New[id.EventID, reactionMeta](reactionCacheSize * 5)
 	m.sentCache, _ = lru.New[id.EventID, struct{}](sentCacheSize)
 	m.userResolveCache, _ = lru.New[string, id.UserID](2048)
 
@@ -683,6 +685,12 @@ func (m *Matrix) handleReaction(r *matrixclient.Reaction, peer id.UserID) {
 	if receiver == nil {
 		return
 	}
+
+	// Cache the reaction metadata so redactions of this reaction can emit reaction_remove.
+	m.reactionMetaCache.Add(r.EventID, reactionMeta{
+		parentID: r.ParentID,
+		key:      r.Key,
+	})
 
 	// The reacted message is the MessageID, a ParentID would show it as a reply to itself.
 	m.sendEvent(&bridge.Event{
@@ -1866,6 +1874,10 @@ func (m *Matrix) AddReaction(ctx context.Context, msgID, emoji string) error {
 	}
 
 	m.reactionCache.Add(msgID+"\x00"+key, reactionID)
+	m.reactionMetaCache.Add(reactionID, reactionMeta{
+		parentID: id.EventID(msgID),
+		key:      key,
+	})
 
 	return nil
 }
@@ -2059,4 +2071,9 @@ func (m *Matrix) resolveThreadRoot(ctx context.Context, roomID id.RoomID, eventI
 	}
 
 	return curr
+}
+
+type reactionMeta struct {
+	parentID id.EventID
+	key      string
 }

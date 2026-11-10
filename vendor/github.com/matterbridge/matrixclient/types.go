@@ -195,6 +195,7 @@ type PinChange struct {
 // delivered too, compare Sender with Client.UserID.
 type Reaction struct {
 	RoomID   id.RoomID
+	EventID  id.EventID
 	ParentID id.EventID
 	Sender   id.UserID
 	Key      string
