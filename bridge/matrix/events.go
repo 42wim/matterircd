@@ -171,6 +171,7 @@ func (m *Matrix) handleEdit(e *matrixclient.Edit, peer id.UserID) {
 
 	text := e.Text
 	mxCfg := m.cfg.Matrix()
+
 	if !mxCfg.HideReplies && parentID != "" {
 		message, err := m.addParentMsg(m.ctx, e.RoomID, parentID, text, mxCfg.ShortenRepliesTo, "@")
 		if err != nil {
@@ -190,6 +191,7 @@ func (m *Matrix) OnRedaction(r *matrixclient.Redaction) {
 	m.enqueueEvent(r)
 }
 
+//nolint:gocyclo
 func (m *Matrix) handleRedaction(r *matrixclient.Redaction, peer id.UserID) {
 	// Redactions of other events, such as topics or pins, are not deleted messages.
 	if r.TargetType.Type != "" && r.TargetType != event.EventMessage && r.TargetType != event.EventEncrypted {
@@ -240,6 +242,7 @@ func (m *Matrix) handleRedaction(r *matrixclient.Redaction, peer id.UserID) {
 
 	summary := m.cachedSummary(text)
 	mxCfg := m.cfg.Matrix()
+
 	if !mxCfg.HideReplies && parentID != "" {
 		message, err := m.addParentMsg(m.ctx, r.RoomID, parentID, summary, mxCfg.ShortenRepliesTo, "@")
 		if err != nil {

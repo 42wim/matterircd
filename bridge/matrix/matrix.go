@@ -1495,6 +1495,7 @@ func (m *Matrix) messageType(text string) string {
 	return ""
 }
 
+//nolint:unparam
 func (m *Matrix) addParentMsg(ctx context.Context, roomID id.RoomID, parentID id.EventID, msg string, newLen int, uncounted string) (string, error) {
 	// Search and use cached reply if it exists.
 	replyMessage, ok := m.msgParentCache.Get(parentID)
