@@ -147,7 +147,7 @@ func (m *Matrix) OnEdit(e *matrixclient.Edit) {
 	m.enqueueEvent(e)
 }
 
-func (m *Matrix) handleEdit(e *matrixclient.Edit, echo bool, peer id.UserID) {
+func (m *Matrix) handleEdit(e *matrixclient.Edit, peer id.UserID) {
 	ghost := m.createUser(e.Sender)
 	if ghost == nil {
 		return
@@ -160,15 +160,29 @@ func (m *Matrix) handleEdit(e *matrixclient.Edit, echo bool, peer id.UserID) {
 	m.latestEditIDs.Add(e.TargetID, e.EventID)
 	m.editMu.Unlock()
 
-	if ghost.Me && echo {
-		return
-	}
-
 	// Replies to the edited message must show the new text.
 	m.msgParentCache.Remove(e.TargetID)
 	m.msgRoomCache.Add(e.TargetID, e.RoomID)
 
-	m.sendText(ghost, e.RoomID, e.Direct, peer, e.TargetID, "", e.Text+m.formatSuffix(suffixEdited), "post_edited", m.messageType(e.Text), e.Timestamp)
+	parentID := m.resolveThreadRoot(m.ctx, e.RoomID, e.TargetID)
+	if parentID == e.TargetID {
+		parentID = ""
+	}
+
+	text := e.Text
+	mxCfg := m.cfg.Matrix()
+	if !mxCfg.HideReplies && parentID != "" {
+		message, err := m.addParentMsg(m.ctx, e.RoomID, parentID, text, mxCfg.ShortenRepliesTo, "@")
+		if err != nil {
+			logger.Errorf("Unable to get parent post for %s: %s", e.TargetID, err)
+		} else {
+			text = message
+		}
+	}
+
+	text += m.formatSuffix(suffixEdited)
+
+	m.sendText(ghost, e.RoomID, e.Direct, peer, e.TargetID, parentID, text, "post_edited", m.messageType(e.Text), e.Timestamp)
 }
 
 // OnRedaction implements matrixclient.RedactionHandler.
@@ -176,7 +190,7 @@ func (m *Matrix) OnRedaction(r *matrixclient.Redaction) {
 	m.enqueueEvent(r)
 }
 
-func (m *Matrix) handleRedaction(r *matrixclient.Redaction, echo bool, peer id.UserID) {
+func (m *Matrix) handleRedaction(r *matrixclient.Redaction, peer id.UserID) {
 	// Redactions of other events, such as topics or pins, are not deleted messages.
 	if r.TargetType.Type != "" && r.TargetType != event.EventMessage && r.TargetType != event.EventEncrypted {
 		return
@@ -219,15 +233,27 @@ func (m *Matrix) handleRedaction(r *matrixclient.Redaction, echo bool, peer id.U
 		return
 	}
 
-	if ghost.Me && echo {
-		m.sentRedactions.Remove(r.TargetID)
-
-		return
+	parentID := m.resolveThreadRoot(m.ctx, r.RoomID, r.TargetID)
+	if parentID == r.TargetID {
+		parentID = ""
 	}
+
+	summary := m.cachedSummary(text)
+	mxCfg := m.cfg.Matrix()
+	if !mxCfg.HideReplies && parentID != "" {
+		message, err := m.addParentMsg(m.ctx, r.RoomID, parentID, summary, mxCfg.ShortenRepliesTo, "@")
+		if err != nil {
+			logger.Errorf("Unable to get parent post for %s: %s", r.TargetID, err)
+		} else {
+			summary = message
+		}
+	}
+
+	summary += m.formatSuffix(suffixDeleted)
 
 	m.msgParentCache.Remove(r.TargetID)
 
-	m.sendText(ghost, r.RoomID, r.Direct, peer, r.TargetID, "", m.cachedSummary(text)+m.formatSuffix(suffixDeleted), "post_deleted", m.messageType(text), 0)
+	m.sendText(ghost, r.RoomID, r.Direct, peer, r.TargetID, parentID, summary, "post_deleted", m.messageType(text), 0)
 }
 
 // fetchText looks up and caches the text of a message missing from the cache. It returns
