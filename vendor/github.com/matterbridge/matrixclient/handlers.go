@@ -575,6 +575,7 @@ func (c *Client) handleReaction(_ context.Context, ev *event.Event) {
 
 	c.handler.OnReaction(&Reaction{
 		RoomID:   ev.RoomID,
+		EventID:  ev.ID,
 		ParentID: content.RelatesTo.EventID,
 		Sender:   ev.Sender,
 		Key:      content.RelatesTo.Key,

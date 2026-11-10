@@ -52,12 +52,21 @@ func (c *Client) SendFile(ctx context.Context, roomID id.RoomID, parentID id.Eve
 		content.RelatesTo = &event.RelatesTo{Type: event.RelThread, EventID: parentID}
 	}
 
-	resp, err := c.mc.SendMessageEvent(ctx, roomID, event.EventMessage, &content)
-	if err != nil {
-		return "", err
-	}
+	for attempt := 0; ; attempt++ {
+		resp, err := c.mc.SendMessageEvent(ctx, roomID, event.EventMessage, &content)
+		if err == nil {
+			return resp.EventID, nil
+		}
 
-	return resp.EventID, nil
+		retry, herr := c.HandleRetry(ctx, "SendFile", err, attempt, maxAPIRetries)
+		if herr != nil {
+			return "", herr
+		}
+
+		if !retry {
+			return "", err
+		}
+	}
 }
 
 // Download fetches the media behind an mxc:// URI.

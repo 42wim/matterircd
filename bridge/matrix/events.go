@@ -191,8 +191,14 @@ func (m *Matrix) OnRedaction(r *matrixclient.Redaction) {
 	m.enqueueEvent(r)
 }
 
-//nolint:gocyclo
+//nolint:funlen,gocyclo
 func (m *Matrix) handleRedaction(r *matrixclient.Redaction, peer id.UserID) {
+	if meta, ok := m.reactionMetaCache.Get(r.TargetID); ok {
+		m.handleReactionRemove(r, peer, meta)
+
+		return
+	}
+
 	// Redactions of other events, such as topics or pins, are not deleted messages.
 	if r.TargetType.Type != "" && r.TargetType != event.EventMessage && r.TargetType != event.EventEncrypted {
 		return
@@ -257,6 +263,55 @@ func (m *Matrix) handleRedaction(r *matrixclient.Redaction, peer id.UserID) {
 	m.msgParentCache.Remove(r.TargetID)
 
 	m.sendText(ghost, r.RoomID, r.Direct, peer, r.TargetID, parentID, summary, "post_deleted", m.messageType(text), 0)
+}
+
+func (m *Matrix) handleReactionRemove(r *matrixclient.Redaction, peer id.UserID, meta reactionMeta) {
+	m.reactionMetaCache.Remove(r.TargetID)
+	m.reactionCache.Remove(meta.parentID.String() + "\x00" + meta.key)
+
+	ghost := m.createUser(r.Sender)
+	if ghost == nil {
+		return
+	}
+
+	if ghost.Me && !m.cfg.Matrix().ShowOwnReactions {
+		return
+	}
+
+	var text string
+
+	mxCfg := m.cfg.Matrix()
+	if !mxCfg.HideReplies {
+		message, err := m.addParentMsg(m.ctx, r.RoomID, meta.parentID, text, mxCfg.ShortenRepliesTo, "@")
+		if err != nil {
+			logger.Errorf("Unable to get parent post for %s: %s", meta.parentID, err)
+		} else {
+			text = message
+		}
+	}
+
+	channelType := ""
+	if r.Direct {
+		channelType = "D"
+	}
+
+	receiver := m.dmReceiver(ghost, r.Direct, peer)
+	if receiver == nil {
+		return
+	}
+
+	m.sendEvent(&bridge.Event{
+		Type: "reaction_remove",
+		Data: &bridge.ReactionRemoveEvent{
+			ChannelID:   r.RoomID.String(),
+			MessageID:   string(meta.parentID),
+			Receiver:    receiver,
+			Sender:      ghost,
+			Reaction:    meta.key,
+			ChannelType: channelType,
+			Message:     text,
+		},
+	})
 }
 
 // fetchText looks up and caches the text of a message missing from the cache. It returns
