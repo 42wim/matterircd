@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -88,9 +87,19 @@ func (c *CopilotClient) Summarize(ctx context.Context, prompt string, _ string) 
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		var errResp struct {
+			Error *struct {
+				Message string `json:"message"`
+			} `json:"error,omitempty"`
+		}
 
-		errMsg := strings.TrimSpace(string(body))
+		var errMsg string
+
+		err = json.NewDecoder(resp.Body).Decode(&errResp)
+		if err == nil && errResp.Error != nil && errResp.Error.Message != "" {
+			errMsg = strings.Join(strings.Fields(errResp.Error.Message), " ")
+		}
+
 		if errMsg != "" {
 			return nil, fmt.Errorf("copilot API returned status %s: %s", resp.Status, errMsg)
 		}

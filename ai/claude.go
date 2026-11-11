@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -145,17 +144,18 @@ func (c *ClaudeClient) Summarize(ctx context.Context, prompt string, thinking st
 			} `json:"error,omitempty"`
 		}
 
-		body, _ := io.ReadAll(resp.Body)
-		errMsg := string(body)
+		var errMsg string
 
-		err = json.Unmarshal(body, &errResp)
+		err = json.NewDecoder(resp.Body).Decode(&errResp)
 		if err == nil && errResp.Error != nil && errResp.Error.Message != "" {
-			errMsg = errResp.Error.Message
+			errMsg = strings.Join(strings.Fields(errResp.Error.Message), " ")
 		}
 
-		errMsg = strings.Join(strings.Fields(errMsg), " ")
+		if errMsg != "" {
+			return nil, fmt.Errorf("anthropic API returned status %s: %s", resp.Status, errMsg)
+		}
 
-		return nil, fmt.Errorf("anthropic API returned status %s: %s", resp.Status, errMsg)
+		return nil, fmt.Errorf("anthropic API returned status %s", resp.Status)
 	}
 
 	var chatResp claudeResponse
