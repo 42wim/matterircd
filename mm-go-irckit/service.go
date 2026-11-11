@@ -1488,7 +1488,7 @@ func parseSummarizeAIProvider(arg string) (string, bool) {
 
 func parseSummarizeAIThinkingMode(arg string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(arg)) {
-	case "off", "none":
+	case "off", "none": //nolint:goconst
 		return "off", true
 	case "low":
 		return "low", true
@@ -1715,7 +1715,12 @@ func summarize(u *User, toUser *User, args []string, service string) {
 		ellipsis = "…"
 	}
 
-	u.MsgUser(toUser, fmt.Sprintf("Fetching messages for %s and generating summary%s", contextLabel, ellipsis))
+	thinkingStr := ""
+	if query.Thinking != "" && query.Thinking != "off" && query.Thinking != "none" {
+		thinkingStr = ", thinking: " + query.Thinking
+	}
+
+	u.MsgUser(toUser, fmt.Sprintf("Fetching messages for %s and generating summary (provider: %s, model: %s%s) %s", contextLabel, provider, model, thinkingStr, ellipsis))
 
 	var transcript strings.Builder
 
