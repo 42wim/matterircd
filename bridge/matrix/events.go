@@ -399,9 +399,34 @@ func (m *Matrix) OnTopic(t *matrixclient.TopicChange) {
 	m.enqueueEvent(t)
 }
 
-func (m *Matrix) handleTopic(t *matrixclient.TopicChange) {
+func (m *Matrix) handleTopic(t *matrixclient.TopicChange, direct bool, peer id.UserID) {
 	ghost := m.createUser(t.Sender)
 	if ghost == nil {
+		return
+	}
+
+	if direct {
+		receiver := m.dmReceiver(ghost, true, peer)
+		if receiver == nil {
+			return
+		}
+
+		topicText := "\x01ACTION updated topic to: " + t.Topic + "\x01"
+		if t.Topic == "" {
+			topicText = "\x01ACTION cleared topic\x01"
+		}
+
+		m.sendEvent(&bridge.Event{
+			Type: "direct_message", //nolint:goconst
+			Data: &bridge.DirectMessageEvent{
+				Text:      topicText,
+				ChannelID: t.RoomID.String(),
+				Sender:    ghost,
+				Receiver:  receiver,
+				Event:     "dm_topic",
+			},
+		})
+
 		return
 	}
 

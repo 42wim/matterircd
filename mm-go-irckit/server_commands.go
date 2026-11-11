@@ -1253,45 +1253,94 @@ func CmdTagMsg(s Server, u *User, msg *irc.Message) error {
 }
 
 // CmdTopic is a handler for the /TOPIC command.
+//
+//nolint:funlen,gocyclo
 func CmdTopic(s Server, u *User, msg *irc.Message) error {
 	channelname := msg.Params[0]
-	if channelname == "" || !strings.HasPrefix(channelname, "#") {
+	if channelname == "" || u.br == nil {
 		return nil
 	}
 
-	ch := s.Channel(channelname)
-
-	if msg.Trailing != "" {
-		err := u.br.SetTopic(u.ctx, ch.ID(), utils.Irc2Markdown(msg.Trailing))
-		if err != nil {
-			return s.EncodeMessage(u, irc.ERR_CHANOPRIVSNEEDED, msg.Params, err.Error())
-		}
-
-		ch.Topic(u, msg.Trailing)
-	} else {
-		r := make([]*irc.Message, 0, ch.Len()+1)
-
-		t := ch.GetTopic()
-		if t == "" {
-			r = append(r, &irc.Message{
-				Prefix:   s.Prefix(),
-				Params:   []string{u.Nick, channelname},
-				Command:  irc.RPL_NOTOPIC,
-				Trailing: "No topic is set",
-			})
-		} else {
-			r = append(r, &irc.Message{
-				Prefix:   s.Prefix(),
-				Params:   []string{u.Nick, channelname},
-				Command:  irc.RPL_TOPIC,
-				Trailing: t,
-			})
-		}
-
-		return u.Encode(r...)
+	if len(msg.Params) > 1 && msg.Trailing == "" {
+		msg.Trailing = strings.Join(msg.Params[1:], " ")
 	}
 
-	return nil
+	if ch, exists := s.HasChannel(channelname); exists { //nolint:nestif
+		if msg.Trailing != "" || msg.EmptyTrailing {
+			err := u.br.SetTopic(u.ctx, ch.ID(), utils.Irc2Markdown(msg.Trailing))
+			if err != nil {
+				return s.EncodeMessage(u, irc.ERR_CHANOPRIVSNEEDED, msg.Params, err.Error())
+			}
+
+			ch.Topic(u, msg.Trailing)
+		} else {
+			r := make([]*irc.Message, 0, ch.Len()+1)
+
+			t := ch.GetTopic()
+			if t == "" {
+				r = append(r, &irc.Message{
+					Prefix:   s.Prefix(),
+					Params:   []string{u.Nick, channelname},
+					Command:  irc.RPL_NOTOPIC,
+					Trailing: "No topic is set",
+				})
+			} else {
+				r = append(r, &irc.Message{
+					Prefix:   s.Prefix(),
+					Params:   []string{u.Nick, channelname},
+					Command:  irc.RPL_TOPIC,
+					Trailing: t,
+				})
+			}
+
+			return u.Encode(r...)
+		}
+
+		return nil
+	}
+
+	if toUser, exists := s.HasUser(channelname); exists { //nolint:nestif
+		dmChannelID := u.br.GetDMChannelID(u.ctx, toUser.User)
+		if dmChannelID == "" {
+			return s.EncodeMessage(u, irc.ERR_NOSUCHNICK, msg.Params, "No such nick/channel")
+		}
+
+		if msg.Trailing != "" || msg.EmptyTrailing {
+			err := u.br.SetTopic(u.ctx, dmChannelID, utils.Irc2Markdown(msg.Trailing))
+			if err != nil {
+				return s.EncodeMessage(u, irc.ERR_CHANOPRIVSNEEDED, msg.Params, err.Error())
+			}
+
+			return nil
+		}
+
+		t := u.br.Topic(u.ctx, dmChannelID)
+		if t == "" {
+			return s.EncodeMessage(u, irc.RPL_NOTOPIC, []string{u.Nick, channelname}, "No topic is set")
+		}
+
+		customEmoji := u.br.FormatterConfig().CustomEmoji
+		disableEmoji := u.br.FormatterConfig().DisableEmoji
+		disableMarkdown := u.br.FormatterConfig().DisableMarkdown
+		inlineCode := u.br.FormatterConfig().MarkdownInlineCode
+
+		t = utils.FormatMarkdownAndEmoji(
+			t,
+			disableMarkdown,
+			disableEmoji,
+			blockQuoteCharDefault,
+			inlineCode,
+			customEmoji,
+		)
+
+		return s.EncodeMessage(u, irc.RPL_TOPIC, []string{u.Nick, channelname}, t)
+	}
+
+	if strings.HasPrefix(channelname, "#") || strings.HasPrefix(channelname, "&") {
+		return s.EncodeMessage(u, irc.ERR_NOSUCHCHANNEL, []string{channelname}, "No such channel")
+	}
+
+	return s.EncodeMessage(u, irc.ERR_NOSUCHNICK, msg.Params, "No such nick/channel")
 }
 
 // CmdWho is a handler for the /WHO command.

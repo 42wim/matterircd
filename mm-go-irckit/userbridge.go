@@ -192,6 +192,16 @@ func (u *User) handleChannelTopicEvent(event *bridge.ChannelTopicEvent) {
 		tu = u
 	}
 
+	if !ok {
+		if info := u.br.GetUser(u.ctx, event.UserID); info != nil {
+			tu = u.createUserFromInfo(info)
+			ok = true
+		} else if svc, hasSvc := u.Srv.HasUser(u.br.Protocol()); hasSvc {
+			tu = svc
+			ok = true
+		}
+	}
+
 	customEmoji := u.br.FormatterConfig().CustomEmoji
 	disableEmoji := u.br.FormatterConfig().DisableEmoji
 	disableMarkdown := u.br.FormatterConfig().DisableMarkdown
@@ -199,6 +209,15 @@ func (u *User) handleChannelTopicEvent(event *bridge.ChannelTopicEvent) {
 
 	if ok {
 		ch := u.Srv.Channel(event.ChannelID)
+
+		// If we are permitted to be in the channel but haven't synced/joined it yet, do so now
+		if !ch.HasUser(u) && u.mayJoin(event.ChannelID) {
+			_ = u.syncChannel(event.ChannelID, u.br.GetChannelName(u.ctx, event.ChannelID))
+		}
+
+		if tu.Ghost && !ch.HasUser(tu) {
+			_ = ch.Join(tu)
+		}
 
 		topic := utils.FormatMarkdownAndEmoji(
 			event.Text,
