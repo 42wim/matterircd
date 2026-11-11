@@ -1473,7 +1473,7 @@ func parseSummarizeAIProvider(arg string) (string, bool) {
 		return utils.AIClaudeProvider, true
 	case utils.AICopilotProvider, utils.AIGitHubProvider:
 		return utils.AICopilotProvider, true
-	case utils.AIGeminiProvider, "google":
+	case utils.AIGeminiProvider, utils.AIGoogleProvider:
 		return utils.AIGeminiProvider, true
 	case utils.AIXAIProvider, utils.AIGrokProvider:
 		return utils.AIXAIProvider, true
@@ -1680,21 +1680,33 @@ func summarize(u *User, toUser *User, args []string, service string) {
 			return
 		}
 	default:
-		if cfg.ServiceAccountFile == "" {
-			u.MsgUser(toUser, "Gemini AI is not configured (missing service_account_file).")
+		switch {
+		case cfg.ServiceAccountFile != "":
+			geminiClient, err := utils.NewGeminiClient(u.ctx, cfg.ServiceAccountFile, cfg.Project, cfg.Location, model)
+			if err != nil {
+				u.MsgUser(toUser, fmt.Sprintf("Failed to initialize Gemini AI: %v", err))
+
+				return
+			}
+
+			project = geminiClient.Project()
+			aiClient = geminiClient
+		case token != "":
+			baseURL := cfg.GetBaseURL(provider)
+
+			geminiClient, err := utils.NewGeminiAPIKeyClient(token, baseURL, model)
+			if err != nil {
+				u.MsgUser(toUser, fmt.Sprintf("Failed to initialize Gemini AI: %v", err))
+
+				return
+			}
+
+			aiClient = geminiClient
+		default:
+			u.MsgUser(toUser, "Gemini AI is not configured (missing service_account_file or token).")
 
 			return
 		}
-
-		geminiClient, err := utils.NewGeminiClient(u.ctx, cfg.ServiceAccountFile, cfg.Project, cfg.Location, model)
-		if err != nil {
-			u.MsgUser(toUser, fmt.Sprintf("Failed to initialize Gemini AI: %v", err))
-
-			return
-		}
-
-		project = geminiClient.Project()
-		aiClient = geminiClient
 	}
 
 	contextLabel, events, err := u.getSummarizeEvents(args[0], query)
@@ -1768,6 +1780,14 @@ func summarize(u *User, toUser *User, args []string, service string) {
 
 		logger.Debugf("AI summarization for %s (provider: %s, model: %s, thinking: %s, url: %s)", contextLabel, provider, model, thinking, baseURL)
 	default:
+		if cfg.ServiceAccountFile == "" {
+			baseURL := cfg.GetBaseURL(provider)
+
+			logger.Debugf("AI summarization for %s (provider: %s, model: %s, thinking: %s, url: %s)", contextLabel, provider, model, thinking, baseURL)
+
+			break
+		}
+
 		region := cfg.Location
 		if region == "" {
 			region = "us"

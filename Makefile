@@ -21,7 +21,7 @@ docker:
 	docker build -t 42wim/matterircd .
 
 lint:
-	golangci-lint run -v --new-from-rev HEAD~5
+	golangci-lint run
 
 release:
 	goreleaser release --skip publish

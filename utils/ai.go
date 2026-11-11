@@ -21,6 +21,8 @@ type Summarizer interface {
 }
 
 type Client struct {
+	apiKey      string
+	baseURL     string
 	project     string
 	location    string
 	model       string
@@ -116,6 +118,7 @@ const (
 	AIDeepSeekProvider  = "deepseek"
 	AIGeminiProvider    = "gemini"
 	AIGitHubProvider    = "github"
+	AIGoogleProvider    = "google"
 	AIGrokProvider      = "grok"
 	AIHetznerProvider   = "hetzner"
 	AILocalProvider     = "local"
@@ -138,6 +141,7 @@ const (
 
 	DefaultClaudeBaseURL   = "https://api.anthropic.com/v1"
 	DefaultDeepSeekBaseURL = "https://api.deepseek.com"
+	DefaultGeminiBaseURL   = "https://generativelanguage.googleapis.com/v1beta"
 	DefaultHetznerBaseURL  = "https://inference.hetzner.com/api/v1"
 	DefaultMuseBaseURL     = "https://api.meta.ai/v1"
 	DefaultOpenAIBaseURL   = "https://api.openai.com/v1"
@@ -247,33 +251,85 @@ func NewGeminiClient(ctx context.Context, saFile, project, location, model strin
 	}, nil
 }
 
+// NewGeminiAPIKeyClient creates a new Gemini AI client targeting Google AI Studio authenticated via API key.
+func NewGeminiAPIKeyClient(apiKey, baseURL, model string) (*Client, error) {
+	if apiKey == "" {
+		return nil, errors.New("gemini API key is required")
+	}
+
+	if baseURL == "" {
+		baseURL = DefaultGeminiBaseURL
+	}
+
+	if model == "" {
+		model = DefaultGeminiModel
+	}
+
+	return &Client{
+		apiKey:     apiKey,
+		baseURL:    strings.TrimRight(baseURL, "/"),
+		model:      model,
+		httpClient: &http.Client{Timeout: 30 * time.Second},
+	}, nil
+}
+
 // Project returns the resolved GCP project ID.
 func (c *Client) Project() string {
 	return c.project
 }
 
+// BaseURL returns the configured base URL.
+func (c *Client) BaseURL() string {
+	if c.baseURL != "" {
+		return c.baseURL
+	}
+
+	return DefaultGeminiBaseURL
+}
+
 //nolint:funlen,gocyclo
 func (c *Client) Summarize(ctx context.Context, prompt string, thinking string) (string, error) {
-	token, err := c.tokenSource.Token()
-	if err != nil {
-		return "", fmt.Errorf("failed to get oauth2 token: %w", err)
-	}
-
-	var endpointHost string
-
-	switch c.location {
-	case "", "global", "us":
-		endpointHost = "aiplatform.googleapis.com"
-	case "eu":
-		endpointHost = "eu-aiplatform.googleapis.com"
-	default:
-		endpointHost = fmt.Sprintf("%s-aiplatform.googleapis.com", c.location)
-	}
-
-	url := fmt.Sprintf(
-		"https://%s/v1/projects/%s/locations/%s/publishers/google/models/%s:generateContent",
-		endpointHost, c.project, c.location, c.model,
+	var (
+		url        string
+		authHeader = "Authorization"
+		authValue  string
 	)
+
+	switch {
+	case c.apiKey != "":
+		baseURL := c.baseURL
+		if baseURL == "" {
+			baseURL = DefaultGeminiBaseURL
+		}
+
+		url = fmt.Sprintf("%s/models/%s:generateContent", strings.TrimRight(baseURL, "/"), c.model)
+		authHeader = "x-goog-api-key"
+		authValue = c.apiKey
+	case c.tokenSource != nil:
+		token, err := c.tokenSource.Token()
+		if err != nil {
+			return "", fmt.Errorf("failed to get oauth2 token: %w", err)
+		}
+
+		var endpointHost string
+
+		switch c.location {
+		case "", "global", "us":
+			endpointHost = "aiplatform.googleapis.com"
+		case "eu":
+			endpointHost = "eu-aiplatform.googleapis.com"
+		default:
+			endpointHost = fmt.Sprintf("%s-aiplatform.googleapis.com", c.location)
+		}
+
+		url = fmt.Sprintf(
+			"https://%s/v1/projects/%s/locations/%s/publishers/google/models/%s:generateContent",
+			endpointHost, c.project, c.location, c.model,
+		)
+		authValue = "Bearer " + token.AccessToken
+	default:
+		return "", errors.New("gemini client has neither API key nor service account credentials configured")
+	}
 
 	reqBody := generateRequest{
 		Contents: []content{
@@ -302,7 +358,7 @@ func (c *Client) Summarize(ctx context.Context, prompt string, thinking string) 
 		return "", err
 	}
 
-	req.Header.Set("Authorization", "Bearer "+token.AccessToken)
+	req.Header.Set(authHeader, authValue)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(req)

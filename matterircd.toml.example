@@ -87,16 +87,18 @@ max_post_limit = 100
 
 # Credentials & Endpoints
 # Default token for the configured provider:
-token = "ghu_..." # GitHub token for Copilot, or API key for OpenAI / Hetzner
+token = "ghu_..." # GitHub token for Copilot, or API key for Gemini / OpenAI / Hetzner
 # Or specify provider-scoped tokens to safely switch between providers on IRC without leaking keys:
 #claude_token = "sk-..."
 #copilot_token = "ghu_..."
 #deepseek_token = "sk-..."
+#gemini_token = "AIzaSy..."
 #hetzner_token = "..."
 #openai_token = "sk-..."
 #muse_token = "..."
 #xai_token = "xai-..."
 
+# For Gemini via Google Cloud Vertex AI (instead of Google AI Studio API key):
 service_account_file = "/etc/matterircd/sa.json"
 project = "myproject-req-10375"
 location = "us"
@@ -106,6 +108,7 @@ location = "us"
 
 # Or configure provider-specific endpoints to prevent endpoint bleed:
 #[ai.urls]
+#gemini = "https://generativelanguage.googleapis.com/v1beta"
 #openai = "https://api.openai.com/v1"
 #hetzner = "https://inference.hetzner.com/api/v1"
 #ollama = "http://localhost:11434/v1"
