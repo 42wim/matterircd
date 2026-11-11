@@ -1800,12 +1800,16 @@ func summarize(u *User, toUser *User, args []string, service string) {
 		)
 	}
 
-	summary, err := aiClient.Summarize(u.ctx, prompt, query.Thinking)
+	startTime := time.Now()
+
+	summaryResult, err := aiClient.Summarize(u.ctx, prompt, query.Thinking)
 	if err != nil {
 		u.MsgUser(toUser, fmt.Sprintf("Summarization failed: %v", err))
 
 		return
 	}
+
+	duration := time.Since(startTime)
 
 	heading := "Summary for " + contextLabel
 	headingLen := 4 + len(heading) + 4
@@ -1831,7 +1835,7 @@ func summarize(u *User, toUser *User, args []string, service string) {
 		PreserveNewLines:   preserveNewLines,
 	}
 
-	utils.ProcessMessageText(summary, opts, func(line string) {
+	utils.ProcessMessageText(summaryResult.Content, opts, func(line string) {
 		trimmed := strings.TrimRight(line, " \r\t")
 		if trimmed != "" {
 			u.MsgUser(toUser, trimmed)
@@ -1839,4 +1843,79 @@ func summarize(u *User, toUser *User, args []string, service string) {
 	})
 
 	u.MsgUser(toUser, strings.Repeat("=", headingLen))
+	u.MsgUser(toUser, formatSummarizeStats(len(events), transcript.Len(), summaryResult.Usage, duration))
+}
+
+func formatSummarizeStats(postCount, contentBytes int, usage ai.Usage, duration time.Duration) string {
+	var parts []string
+
+	postStr := fmt.Sprintf("%d posts", postCount)
+	if postCount == 1 {
+		postStr = "1 post"
+	}
+
+	var sizeStr string
+	if contentBytes < 1024 {
+		sizeStr = fmt.Sprintf("%d B", contentBytes)
+	} else {
+		sizeStr = fmt.Sprintf("%.1f KB", float64(contentBytes)/1024.0)
+	}
+
+	parts = append(parts, postStr+", "+sizeStr)
+
+	if usage.TotalTokens > 0 || usage.PromptTokens > 0 {
+		var tokenStr string
+
+		switch {
+		case usage.ReasoningTokens > 0:
+			tokenStr = fmt.Sprintf("Tokens: %s prompt + %s reply (thinking: %s) = %s total",
+				formatTokenNumber(usage.PromptTokens),
+				formatTokenNumber(usage.CompletionTokens),
+				formatTokenNumber(usage.ReasoningTokens),
+				formatTokenNumber(usage.TotalTokens),
+			)
+		case usage.PromptTokens > 0 && usage.CompletionTokens > 0:
+			tokenStr = fmt.Sprintf("Tokens: %s prompt + %s reply = %s total",
+				formatTokenNumber(usage.PromptTokens),
+				formatTokenNumber(usage.CompletionTokens),
+				formatTokenNumber(usage.TotalTokens),
+			)
+		default:
+			tokenStr = fmt.Sprintf("Tokens: %s total", formatTokenNumber(usage.TotalTokens))
+		}
+
+		parts = append(parts, tokenStr)
+	}
+
+	parts = append(parts, fmt.Sprintf("%.1fs", duration.Seconds()))
+
+	return fmt.Sprintf("[%s]", strings.Join(parts, " | "))
+}
+
+func formatTokenNumber(n int) string {
+	if n < 0 {
+		return "-" + formatTokenNumber(-n)
+	}
+
+	s := strconv.Itoa(n)
+	if len(s) <= 3 {
+		return s
+	}
+
+	var b strings.Builder
+
+	rem := len(s) % 3
+	if rem > 0 {
+		b.WriteString(s[:rem])
+	}
+
+	for i := rem; i < len(s); i += 3 {
+		if b.Len() > 0 {
+			b.WriteByte(',')
+		}
+
+		b.WriteString(s[i : i+3])
+	}
+
+	return b.String()
 }

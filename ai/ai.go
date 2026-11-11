@@ -6,12 +6,33 @@ import (
 )
 
 type Summarizer interface {
-	Summarize(ctx context.Context, prompt string, thinking string) (string, error)
+	Summarize(ctx context.Context, prompt string, thinking string) (*SummaryResult, error)
+}
+
+type Usage struct {
+	PromptTokens     int
+	CompletionTokens int
+	TotalTokens      int
+	ReasoningTokens  int
+}
+
+type SummaryResult struct {
+	Content string
+	Usage   Usage
 }
 
 type chatMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
+}
+
+type chatUsage struct {
+	PromptTokens            int `json:"prompt_tokens"`
+	CompletionTokens        int `json:"completion_tokens"`
+	TotalTokens             int `json:"total_tokens"`
+	CompletionTokensDetails *struct {
+		ReasoningTokens int `json:"reasoning_tokens"`
+	} `json:"completion_tokens_details,omitempty"`
 }
 
 type chatResponse struct {
@@ -20,9 +41,32 @@ type chatResponse struct {
 			Content string `json:"content"`
 		} `json:"message"`
 	} `json:"choices"`
+	Usage *chatUsage `json:"usage,omitempty"`
 	Error *struct {
 		Message string `json:"message"`
 	} `json:"error,omitempty"`
+}
+
+func parseChatUsage(u *chatUsage) Usage {
+	if u == nil {
+		return Usage{}
+	}
+
+	res := Usage{
+		PromptTokens:     u.PromptTokens,
+		CompletionTokens: u.CompletionTokens,
+		TotalTokens:      u.TotalTokens,
+	}
+
+	if u.CompletionTokensDetails != nil {
+		res.ReasoningTokens = u.CompletionTokensDetails.ReasoningTokens
+	}
+
+	if res.TotalTokens == 0 && (res.PromptTokens > 0 || res.CompletionTokens > 0) {
+		res.TotalTokens = res.PromptTokens + res.CompletionTokens
+	}
+
+	return res
 }
 
 const (

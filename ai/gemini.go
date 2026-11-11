@@ -47,6 +47,13 @@ type part struct {
 	Text string `json:"text"`
 }
 
+type geminiUsageMetadata struct {
+	PromptTokenCount     int `json:"promptTokenCount"`
+	CandidatesTokenCount int `json:"candidatesTokenCount"`
+	TotalTokenCount      int `json:"totalTokenCount"`
+	ThoughtsTokenCount   int `json:"thoughtsTokenCount"`
+}
+
 type generateResponse struct {
 	Candidates []struct {
 		Content struct {
@@ -56,9 +63,29 @@ type generateResponse struct {
 			} `json:"parts"`
 		} `json:"content"`
 	} `json:"candidates"`
-	Error *struct {
+	UsageMetadata *geminiUsageMetadata `json:"usageMetadata,omitempty"`
+	Error         *struct {
 		Message string `json:"message"`
 	} `json:"error,omitempty"`
+}
+
+func parseGeminiUsage(m *geminiUsageMetadata) Usage {
+	if m == nil {
+		return Usage{}
+	}
+
+	res := Usage{
+		PromptTokens:     m.PromptTokenCount,
+		CompletionTokens: m.CandidatesTokenCount,
+		TotalTokens:      m.TotalTokenCount,
+		ReasoningTokens:  m.ThoughtsTokenCount,
+	}
+
+	if res.TotalTokens == 0 && (res.PromptTokens > 0 || res.CompletionTokens > 0) {
+		res.TotalTokens = res.PromptTokens + res.CompletionTokens
+	}
+
+	return res
 }
 
 // NewGeminiClient creates a new Gemini AI client authenticated via service account credentials.
@@ -138,7 +165,7 @@ func (c *GeminiClient) BaseURL() string {
 }
 
 //nolint:funlen,gocyclo
-func (c *GeminiClient) Summarize(ctx context.Context, prompt string, thinking string) (string, error) {
+func (c *GeminiClient) Summarize(ctx context.Context, prompt string, thinking string) (*SummaryResult, error) {
 	var (
 		url        string
 		authHeader = "Authorization"
@@ -158,7 +185,7 @@ func (c *GeminiClient) Summarize(ctx context.Context, prompt string, thinking st
 	case c.tokenSource != nil:
 		token, err := c.tokenSource.Token()
 		if err != nil {
-			return "", fmt.Errorf("failed to get oauth2 token: %w", err)
+			return nil, fmt.Errorf("failed to get oauth2 token: %w", err)
 		}
 
 		var endpointHost string
@@ -178,7 +205,7 @@ func (c *GeminiClient) Summarize(ctx context.Context, prompt string, thinking st
 		)
 		authValue = "Bearer " + token.AccessToken
 	default:
-		return "", errors.New("gemini client has neither API key nor service account credentials configured")
+		return nil, errors.New("gemini client has neither API key nor service account credentials configured")
 	}
 
 	reqBody := generateRequest{
@@ -200,12 +227,12 @@ func (c *GeminiClient) Summarize(ctx context.Context, prompt string, thinking st
 
 	rawJSON, err := json.Marshal(reqBody)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(rawJSON))
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	req.Header.Set(authHeader, authValue)
@@ -213,7 +240,7 @@ func (c *GeminiClient) Summarize(ctx context.Context, prompt string, thinking st
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("gemini API request failed: %w", err)
+		return nil, fmt.Errorf("gemini API request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -221,11 +248,11 @@ func (c *GeminiClient) Summarize(ctx context.Context, prompt string, thinking st
 
 	err = json.NewDecoder(resp.Body).Decode(&genResp)
 	if err != nil {
-		return "", fmt.Errorf("failed to decode response: %w", err)
+		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
 	if genResp.Error != nil {
-		return "", fmt.Errorf("gemini error: %s", genResp.Error.Message)
+		return nil, fmt.Errorf("gemini error: %s", genResp.Error.Message)
 	}
 
 	if len(genResp.Candidates) > 0 {
@@ -237,14 +264,15 @@ func (c *GeminiClient) Summarize(ctx context.Context, prompt string, thinking st
 			}
 		}
 
-		if sb.Len() > 0 {
-			return sb.String(), nil
+		resultText := sb.String()
+		if resultText == "" && len(genResp.Candidates[0].Content.Parts) > 0 {
+			resultText = genResp.Candidates[0].Content.Parts[len(genResp.Candidates[0].Content.Parts)-1].Text
 		}
 
-		if len(genResp.Candidates[0].Content.Parts) > 0 {
-			return genResp.Candidates[0].Content.Parts[len(genResp.Candidates[0].Content.Parts)-1].Text, nil
+		if resultText != "" {
+			return &SummaryResult{Content: resultText, Usage: parseGeminiUsage(genResp.UsageMetadata)}, nil
 		}
 	}
 
-	return "", fmt.Errorf("no summary generated")
+	return nil, fmt.Errorf("no summary generated")
 }
