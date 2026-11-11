@@ -20,14 +20,14 @@ import (
 
 // NewUser creates a *User, wrapping a connection with metadata we need for our server.
 func NewUser(c Conn) *User {
-	ctx, cancel := context.WithCancel(context.Background())
 	u := &User{
-		Conn:   c,
-		cancel: cancel,
-		ctx:    ctx,
+		Conn: c,
 	}
 
 	if c != nil {
+		ctx, cancel := context.WithCancel(context.Background())
+		u.ctx = ctx
+		u.cancel = cancel
 		u.UserInfo = &bridge.UserInfo{
 			Host: "*",
 		}

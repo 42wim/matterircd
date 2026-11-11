@@ -376,6 +376,8 @@ func (m *Matrix) handleTyping(t *matrixclient.Typing) {
 		channelType = "D"
 	}
 
+	me := m.GetMe()
+
 	for _, userID := range t.Users {
 		ghost := m.createUser(userID)
 		if ghost == nil {
@@ -387,7 +389,7 @@ func (m *Matrix) handleTyping(t *matrixclient.Typing) {
 			Data: &bridge.TypingEvent{
 				ChannelID:   t.RoomID.String(),
 				ChannelType: channelType,
-				Receiver:    m.GetMe(),
+				Receiver:    me,
 				Sender:      ghost,
 			},
 		})
@@ -860,27 +862,54 @@ func (m *Matrix) resolveUserID(name string) (id.UserID, bool) {
 	}
 
 	isIdent := strings.HasPrefix(name, "~")
+	_, myHomeserver, _ := m.mc.UserID().Parse()
 
-	for _, userID := range m.mc.KnownUsers() {
-		u := m.createUser(userID)
-		if u == nil {
-			continue
+	userID, found := m.mc.FindUser(func(userID id.UserID, displayName string) bool {
+		localpart, homeserver, err := userID.Parse()
+		if err != nil {
+			return false
 		}
 
-		if isIdent && strings.EqualFold(u.User, name) {
-			m.userResolveCache.Add(lookupKey, userID)
-
-			return userID, true
+		if isIdent {
+			return matchUserIdent(localpart, homeserver, userID, name)
 		}
 
-		if !isIdent && (strings.EqualFold(u.Nick, name) || strings.EqualFold(u.Real, name)) {
-			m.userResolveCache.Add(lookupKey, userID)
+		return m.matchUserNickOrReal(localpart, homeserver, userID, myHomeserver, displayName, name)
+	})
+	if found {
+		m.userResolveCache.Add(lookupKey, userID)
 
-			return userID, true
-		}
+		return userID, true
 	}
 
 	return "", false
+}
+
+func matchUserIdent(localpart, homeserver string, userID id.UserID, name string) bool {
+	if len(userID) <= maxIdentLen {
+		return len(name) == len(userID) &&
+			name[0] == '~' &&
+			name[1+len(localpart)] == '/' &&
+			strings.EqualFold(name[1:1+len(localpart)], localpart) &&
+			strings.EqualFold(name[2+len(localpart):], homeserver)
+	}
+
+	return strings.EqualFold(userIdent(localpart, homeserver, userID), name)
+}
+
+func (m *Matrix) matchUserNickOrReal(localpart, homeserver string, userID id.UserID, myHomeserver, displayName, name string) bool {
+	if displayName != "" {
+		if strings.EqualFold(displayName, name) {
+			return true
+		}
+	} else if len(name) == len(userID)-1 &&
+		name[len(localpart)] == '@' &&
+		strings.EqualFold(name[:len(localpart)], localpart) &&
+		strings.EqualFold(name[len(localpart)+1:], homeserver) {
+		return true
+	}
+
+	return strings.EqualFold(m.userNick(localpart, homeserver, userID, myHomeserver), name)
 }
 
 // dmRoom returns the direct room with a user, "" if there is none.

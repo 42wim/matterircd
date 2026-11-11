@@ -136,6 +136,7 @@ type Matrix struct {
 	reactionCache      *lru.Cache[string, id.EventID]
 	reactionMetaCache  *lru.Cache[id.EventID, reactionMeta]
 	userResolveCache   *lru.Cache[string, id.UserID]
+	userInfoCache      *lru.Cache[id.UserID, cachedUser]
 
 	pinFetchMu    sync.Mutex
 	pinFetchStart time.Time
@@ -161,6 +162,13 @@ type Matrix struct {
 	// roomProgressMu guards roomProgress, see UpdateLastViewed.
 	roomProgressMu sync.Mutex
 	roomProgress   map[id.RoomID]*roomProgress
+}
+
+type cachedUser struct {
+	info        bridge.UserInfo
+	displayName string
+	dirTmpl     string
+	isBot       bool
 }
 
 // resolveNickSep returns the configured separator and the one to use: an invalid
@@ -247,6 +255,7 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 	m.reactionMetaCache, _ = lru.New[id.EventID, reactionMeta](reactionCacheSize * 5)
 	m.sentCache, _ = lru.New[id.EventID, struct{}](sentCacheSize)
 	m.userResolveCache, _ = lru.New[string, id.UserID](2048)
+	m.userInfoCache, _ = lru.New[id.UserID, cachedUser](2048)
 
 	if cred.Token != "" && cred.Server == "" {
 		cancel()
@@ -770,9 +779,8 @@ func (m *Matrix) Join(ctx context.Context, channelName string) (string, string, 
 }
 
 func (m *Matrix) List(ctx context.Context) (map[string]string, error) {
-	rooms := make(map[string]string)
-
 	all, names := m.roomsWithNames()
+	rooms := make(map[string]string, len(all))
 
 	for _, room := range all {
 		if room.IsDirect {
@@ -810,6 +818,7 @@ func (m *Matrix) Logout(ctx context.Context) error {
 	}
 
 	m.userResolveCache.Purge()
+	m.userInfoCache.Purge()
 	m.mc.Logout()
 	m.roomUpdateCancel()
 	m.cancel()
@@ -1093,13 +1102,29 @@ func (m *Matrix) HasCustomStatus(userID string) bool {
 }
 
 func (m *Matrix) StatusUsers(ctx context.Context) (map[string]string, error) {
-	statuses := make(map[string]string)
+	raw := m.mc.GetStatuses()
+	statuses := make(map[string]string, len(raw))
 
-	for _, userID := range m.mc.KnownUsers() {
-		statuses[userID.String()] = m.mc.GetStatus(userID)
+	for userID, status := range raw {
+		if ident := m.cachedUserIdent(userID); ident != "" {
+			statuses[ident] = status
+		}
 	}
 
 	return statuses, nil
+}
+
+func (m *Matrix) cachedUserIdent(userID id.UserID) string {
+	if cached, ok := m.userInfoCache.Peek(userID); ok {
+		return cached.info.User
+	}
+
+	localpart, homeserver, err := userID.Parse()
+	if err != nil {
+		return ""
+	}
+
+	return userIdent(localpart, homeserver, userID)
 }
 
 func (m *Matrix) IsOnline(status string) bool {
@@ -1292,7 +1317,7 @@ func (m *Matrix) GetUserChannels(ctx context.Context, userID string) ([]string, 
 }
 
 func (m *Matrix) GetUserCount() int {
-	return len(m.mc.KnownUsers())
+	return m.mc.GetUserCount()
 }
 
 func (m *Matrix) GetMe() *bridge.UserInfo {
@@ -1420,36 +1445,62 @@ func (m *Matrix) NickAllowsColon() bool {
 	return strings.Contains(m.nickSep, ":")
 }
 
+// userIdent returns the IRC ident of a Matrix user, which is also the key of a ghost.
+// It always includes the homeserver, as '/' is legal in a localpart and would otherwise
+// collide with a remote user.
+func userIdent(localpart, homeserver string, userID id.UserID) string {
+	return capLen("~"+localpart+"/"+homeserver, userID, maxIdentLen)
+}
+
+// userNick returns the IRC nick of a Matrix user, dropping the homeserver part for
+// users on the same homeserver as us. The separator is escaped in the localpart.
+func (m *Matrix) userNick(localpart, homeserver string, userID id.UserID, myHomeserver string) string {
+	safeLocalpart := escapeNickPart(localpart, m.nickSep)
+	if homeserver == myHomeserver {
+		return capLen(safeLocalpart, userID, maxNickLen)
+	}
+
+	prefix, suffix := nickAffixes(m.nickSep)
+
+	return capLen(safeLocalpart+prefix+escapeNickPart(homeserver, m.nickSep)+suffix, userID, maxNickLen)
+}
+
 func (m *Matrix) createUser(userID id.UserID) *bridge.UserInfo {
+	if userID == "" {
+		return nil
+	}
+
+	displayName := m.mc.DisplayName(userID)
+	dirTmpl := m.cfg.Matrix().Bridge.DirectoryURL
+	isBot := m.mc.IsBot(userID)
+
+	if cached, ok := m.userInfoCache.Get(userID); ok &&
+		cached.displayName == displayName &&
+		cached.dirTmpl == dirTmpl &&
+		cached.isBot == isBot {
+		info := cached.info
+
+		return &info
+	}
+
 	localpart, homeserver, err := userID.Parse()
 	if err != nil {
 		return nil
 	}
 
-	displayName := m.mc.DisplayName(userID)
-	if displayName == "" {
-		displayName = localpart + "@" + homeserver
+	realName := displayName
+	if realName == "" {
+		realName = localpart + "@" + homeserver
 	}
 
-	// Drop the homeserver/host part if it's a user on the same homeserver as us.
-	// The separator can't appear in the localpart, so it is escaped.
-	prefix, suffix := nickAffixes(m.nickSep)
-	safeLocalpart := escapeNickPart(localpart, m.nickSep)
-	nick := capLen(safeLocalpart+prefix+escapeNickPart(homeserver, m.nickSep)+suffix, userID, maxNickLen)
+	_, myHomeserver, _ := m.mc.UserID().Parse()
+	nick := m.userNick(localpart, homeserver, userID, myHomeserver)
+	ident := userIdent(localpart, homeserver, userID)
 
-	// The IRC user is the key of a ghost. It always has the homeserver, as '/' is
-	// legal in a localpart and would otherwise collide with a remote user.
-	ident := capLen("~"+localpart+"/"+homeserver, userID, maxIdentLen)
-
-	_, myHomeserver, err := m.mc.UserID().Parse()
-	if err == nil && homeserver == myHomeserver {
-		nick = capLen(safeLocalpart, userID, maxNickLen)
-	}
-
-	info := &bridge.UserInfo{
+	info := bridge.UserInfo{
 		Nick:      nick,
 		User:      ident,
-		Real:      displayName,
+		Real:      realName,
 		Host:      hostWithoutPort(homeserver),
 		Ghost:     true,
 		Me:        userID == m.mc.UserID(),
@@ -1457,15 +1508,22 @@ func (m *Matrix) createUser(userID id.UserID) *bridge.UserInfo {
 		Directory: m.directoryURL(nick, localpart),
 	}
 
-	if m.mc.IsBot(userID) {
+	if isBot {
 		info.Roles = "bot"
 	}
 
 	if info.Me {
-		info.MentionKeys = []string{localpart, displayName, userID.String()}
+		info.MentionKeys = []string{localpart, realName, userID.String()}
 	}
 
-	return info
+	m.userInfoCache.Add(userID, cachedUser{
+		info:        info,
+		displayName: displayName,
+		dirTmpl:     dirTmpl,
+		isBot:       isBot,
+	})
+
+	return &info
 }
 
 // directoryURL expands the {nick} and {username} placeholders of matrix.DirectoryURL,
@@ -1477,20 +1535,25 @@ func (m *Matrix) directoryURL(nick, username string) string {
 	}
 
 	pathPart, queryPart, hasQuery := strings.Cut(tmpl, "?")
-
-	directoryURL := strings.NewReplacer(
-		"{nick}", url.PathEscape(nick),
-		"{username}", url.PathEscape(username),
-	).Replace(pathPart)
+	directoryURL := expandDirectoryPart(pathPart, nick, username, url.PathEscape)
 
 	if hasQuery {
-		directoryURL += "?" + strings.NewReplacer(
-			"{nick}", url.QueryEscape(nick),
-			"{username}", url.QueryEscape(username),
-		).Replace(queryPart)
+		directoryURL += "?" + expandDirectoryPart(queryPart, nick, username, url.QueryEscape)
 	}
 
 	return directoryURL
+}
+
+func expandDirectoryPart(part, nick, username string, escape func(string) string) string {
+	if strings.Contains(part, "{username}") {
+		part = strings.ReplaceAll(part, "{username}", escape(username))
+	}
+
+	if strings.Contains(part, "{nick}") {
+		part = strings.ReplaceAll(part, "{nick}", escape(nick))
+	}
+
+	return part
 }
 
 // roomMentionRegexp matches the Matrix @room mention along with Mattermost's @channel, @all and @here.
@@ -1908,9 +1971,10 @@ func (m *Matrix) RemoveReaction(ctx context.Context, msgID, emoji string) error 
 }
 
 func (m *Matrix) GetLastSentMsgs() []string {
-	data := make([]string, 0)
+	keys := m.msgLastSentCache.Keys()
+	data := make([]string, 0, len(keys))
 
-	for _, k := range m.msgLastSentCache.Keys() {
+	for _, k := range keys {
 		if v, ok := m.msgLastSentCache.Get(k); ok {
 			data = append(data, fmt.Sprintf("[@@%s] %s", k, v))
 		}

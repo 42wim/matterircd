@@ -21,6 +21,12 @@ const (
 	activeThreshold = 20 * time.Minute
 	maintainEvery   = time.Minute
 
+	// Bounds and rate-limits per-user status and timezone lookups, matching matterclient.
+	inactiveFetchTimeout   = 3 * time.Second
+	freshStatusMinInterval = 30 * time.Second
+	timezoneTTL            = 5 * time.Minute
+	maxSharedTimezones     = 1024
+
 	pingSkipWindow = 30 * time.Second // /sync long polls return at least this often
 
 	lastViewedDebounce = 3 * time.Second
@@ -239,12 +245,14 @@ func (c *Client) expirePresence(now time.Time) {
 	for userID, p := range c.presence {
 		if _, ok := c.users[userID]; !ok {
 			delete(c.presence, userID)
+			delete(c.presenceFetched, userID)
 
 			continue
 		}
 
 		if p.Status != StatusOffline && p.LastActivityAt > 0 && p.LastActivityAt < cutoff {
 			p.Status = StatusOffline
+			c.presence[userID] = p
 		}
 	}
 }

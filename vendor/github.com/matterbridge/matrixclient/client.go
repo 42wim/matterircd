@@ -50,12 +50,14 @@ type Client struct {
 	apiLogger     *logrus.Entry
 	rootAPILogger *logrus.Logger
 
-	channels   map[id.RoomID]*Channel
-	dmChannels map[id.RoomID][]id.UserID
-	directData map[id.UserID][]id.RoomID // last known m.direct account data
-	users      map[id.UserID]*User
-	presence   map[id.UserID]*Presence
-	spaces     map[id.RoomID]*space
+	channels        map[id.RoomID]*Channel
+	dmChannels      map[id.RoomID][]id.UserID
+	directData      map[id.UserID][]id.RoomID // last known m.direct account data
+	users           map[id.UserID]*User
+	presence        map[id.UserID]Presence
+	presenceFetched map[id.UserID]int64
+	timezones       map[string]*time.Location
+	spaces          map[id.RoomID]*space
 
 	invitations map[id.RoomID]Invitation
 	// Accepted direct invites may not appear in m.direct, even after joining.
@@ -116,12 +118,14 @@ func New(ctx context.Context, cred Credentials, h Handler, opts ...Option) (*Cli
 		rootAPILogger: rootAPILogger,
 		apiLogger:     rootAPILogger.WithFields(logrus.Fields{"prefix": "matrixclient: API"}),
 
-		channels:   make(map[id.RoomID]*Channel),
-		dmChannels: make(map[id.RoomID][]id.UserID),
-		directData: make(map[id.UserID][]id.RoomID),
-		users:      make(map[id.UserID]*User),
-		presence:   make(map[id.UserID]*Presence),
-		spaces:     make(map[id.RoomID]*space),
+		channels:        make(map[id.RoomID]*Channel),
+		dmChannels:      make(map[id.RoomID][]id.UserID),
+		directData:      make(map[id.UserID][]id.RoomID),
+		users:           make(map[id.UserID]*User),
+		presence:        make(map[id.UserID]Presence),
+		presenceFetched: make(map[id.UserID]int64),
+		timezones:       make(map[string]*time.Location),
+		spaces:          make(map[id.RoomID]*space),
 
 		invitations:    make(map[id.RoomID]Invitation),
 		acceptedDirect: make(map[id.RoomID]id.UserID),
@@ -790,6 +794,43 @@ func (c *Client) KnownUsers() []id.UserID {
 	}
 
 	return ids
+}
+
+// GetUserCount returns the total number of cached users.
+func (c *Client) GetUserCount() int {
+	c.RLock()
+	defer c.RUnlock()
+
+	return len(c.users)
+}
+
+// FindUser returns the first known user for which match returns true.
+func (c *Client) FindUser(match func(userID id.UserID, displayName string) bool) (id.UserID, bool) {
+	c.RLock()
+	defer c.RUnlock()
+
+	for userID, u := range c.users {
+		var displayName string
+		if u.MemberEventContent != nil {
+			displayName = u.Displayname
+		}
+
+		if match(userID, displayName) {
+			return userID, true
+		}
+	}
+
+	return "", false
+}
+
+// userIDKeyLocked returns the cached copy of userID, if the user is cached, so
+// per-user maps share a single copy of every ID. c must be locked.
+func (c *Client) userIDKeyLocked(userID id.UserID) id.UserID {
+	if u, ok := c.users[userID]; ok {
+		return u.ID
+	}
+
+	return userID
 }
 
 // JoinedMembers returns the joined members of a room.

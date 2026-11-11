@@ -35,6 +35,9 @@ type User struct {
 
 	Bot   bool // see Client.IsBot
 	human bool
+
+	tz          *time.Location
+	tzFetchedAt int64 // unix seconds of the last m.tz lookup, even when unset
 }
 
 // Channel is a Matrix room.
