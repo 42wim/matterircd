@@ -411,9 +411,9 @@ func (m *Matrix) handleTopic(t *matrixclient.TopicChange, direct bool, peer id.U
 			return
 		}
 
-		topicText := "\x1dset the channel topic: " + t.Topic + "\x1d"
+		topicText := "\x01ACTION updated topic to: " + t.Topic + "\x01"
 		if t.Topic == "" {
-			topicText = "\x1dcleared the channel topic\x1d"
+			topicText = "\x01ACTION cleared topic\x01"
 		}
 
 		m.sendEvent(&bridge.Event{
