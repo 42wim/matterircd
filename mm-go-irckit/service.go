@@ -746,6 +746,10 @@ func dispatchHistoricalEvent(u *User, toUser *User, event *bridge.Event, searchC
 	switch e := event.Data.(type) {
 	case *bridge.ChannelMessageEvent:
 		createAt, text, nick, msgID, parentID, files, channelID = e.CreateAt, e.Text, u.sanitizeNick(e.Sender.Nick), e.MessageID, e.ParentID, e.Files, e.ChannelID
+
+		if e.Sender.Me {
+			nick = u.Nick
+		}
 	case *bridge.DirectMessageEvent:
 		createAt, text, nick, msgID, parentID, files, channelID = e.CreateAt, e.Text, u.sanitizeNick(e.Sender.Nick), e.MessageID, e.ParentID, e.Files, e.ChannelID
 
