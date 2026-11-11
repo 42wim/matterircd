@@ -382,12 +382,7 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 			} else {
 				// Outbound DM (e.g. from history replay)
 				// Spoof as us, but target THEIR nick so it routes to their query window
-
-				// FORCE ghost creation to bypass irckit's local-echo routing trap
-				event.Sender.Me = false
-				ghostMe := u.createUserFromInfo(event.Sender)
-				event.Sender.Me = true
-				u.MsgSpoofUser(ghostMe, u.createUserFromInfo(event.Receiver).Nick, line, len(line))
+				u.MsgSpoofUser(u, u.createUserFromInfo(event.Receiver).Nick, line, len(line))
 			}
 		} else {
 			// Inbound DM
@@ -802,10 +797,7 @@ func (u *User) handleFileEvent(event *bridge.FileEvent) {
 				if event.Receiver.Me {
 					u.MsgSpoofUser(u, u.Nick, fileMsg)
 				} else {
-					event.Sender.Me = false
-					ghostMe := u.createUserFromInfo(event.Sender)
-					event.Sender.Me = true
-					u.MsgSpoofUser(ghostMe, u.createUserFromInfo(event.Receiver).Nick, fileMsg)
+					u.MsgSpoofUser(u, u.createUserFromInfo(event.Receiver).Nick, fileMsg)
 				}
 			} else {
 				u.MsgSpoofUser(u.createUserFromInfo(event.Sender), u.Nick, fileMsg)
@@ -1117,6 +1109,10 @@ func (u *User) updateUserFromInfo(info *bridge.UserInfo) *User {
 }
 
 func (u *User) createUserFromInfo(info *bridge.UserInfo) *User {
+	if info.Me || (u.User != "" && info.User == u.User) {
+		return u
+	}
+
 	info.Ghost = true
 
 	if ghost, ok := u.Srv.HasUserID(info.User); ok {
@@ -1842,8 +1838,14 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 		switch e := event.Data.(type) {
 		case *bridge.ChannelMessageEvent:
 			createAt, text, nick, msgID, parentID, files = e.CreateAt, e.Text, u.sanitizeNick(e.Sender.Nick), e.MessageID, e.ParentID, e.Files
+			if e.Sender.Me {
+				nick = u.Nick
+			}
 		case *bridge.DirectMessageEvent:
 			createAt, text, nick, msgID, parentID, files = e.CreateAt, e.Text, u.sanitizeNick(e.Sender.Nick), e.MessageID, e.ParentID, e.Files
+			if e.Sender.Me {
+				nick = u.Nick
+			}
 		case *bridge.ChannelAddEvent:
 			createAt, text, nick = e.CreateAt, e.Text, systemUser
 			if len(e.Added) > 0 && !e.Added[0].Me && e.Added[0].User != u.User {

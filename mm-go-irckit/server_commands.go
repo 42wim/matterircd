@@ -1604,7 +1604,7 @@ func CmdWhois(s Server, u *User, msg *irc.Message) error {
 			}
 		}
 
-		if isServiceBot(other.Nick) || (otherUser != nil && strings.Contains(otherUser.Roles, "bot")) {
+		if isServiceBot(other.Nick) || strings.Contains(other.Roles, "bot") || (otherUser != nil && strings.Contains(otherUser.Roles, "bot")) {
 			protocol := "Mattermost"
 
 			if p := u.br.Protocol(); p != "" {

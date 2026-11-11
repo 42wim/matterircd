@@ -809,6 +809,10 @@ func (m *Mattermost) IsOnline(status string) bool {
 
 //nolint:gocyclo
 func (m *Mattermost) StatusUser(ctx context.Context, userID string) (string, error) {
+	if !model.IsValidId(userID) {
+		return "", nil
+	}
+
 	userName := m.mc.GetCachedUserName(userID)
 
 	status := m.mc.GetStatusFresh(ctx, userID)
@@ -1099,10 +1103,18 @@ func (m *Mattermost) GetChannelCount() int {
 }
 
 func (m *Mattermost) GetUser(ctx context.Context, userID string) *bridge.UserInfo {
+	if !model.IsValidId(userID) {
+		return &bridge.UserInfo{}
+	}
+
 	return m.createUser(m.mc.GetUser(ctx, userID))
 }
 
 func (m *Mattermost) GetUserChannels(ctx context.Context, userID string) ([]string, error) {
+	if !model.IsValidId(userID) {
+		return nil, nil
+	}
+
 	channels, err := m.mc.GetUserChannels(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -1240,6 +1252,20 @@ func (m *Mattermost) createUser(mmuser *model.User) *bridge.UserInfo {
 	}
 
 	return info
+}
+
+func (m *Mattermost) createBotUser(username string) *bridge.UserInfo {
+	const botRole = "bot"
+
+	return &bridge.UserInfo{
+		Nick:  username,
+		User:  username,
+		Real:  botRole,
+		Host:  m.credentials.Server,
+		Roles: botRole,
+		Ghost: true,
+		Me:    false,
+	}
 }
 
 //nolint:cyclop
@@ -1548,8 +1574,7 @@ func (m *Mattermost) handleWsActionPost(ctx context.Context, rmsg *model.WebSock
 		logger.Debugf("found override username %s", overrideUsername)
 		// only allow valid irc nicks
 		if validIRCNickRegExp.MatchString(overrideUsername) {
-			ghost.Nick = overrideUsername
-			ghost.Me = false
+			ghost = m.createBotUser(overrideUsername)
 		}
 	}
 
@@ -3476,8 +3501,8 @@ func (m *Mattermost) postToEvent(ctx context.Context, p *model.Post, eventType s
 	botname, override := props["override_username"].(string)
 
 	user := m.GetUser(ctx, p.UserId)
-	if override {
-		user.Nick = botname
+	if override && botname != "" && validIRCNickRegExp.MatchString(botname) {
+		user = m.createBotUser(botname)
 	}
 
 	switch p.Type {
