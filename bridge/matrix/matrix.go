@@ -436,7 +436,7 @@ func (m *Matrix) handleEvent(q *queuedEvent) {
 	case *matrixclient.Typing:
 		m.handleTyping(e)
 	case *matrixclient.TopicChange:
-		m.handleTopic(e)
+		m.handleTopic(e, q.direct, q.peer)
 	case *matrixclient.MemberChange:
 		m.handleMember(e)
 	case *matrixclient.Invitation:
@@ -463,6 +463,8 @@ func (m *Matrix) snapshot(ev any) *queuedEvent {
 	case *matrixclient.Redaction:
 		roomID, q.direct = e.RoomID, e.Direct
 	case *matrixclient.PinChange:
+		roomID, q.direct = e.RoomID, m.mc.IsDirect(e.RoomID)
+	case *matrixclient.TopicChange:
 		roomID, q.direct = e.RoomID, m.mc.IsDirect(e.RoomID)
 	default:
 		return q
