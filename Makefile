@@ -22,6 +22,8 @@ docker:
 
 lint:
 	golangci-lint run
+	golangci-lint run vendor/github.com/matterbridge/matterclient/
+	golangci-lint run vendor/github.com/matterbridge/matrixclient/
 
 release:
 	goreleaser release --skip publish

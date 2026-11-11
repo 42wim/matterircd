@@ -500,8 +500,10 @@ func (c *Client) GetUserAvatarURL(ctx context.Context, userID id.UserID) string 
 // their timezone (profile field m.tz), or "" if unknown.
 func (c *Client) GetUserLocalTime(ctx context.Context, userID id.UserID) string {
 	c.RLock()
+
 	if u, ok := c.users[userID]; ok && u.tzFetchedAt > 0 && time.Since(time.Unix(u.tzFetchedAt, 0)) <= timezoneTTL {
 		loc := u.tz
+
 		c.RUnlock()
 
 		if loc == nil {
@@ -510,6 +512,7 @@ func (c *Client) GetUserLocalTime(ctx context.Context, userID id.UserID) string 
 
 		return time.Now().In(loc).Format("15:04")
 	}
+
 	c.RUnlock()
 
 	fetchCtx, cancel := context.WithTimeout(ctx, inactiveFetchTimeout)
