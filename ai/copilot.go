@@ -46,10 +46,10 @@ func NewCopilotClient(token, model string) (*CopilotClient, error) {
 }
 
 //nolint:funlen
-func (c *CopilotClient) Summarize(ctx context.Context, prompt string, _ string) (string, error) {
+func (c *CopilotClient) Summarize(ctx context.Context, prompt string, _ string) (*SummaryResult, error) {
 	sessionToken, err := c.getGitHubSessionToken(ctx)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	reqBody := copilotRequest{
@@ -65,14 +65,14 @@ func (c *CopilotClient) Summarize(ctx context.Context, prompt string, _ string) 
 
 	rawJSON, err := json.Marshal(reqBody)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	url := "https://api.githubcopilot.com/chat/completions"
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(rawJSON))
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	req.Header.Set("Authorization", "Bearer "+sessionToken)
@@ -83,7 +83,7 @@ func (c *CopilotClient) Summarize(ctx context.Context, prompt string, _ string) 
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("copilot API request failed: %w", err)
+		return nil, fmt.Errorf("copilot API request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -92,33 +92,33 @@ func (c *CopilotClient) Summarize(ctx context.Context, prompt string, _ string) 
 
 		errMsg := strings.TrimSpace(string(body))
 		if errMsg != "" {
-			return "", fmt.Errorf("copilot API returned status %s: %s", resp.Status, errMsg)
+			return nil, fmt.Errorf("copilot API returned status %s: %s", resp.Status, errMsg)
 		}
 
-		return "", fmt.Errorf("copilot API returned status %s", resp.Status)
+		return nil, fmt.Errorf("copilot API returned status %s", resp.Status)
 	}
 
 	var chatResp chatResponse
 
 	err = json.NewDecoder(resp.Body).Decode(&chatResp)
 	if err != nil {
-		return "", fmt.Errorf("failed to decode response: %w", err)
+		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
 	if chatResp.Error != nil {
 		errMsg := strings.Join(strings.Fields(chatResp.Error.Message), " ")
 
-		return "", fmt.Errorf("copilot error: %s", errMsg)
+		return nil, fmt.Errorf("copilot error: %s", errMsg)
 	}
 
 	if len(chatResp.Choices) > 0 {
 		content := strings.TrimSpace(chatResp.Choices[0].Message.Content)
 		if content != "" {
-			return content, nil
+			return &SummaryResult{Content: content, Usage: parseChatUsage(chatResp.Usage)}, nil
 		}
 	}
 
-	return "", fmt.Errorf("no summary generated")
+	return nil, fmt.Errorf("no summary generated")
 }
 
 func (c *CopilotClient) getGitHubSessionToken(ctx context.Context) (string, error) {

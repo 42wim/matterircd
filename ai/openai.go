@@ -57,7 +57,7 @@ func (c *OpenAIClient) BaseURL() string {
 }
 
 //nolint:funlen
-func (c *OpenAIClient) Summarize(ctx context.Context, prompt string, _ string) (string, error) {
+func (c *OpenAIClient) Summarize(ctx context.Context, prompt string, _ string) (*SummaryResult, error) {
 	reqBody := openAIRequest{
 		Model: c.model,
 		Messages: []chatMessage{
@@ -75,14 +75,14 @@ func (c *OpenAIClient) Summarize(ctx context.Context, prompt string, _ string) (
 
 	rawJSON, err := json.Marshal(reqBody)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	url := c.baseURL + "/chat/completions"
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(rawJSON))
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -93,14 +93,9 @@ func (c *OpenAIClient) Summarize(ctx context.Context, prompt string, _ string) (
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("OpenAI API request failed: %w", err)
+		return nil, fmt.Errorf("OpenAI API request failed: %w", err)
 	}
 	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read response body: %w", err)
-	}
 
 	if resp.StatusCode != http.StatusOK {
 		var errResp struct {
@@ -109,6 +104,7 @@ func (c *OpenAIClient) Summarize(ctx context.Context, prompt string, _ string) (
 			} `json:"error,omitempty"`
 		}
 
+		body, _ := io.ReadAll(resp.Body)
 		errMsg := string(body)
 
 		err = json.Unmarshal(body, &errResp)
@@ -118,28 +114,28 @@ func (c *OpenAIClient) Summarize(ctx context.Context, prompt string, _ string) (
 
 		errMsg = strings.Join(strings.Fields(errMsg), " ")
 
-		return "", fmt.Errorf("OpenAI API returned status %s: %s", resp.Status, errMsg)
+		return nil, fmt.Errorf("OpenAI API returned status %s: %s", resp.Status, errMsg)
 	}
 
 	var chatResp chatResponse
 
-	err = json.Unmarshal(body, &chatResp)
+	err = json.NewDecoder(resp.Body).Decode(&chatResp)
 	if err != nil {
-		return "", fmt.Errorf("failed to decode response: %w", err)
+		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
 	if chatResp.Error != nil {
 		errMsg := strings.Join(strings.Fields(chatResp.Error.Message), " ")
 
-		return "", fmt.Errorf("OpenAI error: %s", errMsg)
+		return nil, fmt.Errorf("OpenAI error: %s", errMsg)
 	}
 
 	if len(chatResp.Choices) > 0 {
 		content := strings.TrimSpace(chatResp.Choices[0].Message.Content)
 		if content != "" {
-			return content, nil
+			return &SummaryResult{Content: content, Usage: parseChatUsage(chatResp.Usage)}, nil
 		}
 	}
 
-	return "", errors.New("no summary generated")
+	return nil, errors.New("no summary generated")
 }

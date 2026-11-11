@@ -31,15 +31,33 @@ type claudeThinking struct {
 	BudgetTokens int    `json:"budget_tokens"`
 }
 
+type claudeUsage struct {
+	InputTokens  int `json:"input_tokens"`
+	OutputTokens int `json:"output_tokens"`
+}
+
 type claudeResponse struct {
 	Content []struct {
 		Type string `json:"type"`
 		Text string `json:"text"`
 	} `json:"content"`
+	Usage *claudeUsage `json:"usage,omitempty"`
 	Error *struct {
 		Type    string `json:"type,omitempty"`
 		Message string `json:"message"`
 	} `json:"error,omitempty"`
+}
+
+func parseClaudeUsage(u *claudeUsage) Usage {
+	if u == nil {
+		return Usage{}
+	}
+
+	return Usage{
+		PromptTokens:     u.InputTokens,
+		CompletionTokens: u.OutputTokens,
+		TotalTokens:      u.InputTokens + u.OutputTokens,
+	}
 }
 
 // NewClaudeClient creates a client targeting Anthropic Claude Messages REST API.
@@ -72,7 +90,7 @@ func (c *ClaudeClient) BaseURL() string {
 }
 
 //nolint:funlen,gocyclo
-func (c *ClaudeClient) Summarize(ctx context.Context, prompt string, thinking string) (string, error) {
+func (c *ClaudeClient) Summarize(ctx context.Context, prompt string, thinking string) (*SummaryResult, error) {
 	maxTokens := 4096
 
 	reqBody := claudeRequest{
@@ -100,14 +118,14 @@ func (c *ClaudeClient) Summarize(ctx context.Context, prompt string, thinking st
 
 	rawJSON, err := json.Marshal(reqBody)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	url := c.baseURL + "/messages"
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(rawJSON))
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	req.Header.Set("X-Api-Key", c.token)
@@ -116,14 +134,9 @@ func (c *ClaudeClient) Summarize(ctx context.Context, prompt string, thinking st
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("anthropic API request failed: %w", err)
+		return nil, fmt.Errorf("anthropic API request failed: %w", err)
 	}
 	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read response body: %w", err)
-	}
 
 	if resp.StatusCode != http.StatusOK {
 		var errResp struct {
@@ -132,6 +145,7 @@ func (c *ClaudeClient) Summarize(ctx context.Context, prompt string, thinking st
 			} `json:"error,omitempty"`
 		}
 
+		body, _ := io.ReadAll(resp.Body)
 		errMsg := string(body)
 
 		err = json.Unmarshal(body, &errResp)
@@ -141,20 +155,20 @@ func (c *ClaudeClient) Summarize(ctx context.Context, prompt string, thinking st
 
 		errMsg = strings.Join(strings.Fields(errMsg), " ")
 
-		return "", fmt.Errorf("anthropic API returned status %s: %s", resp.Status, errMsg)
+		return nil, fmt.Errorf("anthropic API returned status %s: %s", resp.Status, errMsg)
 	}
 
 	var chatResp claudeResponse
 
-	err = json.Unmarshal(body, &chatResp)
+	err = json.NewDecoder(resp.Body).Decode(&chatResp)
 	if err != nil {
-		return "", fmt.Errorf("failed to decode response: %w", err)
+		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
 	if chatResp.Error != nil {
 		errMsg := strings.Join(strings.Fields(chatResp.Error.Message), " ")
 
-		return "", fmt.Errorf("anthropic error: %s", errMsg)
+		return nil, fmt.Errorf("anthropic error: %s", errMsg)
 	}
 
 	var sb strings.Builder
@@ -166,8 +180,8 @@ func (c *ClaudeClient) Summarize(ctx context.Context, prompt string, thinking st
 	}
 
 	if sb.Len() > 0 {
-		return sb.String(), nil
+		return &SummaryResult{Content: sb.String(), Usage: parseClaudeUsage(chatResp.Usage)}, nil
 	}
 
-	return "", errors.New("no summary generated")
+	return nil, errors.New("no summary generated")
 }
