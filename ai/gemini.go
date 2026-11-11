@@ -100,7 +100,7 @@ func NewGeminiClient(ctx context.Context, saFile, project, location, model strin
 			ProjectID string `json:"project_id"`
 		}
 
-		err = json.Unmarshal(data, &sa)
+		err = json.NewDecoder(bytes.NewReader(data)).Decode(&sa)
 		if err == nil && sa.ProjectID != "" {
 			project = sa.ProjectID
 		}
