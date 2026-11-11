@@ -31,6 +31,7 @@ type AIConfig struct {
 	ClaudeToken        string            // API key for Anthropic Claude
 	CopilotToken       string            // GitHub token for Copilot
 	DeepSeekToken      string            // API key for DeepSeek
+	GeminiToken        string            // API key for Google AI Studio
 	HetznerToken       string            // API key for Hetzner
 	MuseToken          string            // API key for Meta Muse
 	OpenAIToken        string            // API key for OpenAI
@@ -292,6 +293,11 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 		claudeToken = c.v.GetString("ai.anthropic_token")
 	}
 
+	geminiToken := c.v.GetString("ai.gemini_token")
+	if geminiToken == "" {
+		geminiToken = c.v.GetString("ai.google_token")
+	}
+
 	museToken := c.v.GetString("ai.muse_token")
 	if museToken == "" {
 		museToken = c.v.GetString("ai.meta_token")
@@ -309,6 +315,7 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 		ClaudeToken:        claudeToken,
 		CopilotToken:       c.v.GetString("ai.copilot_token"),
 		DeepSeekToken:      c.v.GetString("ai.deepseek_token"),
+		GeminiToken:        geminiToken,
 		HetznerToken:       c.v.GetString("ai.hetzner_token"),
 		MuseToken:          museToken,
 		OpenAIToken:        c.v.GetString("ai.openai_token"),
@@ -635,6 +642,12 @@ func (c *AIConfig) GetBaseURL(provider string) string {
 		}
 
 		return utils.DefaultDeepSeekBaseURL
+	case utils.AIGeminiProvider, utils.AIGoogleProvider:
+		if (cfgP == utils.AIGeminiProvider || cfgP == utils.AIGoogleProvider) && c.URL != "" {
+			return strings.TrimRight(c.URL, "/")
+		}
+
+		return utils.DefaultGeminiBaseURL
 	case utils.AIHetznerProvider:
 		if cfgP == utils.AIHetznerProvider && c.URL != "" {
 			return strings.TrimRight(c.URL, "/")
@@ -692,7 +705,7 @@ func (c *AIConfig) GetToken(provider string) string {
 		}
 
 		cfgP := strings.ToLower(c.Provider)
-		if cfgP == "" || cfgP == utils.AIGeminiProvider || cfgP == utils.AICopilotProvider || cfgP == utils.AIGitHubProvider {
+		if cfgP == "" || (cfgP == utils.AIGeminiProvider && c.ServiceAccountFile != "") || cfgP == utils.AICopilotProvider || cfgP == utils.AIGitHubProvider {
 			return c.Token
 		}
 	case utils.AIDeepSeekProvider:
@@ -701,6 +714,14 @@ func (c *AIConfig) GetToken(provider string) string {
 		}
 
 		if strings.EqualFold(c.Provider, utils.AIDeepSeekProvider) {
+			return c.Token
+		}
+	case utils.AIGeminiProvider, utils.AIGoogleProvider:
+		if c.GeminiToken != "" {
+			return c.GeminiToken
+		}
+
+		if strings.EqualFold(c.Provider, utils.AIGeminiProvider) || strings.EqualFold(c.Provider, utils.AIGoogleProvider) {
 			return c.Token
 		}
 	case utils.AIHetznerProvider:

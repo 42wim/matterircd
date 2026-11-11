@@ -225,23 +225,40 @@ func main() {
 
 			logger.Infof("AI summarization enabled (default provider: %s, model: %s, url: %s)", provider, model, client.BaseURL())
 		default:
-			if aiCfg.ServiceAccountFile == "" {
-				logger.Warn("AI summarization enabled, but service_account_file is missing")
+			if aiCfg.ServiceAccountFile == "" && token == "" {
+				logger.Warn("AI summarization enabled, but service_account_file or token is missing")
 				break
 			}
 
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
+			if aiCfg.ServiceAccountFile != "" {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
 
-			client, err := utils.NewGeminiClient(ctx, aiCfg.ServiceAccountFile, aiCfg.Project, aiCfg.Location, model)
+				client, err := utils.NewGeminiClient(ctx, aiCfg.ServiceAccountFile, aiCfg.Project, aiCfg.Location, model)
+				if err != nil {
+					logger.Errorf("AI summarization setup error: %v", err)
+					break
+				}
+
+				logger.Infof(
+					"AI summarization enabled (default provider: %s, model: %s, project: %s, region: %s)",
+					provider, model, client.Project(), aiCfg.Location,
+				)
+
+				break
+			}
+
+			baseURL := aiCfg.GetBaseURL(provider)
+
+			client, err := utils.NewGeminiAPIKeyClient(token, baseURL, model)
 			if err != nil {
 				logger.Errorf("AI summarization setup error: %v", err)
 				break
 			}
 
 			logger.Infof(
-				"AI summarization enabled (default provider: %s, model: %s, project: %s, region: %s)",
-				provider, model, client.Project(), aiCfg.Location,
+				"AI summarization enabled (default provider: %s, model: %s, url: %s)",
+				provider, model, client.BaseURL(),
 			)
 		}
 	} else {
