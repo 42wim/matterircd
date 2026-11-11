@@ -1,7 +1,6 @@
 package ai
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -40,7 +39,7 @@ func NewCopilotClient(token, model string) (*CopilotClient, error) {
 	return &CopilotClient{
 		token:      token,
 		model:      model,
-		httpClient: &http.Client{Timeout: 30 * time.Second},
+		httpClient: &http.Client{Timeout: 60 * time.Second},
 	}, nil
 }
 
@@ -69,18 +68,15 @@ func (c *CopilotClient) Summarize(ctx context.Context, prompt string, _ string) 
 
 	url := "https://api.githubcopilot.com/chat/completions"
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(rawJSON))
-	if err != nil {
-		return nil, err
+	headers := map[string]string{
+		"Authorization":          "Bearer " + sessionToken,
+		headerContentType:        contentTypeJSON,
+		"Editor-Version":         "vscode/1.98.0",
+		"Editor-Plugin-Version":  "copilot-chat/0.24.0",
+		"Copilot-Integration-Id": "vscode-chat",
 	}
 
-	req.Header.Set("Authorization", "Bearer "+sessionToken)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Editor-Version", "vscode/1.98.0")
-	req.Header.Set("Editor-Plugin-Version", "copilot-chat/0.24.0")
-	req.Header.Set("Copilot-Integration-Id", "vscode-chat")
-
-	resp, err := c.httpClient.Do(req)
+	resp, err := doPostWithRetry(ctx, c.httpClient, "copilot", url, headers, rawJSON)
 	if err != nil {
 		return nil, fmt.Errorf("copilot API request failed: %w", err)
 	}

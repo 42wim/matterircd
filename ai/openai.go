@@ -1,7 +1,6 @@
 package ai
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -79,18 +78,14 @@ func (c *OpenAIClient) Summarize(ctx context.Context, prompt string, _ string) (
 
 	url := c.baseURL + "/chat/completions"
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(rawJSON))
-	if err != nil {
-		return nil, err
+	headers := map[string]string{
+		headerContentType: contentTypeJSON,
 	}
-
-	req.Header.Set("Content-Type", "application/json")
-
 	if c.token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.token)
+		headers["Authorization"] = "Bearer " + c.token
 	}
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := doPostWithRetry(ctx, c.httpClient, "openai", url, headers, rawJSON)
 	if err != nil {
 		return nil, fmt.Errorf("OpenAI API request failed: %w", err)
 	}

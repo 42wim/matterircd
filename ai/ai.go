@@ -1,8 +1,14 @@
 package ai
 
 import (
+	"bytes"
 	"context"
+	"net/http"
+	"strconv"
 	"strings"
+	"time"
+
+	"github.com/sirupsen/logrus"
 )
 
 type Summarizer interface {
@@ -87,7 +93,9 @@ const (
 	AIvLLMProvider      = "vllm"
 	AIXAIProvider       = "xai"
 
-	roleUser = "user"
+	roleUser          = "user"
+	headerContentType = "Content-Type"
+	contentTypeJSON   = "application/json"
 
 	DefaultClaudeModel   = "claude-sonnet-5"
 	DefaultCopilotModel  = "gpt-4o"
@@ -174,5 +182,150 @@ func resolveThinkingBudget(mode string) *int {
 		return &b
 	default:
 		return nil
+	}
+}
+
+var logger *logrus.Entry
+
+// SetLogger sets the logger for the ai package.
+func SetLogger(l *logrus.Entry) {
+	logger = l
+}
+
+func logWarnf(format string, args ...any) {
+	if logger != nil {
+		logger.Warnf(format, args...)
+	}
+}
+
+const defaultMaxRetries = 3
+
+func sleepWithContext(ctx context.Context, d time.Duration) (bool, error) {
+	select {
+	case <-ctx.Done():
+		return false, ctx.Err()
+	case <-time.After(d):
+		return true, nil
+	}
+}
+
+func parseRetryAfter(resp *http.Response) time.Duration {
+	if resp == nil {
+		return 0
+	}
+
+	header := resp.Header.Get("Retry-After")
+	if header == "" {
+		header = resp.Header.Get("X-RateLimit-Reset") //nolint:canonicalheader
+	}
+
+	if header != "" {
+		seconds, sErr := strconv.Atoi(header)
+		if sErr == nil && seconds > 0 {
+			return time.Duration(seconds) * time.Second
+		}
+
+		resetTime, tErr := http.ParseTime(header)
+		if tErr == nil {
+			if wait := time.Until(resetTime); wait > 0 {
+				return wait
+			}
+		}
+	}
+
+	return 0
+}
+
+func handleRetry(ctx context.Context, name string, err error, current, maxLimit int, resp *http.Response) (bool, error) {
+	if ctx.Err() != nil {
+		return false, ctx.Err()
+	}
+
+	if current >= maxLimit {
+		return false, nil
+	}
+
+	sleepDuration := time.Duration(current+1) * time.Second
+
+	if resp == nil {
+		logWarnf("Network error on %s (resp is nil, err: %v), backing off: %s (attempt %d/%d)",
+			name, err, sleepDuration, current+1, maxLimit)
+
+		return sleepWithContext(ctx, sleepDuration)
+	}
+
+	switch {
+	case resp.StatusCode == http.StatusTooManyRequests:
+		wait := parseRetryAfter(resp)
+		if wait <= 0 || wait > 30*time.Second {
+			wait = sleepDuration
+		}
+
+		logWarnf("Rate limited (429) on %s, backing off: %s (attempt %d/%d)",
+			name, wait, current+1, maxLimit)
+
+		return sleepWithContext(ctx, wait)
+
+	case resp.StatusCode >= http.StatusInternalServerError:
+		logWarnf("Transient error %d on %s, backing off: %s (attempt %d/%d)",
+			resp.StatusCode, name, sleepDuration, current+1, maxLimit)
+
+		return sleepWithContext(ctx, sleepDuration)
+
+	case resp.StatusCode >= 300 && resp.StatusCode < 500:
+		// Client errors (4xx) usually shouldn't be retried unless it's a 429
+		return false, nil
+
+	default:
+		return sleepWithContext(ctx, sleepDuration)
+	}
+}
+
+func doPostWithRetry(ctx context.Context, client *http.Client, name, url string, headers map[string]string, body []byte) (*http.Response, error) {
+	if client == nil {
+		client = http.DefaultClient
+	}
+
+	retryCount := 0
+
+	for {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+		if err != nil {
+			return nil, err
+		}
+
+		for k, v := range headers {
+			req.Header.Set(k, v)
+		}
+
+		resp, err := client.Do(req)
+		if err == nil && resp.StatusCode == http.StatusOK {
+			return resp, nil
+		}
+
+		shouldRetry, hErr := handleRetry(ctx, name, err, retryCount, defaultMaxRetries, resp)
+		if hErr != nil {
+			if resp != nil {
+				_ = resp.Body.Close()
+			}
+
+			return nil, hErr
+		}
+
+		if shouldRetry {
+			if resp != nil {
+				_ = resp.Body.Close()
+			}
+
+			retryCount++
+
+			continue
+		}
+
+		if err != nil {
+			return nil, err
+		}
+
+		return resp, nil
 	}
 }
