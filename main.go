@@ -50,6 +50,7 @@ func main() {
 	}
 	logger = ourlog.WithFields(logrus.Fields{"prefix": project})
 	config.SetLogger(logger)
+	ai.SetLogger(logger)
 
 	// config related. instantiate a new config.Config to store flags
 	flagConfig := flag.String("conf", "matterircd.toml", "config file")

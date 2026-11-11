@@ -1,7 +1,6 @@
 package ai
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -122,16 +121,13 @@ func (c *ClaudeClient) Summarize(ctx context.Context, prompt string, thinking st
 
 	url := c.baseURL + "/messages"
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(rawJSON))
-	if err != nil {
-		return nil, err
+	headers := map[string]string{
+		"X-Api-Key":         c.token,
+		"Anthropic-Version": AnthropicAPIVersion,
+		headerContentType:   contentTypeJSON,
 	}
 
-	req.Header.Set("X-Api-Key", c.token)
-	req.Header.Set("Anthropic-Version", AnthropicAPIVersion)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.httpClient.Do(req)
+	resp, err := doPostWithRetry(ctx, c.httpClient, "claude", url, headers, rawJSON)
 	if err != nil {
 		return nil, fmt.Errorf("anthropic API request failed: %w", err)
 	}

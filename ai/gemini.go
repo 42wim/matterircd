@@ -124,7 +124,7 @@ func NewGeminiClient(ctx context.Context, saFile, project, location, model strin
 		location:    location,
 		model:       model,
 		tokenSource: jwtCfg.TokenSource(ctx),
-		httpClient:  &http.Client{Timeout: 30 * time.Second},
+		httpClient:  &http.Client{Timeout: 60 * time.Second},
 	}, nil
 }
 
@@ -146,7 +146,7 @@ func NewGeminiAPIKeyClient(apiKey, baseURL, model string) (*GeminiClient, error)
 		apiKey:     apiKey,
 		baseURL:    strings.TrimRight(baseURL, "/"),
 		model:      model,
-		httpClient: &http.Client{Timeout: 30 * time.Second},
+		httpClient: &http.Client{Timeout: 60 * time.Second},
 	}, nil
 }
 
@@ -230,15 +230,12 @@ func (c *GeminiClient) Summarize(ctx context.Context, prompt string, thinking st
 		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(rawJSON))
-	if err != nil {
-		return nil, err
+	headers := map[string]string{
+		authHeader:        authValue,
+		headerContentType: contentTypeJSON,
 	}
 
-	req.Header.Set(authHeader, authValue)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.httpClient.Do(req)
+	resp, err := doPostWithRetry(ctx, c.httpClient, "gemini", url, headers, rawJSON)
 	if err != nil {
 		return nil, fmt.Errorf("gemini API request failed: %w", err)
 	}
