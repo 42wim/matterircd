@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/42wim/matterircd/utils"
+	"github.com/42wim/matterircd/ai"
 	"github.com/fsnotify/fsnotify"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
@@ -620,64 +620,64 @@ func (c *AIConfig) GetBaseURL(provider string) string {
 			return strings.TrimRight(u, "/")
 		}
 
-		if p == utils.AIClaudeProvider && c.URLs[utils.AIAnthropicProvider] != "" {
-			return strings.TrimRight(c.URLs[utils.AIAnthropicProvider], "/")
-		} else if p == utils.AIAnthropicProvider && c.URLs[utils.AIClaudeProvider] != "" {
-			return strings.TrimRight(c.URLs[utils.AIClaudeProvider], "/")
+		if p == ai.AIClaudeProvider && c.URLs[ai.AIAnthropicProvider] != "" {
+			return strings.TrimRight(c.URLs[ai.AIAnthropicProvider], "/")
+		} else if p == ai.AIAnthropicProvider && c.URLs[ai.AIClaudeProvider] != "" {
+			return strings.TrimRight(c.URLs[ai.AIClaudeProvider], "/")
 		}
 	}
 
 	cfgP := strings.ToLower(strings.TrimSpace(c.Provider))
 
 	switch p {
-	case utils.AIClaudeProvider, utils.AIAnthropicProvider:
-		if (cfgP == utils.AIClaudeProvider || cfgP == utils.AIAnthropicProvider) && c.URL != "" {
+	case ai.AIClaudeProvider, ai.AIAnthropicProvider:
+		if (cfgP == ai.AIClaudeProvider || cfgP == ai.AIAnthropicProvider) && c.URL != "" {
 			return strings.TrimRight(c.URL, "/")
 		}
 
-		return utils.DefaultClaudeBaseURL
-	case utils.AIDeepSeekProvider:
-		if cfgP == utils.AIDeepSeekProvider && c.URL != "" {
+		return ai.DefaultClaudeBaseURL
+	case ai.AIDeepSeekProvider:
+		if cfgP == ai.AIDeepSeekProvider && c.URL != "" {
 			return strings.TrimRight(c.URL, "/")
 		}
 
-		return utils.DefaultDeepSeekBaseURL
-	case utils.AIGeminiProvider, utils.AIGoogleProvider:
-		if (cfgP == utils.AIGeminiProvider || cfgP == utils.AIGoogleProvider) && c.URL != "" {
+		return ai.DefaultDeepSeekBaseURL
+	case ai.AIGeminiProvider, ai.AIGoogleProvider:
+		if (cfgP == ai.AIGeminiProvider || cfgP == ai.AIGoogleProvider) && c.URL != "" {
 			return strings.TrimRight(c.URL, "/")
 		}
 
-		return utils.DefaultGeminiBaseURL
-	case utils.AIHetznerProvider:
-		if cfgP == utils.AIHetznerProvider && c.URL != "" {
+		return ai.DefaultGeminiBaseURL
+	case ai.AIHetznerProvider:
+		if cfgP == ai.AIHetznerProvider && c.URL != "" {
 			return strings.TrimRight(c.URL, "/")
 		}
 
-		return utils.DefaultHetznerBaseURL
-	case utils.AIMuseProvider, utils.AIMetaProvider:
-		if (cfgP == utils.AIMuseProvider || cfgP == utils.AIMetaProvider) && c.URL != "" {
+		return ai.DefaultHetznerBaseURL
+	case ai.AIMuseProvider, ai.AIMetaProvider:
+		if (cfgP == ai.AIMuseProvider || cfgP == ai.AIMetaProvider) && c.URL != "" {
 			return strings.TrimRight(c.URL, "/")
 		}
 
-		return utils.DefaultMuseBaseURL
-	case utils.AIOpenAIProvider:
-		if cfgP == utils.AIOpenAIProvider && c.URL != "" {
+		return ai.DefaultMuseBaseURL
+	case ai.AIOpenAIProvider:
+		if cfgP == ai.AIOpenAIProvider && c.URL != "" {
 			return strings.TrimRight(c.URL, "/")
 		}
 
-		return utils.DefaultOpenAIBaseURL
-	case utils.AIOllamaProvider, utils.AILocalProvider, utils.AIvLLMProvider:
-		if (cfgP == p || cfgP == utils.AILocalProvider || cfgP == utils.AIOllamaProvider || cfgP == utils.AIvLLMProvider || cfgP == "" || cfgP == utils.AIGeminiProvider) && c.URL != "" {
+		return ai.DefaultOpenAIBaseURL
+	case ai.AIOllamaProvider, ai.AILocalProvider, ai.AIvLLMProvider:
+		if (cfgP == p || cfgP == ai.AILocalProvider || cfgP == ai.AIOllamaProvider || cfgP == ai.AIvLLMProvider || cfgP == "" || cfgP == ai.AIGeminiProvider) && c.URL != "" {
 			return strings.TrimRight(c.URL, "/")
 		}
 
 		return ""
-	case utils.AIXAIProvider, utils.AIGrokProvider:
-		if (cfgP == utils.AIXAIProvider || cfgP == utils.AIGrokProvider) && c.URL != "" {
+	case ai.AIXAIProvider, ai.AIGrokProvider:
+		if (cfgP == ai.AIXAIProvider || cfgP == ai.AIGrokProvider) && c.URL != "" {
 			return strings.TrimRight(c.URL, "/")
 		}
 
-		return utils.DefaultXAIBaseURL
+		return ai.DefaultXAIBaseURL
 	default:
 		return ""
 	}
@@ -691,73 +691,73 @@ func (c *AIConfig) GetToken(provider string) string {
 	p := strings.ToLower(strings.TrimSpace(provider))
 
 	switch p {
-	case utils.AIClaudeProvider, utils.AIAnthropicProvider:
+	case ai.AIClaudeProvider, ai.AIAnthropicProvider:
 		if c.ClaudeToken != "" {
 			return c.ClaudeToken
 		}
 
-		if strings.EqualFold(c.Provider, utils.AIClaudeProvider) || strings.EqualFold(c.Provider, utils.AIAnthropicProvider) {
+		if strings.EqualFold(c.Provider, ai.AIClaudeProvider) || strings.EqualFold(c.Provider, ai.AIAnthropicProvider) {
 			return c.Token
 		}
-	case utils.AICopilotProvider, utils.AIGitHubProvider:
+	case ai.AICopilotProvider, ai.AIGitHubProvider:
 		if c.CopilotToken != "" {
 			return c.CopilotToken
 		}
 
 		cfgP := strings.ToLower(c.Provider)
-		if cfgP == "" || (cfgP == utils.AIGeminiProvider && c.ServiceAccountFile != "") || cfgP == utils.AICopilotProvider || cfgP == utils.AIGitHubProvider {
+		if cfgP == "" || (cfgP == ai.AIGeminiProvider && c.ServiceAccountFile != "") || cfgP == ai.AICopilotProvider || cfgP == ai.AIGitHubProvider {
 			return c.Token
 		}
-	case utils.AIDeepSeekProvider:
+	case ai.AIDeepSeekProvider:
 		if c.DeepSeekToken != "" {
 			return c.DeepSeekToken
 		}
 
-		if strings.EqualFold(c.Provider, utils.AIDeepSeekProvider) {
+		if strings.EqualFold(c.Provider, ai.AIDeepSeekProvider) {
 			return c.Token
 		}
-	case utils.AIGeminiProvider, utils.AIGoogleProvider:
+	case ai.AIGeminiProvider, ai.AIGoogleProvider:
 		if c.GeminiToken != "" {
 			return c.GeminiToken
 		}
 
-		if strings.EqualFold(c.Provider, utils.AIGeminiProvider) || strings.EqualFold(c.Provider, utils.AIGoogleProvider) {
+		if strings.EqualFold(c.Provider, ai.AIGeminiProvider) || strings.EqualFold(c.Provider, ai.AIGoogleProvider) {
 			return c.Token
 		}
-	case utils.AIHetznerProvider:
+	case ai.AIHetznerProvider:
 		if c.HetznerToken != "" {
 			return c.HetznerToken
 		}
 
-		if strings.EqualFold(c.Provider, utils.AIHetznerProvider) {
+		if strings.EqualFold(c.Provider, ai.AIHetznerProvider) {
 			return c.Token
 		}
-	case utils.AIMuseProvider, utils.AIMetaProvider:
+	case ai.AIMuseProvider, ai.AIMetaProvider:
 		if c.MuseToken != "" {
 			return c.MuseToken
 		}
 
-		if strings.EqualFold(c.Provider, utils.AIMuseProvider) || strings.EqualFold(c.Provider, utils.AIMetaProvider) {
+		if strings.EqualFold(c.Provider, ai.AIMuseProvider) || strings.EqualFold(c.Provider, ai.AIMetaProvider) {
 			return c.Token
 		}
-	case utils.AIOpenAIProvider:
+	case ai.AIOpenAIProvider:
 		if c.OpenAIToken != "" {
 			return c.OpenAIToken
 		}
 
-		if strings.EqualFold(c.Provider, utils.AIOpenAIProvider) {
+		if strings.EqualFold(c.Provider, ai.AIOpenAIProvider) {
 			return c.Token
 		}
-	case utils.AIOllamaProvider, utils.AILocalProvider, utils.AIvLLMProvider:
+	case ai.AIOllamaProvider, ai.AILocalProvider, ai.AIvLLMProvider:
 		if strings.EqualFold(c.Provider, p) {
 			return c.Token
 		}
-	case utils.AIXAIProvider, utils.AIGrokProvider:
+	case ai.AIXAIProvider, ai.AIGrokProvider:
 		if c.XAIToken != "" {
 			return c.XAIToken
 		}
 
-		if strings.EqualFold(c.Provider, utils.AIXAIProvider) || strings.EqualFold(c.Provider, utils.AIGrokProvider) {
+		if strings.EqualFold(c.Provider, ai.AIXAIProvider) || strings.EqualFold(c.Provider, ai.AIGrokProvider) {
 			return c.Token
 		}
 	}

@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/42wim/matterircd/ai"
 	"github.com/42wim/matterircd/bridge"
 	"github.com/42wim/matterircd/utils"
 	"github.com/sorcix/irc"
@@ -1469,17 +1470,17 @@ func (u *User) getSummarizeEvents(target string, query summarizeQuery) (string, 
 
 func parseSummarizeAIProvider(arg string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(arg)) {
-	case utils.AIClaudeProvider, utils.AIAnthropicProvider:
-		return utils.AIClaudeProvider, true
-	case utils.AICopilotProvider, utils.AIGitHubProvider:
-		return utils.AICopilotProvider, true
-	case utils.AIGeminiProvider, utils.AIGoogleProvider:
-		return utils.AIGeminiProvider, true
-	case utils.AIXAIProvider, utils.AIGrokProvider:
-		return utils.AIXAIProvider, true
-	case utils.AIMuseProvider, utils.AIMetaProvider:
-		return utils.AIMuseProvider, true
-	case utils.AIOpenAIProvider, utils.AIDeepSeekProvider, utils.AIHetznerProvider, utils.AIOllamaProvider, utils.AILocalProvider, utils.AIvLLMProvider:
+	case ai.AIClaudeProvider, ai.AIAnthropicProvider:
+		return ai.AIClaudeProvider, true
+	case ai.AICopilotProvider, ai.AIGitHubProvider:
+		return ai.AICopilotProvider, true
+	case ai.AIGeminiProvider, ai.AIGoogleProvider:
+		return ai.AIGeminiProvider, true
+	case ai.AIXAIProvider, ai.AIGrokProvider:
+		return ai.AIXAIProvider, true
+	case ai.AIMuseProvider, ai.AIMetaProvider:
+		return ai.AIMuseProvider, true
+	case ai.AIOpenAIProvider, ai.AIDeepSeekProvider, ai.AIHetznerProvider, ai.AIOllamaProvider, ai.AILocalProvider, ai.AIvLLMProvider:
 		return strings.ToLower(strings.TrimSpace(arg)), true
 	default:
 		return "", false
@@ -1619,19 +1620,19 @@ func summarize(u *User, toUser *User, args []string, service string) {
 	}
 
 	if provider == "" {
-		provider = utils.AIGeminiProvider
+		provider = ai.AIGeminiProvider
 	}
 
-	model := utils.GetModel(provider, cfg.Model, cfg.Models)
+	model := ai.GetModel(provider, cfg.Model, cfg.Models)
 	token := cfg.GetToken(provider)
 
 	var (
-		aiClient utils.Summarizer
+		aiClient ai.Summarizer
 		project  = cfg.Project
 	)
 
 	switch strings.ToLower(provider) {
-	case utils.AIClaudeProvider, utils.AIAnthropicProvider:
+	case ai.AIClaudeProvider, ai.AIAnthropicProvider:
 		if token == "" {
 			u.MsgUser(toUser, "Claude AI is not configured (missing token).")
 
@@ -1640,26 +1641,26 @@ func summarize(u *User, toUser *User, args []string, service string) {
 
 		baseURL := cfg.GetBaseURL(provider)
 
-		aiClient, err = utils.NewClaudeClient(token, baseURL, model)
+		aiClient, err = ai.NewClaudeClient(token, baseURL, model)
 		if err != nil {
 			u.MsgUser(toUser, fmt.Sprintf("Failed to initialize Claude client: %v", err))
 
 			return
 		}
-	case utils.AICopilotProvider, utils.AIGitHubProvider:
+	case ai.AICopilotProvider, ai.AIGitHubProvider:
 		if token == "" {
 			u.MsgUser(toUser, "Copilot AI is not configured (missing token).")
 
 			return
 		}
 
-		aiClient, err = utils.NewCopilotClient(token, model)
+		aiClient, err = ai.NewCopilotClient(token, model)
 		if err != nil {
 			u.MsgUser(toUser, fmt.Sprintf("Failed to initialize Copilot AI: %v", err))
 
 			return
 		}
-	case utils.AIOpenAIProvider, utils.AIDeepSeekProvider, utils.AIXAIProvider, utils.AIGrokProvider, utils.AIMuseProvider, utils.AIMetaProvider, utils.AIHetznerProvider, utils.AIOllamaProvider, utils.AILocalProvider, utils.AIvLLMProvider:
+	case ai.AIOpenAIProvider, ai.AIDeepSeekProvider, ai.AIXAIProvider, ai.AIGrokProvider, ai.AIMuseProvider, ai.AIMetaProvider, ai.AIHetznerProvider, ai.AIOllamaProvider, ai.AILocalProvider, ai.AIvLLMProvider:
 		baseURL := cfg.GetBaseURL(provider)
 		if baseURL == "" {
 			u.MsgUser(toUser, fmt.Sprintf("%s AI is not configured (missing url).", provider))
@@ -1673,7 +1674,7 @@ func summarize(u *User, toUser *User, args []string, service string) {
 			return
 		}
 
-		aiClient, err = utils.NewOpenAIClient(token, baseURL, model)
+		aiClient, err = ai.NewOpenAIClient(token, baseURL, model)
 		if err != nil {
 			u.MsgUser(toUser, fmt.Sprintf("Failed to initialize OpenAI client: %v", err))
 
@@ -1682,7 +1683,7 @@ func summarize(u *User, toUser *User, args []string, service string) {
 	default:
 		switch {
 		case cfg.ServiceAccountFile != "":
-			geminiClient, err := utils.NewGeminiClient(u.ctx, cfg.ServiceAccountFile, cfg.Project, cfg.Location, model)
+			geminiClient, err := ai.NewGeminiClient(u.ctx, cfg.ServiceAccountFile, cfg.Project, cfg.Location, model)
 			if err != nil {
 				u.MsgUser(toUser, fmt.Sprintf("Failed to initialize Gemini AI: %v", err))
 
@@ -1694,7 +1695,7 @@ func summarize(u *User, toUser *User, args []string, service string) {
 		case token != "":
 			baseURL := cfg.GetBaseURL(provider)
 
-			geminiClient, err := utils.NewGeminiAPIKeyClient(token, baseURL, model)
+			geminiClient, err := ai.NewGeminiAPIKeyClient(token, baseURL, model)
 			if err != nil {
 				u.MsgUser(toUser, fmt.Sprintf("Failed to initialize Gemini AI: %v", err))
 
@@ -1769,13 +1770,13 @@ func summarize(u *User, toUser *User, args []string, service string) {
 	}
 
 	switch strings.ToLower(provider) {
-	case utils.AIClaudeProvider, utils.AIAnthropicProvider:
+	case ai.AIClaudeProvider, ai.AIAnthropicProvider:
 		baseURL := cfg.GetBaseURL(provider)
 
 		logger.Debugf("AI summarization for %s (provider: %s, model: %s, thinking: %s, url: %s)", contextLabel, provider, model, thinking, baseURL)
-	case utils.AICopilotProvider, utils.AIGitHubProvider:
+	case ai.AICopilotProvider, ai.AIGitHubProvider:
 		logger.Debugf("AI summarization for %s (provider: %s, model: %s, thinking: %s)", contextLabel, provider, model, thinking)
-	case utils.AIOpenAIProvider, utils.AIDeepSeekProvider, utils.AIXAIProvider, utils.AIGrokProvider, utils.AIMuseProvider, utils.AIMetaProvider, utils.AIHetznerProvider, utils.AIOllamaProvider, utils.AILocalProvider, utils.AIvLLMProvider:
+	case ai.AIOpenAIProvider, ai.AIDeepSeekProvider, ai.AIXAIProvider, ai.AIGrokProvider, ai.AIMuseProvider, ai.AIMetaProvider, ai.AIHetznerProvider, ai.AIOllamaProvider, ai.AILocalProvider, ai.AIvLLMProvider:
 		baseURL := cfg.GetBaseURL(provider)
 
 		logger.Debugf("AI summarization for %s (provider: %s, model: %s, thinking: %s, url: %s)", contextLabel, provider, model, thinking, baseURL)
