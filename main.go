@@ -19,9 +19,9 @@ import (
 
 	bolt "go.etcd.io/bbolt"
 
+	"github.com/42wim/matterircd/ai"
 	"github.com/42wim/matterircd/config"
 	irckit "github.com/42wim/matterircd/mm-go-irckit"
-	"github.com/42wim/matterircd/utils"
 	"github.com/google/gops/agent"
 	prefixed "github.com/matterbridge/logrus-prefixed-formatter"
 	"github.com/sirupsen/logrus"
@@ -185,27 +185,27 @@ func main() {
 	if aiCfg.Enabled { //nolint:nestif
 		provider := aiCfg.Provider
 		if provider == "" {
-			provider = utils.AIGeminiProvider
+			provider = ai.AIGeminiProvider
 		}
 
-		model := utils.GetModel(provider, aiCfg.Model, aiCfg.Models)
+		model := ai.GetModel(provider, aiCfg.Model, aiCfg.Models)
 		token := aiCfg.GetToken(provider)
 
 		switch strings.ToLower(provider) {
-		case utils.AICopilotProvider, utils.AIGitHubProvider:
+		case ai.AICopilotProvider, ai.AIGitHubProvider:
 			if token == "" {
 				logger.Warn("AI summarization enabled, but token is missing")
 				break
 			}
 
-			_, err := utils.NewCopilotClient(token, model)
+			_, err := ai.NewCopilotClient(token, model)
 			if err != nil {
 				logger.Errorf("AI summarization setup error: %v", err)
 				break
 			}
 
 			logger.Infof("AI summarization enabled (default provider: %s, model: %s)", provider, model)
-		case utils.AIOpenAIProvider, utils.AIHetznerProvider, utils.AIOllamaProvider, utils.AILocalProvider, utils.AIvLLMProvider:
+		case ai.AIOpenAIProvider, ai.AIHetznerProvider, ai.AIOllamaProvider, ai.AILocalProvider, ai.AIvLLMProvider:
 			baseURL := aiCfg.GetBaseURL(provider)
 			if baseURL == "" {
 				logger.Warnf("AI summarization enabled for %s, but url is missing", provider)
@@ -217,7 +217,7 @@ func main() {
 				break
 			}
 
-			client, err := utils.NewOpenAIClient(token, baseURL, model)
+			client, err := ai.NewOpenAIClient(token, baseURL, model)
 			if err != nil {
 				logger.Errorf("AI summarization setup error: %v", err)
 				break
@@ -234,7 +234,7 @@ func main() {
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
 
-				client, err := utils.NewGeminiClient(ctx, aiCfg.ServiceAccountFile, aiCfg.Project, aiCfg.Location, model)
+				client, err := ai.NewGeminiClient(ctx, aiCfg.ServiceAccountFile, aiCfg.Project, aiCfg.Location, model)
 				if err != nil {
 					logger.Errorf("AI summarization setup error: %v", err)
 					break
@@ -250,7 +250,7 @@ func main() {
 
 			baseURL := aiCfg.GetBaseURL(provider)
 
-			client, err := utils.NewGeminiAPIKeyClient(token, baseURL, model)
+			client, err := ai.NewGeminiAPIKeyClient(token, baseURL, model)
 			if err != nil {
 				logger.Errorf("AI summarization setup error: %v", err)
 				break
