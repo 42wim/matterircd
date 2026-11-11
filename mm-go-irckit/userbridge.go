@@ -865,6 +865,8 @@ func (u *User) handleChannelDeleteEvent(event *bridge.ChannelDeleteEvent) {
 	delete(u.channels, ch)
 	u.Unlock()
 
+	u.clearChannelState(event.ChannelID)
+
 	ch.Unlink()
 }
 
@@ -2651,6 +2653,31 @@ func (u *User) forgetMsgLast(channelID, msgID string) {
 	}
 
 	delete(u.msgLast, channelID)
+}
+
+func (u *User) clearChannelState(channelID string) {
+	if channelID == "" {
+		return
+	}
+
+	u.msgMapMutex.Lock()
+	delete(u.msgMap, channelID)
+	u.msgMapIndexMutex.Lock()
+	delete(u.msgMapIndex, channelID)
+	u.msgMapIndexMutex.Unlock()
+	u.msgCounterMutex.Lock()
+	delete(u.msgCounter, channelID)
+	u.msgCounterMutex.Unlock()
+	u.msgMapMutex.Unlock()
+
+	u.msgLastMutex.Lock()
+	delete(u.msgLast, channelID)
+	delete(u.msgPrev, channelID)
+	u.msgLastMutex.Unlock()
+
+	u.updateCounterMutex.Lock()
+	delete(u.updateCounter, channelID)
+	u.updateCounterMutex.Unlock()
 }
 
 func (u *User) saveLastViewedAt(channelID string, ts ...int64) {

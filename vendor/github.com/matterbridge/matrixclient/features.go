@@ -408,6 +408,19 @@ func (c *Client) GetStatus(userID id.UserID) string {
 	return StatusOffline
 }
 
+// GetStatuses returns the cached statuses of users with known presence.
+func (c *Client) GetStatuses() map[id.UserID]string {
+	c.RLock()
+	defer c.RUnlock()
+
+	statuses := make(map[id.UserID]string, len(c.presence))
+	for userID, p := range c.presence {
+		statuses[userID] = p.Status
+	}
+
+	return statuses
+}
+
 // GetUserCustomStatus returns the cached status message of a user.
 func (c *Client) GetUserCustomStatus(userID id.UserID) string {
 	c.RLock()
@@ -433,27 +446,38 @@ func (c *Client) GetUserLastActivity(userID id.UserID) int64 {
 	return 0
 }
 
-// UpdateStatus refreshes the cached presence of a user from the homeserver.
+// UpdateStatus refreshes the cached presence of a user from the homeserver,
+// reusing a recent fetch within freshStatusMinInterval and falling back to
+// cached presence on error, matching matterclient.
 func (c *Client) UpdateStatus(ctx context.Context, userID id.UserID) error {
-	var (
-		resp *mautrix.RespPresence
-		err  error
-	)
+	c.Lock()
+	key := c.userIDKeyLocked(userID)
+	_, hasCached := c.presence[key]
+	lastREST := c.presenceFetched[key]
 
-	for attempt := 0; ; attempt++ {
-		resp, err = c.mc.GetPresence(ctx, userID)
-		if err == nil {
-			break
+	if hasCached && lastREST > 0 && time.Since(time.Unix(lastREST, 0)) <= freshStatusMinInterval {
+		c.Unlock()
+
+		return nil
+	}
+
+	c.presenceFetched[key] = time.Now().Unix()
+	c.Unlock()
+
+	fetchCtx, cancel := context.WithTimeout(ctx, inactiveFetchTimeout)
+	defer cancel()
+
+	resp, err := c.mc.GetPresence(fetchCtx, userID)
+	if err != nil {
+		if hasCached {
+			return nil
 		}
 
-		retry, herr := c.HandleRetry(ctx, "UpdateStatus", err, attempt, maxAPIRetries)
-		if herr != nil {
-			return herr
-		}
+		c.Lock()
+		delete(c.presenceFetched, key)
+		c.Unlock()
 
-		if !retry {
-			return err
-		}
+		return err
 	}
 
 	c.setPresence(userID, resp.Presence, resp.StatusMsg, int64(resp.LastActiveAgo))
@@ -475,22 +499,69 @@ func (c *Client) GetUserAvatarURL(ctx context.Context, userID id.UserID) string 
 // GetUserLocalTime returns the current time of a user formatted as HH:MM in
 // their timezone (profile field m.tz), or "" if unknown.
 func (c *Client) GetUserLocalTime(ctx context.Context, userID id.UserID) string {
+	c.RLock()
+	if u, ok := c.users[userID]; ok && u.tzFetchedAt > 0 && time.Since(time.Unix(u.tzFetchedAt, 0)) <= timezoneTTL {
+		loc := u.tz
+		c.RUnlock()
+
+		if loc == nil {
+			return ""
+		}
+
+		return time.Now().In(loc).Format("15:04")
+	}
+	c.RUnlock()
+
+	fetchCtx, cancel := context.WithTimeout(ctx, inactiveFetchTimeout)
+	defer cancel()
+
 	// The homeserver returns {"m.tz": "..."}, not a bare string.
 	var p struct {
 		TZ string `json:"m.tz"`
 	}
 
-	err := c.mc.GetProfileField(ctx, userID, "m.tz", &p)
-	if err != nil || p.TZ == "" {
-		return ""
+	err := c.mc.GetProfileField(fetchCtx, userID, "m.tz", &p)
+
+	var loc *time.Location
+	if err == nil && p.TZ != "" {
+		loc = c.loadTimezone(p.TZ)
 	}
 
-	loc, err := time.LoadLocation(p.TZ)
-	if err != nil {
+	c.Lock()
+	if u, ok := c.users[userID]; ok {
+		u.tz = loc
+		u.tzFetchedAt = time.Now().Unix()
+	}
+	c.Unlock()
+
+	if loc == nil {
 		return ""
 	}
 
 	return time.Now().In(loc).Format("15:04")
+}
+
+func (c *Client) loadTimezone(tz string) *time.Location {
+	c.RLock()
+	loc, ok := c.timezones[tz]
+	c.RUnlock()
+
+	if ok {
+		return loc
+	}
+
+	loaded, err := time.LoadLocation(tz)
+	if err != nil {
+		return nil
+	}
+
+	c.Lock()
+	if len(c.timezones) < maxSharedTimezones {
+		c.timezones[tz] = loaded
+	}
+	c.Unlock()
+
+	return loaded
 }
 
 func (c *Client) setPresence(userID id.UserID, p event.Presence, msg string, agoMS int64) {
@@ -509,7 +580,7 @@ func (c *Client) setPresence(userID id.UserID, p event.Presence, msg string, ago
 	}
 
 	c.Lock()
-	c.presence[userID] = &Presence{Status: status, StatusMsg: msg, LastActivityAt: last}
+	c.presence[c.userIDKeyLocked(userID)] = Presence{Status: status, StatusMsg: msg, LastActivityAt: last}
 	c.Unlock()
 }
 
