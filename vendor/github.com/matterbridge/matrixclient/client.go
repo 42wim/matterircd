@@ -903,8 +903,9 @@ func (c *Client) Send(ctx context.Context, roomID id.RoomID, parentID id.EventID
 		content.RelatesTo = &event.RelatesTo{Type: event.RelThread, EventID: parentID}
 	}
 
+	txnID := c.mc.TxnID()
 	for attempt := 0; ; attempt++ {
-		resp, err := c.mc.SendMessageEvent(ctx, roomID, event.EventMessage, &content)
+		resp, err := c.mc.SendMessageEvent(ctx, roomID, event.EventMessage, &content, mautrix.ReqSendEvent{TransactionID: txnID})
 		if err == nil {
 			return resp.EventID, nil
 		}
