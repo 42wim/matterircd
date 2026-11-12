@@ -24,6 +24,7 @@ lint:
 	golangci-lint run
 	golangci-lint run vendor/github.com/matterbridge/matterclient/
 	golangci-lint run vendor/github.com/matterbridge/matrixclient/
+	golangci-lint run vendor/github.com/matterbridge/slackclient/
 
 release:
 	goreleaser release --skip publish

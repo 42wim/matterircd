@@ -1,85 +1,12 @@
 package slack
 
 import (
-	"encoding/json"
-	"errors"
 	"fmt"
 	"html"
-	"io"
-	"net/http"
-	"net/url"
 	"regexp"
 	"strings"
 	"time"
-
-	"github.com/sirupsen/logrus"
-	"github.com/slack-go/slack"
 )
-
-//nolint:funlen
-func (s *Slack) getSlackToken() (string, error) {
-	type findTeamResponseFull struct {
-		slack.SlackResponse
-
-		SSO    bool   `json:"sso"`
-		TeamID string `json:"team_id"`
-	}
-
-	type loginResponseFull struct {
-		slack.SlackResponse
-
-		Token string `json:"token"`
-	}
-
-	resp, err := http.PostForm("https://slack.com/api/auth.findTeam", url.Values{"domain": {s.credentials.Team}})
-	if err != nil {
-		return "", err
-	}
-
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-
-	var findTeamResponse findTeamResponseFull
-
-	err = json.Unmarshal(body, &findTeamResponse)
-	if err != nil {
-		return "", err
-	}
-
-	if findTeamResponse.SSO {
-		return "", errors.New("SSO teams not yet supported")
-	}
-
-	resp, err = http.PostForm("https://slack.com/api/auth.signin",
-		url.Values{"team": {findTeamResponse.TeamID}, "email": {s.credentials.Login}, "password": {s.credentials.Pass}})
-	if err != nil {
-		return "", err
-	}
-
-	defer resp.Body.Close()
-
-	body, err = io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-
-	var loginResponse loginResponseFull
-
-	err = json.Unmarshal(body, &loginResponse)
-	if err != nil {
-		return "", err
-	}
-
-	if !loginResponse.Ok {
-		return "", errors.New(loginResponse.Error)
-	}
-
-	return loginResponse.Token, nil
-}
 
 func isValidNick(s string) bool {
 	/* IRC RFC ([0] - see below) mentions a limit of 9 chars for
@@ -134,7 +61,7 @@ func formatTS(unixts string) string {
 func (s *Slack) replaceMention(text string) string {
 	results := regexp.MustCompile(`<@([a-zA-z0-9]+)>`).FindAllStringSubmatch(text, -1)
 	for _, r := range results {
-		text = strings.ReplaceAll(text, "<@"+r[1]+">", "@"+s.userName(r[1]))
+		text = strings.ReplaceAll(text, "<@"+r[1]+">", "@"+s.sc.UserName(r[1]))
 	}
 
 	return text
@@ -182,59 +109,4 @@ func (s *Slack) cleanupMessage(msg string) string {
 	msg = html.UnescapeString(msg)
 
 	return msg
-}
-
-// passwordToTokenAndCookie parses the password specified by the user into a
-// Slack token and optionally a cookie Auth cookies can be specified by
-// appending a "|" symbol and the base64-encoded auth cookie to the Slack token.
-// taken from https://github.com/insomniacslk/irc-slack/blob/master/pkg/ircslack/irc_server.go
-func passwordToTokenAndCookie(p string) (string, string, error) {
-	parts := strings.Split(p, "|")
-
-	switch len(parts) {
-	case 1:
-		// XXX should check that the token starts with xoxp- ?
-		return parts[0], "", nil
-	case 2:
-		if !strings.HasPrefix(parts[0], "xoxc-") {
-			return "", "", errors.New("auth cookie is set, but token does not start with xoxc-")
-		}
-
-		if parts[1] == "" {
-			return "", "", errors.New("auth cookie is empty")
-		}
-
-		if !strings.HasPrefix(parts[1], "d=") || !strings.HasSuffix(parts[1], ";") {
-			return "", "", errors.New("auth cookie must have the format 'd=XXX;'")
-		}
-
-		return parts[0], parts[1], nil
-	default:
-		return "", "", fmt.Errorf("failed to parse password into token and cookie, got %d components, want 1 or 2", len(parts))
-	}
-}
-
-// custom HTTP client used to set the auth cookie if requested, and only over
-// TLS.
-// taken from https://github.com/insomniacslk/irc-slack/blob/master/pkg/ircslack/irc_server.go
-type httpClient struct {
-	c      http.Client
-	cookie string
-}
-
-// taken from https://github.com/insomniacslk/irc-slack/blob/master/pkg/ircslack/irc_server.go
-//
-//nolint:gosec // thin wrapper; the request URL is built by the slack client, not user input
-func (hc httpClient) Do(req *http.Request) (*http.Response, error) {
-	if hc.cookie != "" {
-		logrus.Debug("Setting auth cookie")
-
-		if strings.ToLower(req.URL.Scheme) == "https" {
-			req.Header.Add("Cookie", hc.cookie)
-		} else {
-			logrus.Warning("Cookie is set but connection is not HTTPS, skipping")
-		}
-	}
-
-	return hc.c.Do(req)
 }
