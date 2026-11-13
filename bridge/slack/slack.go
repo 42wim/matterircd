@@ -80,13 +80,17 @@ func configureBridgeLogging(ourlog *logrus.Logger, sc *slackclient.Client, rc *c
 	switch {
 	case rc.Trace:
 		ourlog.SetLevel(logrus.TraceLevel)
-		sc.SetLogLevel("trace")
 	case rc.Debug:
 		ourlog.SetLevel(logrus.DebugLevel)
-		sc.SetLogLevel("debug")
 	default:
 		ourlog.SetLevel(logrus.InfoLevel)
-		sc.SetLogLevel("info")
+	}
+
+	sc.SetLogLevel("info")
+
+	if rc.Slack.SlackclientLogLevel != "" {
+		logger.Infof("enabling slackclient logging: level: %s", rc.Slack.SlackclientLogLevel)
+		sc.SetLogLevel(strings.ToLower(rc.Slack.SlackclientLogLevel))
 	}
 
 	sc.SetLogAPICalls("error")

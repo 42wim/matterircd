@@ -96,16 +96,16 @@ func (c *Client) Login() error {
 	opts := []slack.Option{
 		slack.OptionDebug(true),
 		slack.OptionLog(slackLogAdapter{logger: c.apiLogger}),
+		slack.OptionHTTPClient(&httpClient{
+			cookie:    cookie,
+			logger:    c.logger,
+			apiLogger: c.apiLogger,
+		}),
 	}
 
 	var rtmOpts []slack.RTMOption
 
 	if cookie != "" {
-		opts = append(opts, slack.OptionHTTPClient(&httpClient{
-			cookie: cookie,
-			logger: c.logger,
-		}))
-
 		rtmOpts = append(rtmOpts, slack.RTMOptionDialer(newCookieDialer(cookie)))
 	}
 
@@ -295,9 +295,10 @@ func passwordToTokenAndCookie(p string) (string, string, error) {
 // TLS.
 // taken from https://github.com/insomniacslk/irc-slack/blob/master/pkg/ircslack/irc_server.go
 type httpClient struct {
-	c      http.Client
-	cookie string
-	logger *logrus.Entry
+	c         http.Client
+	cookie    string
+	logger    *logrus.Entry
+	apiLogger *logrus.Entry
 }
 
 // taken from https://github.com/insomniacslk/irc-slack/blob/master/pkg/ircslack/irc_server.go
@@ -314,7 +315,20 @@ func (hc *httpClient) Do(req *http.Request) (*http.Response, error) {
 		}
 	}
 
-	return hc.c.Do(req)
+	start := time.Now()
+
+	resp, err := hc.c.Do(req)
+	duration := time.Since(start).Round(time.Millisecond)
+
+	if err != nil {
+		hc.apiLogger.Warnf("%s %s: %s (%s)", req.Method, req.URL.Path, err, duration)
+		return resp, err
+	}
+
+	// Only the path is logged; the query string or body can carry credentials.
+	hc.apiLogger.Warnf("%s %s: %d (%s)", req.Method, req.URL.Path, resp.StatusCode, duration)
+
+	return resp, nil
 }
 
 func newCookieDialer(cookie string) *websocket.Dialer {
@@ -338,7 +352,7 @@ type slackLogAdapter struct {
 }
 
 func (l slackLogAdapter) Output(_ int, s string) error {
-	l.logger.Debug(strings.TrimRight(s, "\r\n"))
+	l.logger.Trace(strings.TrimRight(s, "\r\n"))
 
 	return nil
 }
