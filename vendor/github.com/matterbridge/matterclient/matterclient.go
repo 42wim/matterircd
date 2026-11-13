@@ -1800,6 +1800,27 @@ func (m *Client) reauthSession(ctx context.Context) error {
 	return nil
 }
 
+func (m *Client) handleUnauthorized(ctx context.Context, name string, current int) bool {
+	if name == "doLogin" || name == "serverAlive" || current > 0 || m.IsAborted(ctx) {
+		return false
+	}
+
+	if m.Credentials == nil || m.Token != "" || m.MFAToken != "" || m.Credentials.Login == "" || m.Pass == "" {
+		m.logger.Warnf("HTTP 401 Unauthorized on %s: cannot auto-relogin with token/MFA credentials, please LOGOUT and LOGIN again", name)
+		return false
+	}
+
+	m.logger.Warnf("HTTP 401 Unauthorized on %s, attempting HTTP session re-login", name)
+
+	loginErr := m.reauthSession(ctx)
+	if loginErr != nil {
+		m.logger.Errorf("HTTP session re-login failed on %s: %v", name, loginErr)
+		return false
+	}
+
+	return true
+}
+
 func (m *Client) HandleRetry(ctx context.Context, name string, err error, current int, maxLimit int, resp *model.Response) (bool, error) {
 	if ctx.Err() != nil {
 		return false, ctx.Err()
@@ -1824,23 +1845,7 @@ func (m *Client) HandleRetry(ctx context.Context, name string, err error, curren
 		return true, nil
 
 	case resp.StatusCode == http.StatusUnauthorized:
-		if name == "doLogin" || name == "serverAlive" || current > 0 || m.IsAborted(ctx) {
-			return false, nil
-		}
-
-		if m.Credentials == nil || m.Token != "" || m.MFAToken != "" || m.Credentials.Login == "" || m.Pass == "" {
-			m.logger.Warnf("HTTP 401 Unauthorized on %s: cannot auto-relogin with token/MFA credentials, please LOGOUT and LOGIN again", name)
-			return false, nil
-		}
-
-		m.logger.Warnf("HTTP 401 Unauthorized on %s, attempting HTTP session re-login", name)
-
-		if loginErr := m.reauthSession(ctx); loginErr != nil {
-			m.logger.Errorf("HTTP session re-login failed on %s: %v", name, loginErr)
-			return false, nil
-		}
-
-		return true, nil
+		return m.handleUnauthorized(ctx, name, current), nil
 
 	case resp.StatusCode >= http.StatusInternalServerError:
 		m.logger.Warnf("Transient error %d on %s, backing off: %s (attempt %d/%d)",
