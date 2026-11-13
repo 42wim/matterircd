@@ -1763,7 +1763,10 @@ func (m *Client) HandleRatelimit(ctx context.Context, name string, resp *model.R
 	return err
 }
 
-const reauthCooldown = 5 * time.Second
+const (
+	reauthCooldown    = 5 * time.Second
+	reauthMaxAttempts = 3
+)
 
 // reauthSession refreshes the HTTP session token via Login without tearing down the websocket.
 // Concurrent callers within reauthCooldown reuse the freshly obtained session.
@@ -1779,25 +1782,53 @@ func (m *Client) reauthSession(ctx context.Context) error {
 		return errors.New("client not initialized")
 	}
 
-	m.apiLogger.Info("reauthSession: Login")
+	var lastErr error
 
-	user, _, err := m.Client.Login(ctx, m.Credentials.Login, m.Pass)
-	if err != nil {
-		return err
+	for attempt := range reauthMaxAttempts {
+		if m.IsAborted(ctx) {
+			return errors.New("re-login aborted")
+		}
+
+		m.apiLogger.Info("reauthSession: Login")
+
+		user, resp, err := m.Client.Login(ctx, m.Credentials.Login, m.Pass)
+		if err == nil && user != nil {
+			m.Lock()
+			m.User = user
+			m.Unlock()
+
+			m.lastReauth = time.Now()
+			m.logger.Info("HTTP session re-login successful")
+
+			return nil
+		}
+
+		if err == nil {
+			err = errors.New("login succeeded but returned a nil user")
+		}
+
+		lastErr = err
+
+		// Don't retry invalid credentials or forbidden accounts.
+		if resp != nil && (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) {
+			return lastErr
+		}
+
+		if attempt+1 < reauthMaxAttempts {
+			m.logger.Warnf("HTTP session re-login attempt %d/%d failed: %v", attempt+1, reauthMaxAttempts, lastErr)
+
+			ok, sleepErr := m.sleepWithContext(ctx, time.Duration(attempt+1)*time.Second)
+			if !ok {
+				if sleepErr != nil {
+					return sleepErr
+				}
+
+				return lastErr
+			}
+		}
 	}
 
-	if user == nil {
-		return errors.New("login succeeded but returned a nil user")
-	}
-
-	m.Lock()
-	m.User = user
-	m.Unlock()
-
-	m.lastReauth = time.Now()
-	m.logger.Info("HTTP session re-login successful")
-
-	return nil
+	return lastErr
 }
 
 func (m *Client) handleUnauthorized(ctx context.Context, name string, current int) bool {
