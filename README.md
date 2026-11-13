@@ -162,12 +162,16 @@ Part/leave
 
 ### Slack user commands
 
-Get a slack token on <https://api.slack.com/custom-integrations/legacy-tokens>
-
-Login
+If you still have a legacy Slack token (`xoxp-...`, previously from <https://api.slack.com/custom-integrations/legacy-tokens>), you can log in directly with it:
 
 ```
 /msg slack login <token>
+```
+
+Otherwise, use browser session credentials (`xoxc-` token + `d` cookie — see [slack sso login / xoxc tokens](#slack-sso-login--xoxc-tokens) below, noting the required trailing `;`):
+
+```
+/msg slack login xoxc-XXXX|d=xoxd-XXXX;
 ```
 
 Or use team/login/pass to login
@@ -275,14 +279,26 @@ Also see [#98](https://github.com/42wim/matterircd/issues/98#issuecomment-307308
 
 Taken from: <https://github.com/insomniacslk/irc-slack>
 
-Log via browser on the Slack team, open the browser's network tab in the developer tools, and look for an XHR transaction. Then look for the token (it starts with xoxc-) in the request data the auth cookie, contained in the d key-value in the request cookies (it looks like d=XXXX;)
+Since legacy `xoxp-` tokens are deprecated, you can use your browser session's `xoxc-` token and `d` (`xoxd-...`) cookie:
 
-Then concatenate the token and the auth cookie using a | character, like this:
+1. Log into your Slack workspace in a browser (`https://app.slack.com/client/...`) and open Developer Tools (`F12`).
+2. **Get the `xoxc-` token** using either method:
+   - **Console**: Run the following in the DevTools **Console** tab and copy your workspace's `token` (`xoxc-...`):
+     ```js
+     Object.values(JSON.parse(localStorage.localConfig_v2).teams).map(t => ({name: t.name, token: t.token}))
+     ```
+   - **Network tab**: Open the **Network** tab, filter for `api/`, trigger an action or reload, click a request to `slack.com/api/...`, and copy the `token` (`xoxc-...`) from the request payload/form data.
+3. **Get the `d` cookie (`xoxd-...`)**:
+   - Open DevTools → **Application** (Chrome/Edge) or **Storage** (Firefox) → **Cookies** → `https://app.slack.com` (or `.slack.com`).
+   - Copy the value of the cookie named `d` (it starts with `xoxd-`). Keep any URL encoding (such as `%2B`, `%2F`, `%3D`) as-is—do not decode it.
+4. **Log in via IRC**:
+   Concatenate the `xoxc-` token and `d=` cookie with `|`. **You MUST include the trailing semicolon `;` at the end**, otherwise login will fail with `auth cookie must have the format 'd=XXX;'`:
 
-`xoxc-XXXX|d=XXXX;`
-and use the above as your token with slack login
+   ```
+   /msg slack login xoxc-XXXX|d=xoxd-XXXX;
+   ```
 
-`/msg slack login xoxc-XXXX|d=XXXX;`
+   Keep that browser session signed in (closing the tab is fine, but clicking "Sign out" in the browser will invalidate the token and cookie).
 
 ## Guides
 
