@@ -21,9 +21,8 @@ type copilotTokenResponse struct {
 }
 
 type copilotRequest struct {
-	Model       string        `json:"model"`
-	Messages    []chatMessage `json:"messages"`
-	Temperature float64       `json:"temperature"`
+	Model    string        `json:"model"`
+	Messages []chatMessage `json:"messages"`
 }
 
 // NewCopilotClient creates a client targeting the native GitHub Copilot API.
@@ -58,7 +57,6 @@ func (c *CopilotClient) Summarize(ctx context.Context, prompt string, _ string) 
 				Content: prompt,
 			},
 		},
-		Temperature: 0.2,
 	}
 
 	rawJSON, err := json.Marshal(reqBody)

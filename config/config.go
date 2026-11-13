@@ -42,7 +42,7 @@ type AIConfig struct {
 	Project            string
 	Location           string
 	Model              string            // Fallback model if not specified in Models map
-	Models             map[string]string // Provider-specific models, e.g. { "gemini": "gemini-3.8-flash", "copilot": "gpt-4o" }
+	Models             map[string]string // Provider-specific models, e.g. { "gemini": "gemini-4-hydrogen", "copilot": "gpt-6-luna" }
 	Prompt             string
 	DefaultPostLimit   int
 	MaxPostLimit       int

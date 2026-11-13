@@ -115,9 +115,9 @@ location = "us"
 
 # Provider-specific models
 [ai.models]
-gemini = "gemini-3.8-flash"
-copilot = "gpt-4o"          # or "gpt-4o-mini"
-openai = "gpt-4o"           # or "gpt-4o-mini", "o3-mini"
+gemini = "gemini-4-hydrogen"
+copilot = "gpt-6-luna"      # or "gpt-6.1-sol"
+openai = "gpt-6-luna"       # or "gpt-6.1-sol", "gpt-6.1-terra"
 #hetzner = "meta-llama/Meta-Llama-3.1-70B-Instruct"
 #ollama = "llama3.2"
 
