@@ -3,7 +3,6 @@ package slack
 import (
 	"fmt"
 	"html"
-	"regexp"
 	"strings"
 	"time"
 )
@@ -57,56 +56,74 @@ func formatTS(unixts string) string {
 	return ts.Format("15:04:05")
 }
 
-// @see https://api.slack.com/docs/message-formatting#linking_to_channels_and_users
-func (s *Slack) replaceMention(text string) string {
-	results := regexp.MustCompile(`<@([a-zA-z0-9]+)>`).FindAllStringSubmatch(text, -1)
-	for _, r := range results {
-		text = strings.ReplaceAll(text, "<@"+r[1]+">", "@"+s.sc.UserName(r[1]))
+func (s *Slack) formatSlackToken(inner string) string {
+	if inner == "" {
+		return ""
 	}
 
-	return text
-}
+	switch inner[0] {
+	case '@':
+		id, _, _ := strings.Cut(inner[1:], "|")
 
-// @see https://api.slack.com/docs/message-formatting#linking_to_channels_and_users
-func replaceChannel(text string) string {
-	results := regexp.MustCompile(`<#[a-zA-Z0-9]+\|(.+?)>`).FindAllStringSubmatch(text, -1)
-	for _, r := range results {
-		text = strings.ReplaceAll(text, r[0], "#"+r[1])
-	}
-
-	return text
-}
-
-// @see https://api.slack.com/docs/message-formatting#variables
-func replaceVariable(text string) string {
-	results := regexp.MustCompile(`<!((?:subteam\^)?[a-zA-Z0-9]+)(?:\|@?(.+?))?>`).FindAllStringSubmatch(text, -1)
-	for _, r := range results {
-		if r[2] != "" {
-			text = strings.ReplaceAll(text, r[0], "@"+r[2])
-		} else {
-			text = strings.ReplaceAll(text, r[0], "@"+r[1])
+		return "@" + s.sc.UserName(id)
+	case '#':
+		id, label, hasLabel := strings.Cut(inner[1:], "|")
+		if hasLabel && label != "" {
+			return "#" + label
 		}
+
+		return s.sc.GetChannelName(id)
+	case '!':
+		id, label, hasLabel := strings.Cut(inner[1:], "|")
+		if hasLabel && label != "" {
+			return "@" + strings.TrimPrefix(label, "@")
+		}
+
+		return "@" + id
+	default:
+		link, _, _ := strings.Cut(inner, "|")
+
+		return link
 	}
-
-	return text
-}
-
-// @see https://api.slack.com/docs/message-formatting#linking_to_urls
-func replaceURL(text string) string {
-	results := regexp.MustCompile(`<(.*?)(\|.*?)?>`).FindAllStringSubmatch(text, -1)
-	for _, r := range results {
-		text = strings.ReplaceAll(text, r[0], r[1])
-	}
-
-	return text
 }
 
 func (s *Slack) cleanupMessage(msg string) string {
-	msg = s.replaceMention(msg)
-	msg = replaceVariable(msg)
-	msg = replaceChannel(msg)
-	msg = replaceURL(msg)
-	msg = html.UnescapeString(msg)
+	if !strings.ContainsRune(msg, '<') {
+		return html.UnescapeString(msg)
+	}
 
-	return msg
+	var b strings.Builder
+
+	b.Grow(len(msg))
+
+	for i := 0; i < len(msg); {
+		relStart := strings.IndexByte(msg[i:], '<')
+		if relStart == -1 {
+			b.WriteString(msg[i:])
+			break
+		}
+
+		start := i + relStart
+		b.WriteString(msg[i:start])
+
+		relEnd := strings.IndexByte(msg[start+1:], '>')
+		if relEnd == -1 {
+			b.WriteString(msg[start:])
+			break
+		}
+
+		inner := msg[start+1 : start+1+relEnd]
+		if nextOpen := strings.IndexByte(inner, '<'); nextOpen != -1 {
+			b.WriteString(msg[start : start+1+nextOpen])
+			i = start + 1 + nextOpen
+
+			continue
+		}
+
+		b.WriteString(s.formatSlackToken(inner))
+
+		i = start + 1 + relEnd + 1
+	}
+
+	return html.UnescapeString(b.String())
 }

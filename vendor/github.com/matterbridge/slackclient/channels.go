@@ -30,6 +30,10 @@ func (c *Client) JoinChannel(channelName string) (string, string, error) {
 		return "", "", fmt.Errorf("cannot join channel (+i): %w", err)
 	}
 
+	c.Lock()
+	c.channels[mychan.ID] = "#" + mychan.Name
+	c.Unlock()
+
 	return mychan.ID, mychan.Topic.Value, nil
 }
 
@@ -57,6 +61,12 @@ func (c *Client) GetConversations() ([]slack.Channel, error) {
 			break
 		}
 	}
+
+	c.Lock()
+	for _, ch := range channels {
+		c.channels[ch.ID] = "#" + ch.Name
+	}
+	c.Unlock()
 
 	return channels, nil
 }
@@ -103,16 +113,27 @@ func (c *Client) SetTopic(channelID, text string) error {
 }
 
 func (c *Client) GetChannelName(channelID string) string {
-	var name string
+	c.RLock()
+
+	if name, ok := c.channels[channelID]; ok {
+		c.RUnlock()
+		return name
+	}
+
+	c.RUnlock()
 
 	info, err := c.sc.GetConversationInfo(&slack.GetConversationInfoInput{
 		ChannelID: channelID,
 	})
-	if err != nil {
-		name = channelID
-	} else {
-		name = "#" + info.Name
+	if err != nil || info == nil {
+		return channelID
 	}
+
+	name := "#" + info.Name
+
+	c.Lock()
+	c.channels[channelID] = name
+	c.Unlock()
 
 	return name
 }

@@ -34,6 +34,7 @@ type Client struct {
 	rtm       *slack.RTM
 	info      *slack.Info
 	users     map[string]slack.User
+	channels  map[string]string
 	msgLast   map[string]string
 	connected bool
 
@@ -64,6 +65,7 @@ func New(cred Credentials) *Client {
 	return &Client{
 		cred:          cred,
 		users:         make(map[string]slack.User),
+		channels:      make(map[string]string),
 		msgLast:       make(map[string]string),
 		rootLogger:    rootLogger,
 		logger:        rootLogger.WithFields(logrus.Fields{"prefix": "slackclient"}),
@@ -112,25 +114,32 @@ func (c *Client) Login() error {
 	c.sc = slack.New(token, opts...)
 	c.rtm = c.sc.NewRTM(rtmOpts...)
 	c.users = make(map[string]slack.User)
+	c.channels = make(map[string]string)
 
 	go c.rtm.ManageConnection()
 
-	count := 0
+	err = c.waitForInfo()
+	if err != nil {
+		return err
+	}
 
+	c.connected = true
+
+	return nil
+}
+
+func (c *Client) waitForInfo() error {
 	c.info = c.rtm.GetInfo()
-	for c.info == nil {
+	for count := 0; c.info == nil; count++ {
+		if count == 20 {
+			return errors.New("couldn't connect in 10 seconds. Check your credentials")
+		}
+
 		time.Sleep(time.Millisecond * 500)
 		c.logger.Debug("still waiting for sinfo")
 
 		c.info = c.rtm.GetInfo()
-
-		count++
-		if count == 20 {
-			return errors.New("couldn't connect in 10 seconds. Check your credentials")
-		}
 	}
-
-	c.connected = true
 
 	return nil
 }
