@@ -193,6 +193,10 @@ type Client struct {
 	typingLock     sync.Mutex
 	lastTypingSent map[string]time.Time
 
+	// reauthMu serializes HTTP-only session re-login on 401 Unauthorized.
+	reauthMu   sync.Mutex
+	lastReauth time.Time
+
 	// OnChannelNameResolved, if set, is called after a channel name that was previously
 	// unresolved (still showing an ID) has been healed. It must not block.
 	OnChannelNameResolved func(channelID, name string)
@@ -1759,6 +1763,95 @@ func (m *Client) HandleRatelimit(ctx context.Context, name string, resp *model.R
 	return err
 }
 
+const (
+	reauthCooldown    = 5 * time.Second
+	reauthMaxAttempts = 3
+)
+
+// reauthSession refreshes the HTTP session token via Login without tearing down the websocket.
+// Concurrent callers within reauthCooldown reuse the freshly obtained session.
+func (m *Client) reauthSession(ctx context.Context) error {
+	m.reauthMu.Lock()
+	defer m.reauthMu.Unlock()
+
+	if !m.lastReauth.IsZero() && time.Since(m.lastReauth) < reauthCooldown {
+		return nil
+	}
+
+	if m.Client == nil {
+		return errors.New("client not initialized")
+	}
+
+	var lastErr error
+
+	for attempt := range reauthMaxAttempts {
+		if m.IsAborted(ctx) {
+			return errors.New("re-login aborted")
+		}
+
+		m.apiLogger.Info("reauthSession: Login")
+
+		user, resp, err := m.Client.Login(ctx, m.Credentials.Login, m.Pass)
+		if err == nil && user != nil {
+			m.Lock()
+			m.User = user
+			m.Unlock()
+
+			m.lastReauth = time.Now()
+			m.logger.Info("HTTP session re-login successful")
+
+			return nil
+		}
+
+		if err == nil {
+			err = errors.New("login succeeded but returned a nil user")
+		}
+
+		lastErr = err
+
+		// Don't retry invalid credentials or forbidden accounts.
+		if resp != nil && (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) {
+			return lastErr
+		}
+
+		if attempt+1 < reauthMaxAttempts {
+			m.logger.Warnf("HTTP session re-login attempt %d/%d failed: %v", attempt+1, reauthMaxAttempts, lastErr)
+
+			ok, sleepErr := m.sleepWithContext(ctx, time.Duration(attempt+1)*time.Second)
+			if !ok {
+				if sleepErr != nil {
+					return sleepErr
+				}
+
+				return lastErr
+			}
+		}
+	}
+
+	return lastErr
+}
+
+func (m *Client) handleUnauthorized(ctx context.Context, name string, current int) bool {
+	if name == "doLogin" || name == "serverAlive" || current > 0 || m.IsAborted(ctx) {
+		return false
+	}
+
+	if m.Credentials == nil || m.Token != "" || m.MFAToken != "" || m.Credentials.Login == "" || m.Pass == "" {
+		m.logger.Warnf("HTTP 401 Unauthorized on %s: cannot auto-relogin with token/MFA credentials, please LOGOUT and LOGIN again", name)
+		return false
+	}
+
+	m.logger.Warnf("HTTP 401 Unauthorized on %s, attempting HTTP session re-login", name)
+
+	loginErr := m.reauthSession(ctx)
+	if loginErr != nil {
+		m.logger.Errorf("HTTP session re-login failed on %s: %v", name, loginErr)
+		return false
+	}
+
+	return true
+}
+
 func (m *Client) HandleRetry(ctx context.Context, name string, err error, current int, maxLimit int, resp *model.Response) (bool, error) {
 	if ctx.Err() != nil {
 		return false, ctx.Err()
@@ -1781,6 +1874,9 @@ func (m *Client) HandleRetry(ctx context.Context, name string, err error, curren
 	case resp.StatusCode == http.StatusTooManyRequests:
 		_ = m.HandleRatelimit(ctx, name, resp)
 		return true, nil
+
+	case resp.StatusCode == http.StatusUnauthorized:
+		return m.handleUnauthorized(ctx, name, current), nil
 
 	case resp.StatusCode >= http.StatusInternalServerError:
 		m.logger.Warnf("Transient error %d on %s, backing off: %s (attempt %d/%d)",
