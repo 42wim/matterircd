@@ -93,12 +93,15 @@ func (c *Client) Login() error {
 		}
 	}
 
+	opts := []slack.Option{
+		slack.OptionDebug(true),
+		slack.OptionLog(slackLogAdapter{logger: c.apiLogger}),
+	}
+
 	var rtmOpts []slack.RTMOption
 
-	if cookie == "" {
-		c.sc = slack.New(token, slack.OptionDebug(true))
-	} else {
-		c.sc = slack.New(token, slack.OptionDebug(true), slack.OptionHTTPClient(&httpClient{
+	if cookie != "" {
+		opts = append(opts, slack.OptionHTTPClient(&httpClient{
 			cookie: cookie,
 			logger: c.logger,
 		}))
@@ -106,6 +109,7 @@ func (c *Client) Login() error {
 		rtmOpts = append(rtmOpts, slack.RTMOptionDialer(newCookieDialer(cookie)))
 	}
 
+	c.sc = slack.New(token, opts...)
 	c.rtm = c.sc.NewRTM(rtmOpts...)
 	c.users = make(map[string]slack.User)
 
@@ -301,7 +305,7 @@ type httpClient struct {
 //nolint:gosec // thin wrapper; the request URL is built by the slack client, not user input
 func (hc *httpClient) Do(req *http.Request) (*http.Response, error) {
 	if hc.cookie != "" {
-		hc.logger.Debug("Setting auth cookie")
+		hc.logger.Trace("Setting auth cookie")
 
 		if strings.ToLower(req.URL.Scheme) == "https" {
 			req.Header.Add("Cookie", hc.cookie)
@@ -327,6 +331,16 @@ func newCookieDialer(cookie string) *websocket.Dialer {
 	}
 
 	return &dialer
+}
+
+type slackLogAdapter struct {
+	logger *logrus.Entry
+}
+
+func (l slackLogAdapter) Output(_ int, s string) error {
+	l.logger.Debug(strings.TrimRight(s, "\r\n"))
+
+	return nil
 }
 
 type staticCookieJar struct {

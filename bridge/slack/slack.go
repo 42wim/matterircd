@@ -62,33 +62,44 @@ func New(cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Eve
 	if err != nil {
 		return nil, err
 	}
-	// Helper closure to set bridge levels
-	setBridgeLogLevels := func(rc *config.RuntimeConfig) {
-		switch {
-		case rc.Trace:
-			ourlog.SetLevel(logrus.TraceLevel)
-			sc.SetLogLevel("trace")
-		case rc.Debug:
-			ourlog.SetLevel(logrus.DebugLevel)
-			sc.SetLogLevel("debug")
-		default:
-			ourlog.SetLevel(logrus.InfoLevel)
-			sc.SetLogLevel("info")
-		}
-	}
-
 	// Set initial log level
-	setBridgeLogLevels(rc)
+	configureBridgeLogging(ourlog, sc, rc)
 
 	// Register hook to update live on reloads
 	cfg.RegisterReloadHook(func(newRC *config.RuntimeConfig) {
-		setBridgeLogLevels(newRC)
+		configureBridgeLogging(ourlog, sc, newRC)
 	})
 
 	s.sc = sc
 	s.sc.InitUsers()
 
 	return s, nil
+}
+
+func configureBridgeLogging(ourlog *logrus.Logger, sc *slackclient.Client, rc *config.RuntimeConfig) {
+	switch {
+	case rc.Trace:
+		ourlog.SetLevel(logrus.TraceLevel)
+		sc.SetLogLevel("trace")
+	case rc.Debug:
+		ourlog.SetLevel(logrus.DebugLevel)
+		sc.SetLogLevel("debug")
+	default:
+		ourlog.SetLevel(logrus.InfoLevel)
+		sc.SetLogLevel("info")
+	}
+
+	sc.SetLogAPICalls("error")
+
+	if rc.Profiling {
+		if rc.Trace {
+			logger.Infof("enabling slackclient API logging: level: trace")
+			sc.SetLogAPICalls("trace")
+		} else if rc.Debug {
+			logger.Infof("enabling slackclient API logging: level: warn")
+			sc.SetLogAPICalls("warn")
+		}
+	}
 }
 
 func (s *Slack) Invite(ctx context.Context, channelID, username string) error {
@@ -399,10 +410,12 @@ func (s *Slack) loginToSlack() (*slackclient.Client, error) {
 
 	if rc.Debug {
 		sc.SetLogLevel("debug")
+		sc.SetLogAPICalls("warn")
 	}
 
 	if rc.Trace {
 		sc.SetLogLevel("trace")
+		sc.SetLogAPICalls("trace")
 	}
 
 	err := sc.Login()
