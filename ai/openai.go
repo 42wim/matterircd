@@ -18,15 +18,8 @@ type OpenAIClient struct {
 }
 
 type openAIRequest struct {
-	Model       string        `json:"model"`
-	Messages    []chatMessage `json:"messages"`
-	Temperature *float64      `json:"temperature,omitempty"`
-}
-
-func isOpenAIReasoningModel(model string) bool {
-	m := strings.ToLower(strings.TrimSpace(model))
-
-	return strings.HasPrefix(m, "o1") || strings.HasPrefix(m, "o3") || strings.HasPrefix(m, "o4") || strings.HasPrefix(m, "gpt-5") || strings.HasPrefix(m, "deepseek-reasoner") || strings.HasPrefix(m, "deepseek-r1") || strings.HasPrefix(m, "grok-reasoner")
+	Model    string        `json:"model"`
+	Messages []chatMessage `json:"messages"`
 }
 
 // NewOpenAIClient creates a client targeting standard OpenAI or compatible REST endpoints.
@@ -64,11 +57,6 @@ func (c *OpenAIClient) Summarize(ctx context.Context, prompt string, _ string) (
 				Content: prompt,
 			},
 		},
-	}
-
-	if !isOpenAIReasoningModel(c.model) {
-		temp := 0.2
-		reqBody.Temperature = &temp
 	}
 
 	rawJSON, err := json.Marshal(reqBody)

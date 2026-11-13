@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gorilla/websocket"
 	prefixed "github.com/matterbridge/logrus-prefixed-formatter"
 	"github.com/sirupsen/logrus"
 	"github.com/slack-go/slack"
@@ -92,6 +93,8 @@ func (c *Client) Login() error {
 		}
 	}
 
+	var rtmOpts []slack.RTMOption
+
 	if cookie == "" {
 		c.sc = slack.New(token, slack.OptionDebug(true))
 	} else {
@@ -99,9 +102,11 @@ func (c *Client) Login() error {
 			cookie: cookie,
 			logger: c.logger,
 		}))
+
+		rtmOpts = append(rtmOpts, slack.RTMOptionDialer(newCookieDialer(cookie)))
 	}
 
-	c.rtm = c.sc.NewRTM()
+	c.rtm = c.sc.NewRTM(rtmOpts...)
 	c.users = make(map[string]slack.User)
 
 	go c.rtm.ManageConnection()
@@ -306,4 +311,34 @@ func (hc *httpClient) Do(req *http.Request) (*http.Response, error) {
 	}
 
 	return hc.c.Do(req)
+}
+
+func newCookieDialer(cookie string) *websocket.Dialer {
+	val := strings.TrimSuffix(strings.TrimPrefix(cookie, "d="), ";")
+	dialer := *websocket.DefaultDialer
+	dialer.Jar = &staticCookieJar{
+		cookies: []*http.Cookie{{
+			Name:     "d",
+			Value:    val,
+			Secure:   true,
+			HttpOnly: true,
+			SameSite: http.SameSiteStrictMode,
+		}},
+	}
+
+	return &dialer
+}
+
+type staticCookieJar struct {
+	cookies []*http.Cookie
+}
+
+func (j *staticCookieJar) SetCookies(_ *url.URL, _ []*http.Cookie) {}
+
+func (j *staticCookieJar) Cookies(u *url.URL) []*http.Cookie {
+	if strings.EqualFold(u.Scheme, "https") {
+		return j.cookies
+	}
+
+	return nil
 }

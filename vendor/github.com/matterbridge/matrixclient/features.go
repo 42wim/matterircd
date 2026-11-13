@@ -144,8 +144,9 @@ func (c *Client) Edit(ctx context.Context, roomID id.RoomID, eventID id.EventID,
 	content := event.MessageEventContent{MsgType: event.MsgText, Body: text}
 	content.SetEdit(eventID)
 
+	txnID := c.mc.TxnID()
 	for attempt := 0; ; attempt++ {
-		resp, err := c.mc.SendMessageEvent(ctx, roomID, event.EventMessage, &content)
+		resp, err := c.mc.SendMessageEvent(ctx, roomID, event.EventMessage, &content, mautrix.ReqSendEvent{TransactionID: txnID})
 		if err == nil {
 			return resp.EventID, nil
 		}
@@ -171,8 +172,9 @@ func (c *Client) EditHTML(ctx context.Context, roomID id.RoomID, eventID id.Even
 	}
 	content.SetEdit(eventID)
 
+	txnID := c.mc.TxnID()
 	for attempt := 0; ; attempt++ {
-		resp, err := c.mc.SendMessageEvent(ctx, roomID, event.EventMessage, &content)
+		resp, err := c.mc.SendMessageEvent(ctx, roomID, event.EventMessage, &content, mautrix.ReqSendEvent{TransactionID: txnID})
 		if err == nil {
 			return resp.EventID, nil
 		}
@@ -209,8 +211,17 @@ func (c *Client) Delete(ctx context.Context, roomID id.RoomID, eventID id.EventI
 
 // React adds a reaction to an event and returns the reaction event ID.
 func (c *Client) React(ctx context.Context, roomID id.RoomID, eventID id.EventID, key string) (id.EventID, error) {
+	content := event.ReactionEventContent{
+		RelatesTo: event.RelatesTo{
+			EventID: eventID,
+			Type:    event.RelAnnotation,
+			Key:     key,
+		},
+	}
+
+	txnID := c.mc.TxnID()
 	for attempt := 0; ; attempt++ {
-		resp, err := c.mc.SendReaction(ctx, roomID, eventID, key)
+		resp, err := c.mc.SendMessageEvent(ctx, roomID, event.EventReaction, &content, mautrix.ReqSendEvent{TransactionID: txnID})
 		if err == nil {
 			return resp.EventID, nil
 		}

@@ -38,6 +38,7 @@ release:
 updatedeps:
 	go get github.com/matterbridge/matterclient@master
 	go get github.com/matterbridge/matrixclient@master
+	go get github.com/matterbridge/slackclient@master
 	go mod tidy && go mod vendor
 	# https://github.com/alecthomas/chroma/pull/1344
 	git checkout -q vendor/github.com/alecthomas/chroma/v2/formatters/mirc.go

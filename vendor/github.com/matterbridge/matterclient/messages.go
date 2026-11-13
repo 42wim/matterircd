@@ -19,6 +19,10 @@ func (m *Client) CreatePost(ctx context.Context, post *model.Post) (*model.Post,
 		post.UserId = m.User.Id
 	}
 
+	if post.PendingPostId == "" {
+		post.PendingPostId = model.NewId()
+	}
+
 	// Proactive RootId resolution: if RootId points to a reply, flatten to root post
 	if post.RootId != "" && m.postCache != nil {
 		if cached, ok := m.postCache.Get(post.RootId); ok && cached.RootId != "" {
@@ -473,9 +477,10 @@ func (m *Client) PatchPost(ctx context.Context, postID string, patch *model.Post
 
 func (m *Client) PostMessage(ctx context.Context, channelID string, text string, rootID string) (string, error) {
 	post := &model.Post{
-		ChannelId: channelID,
-		Message:   text,
-		RootId:    rootID,
+		ChannelId:     channelID,
+		Message:       text,
+		RootId:        rootID,
+		PendingPostId: model.NewId(),
 	}
 
 	channelName := m.GetCachedChannelName(channelID)
@@ -507,10 +512,11 @@ func (m *Client) PostMessage(ctx context.Context, channelID string, text string,
 
 func (m *Client) PostMessageWithFiles(ctx context.Context, channelID string, text string, rootID string, fileIds []string) (string, error) {
 	post := &model.Post{
-		ChannelId: channelID,
-		Message:   text,
-		RootId:    rootID,
-		FileIds:   fileIds,
+		ChannelId:     channelID,
+		Message:       text,
+		RootId:        rootID,
+		FileIds:       fileIds,
+		PendingPostId: model.NewId(),
 	}
 
 	channelName := m.GetCachedChannelName(channelID)
@@ -587,9 +593,10 @@ func (m *Client) SendDirectMessageProps(ctx context.Context, toUserID string, ms
 	// build & send the message
 	msg = strings.ReplaceAll(msg, "\r", "")
 	post := &model.Post{
-		ChannelId: dchannel.Id,
-		Message:   msg,
-		RootId:    rootID,
+		ChannelId:     dchannel.Id,
+		Message:       msg,
+		RootId:        rootID,
+		PendingPostId: model.NewId(),
 	}
 	post.SetProps(props)
 
