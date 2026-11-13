@@ -193,6 +193,10 @@ type Client struct {
 	typingLock     sync.Mutex
 	lastTypingSent map[string]time.Time
 
+	// reauthMu serializes HTTP-only session re-login on 401 Unauthorized.
+	reauthMu   sync.Mutex
+	lastReauth time.Time
+
 	// OnChannelNameResolved, if set, is called after a channel name that was previously
 	// unresolved (still showing an ID) has been healed. It must not block.
 	OnChannelNameResolved func(channelID, name string)
@@ -1759,6 +1763,43 @@ func (m *Client) HandleRatelimit(ctx context.Context, name string, resp *model.R
 	return err
 }
 
+const reauthCooldown = 5 * time.Second
+
+// reauthSession refreshes the HTTP session token via Login without tearing down the websocket.
+// Concurrent callers within reauthCooldown reuse the freshly obtained session.
+func (m *Client) reauthSession(ctx context.Context) error {
+	m.reauthMu.Lock()
+	defer m.reauthMu.Unlock()
+
+	if !m.lastReauth.IsZero() && time.Since(m.lastReauth) < reauthCooldown {
+		return nil
+	}
+
+	if m.Client == nil {
+		return errors.New("client not initialized")
+	}
+
+	m.apiLogger.Info("reauthSession: Login")
+
+	user, _, err := m.Client.Login(ctx, m.Credentials.Login, m.Pass)
+	if err != nil {
+		return err
+	}
+
+	if user == nil {
+		return errors.New("login succeeded but returned a nil user")
+	}
+
+	m.Lock()
+	m.User = user
+	m.Unlock()
+
+	m.lastReauth = time.Now()
+	m.logger.Info("HTTP session re-login successful")
+
+	return nil
+}
+
 func (m *Client) HandleRetry(ctx context.Context, name string, err error, current int, maxLimit int, resp *model.Response) (bool, error) {
 	if ctx.Err() != nil {
 		return false, ctx.Err()
@@ -1780,6 +1821,25 @@ func (m *Client) HandleRetry(ctx context.Context, name string, err error, curren
 	switch {
 	case resp.StatusCode == http.StatusTooManyRequests:
 		_ = m.HandleRatelimit(ctx, name, resp)
+		return true, nil
+
+	case resp.StatusCode == http.StatusUnauthorized:
+		if name == "doLogin" || name == "serverAlive" || current > 0 || m.IsAborted(ctx) {
+			return false, nil
+		}
+
+		if m.Credentials == nil || m.Token != "" || m.MFAToken != "" || m.Credentials.Login == "" || m.Pass == "" {
+			m.logger.Warnf("HTTP 401 Unauthorized on %s: cannot auto-relogin with token/MFA credentials, please LOGOUT and LOGIN again", name)
+			return false, nil
+		}
+
+		m.logger.Warnf("HTTP 401 Unauthorized on %s, attempting HTTP session re-login", name)
+
+		if loginErr := m.reauthSession(ctx); loginErr != nil {
+			m.logger.Errorf("HTTP session re-login failed on %s: %v", name, loginErr)
+			return false, nil
+		}
+
 		return true, nil
 
 	case resp.StatusCode >= http.StatusInternalServerError:
