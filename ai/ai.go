@@ -98,13 +98,13 @@ const (
 	contentTypeJSON   = "application/json"
 
 	DefaultClaudeModel   = "claude-sonnet-5"
-	DefaultCopilotModel  = "gpt-4o"
+	DefaultCopilotModel  = "gpt-6-luna"
 	DefaultDeepSeekModel = "deepseek-chat"
-	DefaultGeminiModel   = "gemini-3.8-flash"
+	DefaultGeminiModel   = "gemini-4-hydrogen"
 	DefaultHetznerModel  = "meta-llama/Meta-Llama-3.1-70B-Instruct"
 	DefaultLocalModel    = "llama3.2"
 	DefaultMuseModel     = "muse-spark-1.3"
-	DefaultOpenAIModel   = "gpt-4o"
+	DefaultOpenAIModel   = "gpt-6-luna"
 	DefaultXAIModel      = "grok-2"
 
 	DefaultClaudeBaseURL   = "https://api.anthropic.com/v1"
