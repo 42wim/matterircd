@@ -627,6 +627,11 @@ func (s *Slack) sendPublicMessage(ghost *bridge.UserInfo, msg, channelID string)
 func (s *Slack) handleSlackActionPost(rmsg *slack.MessageEvent) {
 	logger.Debugf("handleSlackActionPost: receiving msg %#v", rmsg)
 
+	// Thread metadata updates carry no new message; the actual reply arrives in its own event.
+	if rmsg.SubType == "message_replied" {
+		return
+	}
+
 	// Is this our own message
 	if s.sc.IsOwnMessageEcho(rmsg.User, rmsg.Channel, rmsg.Timestamp) {
 		return
