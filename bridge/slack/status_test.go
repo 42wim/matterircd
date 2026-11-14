@@ -187,24 +187,38 @@ func TestFormatSlackAttachmentFields(t *testing.T) {
 	msg := &slack.Msg{
 		Attachments: []slack.Attachment{
 			{
-				Title: "Alert",
+				AuthorName: "Monitoring",
+				AuthorLink: "https://mon.example",
+				Title:      "Alert",
+				TitleLink:  "https://mon.example/a/1",
 				Fields: []slack.AttachmentField{
 					{Title: "Env", Value: "prod", Short: true},
 					{Title: "Host", Value: "web-01", Short: true},
 					{Title: "Status", Value: "degraded", Short: true},
 					{Title: "Details", Value: "high latency", Short: false},
 				},
+				ImageURL: "https://mon.example/chart.png",
 			},
 		},
 	}
 
 	got, ok := formatSlackMsgOpts(msg, 25, false)
 	assert.True(t, ok)
-	assert.Equal(t, "> Env: prod | Host: web-01\n> Status: degraded\n> Details: high latency", got)
+	assert.Equal(t,
+		"> Monitoring (https://mon.example)\n> Alert (https://mon.example/a/1)\n> Env: prod | Host: web-01\n> Status: degraded\n> Details: high latency\n> https://mon.example/chart.png",
+		got)
 
 	gotOmit, ok := formatSlackMsgOpts(msg, 100, true)
 	assert.True(t, ok)
-	assert.Equal(t, "> prod | web-01 | degraded\n> high latency", gotOmit)
+	assert.Equal(t,
+		"> Monitoring (https://mon.example)\n> Alert (https://mon.example/a/1)\n> prod | web-01 | degraded\n> high latency\n> https://mon.example/chart.png",
+		gotOmit)
+
+	fallbackOnly, ok := formatSlackMsgOpts(&slack.Msg{
+		Attachments: []slack.Attachment{{Fallback: "Fallback summary"}},
+	}, 0, false)
+	assert.True(t, ok)
+	assert.Equal(t, "> Fallback summary", fallbackOnly)
 }
 
 func TestSlackClientChannelMembershipCaches(t *testing.T) {
@@ -517,6 +531,88 @@ func TestSlackUserProfileAndStatusEvents(t *testing.T) {
 
 	statusEv := <-evCh
 	assert.Equal(t, "status_change", statusEv.Type)
+
+	// GetUserByUsername resolves dot-sanitized DisplayName/RealName and userByNick mappings.
+	s.userByNick["Custom.Nick"] = "U1"
+
+	byCustom := s.GetUserByUsername(context.Background(), "custom.nick")
+	if assert.NotNil(t, byCustom) {
+		assert.Equal(t, "U1", byCustom.User)
+	}
+
+	// Logout is idempotent and unregisters reload hooks.
+	unregistered := 0
+	s.unregisterReloadHook = func() { unregistered++ }
+	_ = s.Logout(context.Background())
+	_ = s.Logout(context.Background())
+
+	assert.Equal(t, 1, unregistered)
+}
+
+func TestSlackBlocksListAndGetChannel(t *testing.T) {
+	cfg, err := config.Load("", pflag.NewFlagSet("test", pflag.ContinueOnError))
+	if err != nil {
+		t.Fatalf("config.Load failed: %v", err)
+	}
+
+	sc := slackclient.New(slackclient.Credentials{})
+	sc.UpdateChannel("C1", "general")
+	sc.SetChannelJoined("C1", true)
+	sc.UpdateTopic("C1", "line1\nline2")
+	sc.UpdateChannel("D1", "D1")
+	sc.SetChannelJoined("D1", true)
+
+	evCh := make(chan *bridge.Event, 4)
+
+	s, err := newTestSlackBridge(cfg, sc, evCh)
+	if err != nil {
+		t.Fatalf("newTestSlackBridge: %v", err)
+	}
+
+	// List skips IM/MPIM conversations.
+	list, err := s.List(context.Background())
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+
+	assert.Equal(t, map[string]string{"#general": "line1 | line2"}, list)
+
+	// GetChannel resolves #channel-name and rejects &service channels.
+	chInfo, err := s.GetChannel(context.Background(), "#general")
+	if err != nil {
+		t.Fatalf("GetChannel(#general): %v", err)
+	}
+
+	assert.Equal(t, "C1", chInfo.ID)
+
+	_, err = s.GetChannel(context.Background(), "&users")
+	if err == nil {
+		t.Fatal("expected error for &users")
+	}
+
+	// Block Kit fallback renders SectionBlock and RichTextBlock when Text is empty.
+	headerTxt := slack.NewTextBlockObject(slack.PlainTextType, "Deploy Alert", false, false)
+	secTxt := slack.NewTextBlockObject(slack.MarkdownType, "Service *api* deployed", false, false)
+	rtBlock := slack.NewRichTextBlock("b1",
+		slack.NewRichTextSection(
+			slack.NewRichTextSectionTextElement("Triggered by ", nil),
+			slack.NewRichTextSectionUserElement("U1", nil),
+		),
+	)
+
+	msg := &slack.Msg{
+		Blocks: slack.Blocks{
+			BlockSet: []slack.Block{
+				slack.NewHeaderBlock(headerTxt),
+				slack.NewSectionBlock(secTxt, nil, nil),
+				rtBlock,
+			},
+		},
+	}
+
+	rendered, ok := formatSlackMsg(msg)
+	assert.True(t, ok)
+	assert.Equal(t, "Deploy Alert\nService *api* deployed\nTriggered by <@U1>", rendered)
 }
 
 func newTestSlackBridge(cfg *config.Config, sc *slackclient.Client, evCh chan *bridge.Event) (*Slack, error) {

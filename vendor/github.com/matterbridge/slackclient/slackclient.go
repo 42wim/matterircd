@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -21,10 +22,11 @@ import (
 )
 
 type Credentials struct {
-	Login string
-	Team  string
-	Pass  string
-	Token string
+	Login    string
+	Team     string
+	Pass     string
+	Token    string
+	MFAToken string
 }
 
 type presenceEntry struct {
@@ -61,7 +63,7 @@ type Client struct {
 	dmChannels        map[string]string
 	msgLast           map[string]string
 	pongCh            chan struct{}
-	connected         bool
+	connected         atomic.Bool
 
 	logger        *logrus.Entry
 	rootLogger    *logrus.Logger
@@ -157,7 +159,7 @@ func (c *Client) Login() error {
 		return err
 	}
 
-	c.connected = true
+	c.connected.Store(true)
 
 	return nil
 }
@@ -189,14 +191,14 @@ func (c *Client) Disconnect() error {
 func (c *Client) Logout() error {
 	c.logger.Debug("calling logout from slack")
 
-	err := c.rtm.Disconnect()
+	err := c.Disconnect()
 	if err != nil {
 		c.logger.Debug("logoutfrom slack", err)
 		return err
 	}
 
 	c.sc = nil
-	c.connected = false
+	c.connected.Store(false)
 
 	c.logger.Info("logout succeeded")
 
@@ -204,7 +206,7 @@ func (c *Client) Logout() error {
 }
 
 func (c *Client) Connected() bool {
-	return c.connected
+	return c.connected.Load()
 }
 
 func (c *Client) NotifyPong() {
@@ -219,7 +221,7 @@ func (c *Client) NotifyPong() {
 }
 
 func (c *Client) HttpPing(ctx context.Context) error {
-	if c.sc == nil || !c.connected {
+	if c.sc == nil || !c.connected.Load() {
 		return errors.New("slackclient: not connected")
 	}
 
@@ -229,7 +231,7 @@ func (c *Client) HttpPing(ctx context.Context) error {
 }
 
 func (c *Client) WsPing(ctx context.Context) error {
-	if c.rtm == nil || !c.connected || c.rtm.GetInfo() == nil {
+	if c.rtm == nil || !c.connected.Load() || c.rtm.GetInfo() == nil {
 		return errors.New("slackclient: websocket not connected")
 	}
 
@@ -328,8 +330,16 @@ func (c *Client) getSlackToken() (string, error) {
 		return "", errors.New("SSO teams not yet supported")
 	}
 
-	resp, err = http.PostForm("https://slack.com/api/auth.signin",
-		url.Values{"team": {findTeamResponse.TeamID}, "email": {c.cred.Login}, "password": {c.cred.Pass}})
+	signinValues := url.Values{
+		"team":     {findTeamResponse.TeamID},
+		"email":    {c.cred.Login},
+		"password": {c.cred.Pass},
+	}
+	if c.cred.MFAToken != "" {
+		signinValues.Set("pin", c.cred.MFAToken)
+	}
+
+	resp, err = http.PostForm("https://slack.com/api/auth.signin", signinValues)
 	if err != nil {
 		return "", err
 	}

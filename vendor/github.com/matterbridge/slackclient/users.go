@@ -269,6 +269,20 @@ func (c *Client) GetUserCount() int {
 	return len(c.users)
 }
 
+func matchesSlackUsername(u slack.User, username string) bool {
+	dotSanitize := func(s string) string {
+		return strings.Join(strings.Fields(s), ".")
+	}
+
+	return strings.EqualFold(u.Name, username) ||
+		strings.EqualFold(u.Profile.DisplayName, username) ||
+		strings.EqualFold(u.RealName, username) ||
+		strings.EqualFold(u.Profile.RealName, username) ||
+		strings.EqualFold(dotSanitize(u.Profile.DisplayName), username) ||
+		strings.EqualFold(dotSanitize(u.RealName), username) ||
+		strings.EqualFold(dotSanitize(u.Profile.RealName), username)
+}
+
 func (c *Client) GetUserByUsername(username string) *slack.User {
 	if username == "" {
 		return nil
@@ -286,7 +300,7 @@ func (c *Client) GetUserByUsername(username string) *slack.User {
 	defer c.RUnlock()
 
 	for _, u := range c.users {
-		if strings.EqualFold(u.Name, username) || strings.EqualFold(u.Profile.DisplayName, username) {
+		if matchesSlackUsername(u, username) {
 			user := u
 			return &user
 		}
