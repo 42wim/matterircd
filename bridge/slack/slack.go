@@ -574,9 +574,7 @@ func (s *Slack) handleMemberJoinedChannel(ctx context.Context, rmsg *slack.Membe
 	var adder *bridge.UserInfo
 
 	if rmsg.Inviter != "" {
-		adder = &bridge.UserInfo{
-			Nick: s.GetUser(ctx, rmsg.Inviter).Nick,
-		}
+		adder = s.GetUser(ctx, rmsg.Inviter)
 	}
 
 	event := &bridge.Event{

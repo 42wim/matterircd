@@ -472,8 +472,15 @@ func (u *User) handleChannelAddEvent(event *bridge.ChannelAddEvent) {
 			_ = ch.Join(ghost)
 		}
 
-		if event.Adder != nil && u.sanitizeNick(added.Nick) != u.sanitizeNick(event.Adder.Nick) && event.Adder.Nick != systemUser {
-			ch.SpoofMessage(systemUser, "\x1dadded "+u.sanitizeNick(added.Nick)+" to the channel by "+u.sanitizeNick(event.Adder.Nick)+"\x1d")
+		if event.Adder != nil && event.Adder.Nick != systemUser {
+			adderNick := u.sanitizeNick(event.Adder.Nick)
+			if event.Adder.Me {
+				adderNick = u.Nick
+			}
+
+			if u.sanitizeNick(added.Nick) != adderNick {
+				ch.SpoofMessage(systemUser, "\x1dadded "+u.sanitizeNick(added.Nick)+" to the channel by "+adderNick+"\x1d")
+			}
 		}
 	}
 
@@ -545,8 +552,15 @@ func (u *User) handleChannelRemoveEvent(event *bridge.ChannelRemoveEvent) {
 			ch.Part(ghost, event.Text)
 		}
 
-		if event.Remover != nil && u.sanitizeNick(removed.Nick) != u.sanitizeNick(event.Remover.Nick) && event.Remover.Nick != systemUser {
-			ch.SpoofMessage(systemUser, "\x1dremoved "+u.sanitizeNick(removed.Nick)+" from the channel by "+u.sanitizeNick(event.Remover.Nick)+"\x1d")
+		if event.Remover != nil && event.Remover.Nick != systemUser {
+			removerNick := u.sanitizeNick(event.Remover.Nick)
+			if event.Remover.Me {
+				removerNick = u.Nick
+			}
+
+			if u.sanitizeNick(removed.Nick) != removerNick {
+				ch.SpoofMessage(systemUser, "\x1dremoved "+u.sanitizeNick(removed.Nick)+" from the channel by "+removerNick+"\x1d")
+			}
 		}
 	}
 
