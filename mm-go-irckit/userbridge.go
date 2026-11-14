@@ -634,6 +634,11 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		senderPrefix = &irc.Prefix{Name: nick, User: nick, Host: u.Srv.Name()}
 	}
 
+	if event.Event == "channel_purpose" {
+		ch.SpoofMessage(systemUser, "\x1d"+nick+" "+event.Text+"\x1d")
+		return
+	}
+
 	if u.hasSharedCfg() && u.sharedCfg().ShowMentions {
 		for _, m := range u.MentionKeys {
 			if m == u.Nick || m == "" {
