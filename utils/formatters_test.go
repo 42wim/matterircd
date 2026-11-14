@@ -3,6 +3,7 @@ package utils
 import (
 	"slices"
 	"testing"
+	"time"
 )
 
 func collectProcessedLines(text string, opts ProcessMessageOpts) []string {
@@ -198,5 +199,33 @@ func TestProcessMessageTextQuotedCodeBlock(t *testing.T) {
 	gotPre := collectProcessedLines(preformattedInput, opts)
 	if !slices.Equal(gotPre, wantPreformatted) {
 		t.Errorf("preformatted got: %q\nwant: %q", gotPre, wantPreformatted)
+	}
+}
+
+func TestFormatLastOnline(t *testing.T) {
+	now := time.Now().Unix()
+
+	if got := FormatLastOnline(0); got != "" {
+		t.Errorf("expected empty string for 0, got %q", got)
+	}
+
+	if got := FormatLastOnline(now - 10); got != "Last online just now" {
+		t.Errorf("expected 'Last online just now', got %q", got)
+	}
+
+	if got := FormatLastOnline(now-10, true); got != "Last activity just now" {
+		t.Errorf("expected 'Last activity just now', got %q", got)
+	}
+
+	if got := FormatLastOnline(now - 60); got != "Last online 1 min. ago" {
+		t.Errorf("expected 'Last online 1 min. ago', got %q", got)
+	}
+
+	if got := FormatLastOnline(now - 3600); got != "Last online 1 hr. ago" {
+		t.Errorf("expected 'Last online 1 hr. ago', got %q", got)
+	}
+
+	if got := FormatLastOnline(now - 86400); got != "Last online 1 day ago" {
+		t.Errorf("expected 'Last online 1 day ago', got %q", got)
 	}
 }
