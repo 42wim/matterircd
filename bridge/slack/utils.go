@@ -39,6 +39,9 @@ func (s *Slack) formatSlackToken(inner string) string {
 		return "@" + id
 	default:
 		link, _, _ := strings.Cut(inner, "|")
+		if ch, ts, ok := parseSlackArchiveURL(link); ok {
+			return link + " (" + encodeSlackID(ch, ts) + ")"
+		}
 
 		return link
 	}

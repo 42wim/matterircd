@@ -301,3 +301,63 @@ func TestFormatPinnedSlackMsg(t *testing.T) {
 		formatPinnedSlackMsg(nil, true, &slack.Message{}, "", subTypePinAdded),
 	)
 }
+
+func TestSlackLinkUnfurl(t *testing.T) {
+	urlText := "<https://example.com|https://example.com>"
+	unfurlEv := &slack.MessageEvent{
+		Msg: slack.Msg{
+			SubType: subTypeMessageChanged,
+		},
+		SubMessage: &slack.Msg{
+			Text: urlText,
+			Attachments: []slack.Attachment{
+				{Text: "```bash\necho hi\n```"},
+			},
+		},
+		PreviousMessage: &slack.Msg{
+			Text: urlText,
+		},
+	}
+
+	assert.True(t, isSlackLinkUnfurl(unfurlEv))
+
+	text, ok := formatSlackActionPostText(unfurlEv, true)
+	assert.True(t, ok)
+	assert.Equal(t, "> ```bash\n> echo hi\n> ```", text)
+
+	// Actual user edit (Edited != nil) should not be treated as a link unfurl.
+	editedEv := &slack.MessageEvent{
+		Msg: slack.Msg{
+			SubType: subTypeMessageChanged,
+		},
+		SubMessage: &slack.Msg{
+			Text:   urlText,
+			Edited: &slack.Edited{User: "U1", Timestamp: "123.456"},
+			Attachments: []slack.Attachment{
+				{Text: "preview"},
+			},
+		},
+		PreviousMessage: &slack.Msg{
+			Text: urlText,
+		},
+	}
+
+	assert.False(t, isSlackLinkUnfurl(editedEv))
+}
+
+func TestFormatSlackArchiveToken(t *testing.T) {
+	s := &Slack{}
+	url := "https://haw-testing.slack.com/archives/C0BQRTTFYAK/p1794641989780999"
+	wantID := encodeSlackID("C0BQRTTFYAK", "1794641989.780999")
+
+	assert.Equal(
+		t,
+		url+" ("+wantID+")",
+		s.cleanupMessage("<"+url+"|"+url+">"),
+	)
+	assert.Equal(
+		t,
+		"https://example.com/foo",
+		s.cleanupMessage("<https://example.com/foo|https://example.com/foo>"),
+	)
+}

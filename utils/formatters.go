@@ -626,15 +626,16 @@ func ProcessMessageText(text string, opts ProcessMessageOpts, yield func(line st
 	}
 
 	var (
-		codeBuilder      strings.Builder
-		emptyLines       int
-		hasContent       bool
-		lastBlockWasCode bool
-		inCodeBlock      bool
-		inAttachment     bool
-		codeBlockMarker  string
-		lexer            string
-		currentIndent    string // Tracks leading whitespace for nested blocks
+		codeBuilder       strings.Builder
+		emptyLines        int
+		hasContent        bool
+		lastBlockWasCode  bool
+		inCodeBlock       bool
+		inQuotedCodeBlock bool
+		inAttachment      bool
+		codeBlockMarker   string
+		lexer             string
+		currentIndent     string // Tracks leading whitespace for nested blocks
 	)
 
 	for text != "" {
@@ -685,6 +686,14 @@ func ProcessMessageText(text string, opts ProcessMessageOpts, yield func(line st
 		}
 
 		if inCodeBlock { //nolint:nestif
+			if inQuotedCodeBlock {
+				if _, qrest, ok := splitQuotePrefix(line, opts.BlockquoteChar, opts.InlineCodeChar); ok {
+					line = qrest
+					origLine = qrest
+					trimmed = strings.TrimSpace(line)
+				}
+			}
+
 			isPrefixClose := strings.HasPrefix(trimmed, codeBlockMarker)
 
 			closeIdx := -1
@@ -716,6 +725,7 @@ func ProcessMessageText(text string, opts ProcessMessageOpts, yield func(line st
 				}
 
 				inCodeBlock = false
+				inQuotedCodeBlock = false
 				lastBlockWasCode = true
 				hasContent = true
 
@@ -752,8 +762,18 @@ func ProcessMessageText(text string, opts ProcessMessageOpts, yield func(line st
 			continue
 		}
 
-		isBacktick := strings.HasPrefix(trimmed, "```")
-		isTilde := strings.HasPrefix(trimmed, "~~~")
+		formattedQuotePrefix := ""
+		fenceTrimmed := trimmed
+
+		if !opts.DisableMarkdown {
+			if qp, qrest, ok := splitQuotePrefix(line, opts.BlockquoteChar, opts.InlineCodeChar); ok {
+				formattedQuotePrefix = qp
+				fenceTrimmed = strings.TrimSpace(qrest)
+			}
+		}
+
+		isBacktick := strings.HasPrefix(fenceTrimmed, "```")
+		isTilde := strings.HasPrefix(fenceTrimmed, "~~~")
 
 		if isBacktick || isTilde { //nolint:nestif
 			marker := "```"
@@ -761,17 +781,23 @@ func ProcessMessageText(text string, opts ProcessMessageOpts, yield func(line st
 				marker = "~~~"
 			}
 
-			// Capture the leading whitespace to use as indentation for the whole block
-			idx := strings.Index(line, marker)
-			if idx >= 0 {
-				currentIndent = line[:idx]
+			if formattedQuotePrefix != "" {
+				inQuotedCodeBlock = true
+				currentIndent = formattedQuotePrefix
 			} else {
-				currentIndent = ""
+				inQuotedCodeBlock = false
+				// Capture the leading whitespace to use as indentation for the whole block
+				idx := strings.Index(line, marker)
+				if idx >= 0 {
+					currentIndent = line[:idx]
+				} else {
+					currentIndent = ""
+				}
 			}
 
 			inCodeBlock = true
 			codeBlockMarker = marker
-			lexer = strings.TrimSpace(strings.TrimPrefix(trimmed, marker))
+			lexer = strings.TrimSpace(strings.TrimPrefix(fenceTrimmed, marker))
 
 			// Logic for back-to-back code blocks
 			if lastBlockWasCode && opts.CodeBlockSeparator != "" {
@@ -820,6 +846,55 @@ func ProcessMessageText(text string, opts ProcessMessageOpts, yield func(line st
 			yield("")
 		}
 	}
+}
+
+func splitQuotePrefix(line, blockQuoteChar, inlineCodeChar string) (string, string, bool) {
+	trimmedText := strings.TrimLeft(line, " \t")
+
+	if blockQuoteChar != "" && blockQuoteChar != BlockQuoteCharDefault && strings.HasPrefix(trimmedText, blockQuoteChar) {
+		var pre strings.Builder
+
+		idx := 0
+		for strings.HasPrefix(trimmedText[idx:], blockQuoteChar) {
+			pre.WriteString(blockQuoteChar)
+			idx += len(blockQuoteChar)
+
+			if idx < len(trimmedText) && trimmedText[idx] == ' ' {
+				idx++
+			}
+		}
+
+		return pre.String(), trimmedText[idx:], true
+	}
+
+	if !strings.HasPrefix(trimmedText, BlockQuoteCharDefault) {
+		return "", line, false
+	}
+
+	leading := len(line) - len(trimmedText)
+	idx := 0
+
+ParseLoop:
+	for idx < len(trimmedText) {
+		switch trimmedText[idx] {
+		case '>':
+			idx++
+			if idx < len(trimmedText) && trimmedText[idx] == ' ' {
+				idx++
+			}
+		case ' ', '\t':
+			idx++
+		default:
+			break ParseLoop
+		}
+	}
+
+	bq := blockQuoteChar
+	if bq == "" {
+		bq = BlockQuoteCharDefault
+	}
+
+	return Markdown2irc(line[:leading+idx], bq, inlineCodeChar), trimmedText[idx:], true
 }
 
 func checkWordBoundaryStart(s string, idx int) bool {

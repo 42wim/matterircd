@@ -1229,6 +1229,29 @@ func (s *Slack) handleSlackMessageDeleted(ctx context.Context, rmsg *slack.Messa
 	s.sendPublicMessage(ghost, msg, channelID, msgID, parentID, "post_deleted", createAt)
 }
 
+func isSlackLinkUnfurl(rmsg *slack.MessageEvent) bool {
+	return rmsg.SubType == subTypeMessageChanged &&
+		rmsg.SubMessage != nil &&
+		rmsg.PreviousMessage != nil &&
+		rmsg.SubMessage.Edited == nil &&
+		rmsg.SubMessage.Text == rmsg.PreviousMessage.Text &&
+		len(rmsg.SubMessage.Attachments) > len(rmsg.PreviousMessage.Attachments)
+}
+
+func formatSlackActionPostText(rmsg *slack.MessageEvent, isUnfurl bool) (string, bool) {
+	if isUnfurl {
+		newAttachments := rmsg.SubMessage.Attachments[len(rmsg.PreviousMessage.Attachments):]
+
+		return formatSlackMsg(&slack.Msg{Attachments: newAttachments})
+	}
+
+	if rmsg.SubType == subTypeMessageChanged && rmsg.SubMessage != nil {
+		return formatSlackMsg(rmsg.SubMessage)
+	}
+
+	return formatSlackMsg(&rmsg.Msg)
+}
+
 //nolint:funlen,gocyclo
 func (s *Slack) handleSlackActionPost(ctx context.Context, rmsg *slack.MessageEvent) {
 	logger.Debugf("handleSlackActionPost: receiving msg %#v", rmsg)
@@ -1277,13 +1300,17 @@ func (s *Slack) handleSlackActionPost(ctx context.Context, rmsg *slack.MessageEv
 
 	msgTS := rmsg.Timestamp
 	parentTS := rmsg.ThreadTimestamp
+	isUnfurl := isSlackLinkUnfurl(rmsg)
 
 	if rmsg.SubType == subTypeMessageChanged {
 		if rmsg.SubMessage == nil {
 			return
 		}
 
-		eventType = "post_edited"
+		if !isUnfurl {
+			eventType = "post_edited"
+		}
+
 		msgTS = rmsg.SubMessage.Timestamp
 
 		if rmsg.SubMessage.ThreadTimestamp != "" {
@@ -1296,17 +1323,7 @@ func (s *Slack) handleSlackActionPost(ctx context.Context, rmsg *slack.MessageEv
 		return
 	}
 
-	var (
-		rawText    string
-		msghandled bool
-	)
-
-	if rmsg.SubType == subTypeMessageChanged && rmsg.SubMessage != nil {
-		rawText, msghandled = formatSlackMsg(rmsg.SubMessage)
-	} else {
-		rawText, msghandled = formatSlackMsg(&rmsg.Msg)
-	}
-
+	rawText, msghandled := formatSlackActionPostText(rmsg, isUnfurl)
 	if !msghandled {
 		return
 	}
@@ -1327,15 +1344,17 @@ func (s *Slack) handleSlackActionPost(ctx context.Context, rmsg *slack.MessageEv
 	case eventChannelTopic, eventChannelPurpose:
 		s.cacheThreadRoot(channelID, msgTS, rootTS)
 	default:
-		s.cachePost(channelID, msgTS, rootTS, ghost, msg)
+		if !isUnfurl {
+			s.cachePost(channelID, msgTS, rootTS, ghost, msg)
+		}
 	}
 
 	if parentID != "" {
 		msg = strings.TrimRight(msg, "\n") + s.formatReplySuffix(ctx, channelID, parentTS)
 	}
 
-	if rmsg.SubType == subTypeMessageChanged {
-		msg = strings.TrimRight(msg, "\n") + slackActionSuffix(s.FormatterConfig().Unicode, subTypeMessageChanged)
+	if rmsg.SubType == subTypeMessageChanged && !isUnfurl {
+		msg = utils.AppendMessageSuffix(msg, slackActionSuffix(s.FormatterConfig().Unicode, subTypeMessageChanged))
 	}
 
 	createAt := slackTSMillis(msgTS)
