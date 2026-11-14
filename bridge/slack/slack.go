@@ -1045,6 +1045,8 @@ func (s *Slack) handleSlackEvent(ctx context.Context, msg slack.RTMEvent) {
 	case *slack.TeamJoinEvent:
 		s.sc.UpdateUser(ev.User)
 		s.emitUserUpdate(ev.User)
+	case *slack.LatencyReport:
+		s.sc.NotifyPong()
 	default:
 		if !s.handleSlackItemEvent(ctx, msg.Data) {
 			s.handleSlackLifecycleEvent(msg.Data)
@@ -2089,7 +2091,21 @@ func (s *Slack) GetReplayEvents(ctx context.Context, channelID string, since int
 }
 
 func (s *Slack) Ping(ctx context.Context, proto ...string) error {
-	return s.sc.Ping(ctx)
+	if s.sc == nil {
+		return errors.New("client not initialized")
+	}
+
+	protocol := "ws"
+	if len(proto) > 0 && proto[0] != "" {
+		protocol = strings.ToLower(proto[0])
+	}
+
+	switch protocol {
+	case "http", "rest":
+		return s.sc.HttpPing(ctx)
+	default:
+		return s.sc.WsPing(ctx)
+	}
 }
 
 func firstEventRootTS(events []*bridge.Event) string {

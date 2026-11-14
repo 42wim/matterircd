@@ -51,6 +51,7 @@ type Client struct {
 	userChannels map[string]userChannelsEntry
 	dmChannels   map[string]string
 	msgLast      map[string]string
+	pongCh       chan struct{}
 	connected    bool
 
 	logger        *logrus.Entry
@@ -85,6 +86,7 @@ func New(cred Credentials) *Client {
 		userChannels:  make(map[string]userChannelsEntry),
 		dmChannels:    make(map[string]string),
 		msgLast:       make(map[string]string),
+		pongCh:        make(chan struct{}, 1),
 		rootLogger:    rootLogger,
 		logger:        rootLogger.WithFields(logrus.Fields{"prefix": "slackclient"}),
 		rootAPILogger: rootAPILogger,
@@ -193,7 +195,18 @@ func (c *Client) Connected() bool {
 	return c.connected
 }
 
-func (c *Client) Ping(ctx context.Context) error {
+func (c *Client) NotifyPong() {
+	if c.pongCh == nil {
+		return
+	}
+
+	select {
+	case c.pongCh <- struct{}{}:
+	default:
+	}
+}
+
+func (c *Client) HttpPing(ctx context.Context) error {
 	if c.sc == nil || !c.connected {
 		return errors.New("slackclient: not connected")
 	}
@@ -201,6 +214,36 @@ func (c *Client) Ping(ctx context.Context) error {
 	_, err := c.sc.AuthTestContext(ctx)
 
 	return err
+}
+
+func (c *Client) WsPing(ctx context.Context) error {
+	if c.rtm == nil || !c.connected || c.rtm.GetInfo() == nil {
+		return errors.New("slackclient: websocket not connected")
+	}
+
+	if c.pongCh != nil {
+		select {
+		case <-c.pongCh:
+		default:
+		}
+	}
+
+	c.rtm.SendMessage(&slack.OutgoingMessage{Type: "ping"})
+
+	if c.pongCh == nil {
+		return nil
+	}
+
+	select {
+	case <-c.pongCh:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (c *Client) Ping(ctx context.Context) error {
+	return c.HttpPing(ctx)
 }
 
 func (c *Client) IncomingEvents() <-chan slack.RTMEvent {

@@ -132,6 +132,23 @@ func TestSlackClientCountsAndLookups(t *testing.T) {
 		t.Fatal("expected error from Ping when disconnected")
 	}
 
+	err = sc.WsPing(context.Background())
+	if err == nil {
+		t.Fatal("expected error from WsPing when disconnected")
+	}
+
+	s := &Slack{sc: sc}
+
+	err = s.Ping(context.Background(), "http")
+	if err == nil {
+		t.Fatal("expected error from Slack.Ping(http) when disconnected")
+	}
+
+	err = s.Ping(context.Background(), "ws")
+	if err == nil {
+		t.Fatal("expected error from Slack.Ping(ws) when disconnected")
+	}
+
 	sc.UpdateUser(slack.User{
 		ID:   "U10",
 		Name: "carol",
