@@ -686,6 +686,7 @@ func ProcessMessageText(text string, opts ProcessMessageOpts, yield func(line st
 
 		if inCodeBlock { //nolint:nestif
 			isPrefixClose := strings.HasPrefix(trimmed, codeBlockMarker)
+
 			closeIdx := -1
 			if isPrefixClose {
 				closeIdx = strings.Index(line, codeBlockMarker)
@@ -702,12 +703,15 @@ func ProcessMessageText(text string, opts ProcessMessageOpts, yield func(line st
 					if idxOrig := strings.LastIndex(contentBefore, codeBlockMarker); idxOrig >= 0 {
 						contentBefore = contentBefore[:idxOrig]
 					}
+
 					if currentIndent != "" && strings.HasPrefix(contentBefore, currentIndent) {
 						contentBefore = contentBefore[len(currentIndent):]
 					}
+
 					if codeBuilder.Len() > 0 {
 						codeBuilder.WriteByte('\n')
 					}
+
 					codeBuilder.WriteString(contentBefore)
 				}
 

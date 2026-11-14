@@ -7,12 +7,15 @@ import (
 
 func collectProcessedLines(text string, opts ProcessMessageOpts) []string {
 	var lines []string
+
 	ProcessMessageText(text, opts, func(line string) {
 		lines = append(lines, line)
 	})
+
 	return lines
 }
 
+//nolint:dupword,goconst
 func TestProcessMessageTextCodeBlockInlineClose(t *testing.T) {
 	opts := ProcessMessageOpts{
 		CodeBlockPrefix:    "🮇 ",
@@ -63,6 +66,29 @@ func TestProcessMessageTextCodeBlockInlineClose(t *testing.T) {
 				"\x1d(edited)\x1d",
 			},
 		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := collectProcessedLines(tc.input, opts)
+			if !slices.Equal(got, tc.wantLines) {
+				t.Errorf("got: %q\nwant: %q", got, tc.wantLines)
+			}
+		})
+	}
+}
+
+func TestProcessMessageTextCodeBlockMidLineBackticks(t *testing.T) {
+	opts := ProcessMessageOpts{
+		CodeBlockPrefix:    "🮇 ",
+		SyntaxHighlighting: "terminal256:pygments",
+	}
+
+	tests := []struct {
+		name      string
+		input     string
+		wantLines []string
+	}{
 		{
 			name:  "code block containing inline backticks mid-line is not prematurely closed",
 			input: "```bash\necho \"```hello```\"\n```",
