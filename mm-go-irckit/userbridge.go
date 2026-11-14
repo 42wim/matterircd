@@ -1165,8 +1165,8 @@ func (u *User) addUsersToChannels() {
 		return
 	}
 
-	// wait until the bridge is ready
-	for u.currentBridge() == nil {
+	// wait until the bridge is ready and login OK has been sent
+	for u.currentBridge() == nil || !u.loginReady.Load() {
 		logger.Debug("bridge not ready yet, sleeping")
 
 		// don't wait forever for a user that is gone
@@ -2253,6 +2253,8 @@ func (u *User) loginTo(protocol string) error {
 		err error
 	)
 
+	u.loginReady.Store(false)
+
 	// Reset the event loop tracker in case this User struct is recycled.
 	// The new channel has to be in place before the bridge starts: it calls
 	// addUsersToChannels, which hands the channel to the event loop.
@@ -2308,6 +2310,7 @@ func (u *User) loginTo(protocol string) error {
 	// abandons the new bridge, it will never be used. Same order as logoutFrom: addUsersToChannels
 	// may have started the event loop already, it has to be done before the bridge is dropped.
 	abort := func(err error) error {
+		u.loginReady.Store(false)
 		_ = br.Logout(u.ctx)
 
 		u.stopEventLoop()
@@ -2352,9 +2355,16 @@ func (u *User) loginTo(protocol string) error {
 	return nil
 }
 
+func (u *User) finishLogin(toUser *User, service string) {
+	u.respondService(toUser, "login OK", service)
+	u.loginReady.Store(true)
+}
+
 //nolint:unparam
 func (u *User) logoutFrom(protocol string) error {
 	logger.Debug("logging out from", protocol)
+
+	u.loginReady.Store(false)
 
 	// Don't hold eventLoopMutex while logging out: the logout hands an event to the
 	// event loop, and that loop is started while holding the mutex.

@@ -77,6 +77,7 @@ type User struct {
 	awayNotifiedGen uint64
 	awayLookupBusy  atomic.Bool
 	awaySendMu      sync.Mutex
+	loginReady      atomic.Bool
 }
 
 func (u *User) ID() string {
