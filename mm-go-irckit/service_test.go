@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/sorcix/irc"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -157,4 +158,29 @@ func TestSlackIDPatterns(t *testing.T) {
 	assert.Len(t, modMatches, 3)
 	assert.Equal(t, "/"+slackID+"/", modMatches[1])
 	assert.Equal(t, "new text", modMatches[2])
+}
+
+func TestIsSensitiveServiceMsg(t *testing.T) {
+	const serviceHost = "service"
+
+	assert.True(t, isSensitiveServiceMsg(&irc.Message{
+		Prefix:   &irc.Prefix{Name: serviceMattermost, Host: serviceHost},
+		Command:  irc.PRIVMSG,
+		Trailing: "LOGIN server user pass",
+	}))
+	assert.True(t, isSensitiveServiceMsg(&irc.Message{
+		Prefix:   &irc.Prefix{Name: serviceMatrix, Host: serviceHost},
+		Command:  irc.PRIVMSG,
+		Trailing: "need LOGIN <server> <token>",
+	}))
+	assert.True(t, isSensitiveServiceMsg(&irc.Message{
+		Prefix:   &irc.Prefix{Name: serviceSlack, Host: serviceHost},
+		Command:  irc.PRIVMSG,
+		Trailing: "xoxp-secret-value",
+	}))
+	assert.False(t, isSensitiveServiceMsg(&irc.Message{
+		Prefix:   &irc.Prefix{Name: serviceSlack, Host: serviceHost},
+		Command:  irc.PRIVMSG,
+		Trailing: "login OK",
+	}))
 }

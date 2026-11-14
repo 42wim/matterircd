@@ -167,8 +167,6 @@ func (u *User) VisibleTo() []*User {
 const writeTimeout = 10 * time.Second
 
 // Encode and send each msg until an error occurs, then returns.
-//
-//nolint:gocyclo
 func (u *User) Encode(msgs ...*irc.Message) error {
 	if u == nil || u.Ghost || u.Conn == nil {
 		return nil
@@ -186,8 +184,8 @@ func (u *User) Encode(msgs ...*irc.Message) error {
 			logger.Warnf("failed to set write deadline for %s: %v", u.Nick, err)
 		}
 
-		if msg.Prefix != nil && msg.Command == irc.PRIVMSG && (msg.Name == serviceSlack || msg.Name == serviceMattermost) && msg.Host == "service" && strings.Contains(msg.Trailing, "token") {
-			logger.Debugf("-> %s %s %s", msg.Command, msg.Name, "[token redacted]")
+		if isSensitiveServiceMsg(msg) {
+			logger.Debugf("-> %s %s %s", msg.Command, msg.Name, "[credentials redacted]")
 
 			err := u.Conn.Encode(msg)
 			if err != nil {
@@ -581,4 +579,22 @@ func (u *User) ResetAwayNotified() {
 
 	u.awayNotifiedAt = 0
 	u.awayNotifiedGen++
+}
+
+func isSensitiveServiceMsg(msg *irc.Message) bool {
+	if msg == nil || msg.Prefix == nil || msg.Command != irc.PRIVMSG || msg.Host != "service" {
+		return false
+	}
+
+	if msg.Name != serviceSlack && msg.Name != serviceMattermost && msg.Name != serviceMatrix {
+		return false
+	}
+
+	lower := strings.ToLower(strings.TrimSpace(msg.Trailing))
+
+	return (lower != "login ok" && strings.HasPrefix(lower, "login ")) ||
+		strings.Contains(lower, "token") ||
+		strings.Contains(lower, "xoxp-") ||
+		strings.Contains(lower, "xoxc-") ||
+		strings.Contains(lower, "xoxd-")
 }

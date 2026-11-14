@@ -442,8 +442,8 @@ PrefixContext = false
 #EnableLazyJoin = false
 #LazyJoinDuration = "504h"
 #LazyJoinExclude = ["#some-room"]
-#The replay positions are saved in one file, [mattermost] LastViewedSaveFile has precedence.
-#LastViewedSaveFile = "matterircd-lastsaved.db"
+#Optional per-protocol DB path; falls back to [mattermost] LastViewedSaveFile when unset.
+#LastViewedSaveFile = "matterircd-matrix-lastsaved.db"
 #Encrypted rooms need a build with "go build -tags goolm" and cgo.
 #Directory for the per user key databases and the key encrypting them.
 #Keep both, losing them makes earlier messages undecryptable.

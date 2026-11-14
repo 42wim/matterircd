@@ -240,7 +240,7 @@ type MatrixConfig struct {
 
 	MatrixclientLogLevel string
 
-	// Only used when mattermost.LastViewedSaveFile is unset, there is one file for all bridges.
+	// Optional per-protocol DB path; falls back to mattermost.LastViewedSaveFile (or default) if unset.
 	LastViewedSaveFile string
 
 	HideReplies      bool
