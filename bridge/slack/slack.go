@@ -30,6 +30,8 @@ type Slack struct {
 	cfg *config.Config
 }
 
+const systemUser = "system"
+
 var logger *logrus.Entry
 
 func New(cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Event, onConnect func()) (bridge.Bridger, error) {
@@ -231,14 +233,12 @@ func (s *Slack) GetChannelUsers(ctx context.Context, channelID string) ([]*bridg
 		return nil, err
 	}
 
-	users := make([]*bridge.UserInfo, 0, len(susers)+2)
+	users := make([]*bridge.UserInfo, 0, len(susers)+1)
 	for _, suser := range susers {
 		users = append(users, s.createUser(suser))
 	}
 
-	// Add slackbot to all channels
-	slackuser := s.sc.GetUser("USLACKBOT")
-	users = append(users, s.createUser(slackuser), s.GetMe())
+	users = append(users, s.GetMe())
 
 	return users, nil
 }
@@ -574,9 +574,7 @@ func (s *Slack) handleMemberJoinedChannel(ctx context.Context, rmsg *slack.Membe
 	var adder *bridge.UserInfo
 
 	if rmsg.Inviter != "" {
-		adder = &bridge.UserInfo{
-			Nick: s.GetUser(ctx, rmsg.Inviter).Nick,
-		}
+		adder = s.GetUser(ctx, rmsg.Inviter)
 	}
 
 	event := &bridge.Event{
@@ -642,17 +640,22 @@ func (s *Slack) handleSlackActionPost(rmsg *slack.MessageEvent) {
 		rmsg.Text = "[M " + ts + "] Message deleted"
 	}
 
-	// TODO: cache userinfo
-	suser, err := s.sc.GetUserFromMessage(rmsg)
-	if err != nil {
-		logger.Errorf("couldn't find user in message %#v: %s", spew.Sdump(rmsg), err)
-		return
+	var ghost *bridge.UserInfo
+	if !strings.HasPrefix(rmsg.Channel, "D") && (rmsg.User == "USLACKBOT" || (rmsg.SubType == "bot_message" && rmsg.BotID == "B01" && rmsg.Username == "") || rmsg.SubType == "message_deleted") {
+		ghost = &bridge.UserInfo{Nick: systemUser}
+	} else {
+		// TODO: cache userinfo
+		suser, err := s.sc.GetUserFromMessage(rmsg)
+		if err != nil {
+			logger.Errorf("couldn't find user in message %#v: %s", spew.Sdump(rmsg), err)
+			return
+		}
+
+		// create new "ghost" user
+		ghost = s.createUser(suser)
 	}
 
 	msghandled := false
-
-	// create new "ghost" user
-	ghost := s.createUser(suser)
 
 	spoofUsername := ghost.Nick
 
