@@ -1,6 +1,7 @@
 package slack
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -640,20 +641,53 @@ func (s *Slack) UpdateLastViewedUser(ctx context.Context, userID string) error {
 	return nil
 }
 
+func slackFileToBridgeFile(f *slack.File) *bridge.File {
+	if f == nil {
+		return nil
+	}
+
+	fileURL := cmp.Or(f.URLPrivateDownload, f.URLPrivate, f.Permalink)
+	if fileURL == "" {
+		return nil
+	}
+
+	name := cmp.Or(f.Name, f.Title, f.ID)
+
+	return &bridge.File{
+		Name: name,
+		Size: int64(f.Size),
+		URL:  fileURL,
+	}
+}
+
+func slackFilesToBridgeFiles(files []slack.File) []*bridge.File {
+	if len(files) == 0 {
+		return nil
+	}
+
+	out := make([]*bridge.File, 0, len(files))
+
+	for i := range files {
+		if bf := slackFileToBridgeFile(&files[i]); bf != nil {
+			out = append(out, bf)
+		}
+	}
+
+	return out
+}
+
 func (s *Slack) GetFilesInfo(ctx context.Context, fileIDs []string) []*bridge.File {
 	files := make([]*bridge.File, 0, len(fileIDs))
 
 	for _, id := range fileIDs {
 		f, err := s.sc.GetFileInfo(ctx, id)
-		if err != nil || f == nil {
+		if err != nil {
 			continue
 		}
 
-		files = append(files, &bridge.File{
-			Name: f.Name,
-			Size: int64(f.Size),
-			URL:  firstNonEmpty(f.URLPrivateDownload, f.URLPrivate, f.Permalink),
-		})
+		if bf := slackFileToBridgeFile(f); bf != nil {
+			files = append(files, bf)
+		}
 	}
 
 	return files
@@ -883,11 +917,17 @@ func (s *Slack) slackMsgToEvent(ctx context.Context, channelID string, m slack.M
 	shortFieldMaxLen, omitFieldTitles := s.attachmentFormattingOpts()
 
 	rawText, ok := formatSlackMsgOpts(&m, shortFieldMaxLen, omitFieldTitles)
-	if !ok {
+	files := slackFilesToBridgeFiles(m.Files)
+
+	if !ok && len(files) == 0 {
 		return nil
 	}
 
-	text := s.cleanupMessage(rawText)
+	text := ""
+	if ok {
+		text = s.cleanupMessage(rawText)
+	}
+
 	msgID := encodeSlackID(channelID, m.Timestamp)
 
 	parentID := ""
@@ -915,6 +955,7 @@ func (s *Slack) slackMsgToEvent(ctx context.Context, channelID string, m slack.M
 				MessageID: msgID,
 				ParentID:  parentID,
 				CreateAt:  createAt,
+				Files:     files,
 			},
 		}
 	}
@@ -928,6 +969,7 @@ func (s *Slack) slackMsgToEvent(ctx context.Context, channelID string, m slack.M
 			MessageID: msgID,
 			ParentID:  parentID,
 			CreateAt:  createAt,
+			Files:     files,
 		},
 	}
 }
@@ -1693,12 +1735,6 @@ func formatSlackMsgOpts(m *slack.Msg, shortFieldMaxLen int, omitFieldTitles bool
 		}
 	}
 
-	for _, file := range m.Files {
-		msgs = append(msgs, "Uploaded "+file.Mode+" "+
-			file.Name+" / "+file.Title+" ("+file.Filetype+"): "+file.URLPrivate)
-		msghandled = true
-	}
-
 	if !msghandled {
 		return "", false
 	}
@@ -1962,11 +1998,12 @@ func (s *Slack) handleSlackActionPost(ctx context.Context, rmsg *slack.MessageEv
 	}
 
 	rawText, msghandled := formatSlackActionPostText(rmsg, isUnfurl, shortFieldMaxLen, omitFieldTitles)
-	if !msghandled {
+	files := slackFilesToBridgeFiles(rmsg.Files)
+
+	if !msghandled && len(files) == 0 {
 		return
 	}
 
-	msg := s.cleanupMessage(rawText)
 	channelID := rmsg.Channel
 	msgID := encodeSlackID(channelID, msgTS)
 
@@ -1977,6 +2014,24 @@ func (s *Slack) handleSlackActionPost(ctx context.Context, rmsg *slack.MessageEv
 		parentID = encodeSlackID(channelID, parentTS)
 		rootTS = parentTS
 	}
+
+	if msghandled {
+		s.sendSlackActionPostMessage(ctx, ghost, rmsg, rawText, channelID, msgTS, rootTS, msgID, parentID, parentTS, eventType, isUnfurl)
+	}
+
+	if len(files) > 0 && rmsg.SubType != subTypeMessageChanged {
+		s.emitSlackFileEvent(ghost, channelID, msgID, parentID, files)
+	}
+}
+
+func (s *Slack) sendSlackActionPostMessage(
+	ctx context.Context,
+	ghost *bridge.UserInfo,
+	rmsg *slack.MessageEvent,
+	rawText, channelID, msgTS, rootTS, msgID, parentID, parentTS, eventType string,
+	isUnfurl bool,
+) {
+	msg := s.cleanupMessage(rawText)
 
 	switch rmsg.SubType {
 	case eventChannelTopic, eventChannelPurpose:
@@ -2005,6 +2060,29 @@ func (s *Slack) handleSlackActionPost(ctx context.Context, rmsg *slack.MessageEv
 	}
 
 	s.sendPublicMessage(ghost, msg, channelID, msgID, parentID, eventType, createAt)
+}
+
+func (s *Slack) emitSlackFileEvent(ghost *bridge.UserInfo, channelID, msgID, parentID string, files []*bridge.File) {
+	channelType := ""
+	receiver := ghost
+
+	if strings.HasPrefix(channelID, "D") {
+		channelType = "D"
+		receiver = s.resolveDMReceiver(ghost, channelID)
+	}
+
+	s.eventChan <- &bridge.Event{
+		Type: "file_event",
+		Data: &bridge.FileEvent{
+			Sender:      ghost,
+			Receiver:    receiver,
+			ChannelType: channelType,
+			ChannelID:   channelID,
+			MessageID:   msgID,
+			ParentID:    parentID,
+			Files:       files,
+		},
+	}
 }
 
 func isEnterpriseUser(slackuser *slack.User) bool {
