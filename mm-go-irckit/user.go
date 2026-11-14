@@ -223,8 +223,8 @@ func (u *User) Encode(msgs ...*irc.Message) error {
 }
 
 var (
-	replyRegExp  = regexp.MustCompile(`^\@\@(?:!!|[0-9a-z]{26}|[0-9a-f]{3}|\$[0-9A-Za-z\-_\.\+\/]{43})\s`)
-	modifyRegExp = regexp.MustCompile(`^s/(?:!!|[0-9a-z]{26}|[0-9a-f]{3}|\$[0-9A-Za-z\-_\.\+\/]{43})?/`)
+	replyRegExp  = regexp.MustCompile(`^\@\@(?:!!|[0-9a-z]{26}|[0-9a-f]{3}|\$[0-9A-Za-z\-_\.\+\/]{43}|sl[0-9a-v]{34,80})\s`)
+	modifyRegExp = regexp.MustCompile(`^s/(?:!!|[0-9a-z]{26}|[0-9a-f]{3}|\$[0-9A-Za-z\-_\.\+\/]{43}|sl[0-9a-v]{34,80})?/`)
 )
 
 // threadPrefix returns the thread ("@@id ") that text is a reply to, or an empty string.

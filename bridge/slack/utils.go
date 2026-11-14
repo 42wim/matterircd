@@ -1,27 +1,12 @@
 package slack
 
 import (
-	"fmt"
 	"html"
 	"strings"
-	"time"
 )
 
 func sanitizeSlackNick(name string) string {
 	return strings.Join(strings.Fields(name), ".")
-}
-
-func formatTS(unixts string) string {
-	var targetts, targetus int64
-
-	_, _ = fmt.Sscanf(unixts, "%d.%d", &targetts, &targetus)
-	ts := time.Unix(targetts, targetus*1000)
-
-	if ts.YearDay() != time.Now().YearDay() {
-		return ts.Format("2.1. 15:04:05")
-	}
-
-	return ts.Format("15:04:05")
 }
 
 func (s *Slack) formatSlackToken(inner string) string {

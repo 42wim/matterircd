@@ -592,6 +592,16 @@ func isBareThreadID(msg string) bool {
 		return true
 	}
 
+	if strings.HasPrefix(id, "sl") && len(id) >= 36 && len(id) <= 82 {
+		for i := 2; i < len(id); i++ {
+			if strings.IndexByte("0123456789abcdefghijklmnopqrstuv", id[i]) == -1 {
+				return false
+			}
+		}
+
+		return true
+	}
+
 	var validChars string
 
 	switch len(id) {
@@ -832,9 +842,9 @@ func awayNotice(s Server, u *User, br bridge.Bridger, toUser *User) {
 }
 
 var (
-	parseModifyMsgRegExp     = regexp.MustCompile(`^s(\/(?:!!|[0-9a-f]{3}|[0-9a-z]{26}|\$[0-9A-Za-z\-_\.\+\/]{43})?\/)(.*)`)
-	parseReactionToMsgRegExp = regexp.MustCompile(`^\@\@(!!|[0-9a-f]{3}|[0-9a-z]{26}|\$[0-9A-Za-z\-_\.\+\/]{43})\s+([\-\+]):(\S+):\s*$`)
-	parseThreadIDRegExp      = regexp.MustCompile(`(?s)^\@\@(?:(!!|[0-9a-f]{3}|[0-9a-z]{26}|\$[0-9A-Za-z\-_\.\+\/]{43})\s)(.*)`)
+	parseModifyMsgRegExp     = regexp.MustCompile(`^s(\/(?:!!|[0-9a-f]{3}|[0-9a-z]{26}|\$[0-9A-Za-z\-_\.\+\/]{43}|sl[0-9a-v]{34,80})?\/)(.*)`)
+	parseReactionToMsgRegExp = regexp.MustCompile(`^\@\@(!!|[0-9a-f]{3}|[0-9a-z]{26}|\$[0-9A-Za-z\-_\.\+\/]{43}|sl[0-9a-v]{34,80})\s+([\-\+]):(\S+):\s*$`)
+	parseThreadIDRegExp      = regexp.MustCompile(`(?s)^\@\@(?:(!!|[0-9a-f]{3}|[0-9a-z]{26}|\$[0-9A-Za-z\-_\.\+\/]{43}|sl[0-9a-v]{34,80})\s)(.*)`)
 )
 
 func parseReactionToMsg(s Server, u *User, msg *irc.Message, channelID string) bool {
@@ -927,8 +937,8 @@ func parseModifyMsg(s Server, u *User, msg *irc.Message, channelID string) bool 
 		}
 
 		u.msgLastMutex.RUnlock()
-	// Matrix event ID (e.g. '$<43chars>')
-	case strings.HasPrefix(matches[1], "/$"):
+	// Matrix event ID (e.g. '$<43chars>') or Slack encoded ID (e.g. 'sl<base32>')
+	case strings.HasPrefix(matches[1], "/$"), strings.HasPrefix(matches[1], "/sl"):
 		msgID = matches[1][1 : len(matches[1])-1]
 	// Mattermost message/thread ID (e.g. 'cfrakpwix7y8pgzux6ta76pm9c')
 	case len(matches[1]) == 28:
@@ -1038,6 +1048,8 @@ func parseThreadID(u *User, msg *irc.Message, channelID string) (string, string)
 	// Matrix's Event ID format:
 	//   https://spec.matrix.org/latest/appendices/#common-identifier-format
 	case len(matches[1]) == 44:
+		return matches[1], matches[2]
+	case strings.HasPrefix(matches[1], "sl"):
 		return matches[1], matches[2]
 	default:
 		logger.Errorf("parseThreadID: could not parse reply ID %q", matches[1])

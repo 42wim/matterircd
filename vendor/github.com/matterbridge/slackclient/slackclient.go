@@ -29,14 +29,15 @@ type Credentials struct {
 type Client struct {
 	sync.RWMutex
 
-	cred      Credentials
-	sc        *slack.Client
-	rtm       *slack.RTM
-	info      *slack.Info
-	users     map[string]slack.User
-	channels  map[string]string
-	msgLast   map[string]string
-	connected bool
+	cred       Credentials
+	sc         *slack.Client
+	rtm        *slack.RTM
+	info       *slack.Info
+	users      map[string]slack.User
+	channels   map[string]string
+	dmChannels map[string]string
+	msgLast    map[string]string
+	connected  bool
 
 	logger        *logrus.Entry
 	rootLogger    *logrus.Logger
@@ -66,6 +67,7 @@ func New(cred Credentials) *Client {
 		cred:          cred,
 		users:         make(map[string]slack.User),
 		channels:      make(map[string]string),
+		dmChannels:    make(map[string]string),
 		msgLast:       make(map[string]string),
 		rootLogger:    rootLogger,
 		logger:        rootLogger.WithFields(logrus.Fields{"prefix": "slackclient"}),

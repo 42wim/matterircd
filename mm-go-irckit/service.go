@@ -399,9 +399,13 @@ func replay(u *User, toUser *User, args []string, service string) {
 	u.replayHistory(brchannel, since, logSince)
 }
 
+type postURLFormatter interface {
+	PostURL(ctx context.Context, postID string, events []*bridge.Event) string
+}
+
 //nolint:funlen,gocyclo
 func details(u *User, toUser *User, args []string, service string) {
-	if service != serviceMattermost && service != serviceMatrix {
+	if service != serviceMattermost && service != serviceMatrix && service != serviceSlack {
 		u.MsgUser(toUser, "not implemented")
 		return
 	}
@@ -423,13 +427,18 @@ func details(u *User, toUser *User, args []string, service string) {
 	postlistURL := proto + "://" + u.Credentials.Server + "/" + u.Credentials.Team + "/pl/"
 
 	switch {
-	case service == serviceMatrix:
+	case service == serviceMatrix || service == serviceSlack:
 		postID = u.br.NormalizePostID(strings.TrimPrefix(postID, "@@"))
 		postlistURL = ""
 
 		if postID == "" {
 			u.MsgUser(toUser, "need DETAILS <event ID>")
-			u.MsgUser(toUser, "e.g. DETAILS $abc123...")
+
+			if service == serviceMatrix {
+				u.MsgUser(toUser, "e.g. DETAILS $abc123...")
+			} else {
+				u.MsgUser(toUser, "e.g. DETAILS sl...")
+			}
 
 			return
 		}
@@ -452,8 +461,15 @@ func details(u *User, toUser *User, args []string, service string) {
 		return
 	}
 
+	header := postlistURL + postID
+	if formatter, ok := u.br.(postURLFormatter); ok {
+		if postURL := formatter.PostURL(u.ctx, postID, events); postURL != "" {
+			header = postURL
+		}
+	}
+
 	prefix := "\x0312|\x0f "
-	u.MsgUser(toUser, prefix+postlistURL+postID)
+	u.MsgUser(toUser, prefix+header)
 
 	customEmoji := u.br.FormatterConfig().CustomEmoji
 	disableEmoji := u.br.FormatterConfig().DisableEmoji
@@ -1413,9 +1429,12 @@ type summarizeQuery struct {
 func (u *User) getSummarizeEvents(target string, query summarizeQuery) (string, []*bridge.Event, error) {
 	target = strings.TrimSpace(target)
 
-	// Post / Thread ID (@@<id> or bare 26-character post ID)
+	// Post / Thread ID (@@<id> or bare post/thread ID)
 	postID, isThread := strings.CutPrefix(target, "@@")
-	if isThread || (len(target) == 26 && !strings.HasPrefix(target, "#") && !strings.HasPrefix(target, "@")) {
+	isBarePostID := !strings.HasPrefix(target, "#") && !strings.HasPrefix(target, "@") &&
+		(len(target) == 26 || (u.br != nil && u.br.Protocol() == serviceSlack && u.br.NormalizePostID(target) != ""))
+
+	if isThread || isBarePostID {
 		if !isThread {
 			postID = target
 		}
