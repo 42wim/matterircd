@@ -167,6 +167,7 @@ type SharedConfig struct {
 	JoinReplayDuration time.Duration
 	MaxReplayDuration  time.Duration
 	LazyJoinDuration   time.Duration
+	HeavySyncThreshold time.Duration
 }
 
 type MattermostConfig struct {
@@ -204,7 +205,6 @@ type MattermostConfig struct {
 	ForceSyncOnReconnect bool
 
 	DefaultDMOfflineThreshold time.Duration
-	HeavySyncThreshold        time.Duration
 
 	MessageAttachmentShortFieldMaxLineLength int
 	MessageAttachmentOmitFieldTitles         bool
@@ -283,6 +283,7 @@ func (c *Config) buildSharedConfig(section string) SharedConfig {
 		JoinReplayDuration: c.v.GetDuration(section + ".JoinReplayDuration"),
 		MaxReplayDuration:  c.v.GetDuration(section + ".MaxReplayDuration"),
 		LazyJoinDuration:   c.v.GetDuration(section + ".LazyJoinDuration"),
+		HeavySyncThreshold: c.v.GetDuration(section + ".HeavySyncThreshold"),
 	}
 }
 
@@ -561,7 +562,6 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 			ForceSyncOnReconnect: c.v.GetBool("mattermost.ForceSyncOnReconnect"),
 
 			DefaultDMOfflineThreshold: c.v.GetDuration("mattermost.DefaultDMOfflineThreshold"),
-			HeavySyncThreshold:        c.v.GetDuration("mattermost.HeavySyncThreshold"),
 
 			MessageAttachmentShortFieldMaxLineLength: c.v.GetInt("mattermost.MessageAttachmentShortFieldMaxLineLength"),
 			MessageAttachmentOmitFieldTitles:         c.v.GetBool("mattermost.MessageAttachmentOmitFieldTitles"),

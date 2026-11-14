@@ -377,6 +377,26 @@ func (m *Matrix) Ready() {
 	}
 }
 
+// OnReconnect implements matrixclient.ReconnectHandler.
+func (m *Matrix) OnReconnect(downtime time.Duration) {
+	if !m.ready.Load() || m.ctx.Err() != nil || m.onConnect == nil {
+		return
+	}
+
+	thresh := m.cfg.Matrix().HeavySyncThreshold
+	if thresh <= 0 {
+		thresh = 15 * time.Minute
+	}
+
+	if downtime < thresh {
+		return
+	}
+
+	logger.Infof("matrix sync recovered after %s, triggering channel synchronization", downtime.Round(time.Second))
+
+	go m.onConnect()
+}
+
 func (m *Matrix) sendEvent(ev *bridge.Event) {
 	m.sendEventCtx(m.ctx, ev)
 }

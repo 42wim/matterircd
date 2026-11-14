@@ -164,6 +164,7 @@ func New(ctx context.Context, cred Credentials, h Handler, opts ...Option) (*Cli
 		logger:        c.logger,
 		ready:         h.Ready,
 		synced:        c.onSynced,
+		reconnected:   c.notifyReconnect,
 		named:         c.noteRoomNames,
 		track:         c.noteTimeline,
 		summary:       c.logSyncSummary,
@@ -377,7 +378,8 @@ type readySyncer struct {
 
 	once         sync.Once
 	ready        func()
-	synced       func()
+	synced       func() (bool, time.Duration)
+	reconnected  func(time.Duration)
 	named        func(*mautrix.RespSync)
 	track        func(*mautrix.RespSync)
 	summary      func(*mautrix.RespSync)
@@ -427,7 +429,7 @@ func (r *readySyncer) ProcessResponse(ctx context.Context, res *mautrix.RespSync
 	postStart := time.Now()
 
 	r.leftInvites(res)
-	r.synced()
+	reconnected, downtime := r.synced()
 
 	postDuration := time.Since(postStart)
 	namedStart := time.Now()
@@ -438,6 +440,10 @@ func (r *readySyncer) ProcessResponse(ctx context.Context, res *mautrix.RespSync
 	readyStart := time.Now()
 
 	r.once.Do(r.ready)
+
+	if reconnected && r.reconnected != nil {
+		r.reconnected(downtime)
+	}
 
 	readyDuration := time.Since(readyStart)
 	totalDuration := time.Since(start)
