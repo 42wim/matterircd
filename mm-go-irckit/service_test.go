@@ -130,3 +130,31 @@ func TestIsSlackToken(t *testing.T) {
 		assert.Equal(t, tc.want, isSlackToken(tc.pass), tc.pass)
 	}
 }
+
+func TestSlackIDPatterns(t *testing.T) {
+	slackID := "slfjm1dbhvpijvf4el03a39vq5p19benbsus"
+
+	assert.True(t, isBareThreadID("@@"+slackID))
+	assert.False(t, isBareThreadID("@@"+slackID+" reply text"))
+	assert.False(t, isBareThreadID("@@slshort"))
+	assert.False(t, isBareThreadID("@@sle4kb6g2mq3bs2eslbs949fmvvk"))
+
+	assert.Equal(t, "@@"+slackID+" ", threadPrefix("@@"+slackID+" hello"))
+	assert.True(t, modifyRegExp.MatchString("s/"+slackID+"/updated"))
+
+	threadMatches := parseThreadIDRegExp.FindStringSubmatch("@@" + slackID + " hello\nworld")
+	assert.Len(t, threadMatches, 3)
+	assert.Equal(t, slackID, threadMatches[1])
+	assert.Equal(t, "hello\nworld", threadMatches[2])
+
+	reactMatches := parseReactionToMsgRegExp.FindStringSubmatch("@@" + slackID + " +:thumbsup:")
+	assert.Len(t, reactMatches, 4)
+	assert.Equal(t, slackID, reactMatches[1])
+	assert.Equal(t, "+", reactMatches[2])
+	assert.Equal(t, "thumbsup", reactMatches[3])
+
+	modMatches := parseModifyMsgRegExp.FindStringSubmatch("s/" + slackID + "/new text")
+	assert.Len(t, modMatches, 3)
+	assert.Equal(t, "/"+slackID+"/", modMatches[1])
+	assert.Equal(t, "new text", modMatches[2])
+}

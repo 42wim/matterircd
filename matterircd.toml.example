@@ -374,9 +374,18 @@ UseRealName = false
 #show only messages for channels joined, so nothing in the &messages channel.
 #ShowOnlyJoined = false
 
+#Show the parent message in threaded replies/reactions
+#HideReplies = false
+#ShortenRepliesTo = 0
+
 #This will add a number between 000 and fff to each message
 #This number will be referenced when a message is edited/deleted/threaded/reaction
 PrefixContext = false
+# Same as PrefixContext but with the message context at the end.
+#SuffixContext = false
+# Threads are shown using Slack's encoded message/thread IDs (or "slack+post" to include post IDs).
+#ThreadContext = "slack"
+#ShowContextMulti = false
 
 
 #############################

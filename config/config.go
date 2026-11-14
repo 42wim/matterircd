@@ -218,10 +218,12 @@ type SlackConfig struct {
 
 	SlackclientLogLevel string
 
-	DenyUsers      []string
-	UseDisplayName bool
-	PreferNickname bool
-	UseRealName    bool
+	DenyUsers        []string
+	HideReplies      bool
+	ShortenRepliesTo int
+	UseDisplayName   bool
+	PreferNickname   bool
+	UseRealName      bool
 }
 
 type MatrixConfig struct {
@@ -573,10 +575,12 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 
 			SlackclientLogLevel: c.v.GetString("slack.SlackclientLogLevel"),
 
-			DenyUsers:      append([]string(nil), c.v.GetStringSlice("slack.DenyUsers")...),
-			UseDisplayName: c.v.GetBool("slack.UseDisplayName"),
-			PreferNickname: c.v.GetBool("slack.PreferNickname"),
-			UseRealName:    c.v.GetBool("slack.UseRealName"),
+			DenyUsers:        append([]string(nil), c.v.GetStringSlice("slack.DenyUsers")...),
+			HideReplies:      c.v.GetBool("slack.HideReplies"),
+			ShortenRepliesTo: c.v.GetInt("slack.ShortenRepliesTo"),
+			UseDisplayName:   c.v.GetBool("slack.UseDisplayName"),
+			PreferNickname:   c.v.GetBool("slack.PreferNickname"),
+			UseRealName:      c.v.GetBool("slack.UseRealName"),
 		},
 
 		Matrix: MatrixConfig{

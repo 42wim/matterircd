@@ -2494,12 +2494,14 @@ func (u *User) prefixContext(channelID, messageID, parentID, event string) strin
 	}
 
 	tc := u.br.BridgeConfig().ThreadContext
-	if tc == serviceMattermost || tc == serviceMattermost+"+post" || tc == serviceMatrix || tc == serviceMatrix+"+post" {
+	if tc == serviceMattermost || tc == serviceMattermost+"+post" ||
+		tc == serviceMatrix || tc == serviceMatrix+"+post" ||
+		tc == serviceSlack || tc == serviceSlack+"+post" {
 		if parentID == "" {
 			return "[@@" + messageID + "]"
 		}
 
-		if tc == serviceMattermost || tc == serviceMatrix || parentID == messageID {
+		if tc == serviceMattermost || tc == serviceMatrix || tc == serviceSlack || parentID == messageID {
 			return "[" + prefixChar + "@@" + parentID + "]"
 		}
 
@@ -2952,7 +2954,9 @@ func (u *User) handleTyping(e *bridge.TypingEvent) {
 	parentID := e.ParentID
 	if parentID != "" {
 		tc := u.br.BridgeConfig().ThreadContext
-		if tc != serviceMattermost && tc != serviceMattermost+"+post" && tc != serviceMatrix && tc != serviceMatrix+"+post" {
+		if tc != serviceMattermost && tc != serviceMattermost+"+post" &&
+			tc != serviceMatrix && tc != serviceMatrix+"+post" &&
+			tc != serviceSlack && tc != serviceSlack+"+post" {
 			parentID = u.getMsgCounterHex(e.ChannelID, parentID)
 		}
 

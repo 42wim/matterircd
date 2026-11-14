@@ -11,22 +11,45 @@ import (
 
 	"github.com/42wim/matterircd/bridge"
 	"github.com/42wim/matterircd/config"
+	"github.com/42wim/matterircd/utils"
 	"github.com/davecgh/go-spew/spew"
+	lru "github.com/hashicorp/golang-lru/v2"
 	prefixed "github.com/matterbridge/logrus-prefixed-formatter"
 	"github.com/matterbridge/slackclient"
 	"github.com/sirupsen/logrus"
 	"github.com/slack-go/slack"
 )
 
+const (
+	slackThreadRootCacheSize = 4096
+	slackParentCacheSize     = 2048
+	slackLastSentCacheSize   = 128
+	slackLastSentSummaryLen  = 80
+
+	subTypeMessageChanged = "message_changed"
+	subTypeMessageDeleted = "message_deleted"
+	eventChannelTopic     = "channel_topic"
+	eventChannelPurpose   = "channel_purpose"
+)
+
+type slackCachedPost struct {
+	rootTS  string
+	sender  *bridge.UserInfo
+	message string
+}
+
 type Slack struct {
 	sync.RWMutex
 
-	sc          *slackclient.Client
-	connected   bool
-	credentials bridge.Credentials
-	eventChan   chan *bridge.Event
-	onConnect   func()
-	userByNick  map[string]string
+	sc                 *slackclient.Client
+	connected          bool
+	credentials        bridge.Credentials
+	eventChan          chan *bridge.Event
+	onConnect          func()
+	userByNick         map[string]string
+	msgThreadRootCache *lru.Cache[string, string]
+	msgParentCache     *lru.Cache[string, slackCachedPost]
+	msgLastSentCache   *lru.Cache[string, string]
 
 	cfg *config.Config
 }
@@ -36,12 +59,19 @@ const systemUser = "system"
 var logger *logrus.Entry
 
 func New(cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Event, onConnect func()) (bridge.Bridger, error) {
+	threadRootCache, _ := lru.New[string, string](slackThreadRootCacheSize)
+	parentCache, _ := lru.New[string, slackCachedPost](slackParentCacheSize)
+	lastSentCache, _ := lru.New[string, string](slackLastSentCacheSize)
+
 	s := &Slack{
-		credentials: cred,
-		eventChan:   eventChan,
-		onConnect:   onConnect,
-		userByNick:  make(map[string]string),
-		cfg:         cfg,
+		credentials:        cred,
+		eventChan:          eventChan,
+		onConnect:          onConnect,
+		userByNick:         make(map[string]string),
+		msgThreadRootCache: threadRootCache,
+		msgParentCache:     parentCache,
+		msgLastSentCache:   lastSentCache,
+		cfg:                cfg,
 	}
 
 	rc := cfg.Current()
@@ -163,26 +193,22 @@ func (s *Slack) Logout(ctx context.Context) error {
 	return nil
 }
 
-func (s *Slack) MsgUser(ctx context.Context, username, text string) (string, error) {
+func slackActionText(text string) string {
 	// CTCP ACTION (/me)
 	if after, ok := strings.CutPrefix(text, "\x01ACTION "); ok {
-		text = after
-		text = strings.TrimSuffix(text, "\x01")
-		text = "*" + text + "*"
+		text = strings.TrimSuffix(after, "\x01")
+		return "*" + text + "*"
 	}
 
-	return s.sc.SendDirectMessage(username, text)
+	return text
+}
+
+func (s *Slack) MsgUser(ctx context.Context, username, text string) (string, error) {
+	return s.MsgUserThread(ctx, username, "", text)
 }
 
 func (s *Slack) MsgChannel(ctx context.Context, channelID, text string) (string, error) {
-	// CTCP ACTION (/me)
-	if after, ok := strings.CutPrefix(text, "\x01ACTION "); ok {
-		text = after
-		text = strings.TrimSuffix(text, "\x01")
-		text = "*" + text + "*"
-	}
-
-	return s.sc.PostMessage(channelID, text)
+	return s.MsgChannelThread(ctx, channelID, "", text)
 }
 
 func (s *Slack) Topic(ctx context.Context, channelID string) string {
@@ -246,7 +272,21 @@ func (s *Slack) GetChannelUsers(ctx context.Context, channelID string) ([]*bridg
 }
 
 func (s *Slack) GetDMChannelID(ctx context.Context, userID string) string {
-	return ""
+	if userID == "" {
+		return ""
+	}
+
+	if strings.HasPrefix(strings.ToUpper(userID), "D") {
+		return strings.ToUpper(userID)
+	}
+
+	chID, err := s.sc.OpenDMChannel(ctx, userID)
+	if err != nil {
+		logger.Debugf("GetDMChannelID %s: %s", userID, err)
+		return ""
+	}
+
+	return chID
 }
 
 func (s *Slack) GetDMChannelName(userID1 string, userID2 string) string {
@@ -372,8 +412,270 @@ func (s *Slack) GetPosts(ctx context.Context, channelID string, limit int) []*br
 	return []*bridge.Event{}
 }
 
-func (s *Slack) GetPostThread(ctx context.Context, channelID string) []*bridge.Event {
-	return []*bridge.Event{}
+func (s *Slack) cacheThreadRoot(channelID, msgTS, rootTS string) {
+	if s.msgThreadRootCache == nil || channelID == "" || msgTS == "" || rootTS == "" {
+		return
+	}
+
+	if id := encodeSlackID(channelID, msgTS); id != "" {
+		s.msgThreadRootCache.Add(id, rootTS)
+	}
+}
+
+func (s *Slack) cachePost(channelID, ts, rootTS string, sender *bridge.UserInfo, message string) {
+	if channelID == "" || ts == "" {
+		return
+	}
+
+	if rootTS == "" {
+		rootTS = ts
+	}
+
+	s.cacheThreadRoot(channelID, ts, rootTS)
+
+	if s.msgParentCache == nil {
+		return
+	}
+
+	if id := encodeSlackID(channelID, ts); id != "" {
+		s.msgParentCache.Add(id, slackCachedPost{
+			rootTS:  rootTS,
+			sender:  sender,
+			message: message,
+		})
+	}
+}
+
+func (s *Slack) msgAuthorGhost(ctx context.Context, m *slack.Msg) *bridge.UserInfo {
+	if m == nil {
+		return &bridge.UserInfo{Nick: systemUser}
+	}
+
+	switch {
+	case m.User == "USLACKBOT" || (m.SubType == "bot_message" && m.BotID == "B01" && m.Username == ""):
+		return &bridge.UserInfo{Nick: systemUser}
+	case m.User != "":
+		return s.GetUser(ctx, m.User)
+	case m.BotID != "" || m.Username != "":
+		nick := firstNonEmpty(m.Username, "bot")
+		return &bridge.UserInfo{Nick: nick, User: m.BotID, Ghost: true}
+	default:
+		return &bridge.UserInfo{Nick: systemUser}
+	}
+}
+
+func (s *Slack) getCachedPostOnly(channelID, ts string) (slackCachedPost, bool) {
+	if channelID == "" || ts == "" || s.msgParentCache == nil {
+		return slackCachedPost{}, false
+	}
+
+	id := encodeSlackID(channelID, ts)
+	if id == "" {
+		return slackCachedPost{}, false
+	}
+
+	return s.msgParentCache.Get(id)
+}
+
+func (s *Slack) evictCachedPost(channelID, ts string) {
+	if channelID == "" || ts == "" {
+		return
+	}
+
+	id := encodeSlackID(channelID, ts)
+	if id == "" {
+		return
+	}
+
+	if s.msgParentCache != nil {
+		s.msgParentCache.Remove(id)
+	}
+
+	if s.msgThreadRootCache != nil {
+		s.msgThreadRootCache.Remove(id)
+	}
+}
+
+func (s *Slack) getCachedPost(ctx context.Context, channelID, ts string) (slackCachedPost, bool) {
+	if cp, ok := s.getCachedPostOnly(channelID, ts); ok {
+		return cp, true
+	}
+
+	if s.sc == nil {
+		return slackCachedPost{}, false
+	}
+
+	msgs, err := s.sc.GetConversationReplies(ctx, channelID, ts)
+	if err != nil || len(msgs) == 0 {
+		return slackCachedPost{}, false
+	}
+
+	m := msgs[0]
+	rootTS := m.Timestamp
+
+	if m.ThreadTimestamp != "" {
+		rootTS = m.ThreadTimestamp
+	}
+
+	cleanMsg := ""
+	if rawText, ok := formatSlackMsg(&m.Msg); ok {
+		cleanMsg = s.cleanupMessage(rawText)
+	}
+
+	ghost := s.msgAuthorGhost(ctx, &m.Msg)
+	s.cachePost(channelID, ts, rootTS, ghost, cleanMsg)
+
+	return slackCachedPost{
+		rootTS:  rootTS,
+		sender:  ghost,
+		message: cleanMsg,
+	}, true
+}
+
+func slackSummaryOpts(rc *config.RuntimeConfig) utils.SummaryOpts {
+	return utils.SummaryOpts{
+		DisableEmoji:    true,
+		DisableMarkdown: true,
+		MaxLength:       rc.Slack.ShortenRepliesTo,
+		UncountedPrefix: "@",
+		Unicode:         rc.Slack.Formatter.Unicode,
+	}
+}
+
+func formatReplySummary(rc *config.RuntimeConfig, cp slackCachedPost) string {
+	if rc == nil || rc.Slack.HideReplies {
+		return ""
+	}
+
+	summary := utils.FormatAndShortenSummary(cp.message, slackSummaryOpts(rc))
+	if cp.sender == nil || cp.sender.Nick == "" {
+		return " (re: " + summary + ")"
+	}
+
+	return " (re @" + cp.sender.Nick + ": " + summary + ")"
+}
+
+func (s *Slack) formatReplySuffix(ctx context.Context, channelID, ts string) string {
+	if s.cfg == nil || channelID == "" || ts == "" {
+		return ""
+	}
+
+	rc := s.cfg.Current()
+	if rc.Slack.HideReplies {
+		return ""
+	}
+
+	cp, ok := s.getCachedPost(ctx, channelID, ts)
+	if !ok {
+		return ""
+	}
+
+	return formatReplySummary(rc, cp)
+}
+
+func (s *Slack) resolveThreadRoot(ctx context.Context, channelID, ts string) string {
+	if channelID == "" || ts == "" {
+		return ts
+	}
+
+	if s.msgThreadRootCache != nil {
+		if id := encodeSlackID(channelID, ts); id != "" {
+			if rootTS, ok := s.msgThreadRootCache.Get(id); ok && rootTS != "" {
+				return rootTS
+			}
+		}
+	}
+
+	msgs, err := s.sc.GetConversationReplies(ctx, channelID, ts)
+	if err != nil || len(msgs) == 0 {
+		return ts
+	}
+
+	rootTS := ts
+	if msgs[0].ThreadTimestamp != "" {
+		rootTS = msgs[0].ThreadTimestamp
+	}
+
+	s.cacheThreadRoot(channelID, ts, rootTS)
+
+	return rootTS
+}
+
+func (s *Slack) slackMsgToEvent(ctx context.Context, channelID string, m slack.Msg) *bridge.Event {
+	ghost := s.msgAuthorGhost(ctx, &m)
+
+	rawText, ok := formatSlackMsg(&m)
+	if !ok {
+		return nil
+	}
+
+	text := s.cleanupMessage(rawText)
+	msgID := encodeSlackID(channelID, m.Timestamp)
+
+	parentID := ""
+	rootTS := m.Timestamp
+
+	if m.ThreadTimestamp != "" && m.ThreadTimestamp != m.Timestamp {
+		parentID = encodeSlackID(channelID, m.ThreadTimestamp)
+		rootTS = m.ThreadTimestamp
+	}
+
+	s.cachePost(channelID, m.Timestamp, rootTS, ghost, text)
+
+	createAt := slackTSMillis(m.Timestamp)
+
+	if strings.HasPrefix(channelID, "D") {
+		receiver := s.resolveDMReceiver(ghost, channelID)
+
+		return &bridge.Event{
+			Type: "direct_message",
+			Data: &bridge.DirectMessageEvent{
+				Text:      text,
+				ChannelID: channelID,
+				Sender:    ghost,
+				Receiver:  receiver,
+				MessageID: msgID,
+				ParentID:  parentID,
+				CreateAt:  createAt,
+			},
+		}
+	}
+
+	return &bridge.Event{
+		Type: "channel_message",
+		Data: &bridge.ChannelMessageEvent{
+			Text:      text,
+			ChannelID: channelID,
+			Sender:    ghost,
+			MessageID: msgID,
+			ParentID:  parentID,
+			CreateAt:  createAt,
+		},
+	}
+}
+
+func (s *Slack) GetPostThread(ctx context.Context, postID string) []*bridge.Event {
+	channelID, ts, ok := decodeSlackID(postID)
+	if !ok {
+		return []*bridge.Event{}
+	}
+
+	rootTS := s.resolveThreadRoot(ctx, channelID, ts)
+
+	msgs, err := s.sc.GetConversationReplies(ctx, channelID, rootTS)
+	if err != nil {
+		logger.Errorf("slack: fetching thread %s: %s", postID, err)
+		return []*bridge.Event{}
+	}
+
+	events := make([]*bridge.Event, 0, len(msgs))
+	for _, m := range msgs {
+		if ev := s.slackMsgToEvent(ctx, channelID, m.Msg); ev != nil {
+			events = append(events, ev)
+		}
+	}
+
+	return events
 }
 
 func (s *Slack) GetChannelID(ctx context.Context, name, teamID string) string {
@@ -444,7 +746,7 @@ func (s *Slack) loginToSlack() (*slackclient.Client, error) {
 	return s.sc, nil
 }
 
-//nolint:funlen,gocyclo
+//nolint:gocyclo
 func (s *Slack) handleSlack(ctx context.Context) {
 	for msg := range s.sc.IncomingEvents() {
 		logger.Tracef("handleSlack %s", spew.Sdump(msg))
@@ -454,7 +756,7 @@ func (s *Slack) handleSlack(ctx context.Context) {
 			switch ev.SubType {
 			case "group_join", "channel_join", "group_leave", "channel_leave":
 			default:
-				s.handleSlackActionPost(ev)
+				s.handleSlackActionPost(ctx, ev)
 			}
 		case *slack.MemberLeftChannelEvent:
 			s.handleMemberLeftChannel(ctx, ev)
@@ -464,14 +766,10 @@ func (s *Slack) handleSlack(ctx context.Context) {
 			logger.Debug("disconnected event received, we should reconnect now..")
 		case *slack.ReactionAddedEvent:
 			logger.Debugf("ReactionAdded msg %#v", ev)
-			ts := formatTS(ev.Item.Timestamp)
-			msg := "[M " + ts + "] Added reaction :" + ev.Reaction + ":"
-			s.handleActionMisc(ev.User, ev.Item.Channel, msg)
+			s.handleSlackReaction(ctx, ev.User, ev.Item.Channel, ev.Item.Timestamp, ev.Reaction, true)
 		case *slack.ReactionRemovedEvent:
 			logger.Debugf("ReactionRemoved msg %#v", ev)
-			ts := formatTS(ev.Item.Timestamp)
-			msg := "[M " + ts + "] Removed reaction :" + ev.Reaction + ":"
-			s.handleActionMisc(ev.User, ev.Item.Channel, msg)
+			s.handleSlackReaction(ctx, ev.User, ev.Item.Channel, ev.Item.Timestamp, ev.Reaction, false)
 		case *slack.StarAddedEvent:
 			logger.Debugf("StarAdded msg %#v", ev)
 
@@ -479,9 +777,7 @@ func (s *Slack) handleSlack(ctx context.Context) {
 				continue
 			}
 
-			ts := formatTS(ev.Item.Message.Timestamp)
-			msg := "[M " + ts + "] Message starred (" + ev.Item.Message.Text + ")"
-			s.handleActionMisc(ev.User, ev.Item.Channel, msg)
+			s.handleItemMisc(ctx, ev.User, ev.Item.Channel, ev.Item.Message, "Message starred")
 		case *slack.StarRemovedEvent:
 			logger.Debugf("StarRemoved msg %#v", ev)
 
@@ -489,9 +785,7 @@ func (s *Slack) handleSlack(ctx context.Context) {
 				continue
 			}
 
-			ts := formatTS(ev.Item.Message.Timestamp)
-			msg := "[M " + ts + "] Message unstarred (" + ev.Item.Message.Text + ")"
-			s.handleActionMisc(ev.User, ev.Item.Channel, msg)
+			s.handleItemMisc(ctx, ev.User, ev.Item.Channel, ev.Item.Message, "Message unstarred")
 		case *slack.PinAddedEvent:
 			logger.Debugf("PinAdded msg %#v", ev)
 
@@ -499,9 +793,7 @@ func (s *Slack) handleSlack(ctx context.Context) {
 				continue
 			}
 
-			ts := formatTS(ev.Item.Message.Timestamp)
-			msg := "[M " + ts + "] Message pinned (" + ev.Item.Message.Text + ")"
-			s.handleActionMisc(ev.User, ev.Item.Channel, msg)
+			s.handleItemMisc(ctx, ev.User, ev.Item.Channel, ev.Item.Message, "Message pinned")
 		case *slack.PinRemovedEvent:
 			logger.Debugf("PinRemoved msg %#v", ev)
 
@@ -509,14 +801,123 @@ func (s *Slack) handleSlack(ctx context.Context) {
 				continue
 			}
 
-			ts := formatTS(ev.Item.Message.Timestamp)
-			msg := "[M " + ts + "] Message unpinned (" + ev.Item.Message.Text + ")"
-			s.handleActionMisc(ev.User, ev.Item.Channel, msg)
+			s.handleItemMisc(ctx, ev.User, ev.Item.Channel, ev.Item.Message, "Message unpinned")
 		}
 	}
 }
 
-func (s *Slack) handleActionMisc(userID, channelID, msg string) {
+func (s *Slack) resolveDMReceiver(ghost *bridge.UserInfo, channelID string) *bridge.UserInfo {
+	receiver := ghost
+	if ghost != nil && ghost.Me {
+		members, _ := s.sc.GetUsersInConversation(channelID)
+		for _, member := range members {
+			if member == s.GetMe().User {
+				continue
+			}
+
+			ghostuser, _ := s.sc.GetUserInfo(member)
+			receiver = s.createUser(ghostuser)
+		}
+	}
+
+	return receiver
+}
+
+func (s *Slack) cachedParentID(channelID, ts string) string {
+	if s.msgThreadRootCache == nil || channelID == "" || ts == "" {
+		return ""
+	}
+
+	msgID := encodeSlackID(channelID, ts)
+	if msgID == "" {
+		return ""
+	}
+
+	if rootTS, ok := s.msgThreadRootCache.Get(msgID); ok && rootTS != "" && rootTS != ts {
+		return encodeSlackID(channelID, rootTS)
+	}
+
+	return ""
+}
+
+func (s *Slack) handleSlackReaction(ctx context.Context, userID, channelID, ts, reaction string, added bool) {
+	if channelID == "" || ts == "" {
+		return
+	}
+
+	suser, err := s.sc.GetUserInfo(userID)
+	if err != nil {
+		return
+	}
+
+	ghost := s.createUser(suser)
+	msgID := encodeSlackID(channelID, ts)
+
+	parentID := s.cachedParentID(channelID, ts)
+	if cp, ok := s.getCachedPost(ctx, channelID, ts); ok && cp.rootTS != "" && cp.rootTS != ts {
+		parentID = encodeSlackID(channelID, cp.rootTS)
+	}
+
+	replyMsg := s.formatReplySuffix(ctx, channelID, ts)
+
+	channelType := ""
+	receiver := ghost
+
+	if strings.HasPrefix(channelID, "D") {
+		channelType = "D"
+		receiver = s.resolveDMReceiver(ghost, channelID)
+	}
+
+	if added {
+		s.eventChan <- &bridge.Event{
+			Type: "reaction_add",
+			Data: &bridge.ReactionAddEvent{
+				ChannelID:   channelID,
+				MessageID:   msgID,
+				ParentID:    parentID,
+				Message:     replyMsg,
+				Receiver:    receiver,
+				Sender:      ghost,
+				Reaction:    reaction,
+				ChannelType: channelType,
+			},
+		}
+
+		return
+	}
+
+	s.eventChan <- &bridge.Event{
+		Type: "reaction_remove",
+		Data: &bridge.ReactionRemoveEvent{
+			ChannelID:   channelID,
+			MessageID:   msgID,
+			ParentID:    parentID,
+			Message:     replyMsg,
+			Receiver:    receiver,
+			Sender:      ghost,
+			Reaction:    reaction,
+			ChannelType: channelType,
+		},
+	}
+}
+
+func (s *Slack) handleItemMisc(ctx context.Context, userID, channelID string, itemMsg *slack.Message, action string) {
+	msgID := encodeSlackID(channelID, itemMsg.Timestamp)
+
+	parentID := s.cachedParentID(channelID, itemMsg.Timestamp)
+	if parentID == "" && itemMsg.ThreadTimestamp != "" && itemMsg.ThreadTimestamp != itemMsg.Timestamp {
+		parentID = encodeSlackID(channelID, itemMsg.ThreadTimestamp)
+	}
+
+	msg := s.cleanupMessage(action + " (" + itemMsg.Text + ")")
+	if itemMsg.ThreadTimestamp != "" && itemMsg.ThreadTimestamp != itemMsg.Timestamp {
+		msg += s.formatReplySuffix(ctx, channelID, itemMsg.ThreadTimestamp)
+	}
+
+	s.handleActionMisc(userID, channelID, msgID, parentID, msg, slackTSMillis(itemMsg.Timestamp))
+}
+
+func (s *Slack) handleActionMisc(userID, channelID, msgID, parentID, msg string, createAt int64) {
 	suser, err := s.sc.GetUserInfo(userID)
 	if err != nil {
 		return
@@ -526,36 +927,14 @@ func (s *Slack) handleActionMisc(userID, channelID, msg string) {
 	ghost := s.createUser(suser)
 
 	// direct message
-	switch {
-	case strings.HasPrefix(channelID, "D"):
-		sender := ghost
+	if strings.HasPrefix(channelID, "D") {
+		receiver := s.resolveDMReceiver(ghost, channelID)
+		s.sendDirectMessage(ghost, receiver, msg, channelID, msgID, parentID, createAt)
 
-		receiver := ghost
-		if ghost.Me {
-			members, _ := s.sc.GetUsersInConversation(channelID)
-			for _, member := range members {
-				if member == s.GetMe().User {
-					continue
-				}
-
-				ghostuser, _ := s.sc.GetUserInfo(member)
-				receiver = s.createUser(ghostuser)
-			}
-		}
-
-		s.sendDirectMessage(sender, receiver, msg, channelID)
-	default:
-		event := &bridge.Event{
-			Type: "channel_message",
-			Data: &bridge.ChannelMessageEvent{
-				Text:      msg,
-				ChannelID: channelID,
-				Sender:    ghost,
-			},
-		}
-
-		s.eventChan <- event
+		return
 	}
+
+	s.sendPublicMessage(ghost, msg, channelID, msgID, parentID, "", createAt)
 }
 
 func (s *Slack) handleMemberLeftChannel(ctx context.Context, rmsg *slack.MemberLeftChannelEvent) {
@@ -592,7 +971,7 @@ func (s *Slack) handleMemberJoinedChannel(ctx context.Context, rmsg *slack.Membe
 	s.eventChan <- event
 }
 
-func (s *Slack) sendDirectMessage(sender, receiver *bridge.UserInfo, msg string, channelID string) {
+func (s *Slack) sendDirectMessage(sender, receiver *bridge.UserInfo, msg, channelID, msgID, parentID string, createAt int64) {
 	event := &bridge.Event{
 		Type: "direct_message",
 	}
@@ -600,6 +979,9 @@ func (s *Slack) sendDirectMessage(sender, receiver *bridge.UserInfo, msg string,
 	d := &bridge.DirectMessageEvent{
 		Text:      msg,
 		ChannelID: channelID,
+		MessageID: msgID,
+		ParentID:  parentID,
+		CreateAt:  createAt,
 	}
 
 	d.Sender = sender
@@ -610,25 +992,114 @@ func (s *Slack) sendDirectMessage(sender, receiver *bridge.UserInfo, msg string,
 	s.eventChan <- event
 }
 
-func (s *Slack) sendPublicMessage(ghost *bridge.UserInfo, msg, channelID, eventType string) {
+func (s *Slack) sendPublicMessage(ghost *bridge.UserInfo, msg, channelID, msgID, parentID, eventType string, createAt int64) {
 	event := &bridge.Event{
 		Type: "channel_message",
 		Data: &bridge.ChannelMessageEvent{
 			Text:      msg,
 			ChannelID: channelID,
 			Sender:    ghost,
+			MessageID: msgID,
+			ParentID:  parentID,
 			Event:     eventType,
+			CreateAt:  createAt,
 		},
 	}
 
 	s.eventChan <- event
 }
 
+func formatSlackMsg(m *slack.Msg) (string, bool) {
+	if m == nil {
+		return "", false
+	}
+
+	var msgs []string
+
+	msghandled := false
+
+	if m.Text != "" {
+		msgs = append(msgs, strings.Split(m.Text, "\n")...)
+		msghandled = true
+	}
+
+	for _, attach := range m.Attachments {
+		if attach.Pretext != "" {
+			msgs = append(msgs, strings.Split(attach.Pretext, "\n")...)
+			msghandled = true
+		}
+
+		if attach.Text == "" {
+			continue
+		}
+
+		for i, row := range strings.Split(attach.Text, "\n") {
+			msgs = append(msgs, "> "+row)
+
+			if i > 4 {
+				msgs = append(msgs, "> ...")
+				break
+			}
+		}
+
+		msghandled = true
+	}
+
+	for _, file := range m.Files {
+		msgs = append(msgs, "Uploaded "+file.Mode+" "+
+			file.Name+" / "+file.Title+" ("+file.Filetype+"): "+file.URLPrivate)
+		msghandled = true
+	}
+
+	if !msghandled {
+		return "", false
+	}
+
+	return strings.Join(msgs, "\n"), true
+}
+
+func slackActionSuffix(unicode bool, kind string) string {
+	switch kind {
+	case subTypeMessageChanged:
+		if unicode {
+			return " \x1d(✏️edited)\x1d"
+		}
+
+		return " \x1d(edited)\x1d"
+	case subTypeMessageDeleted:
+		if unicode {
+			return " \x1d(🗑️deleted)\x1d"
+		}
+
+		return " \x1d(deleted)\x1d"
+	default:
+		return ""
+	}
+}
+
+func formatDeletedSlackMsg(rc *config.RuntimeConfig, origMsg, replySuffix string) string {
+	summary := origMsg
+	if origMsg != "" && rc != nil {
+		summary = utils.FormatAndShortenSummary(origMsg, slackSummaryOpts(rc))
+	}
+
+	unicode := rc != nil && rc.Slack.Formatter.Unicode
+	out := summary + replySuffix + slackActionSuffix(unicode, subTypeMessageDeleted)
+
+	return strings.TrimLeft(out, " ")
+}
+
 func (s *Slack) resolveSlackPostGhost(rmsg *slack.MessageEvent) (*bridge.UserInfo, bool) {
 	isDM := strings.HasPrefix(rmsg.Channel, "D")
-	isSlackbot := rmsg.User == "USLACKBOT" || (rmsg.SubType == "bot_message" && rmsg.BotID == "B01" && rmsg.Username == "")
+	userID := rmsg.User
 
-	if !isDM && (isSlackbot || rmsg.SubType == "message_deleted") {
+	if rmsg.SubType == subTypeMessageChanged && rmsg.SubMessage != nil {
+		userID = rmsg.SubMessage.User
+	}
+
+	isSlackbot := userID == "USLACKBOT" || (rmsg.SubType == "bot_message" && rmsg.BotID == "B01" && rmsg.Username == "")
+
+	if !isDM && isSlackbot {
 		return &bridge.UserInfo{Nick: systemUser}, true
 	}
 
@@ -642,8 +1113,98 @@ func (s *Slack) resolveSlackPostGhost(rmsg *slack.MessageEvent) (*bridge.UserInf
 	return s.createUser(suser), true
 }
 
-//nolint:funlen,gocognit,gocyclo
-func (s *Slack) handleSlackActionPost(rmsg *slack.MessageEvent) {
+func (s *Slack) deletedMsgSender(ctx context.Context, rmsg *slack.MessageEvent, cp slackCachedPost, hasCached bool) *bridge.UserInfo {
+	switch {
+	case rmsg.PreviousMessage != nil && (rmsg.PreviousMessage.User != "" || rmsg.PreviousMessage.BotID != "" || rmsg.PreviousMessage.Username != ""):
+		return s.msgAuthorGhost(ctx, rmsg.PreviousMessage)
+	case hasCached && cp.sender != nil:
+		return cp.sender
+	case rmsg.User != "":
+		if ghost, ok := s.resolveSlackPostGhost(rmsg); ok {
+			return ghost
+		}
+	}
+
+	return &bridge.UserInfo{Nick: systemUser}
+}
+
+func (s *Slack) deletedMsgOrigText(rmsg *slack.MessageEvent, cp slackCachedPost, hasCached bool) string {
+	if rmsg.PreviousMessage != nil {
+		if rawText, ok := formatSlackMsg(rmsg.PreviousMessage); ok {
+			return s.cleanupMessage(rawText)
+		}
+	}
+
+	if hasCached {
+		return cp.message
+	}
+
+	return ""
+}
+
+func deletedMsgParentTS(rmsg *slack.MessageEvent, cp slackCachedPost, hasCached bool, msgTS string) string {
+	if rmsg.ThreadTimestamp != "" && rmsg.ThreadTimestamp != msgTS {
+		return rmsg.ThreadTimestamp
+	}
+
+	if rmsg.PreviousMessage != nil && rmsg.PreviousMessage.ThreadTimestamp != "" && rmsg.PreviousMessage.ThreadTimestamp != msgTS {
+		return rmsg.PreviousMessage.ThreadTimestamp
+	}
+
+	if hasCached && cp.rootTS != "" && cp.rootTS != msgTS {
+		return cp.rootTS
+	}
+
+	return ""
+}
+
+func (s *Slack) handleSlackMessageDeleted(ctx context.Context, rmsg *slack.MessageEvent) {
+	channelID := rmsg.Channel
+
+	msgTS := rmsg.DeletedTimestamp
+	if msgTS == "" {
+		msgTS = rmsg.Timestamp
+	}
+
+	msgID := encodeSlackID(channelID, msgTS)
+	cp, hasCached := s.getCachedPostOnly(channelID, msgTS)
+	parentTS := deletedMsgParentTS(rmsg, cp, hasCached, msgTS)
+
+	parentID := ""
+	if parentTS != "" {
+		parentID = encodeSlackID(channelID, parentTS)
+	}
+
+	ghost := s.deletedMsgSender(ctx, rmsg, cp, hasCached)
+	origMsg := s.deletedMsgOrigText(rmsg, cp, hasCached)
+
+	replySuffix := ""
+	if parentID != "" {
+		replySuffix = s.formatReplySuffix(ctx, channelID, parentTS)
+	}
+
+	var rc *config.RuntimeConfig
+	if s.cfg != nil {
+		rc = s.cfg.Current()
+	}
+
+	msg := formatDeletedSlackMsg(rc, origMsg, replySuffix)
+	createAt := slackTSMillis(msgTS)
+
+	s.evictCachedPost(channelID, msgTS)
+
+	if strings.HasPrefix(channelID, "D") {
+		receiver := s.resolveDMReceiver(ghost, channelID)
+		s.sendDirectMessage(ghost, receiver, msg, channelID, msgID, parentID, createAt)
+
+		return
+	}
+
+	s.sendPublicMessage(ghost, msg, channelID, msgID, parentID, "post_deleted", createAt)
+}
+
+//nolint:funlen,gocyclo
+func (s *Slack) handleSlackActionPost(ctx context.Context, rmsg *slack.MessageEvent) {
 	logger.Debugf("handleSlackActionPost: receiving msg %#v", rmsg)
 
 	// Thread metadata updates carry no new message; the actual reply arrives in its own event.
@@ -656,11 +1217,16 @@ func (s *Slack) handleSlackActionPost(rmsg *slack.MessageEvent) {
 		return
 	}
 
-	if rmsg.SubType == "channel_topic" {
+	if rmsg.SubType == subTypeMessageDeleted {
+		s.handleSlackMessageDeleted(ctx, rmsg)
+		return
+	}
+
+	if rmsg.SubType == eventChannelTopic {
 		topic := s.cleanupMessage(rmsg.Topic)
 		if !strings.HasPrefix(rmsg.Channel, "D") {
 			s.eventChan <- &bridge.Event{
-				Type: "channel_topic",
+				Type: eventChannelTopic,
 				Data: &bridge.ChannelTopicEvent{
 					Text:      topic,
 					ChannelID: rmsg.Channel,
@@ -675,17 +1241,28 @@ func (s *Slack) handleSlackActionPost(rmsg *slack.MessageEvent) {
 	}
 
 	eventType := ""
-	if rmsg.SubType == "channel_purpose" && !strings.HasPrefix(rmsg.Channel, "D") {
-		eventType = "channel_purpose"
+	if rmsg.SubType == eventChannelPurpose && !strings.HasPrefix(rmsg.Channel, "D") {
+		eventType = eventChannelPurpose
 
 		if rmsg.Purpose != "" {
 			rmsg.Text = "set the channel description: " + rmsg.Purpose
 		}
 	}
 
-	if rmsg.SubType == "message_deleted" {
-		ts := formatTS(rmsg.DeletedTimestamp)
-		rmsg.Text = "[M " + ts + "] Message deleted"
+	msgTS := rmsg.Timestamp
+	parentTS := rmsg.ThreadTimestamp
+
+	if rmsg.SubType == subTypeMessageChanged {
+		if rmsg.SubMessage == nil {
+			return
+		}
+
+		eventType = "post_edited"
+		msgTS = rmsg.SubMessage.Timestamp
+
+		if rmsg.SubMessage.ThreadTimestamp != "" {
+			parentTS = rmsg.SubMessage.ThreadTimestamp
+		}
 	}
 
 	ghost, ok := s.resolveSlackPostGhost(rmsg)
@@ -693,97 +1270,58 @@ func (s *Slack) handleSlackActionPost(rmsg *slack.MessageEvent) {
 		return
 	}
 
-	msghandled := false
+	var (
+		rawText    string
+		msghandled bool
+	)
 
-	spoofUsername := ghost.Nick
-
-	msgs := []string{}
-
-	if rmsg.Text != "" {
-		msgs = append(msgs, strings.Split(rmsg.Text, "\n")...)
-		msghandled = true
+	if rmsg.SubType == subTypeMessageChanged && rmsg.SubMessage != nil {
+		rawText, msghandled = formatSlackMsg(rmsg.SubMessage)
+	} else {
+		rawText, msghandled = formatSlackMsg(&rmsg.Msg)
 	}
 
-	// look in attachments
-	for _, attach := range rmsg.Attachments {
-		if attach.Pretext != "" {
-			msgs = append(msgs, strings.Split(attach.Pretext, "\n")...)
-			msghandled = true
-		}
-
-		if attach.Text == "" {
-			continue
-		}
-
-		for i, row := range strings.Split(attach.Text, "\n") {
-			msgs = append(msgs, "> "+row)
-			if i > 4 {
-				msgs = append(msgs, "> ...")
-				break
-			}
-		}
-
-		msghandled = true
+	if !msghandled {
+		return
 	}
 
-	// List files
-	for _, file := range rmsg.Files {
-		msgs = append(msgs, "Uploaded "+file.Mode+" "+
-			file.Name+" / "+file.Title+" ("+file.Filetype+"): "+file.URLPrivate)
-		msghandled = true
-	}
-
-	if msghandled {
-		if rmsg.ThreadTimestamp != "" && len(msgs) > 0 {
-			msgs[0] = "[T " + formatTS(rmsg.ThreadTimestamp) + "] " + msgs[0]
-		}
-	}
-
-	if rmsg.SubType == "message_changed" {
-		msgs = append(msgs, strings.Split(rmsg.SubMessage.Text, "\n")...)
-		if len(msgs) > 0 {
-			msgs[0] = "[C " + formatTS(rmsg.SubMessage.Timestamp) + "] " + msgs[0]
-		}
-
-		msghandled = true
-	}
-
+	msg := s.cleanupMessage(rawText)
 	channelID := rmsg.Channel
+	msgID := encodeSlackID(channelID, msgTS)
 
-	for _, msg := range msgs {
-		// cleanup the message
-		msg = s.cleanupMessage(msg)
+	parentID := ""
+	rootTS := msgTS
 
-		// still no text, ignore this message
-		if !msghandled {
-			msg = fmt.Sprintf("Empty: %#v", rmsg)
-		}
-
-		// direct message
-		switch {
-		case strings.HasPrefix(rmsg.Channel, "D"):
-			sender := ghost
-
-			receiver := ghost
-			if ghost.Me {
-				members, _ := s.sc.GetUsersInConversation(channelID)
-				for _, member := range members {
-					if member == s.GetMe().User {
-						continue
-					}
-
-					ghostuser, _ := s.sc.GetUserInfo(member)
-					receiver = s.createUser(ghostuser)
-				}
-			}
-
-			s.sendDirectMessage(sender, receiver, msg, channelID)
-		default:
-			// could be a bot
-			ghost.Nick = spoofUsername
-			s.sendPublicMessage(ghost, msg, channelID, eventType)
-		}
+	if parentTS != "" && parentTS != msgTS {
+		parentID = encodeSlackID(channelID, parentTS)
+		rootTS = parentTS
 	}
+
+	switch rmsg.SubType {
+	case eventChannelTopic, eventChannelPurpose:
+		s.cacheThreadRoot(channelID, msgTS, rootTS)
+	default:
+		s.cachePost(channelID, msgTS, rootTS, ghost, msg)
+	}
+
+	if parentID != "" {
+		msg = strings.TrimRight(msg, "\n") + s.formatReplySuffix(ctx, channelID, parentTS)
+	}
+
+	if rmsg.SubType == subTypeMessageChanged {
+		msg = strings.TrimRight(msg, "\n") + slackActionSuffix(s.FormatterConfig().Unicode, subTypeMessageChanged)
+	}
+
+	createAt := slackTSMillis(msgTS)
+
+	if strings.HasPrefix(channelID, "D") {
+		receiver := s.resolveDMReceiver(ghost, channelID)
+		s.sendDirectMessage(ghost, receiver, msg, channelID, msgID, parentID, createAt)
+
+		return
+	}
+
+	s.sendPublicMessage(ghost, msg, channelID, msgID, parentID, eventType, createAt)
 }
 
 func isEnterpriseUser(slackuser *slack.User) bool {
@@ -876,28 +1414,125 @@ func (s *Slack) Connected() bool {
 	return s.connected
 }
 
+func (s *Slack) recordSent(ctx context.Context, channelID, msgID, threadTS, parentID, text string) {
+	if s.msgLastSentCache == nil || msgID == "" {
+		return
+	}
+
+	name := s.GetChannelName(ctx, channelID)
+	if name == "" {
+		name = channelID
+	}
+
+	summary := strings.Join(strings.Fields(text), " ")
+	if len(summary) > slackLastSentSummaryLen {
+		summary = strings.ToValidUTF8(summary[:slackLastSentSummaryLen], "") + "..."
+	}
+
+	if threadTS != "" {
+		summary += s.formatReplySuffix(ctx, channelID, threadTS)
+	}
+
+	key := msgID
+	if parentID != "" {
+		key = parentID
+	}
+
+	s.msgLastSentCache.Add(key, name+": "+summary)
+}
+
 func (s *Slack) MsgUserThread(ctx context.Context, username, parentID, text string) (string, error) {
-	return "", nil
+	channelID := s.GetDMChannelID(ctx, username)
+	if channelID == "" {
+		return "", errors.New("could not open DM channel for " + username)
+	}
+
+	return s.MsgChannelThread(ctx, channelID, parentID, text)
 }
 
-func (s *Slack) MsgChannelThread(ctx context.Context, username, parentID, text string) (string, error) {
-	return "", nil
+func (s *Slack) MsgChannelThread(ctx context.Context, channelID, parentID, text string) (string, error) {
+	text = slackActionText(text)
+
+	var threadTS, resolvedParentID string
+
+	if parentID != "" {
+		decodedCh, decodedTS, ok := decodeSlackID(parentID)
+		if !ok {
+			return "", errors.New("invalid Slack thread ID: " + parentID)
+		}
+
+		if !strings.EqualFold(decodedCh, channelID) {
+			return "", errors.New("thread ID belongs to a different channel")
+		}
+
+		threadTS = s.resolveThreadRoot(ctx, channelID, decodedTS)
+		resolvedParentID = encodeSlackID(channelID, threadTS)
+	}
+
+	ts, err := s.sc.PostMessageThread(ctx, channelID, threadTS, text)
+	if err != nil {
+		return "", err
+	}
+
+	msgID := encodeSlackID(channelID, ts)
+
+	rootTS := ts
+	if threadTS != "" {
+		rootTS = threadTS
+	}
+
+	s.cachePost(channelID, ts, rootTS, s.GetMe(), text)
+	s.recordSent(ctx, channelID, msgID, threadTS, resolvedParentID, text)
+
+	return msgID, nil
 }
 
-func (s *Slack) ModifyPost(ctx context.Context, channelID, text string) error {
-	return nil
+func (s *Slack) ModifyPost(ctx context.Context, msgID, text string) error {
+	channelID, ts, ok := decodeSlackID(msgID)
+	if !ok {
+		return errors.New("invalid Slack message ID: " + msgID)
+	}
+
+	if text == "" {
+		return s.sc.DeleteMessage(ctx, channelID, ts)
+	}
+
+	return s.sc.UpdateMessage(ctx, channelID, ts, text)
 }
 
 func (s *Slack) AddReaction(ctx context.Context, msgID, emoji string) error {
-	return nil
+	channelID, ts, ok := decodeSlackID(msgID)
+	if !ok {
+		return errors.New("invalid Slack message ID: " + msgID)
+	}
+
+	return s.sc.AddReaction(ctx, channelID, ts, emoji)
 }
 
 func (s *Slack) RemoveReaction(ctx context.Context, msgID, emoji string) error {
-	return nil
+	channelID, ts, ok := decodeSlackID(msgID)
+	if !ok {
+		return errors.New("invalid Slack message ID: " + msgID)
+	}
+
+	return s.sc.RemoveReaction(ctx, channelID, ts, emoji)
 }
 
 func (s *Slack) GetLastSentMsgs() []string {
-	return []string{}
+	if s.msgLastSentCache == nil {
+		return []string{}
+	}
+
+	keys := s.msgLastSentCache.Keys()
+	data := make([]string, 0, len(keys))
+
+	for _, k := range keys {
+		if v, ok := s.msgLastSentCache.Get(k); ok {
+			data = append(data, fmt.Sprintf("[@@%s] %s", k, v))
+		}
+	}
+
+	return data
 }
 
 func (s *Slack) Config() any {
@@ -913,7 +1548,12 @@ func (s *Slack) FormatterConfig() *config.FormatterConfig {
 }
 
 func (s *Slack) GetPostChannelID(ctx context.Context, postID string) string {
-	return ""
+	channelID, _, ok := decodeSlackID(postID)
+	if !ok {
+		return ""
+	}
+
+	return channelID
 }
 
 func (s *Slack) GetPostSizeLimit() int {
@@ -928,8 +1568,70 @@ func (s *Slack) Ping(ctx context.Context, proto ...string) error {
 	return nil
 }
 
+func firstEventRootTS(events []*bridge.Event) string {
+	if len(events) == 0 {
+		return ""
+	}
+
+	var firstMsgID string
+
+	switch e := events[0].Data.(type) {
+	case *bridge.ChannelMessageEvent:
+		firstMsgID = e.MessageID
+	case *bridge.DirectMessageEvent:
+		firstMsgID = e.MessageID
+	}
+
+	if firstMsgID == "" {
+		return ""
+	}
+
+	if _, rootTS, ok := decodeSlackID(firstMsgID); ok {
+		return rootTS
+	}
+
+	return ""
+}
+
+func (s *Slack) PostURL(ctx context.Context, postID string, events []*bridge.Event) string {
+	channelID, ts, ok := decodeSlackID(postID)
+	if !ok {
+		return ""
+	}
+
+	if s.sc != nil {
+		permalink, err := s.sc.GetPermalink(ctx, channelID, ts)
+		if err == nil && permalink != "" {
+			return permalink
+		}
+	}
+
+	rootTS := firstEventRootTS(events)
+	if rootTS == "" {
+		if parentID := s.cachedParentID(channelID, ts); parentID != "" {
+			_, rootTS, _ = decodeSlackID(parentID)
+		}
+	}
+
+	domain := ""
+	if s.sc != nil {
+		domain = s.sc.TeamDomain()
+	}
+
+	return formatSlackArchiveURL(domain, channelID, ts, rootTS)
+}
+
 func (s *Slack) NormalizePostID(msgID string) string {
-	return msgID
+	if ch, ts, ok := parseSlackArchiveURL(msgID); ok {
+		return encodeSlackID(ch, ts)
+	}
+
+	msgID = strings.ToLower(msgID)
+	if _, _, ok := decodeSlackID(msgID); ok {
+		return msgID
+	}
+
+	return ""
 }
 
 func (s *Slack) SendTyping(ctx context.Context, channelName string) {
