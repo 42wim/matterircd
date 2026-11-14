@@ -1828,3 +1828,74 @@ func stepRegionalIndicator(inRI bool) (int, bool) {
 
 	return 2, true
 }
+
+// ActionSuffixKind identifies a message state suffix appended to IRC messages.
+type ActionSuffixKind string
+
+const (
+	SuffixEdited    ActionSuffixKind = "edited"
+	SuffixPinned    ActionSuffixKind = "pinned"
+	SuffixUnpinned  ActionSuffixKind = "unpinned"
+	SuffixUpdated   ActionSuffixKind = "updated"
+	SuffixDeleted   ActionSuffixKind = "deleted"
+	SuffixEncrypted ActionSuffixKind = "encrypted"
+)
+
+// FormatActionSuffix returns the italicized IRC suffix for a message state change.
+func FormatActionSuffix(kind ActionSuffixKind, useUnicode bool) string {
+	switch kind {
+	case SuffixEdited:
+		if useUnicode {
+			return " \x1d(✏️edited)\x1d"
+		}
+
+		return " \x1d(edited)\x1d"
+	case SuffixPinned:
+		if useUnicode {
+			return " \x1d(📌pinned)\x1d"
+		}
+
+		return " \x1d(pinned)\x1d"
+	case SuffixUnpinned:
+		if useUnicode {
+			return " \x1d(📌unpinned)\x1d"
+		}
+
+		return " \x1d(unpinned)\x1d"
+	case SuffixUpdated:
+		if useUnicode {
+			return " \x1d(🔄updated)\x1d"
+		}
+
+		return " \x1d(updated)\x1d"
+	case SuffixDeleted:
+		if useUnicode {
+			return " \x1d(🗑️deleted)\x1d"
+		}
+
+		return " \x1d(deleted)\x1d"
+	case SuffixEncrypted:
+		if useUnicode {
+			return " \x1d(🔒encrypted)\x1d"
+		}
+
+		return " \x1d(encrypted)\x1d"
+	default:
+		return ""
+	}
+}
+
+// AppendMessageSuffix appends a formatted suffix (such as a reply context or action suffix)
+// to msg, stripping trailing newlines and placing single-line CTCP ACTION suffixes inside \x01.
+func AppendMessageSuffix(msg, suffix string) string {
+	msg = strings.TrimRight(msg, "\r\n")
+	if suffix == "" {
+		return msg
+	}
+
+	if strings.HasPrefix(msg, "\x01ACTION ") && strings.HasSuffix(msg, "\x01") && !strings.Contains(msg, "\n") {
+		return msg[:len(msg)-1] + suffix + "\x01"
+	}
+
+	return strings.TrimLeft(msg+suffix, " ")
+}
