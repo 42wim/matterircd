@@ -334,10 +334,15 @@ JoinDM = false
 #
 #Restrict = ["myslack"]
 
-# This will add the slack DisplayName as prefix to every message if the DisplayName differs from the Username
+# Use the Slack DisplayName (falling back to RealName if empty) as the IRC nick.
 # More info about username/displayname see https://api.slack.com/changelog/2017-09-the-one-about-usernames
 # Default false
 UseDisplayName = false
+
+# Use the Slack RealName (with spaces replaced by '.') as the IRC nick.
+# Useful on Enterprise Slack where usernames are internal IDs.
+# Default false
+UseRealName = false
 
 #an array of channels that only will be joined on IRC. JoinExlude and JoinInclude will not be checked
 #regexp is supported

@@ -26,6 +26,7 @@ type Slack struct {
 	credentials bridge.Credentials
 	eventChan   chan *bridge.Event
 	onConnect   func()
+	userByNick  map[string]string
 
 	cfg *config.Config
 }
@@ -39,6 +40,7 @@ func New(cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Eve
 		credentials: cred,
 		eventChan:   eventChan,
 		onConnect:   onConnect,
+		userByNick:  make(map[string]string),
 		cfg:         cfg,
 	}
 
@@ -784,17 +786,71 @@ func (s *Slack) handleSlackActionPost(rmsg *slack.MessageEvent) {
 	}
 }
 
+func isEnterpriseUser(slackuser *slack.User) bool {
+	return slackuser.Enterprise.EnterpriseID != "" ||
+		strings.HasPrefix(slackuser.ID, "W") ||
+		(slackuser.ID != "" && strings.EqualFold(slackuser.Name, slackuser.ID))
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if sanitized := sanitizeSlackNick(v); sanitized != "" {
+			return sanitized
+		}
+	}
+
+	return ""
+}
+
+func (s *Slack) resolveSlackNick(slackuser *slack.User, rc *config.RuntimeConfig) string {
+	realName := slackuser.RealName
+	if realName == "" {
+		realName = slackuser.Profile.RealName
+	}
+
+	displayName := slackuser.Profile.DisplayName
+	enterprise := isEnterpriseUser(slackuser)
+
+	var nick string
+
+	switch {
+	case rc.Slack.UseRealName:
+		nick = firstNonEmpty(realName, displayName, slackuser.Name, slackuser.ID)
+	case rc.Slack.PreferNickname || rc.Slack.UseDisplayName:
+		nick = firstNonEmpty(displayName, realName, slackuser.Name, slackuser.ID)
+	case enterprise:
+		nick = firstNonEmpty(displayName, realName, slackuser.Name, slackuser.ID)
+	default:
+		nick = firstNonEmpty(slackuser.Name, slackuser.ID)
+	}
+
+	if slackuser.ID == "" {
+		return nick
+	}
+
+	if enterprise && !strings.EqualFold(nick, slackuser.ID) {
+		nick += "-" + strings.ToLower(slackuser.ID)
+	}
+
+	s.Lock()
+	defer s.Unlock()
+
+	if owner, taken := s.userByNick[nick]; taken && owner != slackuser.ID {
+		nick += "-" + strings.ToLower(slackuser.ID)
+	}
+
+	s.userByNick[nick] = slackuser.ID
+
+	return nick
+}
+
 func (s *Slack) createUser(slackuser *slack.User) *bridge.UserInfo {
 	if slackuser == nil {
 		return &bridge.UserInfo{}
 	}
 
 	rc := s.cfg.Current()
-
-	nick := slackuser.Name
-	if (rc.Slack.PreferNickname || rc.Slack.UseDisplayName) && isValidNick(slackuser.Profile.DisplayName) {
-		nick = slackuser.Profile.DisplayName
-	}
+	nick := s.resolveSlackNick(slackuser, rc)
 
 	me := slackuser.ID == s.sc.UserID()
 

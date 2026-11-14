@@ -221,6 +221,7 @@ type SlackConfig struct {
 	DenyUsers      []string
 	UseDisplayName bool
 	PreferNickname bool
+	UseRealName    bool
 }
 
 type MatrixConfig struct {
@@ -575,6 +576,7 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 			DenyUsers:      append([]string(nil), c.v.GetStringSlice("slack.DenyUsers")...),
 			UseDisplayName: c.v.GetBool("slack.UseDisplayName"),
 			PreferNickname: c.v.GetBool("slack.PreferNickname"),
+			UseRealName:    c.v.GetBool("slack.UseRealName"),
 		},
 
 		Matrix: MatrixConfig{
