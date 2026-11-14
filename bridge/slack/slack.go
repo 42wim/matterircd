@@ -848,7 +848,9 @@ func (s *Slack) resolveThreadRoot(ctx context.Context, channelID, ts string) str
 func (s *Slack) slackMsgToEvent(ctx context.Context, channelID string, m slack.Msg) *bridge.Event {
 	ghost := s.msgAuthorGhost(ctx, &m)
 
-	rawText, ok := formatSlackMsg(&m)
+	shortFieldMaxLen, omitFieldTitles := s.attachmentFormattingOpts()
+
+	rawText, ok := formatSlackMsgOpts(&m, shortFieldMaxLen, omitFieldTitles)
 	if !ok {
 		return nil
 	}
@@ -1500,7 +1502,81 @@ func (s *Slack) sendPublicMessage(ghost *bridge.UserInfo, msg, channelID, msgID,
 	s.eventChan <- event
 }
 
+func (s *Slack) attachmentFormattingOpts() (int, bool) {
+	if s.cfg == nil {
+		return 0, false
+	}
+
+	sc := s.cfg.Current().Slack
+
+	return sc.MessageAttachmentShortFieldMaxLineLength, sc.MessageAttachmentOmitFieldTitles
+}
+
+func formatSlackAttachmentFields(fields []slack.AttachmentField, shortFieldMaxLen int, omitFieldTitles bool) []string {
+	if len(fields) == 0 {
+		return nil
+	}
+
+	if shortFieldMaxLen <= 0 {
+		shortFieldMaxLen = 100
+	}
+
+	var (
+		lines    []string
+		shortBuf string
+	)
+
+	flushShort := func() {
+		if shortBuf != "" {
+			lines = append(lines, "> "+shortBuf)
+			shortBuf = ""
+		}
+	}
+
+	for _, f := range fields {
+		entry := f.Value
+		if !omitFieldTitles && f.Title != "" {
+			if entry != "" {
+				entry = f.Title + ": " + entry
+			} else {
+				entry = f.Title
+			}
+		}
+
+		if entry == "" {
+			continue
+		}
+
+		if !f.Short {
+			flushShort()
+
+			lines = append(lines, "> "+entry)
+
+			continue
+		}
+
+		switch {
+		case shortBuf == "":
+			shortBuf = entry
+		case len(shortBuf)+3+len(entry) <= shortFieldMaxLen:
+			shortBuf += " | " + entry
+		default:
+			flushShort()
+
+			shortBuf = entry
+		}
+	}
+
+	flushShort()
+
+	return lines
+}
+
 func formatSlackMsg(m *slack.Msg) (string, bool) {
+	return formatSlackMsgOpts(m, 0, false)
+}
+
+func formatSlackMsgOpts(m *slack.Msg, shortFieldMaxLen int, omitFieldTitles bool) (string, bool) {
 	if m == nil {
 		return "", false
 	}
@@ -1520,20 +1596,23 @@ func formatSlackMsg(m *slack.Msg) (string, bool) {
 			msghandled = true
 		}
 
-		if attach.Text == "" {
-			continue
-		}
+		if attach.Text != "" {
+			for i, row := range strings.Split(attach.Text, "\n") {
+				msgs = append(msgs, "> "+row)
 
-		for i, row := range strings.Split(attach.Text, "\n") {
-			msgs = append(msgs, "> "+row)
-
-			if i > 4 {
-				msgs = append(msgs, "> ...")
-				break
+				if i > 4 {
+					msgs = append(msgs, "> ...")
+					break
+				}
 			}
+
+			msghandled = true
 		}
 
-		msghandled = true
+		if fieldLines := formatSlackAttachmentFields(attach.Fields, shortFieldMaxLen, omitFieldTitles); len(fieldLines) > 0 {
+			msgs = append(msgs, fieldLines...)
+			msghandled = true
+		}
 	}
 
 	for _, file := range m.Files {
@@ -1674,10 +1753,14 @@ func (s *Slack) handleSlackMessageDeleted(ctx context.Context, rmsg *slack.Messa
 		rc = s.cfg.Current()
 	}
 
+	s.evictCachedPost(channelID, msgTS)
+
+	if ghost != nil && ghost.Me && rc != nil && rc.Slack.DisableShowOwnModified {
+		return
+	}
+
 	msg := formatDeletedSlackMsg(rc, origMsg, replySuffix)
 	createAt := slackTSMillis(msgTS)
-
-	s.evictCachedPost(channelID, msgTS)
 
 	if strings.HasPrefix(channelID, "D") {
 		receiver := s.resolveDMReceiver(ghost, channelID)
@@ -1698,18 +1781,18 @@ func isSlackLinkUnfurl(rmsg *slack.MessageEvent) bool {
 		len(rmsg.SubMessage.Attachments) > len(rmsg.PreviousMessage.Attachments)
 }
 
-func formatSlackActionPostText(rmsg *slack.MessageEvent, isUnfurl bool) (string, bool) {
+func formatSlackActionPostText(rmsg *slack.MessageEvent, isUnfurl bool, shortFieldMaxLen int, omitFieldTitles bool) (string, bool) {
 	if isUnfurl {
 		newAttachments := rmsg.SubMessage.Attachments[len(rmsg.PreviousMessage.Attachments):]
 
-		return formatSlackMsg(&slack.Msg{Attachments: newAttachments})
+		return formatSlackMsgOpts(&slack.Msg{Attachments: newAttachments}, shortFieldMaxLen, omitFieldTitles)
 	}
 
 	if rmsg.SubType == subTypeMessageChanged && rmsg.SubMessage != nil {
-		return formatSlackMsg(rmsg.SubMessage)
+		return formatSlackMsgOpts(rmsg.SubMessage, shortFieldMaxLen, omitFieldTitles)
 	}
 
-	return formatSlackMsg(&rmsg.Msg)
+	return formatSlackMsgOpts(&rmsg.Msg, shortFieldMaxLen, omitFieldTitles)
 }
 
 //nolint:funlen,gocyclo
@@ -1783,7 +1866,12 @@ func (s *Slack) handleSlackActionPost(ctx context.Context, rmsg *slack.MessageEv
 		return
 	}
 
-	rawText, msghandled := formatSlackActionPostText(rmsg, isUnfurl)
+	shortFieldMaxLen, omitFieldTitles := s.attachmentFormattingOpts()
+	if rmsg.SubType == subTypeMessageChanged && !isUnfurl && ghost.Me && s.cfg != nil && s.cfg.Current().Slack.DisableShowOwnModified {
+		return
+	}
+
+	rawText, msghandled := formatSlackActionPostText(rmsg, isUnfurl, shortFieldMaxLen, omitFieldTitles)
 	if !msghandled {
 		return
 	}

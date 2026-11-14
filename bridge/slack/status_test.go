@@ -177,3 +177,27 @@ func TestSlackClientCountsAndLookups(t *testing.T) {
 	sc.RemoveChannel("C10")
 	assert.Equal(t, 0, sc.GetChannelCount())
 }
+
+func TestFormatSlackAttachmentFields(t *testing.T) {
+	msg := &slack.Msg{
+		Attachments: []slack.Attachment{
+			{
+				Title: "Alert",
+				Fields: []slack.AttachmentField{
+					{Title: "Env", Value: "prod", Short: true},
+					{Title: "Host", Value: "web-01", Short: true},
+					{Title: "Status", Value: "degraded", Short: true},
+					{Title: "Details", Value: "high latency", Short: false},
+				},
+			},
+		},
+	}
+
+	got, ok := formatSlackMsgOpts(msg, 25, false)
+	assert.True(t, ok)
+	assert.Equal(t, "> Env: prod | Host: web-01\n> Status: degraded\n> Details: high latency", got)
+
+	gotOmit, ok := formatSlackMsgOpts(msg, 100, true)
+	assert.True(t, ok)
+	assert.Equal(t, "> prod | web-01 | degraded\n> high latency", gotOmit)
+}

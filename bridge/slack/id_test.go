@@ -321,7 +321,7 @@ func TestSlackLinkUnfurl(t *testing.T) {
 
 	assert.True(t, isSlackLinkUnfurl(unfurlEv))
 
-	text, ok := formatSlackActionPostText(unfurlEv, true)
+	text, ok := formatSlackActionPostText(unfurlEv, true, 100, false)
 	assert.True(t, ok)
 	assert.Equal(t, "> ```bash\n> echo hi\n> ```", text)
 

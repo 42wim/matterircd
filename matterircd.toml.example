@@ -394,6 +394,10 @@ PrefixContext = false
 # Threads are shown using Slack's encoded message/thread IDs (or "slack+post" to include post IDs).
 #ThreadContext = "slack"
 #DirectoryURL = "https://directory.mydomain.local/people/{nick}"  # {nick} and {username}
+#HideReactions = false
+#DisableShowOwnModified = true
+#MessageAttachmentShortFieldMaxLineLength = 100
+#MessageAttachmentOmitFieldTitles = false
 #ShowContextMulti = false
 
 
@@ -425,6 +429,8 @@ PrefixContext = false
 #DirectoryURL = "https://directory.mydomain.local/people/{nick}"  # {nick} and {username}
 #CollapseScrollback = false
 #ShowOwnReactions = false
+#HideReactions = false
+#DisableShowOwnModified = true
 #ShowMentions = false
 #DisableDefaultMentions = false  # also covers @room, @channel, @all and @here
 #DisableAutoView = false

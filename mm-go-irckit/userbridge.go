@@ -1013,7 +1013,7 @@ func (u *User) handleReactionEvent(event any) {
 
 	defer u.saveLastViewedAt(channelID)
 
-	if u.br.Protocol() == serviceMattermost && u.cfg.Mattermost().HideReactions {
+	if u.hasSharedCfg() && u.sharedCfg().HideReactions {
 		logger.Debug("Not showing reaction: " + text + reaction)
 		return
 	}
