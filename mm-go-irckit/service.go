@@ -223,10 +223,6 @@ func login(u *User, toUser *User, args []string, service string) {
 
 		u.respondService(toUser, "login OK", service)
 
-		if u.Credentials.Token != "" {
-			u.respondService(toUser, "token used: "+u.Credentials.Token, service)
-		}
-
 		return
 	}
 

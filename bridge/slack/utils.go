@@ -1,85 +1,11 @@
 package slack
 
 import (
-	"encoding/json"
-	"errors"
 	"fmt"
 	"html"
-	"io"
-	"net/http"
-	"net/url"
-	"regexp"
 	"strings"
 	"time"
-
-	"github.com/sirupsen/logrus"
-	"github.com/slack-go/slack"
 )
-
-//nolint:funlen
-func (s *Slack) getSlackToken() (string, error) {
-	type findTeamResponseFull struct {
-		slack.SlackResponse
-
-		SSO    bool   `json:"sso"`
-		TeamID string `json:"team_id"`
-	}
-
-	type loginResponseFull struct {
-		slack.SlackResponse
-
-		Token string `json:"token"`
-	}
-
-	resp, err := http.PostForm("https://slack.com/api/auth.findTeam", url.Values{"domain": {s.credentials.Team}})
-	if err != nil {
-		return "", err
-	}
-
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-
-	var findTeamResponse findTeamResponseFull
-
-	err = json.Unmarshal(body, &findTeamResponse)
-	if err != nil {
-		return "", err
-	}
-
-	if findTeamResponse.SSO {
-		return "", errors.New("SSO teams not yet supported")
-	}
-
-	resp, err = http.PostForm("https://slack.com/api/auth.signin",
-		url.Values{"team": {findTeamResponse.TeamID}, "email": {s.credentials.Login}, "password": {s.credentials.Pass}})
-	if err != nil {
-		return "", err
-	}
-
-	defer resp.Body.Close()
-
-	body, err = io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-
-	var loginResponse loginResponseFull
-
-	err = json.Unmarshal(body, &loginResponse)
-	if err != nil {
-		return "", err
-	}
-
-	if !loginResponse.Ok {
-		return "", errors.New(loginResponse.Error)
-	}
-
-	return loginResponse.Token, nil
-}
 
 func isValidNick(s string) bool {
 	/* IRC RFC ([0] - see below) mentions a limit of 9 chars for
@@ -130,111 +56,74 @@ func formatTS(unixts string) string {
 	return ts.Format("15:04:05")
 }
 
-// @see https://api.slack.com/docs/message-formatting#linking_to_channels_and_users
-func (s *Slack) replaceMention(text string) string {
-	results := regexp.MustCompile(`<@([a-zA-z0-9]+)>`).FindAllStringSubmatch(text, -1)
-	for _, r := range results {
-		text = strings.ReplaceAll(text, "<@"+r[1]+">", "@"+s.userName(r[1]))
+func (s *Slack) formatSlackToken(inner string) string {
+	if inner == "" {
+		return ""
 	}
 
-	return text
-}
+	switch inner[0] {
+	case '@':
+		id, _, _ := strings.Cut(inner[1:], "|")
 
-// @see https://api.slack.com/docs/message-formatting#linking_to_channels_and_users
-func replaceChannel(text string) string {
-	results := regexp.MustCompile(`<#[a-zA-Z0-9]+\|(.+?)>`).FindAllStringSubmatch(text, -1)
-	for _, r := range results {
-		text = strings.ReplaceAll(text, r[0], "#"+r[1])
-	}
-
-	return text
-}
-
-// @see https://api.slack.com/docs/message-formatting#variables
-func replaceVariable(text string) string {
-	results := regexp.MustCompile(`<!((?:subteam\^)?[a-zA-Z0-9]+)(?:\|@?(.+?))?>`).FindAllStringSubmatch(text, -1)
-	for _, r := range results {
-		if r[2] != "" {
-			text = strings.ReplaceAll(text, r[0], "@"+r[2])
-		} else {
-			text = strings.ReplaceAll(text, r[0], "@"+r[1])
+		return "@" + s.sc.UserName(id)
+	case '#':
+		id, label, hasLabel := strings.Cut(inner[1:], "|")
+		if hasLabel && label != "" {
+			return "#" + label
 		}
+
+		return s.sc.GetChannelName(id)
+	case '!':
+		id, label, hasLabel := strings.Cut(inner[1:], "|")
+		if hasLabel && label != "" {
+			return "@" + strings.TrimPrefix(label, "@")
+		}
+
+		return "@" + id
+	default:
+		link, _, _ := strings.Cut(inner, "|")
+
+		return link
 	}
-
-	return text
-}
-
-// @see https://api.slack.com/docs/message-formatting#linking_to_urls
-func replaceURL(text string) string {
-	results := regexp.MustCompile(`<(.*?)(\|.*?)?>`).FindAllStringSubmatch(text, -1)
-	for _, r := range results {
-		text = strings.ReplaceAll(text, r[0], r[1])
-	}
-
-	return text
 }
 
 func (s *Slack) cleanupMessage(msg string) string {
-	msg = s.replaceMention(msg)
-	msg = replaceVariable(msg)
-	msg = replaceChannel(msg)
-	msg = replaceURL(msg)
-	msg = html.UnescapeString(msg)
-
-	return msg
-}
-
-// passwordToTokenAndCookie parses the password specified by the user into a
-// Slack token and optionally a cookie Auth cookies can be specified by
-// appending a "|" symbol and the base64-encoded auth cookie to the Slack token.
-// taken from https://github.com/insomniacslk/irc-slack/blob/master/pkg/ircslack/irc_server.go
-func passwordToTokenAndCookie(p string) (string, string, error) {
-	parts := strings.Split(p, "|")
-
-	switch len(parts) {
-	case 1:
-		// XXX should check that the token starts with xoxp- ?
-		return parts[0], "", nil
-	case 2:
-		if !strings.HasPrefix(parts[0], "xoxc-") {
-			return "", "", errors.New("auth cookie is set, but token does not start with xoxc-")
-		}
-
-		if parts[1] == "" {
-			return "", "", errors.New("auth cookie is empty")
-		}
-
-		if !strings.HasPrefix(parts[1], "d=") || !strings.HasSuffix(parts[1], ";") {
-			return "", "", errors.New("auth cookie must have the format 'd=XXX;'")
-		}
-
-		return parts[0], parts[1], nil
-	default:
-		return "", "", fmt.Errorf("failed to parse password into token and cookie, got %d components, want 1 or 2", len(parts))
-	}
-}
-
-// custom HTTP client used to set the auth cookie if requested, and only over
-// TLS.
-// taken from https://github.com/insomniacslk/irc-slack/blob/master/pkg/ircslack/irc_server.go
-type httpClient struct {
-	c      http.Client
-	cookie string
-}
-
-// taken from https://github.com/insomniacslk/irc-slack/blob/master/pkg/ircslack/irc_server.go
-//
-//nolint:gosec // thin wrapper; the request URL is built by the slack client, not user input
-func (hc httpClient) Do(req *http.Request) (*http.Response, error) {
-	if hc.cookie != "" {
-		logrus.Debug("Setting auth cookie")
-
-		if strings.ToLower(req.URL.Scheme) == "https" {
-			req.Header.Add("Cookie", hc.cookie)
-		} else {
-			logrus.Warning("Cookie is set but connection is not HTTPS, skipping")
-		}
+	if !strings.ContainsRune(msg, '<') {
+		return html.UnescapeString(msg)
 	}
 
-	return hc.c.Do(req)
+	var b strings.Builder
+
+	b.Grow(len(msg))
+
+	for i := 0; i < len(msg); {
+		relStart := strings.IndexByte(msg[i:], '<')
+		if relStart == -1 {
+			b.WriteString(msg[i:])
+			break
+		}
+
+		start := i + relStart
+		b.WriteString(msg[i:start])
+
+		relEnd := strings.IndexByte(msg[start+1:], '>')
+		if relEnd == -1 {
+			b.WriteString(msg[start:])
+			break
+		}
+
+		inner := msg[start+1 : start+1+relEnd]
+		if nextOpen := strings.IndexByte(inner, '<'); nextOpen != -1 {
+			b.WriteString(msg[start : start+1+nextOpen])
+			i = start + 1 + nextOpen
+
+			continue
+		}
+
+		b.WriteString(s.formatSlackToken(inner))
+
+		i = start + 1 + relEnd + 1
+	}
+
+	return html.UnescapeString(b.String())
 }

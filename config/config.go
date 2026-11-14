@@ -216,6 +216,8 @@ type SlackConfig struct {
 
 	Disable bool
 
+	SlackclientLogLevel string
+
 	DenyUsers      []string
 	UseDisplayName bool
 	PreferNickname bool
@@ -567,6 +569,8 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 			Formatter: slFormatter,
 
 			Disable: c.v.GetBool("slack.Disable"),
+
+			SlackclientLogLevel: c.v.GetString("slack.SlackclientLogLevel"),
 
 			DenyUsers:      append([]string(nil), c.v.GetStringSlice("slack.DenyUsers")...),
 			UseDisplayName: c.v.GetBool("slack.UseDisplayName"),

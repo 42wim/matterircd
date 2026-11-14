@@ -24,6 +24,7 @@ lint:
 	golangci-lint run
 	golangci-lint run vendor/github.com/matterbridge/matterclient/
 	golangci-lint run vendor/github.com/matterbridge/matrixclient/
+	golangci-lint run vendor/github.com/matterbridge/slackclient/
 
 release:
 	goreleaser release --skip publish
@@ -37,6 +38,7 @@ release:
 updatedeps:
 	go get github.com/matterbridge/matterclient@master
 	go get github.com/matterbridge/matrixclient@master
+	go get github.com/matterbridge/slackclient@master
 	go mod tidy && go mod vendor
 	# https://github.com/alecthomas/chroma/pull/1344
 	git checkout -q vendor/github.com/alecthomas/chroma/v2/formatters/mirc.go
