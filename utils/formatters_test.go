@@ -167,3 +167,36 @@ func TestAppendMessageSuffix(t *testing.T) {
 		})
 	}
 }
+
+func TestProcessMessageTextQuotedCodeBlock(t *testing.T) {
+	opts := ProcessMessageOpts{
+		BlockquoteChar:     "\x0310🮇\x0f\u00a0",
+		CodeBlockPrefix:    "🮇 ",
+		SyntaxHighlighting: "terminal256:pygments",
+	}
+
+	input := "https://example.com\n> ```bash\n> echo \"hello\"\n> ``` \x1d(📌pinned)\x1d"
+	wantLines := []string{
+		"https://example.com",
+		"\x0310🮇\x0f\u00a0🮇 \x16bash\x16",
+		"\x0310🮇\x0f\u00a0🮇 \x1b[38;5;2mecho\x1b[0m \x1b[38;5;124m\"hello\"\x1b[0m",
+		"\x1d(📌pinned)\x1d",
+	}
+
+	got := collectProcessedLines(input, opts)
+	if !slices.Equal(got, wantLines) {
+		t.Errorf("got: %q\nwant: %q", got, wantLines)
+	}
+
+	// mm-go-irckit pre-replaces the leading '>' on line 1 with BlockquoteChar before ProcessMessageText.
+	preformattedInput := "\x0310🮇\x0f\u00a0 ```bash\n> echo \"hello\"\n> ```"
+	wantPreformatted := []string{
+		"\x0310🮇\x0f\u00a0🮇 \x16bash\x16",
+		"\x0310🮇\x0f\u00a0🮇 \x1b[38;5;2mecho\x1b[0m \x1b[38;5;124m\"hello\"\x1b[0m",
+	}
+
+	gotPre := collectProcessedLines(preformattedInput, opts)
+	if !slices.Equal(gotPre, wantPreformatted) {
+		t.Errorf("preformatted got: %q\nwant: %q", gotPre, wantPreformatted)
+	}
+}
