@@ -38,21 +38,30 @@ type userChannelsEntry struct {
 	fetchedAt int64
 }
 
+type channelMembersEntry struct {
+	members   []string
+	fetchedAt int64
+}
+
 type Client struct {
 	sync.RWMutex
 
-	cred         Credentials
-	sc           *slack.Client
-	rtm          *slack.RTM
-	info         *slack.Info
-	users        map[string]slack.User
-	presences    map[string]presenceEntry
-	channels     map[string]string
-	userChannels map[string]userChannelsEntry
-	dmChannels   map[string]string
-	msgLast      map[string]string
-	pongCh       chan struct{}
-	connected    bool
+	cred              Credentials
+	sc                *slack.Client
+	rtm               *slack.RTM
+	info              *slack.Info
+	users             map[string]slack.User
+	presences         map[string]presenceEntry
+	channels          map[string]string
+	channelData       map[string]slack.Channel
+	channelsFetchedAt int64
+	joinedChannels    map[string]bool
+	channelMembers    map[string]channelMembersEntry
+	userChannels      map[string]userChannelsEntry
+	dmChannels        map[string]string
+	msgLast           map[string]string
+	pongCh            chan struct{}
+	connected         bool
 
 	logger        *logrus.Entry
 	rootLogger    *logrus.Logger
@@ -79,18 +88,21 @@ func New(cred Credentials) *Client {
 	rootAPILogger.SetLevel(logrus.ErrorLevel)
 
 	return &Client{
-		cred:          cred,
-		users:         make(map[string]slack.User),
-		presences:     make(map[string]presenceEntry),
-		channels:      make(map[string]string),
-		userChannels:  make(map[string]userChannelsEntry),
-		dmChannels:    make(map[string]string),
-		msgLast:       make(map[string]string),
-		pongCh:        make(chan struct{}, 1),
-		rootLogger:    rootLogger,
-		logger:        rootLogger.WithFields(logrus.Fields{"prefix": "slackclient"}),
-		rootAPILogger: rootAPILogger,
-		apiLogger:     rootAPILogger.WithFields(logrus.Fields{"prefix": "slackclient: API"}),
+		cred:           cred,
+		users:          make(map[string]slack.User),
+		presences:      make(map[string]presenceEntry),
+		channels:       make(map[string]string),
+		channelData:    make(map[string]slack.Channel),
+		joinedChannels: make(map[string]bool),
+		channelMembers: make(map[string]channelMembersEntry),
+		userChannels:   make(map[string]userChannelsEntry),
+		dmChannels:     make(map[string]string),
+		msgLast:        make(map[string]string),
+		pongCh:         make(chan struct{}, 1),
+		rootLogger:     rootLogger,
+		logger:         rootLogger.WithFields(logrus.Fields{"prefix": "slackclient"}),
+		rootAPILogger:  rootAPILogger,
+		apiLogger:      rootAPILogger.WithFields(logrus.Fields{"prefix": "slackclient: API"}),
 	}
 }
 

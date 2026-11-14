@@ -172,7 +172,8 @@ func (s *Slack) Part(ctx context.Context, channelID string) error {
 }
 
 func (s *Slack) UpdateChannels(ctx context.Context) error {
-	return nil
+	_, err := s.sc.RefreshConversations()
+	return err
 }
 
 func (s *Slack) Logout(ctx context.Context) error {
@@ -1173,6 +1174,7 @@ func (s *Slack) emitChannelCreate(channelID, name string) {
 	}
 
 	s.sc.UpdateChannel(channelID, name)
+	s.sc.SetChannelJoined(channelID, true)
 	s.sc.InvalidateUserChannels("")
 
 	chName := ""
@@ -1211,6 +1213,7 @@ func (s *Slack) emitChannelAdd(channelID, name string) {
 	}
 
 	s.sc.UpdateChannel(channelID, name)
+	s.sc.SetChannelJoined(channelID, true)
 
 	me := s.GetMe()
 
@@ -1228,6 +1231,8 @@ func (s *Slack) emitChannelRemove(channelID string) {
 	if channelID == "" {
 		return
 	}
+
+	s.sc.SetChannelJoined(channelID, false)
 
 	me := s.GetMe()
 
@@ -1427,7 +1432,7 @@ func (s *Slack) handleActionMisc(userID, channelID, msgID, parentID, msg, eventT
 }
 
 func (s *Slack) handleMemberLeftChannel(ctx context.Context, rmsg *slack.MemberLeftChannelEvent) {
-	s.sc.InvalidateUserChannels(rmsg.User)
+	s.sc.RemoveChannelMember(rmsg.Channel, rmsg.User)
 
 	event := &bridge.Event{
 		Type: "channel_remove",
@@ -1443,7 +1448,7 @@ func (s *Slack) handleMemberLeftChannel(ctx context.Context, rmsg *slack.MemberL
 }
 
 func (s *Slack) handleMemberJoinedChannel(ctx context.Context, rmsg *slack.MemberJoinedChannelEvent) {
-	s.sc.InvalidateUserChannels(rmsg.User)
+	s.sc.AddChannelMember(rmsg.Channel, rmsg.User)
 
 	var adder *bridge.UserInfo
 

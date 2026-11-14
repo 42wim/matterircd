@@ -16,7 +16,29 @@ func (c *Client) Invite(channelID, username string) error {
 	return err
 }
 
+const (
+	channelsCacheTTL       = 5 * time.Minute
+	channelMembersCacheTTL = 5 * time.Minute
+	userChannelsCacheTTL   = 5 * time.Minute
+)
+
 func (c *Client) IsChannelMember(channelID string) bool {
+	if channelID == "" {
+		return false
+	}
+
+	c.RLock()
+	member, ok := c.joinedChannels[channelID]
+	c.RUnlock()
+
+	if ok {
+		return member
+	}
+
+	if c.sc == nil {
+		return false
+	}
+
 	info, err := c.sc.GetConversationInfo(&slack.GetConversationInfoInput{
 		ChannelID: channelID,
 	})
@@ -24,7 +46,24 @@ func (c *Client) IsChannelMember(channelID string) bool {
 		return false
 	}
 
+	c.cacheChannel(*info)
+
 	return info.IsMember
+}
+
+func (c *Client) cacheChannel(ch slack.Channel) {
+	if ch.ID == "" {
+		return
+	}
+
+	c.Lock()
+	if ch.Name != "" {
+		c.channels[ch.ID] = "#" + ch.Name
+	}
+
+	c.channelData[ch.ID] = ch
+	c.joinedChannels[ch.ID] = ch.IsMember
+	c.Unlock()
 }
 
 func (c *Client) JoinChannel(channelName string) (string, string, error) {
@@ -33,14 +72,43 @@ func (c *Client) JoinChannel(channelName string) (string, string, error) {
 		return "", "", fmt.Errorf("cannot join channel (+i): %w", err)
 	}
 
-	c.Lock()
-	c.channels[mychan.ID] = "#" + mychan.Name
-	c.Unlock()
+	mychan.IsMember = true
+	c.cacheChannel(*mychan)
 
 	return mychan.ID, mychan.Topic.Value, nil
 }
 
 func (c *Client) GetConversations() ([]slack.Channel, error) {
+	now := time.Now().Unix()
+
+	c.RLock()
+
+	fresh := c.channelsFetchedAt > 0 && now-c.channelsFetchedAt < int64(channelsCacheTTL.Seconds())
+	if (fresh || c.sc == nil) && len(c.channelData) > 0 {
+		channels := make([]slack.Channel, 0, len(c.channelData))
+		for _, ch := range c.channelData {
+			channels = append(channels, ch)
+		}
+
+		c.RUnlock()
+
+		return channels, nil
+	}
+
+	c.RUnlock()
+
+	if c.sc == nil {
+		return nil, nil
+	}
+
+	return c.RefreshConversations()
+}
+
+func (c *Client) RefreshConversations() ([]slack.Channel, error) {
+	if c.sc == nil {
+		return nil, nil
+	}
+
 	var channels []slack.Channel
 
 	params := slack.GetConversationsParameters{
@@ -54,6 +122,7 @@ func (c *Client) GetConversations() ([]slack.Channel, error) {
 		conversations, nextCursor, err := c.sc.GetConversations(&params)
 		if err != nil {
 			c.logger.Error("GetConversations", err)
+			break
 		}
 
 		params.Cursor = nextCursor
@@ -67,8 +136,19 @@ func (c *Client) GetConversations() ([]slack.Channel, error) {
 
 	c.Lock()
 	for _, ch := range channels {
-		c.channels[ch.ID] = "#" + ch.Name
+		if ch.ID == "" {
+			continue
+		}
+
+		if ch.Name != "" {
+			c.channels[ch.ID] = "#" + ch.Name
+		}
+
+		c.channelData[ch.ID] = ch
+		c.joinedChannels[ch.ID] = ch.IsMember
 	}
+
+	c.channelsFetchedAt = time.Now().Unix()
 	c.Unlock()
 
 	return channels, nil
@@ -90,7 +170,13 @@ func (c *Client) GetChannels() []slack.Channel {
 }
 
 func (c *Client) LeaveChannel(channelID string) error {
-	_, err := c.sc.LeaveConversation(strings.ToUpper(channelID))
+	upperID := strings.ToUpper(channelID)
+
+	_, err := c.sc.LeaveConversation(upperID)
+	if err == nil {
+		c.SetChannelJoined(upperID, false)
+	}
+
 	return err
 }
 
@@ -99,19 +185,51 @@ func (c *Client) Kick(channelID, username string) error {
 }
 
 func (c *Client) Topic(channelID string) string {
+	upperID := strings.ToUpper(channelID)
+	now := time.Now().Unix()
+
+	c.RLock()
+	ch, ok := c.channelData[upperID]
+	fresh := c.channelsFetchedAt > 0 && now-c.channelsFetchedAt < int64(channelsCacheTTL.Seconds())
+	c.RUnlock()
+
+	if ok && fresh {
+		return ch.Topic.Value
+	}
+
+	if c.sc == nil {
+		return ""
+	}
+
 	info, err := c.sc.GetConversationInfo(&slack.GetConversationInfoInput{
-		ChannelID: strings.ToUpper(channelID),
+		ChannelID: upperID,
 	})
 	if err != nil {
 		c.logger.Errorf("error getting topic of %s: %s", channelID, err)
 		return ""
 	}
 
-	return info.Topic.Value
+	if info != nil {
+		c.cacheChannel(*info)
+		return info.Topic.Value
+	}
+
+	return ""
 }
 
 func (c *Client) SetTopic(channelID, text string) error {
-	_, err := c.sc.SetTopicOfConversation(strings.ToUpper(channelID), text)
+	upperID := strings.ToUpper(channelID)
+
+	_, err := c.sc.SetTopicOfConversation(upperID, text)
+	if err == nil {
+		c.Lock()
+		if ch, ok := c.channelData[upperID]; ok {
+			ch.Topic.Value = text
+			c.channelData[upperID] = ch
+		}
+		c.Unlock()
+	}
+
 	return err
 }
 
@@ -150,9 +268,8 @@ func (c *Client) CreateChannel(ctx context.Context, name string, isPrivate bool)
 		return nil, err
 	}
 
-	c.Lock()
-	c.channels[ch.ID] = "#" + ch.Name
-	c.Unlock()
+	ch.IsMember = true
+	c.cacheChannel(*ch)
 
 	return ch, nil
 }
@@ -191,21 +308,29 @@ func (c *Client) MarkConversation(ctx context.Context, channelID, ts string) err
 	return c.sc.MarkConversationContext(ctx, channelID, ts)
 }
 
-func (c *Client) GetChannelUsers(channelID string) ([]*slack.User, error) {
+func (c *Client) resolveChannelUsers(members []string) []*slack.User {
 	var users []*slack.User
 
-	limit := 100
-
-	info, err := c.sc.GetConversationInfo(&slack.GetConversationInfoInput{
-		ChannelID: channelID,
-	})
-	if err != nil {
-		return nil, err
+	selfID := ""
+	if c.info != nil && c.info.User != nil {
+		selfID = c.info.User.ID
 	}
 
-	if info == nil {
-		return nil, errors.New("Unknown channel seen (" + channelID + ")")
+	for _, user := range members {
+		if selfID != "" && selfID == user {
+			continue
+		}
+
+		if u := c.GetUser(user); u != nil {
+			users = append(users, u)
+		}
 	}
+
+	return users
+}
+
+func (c *Client) fetchChannelMembers(channelID string) ([]string, error) {
+	const limit = 100
 
 	params := slack.GetUsersInConversationParameters{
 		ChannelID: channelID,
@@ -213,24 +338,74 @@ func (c *Client) GetChannelUsers(channelID string) ([]*slack.User, error) {
 		Limit:     limit,
 	}
 
+	var allMembers []string
+
 	for {
-		members, nextCursor, _ := c.sc.GetUsersInConversation(&params)
+		members, nextCursor, err := c.sc.GetUsersInConversation(&params)
+		if err != nil {
+			return nil, err
+		}
+
 		params.Cursor = nextCursor
 
-		for _, user := range members {
-			if c.info.User.ID == user {
-				continue
-			}
-
-			users = append(users, c.GetUser(user))
-		}
+		allMembers = append(allMembers, members...)
 
 		if nextCursor == "" {
 			break
 		}
 	}
 
-	return users, nil
+	c.Lock()
+	c.channelMembers[channelID] = channelMembersEntry{
+		members:   slices.Clone(allMembers),
+		fetchedAt: time.Now().Unix(),
+	}
+	c.Unlock()
+
+	return allMembers, nil
+}
+
+func (c *Client) GetChannelUsers(channelID string) ([]*slack.User, error) {
+	if channelID == "" {
+		return nil, nil
+	}
+
+	now := time.Now().Unix()
+
+	c.RLock()
+	entry, hasMembers := c.channelMembers[channelID]
+	_, hasChannel := c.channelData[channelID]
+	c.RUnlock()
+
+	if hasMembers && ((entry.fetchedAt > 0 && now-entry.fetchedAt < int64(channelMembersCacheTTL.Seconds())) || c.sc == nil) {
+		return c.resolveChannelUsers(entry.members), nil
+	}
+
+	if c.sc == nil {
+		return nil, nil
+	}
+
+	if !hasChannel {
+		info, err := c.sc.GetConversationInfo(&slack.GetConversationInfoInput{
+			ChannelID: channelID,
+		})
+		if err != nil {
+			return nil, err
+		}
+
+		if info == nil {
+			return nil, errors.New("Unknown channel seen (" + channelID + ")")
+		}
+
+		c.cacheChannel(*info)
+	}
+
+	allMembers, err := c.fetchChannelMembers(channelID)
+	if err != nil {
+		return nil, err
+	}
+
+	return c.resolveChannelUsers(allMembers), nil
 }
 
 func (c *Client) GetUsersInConversation(channelID string) ([]string, error) {
@@ -246,8 +421,15 @@ func (c *Client) UpdateChannel(channelID, name string) {
 		return
 	}
 
+	cleanName := strings.TrimPrefix(name, "#")
+
 	c.Lock()
-	c.channels[channelID] = "#" + strings.TrimPrefix(name, "#")
+	c.channels[channelID] = "#" + cleanName
+
+	if ch, ok := c.channelData[channelID]; ok {
+		ch.Name = cleanName
+		c.channelData[channelID] = ch
+	}
 	c.Unlock()
 }
 
@@ -258,6 +440,56 @@ func (c *Client) RemoveChannel(channelID string) {
 
 	c.Lock()
 	delete(c.channels, channelID)
+	delete(c.channelData, channelID)
+	delete(c.joinedChannels, channelID)
+	delete(c.channelMembers, channelID)
+	c.Unlock()
+}
+
+func (c *Client) SetChannelJoined(channelID string, joined bool) {
+	if channelID == "" {
+		return
+	}
+
+	c.Lock()
+	c.joinedChannels[channelID] = joined
+
+	if ch, ok := c.channelData[channelID]; ok {
+		ch.IsMember = joined
+		c.channelData[channelID] = ch
+	}
+	c.Unlock()
+}
+
+func (c *Client) AddChannelMember(channelID, userID string) {
+	if channelID == "" || userID == "" {
+		return
+	}
+
+	c.Lock()
+	if entry, ok := c.channelMembers[channelID]; ok && !slices.Contains(entry.members, userID) {
+		entry.members = append(entry.members, userID)
+		c.channelMembers[channelID] = entry
+	}
+
+	delete(c.userChannels, userID)
+	c.Unlock()
+}
+
+func (c *Client) RemoveChannelMember(channelID, userID string) {
+	if channelID == "" || userID == "" {
+		return
+	}
+
+	c.Lock()
+	if entry, ok := c.channelMembers[channelID]; ok {
+		entry.members = slices.DeleteFunc(entry.members, func(id string) bool {
+			return id == userID
+		})
+		c.channelMembers[channelID] = entry
+	}
+
+	delete(c.userChannels, userID)
 	c.Unlock()
 }
 
@@ -267,8 +499,6 @@ func (c *Client) GetChannelCount() int {
 
 	return len(c.channels)
 }
-
-const userChannelsCacheTTL = 5 * time.Minute
 
 func (c *Client) InvalidateUserChannels(userID string) {
 	c.Lock()
