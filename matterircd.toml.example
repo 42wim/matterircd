@@ -423,6 +423,7 @@ PrefixContext = false
 #ReplayExclude = ["#some-room"]
 #MaxReplayDuration = "744h"
 #JoinReplayDuration = "15m"
+#HeavySyncThreshold = "15m"
 #EnableLazyJoin = false
 #LazyJoinDuration = "504h"
 #LazyJoinExclude = ["#some-room"]

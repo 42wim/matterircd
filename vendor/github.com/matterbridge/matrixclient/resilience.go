@@ -70,10 +70,28 @@ func (c *Client) applyDeviceName(ctx context.Context) {
 	}
 }
 
-func (c *Client) onSynced() {
-	c.lastSync.Store(time.Now().UnixNano())
-	c.connected.Store(true)
-	c.synced.Store(true)
+func (c *Client) onSynced() (bool, time.Duration) {
+	now := time.Now()
+	prevSync := c.lastSync.Swap(now.UnixNano())
+	wasConnected := c.connected.Swap(true)
+	wasSynced := c.synced.Swap(true)
+
+	if !wasSynced || wasConnected {
+		return false, 0
+	}
+
+	var downtime time.Duration
+	if prevSync > 0 {
+		downtime = now.Sub(time.Unix(0, prevSync))
+	}
+
+	return true, downtime
+}
+
+func (c *Client) notifyReconnect(downtime time.Duration) {
+	if h, ok := c.handler.(ReconnectHandler); ok {
+		h.OnReconnect(downtime)
+	}
 }
 
 func (c *Client) onSyncFailed(err error, wait time.Duration) {

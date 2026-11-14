@@ -1176,9 +1176,9 @@ func (u *User) addUsersToChannels() {
 	}
 
 	syncStartTime := time.Now()
-	syncThresh := u.cfg.Mattermost().HeavySyncThreshold
+	syncThresh := u.sharedCfg().HeavySyncThreshold
 
-	if syncThresh == 0 {
+	if syncThresh <= 0 {
 		syncThresh = 15 * time.Minute
 	}
 

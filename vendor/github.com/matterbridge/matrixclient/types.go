@@ -299,3 +299,10 @@ type PinHandler interface {
 type TypingHandler interface {
 	OnTyping(t *Typing)
 }
+
+// ReconnectHandler can optionally be implemented by a Handler to be notified
+// when the sync loop recovers after a disconnection. downtime is the elapsed
+// time since the previous successful sync (0 if unknown).
+type ReconnectHandler interface {
+	OnReconnect(downtime time.Duration)
+}
