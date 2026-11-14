@@ -90,7 +90,7 @@ func loginMatrix(u *User, toUser *User, args []string) {
 		return
 	}
 
-	u.respondService(toUser, "login OK", serviceMatrix)
+	u.finishLogin(toUser, serviceMatrix)
 
 	if e, ok := u.currentBridge().(interface{ EncryptionEnabled() bool }); ok && e.EncryptionEnabled() { //nolint:nestif
 		u.respondService(toUser, "end-to-end encryption (e2ee) is enabled", serviceMatrix)
@@ -170,7 +170,7 @@ func login(u *User, toUser *User, args []string, service string) {
 			return
 		}
 
-		u.respondService(toUser, "login OK", service)
+		u.finishLogin(toUser, service)
 
 		return
 	}
@@ -224,7 +224,7 @@ func login(u *User, toUser *User, args []string, service string) {
 			return
 		}
 
-		u.respondService(toUser, "login OK", service)
+		u.finishLogin(toUser, service)
 
 		return
 	}
@@ -328,7 +328,7 @@ func login(u *User, toUser *User, args []string, service string) {
 		return
 	}
 
-	u.respondService(toUser, "login OK", service)
+	u.finishLogin(toUser, service)
 }
 
 //nolint:funlen
