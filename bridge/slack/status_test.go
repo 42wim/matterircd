@@ -7,6 +7,8 @@ import (
 
 	"github.com/42wim/matterircd/bridge"
 	"github.com/42wim/matterircd/config"
+	"github.com/42wim/matterircd/utils"
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/matterbridge/slackclient"
 	"github.com/slack-go/slack"
 	"github.com/spf13/pflag"
@@ -373,4 +375,167 @@ func TestSlackFileAttachments(t *testing.T) {
 	assert.Len(t, fe.Files, 1)
 	assert.Equal(t, "report.pdf", fe.Files[0].Name)
 	assert.Equal(t, "https://files.slack.com/files-pri/T1-F1/download/report.pdf", fe.Files[0].URL)
+}
+
+func TestSlackParityFeatures(t *testing.T) {
+	cfg, err := config.Load("", pflag.NewFlagSet("test", pflag.ContinueOnError))
+	if err != nil {
+		t.Fatalf("config.Load failed: %v", err)
+	}
+
+	assert.Equal(t, 15*time.Minute, cfg.Slack().JoinReplayDuration)
+
+	sc := slackclient.New(slackclient.Credentials{})
+	sc.UpdateUser(slack.User{
+		ID:       "U1",
+		Name:     "dana",
+		RealName: "Dana Smith",
+		TZ:       "UTC",
+		Profile: slack.UserProfile{
+			DisplayName: "DanaS",
+			FirstName:   "Dana",
+			LastName:    "Smith",
+			Email:       "dana@example.com",
+		},
+	})
+
+	// Partial UserProfileChangedEvent / UserStatusChangedEvent preserves existing top-level fields.
+	sc.UpdateUser(slack.User{
+		ID: "U1",
+		Profile: slack.UserProfile{
+			DisplayName: "DanaUpdated",
+			StatusText:  "Working",
+		},
+	})
+
+	merged := sc.GetUser("U1")
+	if assert.NotNil(t, merged) {
+		assert.Equal(t, "dana", merged.Name)
+		assert.Equal(t, "UTC", merged.TZ)
+		assert.Equal(t, "DanaUpdated", merged.Profile.DisplayName)
+	}
+
+	selfInfo := buildSlackUserInfo(merged, "DanaUpdated", "T1", "", true)
+	assert.Equal(t, "dana", selfInfo.Username)
+	assert.Contains(t, selfInfo.MentionKeys, "DanaUpdated")
+	assert.Contains(t, selfInfo.MentionKeys, "U1")
+
+	dirURL := utils.ExpandDirectoryURL(
+		"https://dir.example/u/{username}?nick={nick}&email={email}&first={firstname}&last={lastname}",
+		"DanaNew", "dana", "dana@example.com", "Dana", "Smith",
+	)
+	assert.Equal(t, "https://dir.example/u/dana?nick=DanaNew&email=dana%40example.com&first=Dana&last=Smith", dirURL)
+}
+
+func TestSlackDMAndHistoricalEvents(t *testing.T) {
+	cfg, err := config.Load("", pflag.NewFlagSet("test", pflag.ContinueOnError))
+	if err != nil {
+		t.Fatalf("config.Load failed: %v", err)
+	}
+
+	sc := slackclient.New(slackclient.Credentials{})
+	sc.UpdateUser(slack.User{ID: "U1", Name: "erin"})
+	sc.CacheDMChannel("U1", "D12345678")
+
+	evCh := make(chan *bridge.Event, 4)
+
+	s, err := newTestSlackBridge(cfg, sc, evCh)
+	if err != nil {
+		t.Fatalf("newTestSlackBridge: %v", err)
+	}
+
+	otherID, ok := s.GetDMOtherUserID("D12345678", "UME")
+	assert.True(t, ok)
+	assert.Equal(t, "U1", otherID)
+
+	dmUser := s.GetDMUser(context.Background(), "D12345678")
+	if assert.NotNil(t, dmUser) {
+		assert.Equal(t, "U1", dmUser.User)
+		assert.Equal(t, "erin", dmUser.Nick)
+	}
+
+	rootEv := s.slackMsgToEvent(context.Background(), "C1", slack.Msg{
+		User:      "U1",
+		Timestamp: "1700000100.000100",
+		Text:      "Root post <!here>",
+	})
+	if assert.NotNil(t, rootEv) {
+		chEv, ok := rootEv.Data.(*bridge.ChannelMessageEvent)
+		assert.True(t, ok)
+		assert.Equal(t, "notice", chEv.MessageType)
+	}
+
+	replyEv := s.slackMsgToEvent(context.Background(), "C1", slack.Msg{
+		User:            "U1",
+		Timestamp:       "1700000101.000200",
+		ThreadTimestamp: "1700000100.000100",
+		Text:            "Reply body",
+	})
+	if assert.NotNil(t, replyEv) {
+		chEv, ok := replyEv.Data.(*bridge.ChannelMessageEvent)
+		assert.True(t, ok)
+		assert.Equal(t, "Reply body (re @erin: Root post @here)", chEv.Text)
+	}
+
+	assert.Equal(t, "1700000100.000100",
+		threadTSFromPermalink("https://team.slack.com/archives/C1/p1700000101000200?thread_ts=1700000100.000100&cid=C1"))
+}
+
+func TestSlackUserProfileAndStatusEvents(t *testing.T) {
+	cfg, err := config.Load("", pflag.NewFlagSet("test", pflag.ContinueOnError))
+	if err != nil {
+		t.Fatalf("config.Load failed: %v", err)
+	}
+
+	sc := slackclient.New(slackclient.Credentials{})
+	sc.UpdateUser(slack.User{ID: "U1", Name: "erin"})
+
+	evCh := make(chan *bridge.Event, 4)
+
+	s, err := newTestSlackBridge(cfg, sc, evCh)
+	if err != nil {
+		t.Fatalf("newTestSlackBridge: %v", err)
+	}
+
+	s.handleSlackEvent(context.Background(), slack.RTMEvent{
+		Data: &slack.UserProfileChangedEvent{
+			User: slack.User{ID: "U1", Profile: slack.UserProfile{DisplayName: "ErinNew"}},
+		},
+	})
+
+	updEv := <-evCh
+	assert.Equal(t, "user_update", updEv.Type)
+
+	s.handleSlackEvent(context.Background(), slack.RTMEvent{
+		Data: &slack.UserStatusChangedEvent{
+			User: slack.User{ID: "U1", Profile: slack.UserProfile{StatusText: ""}},
+		},
+	})
+
+	updEv2 := <-evCh
+	assert.Equal(t, "user_update", updEv2.Type)
+
+	statusEv := <-evCh
+	assert.Equal(t, "status_change", statusEv.Type)
+}
+
+func newTestSlackBridge(cfg *config.Config, sc *slackclient.Client, evCh chan *bridge.Event) (*Slack, error) {
+	rootCache, err := lru.New[string, string](64)
+	if err != nil {
+		return nil, err
+	}
+
+	parentCache, err := lru.New[string, slackCachedPost](64)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Slack{
+		cfg:                cfg,
+		sc:                 sc,
+		eventChan:          evCh,
+		userByNick:         make(map[string]string),
+		msgThreadRootCache: rootCache,
+		msgParentCache:     parentCache,
+	}, nil
 }

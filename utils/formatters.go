@@ -1534,6 +1534,8 @@ func matchDefaultMention(text string, start int) int {
 	switch {
 	case strings.HasPrefix(text[start:], "channel") && checkWordBoundaryEnd(text, start+7):
 		return 7
+	case strings.HasPrefix(text[start:], "everyone") && checkWordBoundaryEnd(text, start+8):
+		return 8
 	case strings.HasPrefix(text[start:], "here") && checkWordBoundaryEnd(text, start+4):
 		return 4
 	case strings.HasPrefix(text[start:], "all") && checkWordBoundaryEnd(text, start+3):
@@ -1545,11 +1547,11 @@ func matchDefaultMention(text string, start int) int {
 	}
 }
 
-// SanitizeDefaultMentions defangs @channel, @all, @here, and Matrix @room mentions to prevent
+// SanitizeDefaultMentions defangs @channel, @all, @here, @everyone, and Matrix @room mentions to prevent
 // unwanted highlights in IRC clients. When useUnicode is enabled, it inserts a
 // Zero-Width Non-Joiner (ZWNJ) after the '@'. When disabled, it inserts a hyphen.
 func SanitizeDefaultMentions(text string, useUnicode bool) string {
-	if !strings.Contains(text, "@channel") && !strings.Contains(text, "@all") && !strings.Contains(text, "@here") && !strings.Contains(text, "@room") {
+	if !strings.Contains(text, "@channel") && !strings.Contains(text, "@all") && !strings.Contains(text, "@here") && !strings.Contains(text, "@room") && !strings.Contains(text, "@everyone") {
 		return text
 	}
 
@@ -2020,30 +2022,56 @@ func FormatLastOnline(lastActivity int64, isOnline ...bool) string {
 	}
 }
 
-// ExpandDirectoryURL expands {nick} and {username} placeholders in a DirectoryURL
-// template, escaping them appropriately for the path and query components.
-func ExpandDirectoryURL(tmpl, nick, username string) string {
+// ExpandDirectoryURL expands {nick}, {username}, {email}, {firstname}, and {lastname}
+// placeholders in a DirectoryURL template, escaping them appropriately for the
+// path and query components.
+func ExpandDirectoryURL(tmpl, nick, username string, extra ...string) string {
 	if tmpl == "" {
 		return ""
 	}
 
+	var email, firstName, lastName string
+	if len(extra) > 0 {
+		email = extra[0]
+	}
+
+	if len(extra) > 1 {
+		firstName = extra[1]
+	}
+
+	if len(extra) > 2 {
+		lastName = extra[2]
+	}
+
 	pathPart, queryPart, hasQuery := strings.Cut(tmpl, "?")
-	result := expandDirectoryPart(pathPart, nick, username, neturl.PathEscape)
+	result := expandDirectoryPart(pathPart, nick, username, email, firstName, lastName, neturl.PathEscape)
 
 	if hasQuery {
-		result += "?" + expandDirectoryPart(queryPart, nick, username, neturl.QueryEscape)
+		result += "?" + expandDirectoryPart(queryPart, nick, username, email, firstName, lastName, neturl.QueryEscape)
 	}
 
 	return result
 }
 
-func expandDirectoryPart(part, nick, username string, escape func(string) string) string {
+func expandDirectoryPart(part, nick, username, email, firstName, lastName string, escape func(string) string) string {
 	if strings.Contains(part, "{username}") {
 		part = strings.ReplaceAll(part, "{username}", escape(username))
 	}
 
 	if strings.Contains(part, "{nick}") {
 		part = strings.ReplaceAll(part, "{nick}", escape(nick))
+	}
+
+	if strings.Contains(part, "{email}") {
+		part = strings.ReplaceAll(part, "{email}", escape(email))
+	}
+
+	if strings.Contains(part, "{firstname}") {
+		part = strings.ReplaceAll(part, "{firstname}", escape(firstName))
+	}
+
+	if strings.Contains(part, "{lastname}") {
+		part = strings.ReplaceAll(part, "{lastname}", escape(lastName))
 	}
 
 	return part

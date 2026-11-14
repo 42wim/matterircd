@@ -144,7 +144,7 @@ func (c *Client) GetPermalink(ctx context.Context, channelID, ts string) (string
 }
 
 func (c *Client) IsOwnMessageEcho(userID, channelID, timestamp string) bool {
-	if userID != c.info.User.ID {
+	if c.info == nil || c.info.User == nil || userID == "" || userID != c.info.User.ID {
 		return false
 	}
 
@@ -206,14 +206,17 @@ func (c *Client) SearchMessages(ctx context.Context, query string, count int) ([
 
 	res, err := c.sc.SearchMessagesContext(ctx, query, slack.SearchParameters{
 		Sort:          "timestamp",
-		SortDirection: "asc",
+		SortDirection: "desc",
 		Count:         count,
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	return res.Matches, nil
+	matches := slices.Clone(res.Matches)
+	slices.Reverse(matches)
+
+	return matches, nil
 }
 
 func (c *Client) SendTyping(channelID string) {

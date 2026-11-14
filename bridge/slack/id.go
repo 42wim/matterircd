@@ -253,6 +253,19 @@ func parseSlackArchiveURL(rawURL string) (string, string, bool) {
 	return parts[1], ts, true
 }
 
+func threadTSFromPermalink(rawURL string) string {
+	if rawURL == "" {
+		return ""
+	}
+
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return ""
+	}
+
+	return u.Query().Get("thread_ts")
+}
+
 func slackTSMillis(ts string) int64 {
 	if totalUsec, ok := parseStandardSlackTS(ts); ok {
 		return int64(totalUsec / 1000) //nolint:gosec // bounded timestamp value
