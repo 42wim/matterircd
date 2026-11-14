@@ -83,7 +83,33 @@ func (c *Client) GetUserInfo(userID string) (*slack.User, error) {
 }
 
 func (c *Client) GetMe() *slack.User {
-	me, _ := c.sc.GetUserInfo(c.info.User.ID)
+	if c.info == nil || c.info.User == nil {
+		return nil
+	}
+
+	myID := c.info.User.ID
+
+	c.RLock()
+	u, ok := c.users[myID]
+	c.RUnlock()
+
+	if ok {
+		return &u
+	}
+
+	if c.sc == nil {
+		return nil
+	}
+
+	me, err := c.sc.GetUserInfo(myID)
+	if err != nil || me == nil {
+		return nil
+	}
+
+	c.Lock()
+	c.users[myID] = *me
+	c.Unlock()
+
 	return me
 }
 
@@ -249,14 +275,44 @@ func (c *Client) GetUserByUsername(username string) *slack.User {
 	return nil
 }
 
+func (c *Client) updateSelfDisplayName(name string) {
+	if c.info == nil || c.info.User == nil || c.info.User.ID == "" {
+		return
+	}
+
+	myID := c.info.User.ID
+
+	c.Lock()
+	defer c.Unlock()
+
+	u, ok := c.users[myID]
+	if !ok {
+		u = slack.User{
+			ID:   myID,
+			Name: c.info.User.Name,
+		}
+	}
+
+	u.Profile.DisplayName = name
+	u.Profile.DisplayNameNormalized = name
+	c.users[myID] = u
+}
+
 func (c *Client) SetNick(ctx context.Context, name string) error {
 	if c.sc == nil {
 		return errors.New("slackclient: not connected")
 	}
 
-	return c.sc.SetUserProfileContext(ctx, "", &slack.UserProfile{
+	err := c.sc.SetUserProfileContext(ctx, "", &slack.UserProfile{
 		DisplayName: name,
 	})
+	if err != nil {
+		return err
+	}
+
+	c.updateSelfDisplayName(name)
+
+	return nil
 }
 
 const (

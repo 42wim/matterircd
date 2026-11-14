@@ -332,7 +332,21 @@ func (s *Slack) SetStatus(ctx context.Context, status string) error {
 }
 
 func (s *Slack) Nick(ctx context.Context, name string) error {
-	return s.sc.SetNick(ctx, name)
+	err := s.sc.SetNick(ctx, name)
+	if err != nil {
+		return err
+	}
+
+	if me := s.GetMe(); me != nil && me.User != "" {
+		s.eventChan <- &bridge.Event{
+			Type: "user_update",
+			Data: &bridge.UserUpdateEvent{
+				User: me,
+			},
+		}
+	}
+
+	return nil
 }
 
 func (s *Slack) GetChannelName(ctx context.Context, channelID string) string {
