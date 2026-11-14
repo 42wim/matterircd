@@ -393,6 +393,7 @@ PrefixContext = false
 #CollapseScrollback = false
 # Threads are shown using Slack's encoded message/thread IDs (or "slack+post" to include post IDs).
 #ThreadContext = "slack"
+#DirectoryURL = "https://directory.mydomain.local/people/{nick}"  # {nick} and {username}
 #ShowContextMulti = false
 
 

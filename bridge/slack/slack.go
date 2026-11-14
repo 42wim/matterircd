@@ -982,14 +982,34 @@ func (s *Slack) handleSlackEvent(ctx context.Context, msg slack.RTMEvent) {
 		s.handlePresenceChange(s.sc.UserID(), nil, ev.Presence)
 	case *slack.UserChangeEvent:
 		s.sc.UpdateUser(ev.User)
+		s.emitUserUpdate(ev.User)
 	case *slack.UserStatusChangedEvent:
 		s.sc.UpdateUser(ev.User)
+	case *slack.TeamJoinEvent:
+		s.sc.UpdateUser(ev.User)
+		s.emitUserUpdate(ev.User)
 	default:
-		s.handleSlackItemEvent(ctx, msg.Data)
+		if !s.handleSlackItemEvent(ctx, msg.Data) {
+			s.handleSlackLifecycleEvent(msg.Data)
+		}
 	}
 }
 
-func (s *Slack) handleSlackItemEvent(ctx context.Context, data any) {
+func (s *Slack) emitUserUpdate(user slack.User) {
+	info := s.createUser(&user)
+	if info == nil || info.User == "" {
+		return
+	}
+
+	s.eventChan <- &bridge.Event{
+		Type: "user_update",
+		Data: &bridge.UserUpdateEvent{
+			User: info,
+		},
+	}
+}
+
+func (s *Slack) handleSlackItemEvent(ctx context.Context, data any) bool {
 	switch ev := data.(type) {
 	case *slack.StarAddedEvent:
 		logger.Debugf("StarAdded msg %#v", ev)
@@ -997,24 +1017,133 @@ func (s *Slack) handleSlackItemEvent(ctx context.Context, data any) {
 		if ev.Item.Message != nil {
 			s.handleItemMisc(ctx, ev.User, ev.Item.Channel, ev.Item.Message, "Message starred")
 		}
+
+		return true
 	case *slack.StarRemovedEvent:
 		logger.Debugf("StarRemoved msg %#v", ev)
 
 		if ev.Item.Message != nil {
 			s.handleItemMisc(ctx, ev.User, ev.Item.Channel, ev.Item.Message, "Message unstarred")
 		}
+
+		return true
 	case *slack.PinAddedEvent:
 		logger.Debugf("PinAdded msg %#v", ev)
 
 		if ev.Item.Message != nil {
 			s.handleItemPin(ctx, ev.User, ev.Item.Channel, ev.Item.Message, subTypePinAdded)
 		}
+
+		return true
 	case *slack.PinRemovedEvent:
 		logger.Debugf("PinRemoved msg %#v", ev)
 
 		if ev.Item.Message != nil {
 			s.handleItemPin(ctx, ev.User, ev.Item.Channel, ev.Item.Message, subTypePinRemoved)
 		}
+
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *Slack) handleSlackLifecycleEvent(data any) {
+	switch ev := data.(type) {
+	case *slack.ChannelCreatedEvent:
+		s.emitChannelCreate(ev.Channel.ID, ev.Channel.Name)
+	case *slack.GroupCreatedEvent:
+		s.emitChannelCreate(ev.Channel.ID, ev.Channel.Name)
+	case *slack.ChannelRenameEvent:
+		s.emitChannelCreate(ev.Channel.ID, ev.Channel.Name)
+	case *slack.GroupRenameEvent:
+		s.emitChannelCreate(ev.Group.ID, ev.Group.Name)
+	case *slack.ChannelDeletedEvent:
+		s.emitChannelDelete(ev.Channel)
+	case *slack.ChannelArchiveEvent:
+		s.emitChannelDelete(ev.Channel)
+	case *slack.GroupArchiveEvent:
+		s.emitChannelDelete(ev.Channel)
+	case *slack.ChannelJoinedEvent:
+		s.emitChannelAdd(ev.Channel.ID, ev.Channel.Name)
+	case *slack.GroupJoinedEvent:
+		s.emitChannelAdd(ev.Channel.ID, ev.Channel.Name)
+	case *slack.ChannelLeftEvent:
+		s.emitChannelRemove(ev.Channel)
+	case *slack.GroupLeftEvent:
+		s.emitChannelRemove(ev.Channel)
+	}
+}
+
+func (s *Slack) emitChannelCreate(channelID, name string) {
+	if channelID == "" {
+		return
+	}
+
+	s.sc.UpdateChannel(channelID, name)
+
+	chName := ""
+	if name != "" {
+		chName = "#" + strings.TrimPrefix(name, "#")
+	}
+
+	s.eventChan <- &bridge.Event{
+		Type: "channel_create",
+		Data: &bridge.ChannelCreateEvent{
+			ChannelID: channelID,
+			Name:      chName,
+		},
+	}
+}
+
+func (s *Slack) emitChannelDelete(channelID string) {
+	if channelID == "" {
+		return
+	}
+
+	s.sc.RemoveChannel(channelID)
+
+	s.eventChan <- &bridge.Event{
+		Type: "channel_delete",
+		Data: &bridge.ChannelDeleteEvent{
+			ChannelID: channelID,
+		},
+	}
+}
+
+func (s *Slack) emitChannelAdd(channelID, name string) {
+	if channelID == "" {
+		return
+	}
+
+	s.sc.UpdateChannel(channelID, name)
+
+	me := s.GetMe()
+
+	s.eventChan <- &bridge.Event{
+		Type: "channel_add",
+		Data: &bridge.ChannelAddEvent{
+			Adder:     me,
+			Added:     []*bridge.UserInfo{me},
+			ChannelID: channelID,
+		},
+	}
+}
+
+func (s *Slack) emitChannelRemove(channelID string) {
+	if channelID == "" {
+		return
+	}
+
+	me := s.GetMe()
+
+	s.eventChan <- &bridge.Event{
+		Type: "channel_remove",
+		Data: &bridge.ChannelRemoveEvent{
+			Remover:   me,
+			Removed:   []*bridge.UserInfo{me},
+			ChannelID: channelID,
+		},
 	}
 }
 
@@ -1662,7 +1791,7 @@ func (s *Slack) resolveSlackNick(slackuser *slack.User, rc *config.RuntimeConfig
 	return nick
 }
 
-func buildSlackUserInfo(slackuser *slack.User, nick, teamID string, me bool) *bridge.UserInfo {
+func buildSlackUserInfo(slackuser *slack.User, nick, teamID, directoryURL string, me bool) *bridge.UserInfo {
 	roles := ""
 	if slackuser.IsBot || slackuser.IsAppUser || slackuser.IsWorkflowBot {
 		roles = "bot"
@@ -1691,6 +1820,7 @@ func buildSlackUserInfo(slackuser *slack.User, nick, teamID string, me bool) *br
 		FirstName:   slackuser.Profile.FirstName,
 		LastName:    slackuser.Profile.LastName,
 		Email:       slackuser.Profile.Email,
+		Directory:   directoryURL,
 		Position:    slackuser.Profile.Title,
 		Photo:       photo,
 		TeamID:      teamID,
@@ -1705,8 +1835,9 @@ func (s *Slack) createUser(slackuser *slack.User) *bridge.UserInfo {
 	rc := s.cfg.Current()
 	nick := s.resolveSlackNick(slackuser, rc)
 	me := slackuser.ID == s.sc.UserID()
+	directoryURL := utils.ExpandDirectoryURL(rc.Slack.Bridge.DirectoryURL, nick, slackuser.Name)
 
-	return buildSlackUserInfo(slackuser, nick, s.sc.TeamID(), me)
+	return buildSlackUserInfo(slackuser, nick, s.sc.TeamID(), directoryURL, me)
 }
 
 func (s *Slack) Connected() bool {

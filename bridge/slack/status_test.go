@@ -113,10 +113,11 @@ func TestBuildSlackUserInfo(t *testing.T) {
 		},
 	}
 
-	info := buildSlackUserInfo(u, "jane", "T1", false)
+	info := buildSlackUserInfo(u, "jane", "T1", "https://dir.example/people/jane", false)
 	assert.Equal(t, "U123", info.User)
 	assert.Equal(t, "bot", info.Roles)
 	assert.Equal(t, "jane@example.com", info.Email)
+	assert.Equal(t, "https://dir.example/people/jane", info.Directory)
 	assert.Equal(t, "Staff Engineer", info.Position)
 	assert.Equal(t, "https://example.com/512.png", info.Photo)
 }

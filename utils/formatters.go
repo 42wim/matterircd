@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"math"
+	neturl "net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -2017,4 +2018,33 @@ func FormatLastOnline(lastActivity int64, isOnline ...bool) string {
 	default:
 		return fmt.Sprintf("%s %s", label, time.Unix(lastActivity, 0).Format("2006-01-02"))
 	}
+}
+
+// ExpandDirectoryURL expands {nick} and {username} placeholders in a DirectoryURL
+// template, escaping them appropriately for the path and query components.
+func ExpandDirectoryURL(tmpl, nick, username string) string {
+	if tmpl == "" {
+		return ""
+	}
+
+	pathPart, queryPart, hasQuery := strings.Cut(tmpl, "?")
+	result := expandDirectoryPart(pathPart, nick, username, neturl.PathEscape)
+
+	if hasQuery {
+		result += "?" + expandDirectoryPart(queryPart, nick, username, neturl.QueryEscape)
+	}
+
+	return result
+}
+
+func expandDirectoryPart(part, nick, username string, escape func(string) string) string {
+	if strings.Contains(part, "{username}") {
+		part = strings.ReplaceAll(part, "{username}", escape(username))
+	}
+
+	if strings.Contains(part, "{nick}") {
+		part = strings.ReplaceAll(part, "{nick}", escape(nick))
+	}
+
+	return part
 }
