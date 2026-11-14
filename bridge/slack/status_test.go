@@ -6,8 +6,10 @@ import (
 	"time"
 
 	"github.com/42wim/matterircd/bridge"
+	"github.com/42wim/matterircd/config"
 	"github.com/matterbridge/slackclient"
 	"github.com/slack-go/slack"
+	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -309,4 +311,66 @@ func TestSlackDisconnectReconnectEvents(t *testing.T) {
 	})
 	<-reconnected
 	assert.False(t, s.wasDisconnected.Load())
+}
+
+func TestSlackFileAttachments(t *testing.T) {
+	cfg, err := config.Load("", pflag.NewFlagSet("test", pflag.ContinueOnError))
+	if err != nil {
+		t.Fatalf("config.Load failed: %v", err)
+	}
+
+	sc := slackclient.New(slackclient.Credentials{})
+	sc.UpdateUser(slack.User{ID: "U1", Name: "member1"})
+
+	evCh := make(chan *bridge.Event, 2)
+	s := &Slack{cfg: cfg, sc: sc, eventChan: evCh, userByNick: make(map[string]string)}
+
+	msg := slack.Msg{
+		Username:  "sender",
+		Timestamp: "1700000000.000100",
+		Files: []slack.File{
+			{
+				ID:                 "F1",
+				Name:               "report.pdf",
+				Size:               2048,
+				URLPrivateDownload: "https://files.slack.com/files-pri/T1-F1/download/report.pdf",
+			},
+		},
+	}
+
+	ev := s.slackMsgToEvent(context.Background(), "C1", msg)
+	if ev == nil {
+		t.Fatal("expected non-nil event for file-only message")
+	}
+
+	chMsg, ok := ev.Data.(*bridge.ChannelMessageEvent)
+	assert.True(t, ok)
+	assert.Empty(t, chMsg.Text)
+	assert.Len(t, chMsg.Files, 1)
+	assert.Equal(t, "report.pdf", chMsg.Files[0].Name)
+	assert.Equal(t, int64(2048), chMsg.Files[0].Size)
+	assert.Equal(t, "https://files.slack.com/files-pri/T1-F1/download/report.pdf", chMsg.Files[0].URL)
+
+	formatted, ok := formatSlackMsg(&slack.Msg{
+		Text:  "See attached",
+		Files: msg.Files,
+	})
+	assert.True(t, ok)
+	assert.Equal(t, "See attached", formatted)
+
+	sender := &bridge.UserInfo{Nick: "sender", Ghost: true}
+	s.emitSlackFileEvent(sender, "C1", "msg1", "parent1", chMsg.Files)
+
+	second := <-evCh
+	assert.Equal(t, "file_event", second.Type)
+
+	fe, ok := second.Data.(*bridge.FileEvent)
+	assert.True(t, ok)
+	assert.Equal(t, sender, fe.Sender)
+	assert.Equal(t, "C1", fe.ChannelID)
+	assert.Equal(t, "msg1", fe.MessageID)
+	assert.Equal(t, "parent1", fe.ParentID)
+	assert.Len(t, fe.Files, 1)
+	assert.Equal(t, "report.pdf", fe.Files[0].Name)
+	assert.Equal(t, "https://files.slack.com/files-pri/T1-F1/download/report.pdf", fe.Files[0].URL)
 }
