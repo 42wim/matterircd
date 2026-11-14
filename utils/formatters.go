@@ -685,7 +685,32 @@ func ProcessMessageText(text string, opts ProcessMessageOpts, yield func(line st
 		}
 
 		if inCodeBlock { //nolint:nestif
-			if strings.HasPrefix(trimmed, codeBlockMarker) {
+			isPrefixClose := strings.HasPrefix(trimmed, codeBlockMarker)
+			closeIdx := -1
+			if isPrefixClose {
+				closeIdx = strings.Index(line, codeBlockMarker)
+			} else if idx := strings.LastIndex(line, codeBlockMarker); idx >= 0 {
+				after := strings.TrimSpace(line[idx+len(codeBlockMarker):])
+				if after == "" || strings.HasPrefix(after, "\x1d(") {
+					closeIdx = idx
+				}
+			}
+
+			if closeIdx >= 0 {
+				if !isPrefixClose && strings.TrimSpace(line[:closeIdx]) != "" {
+					contentBefore := origLine
+					if idxOrig := strings.LastIndex(contentBefore, codeBlockMarker); idxOrig >= 0 {
+						contentBefore = contentBefore[:idxOrig]
+					}
+					if currentIndent != "" && strings.HasPrefix(contentBefore, currentIndent) {
+						contentBefore = contentBefore[len(currentIndent):]
+					}
+					if codeBuilder.Len() > 0 {
+						codeBuilder.WriteByte('\n')
+					}
+					codeBuilder.WriteString(contentBefore)
+				}
+
 				inCodeBlock = false
 				lastBlockWasCode = true
 				hasContent = true
@@ -693,7 +718,7 @@ func ProcessMessageText(text string, opts ProcessMessageOpts, yield func(line st
 				FormatFullCodeBlock(codeBuilder.String(), lexer, currentIndent, opts, yield)
 				codeBuilder.Reset() // Frees builder state for next block
 
-				trailing := strings.TrimSpace(strings.TrimPrefix(trimmed, codeBlockMarker))
+				trailing := strings.TrimSpace(line[closeIdx+len(codeBlockMarker):])
 				if trailing != "" {
 					lastBlockWasCode = false
 					trailing = FormatMarkdownAndEmoji(
