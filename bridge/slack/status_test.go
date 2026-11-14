@@ -201,3 +201,24 @@ func TestFormatSlackAttachmentFields(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, "> prod | web-01 | degraded\n> high latency", gotOmit)
 }
+
+func TestSlackClientChannelMembershipCaches(t *testing.T) {
+	sc := slackclient.New(slackclient.Credentials{})
+	sc.UpdateUser(slack.User{ID: "U1", Name: "member1"})
+	sc.UpdateUser(slack.User{ID: "U2", Name: "member2"})
+
+	assert.False(t, sc.IsChannelMember("C1"))
+
+	sc.SetChannelJoined("C1", true)
+	assert.True(t, sc.IsChannelMember("C1"))
+
+	sc.SetChannelJoined("C1", false)
+	assert.False(t, sc.IsChannelMember("C1"))
+
+	sc.UpdateChannel("C1", "general")
+	sc.AddChannelMember("C1", "U1")
+	sc.RemoveChannelMember("C1", "U1")
+
+	sc.RemoveChannel("C1")
+	assert.False(t, sc.IsChannelMember("C1"))
+}
