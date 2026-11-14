@@ -134,6 +134,8 @@ func loginMatrix(u *User, toUser *User, args []string) {
 			u.respondService(toUser, state+", to verify it compare in your other client: device ID "+deviceID+", session key "+fingerprint, serviceMatrix)
 			u.respondService(toUser, "or use VERIFY START to verify interactively", serviceMatrix)
 		}
+	} else if u.cfg.Matrix().EncryptionDir != "" {
+		u.respondService(toUser, "WARNING: EncryptionDir is set but end-to-end encryption NOT ENABLED - make sure built with CGO_ENABLED=1 and -tags=goolm (and EncryptionPickleKey is set)", serviceMatrix)
 	}
 }
 
