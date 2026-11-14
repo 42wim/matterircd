@@ -269,3 +269,44 @@ func TestSlackChannelToInfoAndRenameEvent(t *testing.T) {
 	assert.Equal(t, "renamed-chan", upd.Name)
 	assert.Equal(t, "#renamed-chan", sc.GetChannelName("C1"))
 }
+
+func TestSlackDisconnectReconnectEvents(t *testing.T) {
+	var (
+		gotErr      error
+		reconnected = make(chan struct{}, 1)
+	)
+
+	s := &Slack{
+		onWsError: func(err error) {
+			gotErr = err
+		},
+		onConnect: func() {
+			reconnected <- struct{}{}
+		},
+	}
+
+	// Intentional disconnect (e.g. logout) must not trigger reconnect notice.
+	s.handleSlackEvent(context.Background(), slack.RTMEvent{
+		Data: &slack.DisconnectedEvent{Intentional: true},
+	})
+	assert.False(t, s.wasDisconnected.Load())
+
+	if gotErr != nil {
+		t.Fatalf("unexpected error on intentional disconnect: %v", gotErr)
+	}
+
+	// Unintentional disconnect notifies onWsError and marks wasDisconnected.
+	cause := context.DeadlineExceeded
+	s.handleSlackEvent(context.Background(), slack.RTMEvent{
+		Data: &slack.DisconnectedEvent{Intentional: false, Cause: cause},
+	})
+	assert.True(t, s.wasDisconnected.Load())
+	assert.Equal(t, cause, gotErr)
+
+	// Subsequent ConnectedEvent triggers onConnect/reconnect handling.
+	s.handleSlackEvent(context.Background(), slack.RTMEvent{
+		Data: &slack.ConnectedEvent{},
+	})
+	<-reconnected
+	assert.False(t, s.wasDisconnected.Load())
+}
