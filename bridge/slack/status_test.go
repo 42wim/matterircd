@@ -75,14 +75,14 @@ func TestSlackClientStatusHelpers(t *testing.T) {
 	sc.UpdatePresence("U1", "active")
 	sc.UpdatePresence("U2", "away")
 
-	assert.Equal(t, ":coffee: Coffee break", sc.GetUserCustomStatus("U1"))
+	assert.Contains(t, sc.GetUserCustomStatus("U1"), ":coffee: Coffee break (Until ")
 	assert.Empty(t, sc.GetUserCustomStatus("U2"))
 
 	assert.Equal(t, time.Now().UTC().Format("15:04"), sc.GetUserLocalTime("U1"))
 	assert.Equal(t, time.Now().In(time.FixedZone("AEST", 10*3600)).Format("15:04"), sc.GetUserLocalTime("U2"))
 
 	statuses := sc.GetStatuses()
-	assert.Equal(t, "online: :coffee: Coffee break", statuses["U1"])
+	assert.Contains(t, statuses["U1"], "online: :coffee: Coffee break (Until ")
 	assert.Equal(t, "away", statuses["U2"])
 
 	up, err := sc.GetUserPresence(context.Background(), "U1")

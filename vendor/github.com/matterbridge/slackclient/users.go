@@ -410,7 +410,58 @@ func (c *Client) GetUserPresence(ctx context.Context, userID string) (*slack.Use
 	return up, nil
 }
 
-func formatCustomStatus(profile slack.UserProfile) string {
+func userTimezoneLocation(user *slack.User) *time.Location {
+	if user == nil {
+		return nil
+	}
+
+	if user.TZ != "" {
+		loc, err := time.LoadLocation(user.TZ)
+		if err == nil {
+			return loc
+		}
+	}
+
+	if user.TZOffset != 0 || user.TZLabel != "" {
+		return time.FixedZone(user.TZLabel, user.TZOffset)
+	}
+
+	return nil
+}
+
+func formatStatusExpiration(expUnix int64, userLoc *time.Location) string {
+	expiry := time.Unix(expUnix, 0)
+	now := time.Now().In(time.Local)
+	expLocal := expiry.In(time.Local)
+
+	timeStr := expLocal.Format("15:04")
+	nowDate := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
+	expDate := time.Date(expLocal.Year(), expLocal.Month(), expLocal.Day(), 0, 0, 0, 0, time.Local)
+	daysDiff := int(expDate.Sub(nowDate).Hours() / 24)
+
+	var dateStr string
+
+	switch daysDiff {
+	case 0:
+		dateStr = "Today at " + timeStr
+	case 1:
+		dateStr = "Tomorrow at " + timeStr
+	default:
+		dateStr = expLocal.Format("Mon, 02 Jan 15:04")
+	}
+
+	if userLoc != nil {
+		userTimeStr := expiry.In(userLoc).Format("15:04")
+		if userTimeStr != timeStr {
+			dateStr += ", local time: " + userTimeStr
+		}
+	}
+
+	return dateStr
+}
+
+func formatCustomStatus(user slack.User) string {
+	profile := user.Profile
 	if profile.StatusExpiration > 0 && time.Now().Unix() >= int64(profile.StatusExpiration) {
 		return ""
 	}
@@ -418,16 +469,25 @@ func formatCustomStatus(profile slack.UserProfile) string {
 	emoji := strings.TrimSpace(profile.StatusEmoji)
 	text := strings.TrimSpace(profile.StatusText)
 
+	var formatted string
+
 	switch {
 	case emoji != "" && text != "":
-		return emoji + " " + text
+		formatted = emoji + " " + text
 	case emoji != "":
-		return emoji
+		formatted = emoji
 	case text != "":
-		return text
+		formatted = text
 	default:
 		return ""
 	}
+
+	if profile.StatusExpiration > 0 {
+		dateStr := formatStatusExpiration(int64(profile.StatusExpiration), userTimezoneLocation(&user))
+		formatted += " (Until " + dateStr + ")"
+	}
+
+	return formatted
 }
 
 func (c *Client) GetUserCustomStatus(userID string) string {
@@ -450,7 +510,7 @@ func (c *Client) GetUserCustomStatus(userID string) string {
 		return ""
 	}
 
-	return formatCustomStatus(user.Profile)
+	return formatCustomStatus(user)
 }
 
 func (c *Client) GetUserLocalTime(userID string) string {
@@ -458,20 +518,7 @@ func (c *Client) GetUserLocalTime(userID string) string {
 		return ""
 	}
 
-	user := c.GetUser(userID)
-	if user == nil {
-		return ""
-	}
-
-	if user.TZ != "" {
-		loc, err := time.LoadLocation(user.TZ)
-		if err == nil {
-			return time.Now().In(loc).Format("15:04")
-		}
-	}
-
-	if user.TZOffset != 0 || user.TZLabel != "" {
-		loc := time.FixedZone(user.TZLabel, user.TZOffset)
+	if loc := userTimezoneLocation(c.GetUser(userID)); loc != nil {
 		return time.Now().In(loc).Format("15:04")
 	}
 
@@ -503,7 +550,7 @@ func (c *Client) GetStatuses() map[string]string {
 			prefix = normalizePresence(u.Presence)
 		}
 
-		custom := formatCustomStatus(u.Profile)
+		custom := formatCustomStatus(u)
 
 		switch {
 		case prefix != "" && custom != "":
