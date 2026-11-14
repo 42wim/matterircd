@@ -217,17 +217,27 @@ func (c *Client) Topic(channelID string) string {
 	return ""
 }
 
+func (c *Client) UpdateTopic(channelID, text string) {
+	if channelID == "" {
+		return
+	}
+
+	upperID := strings.ToUpper(channelID)
+
+	c.Lock()
+	if ch, ok := c.channelData[upperID]; ok {
+		ch.Topic.Value = text
+		c.channelData[upperID] = ch
+	}
+	c.Unlock()
+}
+
 func (c *Client) SetTopic(channelID, text string) error {
 	upperID := strings.ToUpper(channelID)
 
 	_, err := c.sc.SetTopicOfConversation(upperID, text)
 	if err == nil {
-		c.Lock()
-		if ch, ok := c.channelData[upperID]; ok {
-			ch.Topic.Value = text
-			c.channelData[upperID] = ch
-		}
-		c.Unlock()
+		c.UpdateTopic(upperID, text)
 	}
 
 	return err
