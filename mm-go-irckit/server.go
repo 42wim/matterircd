@@ -522,6 +522,20 @@ func parseThreadTag(tagStr string) string {
 	return ""
 }
 
+func isSlackToken(pass string) bool {
+	if strings.HasPrefix(pass, "xoxp-") && len(pass) > len("xoxp-") {
+		return true
+	}
+
+	if strings.HasPrefix(pass, "xoxc-") {
+		if _, cookie, ok := strings.Cut(pass, "|d="); ok {
+			return strings.HasPrefix(cookie, "xoxd-") && len(cookie) > len("xoxd-")
+		}
+	}
+
+	return false
+}
+
 //nolint:funlen,gocognit,gocyclo
 func (s *server) handle(u *User) {
 	var partMsg string
@@ -784,7 +798,7 @@ outerloop:
 				service := u.serviceForPass(u.Pass)
 				if service == "" {
 					service = serviceMattermost
-					if len(u.Pass) == 1 && !u.cfg.Slack().Disable {
+					if len(u.Pass) == 1 && !u.cfg.Slack().Disable && isSlackToken(u.Pass[0]) {
 						service = serviceSlack
 					}
 				}
