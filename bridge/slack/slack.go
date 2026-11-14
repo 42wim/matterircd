@@ -608,17 +608,36 @@ func (s *Slack) sendDirectMessage(sender, receiver *bridge.UserInfo, msg string,
 	s.eventChan <- event
 }
 
-func (s *Slack) sendPublicMessage(ghost *bridge.UserInfo, msg, channelID string) {
+func (s *Slack) sendPublicMessage(ghost *bridge.UserInfo, msg, channelID, eventType string) {
 	event := &bridge.Event{
 		Type: "channel_message",
 		Data: &bridge.ChannelMessageEvent{
 			Text:      msg,
 			ChannelID: channelID,
 			Sender:    ghost,
+			Event:     eventType,
 		},
 	}
 
 	s.eventChan <- event
+}
+
+func (s *Slack) resolveSlackPostGhost(rmsg *slack.MessageEvent) (*bridge.UserInfo, bool) {
+	isDM := strings.HasPrefix(rmsg.Channel, "D")
+	isSlackbot := rmsg.User == "USLACKBOT" || (rmsg.SubType == "bot_message" && rmsg.BotID == "B01" && rmsg.Username == "")
+
+	if !isDM && (isSlackbot || rmsg.SubType == "message_deleted") {
+		return &bridge.UserInfo{Nick: systemUser}, true
+	}
+
+	// TODO: cache userinfo
+	suser, err := s.sc.GetUserFromMessage(rmsg)
+	if err != nil {
+		logger.Errorf("couldn't find user in message %#v: %s", spew.Sdump(rmsg), err)
+		return nil, false
+	}
+
+	return s.createUser(suser), true
 }
 
 //nolint:funlen,gocognit,gocyclo
@@ -635,24 +654,41 @@ func (s *Slack) handleSlackActionPost(rmsg *slack.MessageEvent) {
 		return
 	}
 
+	if rmsg.SubType == "channel_topic" {
+		topic := s.cleanupMessage(rmsg.Topic)
+		if !strings.HasPrefix(rmsg.Channel, "D") {
+			s.eventChan <- &bridge.Event{
+				Type: "channel_topic",
+				Data: &bridge.ChannelTopicEvent{
+					Text:      topic,
+					ChannelID: rmsg.Channel,
+					UserID:    rmsg.User,
+				},
+			}
+
+			return
+		}
+
+		rmsg.Text = "\x01ACTION updated topic to: " + topic + "\x01"
+	}
+
+	eventType := ""
+	if rmsg.SubType == "channel_purpose" && !strings.HasPrefix(rmsg.Channel, "D") {
+		eventType = "channel_purpose"
+
+		if rmsg.Purpose != "" {
+			rmsg.Text = "set the channel description: " + rmsg.Purpose
+		}
+	}
+
 	if rmsg.SubType == "message_deleted" {
 		ts := formatTS(rmsg.DeletedTimestamp)
 		rmsg.Text = "[M " + ts + "] Message deleted"
 	}
 
-	var ghost *bridge.UserInfo
-	if !strings.HasPrefix(rmsg.Channel, "D") && (rmsg.User == "USLACKBOT" || (rmsg.SubType == "bot_message" && rmsg.BotID == "B01" && rmsg.Username == "") || rmsg.SubType == "message_deleted") {
-		ghost = &bridge.UserInfo{Nick: systemUser}
-	} else {
-		// TODO: cache userinfo
-		suser, err := s.sc.GetUserFromMessage(rmsg)
-		if err != nil {
-			logger.Errorf("couldn't find user in message %#v: %s", spew.Sdump(rmsg), err)
-			return
-		}
-
-		// create new "ghost" user
-		ghost = s.createUser(suser)
+	ghost, ok := s.resolveSlackPostGhost(rmsg)
+	if !ok {
+		return
 	}
 
 	msghandled := false
@@ -743,7 +779,7 @@ func (s *Slack) handleSlackActionPost(rmsg *slack.MessageEvent) {
 		default:
 			// could be a bot
 			ghost.Nick = spoofUsername
-			s.sendPublicMessage(ghost, msg, channelID)
+			s.sendPublicMessage(ghost, msg, channelID, eventType)
 		}
 	}
 }
