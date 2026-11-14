@@ -106,3 +106,27 @@ func TestParseCommandString(t *testing.T) {
 		}
 	}
 }
+
+func TestIsSlackToken(t *testing.T) {
+	//nolint:gosec // test fixtures for Slack token format matching
+	tests := []struct {
+		pass string
+		want bool
+	}{
+		{pass: "xoxp-1234567890-1234567890-abcdef", want: true},
+		{pass: "xoxc-1234567890-1234567890-abcdef|d=xoxd-1234567890abcdef;", want: true},
+		{pass: "xoxc-1234567890-1234567890-abcdef|d=xoxd-1234567890abcdef", want: false},
+		{pass: "xoxp-", want: false},
+		{pass: "xoxp-short", want: false},
+		{pass: "xoxc-1234567890-1234567890-abcdef", want: false},
+		{pass: "xoxc-short|d=xoxd-1234567890abcdef;", want: false},
+		{pass: "xoxc-1234567890-1234567890-abcdef|d=xoxd-short;", want: false},
+		{pass: "xoxc-1234567890-1234567890-abcdef|d=other", want: false},
+		{pass: "some-mattermost-password", want: false},
+		{pass: "", want: false},
+	}
+
+	for _, tc := range tests {
+		assert.Equal(t, tc.want, isSlackToken(tc.pass), tc.pass)
+	}
+}
