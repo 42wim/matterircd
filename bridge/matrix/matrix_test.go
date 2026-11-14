@@ -9,9 +9,11 @@ import (
 
 	"github.com/42wim/matterircd/config"
 	"github.com/42wim/matterircd/utils"
+
+	"maunium.net/go/mautrix/event"
+
 	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/assert"
-	"maunium.net/go/mautrix/event"
 )
 
 func loadTestConfig(t *testing.T, tomlContent string) *config.Config {
@@ -78,8 +80,9 @@ func TestMatrixOnReconnect(t *testing.T) {
 	}
 }
 
+//nolint:goconst
 func TestExtractEventBody(t *testing.T) {
-	codeBlock := "```bash\nTesting\nTesting again\nTesting bash code block...\n```"
+	codeBlock := "```bash\nTesting\nTesting again\nTesting bash code block...\n```" //nolint:dupword
 
 	ev := &event.Event{
 		Content: event.Content{

@@ -273,7 +273,7 @@ func TestSlackArchiveURL(t *testing.T) {
 }
 
 func TestFormatPinnedSlackMsg(t *testing.T) {
-	codeBlock := "```bash\nTesting\nTesting again\nTesting bash code block...\n```"
+	codeBlock := "```bash\nTesting\nTesting again\nTesting bash code block...\n```" //nolint:dupword
 	itemMsg := &slack.Message{
 		Msg: slack.Msg{
 			Text: codeBlock,

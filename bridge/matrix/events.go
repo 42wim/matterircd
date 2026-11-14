@@ -311,7 +311,8 @@ func (m *Matrix) fetchText(roomID id.RoomID, eventID id.EventID) string {
 	m.editMu.Unlock()
 
 	if hasEdit && latestEditID != "" {
-		if ev, err := m.mc.Event(ctx, roomID, latestEditID); err == nil {
+		ev, err := m.mc.Event(ctx, roomID, latestEditID)
+		if err == nil {
 			if body := extractEventBody(ev); body != "" {
 				m.cacheTextIfAbsent(eventID, body)
 

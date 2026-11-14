@@ -117,6 +117,7 @@ func TestProcessMessageTextCodeBlockMidLineBackticks(t *testing.T) {
 	}
 }
 
+//nolint:goconst
 func TestFormatActionSuffix(t *testing.T) {
 	tests := []struct {
 		kind    ActionSuffixKind
