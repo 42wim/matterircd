@@ -148,7 +148,7 @@ type FormatterConfig struct {
 	PreserveNewLines string
 }
 
-// SharedConfig holds the options that apply to both the Mattermost and Matrix bridges.
+// SharedConfig holds the options that apply to the Mattermost, Matrix, and Slack bridges.
 type SharedConfig struct {
 	CollapseScrollback bool
 
@@ -211,12 +211,15 @@ type MattermostConfig struct {
 }
 
 type SlackConfig struct {
+	SharedConfig
+
 	Bridge    BridgeConfig
 	Formatter FormatterConfig
 
 	Disable bool
 
 	SlackclientLogLevel string
+	LastViewedSaveFile  string
 
 	DenyUsers        []string
 	HideReplies      bool
@@ -568,12 +571,14 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 		},
 
 		Slack: SlackConfig{
-			Bridge:    slBridge,
-			Formatter: slFormatter,
+			Bridge:       slBridge,
+			Formatter:    slFormatter,
+			SharedConfig: c.buildSharedConfig("slack"),
 
 			Disable: c.v.GetBool("slack.Disable"),
 
 			SlackclientLogLevel: c.v.GetString("slack.SlackclientLogLevel"),
+			LastViewedSaveFile:  c.v.GetString("slack.LastViewedSaveFile"),
 
 			DenyUsers:        append([]string(nil), c.v.GetStringSlice("slack.DenyUsers")...),
 			HideReplies:      c.v.GetBool("slack.HideReplies"),

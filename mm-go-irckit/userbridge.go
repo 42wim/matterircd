@@ -2152,13 +2152,18 @@ func (u *User) mayJoin(channelID string) bool {
 
 // hasSharedCfg reports whether the bridge takes the options of config.SharedConfig.
 func (u *User) hasSharedCfg() bool {
-	return u.br != nil && (u.br.Protocol() == serviceMattermost || u.br.Protocol() == serviceMatrix)
+	return u.br != nil && (u.br.Protocol() == serviceMattermost || u.br.Protocol() == serviceMatrix || u.br.Protocol() == serviceSlack)
 }
 
 // sharedCfg returns the shared options of the bridge's protocol, Mattermost's for the others.
 func (u *User) sharedCfg() *config.SharedConfig {
-	if u.br != nil && u.br.Protocol() == serviceMatrix {
-		return &u.cfg.Matrix().SharedConfig
+	if u.br != nil {
+		switch u.br.Protocol() {
+		case serviceMatrix:
+			return &u.cfg.Matrix().SharedConfig
+		case serviceSlack:
+			return &u.cfg.Slack().SharedConfig
+		}
 	}
 
 	return &u.cfg.Mattermost().SharedConfig

@@ -1,6 +1,8 @@
 package slackclient
 
 import (
+	"strings"
+
 	"github.com/slack-go/slack"
 )
 
@@ -163,4 +165,34 @@ func (c *Client) TeamName() string {
 
 func (c *Client) TeamDomain() string {
 	return c.info.Team.Domain
+}
+
+func (c *Client) SearchUsers(query string) []slack.User {
+	c.RLock()
+	empty := len(c.users) == 0
+	c.RUnlock()
+
+	if empty {
+		c.InitUsers()
+	}
+
+	q := strings.ToLower(strings.TrimSpace(query))
+
+	c.RLock()
+	defer c.RUnlock()
+
+	var matches []slack.User
+
+	for _, u := range c.users {
+		if q == "" ||
+			strings.Contains(strings.ToLower(u.Name), q) ||
+			strings.Contains(strings.ToLower(u.RealName), q) ||
+			strings.Contains(strings.ToLower(u.Profile.RealName), q) ||
+			strings.Contains(strings.ToLower(u.Profile.DisplayName), q) ||
+			strings.Contains(strings.ToLower(u.Profile.Email), q) {
+			matches = append(matches, u)
+		}
+	}
+
+	return matches
 }
