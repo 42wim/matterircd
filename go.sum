@@ -139,12 +139,12 @@ github.com/lunixbochs/vtclean v1.0.0/go.mod h1:pHhQNgMf3btfWnGBVipUOjRYhoOsdGqdm
 github.com/mailru/easyjson v0.0.0-20190312143242-1de009706dbe/go.mod h1:C1wdFJiN94OJF2b5HbByQZoLdCWB1Yqtg26g4irojpc=
 github.com/matterbridge/logrus-prefixed-formatter v0.5.3-0.20200523233437-d971309a77ba h1:XleOY4IjAEIcxAh+IFwT5JT5Ze3RHiYz6m+4ZfZ0rc0=
 github.com/matterbridge/logrus-prefixed-formatter v0.5.3-0.20200523233437-d971309a77ba/go.mod h1:iXGEotOvwI1R1SjLxRc+BF5rUORTMtE0iMZBT2lxqAU=
-github.com/matterbridge/matrixclient v0.0.0-20261114072416-98c3bbeb020f h1:jRdA6fPmWsHdWQFo9obCzFvaYAP5notPr9AIQLYA0SI=
-github.com/matterbridge/matrixclient v0.0.0-20261114072416-98c3bbeb020f/go.mod h1:14RGANRRPwjJ3OxEs2tHGGdvvBjrP3nWTVONogCkhsw=
+github.com/matterbridge/matrixclient v0.0.0-20261114185455-e4f204a3344c h1:yqqHX766ZUyUbklMIATlMIukYBBYdvm4mVWnLyCNGow=
+github.com/matterbridge/matrixclient v0.0.0-20261114185455-e4f204a3344c/go.mod h1:14RGANRRPwjJ3OxEs2tHGGdvvBjrP3nWTVONogCkhsw=
 github.com/matterbridge/matterclient v0.0.0-20261113045522-74f90fb9f942 h1:3OB2MsU6XIKFtfU7x74+7XcwLLE0Hmu/NuSNinQme1E=
 github.com/matterbridge/matterclient v0.0.0-20261113045522-74f90fb9f942/go.mod h1:69rJRgvrpV13ZyoA7q1HjHwaM6CSkXQPhCdDFRxwNj0=
-github.com/matterbridge/slackclient v0.0.0-20261114101307-73dd29f1dd14 h1:lm0P9iVf+4s6BOyLSqtBJ0cPLPcgqsZ4dRxZtU0/w78=
-github.com/matterbridge/slackclient v0.0.0-20261114101307-73dd29f1dd14/go.mod h1:HNy/jLN0wToxGFGGVgYd3Sef20FyiqDgNzPPyaxx1fo=
+github.com/matterbridge/slackclient v0.0.0-20261114185559-f77c7fa93994 h1:xWFfVCpqpYYU8FL5UnhoktxSOrdKcvIXwO+NX1KjHbs=
+github.com/matterbridge/slackclient v0.0.0-20261114185559-f77c7fa93994/go.mod h1:+S9vGZleeXISC013UlwXeZSjfWsStvPZ0WdtbcDVMZo=
 github.com/mattermost/go-i18n v1.11.1-0.20211013152124-5c415071e404 h1:Khvh6waxG1cHc4Cz5ef9n3XVCxRWpAKUtqg9PJl5+y8=
 github.com/mattermost/go-i18n v1.11.1-0.20211013152124-5c415071e404/go.mod h1:RyS7FDNQlzF1PsjbJWHRI35exqaKGSO9qD4iv8QjE34=
 github.com/mattermost/ldap v0.0.0-20231116144001-0f480c025956 h1:Y1Tu/swM31pVwwb2BTCsOdamENjjWCI6qmfHLbk6OZI=
