@@ -159,8 +159,14 @@ var GetEmojiMap = sync.OnceValue(func() map[string]string {
 				registerWithVariants("flag-"+alias, e.Emoji, false)
 			}
 		}
+	}
 
-		// In addition to emoji aliases, include emoji tags
+	// Register emoji tags in a second pass so primary aliases always take precedence over tags
+	for _, e := range data {
+		if e.Emoji == "" {
+			continue
+		}
+
 		for _, tag := range e.Tags {
 			registerWithVariants(tag, e.Emoji, e.SkinTones)
 		}
