@@ -2,6 +2,7 @@ package slackclient
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"time"
 
@@ -160,4 +161,56 @@ func (c *Client) IsOwnMessageEcho(userID, channelID, timestamp string) bool {
 	}
 
 	return lastmsg == timestamp
+}
+
+func (c *Client) GetConversationHistory(ctx context.Context, channelID, oldest string, limit int) ([]slack.Message, error) {
+	var all []slack.Message
+
+	cursor := ""
+
+	for {
+		pageLimit := 100
+		if limit > 0 && limit-len(all) < pageLimit {
+			pageLimit = limit - len(all)
+		}
+
+		resp, err := c.sc.GetConversationHistoryContext(ctx, &slack.GetConversationHistoryParameters{
+			ChannelID: channelID,
+			Oldest:    oldest,
+			Limit:     pageLimit,
+			Cursor:    cursor,
+		})
+		if err != nil {
+			return nil, err
+		}
+
+		all = append(all, resp.Messages...)
+
+		if !resp.HasMore || resp.ResponseMetaData.NextCursor == "" || (limit > 0 && len(all) >= limit) {
+			break
+		}
+
+		cursor = resp.ResponseMetaData.NextCursor
+	}
+
+	slices.Reverse(all)
+
+	return all, nil
+}
+
+func (c *Client) SearchMessages(ctx context.Context, query string, count int) ([]slack.SearchMessage, error) {
+	if count <= 0 {
+		count = 100
+	}
+
+	res, err := c.sc.SearchMessagesContext(ctx, query, slack.SearchParameters{
+		Sort:          "timestamp",
+		SortDirection: "asc",
+		Count:         count,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return res.Matches, nil
 }

@@ -292,7 +292,11 @@ func (s *Slack) GetDMChannelID(ctx context.Context, userID string) string {
 }
 
 func (s *Slack) GetDMChannelName(userID1 string, userID2 string) string {
-	return ""
+	if userID2 != "" && userID2 != s.sc.UserID() {
+		return userID2
+	}
+
+	return userID1
 }
 
 func (s *Slack) GetDMUser(ctx context.Context, channelName string) *bridge.UserInfo {
@@ -337,7 +341,19 @@ func (s *Slack) GetChannels() []*bridge.ChannelInfo {
 }
 
 func (s *Slack) CreateChannel(ctx context.Context, channelName string, channelType string) (*bridge.ChannelInfo, error) {
-	return nil, errors.New("not implemented yet")
+	isPrivate := strings.EqualFold(channelType, "private") || strings.EqualFold(channelType, "P")
+
+	ch, err := s.sc.CreateChannel(ctx, strings.TrimPrefix(channelName, "#"), isPrivate)
+	if err != nil {
+		return nil, err
+	}
+
+	return &bridge.ChannelInfo{
+		ID:      ch.ID,
+		Name:    ch.Name,
+		TeamID:  s.sc.TeamID(),
+		Private: ch.IsPrivate,
+	}, nil
 }
 
 func (s *Slack) GetChannel(ctx context.Context, channelID string) (*bridge.ChannelInfo, error) {
@@ -380,25 +396,93 @@ func (s *Slack) GetTeamName(ctx context.Context, teamID string) string {
 }
 
 func (s *Slack) GetLastViewedAt(ctx context.Context, channelID string) int64 {
-	return 0
+	info, err := s.sc.GetConversationInfo(ctx, channelID)
+	if err != nil || info == nil || info.LastRead == "" {
+		return 0
+	}
+
+	return slackTSMillis(info.LastRead)
+}
+
+func (s *Slack) msgsToEvents(ctx context.Context, channelID string, msgs []slack.Message) []*bridge.Event {
+	events := make([]*bridge.Event, 0, len(msgs))
+	for _, m := range msgs {
+		if ev := s.slackMsgToEvent(ctx, channelID, m.Msg); ev != nil {
+			events = append(events, ev)
+		}
+	}
+
+	return events
 }
 
 func (s *Slack) GetPostsSince(ctx context.Context, channelID string, since int64) []*bridge.Event {
-	return []*bridge.Event{}
+	if channelID == "" {
+		return []*bridge.Event{}
+	}
+
+	oldest := ""
+	if since > 0 {
+		oldest = fmt.Sprintf("%.6f", float64(since)/1000.0)
+	}
+
+	msgs, err := s.sc.GetConversationHistory(ctx, channelID, oldest, 0)
+	if err != nil {
+		logger.Errorf("slack: GetPostsSince %s: %s", channelID, err)
+		return []*bridge.Event{}
+	}
+
+	return s.msgsToEvents(ctx, channelID, msgs)
 }
 
 func (s *Slack) IsDMChannelName(channelName string) bool {
-	return false
+	return strings.HasPrefix(strings.ToUpper(channelName), "D")
 }
 
 func (s *Slack) SearchPosts(ctx context.Context, search string) []*bridge.Event {
-	return []*bridge.Event{}
+	matches, err := s.sc.SearchMessages(ctx, search, 100)
+	if err != nil {
+		logger.Errorf("slack: SearchPosts %q: %s", search, err)
+		return []*bridge.Event{}
+	}
+
+	events := make([]*bridge.Event, 0, len(matches))
+	for _, m := range matches {
+		msg := slack.Msg{
+			Timestamp: m.Timestamp,
+			User:      m.User,
+			Username:  m.Username,
+			Text:      m.Text,
+		}
+		if ev := s.slackMsgToEvent(ctx, m.Channel.ID, msg); ev != nil {
+			events = append(events, ev)
+		}
+	}
+
+	return events
 }
 
 func (s *Slack) UpdateLastViewed(ctx context.Context, channelID string) {
+	ts := fmt.Sprintf("%d.000000", time.Now().Unix())
+
+	msgs, err := s.sc.GetConversationHistory(ctx, channelID, "", 1)
+	if err == nil && len(msgs) > 0 && msgs[0].Timestamp != "" {
+		ts = msgs[0].Timestamp
+	}
+
+	err = s.sc.MarkConversation(ctx, channelID, ts)
+	if err != nil {
+		logger.Debugf("UpdateLastViewed %s: %s", channelID, err)
+	}
 }
 
 func (s *Slack) UpdateLastViewedUser(ctx context.Context, userID string) error {
+	chID := s.GetDMChannelID(ctx, userID)
+	if chID == "" {
+		return errors.New("DM channel not found")
+	}
+
+	s.UpdateLastViewed(ctx, chID)
+
 	return nil
 }
 
@@ -407,11 +491,32 @@ func (s *Slack) GetFilesInfo(ctx context.Context, fileIDs []string) []*bridge.Fi
 }
 
 func (s *Slack) SearchUsers(ctx context.Context, query string) ([]*bridge.UserInfo, error) {
-	return nil, nil
+	susers := s.sc.SearchUsers(query)
+	users := make([]*bridge.UserInfo, 0, len(susers))
+
+	for i := range susers {
+		users = append(users, s.createUser(&susers[i]))
+	}
+
+	return users, nil
 }
 
 func (s *Slack) GetPosts(ctx context.Context, channelID string, limit int) []*bridge.Event {
-	return []*bridge.Event{}
+	if channelID == "" {
+		return []*bridge.Event{}
+	}
+
+	if limit <= 0 {
+		limit = 100
+	}
+
+	msgs, err := s.sc.GetConversationHistory(ctx, channelID, "", limit)
+	if err != nil {
+		logger.Errorf("slack: GetPosts %s: %s", channelID, err)
+		return []*bridge.Event{}
+	}
+
+	return s.msgsToEvents(ctx, channelID, msgs)
 }
 
 func (s *Slack) cacheThreadRoot(channelID, msgTS, rootTS string) {
@@ -681,7 +786,23 @@ func (s *Slack) GetPostThread(ctx context.Context, postID string) []*bridge.Even
 }
 
 func (s *Slack) GetChannelID(ctx context.Context, name, teamID string) string {
-	return ""
+	name = strings.TrimPrefix(name, "#")
+	if name == "" {
+		return ""
+	}
+
+	upper := strings.ToUpper(name)
+	if strings.HasPrefix(upper, "D") && len(name) >= 9 {
+		return upper
+	}
+
+	if (strings.HasPrefix(upper, "U") || strings.HasPrefix(upper, "W")) && len(name) >= 9 {
+		if chID := s.GetDMChannelID(ctx, upper); chID != "" {
+			return chID
+		}
+	}
+
+	return s.sc.GetChannelID(ctx, name)
 }
 
 func (s *Slack) allowedLogin() error {
@@ -1606,7 +1727,7 @@ func (s *Slack) GetPostSizeLimit() int {
 }
 
 func (s *Slack) GetReplayEvents(ctx context.Context, channelID string, since int64) []*bridge.Event {
-	return []*bridge.Event{}
+	return s.GetPostsSince(ctx, channelID, since)
 }
 
 func (s *Slack) Ping(ctx context.Context, proto ...string) error {

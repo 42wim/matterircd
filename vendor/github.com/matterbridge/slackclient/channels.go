@@ -1,6 +1,7 @@
 package slackclient
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -136,6 +137,56 @@ func (c *Client) GetChannelName(channelID string) string {
 	c.Unlock()
 
 	return name
+}
+
+func (c *Client) CreateChannel(ctx context.Context, name string, isPrivate bool) (*slack.Channel, error) {
+	ch, err := c.sc.CreateConversationContext(ctx, slack.CreateConversationParams{
+		ChannelName: name,
+		IsPrivate:   isPrivate,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	c.Lock()
+	c.channels[ch.ID] = "#" + ch.Name
+	c.Unlock()
+
+	return ch, nil
+}
+
+func (c *Client) GetChannelID(ctx context.Context, name string) string {
+	target := "#" + strings.TrimPrefix(name, "#")
+
+	c.RLock()
+
+	for id, chName := range c.channels {
+		if strings.EqualFold(chName, target) {
+			c.RUnlock()
+			return id
+		}
+	}
+
+	c.RUnlock()
+
+	channels, _ := c.GetConversations()
+	for _, ch := range channels {
+		if strings.EqualFold(ch.Name, strings.TrimPrefix(name, "#")) {
+			return ch.ID
+		}
+	}
+
+	return ""
+}
+
+func (c *Client) GetConversationInfo(ctx context.Context, channelID string) (*slack.Channel, error) {
+	return c.sc.GetConversationInfoContext(ctx, &slack.GetConversationInfoInput{
+		ChannelID: channelID,
+	})
+}
+
+func (c *Client) MarkConversation(ctx context.Context, channelID, ts string) error {
+	return c.sc.MarkConversationContext(ctx, channelID, ts)
 }
 
 func (c *Client) GetChannelUsers(channelID string) ([]*slack.User, error) {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -330,7 +331,7 @@ func login(u *User, toUser *User, args []string, service string) {
 
 //nolint:funlen
 func replay(u *User, toUser *User, args []string, service string) {
-	if service != serviceMattermost && service != serviceMatrix {
+	if !slices.Contains([]string{serviceMattermost, serviceMatrix, serviceSlack}, service) {
 		u.MsgUser(toUser, "not implemented")
 		return
 	}
@@ -524,7 +525,7 @@ func details(u *User, toUser *User, args []string, service string) {
 }
 
 func search(u *User, toUser *User, args []string, service string) {
-	if service != serviceMattermost && service != serviceMatrix {
+	if service != serviceMattermost && service != serviceMatrix && service != serviceSlack {
 		u.MsgUser(toUser, "not implemented")
 		return
 	}
@@ -577,7 +578,7 @@ func search(u *User, toUser *User, args []string, service string) {
 }
 
 func searchUsers(u *User, toUser *User, args []string, service string) {
-	if service != serviceMattermost && service != serviceMatrix {
+	if service != serviceMattermost && service != serviceMatrix && service != serviceSlack {
 		u.MsgUser(toUser, "not implemented")
 		return
 	}
@@ -648,7 +649,7 @@ func ping(u *User, toUser *User, args []string, service string) {
 
 //nolint:funlen,gocyclo,cyclop
 func scrollback(u *User, toUser *User, args []string, service string) {
-	if service != serviceMattermost && service != serviceMatrix {
+	if service != serviceMattermost && service != serviceMatrix && service != serviceSlack {
 		u.MsgUser(toUser, "not implemented")
 		return
 	}
@@ -701,10 +702,15 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 	case exists && scrollbackUser.Ghost:
 		dmName := u.br.GetDMChannelName(u.User, scrollbackUser.User)
 		channelID = u.br.GetChannelID(u.ctx, dmName, u.br.GetMe().TeamID)
-	case service == serviceMatrix:
+	case service == serviceMatrix || service == serviceSlack:
 		searchPostID = u.br.NormalizePostID(strings.TrimPrefix(search, "@@"))
 		if searchPostID == "" {
-			u.MsgUser(toUser, "need SCROLLBACK (#<room>|<user>|<event ID>) [lines] [server-time]")
+			if service == serviceSlack {
+				u.MsgUser(toUser, "need SCROLLBACK (#<channel>|<user>|<post/thread ID>) [lines] [server-time]")
+			} else {
+				u.MsgUser(toUser, "need SCROLLBACK (#<room>|<user>|<event ID>) [lines] [server-time]")
+			}
+
 			return
 		}
 	case len(search) == 26:
@@ -988,7 +994,7 @@ func (u *User) sendScrollback(target, from, msg, timeTag string) {
 }
 
 func updatelastviewed(u *User, toUser *User, args []string, service string) {
-	if service != serviceMattermost && service != serviceMatrix {
+	if service != serviceMattermost && service != serviceMatrix && service != serviceSlack {
 		u.MsgUser(toUser, "not implemented")
 		return
 	}
@@ -1313,11 +1319,6 @@ func channelHeader(u *User, toUser *User, args []string, service string) {
 
 //nolint:funlen
 func channelCmd(u *User, toUser *User, args []string, service string) {
-	if service == serviceSlack {
-		u.MsgUser(toUser, "not implemented")
-		return
-	}
-
 	showHelp := func() {
 		u.MsgUser(toUser, "need CHANNEL CREATE #<channel> [public|private]")
 		u.MsgUser(toUser, "e.g. CHANNEL CREATE #new-bugs")
