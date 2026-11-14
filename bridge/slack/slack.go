@@ -1662,6 +1662,41 @@ func (s *Slack) resolveSlackNick(slackuser *slack.User, rc *config.RuntimeConfig
 	return nick
 }
 
+func buildSlackUserInfo(slackuser *slack.User, nick, teamID string, me bool) *bridge.UserInfo {
+	roles := ""
+	if slackuser.IsBot || slackuser.IsAppUser || slackuser.IsWorkflowBot {
+		roles = "bot"
+	}
+
+	photo := firstNonEmpty(
+		slackuser.Profile.ImageOriginal,
+		slackuser.Profile.Image512,
+		slackuser.Profile.Image192,
+		slackuser.Profile.Image72,
+		slackuser.Profile.Image48,
+		slackuser.Profile.Image32,
+		slackuser.Profile.Image24,
+	)
+
+	return &bridge.UserInfo{
+		Nick:        nick,
+		User:        slackuser.ID,
+		Real:        slackuser.RealName,
+		Host:        "host",
+		Roles:       roles,
+		DisplayName: slackuser.Profile.DisplayName,
+		Ghost:       true,
+		Me:          me,
+		Username:    slackuser.Profile.RealName,
+		FirstName:   slackuser.Profile.FirstName,
+		LastName:    slackuser.Profile.LastName,
+		Email:       slackuser.Profile.Email,
+		Position:    slackuser.Profile.Title,
+		Photo:       photo,
+		TeamID:      teamID,
+	}
+}
+
 func (s *Slack) createUser(slackuser *slack.User) *bridge.UserInfo {
 	if slackuser == nil {
 		return &bridge.UserInfo{}
@@ -1669,25 +1704,9 @@ func (s *Slack) createUser(slackuser *slack.User) *bridge.UserInfo {
 
 	rc := s.cfg.Current()
 	nick := s.resolveSlackNick(slackuser, rc)
-
 	me := slackuser.ID == s.sc.UserID()
 
-	info := &bridge.UserInfo{
-		Nick:        nick,
-		User:        slackuser.ID,
-		Real:        slackuser.RealName,
-		Host:        "host",
-		Roles:       "",
-		DisplayName: slackuser.Profile.DisplayName,
-		Ghost:       true,
-		Me:          me,
-		Username:    slackuser.Profile.RealName,
-		FirstName:   slackuser.Profile.FirstName,
-		LastName:    slackuser.Profile.LastName,
-		TeamID:      s.sc.TeamID(),
-	}
-
-	return info
+	return buildSlackUserInfo(slackuser, nick, s.sc.TeamID(), me)
 }
 
 func (s *Slack) Connected() bool {

@@ -98,3 +98,25 @@ func TestSlackClientStatusHelpers(t *testing.T) {
 	assert.True(t, up.Online)
 	assert.NotZero(t, up.LastActivity)
 }
+
+func TestBuildSlackUserInfo(t *testing.T) {
+	u := &slack.User{
+		ID:       "U123",
+		RealName: "Jane Doe",
+		IsBot:    true,
+		Profile: slack.UserProfile{
+			DisplayName: "jane",
+			Email:       "jane@example.com",
+			Title:       "Staff Engineer",
+			Image192:    "https://example.com/192.png",
+			Image512:    "https://example.com/512.png",
+		},
+	}
+
+	info := buildSlackUserInfo(u, "jane", "T1", false)
+	assert.Equal(t, "U123", info.User)
+	assert.Equal(t, "bot", info.Roles)
+	assert.Equal(t, "jane@example.com", info.Email)
+	assert.Equal(t, "Staff Engineer", info.Position)
+	assert.Equal(t, "https://example.com/512.png", info.Photo)
+}
