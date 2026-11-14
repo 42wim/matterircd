@@ -271,3 +271,33 @@ func TestSlackArchiveURL(t *testing.T) {
 	assert.Empty(t, s.PostURL(context.Background(), "invalid", events))
 	assert.Empty(t, s.PostURL(context.Background(), encodeSlackID(channelID, replyTS), events))
 }
+
+func TestFormatPinnedSlackMsg(t *testing.T) {
+	codeBlock := "```bash\nTesting\nTesting again\nTesting bash code block...\n```" //nolint:dupword
+	itemMsg := &slack.Message{
+		Msg: slack.Msg{
+			Text: codeBlock,
+		},
+	}
+
+	assert.Equal(
+		t,
+		codeBlock+" \x1d(📌pinned)\x1d",
+		formatPinnedSlackMsg(nil, true, itemMsg, "", subTypePinAdded),
+	)
+	assert.Equal(
+		t,
+		codeBlock+" \x1d(unpinned)\x1d",
+		formatPinnedSlackMsg(nil, false, itemMsg, "", subTypePinRemoved),
+	)
+	assert.Equal(
+		t,
+		"hello (re @alice: root) \x1d(📌unpinned)\x1d",
+		formatPinnedSlackMsg(nil, true, &slack.Message{Msg: slack.Msg{Text: "hello\n"}}, " (re @alice: root)", subTypePinRemoved),
+	)
+	assert.Equal(
+		t,
+		"\x1d(📌pinned)\x1d",
+		formatPinnedSlackMsg(nil, true, &slack.Message{}, "", subTypePinAdded),
+	)
+}

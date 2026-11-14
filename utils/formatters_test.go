@@ -116,3 +116,54 @@ func TestProcessMessageTextCodeBlockMidLineBackticks(t *testing.T) {
 		})
 	}
 }
+
+//nolint:goconst
+func TestFormatActionSuffix(t *testing.T) {
+	tests := []struct {
+		kind    ActionSuffixKind
+		unicode bool
+		want    string
+	}{
+		{SuffixEdited, true, " \x1d(✏️edited)\x1d"},
+		{SuffixEdited, false, " \x1d(edited)\x1d"},
+		{SuffixPinned, true, " \x1d(📌pinned)\x1d"},
+		{SuffixPinned, false, " \x1d(pinned)\x1d"},
+		{SuffixUnpinned, true, " \x1d(📌unpinned)\x1d"},
+		{SuffixUnpinned, false, " \x1d(unpinned)\x1d"},
+		{SuffixUpdated, true, " \x1d(🔄updated)\x1d"},
+		{SuffixUpdated, false, " \x1d(updated)\x1d"},
+		{SuffixDeleted, true, " \x1d(🗑️deleted)\x1d"},
+		{SuffixDeleted, false, " \x1d(deleted)\x1d"},
+		{SuffixEncrypted, true, " \x1d(🔒encrypted)\x1d"},
+		{SuffixEncrypted, false, " \x1d(encrypted)\x1d"},
+		{ActionSuffixKind("unknown"), true, ""},
+	}
+
+	for _, tc := range tests {
+		if got := FormatActionSuffix(tc.kind, tc.unicode); got != tc.want {
+			t.Errorf("FormatActionSuffix(%q, %v) = %q, want %q", tc.kind, tc.unicode, got, tc.want)
+		}
+	}
+}
+
+func TestAppendMessageSuffix(t *testing.T) {
+	tests := []struct {
+		name   string
+		msg    string
+		suffix string
+		want   string
+	}{
+		{name: "plain message", msg: "hello\n\n", suffix: " \x1d(📌pinned)\x1d", want: "hello \x1d(📌pinned)\x1d"},
+		{name: "empty message", msg: "", suffix: " \x1d(📌pinned)\x1d", want: "\x1d(📌pinned)\x1d"},
+		{name: "single-line action", msg: "\x01ACTION waves\x01", suffix: " \x1d(📌pinned)\x1d", want: "\x01ACTION waves \x1d(📌pinned)\x1d\x01"},
+		{name: "empty suffix", msg: "hello\r\n", suffix: "", want: "hello"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := AppendMessageSuffix(tc.msg, tc.suffix); got != tc.want {
+				t.Errorf("AppendMessageSuffix(%q, %q) = %q, want %q", tc.msg, tc.suffix, got, tc.want)
+			}
+		})
+	}
+}

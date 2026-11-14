@@ -8,6 +8,10 @@ import (
 	"time"
 
 	"github.com/42wim/matterircd/config"
+	"github.com/42wim/matterircd/utils"
+
+	"maunium.net/go/mautrix/event"
+
 	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/assert"
 )
@@ -74,4 +78,43 @@ func TestMatrixOnReconnect(t *testing.T) {
 			}
 		})
 	}
+}
+
+//nolint:goconst
+func TestExtractEventBody(t *testing.T) {
+	codeBlock := "```bash\nTesting\nTesting again\nTesting bash code block...\n```" //nolint:dupword
+
+	ev := &event.Event{
+		Content: event.Content{
+			Raw: map[string]any{
+				"body": "> <@alice:example.org> parent\n\n" + codeBlock,
+			},
+		},
+	}
+	assert.Equal(t, codeBlock, extractEventBody(ev))
+
+	editedEv := &event.Event{
+		Content: event.Content{
+			Raw: map[string]any{
+				"body": "* original",
+				"m.new_content": map[string]any{
+					"body": codeBlock,
+				},
+			},
+		},
+	}
+	assert.Equal(t, codeBlock, extractEventBody(editedEv))
+	assert.Empty(t, extractEventBody(nil))
+}
+
+func TestMatrixPinFormatting(t *testing.T) {
+	cfgUnicode := loadTestConfig(t, "[matrix]\nUnicode = true\n")
+	mUnicode := &Matrix{cfg: cfgUnicode}
+	assert.Equal(t, " \x1d(📌pinned)\x1d", mUnicode.formatSuffix(utils.SuffixPinned))
+	assert.Equal(t, " \x1d(📌unpinned)\x1d", mUnicode.formatSuffix(utils.SuffixUnpinned))
+
+	cfgASCII := loadTestConfig(t, "[matrix]\nUnicode = false\n")
+	mASCII := &Matrix{cfg: cfgASCII}
+	assert.Equal(t, " \x1d(pinned)\x1d", mASCII.formatSuffix(utils.SuffixPinned))
+	assert.Equal(t, " \x1d(unpinned)\x1d", mASCII.formatSuffix(utils.SuffixUnpinned))
 }

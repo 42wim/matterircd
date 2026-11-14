@@ -28,6 +28,8 @@ const (
 
 	subTypeMessageChanged = "message_changed"
 	subTypeMessageDeleted = "message_deleted"
+	subTypePinAdded       = "pin_added"
+	subTypePinRemoved     = "pin_removed"
 	eventChannelTopic     = "channel_topic"
 	eventChannelPurpose   = "channel_purpose"
 )
@@ -793,7 +795,7 @@ func (s *Slack) handleSlack(ctx context.Context) {
 				continue
 			}
 
-			s.handleItemMisc(ctx, ev.User, ev.Item.Channel, ev.Item.Message, "Message pinned")
+			s.handleItemPin(ctx, ev.User, ev.Item.Channel, ev.Item.Message, subTypePinAdded)
 		case *slack.PinRemovedEvent:
 			logger.Debugf("PinRemoved msg %#v", ev)
 
@@ -801,7 +803,7 @@ func (s *Slack) handleSlack(ctx context.Context) {
 				continue
 			}
 
-			s.handleItemMisc(ctx, ev.User, ev.Item.Channel, ev.Item.Message, "Message unpinned")
+			s.handleItemPin(ctx, ev.User, ev.Item.Channel, ev.Item.Message, subTypePinRemoved)
 		}
 	}
 }
@@ -901,23 +903,52 @@ func (s *Slack) handleSlackReaction(ctx context.Context, userID, channelID, ts, 
 	}
 }
 
-func (s *Slack) handleItemMisc(ctx context.Context, userID, channelID string, itemMsg *slack.Message, action string) {
-	msgID := encodeSlackID(channelID, itemMsg.Timestamp)
-
+func (s *Slack) resolveItemParent(ctx context.Context, channelID string, itemMsg *slack.Message) (string, string) {
 	parentID := s.cachedParentID(channelID, itemMsg.Timestamp)
 	if parentID == "" && itemMsg.ThreadTimestamp != "" && itemMsg.ThreadTimestamp != itemMsg.Timestamp {
 		parentID = encodeSlackID(channelID, itemMsg.ThreadTimestamp)
 	}
 
-	msg := s.cleanupMessage(action + " (" + itemMsg.Text + ")")
+	replySuffix := ""
 	if itemMsg.ThreadTimestamp != "" && itemMsg.ThreadTimestamp != itemMsg.Timestamp {
-		msg += s.formatReplySuffix(ctx, channelID, itemMsg.ThreadTimestamp)
+		replySuffix = s.formatReplySuffix(ctx, channelID, itemMsg.ThreadTimestamp)
 	}
 
-	s.handleActionMisc(userID, channelID, msgID, parentID, msg, slackTSMillis(itemMsg.Timestamp))
+	return parentID, replySuffix
 }
 
-func (s *Slack) handleActionMisc(userID, channelID, msgID, parentID, msg string, createAt int64) {
+func (s *Slack) handleItemMisc(ctx context.Context, userID, channelID string, itemMsg *slack.Message, action string) {
+	msgID := encodeSlackID(channelID, itemMsg.Timestamp)
+	parentID, replySuffix := s.resolveItemParent(ctx, channelID, itemMsg)
+	msg := s.cleanupMessage(action+" ("+itemMsg.Text+")") + replySuffix
+
+	s.handleActionMisc(userID, channelID, msgID, parentID, msg, "", slackTSMillis(itemMsg.Timestamp))
+}
+
+func formatPinnedSlackMsg(cleanup func(string) string, unicode bool, itemMsg *slack.Message, replySuffix, kind string) string {
+	rawText, msghandled := formatSlackMsg(&itemMsg.Msg)
+	if !msghandled {
+		rawText = itemMsg.Text
+	}
+
+	if cleanup != nil {
+		rawText = cleanup(rawText)
+	}
+
+	msg := utils.AppendMessageSuffix(rawText, replySuffix)
+
+	return utils.AppendMessageSuffix(msg, slackActionSuffix(unicode, kind))
+}
+
+func (s *Slack) handleItemPin(ctx context.Context, userID, channelID string, itemMsg *slack.Message, kind string) {
+	msgID := encodeSlackID(channelID, itemMsg.Timestamp)
+	parentID, replySuffix := s.resolveItemParent(ctx, channelID, itemMsg)
+	msg := formatPinnedSlackMsg(s.cleanupMessage, s.FormatterConfig().Unicode, itemMsg, replySuffix, kind)
+
+	s.handleActionMisc(userID, channelID, msgID, parentID, msg, "post_edited", slackTSMillis(itemMsg.Timestamp))
+}
+
+func (s *Slack) handleActionMisc(userID, channelID, msgID, parentID, msg, eventType string, createAt int64) {
 	suser, err := s.sc.GetUserInfo(userID)
 	if err != nil {
 		return
@@ -934,7 +965,7 @@ func (s *Slack) handleActionMisc(userID, channelID, msgID, parentID, msg string,
 		return
 	}
 
-	s.sendPublicMessage(ghost, msg, channelID, msgID, parentID, "", createAt)
+	s.sendPublicMessage(ghost, msg, channelID, msgID, parentID, eventType, createAt)
 }
 
 func (s *Slack) handleMemberLeftChannel(ctx context.Context, rmsg *slack.MemberLeftChannelEvent) {
@@ -1061,17 +1092,13 @@ func formatSlackMsg(m *slack.Msg) (string, bool) {
 func slackActionSuffix(unicode bool, kind string) string {
 	switch kind {
 	case subTypeMessageChanged:
-		if unicode {
-			return " \x1d(✏️edited)\x1d"
-		}
-
-		return " \x1d(edited)\x1d"
+		return utils.FormatActionSuffix(utils.SuffixEdited, unicode)
 	case subTypeMessageDeleted:
-		if unicode {
-			return " \x1d(🗑️deleted)\x1d"
-		}
-
-		return " \x1d(deleted)\x1d"
+		return utils.FormatActionSuffix(utils.SuffixDeleted, unicode)
+	case subTypePinAdded:
+		return utils.FormatActionSuffix(utils.SuffixPinned, unicode)
+	case subTypePinRemoved:
+		return utils.FormatActionSuffix(utils.SuffixUnpinned, unicode)
 	default:
 		return ""
 	}
@@ -1084,9 +1111,8 @@ func formatDeletedSlackMsg(rc *config.RuntimeConfig, origMsg, replySuffix string
 	}
 
 	unicode := rc != nil && rc.Slack.Formatter.Unicode
-	out := summary + replySuffix + slackActionSuffix(unicode, subTypeMessageDeleted)
 
-	return strings.TrimLeft(out, " ")
+	return utils.AppendMessageSuffix(summary+replySuffix, slackActionSuffix(unicode, subTypeMessageDeleted))
 }
 
 func (s *Slack) resolveSlackPostGhost(rmsg *slack.MessageEvent) (*bridge.UserInfo, bool) {

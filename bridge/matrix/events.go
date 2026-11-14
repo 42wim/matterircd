@@ -10,47 +10,12 @@ import (
 	"maunium.net/go/mautrix/id"
 
 	"github.com/42wim/matterircd/bridge"
+	"github.com/42wim/matterircd/utils"
 	"github.com/matterbridge/matrixclient"
 )
 
-type suffixKind int
-
-const (
-	suffixEdited suffixKind = iota
-	suffixDeleted
-	suffixEncrypted
-	suffixPinned
-	suffixUnpinned
-)
-
-//nolint:gocyclo
-func (m *Matrix) formatSuffix(kind suffixKind) string {
-	useUnicode := m.cfg.Matrix().Formatter.Unicode
-
-	switch {
-	case kind == suffixEdited && useUnicode:
-		return " \x1d(✏️edited)\x1d"
-	case kind == suffixEdited:
-		return " \x1d(edited)\x1d"
-	case kind == suffixDeleted && useUnicode:
-		return " \x1d(🗑️deleted)\x1d"
-	case kind == suffixDeleted:
-		return " \x1d(deleted)\x1d"
-	case kind == suffixEncrypted && useUnicode:
-		return " \x1d(🔒encrypted)\x1d"
-	case kind == suffixEncrypted:
-		return " \x1d(encrypted)\x1d"
-	case kind == suffixPinned && useUnicode:
-		return " \x1d(📌pinned)\x1d"
-	case kind == suffixPinned:
-		return " \x1d(pinned)\x1d"
-	case kind == suffixUnpinned && useUnicode:
-		return " \x1d(📌unpinned)\x1d"
-	case kind == suffixUnpinned:
-		return " \x1d(unpinned)\x1d"
-	default:
-		return ""
-	}
+func (m *Matrix) formatSuffix(kind utils.ActionSuffixKind) string {
+	return utils.FormatActionSuffix(kind, m.cfg.Matrix().Formatter.Unicode)
 }
 
 // shortText returns the start of the first line, enough to recognize a message when it is
@@ -181,7 +146,7 @@ func (m *Matrix) handleEdit(e *matrixclient.Edit, peer id.UserID) {
 		}
 	}
 
-	text += m.formatSuffix(suffixEdited)
+	text = utils.AppendMessageSuffix(text, m.formatSuffix(utils.SuffixEdited))
 
 	m.sendText(ghost, e.RoomID, e.Direct, peer, e.TargetID, parentID, text, "post_edited", m.messageType(e.Text), e.Timestamp)
 }
@@ -258,7 +223,7 @@ func (m *Matrix) handleRedaction(r *matrixclient.Redaction, peer id.UserID) {
 		}
 	}
 
-	summary += m.formatSuffix(suffixDeleted)
+	summary = utils.AppendMessageSuffix(summary, m.formatSuffix(utils.SuffixDeleted))
 
 	m.msgParentCache.Remove(r.TargetID)
 
@@ -314,15 +279,47 @@ func (m *Matrix) handleReactionRemove(r *matrixclient.Redaction, peer id.UserID,
 	})
 }
 
-// fetchText looks up and caches the text of a message missing from the cache. It returns
-// an empty string if the lookup fails, so that callers fall back to showing no text.
+func extractEventBody(ev *event.Event) string {
+	if ev == nil {
+		return ""
+	}
+
+	if newContent, ok := ev.Content.Raw["m.new_content"].(map[string]any); ok {
+		if body, ok := newContent["body"].(string); ok && body != "" {
+			return event.TrimReplyFallbackText(body)
+		}
+	}
+
+	body, _ := ev.Content.Raw["body"].(string)
+
+	return event.TrimReplyFallbackText(body)
+}
+
+// fetchText looks up the full text of a message for pin notifications and seeds the
+// short-text cache if absent. It returns an empty string if the lookup fails or the
+// event is encrypted, so callers can fall back to the cached summary.
 func (m *Matrix) fetchText(roomID id.RoomID, eventID id.EventID) string {
-	if !m.allowPinFetch() {
+	if m.mc == nil || !m.allowPinFetch() {
 		return ""
 	}
 
 	ctx, cancel := context.WithTimeout(m.ctx, fetchTextTimeout)
 	defer cancel()
+
+	m.editMu.Lock()
+	latestEditID, hasEdit := m.latestEditIDs.Get(eventID)
+	m.editMu.Unlock()
+
+	if hasEdit && latestEditID != "" {
+		ev, err := m.mc.Event(ctx, roomID, latestEditID)
+		if err == nil {
+			if body := extractEventBody(ev); body != "" {
+				m.cacheTextIfAbsent(eventID, body)
+
+				return body
+			}
+		}
+	}
 
 	ev, err := m.mc.Event(ctx, roomID, eventID)
 	if err != nil {
@@ -332,12 +329,10 @@ func (m *Matrix) fetchText(roomID id.RoomID, eventID id.EventID) string {
 	}
 
 	// Encrypted content is not decrypted by Event, so there is no body to show.
-	body, _ := ev.Content.Raw["body"].(string)
+	body := extractEventBody(ev)
 	m.cacheTextIfAbsent(eventID, body)
 
-	text, _ := m.msgTextCache.Get(eventID)
-
-	return text
+	return body
 }
 
 // OnPin implements matrixclient.PinHandler.
@@ -351,18 +346,41 @@ func (m *Matrix) handlePin(p *matrixclient.PinChange, direct bool, peer id.UserI
 		return
 	}
 
-	text, ok := m.msgTextCache.Get(p.EventID)
-	if !ok {
-		text = m.fetchText(p.RoomID, p.EventID)
+	text := m.fetchText(p.RoomID, p.EventID)
+	rawText := text
+
+	if text == "" {
+		cached, _ := m.msgTextCache.Get(p.EventID)
+		rawText = cached
+		text = m.cachedSummary(cached)
+	} else {
+		text = strings.TrimRight(text, "\n")
 	}
 
-	kind := suffixUnpinned
-	if p.Pinned {
-		kind = suffixPinned
+	parentID := m.resolveThreadRoot(m.ctx, p.RoomID, p.EventID)
+	if parentID == p.EventID {
+		parentID = ""
 	}
+
+	mxCfg := m.cfg.Matrix()
+	if !mxCfg.HideReplies && parentID != "" {
+		message, err := m.addParentMsg(m.ctx, p.RoomID, parentID, text, mxCfg.ShortenRepliesTo, "@")
+		if err != nil {
+			logger.Errorf("Unable to get parent post for %s: %s", p.EventID, err)
+		} else {
+			text = message
+		}
+	}
+
+	kind := utils.SuffixUnpinned
+	if p.Pinned {
+		kind = utils.SuffixPinned
+	}
+
+	text = utils.AppendMessageSuffix(text, m.formatSuffix(kind))
 
 	m.msgRoomCache.Add(p.EventID, p.RoomID)
-	m.sendText(ghost, p.RoomID, direct, peer, p.EventID, "", m.cachedSummary(text)+m.formatSuffix(kind), "post_edited", m.messageType(text), 0)
+	m.sendText(ghost, p.RoomID, direct, peer, p.EventID, parentID, text, "post_edited", m.messageType(rawText), 0)
 }
 
 // OnTyping implements matrixclient.TypingHandler.
@@ -705,7 +723,7 @@ func (m *Matrix) fileFromMessage(msg *matrixclient.Message) *bridge.File {
 
 	if mxc == "" && msg.File != nil {
 		mxc = msg.File.URL
-		note = m.formatSuffix(suffixEncrypted)
+		note = m.formatSuffix(utils.SuffixEncrypted)
 	}
 
 	if mxc == "" {
