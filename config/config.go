@@ -154,6 +154,10 @@ type SharedConfig struct {
 
 	ShowOwnReactions bool
 
+	HideReactions bool
+
+	DisableShowOwnModified bool
+
 	ShowMentions bool
 
 	DisableDefaultMentions bool
@@ -197,10 +201,6 @@ type MattermostConfig struct {
 	HideReplies      bool
 	ShortenRepliesTo int
 
-	HideReactions bool
-
-	DisableShowOwnModified bool
-
 	LastViewedSaveFile   string
 	ForceSyncOnReconnect bool
 
@@ -227,6 +227,9 @@ type SlackConfig struct {
 	UseDisplayName   bool
 	PreferNickname   bool
 	UseRealName      bool
+
+	MessageAttachmentShortFieldMaxLineLength int
+	MessageAttachmentOmitFieldTitles         bool
 }
 
 type MatrixConfig struct {
@@ -272,6 +275,10 @@ func (c *Config) buildSharedConfig(section string) SharedConfig {
 		CollapseScrollback: c.v.GetBool(section + ".CollapseScrollback"),
 
 		ShowOwnReactions: c.v.GetBool(section + ".ShowOwnReactions"),
+
+		HideReactions: c.v.GetBool(section + ".HideReactions"),
+
+		DisableShowOwnModified: c.v.GetBool(section + ".DisableShowOwnModified"),
 
 		ShowMentions: c.v.GetBool(section + ".ShowMentions"),
 
@@ -557,10 +564,6 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 			HideReplies:      c.v.GetBool("mattermost.HideReplies"),
 			ShortenRepliesTo: c.v.GetInt("mattermost.ShortenRepliesTo"),
 
-			HideReactions: c.v.GetBool("mattermost.HideReactions"),
-
-			DisableShowOwnModified: c.v.GetBool("mattermost.DisableShowOwnModified"),
-
 			LastViewedSaveFile:   c.v.GetString("mattermost.LastViewedSaveFile"),
 			ForceSyncOnReconnect: c.v.GetBool("mattermost.ForceSyncOnReconnect"),
 
@@ -586,6 +589,9 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 			UseDisplayName:   c.v.GetBool("slack.UseDisplayName"),
 			PreferNickname:   c.v.GetBool("slack.PreferNickname"),
 			UseRealName:      c.v.GetBool("slack.UseRealName"),
+
+			MessageAttachmentShortFieldMaxLineLength: c.v.GetInt("slack.MessageAttachmentShortFieldMaxLineLength"),
+			MessageAttachmentOmitFieldTitles:         c.v.GetBool("slack.MessageAttachmentOmitFieldTitles"),
 		},
 
 		Matrix: MatrixConfig{

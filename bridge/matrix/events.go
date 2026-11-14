@@ -137,6 +137,10 @@ func (m *Matrix) handleEdit(e *matrixclient.Edit, peer id.UserID) {
 	text := e.Text
 	mxCfg := m.cfg.Matrix()
 
+	if ghost.Me && mxCfg.DisableShowOwnModified {
+		return
+	}
+
 	if !mxCfg.HideReplies && parentID != "" {
 		message, err := m.addParentMsg(m.ctx, e.RoomID, parentID, text, mxCfg.ShortenRepliesTo, "@")
 		if err != nil {
@@ -213,6 +217,10 @@ func (m *Matrix) handleRedaction(r *matrixclient.Redaction, peer id.UserID) {
 
 	summary := m.cachedSummary(text)
 	mxCfg := m.cfg.Matrix()
+
+	if ghost.Me && mxCfg.DisableShowOwnModified {
+		return
+	}
 
 	if !mxCfg.HideReplies && parentID != "" {
 		message, err := m.addParentMsg(m.ctx, r.RoomID, parentID, summary, mxCfg.ShortenRepliesTo, "@")
