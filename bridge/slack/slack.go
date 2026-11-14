@@ -51,6 +51,8 @@ type Slack struct {
 	credentials        bridge.Credentials
 	eventChan          chan *bridge.Event
 	onConnect          func()
+	onWsError          func(error)
+	wasDisconnected    atomic.Bool
 	userByNick         map[string]string
 	msgThreadRootCache *lru.Cache[string, string]
 	msgParentCache     *lru.Cache[string, slackCachedPost]
@@ -64,15 +66,21 @@ const systemUser = "system"
 
 var logger *logrus.Entry
 
-func New(cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Event, onConnect func()) (bridge.Bridger, error) {
+func New(cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Event, onConnect func(), onWsError ...func(error)) (bridge.Bridger, error) {
 	threadRootCache, _ := lru.New[string, string](slackThreadRootCacheSize)
 	parentCache, _ := lru.New[string, slackCachedPost](slackParentCacheSize)
 	lastSentCache, _ := lru.New[string, string](slackLastSentCacheSize)
+
+	var wsErrFn func(error)
+	if len(onWsError) > 0 {
+		wsErrFn = onWsError[0]
+	}
 
 	s := &Slack{
 		credentials:        cred,
 		eventChan:          eventChan,
 		onConnect:          onConnect,
+		onWsError:          wsErrFn,
 		userByNick:         make(map[string]string),
 		msgThreadRootCache: threadRootCache,
 		msgParentCache:     parentCache,
@@ -1051,8 +1059,6 @@ func (s *Slack) handleSlackEvent(ctx context.Context, msg slack.RTMEvent) {
 		s.handleMemberLeftChannel(ctx, ev)
 	case *slack.MemberJoinedChannelEvent:
 		s.handleMemberJoinedChannel(ctx, ev)
-	case *slack.DisconnectedEvent:
-		logger.Debug("disconnected event received, we should reconnect now..")
 	case *slack.ReactionAddedEvent:
 		logger.Debugf("ReactionAdded msg %#v", ev)
 		s.handleSlackReaction(ctx, ev.User, ev.Item.Channel, ev.Item.Timestamp, ev.Reaction, true)
@@ -1076,6 +1082,26 @@ func (s *Slack) handleSlackEvent(ctx context.Context, msg slack.RTMEvent) {
 	default:
 		if !s.handleSlackItemEvent(ctx, msg.Data) {
 			s.handleSlackLifecycleEvent(msg.Data)
+		}
+	}
+}
+
+func (s *Slack) handleSlackConnected() {
+	if s.wasDisconnected.CompareAndSwap(true, false) && s.onConnect != nil {
+		go s.onConnect()
+	}
+}
+
+func (s *Slack) handleSlackDisconnected(ev *slack.DisconnectedEvent) {
+	if logger != nil {
+		logger.Debugf("disconnected event received (intentional=%v, cause=%v)", ev.Intentional, ev.Cause)
+	}
+
+	if !ev.Intentional {
+		s.wasDisconnected.Store(true)
+
+		if s.onWsError != nil {
+			s.onWsError(ev.Cause)
 		}
 	}
 }
@@ -1159,6 +1185,10 @@ func (s *Slack) handleSlackLifecycleEvent(data any) {
 		s.emitChannelRemove(ev.Channel)
 	case *slack.UserTypingEvent:
 		s.handleSlackTyping(ev)
+	case *slack.ConnectedEvent:
+		s.handleSlackConnected()
+	case *slack.DisconnectedEvent:
+		s.handleSlackDisconnected(ev)
 	}
 }
 

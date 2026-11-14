@@ -2264,23 +2264,24 @@ func (u *User) loginTo(protocol string) error {
 	eventChan := u.eventChan
 	u.eventLoopMutex.Unlock()
 
+	onWsError := func(err error) {
+		if err != nil {
+			u.handleBridgeDisconnect(err.Error())
+			return
+		}
+
+		u.handleBridgeDisconnect("")
+	}
+
 	switch protocol {
 	case serviceMastodon:
 		br, err = mastodon.New(u.cfg, u.Credentials, eventChan, u.addUsersToChannels)
 	case serviceMatrix:
 		br, _, err = matrix.New(u.ctx, u.cfg, u.Credentials, eventChan, u.addUsersToChannels)
 	case serviceSlack:
-		br, err = slack.New(u.cfg, u.Credentials, eventChan, u.addUsersToChannels)
+		br, err = slack.New(u.cfg, u.Credentials, eventChan, u.addUsersToChannels, onWsError)
 	case serviceMattermost:
-		br, _, err = mattermost.New(u.ctx, u.cfg, u.Credentials, eventChan, u.addUsersToChannels, func(err error) {
-			if err != nil {
-				u.handleBridgeDisconnect(err.Error())
-
-				return
-			}
-
-			u.handleBridgeDisconnect("")
-		})
+		br, _, err = mattermost.New(u.ctx, u.cfg, u.Credentials, eventChan, u.addUsersToChannels, onWsError)
 	}
 
 	if err != nil {
