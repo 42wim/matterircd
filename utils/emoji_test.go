@@ -28,6 +28,7 @@ func TestEmojiFromAliasPrecedence(t *testing.T) {
 func TestEmojiReplaceAliasesEyes(t *testing.T) {
 	got := EmojiReplaceAliases("take a look :eyes:", nil)
 	want := "take a look 👀"
+
 	if got != want {
 		t.Errorf("EmojiReplaceAliases() = %q, want %q", got, want)
 	}
