@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/42wim/matterircd/bridge"
 	"github.com/matterbridge/slackclient"
 	"github.com/slack-go/slack"
 	"github.com/stretchr/testify/assert"
@@ -221,4 +222,50 @@ func TestSlackClientChannelMembershipCaches(t *testing.T) {
 
 	sc.RemoveChannel("C1")
 	assert.False(t, sc.IsChannelMember("C1"))
+}
+
+func TestSlackChannelToInfoAndRenameEvent(t *testing.T) {
+	pub := slack.Channel{
+		GroupConversation: slack.GroupConversation{
+			Name: "general",
+			Conversation: slack.Conversation{
+				ID:     "C1",
+				Latest: &slack.Message{Msg: slack.Msg{Timestamp: "1700000000.000000"}},
+			},
+		},
+	}
+
+	pubInfo := slackChannelToInfo("T1", &pub)
+	assert.Equal(t, "general", pubInfo.Name)
+	assert.False(t, pubInfo.Private)
+	assert.False(t, pubInfo.DM)
+	assert.Equal(t, int64(1700000000000), pubInfo.LastPostAt)
+
+	priv := slack.Channel{
+		GroupConversation: slack.GroupConversation{
+			Name: "secret",
+			Conversation: slack.Conversation{
+				ID:        "G1",
+				IsPrivate: true,
+			},
+		},
+	}
+
+	privInfo := slackChannelToInfo("T1", &priv)
+	assert.True(t, privInfo.Private)
+
+	sc := slackclient.New(slackclient.Credentials{})
+	evCh := make(chan *bridge.Event, 1)
+	s := &Slack{sc: sc, eventChan: evCh}
+
+	s.emitChannelUpdate("C1", "#renamed-chan")
+
+	ev := <-evCh
+	assert.Equal(t, "channel_update", ev.Type)
+
+	upd, ok := ev.Data.(*bridge.ChannelUpdateEvent)
+	assert.True(t, ok)
+	assert.Equal(t, "C1", upd.ChannelID)
+	assert.Equal(t, "renamed-chan", upd.Name)
+	assert.Equal(t, "#renamed-chan", sc.GetChannelName("C1"))
 }

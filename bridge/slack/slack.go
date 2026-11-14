@@ -32,7 +32,9 @@ const (
 	subTypePinAdded       = "pin_added"
 	subTypePinRemoved     = "pin_removed"
 	eventChannelTopic     = "channel_topic"
+	eventGroupTopic       = "group_topic"
 	eventChannelPurpose   = "channel_purpose"
+	eventGroupPurpose     = "group_purpose"
 )
 
 type slackCachedPost struct {
@@ -419,19 +421,33 @@ func (s *Slack) GetUsers() []*bridge.UserInfo {
 	return users
 }
 
+func slackChannelToInfo(teamID string, ch *slack.Channel) *bridge.ChannelInfo {
+	if ch == nil {
+		return nil
+	}
+
+	var lastPostAt int64
+	if ch.Latest != nil && ch.Latest.Timestamp != "" {
+		lastPostAt = slackTSMillis(ch.Latest.Timestamp)
+	}
+
+	return &bridge.ChannelInfo{
+		Name:       ch.Name,
+		ID:         ch.ID,
+		TeamID:     teamID,
+		DM:         ch.IsIM || ch.IsMpIM,
+		Private:    ch.IsPrivate || ch.IsGroup,
+		LastPostAt: lastPostAt,
+	}
+}
+
 func (s *Slack) GetChannels() []*bridge.ChannelInfo {
 	var channels []*bridge.ChannelInfo
 
 	teamID := s.sc.TeamID()
 
 	for _, mmchannel := range s.sc.GetChannels() {
-		channels = append(channels, &bridge.ChannelInfo{
-			Name:    mmchannel.Name,
-			ID:      mmchannel.ID,
-			TeamID:  teamID,
-			DM:      mmchannel.IsIM || mmchannel.IsMpIM,
-			Private: !mmchannel.IsOpen,
-		})
+		channels = append(channels, slackChannelToInfo(teamID, &mmchannel))
 	}
 
 	return channels
@@ -458,6 +474,13 @@ func (s *Slack) GetChannel(ctx context.Context, channelID string) (*bridge.Chann
 	for _, channel := range channels {
 		if channel.ID == channelID {
 			return channel, nil
+		}
+	}
+
+	if s.sc != nil {
+		ch, err := s.sc.GetConversationInfo(ctx, channelID)
+		if err == nil && ch != nil {
+			return slackChannelToInfo(s.sc.TeamID(), ch), nil
 		}
 	}
 
@@ -1117,9 +1140,9 @@ func (s *Slack) handleSlackLifecycleEvent(data any) {
 	case *slack.GroupCreatedEvent:
 		s.emitChannelCreate(ev.Channel.ID, ev.Channel.Name)
 	case *slack.ChannelRenameEvent:
-		s.emitChannelCreate(ev.Channel.ID, ev.Channel.Name)
+		s.emitChannelUpdate(ev.Channel.ID, ev.Channel.Name)
 	case *slack.GroupRenameEvent:
-		s.emitChannelCreate(ev.Group.ID, ev.Group.Name)
+		s.emitChannelUpdate(ev.Group.ID, ev.Group.Name)
 	case *slack.ChannelDeletedEvent:
 		s.emitChannelDelete(ev.Channel)
 	case *slack.ChannelArchiveEvent:
@@ -1187,6 +1210,26 @@ func (s *Slack) emitChannelCreate(channelID, name string) {
 		Data: &bridge.ChannelCreateEvent{
 			ChannelID: channelID,
 			Name:      chName,
+		},
+	}
+}
+
+func (s *Slack) emitChannelUpdate(channelID, name string) {
+	if channelID == "" || name == "" {
+		return
+	}
+
+	cleanName := strings.TrimPrefix(name, "#")
+
+	s.sc.UpdateChannel(channelID, cleanName)
+	s.sc.InvalidateUserChannels("")
+
+	s.eventChan <- &bridge.Event{
+		Type: "channel_update",
+		Data: &bridge.ChannelUpdateEvent{
+			ChannelID:   channelID,
+			Name:        cleanName,
+			DisplayName: cleanName,
 		},
 	}
 }
@@ -1800,6 +1843,32 @@ func formatSlackActionPostText(rmsg *slack.MessageEvent, isUnfurl bool, shortFie
 	return formatSlackMsgOpts(&rmsg.Msg, shortFieldMaxLen, omitFieldTitles)
 }
 
+func (s *Slack) handleSlackTopicEvent(rmsg *slack.MessageEvent) bool {
+	if rmsg.SubType != eventChannelTopic && rmsg.SubType != eventGroupTopic {
+		return false
+	}
+
+	topic := s.cleanupMessage(rmsg.Topic)
+	s.sc.UpdateTopic(rmsg.Channel, topic)
+
+	if !strings.HasPrefix(rmsg.Channel, "D") {
+		s.eventChan <- &bridge.Event{
+			Type: eventChannelTopic,
+			Data: &bridge.ChannelTopicEvent{
+				Text:      topic,
+				ChannelID: rmsg.Channel,
+				UserID:    rmsg.User,
+			},
+		}
+
+		return true
+	}
+
+	rmsg.Text = "\x01ACTION updated topic to: " + topic + "\x01"
+
+	return false
+}
+
 //nolint:funlen,gocyclo
 func (s *Slack) handleSlackActionPost(ctx context.Context, rmsg *slack.MessageEvent) {
 	logger.Debugf("handleSlackActionPost: receiving msg %#v", rmsg)
@@ -1819,26 +1888,12 @@ func (s *Slack) handleSlackActionPost(ctx context.Context, rmsg *slack.MessageEv
 		return
 	}
 
-	if rmsg.SubType == eventChannelTopic {
-		topic := s.cleanupMessage(rmsg.Topic)
-		if !strings.HasPrefix(rmsg.Channel, "D") {
-			s.eventChan <- &bridge.Event{
-				Type: eventChannelTopic,
-				Data: &bridge.ChannelTopicEvent{
-					Text:      topic,
-					ChannelID: rmsg.Channel,
-					UserID:    rmsg.User,
-				},
-			}
-
-			return
-		}
-
-		rmsg.Text = "\x01ACTION updated topic to: " + topic + "\x01"
+	if s.handleSlackTopicEvent(rmsg) {
+		return
 	}
 
 	eventType := ""
-	if rmsg.SubType == eventChannelPurpose && !strings.HasPrefix(rmsg.Channel, "D") {
+	if (rmsg.SubType == eventChannelPurpose || rmsg.SubType == eventGroupPurpose) && !strings.HasPrefix(rmsg.Channel, "D") {
 		eventType = eventChannelPurpose
 
 		if rmsg.Purpose != "" {
