@@ -121,3 +121,59 @@ func TestBuildSlackUserInfo(t *testing.T) {
 	assert.Equal(t, "Staff Engineer", info.Position)
 	assert.Equal(t, "https://example.com/512.png", info.Photo)
 }
+
+func TestSlackClientCountsAndLookups(t *testing.T) {
+	sc := slackclient.New(slackclient.Credentials{})
+	assert.Equal(t, 0, sc.GetUserCount())
+	assert.Equal(t, 0, sc.GetChannelCount())
+
+	err := sc.Ping(context.Background())
+	if err == nil {
+		t.Fatal("expected error from Ping when disconnected")
+	}
+
+	err = sc.WsPing(context.Background())
+	if err == nil {
+		t.Fatal("expected error from WsPing when disconnected")
+	}
+
+	s := &Slack{sc: sc}
+
+	err = s.Ping(context.Background(), "http")
+	if err == nil {
+		t.Fatal("expected error from Slack.Ping(http) when disconnected")
+	}
+
+	err = s.Ping(context.Background(), "ws")
+	if err == nil {
+		t.Fatal("expected error from Slack.Ping(ws) when disconnected")
+	}
+
+	sc.UpdateUser(slack.User{
+		ID:   "U10",
+		Name: "carol",
+		Profile: slack.UserProfile{
+			DisplayName: "CarolW",
+		},
+	})
+	assert.Equal(t, 1, sc.GetUserCount())
+
+	u := sc.GetUserByUsername("CAROL")
+	if assert.NotNil(t, u) {
+		assert.Equal(t, "U10", u.ID)
+	}
+
+	uByDisplay := sc.GetUserByUsername("carolw")
+	if assert.NotNil(t, uByDisplay) {
+		assert.Equal(t, "U10", uByDisplay.ID)
+	}
+
+	assert.Nil(t, sc.GetUserByUsername("nonexistent"))
+
+	sc.UpdateChannel("C10", "general")
+	assert.Equal(t, 1, sc.GetChannelCount())
+	assert.Equal(t, "#general", sc.GetChannelName("C10"))
+
+	sc.RemoveChannel("C10")
+	assert.Equal(t, 0, sc.GetChannelCount())
+}

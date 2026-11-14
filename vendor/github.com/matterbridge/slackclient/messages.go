@@ -2,6 +2,7 @@ package slackclient
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"strings"
 	"time"
@@ -213,4 +214,25 @@ func (c *Client) SearchMessages(ctx context.Context, query string, count int) ([
 	}
 
 	return res.Matches, nil
+}
+
+func (c *Client) SendTyping(channelID string) {
+	if c.rtm == nil || channelID == "" {
+		return
+	}
+
+	c.rtm.SendMessage(c.rtm.NewTypingMessage(strings.ToUpper(channelID)))
+}
+
+func (c *Client) GetFileInfo(ctx context.Context, fileID string) (*slack.File, error) {
+	if c.sc == nil || fileID == "" {
+		return nil, errors.New("slackclient: file info unavailable")
+	}
+
+	file, _, _, err := c.sc.GetFileInfoContext(ctx, fileID, 0, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	return file, nil
 }

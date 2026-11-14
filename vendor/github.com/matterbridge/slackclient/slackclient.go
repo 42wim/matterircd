@@ -3,6 +3,7 @@
 package slackclient
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -32,19 +33,26 @@ type presenceEntry struct {
 	verifiedAt int64
 }
 
+type userChannelsEntry struct {
+	channels  []string
+	fetchedAt int64
+}
+
 type Client struct {
 	sync.RWMutex
 
-	cred       Credentials
-	sc         *slack.Client
-	rtm        *slack.RTM
-	info       *slack.Info
-	users      map[string]slack.User
-	presences  map[string]presenceEntry
-	channels   map[string]string
-	dmChannels map[string]string
-	msgLast    map[string]string
-	connected  bool
+	cred         Credentials
+	sc           *slack.Client
+	rtm          *slack.RTM
+	info         *slack.Info
+	users        map[string]slack.User
+	presences    map[string]presenceEntry
+	channels     map[string]string
+	userChannels map[string]userChannelsEntry
+	dmChannels   map[string]string
+	msgLast      map[string]string
+	pongCh       chan struct{}
+	connected    bool
 
 	logger        *logrus.Entry
 	rootLogger    *logrus.Logger
@@ -75,8 +83,10 @@ func New(cred Credentials) *Client {
 		users:         make(map[string]slack.User),
 		presences:     make(map[string]presenceEntry),
 		channels:      make(map[string]string),
+		userChannels:  make(map[string]userChannelsEntry),
 		dmChannels:    make(map[string]string),
 		msgLast:       make(map[string]string),
+		pongCh:        make(chan struct{}, 1),
 		rootLogger:    rootLogger,
 		logger:        rootLogger.WithFields(logrus.Fields{"prefix": "slackclient"}),
 		rootAPILogger: rootAPILogger,
@@ -126,6 +136,7 @@ func (c *Client) Login() error {
 	c.users = make(map[string]slack.User)
 	c.presences = make(map[string]presenceEntry)
 	c.channels = make(map[string]string)
+	c.userChannels = make(map[string]userChannelsEntry)
 
 	go c.rtm.ManageConnection()
 
@@ -182,6 +193,57 @@ func (c *Client) Logout() error {
 
 func (c *Client) Connected() bool {
 	return c.connected
+}
+
+func (c *Client) NotifyPong() {
+	if c.pongCh == nil {
+		return
+	}
+
+	select {
+	case c.pongCh <- struct{}{}:
+	default:
+	}
+}
+
+func (c *Client) HttpPing(ctx context.Context) error {
+	if c.sc == nil || !c.connected {
+		return errors.New("slackclient: not connected")
+	}
+
+	_, err := c.sc.AuthTestContext(ctx)
+
+	return err
+}
+
+func (c *Client) WsPing(ctx context.Context) error {
+	if c.rtm == nil || !c.connected || c.rtm.GetInfo() == nil {
+		return errors.New("slackclient: websocket not connected")
+	}
+
+	if c.pongCh != nil {
+		select {
+		case <-c.pongCh:
+		default:
+		}
+	}
+
+	c.rtm.SendMessage(&slack.OutgoingMessage{Type: "ping"})
+
+	if c.pongCh == nil {
+		return nil
+	}
+
+	select {
+	case <-c.pongCh:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (c *Client) Ping(ctx context.Context) error {
+	return c.HttpPing(ctx)
 }
 
 func (c *Client) IncomingEvents() <-chan slack.RTMEvent {

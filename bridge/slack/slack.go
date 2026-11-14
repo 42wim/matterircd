@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/42wim/matterircd/bridge"
@@ -52,6 +53,7 @@ type Slack struct {
 	msgThreadRootCache *lru.Cache[string, string]
 	msgParentCache     *lru.Cache[string, slackCachedPost]
 	msgLastSentCache   *lru.Cache[string, string]
+	lastTypingSent     sync.Map
 
 	cfg *config.Config
 }
@@ -330,6 +332,20 @@ func (s *Slack) SetStatus(ctx context.Context, status string) error {
 }
 
 func (s *Slack) Nick(ctx context.Context, name string) error {
+	err := s.sc.SetNick(ctx, name)
+	if err != nil {
+		return err
+	}
+
+	if me := s.GetMe(); me != nil && me.User != "" {
+		s.eventChan <- &bridge.Event{
+			Type: "user_update",
+			Data: &bridge.UserUpdateEvent{
+				User: me,
+			},
+		}
+	}
+
 	return nil
 }
 
@@ -448,19 +464,40 @@ func (s *Slack) GetChannel(ctx context.Context, channelID string) (*bridge.Chann
 }
 
 func (s *Slack) GetChannelCount() int {
-	return 0
+	return s.sc.GetChannelCount()
 }
 
 func (s *Slack) GetUser(ctx context.Context, userID string) *bridge.UserInfo {
 	return s.createUser(s.sc.GetUser(userID))
 }
 
+func isPublicSlackChannel(ch slack.Channel) bool {
+	return !ch.IsPrivate && !ch.IsGroup && !ch.IsIM && !ch.IsMpIM
+}
+
 func (s *Slack) GetUserChannels(ctx context.Context, userID string) ([]string, error) {
-	return []string{}, nil
+	if userID == "" {
+		return []string{}, nil
+	}
+
+	if userID == s.sc.UserID() {
+		chs := s.sc.GetChannels()
+		names := make([]string, 0, len(chs))
+
+		for _, ch := range chs {
+			if isPublicSlackChannel(ch) {
+				names = append(names, ch.Name)
+			}
+		}
+
+		return names, nil
+	}
+
+	return s.sc.GetUserChannels(ctx, userID)
 }
 
 func (s *Slack) GetUserCount() int {
-	return 0
+	return s.sc.GetUserCount()
 }
 
 func (s *Slack) GetMe() *bridge.UserInfo {
@@ -468,7 +505,12 @@ func (s *Slack) GetMe() *bridge.UserInfo {
 }
 
 func (s *Slack) GetUserByUsername(ctx context.Context, username string) *bridge.UserInfo {
-	return nil
+	u := s.sc.GetUserByUsername(username)
+	if u == nil {
+		return nil
+	}
+
+	return s.createUser(u)
 }
 
 func (s *Slack) GetTeamName(ctx context.Context, teamID string) string {
@@ -567,7 +609,22 @@ func (s *Slack) UpdateLastViewedUser(ctx context.Context, userID string) error {
 }
 
 func (s *Slack) GetFilesInfo(ctx context.Context, fileIDs []string) []*bridge.File {
-	return []*bridge.File{}
+	files := make([]*bridge.File, 0, len(fileIDs))
+
+	for _, id := range fileIDs {
+		f, err := s.sc.GetFileInfo(ctx, id)
+		if err != nil || f == nil {
+			continue
+		}
+
+		files = append(files, &bridge.File{
+			Name: f.Name,
+			Size: int64(f.Size),
+			URL:  firstNonEmpty(f.URLPrivateDownload, f.URLPrivate, f.Permalink),
+		})
+	}
+
+	return files
 }
 
 func (s *Slack) SearchUsers(ctx context.Context, query string) ([]*bridge.UserInfo, error) {
@@ -988,6 +1045,8 @@ func (s *Slack) handleSlackEvent(ctx context.Context, msg slack.RTMEvent) {
 	case *slack.TeamJoinEvent:
 		s.sc.UpdateUser(ev.User)
 		s.emitUserUpdate(ev.User)
+	case *slack.LatencyReport:
+		s.sc.NotifyPong()
 	default:
 		if !s.handleSlackItemEvent(ctx, msg.Data) {
 			s.handleSlackLifecycleEvent(msg.Data)
@@ -1072,6 +1131,37 @@ func (s *Slack) handleSlackLifecycleEvent(data any) {
 		s.emitChannelRemove(ev.Channel)
 	case *slack.GroupLeftEvent:
 		s.emitChannelRemove(ev.Channel)
+	case *slack.UserTypingEvent:
+		s.handleSlackTyping(ev)
+	}
+}
+
+func (s *Slack) handleSlackTyping(ev *slack.UserTypingEvent) {
+	if ev == nil || ev.User == "" || ev.Channel == "" || ev.User == s.sc.UserID() {
+		return
+	}
+
+	sender := s.createUser(s.sc.GetUser(ev.User))
+	if sender == nil || sender.User == "" {
+		return
+	}
+
+	channelType := ""
+	receiver := sender
+
+	if strings.HasPrefix(ev.Channel, "D") {
+		channelType = "D"
+		receiver = s.GetMe()
+	}
+
+	s.eventChan <- &bridge.Event{
+		Type: "typing",
+		Data: &bridge.TypingEvent{
+			ChannelID:   ev.Channel,
+			ChannelType: channelType,
+			Receiver:    receiver,
+			Sender:      sender,
+		},
 	}
 }
 
@@ -1081,6 +1171,7 @@ func (s *Slack) emitChannelCreate(channelID, name string) {
 	}
 
 	s.sc.UpdateChannel(channelID, name)
+	s.sc.InvalidateUserChannels("")
 
 	chName := ""
 	if name != "" {
@@ -1102,6 +1193,7 @@ func (s *Slack) emitChannelDelete(channelID string) {
 	}
 
 	s.sc.RemoveChannel(channelID)
+	s.sc.InvalidateUserChannels("")
 
 	s.eventChan <- &bridge.Event{
 		Type: "channel_delete",
@@ -1333,6 +1425,8 @@ func (s *Slack) handleActionMisc(userID, channelID, msgID, parentID, msg, eventT
 }
 
 func (s *Slack) handleMemberLeftChannel(ctx context.Context, rmsg *slack.MemberLeftChannelEvent) {
+	s.sc.InvalidateUserChannels(rmsg.User)
+
 	event := &bridge.Event{
 		Type: "channel_remove",
 		Data: &bridge.ChannelRemoveEvent{
@@ -1347,6 +1441,8 @@ func (s *Slack) handleMemberLeftChannel(ctx context.Context, rmsg *slack.MemberL
 }
 
 func (s *Slack) handleMemberJoinedChannel(ctx context.Context, rmsg *slack.MemberJoinedChannelEvent) {
+	s.sc.InvalidateUserChannels(rmsg.User)
+
 	var adder *bridge.UserInfo
 
 	if rmsg.Inviter != "" {
@@ -1995,7 +2091,21 @@ func (s *Slack) GetReplayEvents(ctx context.Context, channelID string, since int
 }
 
 func (s *Slack) Ping(ctx context.Context, proto ...string) error {
-	return nil
+	if s.sc == nil {
+		return errors.New("client not initialized")
+	}
+
+	protocol := "ws"
+	if len(proto) > 0 && proto[0] != "" {
+		protocol = strings.ToLower(proto[0])
+	}
+
+	switch protocol {
+	case "http", "rest":
+		return s.sc.HttpPing(ctx)
+	default:
+		return s.sc.WsPing(ctx)
+	}
 }
 
 func firstEventRootTS(events []*bridge.Event) string {
@@ -2065,4 +2175,40 @@ func (s *Slack) NormalizePostID(msgID string) string {
 }
 
 func (s *Slack) SendTyping(ctx context.Context, channelName string) {
+	rc := s.cfg.Current()
+	if !rc.EnableTyping || rc.DisableSendTyping || strings.HasPrefix(channelName, "&") {
+		return
+	}
+
+	const typingDebounceSec = 4
+
+	lastVal, ok := s.lastTypingSent.Load(channelName)
+	if !ok {
+		lastVal, _ = s.lastTypingSent.LoadOrStore(channelName, new(atomic.Int64))
+	}
+
+	lastPtr, ok := lastVal.(*atomic.Int64)
+	if !ok {
+		return
+	}
+
+	now := time.Now().Unix()
+	last := lastPtr.Load()
+
+	if now-last < typingDebounceSec || !lastPtr.CompareAndSwap(last, now) {
+		return
+	}
+
+	var channelID string
+	if pID, ok := strings.CutPrefix(channelName, "@@"); ok {
+		channelID = s.GetPostChannelID(ctx, pID)
+	} else if strings.HasPrefix(channelName, "#") {
+		channelID = s.GetChannelID(ctx, channelName, "")
+	} else if u := s.GetUserByUsername(ctx, channelName); u != nil && u.User != "" {
+		channelID = s.GetDMChannelID(ctx, u.User)
+	}
+
+	if channelID != "" {
+		s.sc.SendTyping(channelID)
+	}
 }

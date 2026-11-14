@@ -83,7 +83,33 @@ func (c *Client) GetUserInfo(userID string) (*slack.User, error) {
 }
 
 func (c *Client) GetMe() *slack.User {
-	me, _ := c.sc.GetUserInfo(c.info.User.ID)
+	if c.info == nil || c.info.User == nil {
+		return nil
+	}
+
+	myID := c.info.User.ID
+
+	c.RLock()
+	u, ok := c.users[myID]
+	c.RUnlock()
+
+	if ok {
+		return &u
+	}
+
+	if c.sc == nil {
+		return nil
+	}
+
+	me, err := c.sc.GetUserInfo(myID)
+	if err != nil || me == nil {
+		return nil
+	}
+
+	c.Lock()
+	c.users[myID] = *me
+	c.Unlock()
+
 	return me
 }
 
@@ -214,6 +240,79 @@ func (c *Client) SearchUsers(query string) []slack.User {
 	}
 
 	return matches
+}
+
+func (c *Client) GetUserCount() int {
+	c.RLock()
+	defer c.RUnlock()
+
+	return len(c.users)
+}
+
+func (c *Client) GetUserByUsername(username string) *slack.User {
+	if username == "" {
+		return nil
+	}
+
+	c.RLock()
+	empty := len(c.users) == 0
+	c.RUnlock()
+
+	if empty && c.sc != nil {
+		c.InitUsers()
+	}
+
+	c.RLock()
+	defer c.RUnlock()
+
+	for _, u := range c.users {
+		if strings.EqualFold(u.Name, username) || strings.EqualFold(u.Profile.DisplayName, username) {
+			user := u
+			return &user
+		}
+	}
+
+	return nil
+}
+
+func (c *Client) updateSelfDisplayName(name string) {
+	if c.info == nil || c.info.User == nil || c.info.User.ID == "" {
+		return
+	}
+
+	myID := c.info.User.ID
+
+	c.Lock()
+	defer c.Unlock()
+
+	u, ok := c.users[myID]
+	if !ok {
+		u = slack.User{
+			ID:   myID,
+			Name: c.info.User.Name,
+		}
+	}
+
+	u.Profile.DisplayName = name
+	u.Profile.DisplayNameNormalized = name
+	c.users[myID] = u
+}
+
+func (c *Client) SetNick(ctx context.Context, name string) error {
+	if c.sc == nil {
+		return errors.New("slackclient: not connected")
+	}
+
+	err := c.sc.SetUserProfileContext(ctx, "", &slack.UserProfile{
+		DisplayName: name,
+	})
+	if err != nil {
+		return err
+	}
+
+	c.updateSelfDisplayName(name)
+
+	return nil
 }
 
 const (

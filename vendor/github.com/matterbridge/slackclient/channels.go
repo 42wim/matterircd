@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
+	"time"
 
 	"github.com/slack-go/slack"
 )
@@ -257,4 +259,108 @@ func (c *Client) RemoveChannel(channelID string) {
 	c.Lock()
 	delete(c.channels, channelID)
 	c.Unlock()
+}
+
+func (c *Client) GetChannelCount() int {
+	c.RLock()
+	defer c.RUnlock()
+
+	return len(c.channels)
+}
+
+const userChannelsCacheTTL = 5 * time.Minute
+
+func (c *Client) InvalidateUserChannels(userID string) {
+	c.Lock()
+	if userID == "" {
+		clear(c.userChannels)
+	} else {
+		delete(c.userChannels, userID)
+	}
+	c.Unlock()
+}
+
+func (c *Client) fetchUserPublicChannels(ctx context.Context, userID string) ([]slack.Channel, []string, error) {
+	params := slack.GetConversationsForUserParameters{
+		UserID:          userID,
+		Types:           []string{"public_channel"},
+		Limit:           200,
+		ExcludeArchived: true,
+	}
+
+	var (
+		names  []string
+		chMeta []slack.Channel
+	)
+
+	for {
+		channels, nextCursor, err := c.sc.GetConversationsForUserContext(ctx, &params)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		for _, ch := range channels {
+			if ch.Name != "" {
+				names = append(names, ch.Name)
+			}
+		}
+
+		chMeta = append(chMeta, channels...)
+
+		if nextCursor == "" {
+			break
+		}
+
+		params.Cursor = nextCursor
+	}
+
+	return chMeta, names, nil
+}
+
+func (c *Client) GetUserChannels(ctx context.Context, userID string) ([]string, error) {
+	if userID == "" {
+		return []string{}, nil
+	}
+
+	now := time.Now().Unix()
+
+	c.RLock()
+	entry, ok := c.userChannels[userID]
+	c.RUnlock()
+
+	if ok && entry.fetchedAt > 0 && now-entry.fetchedAt < int64(userChannelsCacheTTL.Seconds()) {
+		return slices.Clone(entry.channels), nil
+	}
+
+	if c.sc == nil {
+		if ok {
+			return slices.Clone(entry.channels), nil
+		}
+
+		return []string{}, nil
+	}
+
+	chMeta, names, err := c.fetchUserPublicChannels(ctx, userID)
+	if err != nil {
+		if ok {
+			return slices.Clone(entry.channels), nil
+		}
+
+		return nil, err
+	}
+
+	c.Lock()
+	for _, ch := range chMeta {
+		if ch.ID != "" && ch.Name != "" {
+			c.channels[ch.ID] = "#" + ch.Name
+		}
+	}
+
+	c.userChannels[userID] = userChannelsEntry{
+		channels:  slices.Clone(names),
+		fetchedAt: time.Now().Unix(),
+	}
+	c.Unlock()
+
+	return names, nil
 }
