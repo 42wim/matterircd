@@ -168,10 +168,11 @@ type SharedConfig struct {
 	LazyJoinExclude []string
 	ReplayExclude   []string
 
-	JoinReplayDuration time.Duration
-	MaxReplayDuration  time.Duration
-	LazyJoinDuration   time.Duration
-	HeavySyncThreshold time.Duration
+	JoinReplayDuration        time.Duration
+	MaxReplayDuration         time.Duration
+	LazyJoinDuration          time.Duration
+	HeavySyncThreshold        time.Duration
+	DefaultDMOfflineThreshold time.Duration
 }
 
 type MattermostConfig struct {
@@ -203,8 +204,6 @@ type MattermostConfig struct {
 
 	LastViewedSaveFile   string
 	ForceSyncOnReconnect bool
-
-	DefaultDMOfflineThreshold time.Duration
 
 	MessageAttachmentShortFieldMaxLineLength int
 	MessageAttachmentOmitFieldTitles         bool
@@ -290,10 +289,11 @@ func (c *Config) buildSharedConfig(section string) SharedConfig {
 		LazyJoinExclude: append([]string(nil), c.v.GetStringSlice(section+".LazyJoinExclude")...),
 		ReplayExclude:   append([]string(nil), c.v.GetStringSlice(section+".ReplayExclude")...),
 
-		JoinReplayDuration: c.v.GetDuration(section + ".JoinReplayDuration"),
-		MaxReplayDuration:  c.v.GetDuration(section + ".MaxReplayDuration"),
-		LazyJoinDuration:   c.v.GetDuration(section + ".LazyJoinDuration"),
-		HeavySyncThreshold: c.v.GetDuration(section + ".HeavySyncThreshold"),
+		JoinReplayDuration:        c.v.GetDuration(section + ".JoinReplayDuration"),
+		MaxReplayDuration:         c.v.GetDuration(section + ".MaxReplayDuration"),
+		LazyJoinDuration:          c.v.GetDuration(section + ".LazyJoinDuration"),
+		HeavySyncThreshold:        c.v.GetDuration(section + ".HeavySyncThreshold"),
+		DefaultDMOfflineThreshold: c.v.GetDuration(section + ".DefaultDMOfflineThreshold"),
 	}
 }
 
@@ -567,8 +567,6 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 			LastViewedSaveFile:   c.v.GetString("mattermost.LastViewedSaveFile"),
 			ForceSyncOnReconnect: c.v.GetBool("mattermost.ForceSyncOnReconnect"),
 
-			DefaultDMOfflineThreshold: c.v.GetDuration("mattermost.DefaultDMOfflineThreshold"),
-
 			MessageAttachmentShortFieldMaxLineLength: c.v.GetInt("mattermost.MessageAttachmentShortFieldMaxLineLength"),
 			MessageAttachmentOmitFieldTitles:         c.v.GetBool("mattermost.MessageAttachmentOmitFieldTitles"),
 		},
@@ -820,6 +818,7 @@ func Load(cfgfile string, flags *pflag.FlagSet) (*Config, error) {
 	v.SetDefault("AwayCooldown", "20m")
 
 	v.SetDefault("mattermost.JoinReplayDuration", "15m")
+	v.SetDefault("slack.JoinReplayDuration", "15m")
 	v.SetDefault("matrix.JoinReplayDuration", "15m")
 	v.SetDefault("matrix.ReplaceColonChar", "[]")
 

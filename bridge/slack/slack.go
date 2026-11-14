@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -407,16 +408,53 @@ func (s *Slack) GetDMChannelName(userID1 string, userID2 string) string {
 	return userID1
 }
 
-func (s *Slack) GetDMUser(ctx context.Context, channelName string) *bridge.UserInfo {
+func (s *Slack) resolveDMPeer(channelName string) *bridge.UserInfo {
+	if !s.IsDMChannelName(channelName) || s.sc == nil {
+		return nil
+	}
+
+	otherUserID, ok := s.GetDMOtherUserID(channelName, s.sc.UserID())
+	if !ok || otherUserID == "" {
+		return nil
+	}
+
+	if u := s.sc.GetUser(otherUserID); u != nil {
+		return s.createUser(u)
+	}
+
+	u, err := s.sc.GetUserInfo(otherUserID)
+	if err == nil && u != nil {
+		return s.createUser(u)
+	}
+
 	return nil
 }
 
+func (s *Slack) GetDMUser(ctx context.Context, channelName string) *bridge.UserInfo {
+	return s.resolveDMPeer(channelName)
+}
+
 func (s *Slack) GetDMUserIDs(channelName string) (string, string, bool) {
-	return "", "", false
+	if s.sc == nil {
+		return "", "", false
+	}
+
+	myID := s.sc.UserID()
+
+	otherID, ok := s.GetDMOtherUserID(channelName, myID)
+	if !ok {
+		return "", "", false
+	}
+
+	return myID, otherID, true
 }
 
 func (s *Slack) GetDMOtherUserID(channelName, myUserID string) (string, bool) {
-	return "", false
+	if s.sc == nil {
+		return "", false
+	}
+
+	return s.sc.GetDMOtherUserID(channelName, myUserID)
 }
 
 func (s *Slack) GetUsers() []*bridge.UserInfo {
@@ -602,11 +640,18 @@ func (s *Slack) SearchPosts(ctx context.Context, search string) []*bridge.Event 
 
 	events := make([]*bridge.Event, 0, len(matches))
 	for _, m := range matches {
+		if m.Channel.ID != "" && m.Channel.Name != "" && !s.IsDMChannelName(m.Channel.ID) {
+			s.sc.UpdateChannel(m.Channel.ID, m.Channel.Name)
+		}
+
 		msg := slack.Msg{
-			Timestamp: m.Timestamp,
-			User:      m.User,
-			Username:  m.Username,
-			Text:      m.Text,
+			Timestamp:       m.Timestamp,
+			ThreadTimestamp: threadTSFromPermalink(m.Permalink),
+			User:            m.User,
+			Username:        m.Username,
+			Text:            m.Text,
+			Attachments:     m.Attachments,
+			Blocks:          m.Blocks,
 		}
 		if ev := s.slackMsgToEvent(ctx, m.Channel.ID, msg); ev != nil {
 			events = append(events, ev)
@@ -858,11 +903,25 @@ func formatReplySummary(rc *config.RuntimeConfig, cp slackCachedPost) string {
 	}
 
 	summary := utils.FormatAndShortenSummary(cp.message, slackSummaryOpts(rc))
+	if rc.Slack.DisableDefaultMentions {
+		summary = utils.SanitizeDefaultMentions(summary, rc.Slack.Formatter.Unicode)
+	}
+
 	if cp.sender == nil || cp.sender.Nick == "" {
 		return " (re: " + summary + ")"
 	}
 
 	return " (re @" + cp.sender.Nick + ": " + summary + ")"
+}
+
+var slackChannelMentionsRegExp = regexp.MustCompile(`@(?:channel|all|here|everyone)(?:\W|$)`)
+
+func (s *Slack) channelMessageType(text string) string {
+	if s.cfg != nil && !s.cfg.Current().Slack.DisableDefaultMentions && slackChannelMentionsRegExp.MatchString(text) {
+		return "notice"
+	}
+
+	return ""
 }
 
 func (s *Slack) formatReplySuffix(ctx context.Context, channelID, ts string) string {
@@ -913,9 +972,7 @@ func (s *Slack) resolveThreadRoot(ctx context.Context, channelID, ts string) str
 
 func (s *Slack) slackMsgToEvent(ctx context.Context, channelID string, m slack.Msg) *bridge.Event {
 	ghost := s.msgAuthorGhost(ctx, &m)
-
 	shortFieldMaxLen, omitFieldTitles := s.attachmentFormattingOpts()
-
 	rawText, ok := formatSlackMsgOpts(&m, shortFieldMaxLen, omitFieldTitles)
 	files := slackFilesToBridgeFiles(m.Files)
 
@@ -929,7 +986,6 @@ func (s *Slack) slackMsgToEvent(ctx context.Context, channelID string, m slack.M
 	}
 
 	msgID := encodeSlackID(channelID, m.Timestamp)
-
 	parentID := ""
 	rootTS := m.Timestamp
 
@@ -940,18 +996,20 @@ func (s *Slack) slackMsgToEvent(ctx context.Context, channelID string, m slack.M
 
 	s.cachePost(channelID, m.Timestamp, rootTS, ghost, text)
 
+	if parentID != "" && text != "" {
+		text = strings.TrimRight(text, "\n") + s.formatReplySuffix(ctx, channelID, m.ThreadTimestamp)
+	}
+
 	createAt := slackTSMillis(m.Timestamp)
 
 	if strings.HasPrefix(channelID, "D") {
-		receiver := s.resolveDMReceiver(ghost, channelID)
-
 		return &bridge.Event{
 			Type: "direct_message",
 			Data: &bridge.DirectMessageEvent{
 				Text:      text,
 				ChannelID: channelID,
 				Sender:    ghost,
-				Receiver:  receiver,
+				Receiver:  s.resolveDMReceiver(ghost, channelID),
 				MessageID: msgID,
 				ParentID:  parentID,
 				CreateAt:  createAt,
@@ -963,13 +1021,14 @@ func (s *Slack) slackMsgToEvent(ctx context.Context, channelID string, m slack.M
 	return &bridge.Event{
 		Type: "channel_message",
 		Data: &bridge.ChannelMessageEvent{
-			Text:      text,
-			ChannelID: channelID,
-			Sender:    ghost,
-			MessageID: msgID,
-			ParentID:  parentID,
-			CreateAt:  createAt,
-			Files:     files,
+			Text:        text,
+			ChannelID:   channelID,
+			Sender:      ghost,
+			MessageType: s.channelMessageType(text),
+			MessageID:   msgID,
+			ParentID:    parentID,
+			CreateAt:    createAt,
+			Files:       files,
 		},
 	}
 }
@@ -1114,8 +1173,11 @@ func (s *Slack) handleSlackEvent(ctx context.Context, msg slack.RTMEvent) {
 	case *slack.UserChangeEvent:
 		s.sc.UpdateUser(ev.User)
 		s.emitUserUpdate(ev.User)
-	case *slack.UserStatusChangedEvent:
+	case *slack.UserProfileChangedEvent:
 		s.sc.UpdateUser(ev.User)
+		s.emitUserUpdate(ev.User)
+	case *slack.UserStatusChangedEvent:
+		s.handleUserStatusChanged(ev.User)
 	case *slack.TeamJoinEvent:
 		s.sc.UpdateUser(ev.User)
 		s.emitUserUpdate(ev.User)
@@ -1148,8 +1210,34 @@ func (s *Slack) handleSlackDisconnected(ev *slack.DisconnectedEvent) {
 	}
 }
 
+func (s *Slack) handleUserStatusChanged(user slack.User) {
+	s.sc.UpdateUser(user)
+	s.emitUserUpdate(user)
+
+	if user.ID != "" && user.ID != s.sc.UserID() && !s.HasCustomStatus(user.ID) && s.eventChan != nil {
+		s.eventChan <- &bridge.Event{
+			Type: "status_change",
+			Data: &bridge.StatusChangeEvent{
+				UserID: user.ID,
+				Status: statusOnline,
+			},
+		}
+	}
+}
+
 func (s *Slack) emitUserUpdate(user slack.User) {
-	info := s.createUser(&user)
+	if s.eventChan == nil {
+		return
+	}
+
+	target := &user
+	if user.ID != "" && s.sc != nil {
+		if cached := s.sc.GetUser(user.ID); cached != nil {
+			target = cached
+		}
+	}
+
+	info := s.createUser(target)
 	if info == nil || info.User == "" {
 		return
 	}
@@ -1389,6 +1477,10 @@ func (s *Slack) handlePresenceChange(user string, users []string, presence strin
 func (s *Slack) resolveDMReceiver(ghost *bridge.UserInfo, channelID string) *bridge.UserInfo {
 	receiver := ghost
 	if ghost != nil && ghost.Me {
+		if dmUser := s.resolveDMPeer(channelID); dmUser != nil && dmUser.User != "" {
+			return dmUser
+		}
+
 		members, _ := s.sc.GetUsersInConversation(channelID)
 		for _, member := range members {
 			if member == s.GetMe().User {
@@ -1431,15 +1523,18 @@ func (s *Slack) handleSlackReaction(ctx context.Context, userID, channelID, ts, 
 	}
 
 	ghost := s.createUser(suser)
-	msgID := encodeSlackID(channelID, ts)
+	if ghost.Me && s.cfg != nil && !s.cfg.Current().Slack.ShowOwnReactions {
+		return
+	}
 
+	msgID := encodeSlackID(channelID, ts)
 	parentID := s.cachedParentID(channelID, ts)
+
 	if cp, ok := s.getCachedPost(ctx, channelID, ts); ok && cp.rootTS != "" && cp.rootTS != ts {
 		parentID = encodeSlackID(channelID, cp.rootTS)
 	}
 
 	replyMsg := s.formatReplySuffix(ctx, channelID, ts)
-
 	channelType := ""
 	receiver := ghost
 
@@ -1452,14 +1547,9 @@ func (s *Slack) handleSlackReaction(ctx context.Context, userID, channelID, ts, 
 		s.eventChan <- &bridge.Event{
 			Type: "reaction_add",
 			Data: &bridge.ReactionAddEvent{
-				ChannelID:   channelID,
-				MessageID:   msgID,
-				ParentID:    parentID,
-				Message:     replyMsg,
-				Receiver:    receiver,
-				Sender:      ghost,
-				Reaction:    reaction,
-				ChannelType: channelType,
+				ChannelID: channelID, MessageID: msgID, ParentID: parentID,
+				Message: replyMsg, Receiver: receiver, Sender: ghost,
+				Reaction: reaction, ChannelType: channelType,
 			},
 		}
 
@@ -1469,14 +1559,9 @@ func (s *Slack) handleSlackReaction(ctx context.Context, userID, channelID, ts, 
 	s.eventChan <- &bridge.Event{
 		Type: "reaction_remove",
 		Data: &bridge.ReactionRemoveEvent{
-			ChannelID:   channelID,
-			MessageID:   msgID,
-			ParentID:    parentID,
-			Message:     replyMsg,
-			Receiver:    receiver,
-			Sender:      ghost,
-			Reaction:    reaction,
-			ChannelType: channelType,
+			ChannelID: channelID, MessageID: msgID, ParentID: parentID,
+			Message: replyMsg, Receiver: receiver, Sender: ghost,
+			Reaction: reaction, ChannelType: channelType,
 		},
 	}
 }
@@ -1609,13 +1694,14 @@ func (s *Slack) sendPublicMessage(ghost *bridge.UserInfo, msg, channelID, msgID,
 	event := &bridge.Event{
 		Type: "channel_message",
 		Data: &bridge.ChannelMessageEvent{
-			Text:      msg,
-			ChannelID: channelID,
-			Sender:    ghost,
-			MessageID: msgID,
-			ParentID:  parentID,
-			Event:     eventType,
-			CreateAt:  createAt,
+			Text:        msg,
+			ChannelID:   channelID,
+			Sender:      ghost,
+			MessageType: s.channelMessageType(msg),
+			MessageID:   msgID,
+			ParentID:    parentID,
+			Event:       eventType,
+			CreateAt:    createAt,
 		},
 	}
 
@@ -2143,13 +2229,38 @@ func (s *Slack) resolveSlackNick(slackuser *slack.User, rc *config.RuntimeConfig
 	return nick
 }
 
+func slackMentionKeys(slackuser *slack.User, nick string) []string {
+	if slackuser == nil {
+		return nil
+	}
+
+	candidates := []string{
+		nick,
+		slackuser.Name,
+		slackuser.Profile.DisplayName,
+		cmp.Or(slackuser.RealName, slackuser.Profile.RealName),
+		slackuser.ID,
+	}
+
+	var keys []string
+
+	for _, c := range candidates {
+		c = strings.TrimSpace(c)
+		if c != "" && !slices.Contains(keys, c) {
+			keys = append(keys, c)
+		}
+	}
+
+	return keys
+}
+
 func buildSlackUserInfo(slackuser *slack.User, nick, teamID, directoryURL string, me bool) *bridge.UserInfo {
 	roles := ""
 	if slackuser.IsBot || slackuser.IsAppUser || slackuser.IsWorkflowBot {
 		roles = "bot"
 	}
 
-	photo := firstNonEmpty(
+	photo := cmp.Or(
 		slackuser.Profile.ImageOriginal,
 		slackuser.Profile.Image512,
 		slackuser.Profile.Image192,
@@ -2159,16 +2270,21 @@ func buildSlackUserInfo(slackuser *slack.User, nick, teamID, directoryURL string
 		slackuser.Profile.Image24,
 	)
 
+	var mentionKeys []string
+	if me {
+		mentionKeys = slackMentionKeys(slackuser, nick)
+	}
+
 	return &bridge.UserInfo{
 		Nick:        nick,
 		User:        slackuser.ID,
-		Real:        slackuser.RealName,
+		Real:        cmp.Or(slackuser.RealName, slackuser.Profile.RealName),
 		Host:        "host",
 		Roles:       roles,
 		DisplayName: slackuser.Profile.DisplayName,
 		Ghost:       true,
 		Me:          me,
-		Username:    slackuser.Profile.RealName,
+		Username:    cmp.Or(slackuser.Name, slackuser.Profile.RealName, slackuser.RealName),
 		FirstName:   slackuser.Profile.FirstName,
 		LastName:    slackuser.Profile.LastName,
 		Email:       slackuser.Profile.Email,
@@ -2176,6 +2292,7 @@ func buildSlackUserInfo(slackuser *slack.User, nick, teamID, directoryURL string
 		Position:    slackuser.Profile.Title,
 		Photo:       photo,
 		TeamID:      teamID,
+		MentionKeys: mentionKeys,
 	}
 }
 
@@ -2186,10 +2303,22 @@ func (s *Slack) createUser(slackuser *slack.User) *bridge.UserInfo {
 
 	rc := s.cfg.Current()
 	nick := s.resolveSlackNick(slackuser, rc)
-	me := slackuser.ID == s.sc.UserID()
-	directoryURL := utils.ExpandDirectoryURL(rc.Slack.Bridge.DirectoryURL, nick, slackuser.Name)
+	me := slackuser.ID != "" && slackuser.ID == s.sc.UserID()
+	directoryURL := utils.ExpandDirectoryURL(
+		rc.Slack.Bridge.DirectoryURL,
+		nick,
+		slackuser.Name,
+		slackuser.Profile.Email,
+		slackuser.Profile.FirstName,
+		slackuser.Profile.LastName,
+	)
 
-	return buildSlackUserInfo(slackuser, nick, s.sc.TeamID(), directoryURL, me)
+	info := buildSlackUserInfo(slackuser, nick, s.sc.TeamID(), directoryURL, me)
+	if s.sc != nil && s.sc.TeamDomain() != "" {
+		info.Host = s.sc.TeamDomain() + ".slack.com"
+	}
+
+	return info
 }
 
 func (s *Slack) Connected() bool {
@@ -2202,6 +2331,12 @@ func (s *Slack) recordSent(ctx context.Context, channelID, msgID, threadTS, pare
 	}
 
 	name := s.GetChannelName(ctx, channelID)
+	if s.IsDMChannelName(name) {
+		if receiver := s.GetDMUser(ctx, name); receiver != nil && receiver.Nick != "" {
+			name = receiver.Nick
+		}
+	}
+
 	if name == "" {
 		name = channelID
 	}

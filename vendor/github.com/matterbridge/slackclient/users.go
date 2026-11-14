@@ -193,22 +193,42 @@ func (c *Client) SetStatus(status string) error {
 }
 
 func (c *Client) UserID() string {
+	if c.info == nil || c.info.User == nil {
+		return ""
+	}
+
 	return c.info.User.ID
 }
 
 func (c *Client) CurrentUserName() string {
+	if c.info == nil || c.info.User == nil {
+		return ""
+	}
+
 	return c.info.User.Name
 }
 
 func (c *Client) TeamID() string {
+	if c.info == nil || c.info.Team == nil {
+		return ""
+	}
+
 	return c.info.Team.ID
 }
 
 func (c *Client) TeamName() string {
+	if c.info == nil || c.info.Team == nil {
+		return ""
+	}
+
 	return c.info.Team.Name
 }
 
 func (c *Client) TeamDomain() string {
+	if c.info == nil || c.info.Team == nil {
+		return ""
+	}
+
 	return c.info.Team.Domain
 }
 
@@ -320,12 +340,46 @@ const (
 	presenceStaleTTL = 5 * time.Minute
 )
 
+func mergeSlackUser(existing, updated slack.User) slack.User {
+	if updated.Name == "" {
+		updated.Name = existing.Name
+	}
+
+	if updated.RealName == "" {
+		if updated.Profile.RealName != "" {
+			updated.RealName = updated.Profile.RealName
+		} else {
+			updated.RealName = existing.RealName
+		}
+	}
+
+	if updated.TeamID == "" {
+		updated.TeamID = existing.TeamID
+	}
+
+	if updated.TZ == "" {
+		updated.TZ = existing.TZ
+		updated.TZLabel = existing.TZLabel
+		updated.TZOffset = existing.TZOffset
+	}
+
+	if !updated.IsBot && existing.IsBot {
+		updated.IsBot = existing.IsBot
+	}
+
+	return updated
+}
+
 func (c *Client) UpdateUser(user slack.User) {
 	if user.ID == "" {
 		return
 	}
 
 	c.Lock()
+	if existing, ok := c.users[user.ID]; ok {
+		user = mergeSlackUser(existing, user)
+	}
+
 	c.users[user.ID] = user
 	c.Unlock()
 }

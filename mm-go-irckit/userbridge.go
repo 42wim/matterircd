@@ -1097,6 +1097,10 @@ func (u *User) CreateUsersFromInfo(info []*bridge.UserInfo) []*User {
 
 func (u *User) updateUserFromInfo(info *bridge.UserInfo) *User {
 	if info.Me || (u.User != "" && info.User == u.User) {
+		if len(info.MentionKeys) > 0 {
+			u.MentionKeys = info.MentionKeys
+		}
+
 		return u
 	}
 
@@ -1249,10 +1253,7 @@ func (u *User) addUsersToChannels() {
 
 			threshold := lastSyncThreshold
 			if threshold.IsZero() {
-				dmThresh := u.cfg.Mattermost().DefaultDMOfflineThreshold
-				if dmThresh == 0 {
-					dmThresh = 24 * time.Hour
-				}
+				dmThresh := cmp.Or(u.sharedCfg().DefaultDMOfflineThreshold, u.cfg.Mattermost().DefaultDMOfflineThreshold, 24*time.Hour)
 
 				threshold = time.Now().Add(-dmThresh)
 			}

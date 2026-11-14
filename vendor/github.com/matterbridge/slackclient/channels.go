@@ -253,6 +253,10 @@ func (c *Client) GetChannelName(channelID string) string {
 
 	c.RUnlock()
 
+	if c.sc == nil {
+		return channelID
+	}
+
 	info, err := c.sc.GetConversationInfo(&slack.GetConversationInfoInput{
 		ChannelID: channelID,
 	})
@@ -260,13 +264,13 @@ func (c *Client) GetChannelName(channelID string) string {
 		return channelID
 	}
 
-	name := "#" + info.Name
+	c.cacheChannel(*info)
 
-	c.Lock()
-	c.channels[channelID] = name
-	c.Unlock()
+	if info.Name == "" {
+		return channelID
+	}
 
-	return name
+	return "#" + info.Name
 }
 
 func (c *Client) CreateChannel(ctx context.Context, name string, isPrivate bool) (*slack.Channel, error) {
@@ -419,11 +423,96 @@ func (c *Client) GetChannelUsers(channelID string) ([]*slack.User, error) {
 }
 
 func (c *Client) GetUsersInConversation(channelID string) ([]string, error) {
+	if c.sc == nil {
+		return nil, errors.New("slackclient: not connected")
+	}
+
 	members, _, err := c.sc.GetUsersInConversation(&slack.GetUsersInConversationParameters{
 		ChannelID: channelID,
 	})
 
 	return members, err
+}
+
+func (c *Client) cachedDMOtherUserID(upperID, selfID string) (string, bool) {
+	c.RLock()
+	defer c.RUnlock()
+
+	if ch, ok := c.channelData[upperID]; ok && ch.User != "" && ch.User != selfID {
+		return ch.User, true
+	}
+
+	for uid, dmChID := range c.dmChannels {
+		if strings.EqualFold(dmChID, upperID) && uid != "" && uid != selfID {
+			return uid, true
+		}
+	}
+
+	if entry, ok := c.channelMembers[upperID]; ok {
+		for _, m := range entry.members {
+			if m != "" && m != selfID {
+				return m, true
+			}
+		}
+	}
+
+	return "", false
+}
+
+func (c *Client) CacheDMChannel(userID, channelID string) {
+	if userID == "" || channelID == "" {
+		return
+	}
+
+	c.Lock()
+	c.dmChannels[userID] = strings.ToUpper(channelID)
+	c.Unlock()
+}
+
+func (c *Client) GetDMOtherUserID(channelID, myUserID string) (string, bool) {
+	upperID := strings.ToUpper(strings.TrimSpace(channelID))
+	if !strings.HasPrefix(upperID, "D") {
+		return "", false
+	}
+
+	selfID := myUserID
+	if selfID == "" {
+		selfID = c.UserID()
+	}
+
+	if uid, ok := c.cachedDMOtherUserID(upperID, selfID); ok {
+		return uid, true
+	}
+
+	if c.sc == nil {
+		return "", false
+	}
+
+	info, err := c.sc.GetConversationInfo(&slack.GetConversationInfoInput{
+		ChannelID: upperID,
+	})
+	if err == nil && info != nil {
+		c.cacheChannel(*info)
+
+		if info.User != "" && info.User != selfID {
+			c.CacheDMChannel(info.User, upperID)
+			return info.User, true
+		}
+	}
+
+	members, err := c.GetUsersInConversation(upperID)
+	if err != nil {
+		return "", false
+	}
+
+	for _, m := range members {
+		if m != "" && m != selfID {
+			c.CacheDMChannel(m, upperID)
+			return m, true
+		}
+	}
+
+	return "", false
 }
 
 func (c *Client) UpdateChannel(channelID, name string) {
