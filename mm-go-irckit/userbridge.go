@@ -435,6 +435,7 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 	u.saveLastViewedAt(event.ChannelID, event.CreateAt)
 }
 
+//nolint:gocyclo
 func (u *User) handleChannelAddEvent(event *bridge.ChannelAddEvent) {
 	ch := u.Srv.Channel(event.ChannelID)
 
