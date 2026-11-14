@@ -113,13 +113,15 @@ func TestIsSlackToken(t *testing.T) {
 		pass string
 		want bool
 	}{
-		{pass: "xoxp-1234-5678", want: true},
-		{pass: "xoxp-1234-5678;", want: true},
-		{pass: "xoxc-1234|d=xoxd-5678;", want: true},
-		{pass: "xoxc-1234|d=xoxd-5678", want: true},
+		{pass: "xoxp-1234567890-1234567890-abcdef", want: true},
+		{pass: "xoxc-1234567890-1234567890-abcdef|d=xoxd-1234567890abcdef;", want: true},
+		{pass: "xoxc-1234567890-1234567890-abcdef|d=xoxd-1234567890abcdef", want: false},
 		{pass: "xoxp-", want: false},
-		{pass: "xoxc-1234", want: false},
-		{pass: "xoxc-1234|d=other", want: false},
+		{pass: "xoxp-short", want: false},
+		{pass: "xoxc-1234567890-1234567890-abcdef", want: false},
+		{pass: "xoxc-short|d=xoxd-1234567890abcdef;", want: false},
+		{pass: "xoxc-1234567890-1234567890-abcdef|d=xoxd-short;", want: false},
+		{pass: "xoxc-1234567890-1234567890-abcdef|d=other", want: false},
 		{pass: "some-mattermost-password", want: false},
 		{pass: "", want: false},
 	}

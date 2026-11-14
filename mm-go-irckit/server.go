@@ -522,15 +522,22 @@ func parseThreadTag(tagStr string) string {
 	return ""
 }
 
+const minSlackTokenLen = 20
+
 func isSlackToken(pass string) bool {
-	if strings.HasPrefix(pass, "xoxp-") && len(pass) > len("xoxp-") {
+	if strings.HasPrefix(pass, "xoxp-") && len(pass) >= minSlackTokenLen {
 		return true
 	}
 
-	if strings.HasPrefix(pass, "xoxc-") {
-		if _, cookie, ok := strings.Cut(pass, "|d="); ok {
-			return strings.HasPrefix(cookie, "xoxd-") && len(cookie) > len("xoxd-")
+	if token, cookie, ok := strings.Cut(pass, "|d="); ok {
+		if !strings.HasSuffix(cookie, ";") {
+			return false
 		}
+
+		cookie = strings.TrimSuffix(cookie, ";")
+
+		return strings.HasPrefix(token, "xoxc-") && len(token) >= minSlackTokenLen &&
+			strings.HasPrefix(cookie, "xoxd-") && len(cookie) >= minSlackTokenLen
 	}
 
 	return false
