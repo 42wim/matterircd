@@ -74,6 +74,9 @@ type Channel interface { //nolint:interfacebloat
 	// SpoofWithPrefix is like SpoofMessage/SpoofNotice (cmd) with an already resolved prefix.
 	SpoofWithPrefix(prefix *irc.Prefix, text string, cmd string, maxlen ...int)
 
+	// SpoofWithPrefixTime is like SpoofWithPrefix with an optional IRCv3 server-time tag.
+	SpoofWithPrefixTime(prefix *irc.Prefix, text string, cmd string, timeTag string, maxlen ...int)
+
 	IsPrivate() bool
 }
 
@@ -606,6 +609,10 @@ func wireTextBudget(prefix *irc.Prefix, cmd, target string) int {
 }
 
 func (ch *channel) SpoofWithPrefix(prefix *irc.Prefix, text string, cmd string, maxlen ...int) {
+	ch.SpoofWithPrefixTime(prefix, text, cmd, "", maxlen...)
+}
+
+func (ch *channel) SpoofWithPrefixTime(prefix *irc.Prefix, text string, cmd string, timeTag string, maxlen ...int) {
 	limit := 460
 	if len(maxlen) > 0 {
 		limit = maxlen[0]
@@ -628,11 +635,11 @@ func (ch *channel) SpoofWithPrefix(prefix *irc.Prefix, text string, cmd string, 
 
 	text = utils.WrapMessage(text, limit, hardSplit)
 
-	msg := irc.Message{
-		Prefix:        prefix,
-		Command:       cmd,
-		Params:        []string{ch.name},
-		EmptyTrailing: true,
+	msg := irc.Message{Prefix: prefix, Command: cmd, Params: []string{ch.name}, EmptyTrailing: true}
+
+	var timeMsg *irc.Message
+	if timeTag != "" {
+		timeMsg = &irc.Message{Command: timeTag + " :" + prefix.String() + " " + cmd, Params: []string{ch.name}, EmptyTrailing: true}
 	}
 
 	users := ch.realUsers()
@@ -647,9 +654,16 @@ func (ch *channel) SpoofWithPrefix(prefix *irc.Prefix, text string, cmd string, 
 		}
 
 		msg.Trailing = line
+		if timeMsg != nil {
+			timeMsg.Trailing = line
+		}
 
 		for _, to := range users {
-			to.Encode(&msg) //nolint:errcheck
+			if timeMsg != nil && to.HasCapability("server-time") {
+				to.Encode(timeMsg) //nolint:errcheck
+			} else {
+				to.Encode(&msg) //nolint:errcheck
+			}
 		}
 
 		if !found {

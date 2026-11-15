@@ -370,6 +370,8 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 		PreserveNewLines:   preserveNewLines,
 	}
 
+	timeTag := formatLiveTimeTag(event.CreateAt, event.Event)
+
 	emitLine := func(line string) {
 		if showContext || addPrefix {
 			line = prefix + line + suffix
@@ -378,16 +380,16 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 
 		if event.Sender.Me {
 			if event.Receiver.Me {
-				u.MsgSpoofUser(u, u.Nick, line, len(line))
+				u.msgSpoofUserTime(u, u.Nick, line, timeTag, len(line))
 			} else {
 				// Outbound DM (e.g. from history replay)
 				// Spoof as us, but target THEIR nick so it routes to their query window
-				u.MsgSpoofUser(u, u.createUserFromInfo(event.Receiver).Nick, line, len(line))
+				u.msgSpoofUserTime(u, u.createUserFromInfo(event.Receiver).Nick, line, timeTag, len(line))
 			}
 		} else {
 			// Inbound DM
 			// Spoof as them, target OUR nick
-			u.MsgSpoofUser(u.createUserFromInfo(event.Sender), u.Nick, line, len(line))
+			u.msgSpoofUserTime(u.createUserFromInfo(event.Sender), u.Nick, line, timeTag, len(line))
 		}
 	}
 
@@ -737,13 +739,15 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		PreserveNewLines:   preserveNewLines,
 	}
 
+	timeTag := formatLiveTimeTag(event.CreateAt, event.Event)
+
 	emitLine := func(line string) {
 		if showContext || addPrefix {
 			line = prefix + line + suffix
 			addPrefix = false
 		}
 
-		ch.SpoofWithPrefix(senderPrefix, line, cmd, len(line))
+		ch.SpoofWithPrefixTime(senderPrefix, line, cmd, timeTag, len(line))
 	}
 
 	var (
@@ -798,6 +802,8 @@ func (u *User) handleFileEvent(event *bridge.FileEvent) {
 		}
 	}
 
+	timeTag := formatLiveTimeTag(event.CreateAt, "")
+
 	for _, f := range event.Files {
 		sizeKB := f.Size / 1024
 		if sizeKB == 0 && f.Size > 0 {
@@ -815,20 +821,26 @@ func (u *User) handleFileEvent(event *bridge.FileEvent) {
 		case "D":
 			if event.Sender.Me {
 				if event.Receiver.Me {
-					u.MsgSpoofUser(u, u.Nick, fileMsg)
+					u.msgSpoofUserTime(u, u.Nick, fileMsg, timeTag)
 				} else {
-					u.MsgSpoofUser(u, u.createUserFromInfo(event.Receiver).Nick, fileMsg)
+					u.msgSpoofUserTime(u, u.createUserFromInfo(event.Receiver).Nick, fileMsg, timeTag)
 				}
 			} else {
-				u.MsgSpoofUser(u.createUserFromInfo(event.Sender), u.Nick, fileMsg)
+				u.msgSpoofUserTime(u.createUserFromInfo(event.Sender), u.Nick, fileMsg, timeTag)
 			}
 		default:
 			ch := u.getMessageChannel(event.ChannelID, event.Sender)
+
+			from := u.sanitizeNick(event.Sender.Nick)
+			prefix := &irc.Prefix{Name: from, User: from, Host: u.Srv.Name()}
+
 			if event.Sender.Me {
-				ch.SpoofMessage(u.Nick, fileMsg)
-			} else {
-				ch.SpoofMessage(u.sanitizeNick(event.Sender.Nick), fileMsg)
+				prefix = u.Prefix()
+			} else if sender, ok := u.Srv.HasUser(from); ok {
+				prefix = sender.Prefix()
 			}
+
+			ch.SpoofWithPrefixTime(prefix, fileMsg, irc.PRIVMSG, timeTag)
 		}
 	}
 }
@@ -1893,7 +1905,7 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 		var timeTag, tsStr string
 
 		if hasServerTime {
-			timeTag = "@time=" + time.UnixMilli(createAt).UTC().Format("2006-01-02T15:04:05.000Z")
+			timeTag = formatTimeTag(createAt)
 		} else {
 			tsStr = time.UnixMilli(createAt).Format("2006-01-02 15:04")
 		}
@@ -2006,7 +2018,33 @@ func (u *User) MsgUser(toUser *User, msg string) {
 	})
 }
 
+func formatTimeTag(createAt int64) string {
+	if createAt <= 0 {
+		return ""
+	}
+
+	return "@time=" + time.UnixMilli(createAt).UTC().Format("2006-01-02T15:04:05.000Z")
+}
+
+func formatLiveTimeTag(createAt int64, eventType string) string {
+	// Only backdate new messages; edits, deletes, reactions, etc. carry the
+	// original post's CreateAt and should display at the time of the update.
+	if eventType != "" && eventType != "posted" {
+		return ""
+	}
+
+	if createAt <= 0 || time.Since(time.UnixMilli(createAt)) <= 60*time.Second {
+		return ""
+	}
+
+	return formatTimeTag(createAt)
+}
+
 func (u *User) MsgSpoofUser(sender *User, rcvuser string, text string, maxlen ...int) {
+	u.msgSpoofUserTime(sender, rcvuser, text, "", maxlen...)
+}
+
+func (u *User) msgSpoofUserTime(sender *User, rcvuser, text, timeTag string, maxlen ...int) {
 	hardLineSplit := u.cfg.Current().HardLineSplit
 	if len(maxlen) == 0 {
 		text = utils.WrapMessage(text, 460, hardLineSplit)
@@ -2019,11 +2057,17 @@ func (u *User) MsgSpoofUser(sender *User, rcvuser string, text string, maxlen ..
 		User: sender.Nick,
 		Host: sender.Host,
 	}
+
 	msg := irc.Message{
 		Prefix:        &prefix,
 		Command:       irc.PRIVMSG,
 		Params:        []string{rcvuser},
 		EmptyTrailing: true,
+	}
+
+	if timeTag != "" && u.HasCapability("server-time") {
+		msg.Prefix = nil
+		msg.Command = timeTag + " :" + prefix.String() + " " + irc.PRIVMSG
 	}
 
 	for {
