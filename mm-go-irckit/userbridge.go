@@ -1179,7 +1179,8 @@ func (u *User) addUsersToChannels() {
 		}
 	}
 
-	syncStartTime := time.Now()
+	// Strip monotonic clock so time.Since(u.lastSync) includes system sleep/suspend time.
+	syncStartTime := time.Now().Round(0)
 	syncThresh := u.sharedCfg().HeavySyncThreshold
 
 	if syncThresh <= 0 {
@@ -1188,7 +1189,7 @@ func (u *User) addUsersToChannels() {
 
 	u.eventLoopMutex.Lock()
 	lastSyncThreshold := u.lastSync
-	isHeavySync := !u.eventLoopStarted || time.Since(u.lastSync) > syncThresh
+	isHeavySync := !u.eventLoopStarted || time.Since(u.lastSync.Round(0)) > syncThresh
 	u.eventLoopMutex.Unlock()
 
 	ellipsis := "..."
