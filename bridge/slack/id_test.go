@@ -152,16 +152,18 @@ func TestReplySummary(t *testing.T) {
 	assert.Equal(t, "1794617200.000100", cp.rootTS)
 	assert.Equal(t, "alice", cp.sender.Nick)
 
-	rcHidden := &config.RuntimeConfig{Slack: config.SlackConfig{HideReplies: true, ShortenRepliesTo: 22}}
+	rcHidden := &config.RuntimeConfig{Slack: config.SlackConfig{SharedConfig: config.SharedConfig{HideReplies: true, ShortenRepliesTo: 22}}}
 	assert.Empty(t, formatReplySummary(rcHidden, cp))
 
-	rcShort := &config.RuntimeConfig{Slack: config.SlackConfig{ShortenRepliesTo: 22}}
+	rcShort := &config.RuntimeConfig{Slack: config.SlackConfig{SharedConfig: config.SharedConfig{ShortenRepliesTo: 22}}}
 	assert.Equal(t, " (re @alice: Hello world this is a \x0f ...)", formatReplySummary(rcShort, cp))
 
 	rcUnicode := &config.RuntimeConfig{
 		Slack: config.SlackConfig{
-			ShortenRepliesTo: 22,
-			Formatter:        config.FormatterConfig{Unicode: true},
+			SharedConfig: config.SharedConfig{
+				ShortenRepliesTo: 22,
+			},
+			Formatter: config.FormatterConfig{Unicode: true},
 		},
 	}
 	assert.Equal(t, " (re @alice: Hello world this is a \x0f …)", formatReplySummary(rcUnicode, cp))
