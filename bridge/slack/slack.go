@@ -227,7 +227,7 @@ func (s *Slack) IsChannelMember(channelID string) bool {
 }
 
 func (s *Slack) Join(ctx context.Context, channelName string) (string, string, error) {
-	return s.sc.JoinChannel(channelName)
+	return s.sc.JoinChannel(ctx, channelName)
 }
 
 func (s *Slack) List(ctx context.Context) (map[string]string, error) {

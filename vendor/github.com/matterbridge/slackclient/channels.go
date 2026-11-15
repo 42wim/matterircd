@@ -76,9 +76,9 @@ func (c *Client) InvalidateCaches() {
 	c.Unlock()
 }
 
-func (c *Client) JoinChannel(channelName string) (string, string, error) {
+func (c *Client) JoinChannel(ctx context.Context, channelName string) (string, string, error) {
 	channelID := strings.TrimSpace(channelName)
-	if resolved := c.GetChannelID(context.Background(), channelID); resolved != "" {
+	if resolved := c.GetChannelID(ctx, channelID); resolved != "" {
 		channelID = resolved
 	}
 
@@ -100,7 +100,7 @@ func (c *Client) JoinChannel(channelName string) (string, string, error) {
 		return "", "", errors.New("cannot join channel (+i): slackclient not connected")
 	}
 
-	mychan, _, _, err := c.sc.JoinConversation(channelID)
+	mychan, _, _, err := c.sc.JoinConversationContext(ctx, channelID)
 	if err != nil {
 		return "", "", fmt.Errorf("cannot join channel (+i): %w", err)
 	}

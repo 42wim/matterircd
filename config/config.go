@@ -180,6 +180,9 @@ type SharedConfig struct {
 
 	MessageAttachmentShortFieldMaxLineLength int
 	MessageAttachmentOmitFieldTitles         bool
+
+	LastViewedSaveFile string
+	PreferNickname     bool
 }
 
 type MattermostConfig struct {
@@ -204,9 +207,6 @@ type MattermostConfig struct {
 	AntiIdleChannel  string
 	AntiIdleInterval int
 
-	PreferNickname bool
-
-	LastViewedSaveFile   string
 	ForceSyncOnReconnect bool
 }
 
@@ -219,11 +219,9 @@ type SlackConfig struct {
 	Disable bool
 
 	SlackclientLogLevel string
-	LastViewedSaveFile  string
 
 	DenyUsers      []string
 	UseDisplayName bool
-	PreferNickname bool
 	UseRealName    bool
 }
 
@@ -234,9 +232,6 @@ type MatrixConfig struct {
 	Formatter FormatterConfig
 
 	MatrixclientLogLevel string
-
-	// Optional per-protocol DB path; falls back to mattermost.LastViewedSaveFile (or default) if unset.
-	LastViewedSaveFile string
 
 	// DefaultProvider is left out of channel names, e.g. "ubuntu.com".
 	DefaultProvider string
@@ -293,6 +288,9 @@ func (c *Config) buildSharedConfig(section string) SharedConfig {
 
 		MessageAttachmentShortFieldMaxLineLength: c.v.GetInt(section + ".MessageAttachmentShortFieldMaxLineLength"),
 		MessageAttachmentOmitFieldTitles:         c.v.GetBool(section + ".MessageAttachmentOmitFieldTitles"),
+
+		LastViewedSaveFile: c.v.GetString(section + ".LastViewedSaveFile"),
+		PreferNickname:     c.v.GetBool(section + ".PreferNickname"),
 	}
 }
 
@@ -558,9 +556,6 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 			AntiIdleChannel:  c.v.GetString("mattermost.AntiIdleChannel"),
 			AntiIdleInterval: c.v.GetInt("mattermost.AntiIdleInterval"),
 
-			PreferNickname: c.v.GetBool("mattermost.PreferNickname"),
-
-			LastViewedSaveFile:   c.v.GetString("mattermost.LastViewedSaveFile"),
 			ForceSyncOnReconnect: c.v.GetBool("mattermost.ForceSyncOnReconnect"),
 		},
 
@@ -572,11 +567,9 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 			Disable: c.v.GetBool("slack.Disable"),
 
 			SlackclientLogLevel: c.v.GetString("slack.SlackclientLogLevel"),
-			LastViewedSaveFile:  c.v.GetString("slack.LastViewedSaveFile"),
 
 			DenyUsers:      append([]string(nil), c.v.GetStringSlice("slack.DenyUsers")...),
 			UseDisplayName: c.v.GetBool("slack.UseDisplayName"),
-			PreferNickname: c.v.GetBool("slack.PreferNickname"),
 			UseRealName:    c.v.GetBool("slack.UseRealName"),
 		},
 
@@ -586,8 +579,6 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 			SharedConfig: c.buildSharedConfig("matrix"),
 
 			MatrixclientLogLevel: c.v.GetString("matrix.MatrixclientLogLevel"),
-
-			LastViewedSaveFile: c.v.GetString("matrix.LastViewedSaveFile"),
 
 			DefaultProvider:  c.v.GetString("matrix.DefaultProvider"),
 			ReplaceColonChar: c.v.GetString("matrix.ReplaceColonChar"),
