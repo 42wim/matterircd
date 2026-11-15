@@ -51,7 +51,8 @@ type AIConfig struct {
 type Config struct {
 	current atomic.Pointer[RuntimeConfig]
 
-	v *viper.Viper
+	v        *viper.Viper
+	reloadMu sync.Mutex
 
 	reloadHooks    []reloadHook
 	nextReloadHook uint64
@@ -173,6 +174,12 @@ type SharedConfig struct {
 	LazyJoinDuration          time.Duration
 	HeavySyncThreshold        time.Duration
 	DefaultDMOfflineThreshold time.Duration
+
+	HideReplies      bool
+	ShortenRepliesTo int
+
+	MessageAttachmentShortFieldMaxLineLength int
+	MessageAttachmentOmitFieldTitles         bool
 }
 
 type MattermostConfig struct {
@@ -199,14 +206,8 @@ type MattermostConfig struct {
 
 	PreferNickname bool
 
-	HideReplies      bool
-	ShortenRepliesTo int
-
 	LastViewedSaveFile   string
 	ForceSyncOnReconnect bool
-
-	MessageAttachmentShortFieldMaxLineLength int
-	MessageAttachmentOmitFieldTitles         bool
 }
 
 type SlackConfig struct {
@@ -220,15 +221,10 @@ type SlackConfig struct {
 	SlackclientLogLevel string
 	LastViewedSaveFile  string
 
-	DenyUsers        []string
-	HideReplies      bool
-	ShortenRepliesTo int
-	UseDisplayName   bool
-	PreferNickname   bool
-	UseRealName      bool
-
-	MessageAttachmentShortFieldMaxLineLength int
-	MessageAttachmentOmitFieldTitles         bool
+	DenyUsers      []string
+	UseDisplayName bool
+	PreferNickname bool
+	UseRealName    bool
 }
 
 type MatrixConfig struct {
@@ -241,9 +237,6 @@ type MatrixConfig struct {
 
 	// Optional per-protocol DB path; falls back to mattermost.LastViewedSaveFile (or default) if unset.
 	LastViewedSaveFile string
-
-	HideReplies      bool
-	ShortenRepliesTo int
 
 	// DefaultProvider is left out of channel names, e.g. "ubuntu.com".
 	DefaultProvider string
@@ -294,6 +287,12 @@ func (c *Config) buildSharedConfig(section string) SharedConfig {
 		LazyJoinDuration:          c.v.GetDuration(section + ".LazyJoinDuration"),
 		HeavySyncThreshold:        c.v.GetDuration(section + ".HeavySyncThreshold"),
 		DefaultDMOfflineThreshold: c.v.GetDuration(section + ".DefaultDMOfflineThreshold"),
+
+		HideReplies:      c.v.GetBool(section + ".HideReplies"),
+		ShortenRepliesTo: c.v.GetInt(section + ".ShortenRepliesTo"),
+
+		MessageAttachmentShortFieldMaxLineLength: c.v.GetInt(section + ".MessageAttachmentShortFieldMaxLineLength"),
+		MessageAttachmentOmitFieldTitles:         c.v.GetBool(section + ".MessageAttachmentOmitFieldTitles"),
 	}
 }
 
@@ -561,14 +560,8 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 
 			PreferNickname: c.v.GetBool("mattermost.PreferNickname"),
 
-			HideReplies:      c.v.GetBool("mattermost.HideReplies"),
-			ShortenRepliesTo: c.v.GetInt("mattermost.ShortenRepliesTo"),
-
 			LastViewedSaveFile:   c.v.GetString("mattermost.LastViewedSaveFile"),
 			ForceSyncOnReconnect: c.v.GetBool("mattermost.ForceSyncOnReconnect"),
-
-			MessageAttachmentShortFieldMaxLineLength: c.v.GetInt("mattermost.MessageAttachmentShortFieldMaxLineLength"),
-			MessageAttachmentOmitFieldTitles:         c.v.GetBool("mattermost.MessageAttachmentOmitFieldTitles"),
 		},
 
 		Slack: SlackConfig{
@@ -581,15 +574,10 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 			SlackclientLogLevel: c.v.GetString("slack.SlackclientLogLevel"),
 			LastViewedSaveFile:  c.v.GetString("slack.LastViewedSaveFile"),
 
-			DenyUsers:        append([]string(nil), c.v.GetStringSlice("slack.DenyUsers")...),
-			HideReplies:      c.v.GetBool("slack.HideReplies"),
-			ShortenRepliesTo: c.v.GetInt("slack.ShortenRepliesTo"),
-			UseDisplayName:   c.v.GetBool("slack.UseDisplayName"),
-			PreferNickname:   c.v.GetBool("slack.PreferNickname"),
-			UseRealName:      c.v.GetBool("slack.UseRealName"),
-
-			MessageAttachmentShortFieldMaxLineLength: c.v.GetInt("slack.MessageAttachmentShortFieldMaxLineLength"),
-			MessageAttachmentOmitFieldTitles:         c.v.GetBool("slack.MessageAttachmentOmitFieldTitles"),
+			DenyUsers:      append([]string(nil), c.v.GetStringSlice("slack.DenyUsers")...),
+			UseDisplayName: c.v.GetBool("slack.UseDisplayName"),
+			PreferNickname: c.v.GetBool("slack.PreferNickname"),
+			UseRealName:    c.v.GetBool("slack.UseRealName"),
 		},
 
 		Matrix: MatrixConfig{
@@ -601,8 +589,6 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 
 			LastViewedSaveFile: c.v.GetString("matrix.LastViewedSaveFile"),
 
-			HideReplies:      c.v.GetBool("matrix.HideReplies"),
-			ShortenRepliesTo: c.v.GetInt("matrix.ShortenRepliesTo"),
 			DefaultProvider:  c.v.GetString("matrix.DefaultProvider"),
 			ReplaceColonChar: c.v.GetString("matrix.ReplaceColonChar"),
 
@@ -903,15 +889,20 @@ func (c *Config) RegisterReloadHook(hook func(rc *RuntimeConfig)) func() {
 
 // Reload re-reads the config file, updates the atomic pointer, and triggers hooks.
 func (c *Config) Reload() error {
+	c.reloadMu.Lock()
+
 	// If the atomic pointer is currently nil, this is the initial startup load
 	isFirstLoad := c.Current() == nil
 
 	err := c.v.ReadInConfig()
 	if err != nil {
+		c.reloadMu.Unlock()
 		return err
 	}
 
 	err = c.publishRuntimeConfig()
+	c.reloadMu.Unlock()
+
 	if err != nil {
 		return err
 	}

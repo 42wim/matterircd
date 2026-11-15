@@ -2,6 +2,8 @@ package slack
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -10,6 +12,7 @@ import (
 	"github.com/42wim/matterircd/utils"
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/matterbridge/slackclient"
+	"github.com/sirupsen/logrus"
 	"github.com/slack-go/slack"
 	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/assert"
@@ -679,6 +682,70 @@ func TestSlackDMAndChannelResolution(t *testing.T) {
 
 	_ = s.Logout(ctx)
 	s.sendEvent(&bridge.Event{Type: "status_change"})
+}
+
+func writeTestFile(t *testing.T, path, content string) {
+	t.Helper()
+
+	err := os.WriteFile(path, []byte(content), 0o600)
+	if err != nil {
+		t.Fatalf("WriteFile %s: %v", path, err)
+	}
+}
+
+func TestSlackConfigLiveReload(t *testing.T) {
+	t.Parallel()
+
+	cfgPath := filepath.Join(t.TempDir(), "matterircd.toml")
+	initial := "[slack]\nHideReplies = false\nShortenRepliesTo = 20\nMessageAttachmentShortFieldMaxLineLength = 50\nMessageAttachmentOmitFieldTitles = false\nShowOnlyJoined = false\nUnicode = false\n"
+	writeTestFile(t, cfgPath, initial)
+
+	cfg, err := config.Load(cfgPath, pflag.NewFlagSet("test", pflag.ContinueOnError))
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+
+	sc := slackclient.New(slackclient.Credentials{})
+
+	s, err := newTestSlackBridge(cfg, sc, nil)
+	if err != nil {
+		t.Fatalf("newTestSlackBridge: %v", err)
+	}
+
+	testLog := logrus.New()
+	reloaded := make(chan struct{}, 1)
+
+	s.unregisterReloadHook = cfg.RegisterReloadHook(func(newRC *config.RuntimeConfig) {
+		configureBridgeLogging(testLog, sc, newRC)
+
+		select {
+		case reloaded <- struct{}{}:
+		default:
+		}
+	})
+	defer s.unregisterReloadHook()
+
+	maxLen, omit := s.attachmentFormattingOpts()
+	assert.Equal(t, 50, maxLen)
+	assert.False(t, omit)
+
+	updated := "Debug = true\n[slack]\nHideReplies = true\nShortenRepliesTo = 40\nMessageAttachmentShortFieldMaxLineLength = 120\nMessageAttachmentOmitFieldTitles = true\nShowOnlyJoined = true\nUnicode = true\n"
+	writeTestFile(t, cfgPath, updated)
+
+	select {
+	case <-reloaded:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for WatchConfig live reload")
+	}
+
+	maxLen, omit = s.attachmentFormattingOpts()
+	assert.Equal(t, 120, maxLen)
+	assert.True(t, omit)
+	assert.True(t, s.BridgeConfig().ShowOnlyJoined)
+	assert.True(t, s.FormatterConfig().Unicode)
+	assert.True(t, cfg.Slack().HideReplies)
+	assert.Equal(t, 40, cfg.Slack().ShortenRepliesTo)
+	assert.Equal(t, logrus.DebugLevel, testLog.GetLevel())
 }
 
 func newTestSlackBridge(cfg *config.Config, sc *slackclient.Client, evCh chan *bridge.Event) (*Slack, error) {
