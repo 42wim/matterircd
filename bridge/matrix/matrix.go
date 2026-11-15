@@ -1506,7 +1506,7 @@ func (m *Matrix) createUser(userID id.UserID) *bridge.UserInfo {
 		Ghost:     true,
 		Me:        userID == m.mc.UserID(),
 		Username:  nick,
-		Directory: m.directoryURL(nick, localpart),
+		Directory: m.directoryURL(homeserver, myHomeserver, nick, localpart),
 	}
 
 	if isBot {
@@ -1527,9 +1527,15 @@ func (m *Matrix) createUser(userID id.UserID) *bridge.UserInfo {
 	return &info
 }
 
-// directoryURL expands the {nick} and {username} placeholders of matrix.DirectoryURL,
+// directoryURL expands the {nick} and {username} placeholders of matrix.DirectoryURL
+// for users on DefaultProvider (or myHomeserver when DefaultProvider is unset),
 // escaping them for the path and query part respectively.
-func (m *Matrix) directoryURL(nick, username string) string {
+func (m *Matrix) directoryURL(homeserver, myHomeserver, nick, username string) string {
+	targetHomeserver := cmp.Or(m.defaultProvider, myHomeserver)
+	if targetHomeserver == "" || homeserver != targetHomeserver {
+		return ""
+	}
+
 	tmpl := m.cfg.Matrix().Bridge.DirectoryURL
 	if tmpl == "" {
 		return ""
