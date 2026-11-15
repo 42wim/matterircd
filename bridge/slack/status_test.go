@@ -615,6 +615,72 @@ func TestSlackBlocksListAndGetChannel(t *testing.T) {
 	assert.Equal(t, "Deploy Alert\nService *api* deployed\nTriggered by <@U1>", rendered)
 }
 
+func TestSlackDMAndChannelResolution(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := config.Load("", pflag.NewFlagSet("test", pflag.ContinueOnError))
+	if err != nil {
+		t.Fatalf("config.Load failed: %v", err)
+	}
+
+	sc := slackclient.New(slackclient.Credentials{})
+
+	sc.UpdateUser(slack.User{
+		ID:       "UDANA1234",
+		Name:     "dana",
+		RealName: "Dana Scully",
+	})
+	sc.CacheDMChannel("UDANA1234", "D98765432")
+	sc.UpdateChannel("CDEV12345", "dev")
+	sc.SetChannelJoined("CDEV12345", true)
+	sc.UpdateChannel("GPRIV1234", "secret-ops")
+	sc.SetChannelJoined("GPRIV1234", true)
+
+	s, err := newTestSlackBridge(cfg, sc, nil)
+	if err != nil {
+		t.Fatalf("newTestSlackBridge: %v", err)
+	}
+
+	// Public channel names starting with 'd' must NOT be misidentified as DM channels.
+	assert.False(t, s.IsDMChannelName("dev"))
+	assert.False(t, s.IsDMChannelName("dana"))
+	assert.True(t, s.IsDMChannelName("D98765432"))
+	assert.True(t, s.IsDMChannelName("D1"))
+
+	// slackChannelToInfo populates Name = ch.ID for 1-on-1 DMs where ch.Name is empty.
+	dmInfo := slackChannelToInfo("T1", &slack.Channel{GroupConversation: slack.GroupConversation{Conversation: slack.Conversation{ID: "D98765432", IsIM: true}}})
+	assert.Equal(t, "D98765432", dmInfo.Name)
+	assert.True(t, s.IsDMChannelName(dmInfo.Name))
+
+	// GetDMChannelID resolves usernames starting with 'd' ("dana") via GetUserByUsername
+	// instead of treating "dana" as a raw D-prefixed channel ID.
+	assert.Equal(t, "D98765432", s.GetDMChannelID(context.Background(), "dana"))
+	assert.Equal(t, "D98765432", s.GetDMChannelID(context.Background(), "UDANA1234"))
+
+	// GetChannelID resolves #dev to CDEV12345 and falls back to DM lookup for "dana".
+	assert.Equal(t, "CDEV12345", s.GetChannelID(context.Background(), "#dev", ""))
+	assert.Equal(t, "D98765432", s.GetChannelID(context.Background(), "dana", ""))
+
+	// Join resolves channel name "secret-ops" to GPRIV1234 and succeeds for already-joined private channels.
+	joinedID, _, err := s.Join(context.Background(), "secret-ops")
+	if err != nil {
+		t.Fatalf("Join(secret-ops): %v", err)
+	}
+
+	assert.Equal(t, "GPRIV1234", joinedID)
+
+	// Unbuffered eventChan does not block sendEvent after Logout closes s.done.
+	unbuffered := make(chan *bridge.Event)
+	s.eventChan = unbuffered
+	s.done = make(chan struct{})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_ = s.Logout(ctx)
+	s.sendEvent(&bridge.Event{Type: "status_change"})
+}
+
 func newTestSlackBridge(cfg *config.Config, sc *slackclient.Client, evCh chan *bridge.Event) (*Slack, error) {
 	rootCache, err := lru.New[string, string](64)
 	if err != nil {

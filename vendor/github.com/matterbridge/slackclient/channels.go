@@ -57,7 +57,7 @@ func (c *Client) cacheChannel(ch slack.Channel) {
 	}
 
 	c.Lock()
-	if ch.Name != "" {
+	if ch.Name != "" && !ch.IsIM {
 		c.channels[ch.ID] = "#" + ch.Name
 	}
 
@@ -77,7 +77,30 @@ func (c *Client) InvalidateCaches() {
 }
 
 func (c *Client) JoinChannel(channelName string) (string, string, error) {
-	mychan, _, _, err := c.sc.JoinConversation(channelName)
+	channelID := strings.TrimSpace(channelName)
+	if resolved := c.GetChannelID(context.Background(), channelID); resolved != "" {
+		channelID = resolved
+	}
+
+	c.RLock()
+	existing, hasExisting := c.channelData[channelID]
+	alreadyJoined := c.joinedChannels[channelID]
+	c.RUnlock()
+
+	if hasExisting && (alreadyJoined || existing.IsMember) && (existing.IsPrivate || existing.IsGroup || existing.IsMpIM) {
+		return existing.ID, existing.Topic.Value, nil
+	}
+
+	if c.sc == nil {
+		if hasExisting {
+			c.SetChannelJoined(existing.ID, true)
+			return existing.ID, existing.Topic.Value, nil
+		}
+
+		return "", "", errors.New("cannot join channel (+i): slackclient not connected")
+	}
+
+	mychan, _, _, err := c.sc.JoinConversation(channelID)
 	if err != nil {
 		return "", "", fmt.Errorf("cannot join channel (+i): %w", err)
 	}
@@ -150,7 +173,7 @@ func (c *Client) RefreshConversations() ([]slack.Channel, error) {
 			continue
 		}
 
-		if ch.Name != "" {
+		if ch.Name != "" && !ch.IsIM {
 			c.channels[ch.ID] = "#" + ch.Name
 		}
 
@@ -254,6 +277,10 @@ func (c *Client) SetTopic(channelID, text string) error {
 }
 
 func (c *Client) GetChannelName(channelID string) string {
+	if channelID == "" || strings.HasPrefix(channelID, "&") || strings.HasPrefix(channelID, "#") {
+		return channelID
+	}
+
 	c.RLock()
 
 	if name, ok := c.channels[channelID]; ok {
@@ -261,9 +288,14 @@ func (c *Client) GetChannelName(channelID string) string {
 		return name
 	}
 
+	if ch, ok := c.channelData[channelID]; ok && (ch.IsIM || ch.Name == "") {
+		c.RUnlock()
+		return channelID
+	}
+
 	c.RUnlock()
 
-	if c.sc == nil {
+	if strings.HasPrefix(strings.ToUpper(channelID), "D") || c.sc == nil {
 		return channelID
 	}
 
@@ -276,7 +308,7 @@ func (c *Client) GetChannelName(channelID string) string {
 
 	c.cacheChannel(*info)
 
-	if info.Name == "" {
+	if info.IsIM || info.Name == "" {
 		return channelID
 	}
 
@@ -300,8 +332,19 @@ func (c *Client) CreateChannel(ctx context.Context, name string, isPrivate bool)
 
 func (c *Client) GetChannelID(ctx context.Context, name string) string {
 	target := "#" + strings.TrimPrefix(name, "#")
+	upper := strings.ToUpper(strings.TrimSpace(name))
 
 	c.RLock()
+
+	if _, ok := c.channels[upper]; ok {
+		c.RUnlock()
+		return upper
+	}
+
+	if _, ok := c.channelData[upper]; ok {
+		c.RUnlock()
+		return upper
+	}
 
 	for id, chName := range c.channels {
 		if strings.EqualFold(chName, target) {
@@ -531,14 +574,17 @@ func (c *Client) UpdateChannel(channelID, name string) {
 	}
 
 	cleanName := strings.TrimPrefix(name, "#")
+	isIM := strings.HasPrefix(channelID, "D")
 
 	c.Lock()
-	c.channels[channelID] = "#" + cleanName
+	if !isIM {
+		c.channels[channelID] = "#" + cleanName
+	}
 
 	ch, ok := c.channelData[channelID]
 	if !ok {
 		ch.ID = channelID
-		ch.IsIM = strings.HasPrefix(channelID, "D")
+		ch.IsIM = isIM
 		ch.IsGroup = strings.HasPrefix(channelID, "G")
 		ch.IsPrivate = ch.IsGroup
 		ch.IsMember = c.joinedChannels[channelID]

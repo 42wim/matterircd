@@ -27,7 +27,7 @@ const (
 	slackThreadRootCacheSize = 4096
 	slackParentCacheSize     = 2048
 	slackLastSentCacheSize   = 128
-	slackLastSentSummaryLen  = 80
+	slackLastSentSummaryLen  = 90
 
 	subTypeMessageChanged = "message_changed"
 	subTypeMessageDeleted = "message_deleted"
@@ -52,6 +52,7 @@ type Slack struct {
 	connected            atomic.Bool
 	credentials          bridge.Credentials
 	eventChan            chan *bridge.Event
+	done                 chan struct{}
 	onConnect            func()
 	onWsError            func(error)
 	wasDisconnected      atomic.Bool
@@ -70,7 +71,18 @@ type Slack struct {
 
 const systemUser = "system"
 
-var logger *logrus.Entry
+var logger = newLogger()
+
+func newLogger() *logrus.Entry {
+	ourlog := logrus.New()
+	ourlog.SetFormatter(&prefixed.TextFormatter{
+		PrefixPadding: 13,
+		DisableColors: false,
+		FullTimestamp: true,
+	})
+
+	return ourlog.WithFields(logrus.Fields{"prefix": "bridge/slack"})
+}
 
 func New(cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Event, onConnect func(), onWsError ...func(error)) (bridge.Bridger, error) {
 	threadRootCache, _ := lru.New[string, string](slackThreadRootCacheSize)
@@ -85,6 +97,7 @@ func New(cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Eve
 	s := &Slack{
 		credentials:        cred,
 		eventChan:          eventChan,
+		done:               make(chan struct{}),
 		onConnect:          onConnect,
 		onWsError:          wsErrFn,
 		userByNick:         make(map[string]string),
@@ -95,15 +108,8 @@ func New(cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Eve
 	}
 
 	rc := cfg.Current()
+	ourlog := logger.Logger
 
-	ourlog := logrus.New()
-	ourlog.SetFormatter(&prefixed.TextFormatter{
-		PrefixPadding: 13,
-		DisableColors: false,
-		FullTimestamp: true,
-	})
-
-	logger = ourlog.WithFields(logrus.Fields{"prefix": "bridge/slack"})
 	if rc.Debug {
 		ourlog.SetLevel(logrus.DebugLevel)
 	}
@@ -160,7 +166,59 @@ func configureBridgeLogging(ourlog *logrus.Logger, sc *slackclient.Client, rc *c
 	}
 }
 
+func isSlackIDWithPrefix(id string, prefixes ...byte) bool {
+	if len(id) < 2 {
+		return false
+	}
+
+	first := id[0]
+	if first >= 'a' && first <= 'z' {
+		if len(id) < 9 {
+			return false
+		}
+
+		first -= 'a' - 'A'
+	}
+
+	if !slices.Contains(prefixes, first) {
+		return false
+	}
+
+	hasDigit := false
+
+	for i := 1; i < len(id); i++ {
+		c := id[i]
+		switch {
+		case c >= '0' && c <= '9':
+			hasDigit = true
+		case c >= 'A' && c <= 'Z':
+		case c >= 'a' && c <= 'z' && len(id) >= 9:
+		default:
+			return false
+		}
+	}
+
+	return hasDigit
+}
+
+func (s *Slack) sendEvent(ev *bridge.Event) {
+	if s.eventChan == nil || ev == nil {
+		return
+	}
+
+	select {
+	case s.eventChan <- ev:
+	case <-s.done:
+	}
+}
+
 func (s *Slack) Invite(ctx context.Context, channelID, username string) error {
+	if !isSlackIDWithPrefix(username, 'U', 'W') {
+		if u := s.GetUserByUsername(ctx, username); u != nil && u.User != "" {
+			username = u.User
+		}
+	}
+
 	return s.sc.Invite(channelID, username)
 }
 
@@ -208,6 +266,10 @@ func (s *Slack) Logout(ctx context.Context) error {
 
 func (s *Slack) logout(ctx context.Context) error {
 	s.connected.Store(false)
+
+	if s.done != nil {
+		defer close(s.done)
+	}
 
 	if s.unregisterReloadHook != nil {
 		s.unregisterReloadHook()
@@ -365,6 +427,12 @@ func (s *Slack) Protocol() string {
 }
 
 func (s *Slack) Kick(ctx context.Context, channelID, username string) error {
+	if !isSlackIDWithPrefix(username, 'U', 'W') {
+		if u := s.GetUserByUsername(ctx, username); u != nil && u.User != "" {
+			username = u.User
+		}
+	}
+
 	return s.sc.Kick(channelID, username)
 }
 
@@ -379,12 +447,12 @@ func (s *Slack) Nick(ctx context.Context, name string) error {
 	}
 
 	if me := s.GetMe(); me != nil && me.User != "" {
-		s.eventChan <- &bridge.Event{
+		s.sendEvent(&bridge.Event{
 			Type: "user_update",
 			Data: &bridge.UserUpdateEvent{
 				User: me,
 			},
-		}
+		})
 	}
 
 	return nil
@@ -415,11 +483,17 @@ func (s *Slack) GetDMChannelID(ctx context.Context, userID string) string {
 		return ""
 	}
 
-	if strings.HasPrefix(strings.ToUpper(userID), "D") {
+	if isSlackIDWithPrefix(userID, 'D') {
 		return strings.ToUpper(userID)
 	}
 
-	chID, err := s.sc.OpenDMChannel(ctx, userID)
+	if !isSlackIDWithPrefix(userID, 'U', 'W') {
+		if u := s.GetUserByUsername(ctx, userID); u != nil && u.User != "" {
+			userID = u.User
+		}
+	}
+
+	chID, err := s.sc.OpenDMChannel(ctx, strings.ToUpper(userID))
 	if err != nil {
 		logger.Debugf("GetDMChannelID %s: %s", userID, err)
 		return ""
@@ -506,8 +580,13 @@ func slackChannelToInfo(teamID string, ch *slack.Channel) *bridge.ChannelInfo {
 		lastPostAt = slackTSMillis(ch.Latest.Timestamp)
 	}
 
+	name := ch.Name
+	if (ch.IsIM || isSlackIDWithPrefix(ch.ID, 'D')) && name == "" {
+		name = ch.ID
+	}
+
 	return &bridge.ChannelInfo{
-		Name:        ch.Name,
+		Name:        name,
 		ID:          ch.ID,
 		TeamID:      teamID,
 		DM:          ch.IsIM || ch.IsMpIM,
@@ -698,7 +777,7 @@ func (s *Slack) GetPostsSince(ctx context.Context, channelID string, since int64
 }
 
 func (s *Slack) IsDMChannelName(channelName string) bool {
-	return strings.HasPrefix(strings.ToUpper(channelName), "D")
+	return isSlackIDWithPrefix(channelName, 'D')
 }
 
 func (s *Slack) SearchPosts(ctx context.Context, search string) []*bridge.Event {
@@ -828,6 +907,8 @@ func (s *Slack) GetPosts(ctx context.Context, channelID string, limit int) []*br
 		limit = 100
 	}
 
+	limit = min(limit, 1000)
+
 	msgs, err := s.sc.GetConversationHistory(ctx, channelID, "", limit)
 	if err != nil {
 		logger.Errorf("slack: GetPosts %s: %s", channelID, err)
@@ -943,7 +1024,9 @@ func (s *Slack) getCachedPost(ctx context.Context, channelID, ts string) (slackC
 	}
 
 	cleanMsg := ""
-	if rawText, ok := formatSlackMsg(&m.Msg); ok {
+	shortFieldMaxLen, omitFieldTitles := s.attachmentFormattingOpts()
+
+	if rawText, ok := formatSlackMsgOpts(&m.Msg, shortFieldMaxLen, omitFieldTitles); ok {
 		cleanMsg = s.cleanupMessage(rawText)
 	}
 
@@ -1128,23 +1211,34 @@ func (s *Slack) GetPostThread(ctx context.Context, postID string) []*bridge.Even
 }
 
 func (s *Slack) GetChannelID(ctx context.Context, name, teamID string) string {
-	name = strings.TrimPrefix(name, "#")
+	name, isChan := strings.CutPrefix(name, "#")
 	if name == "" {
 		return ""
 	}
 
-	upper := strings.ToUpper(name)
-	if strings.HasPrefix(upper, "D") && len(name) >= 9 {
-		return upper
-	}
+	if !isChan {
+		if isSlackIDWithPrefix(name, 'D') {
+			return strings.ToUpper(name)
+		}
 
-	if (strings.HasPrefix(upper, "U") || strings.HasPrefix(upper, "W")) && len(name) >= 9 {
-		if chID := s.GetDMChannelID(ctx, upper); chID != "" {
-			return chID
+		if isSlackIDWithPrefix(name, 'U', 'W') {
+			if chID := s.GetDMChannelID(ctx, strings.ToUpper(name)); chID != "" {
+				return chID
+			}
 		}
 	}
 
-	return s.sc.GetChannelID(ctx, name)
+	if chID := s.sc.GetChannelID(ctx, name); chID != "" {
+		return chID
+	}
+
+	if !isChan {
+		if u := s.GetUserByUsername(ctx, name); u != nil && u.User != "" {
+			return s.GetDMChannelID(ctx, u.User)
+		}
+	}
+
+	return ""
 }
 
 func (s *Slack) allowedLogin() error {
@@ -1318,13 +1412,13 @@ func (s *Slack) handleUserStatusChanged(user slack.User) {
 	s.emitUserUpdate(user)
 
 	if user.ID != "" && user.ID != s.sc.UserID() && !s.HasCustomStatus(user.ID) && s.eventChan != nil {
-		s.eventChan <- &bridge.Event{
+		s.sendEvent(&bridge.Event{
 			Type: "status_change",
 			Data: &bridge.StatusChangeEvent{
 				UserID: user.ID,
 				Status: statusOnline,
 			},
-		}
+		})
 	}
 }
 
@@ -1345,12 +1439,12 @@ func (s *Slack) emitUserUpdate(user slack.User) {
 		return
 	}
 
-	s.eventChan <- &bridge.Event{
+	s.sendEvent(&bridge.Event{
 		Type: "user_update",
 		Data: &bridge.UserUpdateEvent{
 			User: info,
 		},
-	}
+	})
 }
 
 func (s *Slack) handleSlackItemEvent(ctx context.Context, data any) bool {
@@ -1443,7 +1537,7 @@ func (s *Slack) handleSlackTyping(ev *slack.UserTypingEvent) {
 		receiver = s.GetMe()
 	}
 
-	s.eventChan <- &bridge.Event{
+	s.sendEvent(&bridge.Event{
 		Type: "typing",
 		Data: &bridge.TypingEvent{
 			ChannelID:   ev.Channel,
@@ -1451,7 +1545,7 @@ func (s *Slack) handleSlackTyping(ev *slack.UserTypingEvent) {
 			Receiver:    receiver,
 			Sender:      sender,
 		},
-	}
+	})
 }
 
 func (s *Slack) emitChannelCreate(channelID, name string) {
@@ -1468,13 +1562,13 @@ func (s *Slack) emitChannelCreate(channelID, name string) {
 		chName = "#" + strings.TrimPrefix(name, "#")
 	}
 
-	s.eventChan <- &bridge.Event{
+	s.sendEvent(&bridge.Event{
 		Type: "channel_create",
 		Data: &bridge.ChannelCreateEvent{
 			ChannelID: channelID,
 			Name:      chName,
 		},
-	}
+	})
 }
 
 func (s *Slack) emitChannelUpdate(channelID, name string) {
@@ -1487,14 +1581,14 @@ func (s *Slack) emitChannelUpdate(channelID, name string) {
 	s.sc.UpdateChannel(channelID, cleanName)
 	s.sc.InvalidateUserChannels("")
 
-	s.eventChan <- &bridge.Event{
+	s.sendEvent(&bridge.Event{
 		Type: "channel_update",
 		Data: &bridge.ChannelUpdateEvent{
 			ChannelID:   channelID,
 			Name:        cleanName,
 			DisplayName: cleanName,
 		},
-	}
+	})
 }
 
 func (s *Slack) emitChannelDelete(channelID string) {
@@ -1505,12 +1599,12 @@ func (s *Slack) emitChannelDelete(channelID string) {
 	s.sc.RemoveChannel(channelID)
 	s.sc.InvalidateUserChannels("")
 
-	s.eventChan <- &bridge.Event{
+	s.sendEvent(&bridge.Event{
 		Type: "channel_delete",
 		Data: &bridge.ChannelDeleteEvent{
 			ChannelID: channelID,
 		},
-	}
+	})
 }
 
 func (s *Slack) emitChannelAdd(channelID, name string) {
@@ -1523,14 +1617,14 @@ func (s *Slack) emitChannelAdd(channelID, name string) {
 
 	me := s.GetMe()
 
-	s.eventChan <- &bridge.Event{
+	s.sendEvent(&bridge.Event{
 		Type: "channel_add",
 		Data: &bridge.ChannelAddEvent{
 			Adder:     me,
 			Added:     []*bridge.UserInfo{me},
 			ChannelID: channelID,
 		},
-	}
+	})
 }
 
 func (s *Slack) emitChannelRemove(channelID string) {
@@ -1542,14 +1636,14 @@ func (s *Slack) emitChannelRemove(channelID string) {
 
 	me := s.GetMe()
 
-	s.eventChan <- &bridge.Event{
+	s.sendEvent(&bridge.Event{
 		Type: "channel_remove",
 		Data: &bridge.ChannelRemoveEvent{
 			Remover:   me,
 			Removed:   []*bridge.UserInfo{me},
 			ChannelID: channelID,
 		},
-	}
+	})
 }
 
 func (s *Slack) handlePresenceChange(user string, users []string, presence string) {
@@ -1567,13 +1661,13 @@ func (s *Slack) handlePresenceChange(user string, users []string, presence strin
 
 		s.sc.UpdatePresence(uid, presence)
 
-		s.eventChan <- &bridge.Event{
+		s.sendEvent(&bridge.Event{
 			Type: "status_change",
 			Data: &bridge.StatusChangeEvent{
 				UserID: uid,
 				Status: normalized,
 			},
-		}
+		})
 	}
 }
 
@@ -1647,26 +1741,26 @@ func (s *Slack) handleSlackReaction(ctx context.Context, userID, channelID, ts, 
 	}
 
 	if added {
-		s.eventChan <- &bridge.Event{
+		s.sendEvent(&bridge.Event{
 			Type: "reaction_add",
 			Data: &bridge.ReactionAddEvent{
 				ChannelID: channelID, MessageID: msgID, ParentID: parentID,
 				Message: replyMsg, Receiver: receiver, Sender: ghost,
 				Reaction: reaction, ChannelType: channelType,
 			},
-		}
+		})
 
 		return
 	}
 
-	s.eventChan <- &bridge.Event{
+	s.sendEvent(&bridge.Event{
 		Type: "reaction_remove",
 		Data: &bridge.ReactionRemoveEvent{
 			ChannelID: channelID, MessageID: msgID, ParentID: parentID,
 			Message: replyMsg, Receiver: receiver, Sender: ghost,
 			Reaction: reaction, ChannelType: channelType,
 		},
-	}
+	})
 }
 
 func (s *Slack) resolveItemParent(ctx context.Context, channelID string, itemMsg *slack.Message) (string, string) {
@@ -1747,7 +1841,7 @@ func (s *Slack) handleMemberLeftChannel(ctx context.Context, rmsg *slack.MemberL
 		},
 	}
 
-	s.eventChan <- event
+	s.sendEvent(event)
 }
 
 func (s *Slack) handleMemberJoinedChannel(ctx context.Context, rmsg *slack.MemberJoinedChannelEvent) {
@@ -1769,7 +1863,7 @@ func (s *Slack) handleMemberJoinedChannel(ctx context.Context, rmsg *slack.Membe
 			ChannelID: rmsg.Channel,
 		},
 	}
-	s.eventChan <- event
+	s.sendEvent(event)
 }
 
 func (s *Slack) sendDirectMessage(sender, receiver *bridge.UserInfo, msg, channelID, msgID, parentID string, createAt int64) {
@@ -1790,7 +1884,7 @@ func (s *Slack) sendDirectMessage(sender, receiver *bridge.UserInfo, msg, channe
 
 	event.Data = d
 
-	s.eventChan <- event
+	s.sendEvent(event)
 }
 
 func (s *Slack) sendPublicMessage(ghost *bridge.UserInfo, msg, channelID, msgID, parentID, eventType string, createAt int64) {
@@ -1808,7 +1902,7 @@ func (s *Slack) sendPublicMessage(ghost *bridge.UserInfo, msg, channelID, msgID,
 		},
 	}
 
-	s.eventChan <- event
+	s.sendEvent(event)
 }
 
 func (s *Slack) attachmentFormattingOpts() (int, bool) {
@@ -2281,14 +2375,14 @@ func (s *Slack) handleSlackTopicEvent(rmsg *slack.MessageEvent) bool {
 	s.sc.UpdateTopic(rmsg.Channel, topic)
 
 	if !strings.HasPrefix(rmsg.Channel, "D") {
-		s.eventChan <- &bridge.Event{
+		s.sendEvent(&bridge.Event{
 			Type: eventChannelTopic,
 			Data: &bridge.ChannelTopicEvent{
 				Text:      topic,
 				ChannelID: rmsg.Channel,
 				UserID:    rmsg.User,
 			},
-		}
+		})
 
 		return true
 	}
@@ -2434,7 +2528,7 @@ func (s *Slack) emitSlackFileEvent(ghost *bridge.UserInfo, channelID, msgID, par
 		receiver = s.resolveDMReceiver(ghost, channelID)
 	}
 
-	s.eventChan <- &bridge.Event{
+	s.sendEvent(&bridge.Event{
 		Type: "file_event",
 		Data: &bridge.FileEvent{
 			Sender:      ghost,
@@ -2445,7 +2539,7 @@ func (s *Slack) emitSlackFileEvent(ghost *bridge.UserInfo, channelID, msgID, par
 			ParentID:    parentID,
 			Files:       files,
 		},
-	}
+	})
 }
 
 func isEnterpriseUser(slackuser *slack.User) bool {
@@ -2618,10 +2712,18 @@ func (s *Slack) recordSent(ctx context.Context, channelID, msgID, threadTS, pare
 		name = channelID
 	}
 
-	summary := strings.Join(strings.Fields(text), " ")
-	if len(summary) > slackLastSentSummaryLen {
-		summary = strings.ToValidUTF8(summary[:slackLastSentSummaryLen], "") + "..."
+	var unicode bool
+	if s.cfg != nil {
+		unicode = s.cfg.Current().Slack.Formatter.Unicode
 	}
+
+	summary := utils.FormatAndShortenSummary(text, utils.SummaryOpts{
+		DisableEmoji:    true,
+		DisableMarkdown: true,
+		MaxLength:       slackLastSentSummaryLen,
+		UncountedPrefix: "@",
+		Unicode:         unicode,
+	})
 
 	if threadTS != "" {
 		summary += s.formatReplySuffix(ctx, channelID, threadTS)
@@ -2688,10 +2790,26 @@ func (s *Slack) ModifyPost(ctx context.Context, msgID, text string) error {
 	}
 
 	if text == "" {
-		return s.sc.DeleteMessage(ctx, channelID, ts)
+		err := s.sc.DeleteMessage(ctx, channelID, ts)
+		if err == nil {
+			s.evictCachedPost(channelID, ts)
+		}
+
+		return err
 	}
 
-	return s.sc.UpdateMessage(ctx, channelID, ts, text)
+	text = slackActionText(text)
+
+	err := s.sc.UpdateMessage(ctx, channelID, ts, text)
+	if err == nil {
+		if cp, ok := s.getCachedPostOnly(channelID, ts); ok {
+			s.cachePost(channelID, ts, cp.rootTS, cp.sender, s.cleanupMessage(text))
+		} else {
+			s.evictCachedPost(channelID, ts)
+		}
+	}
+
+	return err
 }
 
 func (s *Slack) AddReaction(ctx context.Context, msgID, emoji string) error {
