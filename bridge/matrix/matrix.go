@@ -676,6 +676,7 @@ func (m *Matrix) sendFile(ghost *bridge.UserInfo, msg *matrixclient.Message, fil
 			Files:       []*bridge.File{file},
 			MessageID:   msg.EventID.String(),
 			ParentID:    msg.ParentID.String(),
+			CreateAt:    msg.Timestamp,
 		},
 	})
 }

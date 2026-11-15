@@ -2477,7 +2477,7 @@ func (s *Slack) handleSlackActionPost(ctx context.Context, rmsg *slack.MessageEv
 	}
 
 	if len(files) > 0 && rmsg.SubType != subTypeMessageChanged {
-		s.emitSlackFileEvent(ghost, channelID, msgID, parentID, files)
+		s.emitSlackFileEvent(ghost, channelID, msgID, parentID, files, slackTSMillis(msgTS))
 	}
 }
 
@@ -2519,7 +2519,7 @@ func (s *Slack) sendSlackActionPostMessage(
 	s.sendPublicMessage(ghost, msg, channelID, msgID, parentID, eventType, createAt)
 }
 
-func (s *Slack) emitSlackFileEvent(ghost *bridge.UserInfo, channelID, msgID, parentID string, files []*bridge.File) {
+func (s *Slack) emitSlackFileEvent(ghost *bridge.UserInfo, channelID, msgID, parentID string, files []*bridge.File, createAt int64) {
 	channelType := ""
 	receiver := ghost
 
@@ -2537,6 +2537,7 @@ func (s *Slack) emitSlackFileEvent(ghost *bridge.UserInfo, channelID, msgID, par
 			ChannelID:   channelID,
 			MessageID:   msgID,
 			ParentID:    parentID,
+			CreateAt:    createAt,
 			Files:       files,
 		},
 	})

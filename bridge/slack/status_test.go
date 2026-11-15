@@ -378,7 +378,7 @@ func TestSlackFileAttachments(t *testing.T) {
 	assert.Equal(t, "See attached", formatted)
 
 	sender := &bridge.UserInfo{Nick: "sender", Ghost: true}
-	s.emitSlackFileEvent(sender, "C1", "msg1", "parent1", chMsg.Files)
+	s.emitSlackFileEvent(sender, "C1", "msg1", "parent1", chMsg.Files, 1700000000100)
 
 	second := <-evCh
 	assert.Equal(t, "file_event", second.Type)
@@ -389,6 +389,7 @@ func TestSlackFileAttachments(t *testing.T) {
 	assert.Equal(t, "C1", fe.ChannelID)
 	assert.Equal(t, "msg1", fe.MessageID)
 	assert.Equal(t, "parent1", fe.ParentID)
+	assert.Equal(t, int64(1700000000100), fe.CreateAt)
 	assert.Len(t, fe.Files, 1)
 	assert.Equal(t, "report.pdf", fe.Files[0].Name)
 	assert.Equal(t, "https://files.slack.com/files-pri/T1-F1/download/report.pdf", fe.Files[0].URL)

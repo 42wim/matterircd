@@ -370,7 +370,7 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 		PreserveNewLines:   preserveNewLines,
 	}
 
-	timeTag := formatLiveTimeTag(event.CreateAt)
+	timeTag := formatLiveTimeTag(event.CreateAt, event.Event)
 
 	emitLine := func(line string) {
 		if showContext || addPrefix {
@@ -739,7 +739,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		PreserveNewLines:   preserveNewLines,
 	}
 
-	timeTag := formatLiveTimeTag(event.CreateAt)
+	timeTag := formatLiveTimeTag(event.CreateAt, event.Event)
 
 	emitLine := func(line string) {
 		if showContext || addPrefix {
@@ -802,6 +802,8 @@ func (u *User) handleFileEvent(event *bridge.FileEvent) {
 		}
 	}
 
+	timeTag := formatLiveTimeTag(event.CreateAt, "")
+
 	for _, f := range event.Files {
 		sizeKB := f.Size / 1024
 		if sizeKB == 0 && f.Size > 0 {
@@ -819,20 +821,26 @@ func (u *User) handleFileEvent(event *bridge.FileEvent) {
 		case "D":
 			if event.Sender.Me {
 				if event.Receiver.Me {
-					u.MsgSpoofUser(u, u.Nick, fileMsg)
+					u.msgSpoofUserTime(u, u.Nick, fileMsg, timeTag)
 				} else {
-					u.MsgSpoofUser(u, u.createUserFromInfo(event.Receiver).Nick, fileMsg)
+					u.msgSpoofUserTime(u, u.createUserFromInfo(event.Receiver).Nick, fileMsg, timeTag)
 				}
 			} else {
-				u.MsgSpoofUser(u.createUserFromInfo(event.Sender), u.Nick, fileMsg)
+				u.msgSpoofUserTime(u.createUserFromInfo(event.Sender), u.Nick, fileMsg, timeTag)
 			}
 		default:
 			ch := u.getMessageChannel(event.ChannelID, event.Sender)
+
+			from := u.sanitizeNick(event.Sender.Nick)
+			prefix := &irc.Prefix{Name: from, User: from, Host: u.Srv.Name()}
+
 			if event.Sender.Me {
-				ch.SpoofMessage(u.Nick, fileMsg)
-			} else {
-				ch.SpoofMessage(u.sanitizeNick(event.Sender.Nick), fileMsg)
+				prefix = u.Prefix()
+			} else if sender, ok := u.Srv.HasUser(from); ok {
+				prefix = sender.Prefix()
 			}
+
+			ch.SpoofWithPrefixTime(prefix, fileMsg, irc.PRIVMSG, timeTag)
 		}
 	}
 }
@@ -2018,7 +2026,13 @@ func formatTimeTag(createAt int64) string {
 	return "@time=" + time.UnixMilli(createAt).UTC().Format("2006-01-02T15:04:05.000Z")
 }
 
-func formatLiveTimeTag(createAt int64) string {
+func formatLiveTimeTag(createAt int64, eventType string) string {
+	// Only backdate new messages; edits, deletes, reactions, etc. carry the
+	// original post's CreateAt and should display at the time of the update.
+	if eventType != "" && eventType != "posted" {
+		return ""
+	}
+
 	if createAt <= 0 || time.Since(time.UnixMilli(createAt)) <= 60*time.Second {
 		return ""
 	}

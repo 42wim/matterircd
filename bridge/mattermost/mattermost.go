@@ -1792,6 +1792,7 @@ func (m *Mattermost) handleFileEvent(ctx context.Context, channelType string, gh
 		ChannelID:   data.ChannelId,
 		MessageID:   data.Id,
 		ParentID:    data.RootId,
+		CreateAt:    data.CreateAt,
 	}
 
 	event.Data = fileEvent

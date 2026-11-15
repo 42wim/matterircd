@@ -228,6 +228,7 @@ type FileEvent struct {
 	Files       []*File
 	MessageID   string
 	ParentID    string
+	CreateAt    int64
 }
 
 type ReactionAddEvent struct {
