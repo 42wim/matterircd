@@ -178,8 +178,8 @@ func login(u *User, toUser *User, args []string, service string) {
 	if service == serviceSlack { //nolint:nestif
 		var err error
 
-		if len(args) != 1 && len(args) != 3 {
-			u.respondService(toUser, "need LOGIN <team> <login> <pass> or LOGIN <token>", service)
+		if len(args) != 1 && len(args) != 3 && len(args) != 4 {
+			u.respondService(toUser, "need LOGIN <team> <login> <pass> [mfatoken] or LOGIN <token>", service)
 			return
 		}
 
@@ -188,7 +188,7 @@ func login(u *User, toUser *User, args []string, service string) {
 		}
 
 		if u.Credentials.Token == helpArg {
-			u.respondService(toUser, "need LOGIN <team> <login> <pass> or LOGIN <token>", service)
+			u.respondService(toUser, "need LOGIN <team> <login> <pass> [mfatoken] or LOGIN <token>", service)
 			return
 		}
 
@@ -205,7 +205,7 @@ func login(u *User, toUser *User, args []string, service string) {
 				Team:     args[0],
 				Login:    args[1],
 				Pass:     args[2],
-				MFAToken: args[3],
+				MFAToken: strings.TrimPrefix(args[3], "MFAToken="),
 			}
 		}
 

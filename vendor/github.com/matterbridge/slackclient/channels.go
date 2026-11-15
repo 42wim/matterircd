@@ -66,6 +66,16 @@ func (c *Client) cacheChannel(ch slack.Channel) {
 	c.Unlock()
 }
 
+// InvalidateCaches clears cached conversation freshness and membership TTL maps
+// so subsequent lookups re-fetch from the Slack API after a long disconnect.
+func (c *Client) InvalidateCaches() {
+	c.Lock()
+	c.channelsFetchedAt = 0
+	clear(c.channelMembers)
+	clear(c.userChannels)
+	c.Unlock()
+}
+
 func (c *Client) JoinChannel(channelName string) (string, string, error) {
 	mychan, _, _, err := c.sc.JoinConversation(channelName)
 	if err != nil {
@@ -525,10 +535,17 @@ func (c *Client) UpdateChannel(channelID, name string) {
 	c.Lock()
 	c.channels[channelID] = "#" + cleanName
 
-	if ch, ok := c.channelData[channelID]; ok {
-		ch.Name = cleanName
-		c.channelData[channelID] = ch
+	ch, ok := c.channelData[channelID]
+	if !ok {
+		ch.ID = channelID
+		ch.IsIM = strings.HasPrefix(channelID, "D")
+		ch.IsGroup = strings.HasPrefix(channelID, "G")
+		ch.IsPrivate = ch.IsGroup
+		ch.IsMember = c.joinedChannels[channelID]
 	}
+
+	ch.Name = cleanName
+	c.channelData[channelID] = ch
 	c.Unlock()
 }
 

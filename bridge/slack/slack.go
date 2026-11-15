@@ -48,18 +48,22 @@ type slackCachedPost struct {
 type Slack struct {
 	sync.RWMutex
 
-	sc                 *slackclient.Client
-	connected          bool
-	credentials        bridge.Credentials
-	eventChan          chan *bridge.Event
-	onConnect          func()
-	onWsError          func(error)
-	wasDisconnected    atomic.Bool
-	userByNick         map[string]string
-	msgThreadRootCache *lru.Cache[string, string]
-	msgParentCache     *lru.Cache[string, slackCachedPost]
-	msgLastSentCache   *lru.Cache[string, string]
-	lastTypingSent     sync.Map
+	sc                   *slackclient.Client
+	connected            atomic.Bool
+	credentials          bridge.Credentials
+	eventChan            chan *bridge.Event
+	onConnect            func()
+	onWsError            func(error)
+	wasDisconnected      atomic.Bool
+	disconnectedAt       atomic.Int64
+	unregisterReloadHook func()
+	logoutOnce           sync.Once
+	wsCancel             context.CancelFunc
+	userByNick           map[string]string
+	msgThreadRootCache   *lru.Cache[string, string]
+	msgParentCache       *lru.Cache[string, slackCachedPost]
+	msgLastSentCache     *lru.Cache[string, string]
+	lastTypingSent       sync.Map
 
 	cfg *config.Config
 }
@@ -116,7 +120,7 @@ func New(cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Eve
 	configureBridgeLogging(ourlog, sc, rc)
 
 	// Register hook to update live on reloads
-	cfg.RegisterReloadHook(func(newRC *config.RuntimeConfig) {
+	s.unregisterReloadHook = cfg.RegisterReloadHook(func(newRC *config.RuntimeConfig) {
 		configureBridgeLogging(ourlog, sc, newRC)
 	})
 
@@ -173,6 +177,10 @@ func (s *Slack) List(ctx context.Context) (map[string]string, error) {
 
 	conversations, _ := s.sc.GetConversations()
 	for _, channel := range conversations {
+		if channel.IsIM || channel.IsMpIM || channel.Name == "" {
+			continue
+		}
+
 		channelinfo["#"+channel.Name] = strings.ReplaceAll(channel.Topic.Value, "\n", " | ")
 	}
 
@@ -189,9 +197,29 @@ func (s *Slack) UpdateChannels(ctx context.Context) error {
 }
 
 func (s *Slack) Logout(ctx context.Context) error {
-	err := s.sc.Logout()
-	if err != nil {
-		return err
+	var logoutErr error
+
+	s.logoutOnce.Do(func() {
+		logoutErr = s.logout(ctx)
+	})
+
+	return logoutErr
+}
+
+func (s *Slack) logout(ctx context.Context) error {
+	s.connected.Store(false)
+
+	if s.unregisterReloadHook != nil {
+		s.unregisterReloadHook()
+	}
+
+	if s.wsCancel != nil {
+		s.wsCancel()
+	}
+
+	var err error
+	if s.sc != nil {
+		err = s.sc.Logout()
 	}
 
 	// The event loop may never have started, or it ended already when the user disconnected
@@ -199,15 +227,15 @@ func (s *Slack) Logout(ctx context.Context) error {
 	timer := time.NewTimer(time.Second)
 	defer timer.Stop()
 
-	select {
-	case s.eventChan <- &bridge.Event{Type: "logout", Data: &bridge.LogoutEvent{}}:
-	case <-ctx.Done():
-	case <-timer.C:
+	if s.eventChan != nil {
+		select {
+		case s.eventChan <- &bridge.Event{Type: "logout", Data: &bridge.LogoutEvent{}}:
+		case <-ctx.Done():
+		case <-timer.C:
+		}
 	}
 
-	s.connected = false
-
-	return nil
+	return err
 }
 
 func slackActionText(text string) string {
@@ -479,12 +507,13 @@ func slackChannelToInfo(teamID string, ch *slack.Channel) *bridge.ChannelInfo {
 	}
 
 	return &bridge.ChannelInfo{
-		Name:       ch.Name,
-		ID:         ch.ID,
-		TeamID:     teamID,
-		DM:         ch.IsIM || ch.IsMpIM,
-		Private:    ch.IsPrivate || ch.IsGroup,
-		LastPostAt: lastPostAt,
+		Name:        ch.Name,
+		ID:          ch.ID,
+		TeamID:      teamID,
+		DM:          ch.IsIM || ch.IsMpIM,
+		Private:     ch.IsPrivate || ch.IsGroup,
+		DisplayName: ch.Name,
+		LastPostAt:  lastPostAt,
 	}
 }
 
@@ -509,14 +538,28 @@ func (s *Slack) CreateChannel(ctx context.Context, channelName string, channelTy
 	}
 
 	return &bridge.ChannelInfo{
-		ID:      ch.ID,
-		Name:    ch.Name,
-		TeamID:  s.sc.TeamID(),
-		Private: ch.IsPrivate,
+		ID:          ch.ID,
+		Name:        ch.Name,
+		DisplayName: ch.Name,
+		TeamID:      s.sc.TeamID(),
+		Private:     ch.IsPrivate,
 	}, nil
 }
 
 func (s *Slack) GetChannel(ctx context.Context, channelID string) (*bridge.ChannelInfo, error) {
+	if channelID == "" || strings.HasPrefix(channelID, "&") {
+		return nil, errors.New("invalid channel id")
+	}
+
+	if strings.HasPrefix(channelID, "#") {
+		chID := s.GetChannelID(ctx, channelID, "")
+		if chID == "" {
+			return nil, errors.New("channel not found")
+		}
+
+		channelID = chID
+	}
+
 	channels := s.GetChannels()
 	for _, channel := range channels {
 		if channel.ID == channelID {
@@ -575,7 +618,34 @@ func (s *Slack) GetMe() *bridge.UserInfo {
 	return s.createUser(s.sc.GetMe())
 }
 
+func (s *Slack) lookupUserIDByNick(nick string) string {
+	if nick == "" {
+		return ""
+	}
+
+	s.RLock()
+	defer s.RUnlock()
+
+	if uid, ok := s.userByNick[nick]; ok {
+		return uid
+	}
+
+	for k, uid := range s.userByNick {
+		if strings.EqualFold(k, nick) {
+			return uid
+		}
+	}
+
+	return ""
+}
+
 func (s *Slack) GetUserByUsername(ctx context.Context, username string) *bridge.UserInfo {
+	if uid := s.lookupUserIDByNick(username); uid != "" {
+		if u := s.sc.GetUser(uid); u != nil {
+			return s.createUser(u)
+		}
+	}
+
 	u := s.sc.GetUserByUsername(username)
 	if u == nil {
 		return nil
@@ -1105,10 +1175,11 @@ func (s *Slack) loginToSlack() (*slackclient.Client, error) {
 	rc := s.cfg.Current()
 
 	sc := slackclient.New(slackclient.Credentials{
-		Login: s.credentials.Login,
-		Team:  s.credentials.Team,
-		Pass:  s.credentials.Pass,
-		Token: s.credentials.Token,
+		Login:    s.credentials.Login,
+		Team:     s.credentials.Team,
+		Pass:     s.credentials.Pass,
+		Token:    s.credentials.Token,
+		MFAToken: s.credentials.MFAToken,
 	})
 
 	if rc.Debug {
@@ -1133,18 +1204,30 @@ func (s *Slack) loginToSlack() (*slackclient.Client, error) {
 		return nil, err
 	}
 
-	go s.handleSlack(context.TODO())
+	wsCtx, wsCancel := context.WithCancel(context.Background())
+	s.wsCancel = wsCancel
+
+	go s.handleSlack(wsCtx)
 	go s.onConnect()
 
-	s.connected = true
+	s.connected.Store(true)
 
 	return s.sc, nil
 }
 
 func (s *Slack) handleSlack(ctx context.Context) {
-	for msg := range s.sc.IncomingEvents() {
-		logger.Tracef("handleSlack %s", spew.Sdump(msg))
-		s.handleSlackEvent(ctx, msg)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case msg, ok := <-s.sc.IncomingEvents():
+			if !ok {
+				return
+			}
+
+			logger.Tracef("handleSlack %s", spew.Sdump(msg))
+			s.handleSlackEvent(ctx, msg)
+		}
 	}
 }
 
@@ -1191,7 +1274,25 @@ func (s *Slack) handleSlackEvent(ctx context.Context, msg slack.RTMEvent) {
 }
 
 func (s *Slack) handleSlackConnected() {
-	if s.wasDisconnected.CompareAndSwap(true, false) && s.onConnect != nil {
+	if !s.wasDisconnected.CompareAndSwap(true, false) {
+		return
+	}
+
+	if discAt := s.disconnectedAt.Swap(0); discAt > 0 && s.sc != nil {
+		thresh := 15 * time.Minute
+
+		if s.cfg != nil {
+			if rc := s.cfg.Current(); rc != nil && rc.Slack.HeavySyncThreshold > 0 {
+				thresh = rc.Slack.HeavySyncThreshold
+			}
+		}
+
+		if time.Since(time.Unix(discAt, 0)) >= thresh {
+			s.sc.InvalidateCaches()
+		}
+	}
+
+	if s.onConnect != nil {
 		go s.onConnect()
 	}
 }
@@ -1202,7 +1303,9 @@ func (s *Slack) handleSlackDisconnected(ev *slack.DisconnectedEvent) {
 	}
 
 	if !ev.Intentional {
-		s.wasDisconnected.Store(true)
+		if s.wasDisconnected.CompareAndSwap(false, true) {
+			s.disconnectedAt.Store(time.Now().Unix())
+		}
 
 		if s.onWsError != nil {
 			s.onWsError(ev.Cause)
@@ -1778,6 +1881,195 @@ func formatSlackAttachmentFields(fields []slack.AttachmentField, shortFieldMaxLe
 	return lines
 }
 
+func formatSlackAttachmentHeader(attach slack.Attachment) []string {
+	var lines []string
+
+	if attach.AuthorName != "" {
+		if attach.AuthorLink != "" {
+			lines = append(lines, "> "+attach.AuthorName+" ("+attach.AuthorLink+")")
+		} else {
+			lines = append(lines, "> "+attach.AuthorName)
+		}
+	}
+
+	if attach.Title != "" {
+		if attach.TitleLink != "" {
+			lines = append(lines, "> "+attach.Title+" ("+attach.TitleLink+")")
+		} else {
+			lines = append(lines, "> "+attach.Title)
+		}
+	}
+
+	return lines
+}
+
+func formatSlackAttachment(attach slack.Attachment, shortFieldMaxLen int, omitFieldTitles bool) []string {
+	var lines []string
+
+	if attach.Pretext != "" {
+		lines = append(lines, strings.Split(attach.Pretext, "\n")...)
+	}
+
+	lines = append(lines, formatSlackAttachmentHeader(attach)...)
+
+	if attach.Text != "" {
+		for i, row := range strings.Split(attach.Text, "\n") {
+			lines = append(lines, "> "+row)
+
+			if i > 4 {
+				lines = append(lines, "> ...")
+				break
+			}
+		}
+	}
+
+	if fieldLines := formatSlackAttachmentFields(attach.Fields, shortFieldMaxLen, omitFieldTitles); len(fieldLines) > 0 {
+		lines = append(lines, fieldLines...)
+	}
+
+	if attach.ImageURL != "" {
+		lines = append(lines, "> "+attach.ImageURL)
+	}
+
+	if len(lines) == 0 && attach.Fallback != "" {
+		for row := range strings.SplitSeq(attach.Fallback, "\n") {
+			lines = append(lines, "> "+row)
+		}
+	}
+
+	return lines
+}
+
+func formatRichTextInline(elems []slack.RichTextSectionElement) string {
+	var b strings.Builder
+
+	for _, elem := range elems {
+		switch se := elem.(type) {
+		case *slack.RichTextSectionTextElement:
+			b.WriteString(se.Text)
+		case *slack.RichTextSectionLinkElement:
+			if se.Text != "" && se.Text != se.URL {
+				b.WriteString("<" + se.URL + "|" + se.Text + ">")
+			} else {
+				b.WriteString(se.URL)
+			}
+		case *slack.RichTextSectionUserElement:
+			b.WriteString("<@" + se.UserID + ">")
+		case *slack.RichTextSectionChannelElement:
+			b.WriteString("<#" + se.ChannelID + ">")
+		case *slack.RichTextSectionBroadcastElement:
+			b.WriteString("<!" + se.Range + ">")
+		case *slack.RichTextSectionEmojiElement:
+			b.WriteString(":" + se.Name + ":")
+		case *slack.RichTextSectionUserGroupElement:
+			b.WriteString("<!subteam^" + se.UsergroupID + ">")
+		}
+	}
+
+	return b.String()
+}
+
+func formatRichTextElements(elems []slack.RichTextElement) []string {
+	var lines []string
+
+	for _, elem := range elems {
+		switch rt := elem.(type) {
+		case *slack.RichTextSection:
+			if text := formatRichTextInline(rt.Elements); text != "" {
+				lines = append(lines, strings.Split(text, "\n")...)
+			}
+		case *slack.RichTextQuote:
+			if text := formatRichTextInline(rt.Elements); text != "" {
+				for row := range strings.SplitSeq(text, "\n") {
+					lines = append(lines, "> "+row)
+				}
+			}
+		case *slack.RichTextPreformatted:
+			if text := formatRichTextInline(rt.Elements); text != "" {
+				lines = append(lines, strings.Split(text, "\n")...)
+			}
+		case *slack.RichTextList:
+			for _, item := range formatRichTextElements(rt.Elements) {
+				lines = append(lines, "- "+item)
+			}
+		}
+	}
+
+	return lines
+}
+
+func formatSlackContextBlock(b *slack.ContextBlock) []string {
+	var parts []string
+
+	for _, elem := range b.ContextElements.Elements {
+		switch el := elem.(type) {
+		case *slack.TextBlockObject:
+			if el != nil && el.Text != "" {
+				parts = append(parts, el.Text)
+			}
+		case slack.TextBlockObject:
+			if el.Text != "" {
+				parts = append(parts, el.Text)
+			}
+		case *slack.ImageBlockElement:
+			if el != nil && el.ImageURL != nil && *el.ImageURL != "" {
+				parts = append(parts, *el.ImageURL)
+			}
+		}
+	}
+
+	if len(parts) == 0 {
+		return nil
+	}
+
+	return strings.Split(strings.Join(parts, " "), "\n")
+}
+
+func formatSlackSectionBlock(b *slack.SectionBlock) []string {
+	var lines []string
+
+	if b.Text != nil && b.Text.Text != "" {
+		lines = append(lines, strings.Split(b.Text.Text, "\n")...)
+	}
+
+	for _, f := range b.Fields {
+		if f != nil && f.Text != "" {
+			lines = append(lines, strings.Split(f.Text, "\n")...)
+		}
+	}
+
+	return lines
+}
+
+func formatSlackBlocks(blocks slack.Blocks) []string {
+	var lines []string
+
+	for _, blk := range blocks.BlockSet {
+		switch b := blk.(type) {
+		case *slack.HeaderBlock:
+			if b.Text != nil && b.Text.Text != "" {
+				lines = append(lines, strings.Split(b.Text.Text, "\n")...)
+			}
+		case *slack.SectionBlock:
+			lines = append(lines, formatSlackSectionBlock(b)...)
+		case *slack.ContextBlock:
+			lines = append(lines, formatSlackContextBlock(b)...)
+		case *slack.RichTextBlock:
+			lines = append(lines, formatRichTextElements(b.Elements)...)
+		case *slack.MarkdownBlock:
+			if b.Text != "" {
+				lines = append(lines, strings.Split(b.Text, "\n")...)
+			}
+		case *slack.ImageBlock:
+			if b.ImageURL != "" {
+				lines = append(lines, b.ImageURL)
+			}
+		}
+	}
+
+	return lines
+}
+
 func formatSlackMsg(m *slack.Msg) (string, bool) {
 	return formatSlackMsgOpts(m, 0, false)
 }
@@ -1794,29 +2086,14 @@ func formatSlackMsgOpts(m *slack.Msg, shortFieldMaxLen int, omitFieldTitles bool
 	if m.Text != "" {
 		msgs = append(msgs, strings.Split(m.Text, "\n")...)
 		msghandled = true
+	} else if blockLines := formatSlackBlocks(m.Blocks); len(blockLines) > 0 {
+		msgs = append(msgs, blockLines...)
+		msghandled = true
 	}
 
 	for _, attach := range m.Attachments {
-		if attach.Pretext != "" {
-			msgs = append(msgs, strings.Split(attach.Pretext, "\n")...)
-			msghandled = true
-		}
-
-		if attach.Text != "" {
-			for i, row := range strings.Split(attach.Text, "\n") {
-				msgs = append(msgs, "> "+row)
-
-				if i > 4 {
-					msgs = append(msgs, "> ...")
-					break
-				}
-			}
-
-			msghandled = true
-		}
-
-		if fieldLines := formatSlackAttachmentFields(attach.Fields, shortFieldMaxLen, omitFieldTitles); len(fieldLines) > 0 {
-			msgs = append(msgs, fieldLines...)
+		if attachLines := formatSlackAttachment(attach, shortFieldMaxLen, omitFieldTitles); len(attachLines) > 0 {
+			msgs = append(msgs, attachLines...)
 			msghandled = true
 		}
 	}
@@ -2322,7 +2599,7 @@ func (s *Slack) createUser(slackuser *slack.User) *bridge.UserInfo {
 }
 
 func (s *Slack) Connected() bool {
-	return s.connected
+	return s.connected.Load()
 }
 
 func (s *Slack) recordSent(ctx context.Context, channelID, msgID, threadTS, parentID, text string) {
