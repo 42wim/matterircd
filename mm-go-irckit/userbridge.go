@@ -370,7 +370,7 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 		PreserveNewLines:   preserveNewLines,
 	}
 
-	timeTag := formatTimeTag(event.CreateAt)
+	timeTag := formatLiveTimeTag(event.CreateAt)
 
 	emitLine := func(line string) {
 		if showContext || addPrefix {
@@ -739,7 +739,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		PreserveNewLines:   preserveNewLines,
 	}
 
-	timeTag := formatTimeTag(event.CreateAt)
+	timeTag := formatLiveTimeTag(event.CreateAt)
 
 	emitLine := func(line string) {
 		if showContext || addPrefix {
@@ -2016,6 +2016,14 @@ func formatTimeTag(createAt int64) string {
 	}
 
 	return "@time=" + time.UnixMilli(createAt).UTC().Format("2006-01-02T15:04:05.000Z")
+}
+
+func formatLiveTimeTag(createAt int64) string {
+	if createAt <= 0 || time.Since(time.UnixMilli(createAt)) <= 60*time.Second {
+		return ""
+	}
+
+	return formatTimeTag(createAt)
 }
 
 func (u *User) MsgSpoofUser(sender *User, rcvuser string, text string, maxlen ...int) {
