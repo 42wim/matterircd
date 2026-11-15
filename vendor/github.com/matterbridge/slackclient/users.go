@@ -17,17 +17,16 @@ const (
 var errNoPresence = errors.New("slackclient: presence unavailable")
 
 func (c *Client) InitUsers() {
+	if c.sc == nil {
+		return
+	}
+
 	users, _ := c.sc.GetUsers()
 
 	c.Lock()
 	defer c.Unlock()
 
 	for _, mmuser := range users {
-		// do not add our own nick
-		if mmuser.ID == c.info.User.ID {
-			continue
-		}
-
 		c.users[mmuser.ID] = mmuser
 
 		if mmuser.Presence != "" {
@@ -45,8 +44,17 @@ func (c *Client) GetUsers() []slack.User {
 	c.RLock()
 	defer c.RUnlock()
 
+	selfID := ""
+	if c.info != nil && c.info.User != nil {
+		selfID = c.info.User.ID
+	}
+
 	users := make([]slack.User, 0, len(c.users))
 	for _, user := range c.users {
+		if selfID != "" && user.ID == selfID {
+			continue
+		}
+
 		users = append(users, user)
 	}
 
@@ -63,6 +71,10 @@ func (c *Client) GetUser(userID string) *slack.User {
 	}
 
 	c.RUnlock()
+
+	if c.sc == nil {
+		return nil
+	}
 
 	c.logger.Debugf("user %s not in cache, asking slack", userID)
 
@@ -174,7 +186,7 @@ func (c *Client) UserName(id string) string {
 		return us.Name
 	}
 
-	if id == c.info.User.ID {
+	if c.info != nil && c.info.User != nil && id == c.info.User.ID {
 		return c.info.User.Name
 	}
 
