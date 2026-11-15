@@ -118,3 +118,22 @@ func TestMatrixPinFormatting(t *testing.T) {
 	assert.Equal(t, " \x1d(pinned)\x1d", mASCII.formatSuffix(utils.SuffixPinned))
 	assert.Equal(t, " \x1d(unpinned)\x1d", mASCII.formatSuffix(utils.SuffixUnpinned))
 }
+
+func TestMatrixDirectoryURL(t *testing.T) {
+	cfg := loadTestConfig(t, "[matrix]\nDefaultProvider = \"ubuntu.com\"\nDirectoryURL = \"https://directory.canonical.com/people/{nick}\"\n")
+	m := &Matrix{
+		cfg:             cfg,
+		defaultProvider: cfg.Matrix().DefaultProvider,
+	}
+
+	assert.Equal(t, "https://directory.canonical.com/people/hloeung", m.directoryURL("ubuntu.com", "ubuntu.com", "hloeung", "hloeung"))
+	assert.Empty(t, m.directoryURL("matrix.org", "ubuntu.com", "hloeung[matrix.org]", "hloeung"))
+
+	// When DefaultProvider is unset, fall back to myHomeserver.
+	cfgNoProvider := loadTestConfig(t, "[matrix]\nDirectoryURL = \"https://directory.canonical.com/people/{nick}\"\n")
+	mNoProvider := &Matrix{cfg: cfgNoProvider}
+
+	assert.Equal(t, "https://directory.canonical.com/people/hloeung", mNoProvider.directoryURL("ubuntu.com", "ubuntu.com", "hloeung", "hloeung"))
+	assert.Empty(t, mNoProvider.directoryURL("matrix.org", "ubuntu.com", "hloeung[matrix.org]", "hloeung"))
+	assert.Empty(t, mNoProvider.directoryURL("ubuntu.com", "", "hloeung", "hloeung"))
+}
