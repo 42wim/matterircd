@@ -152,7 +152,7 @@ func (c *Client) GetMessagesSince(ctx context.Context, roomID id.RoomID, since i
 
 		for _, ev := range page {
 			// Checked on the raw event so undecryptable pages still hit the cutoff.
-			if ev.Timestamp < since {
+			if ev.Timestamp <= since {
 				done = true
 
 				break
