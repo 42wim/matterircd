@@ -964,7 +964,7 @@ func (u *User) handleStatusChangeEvent(event *bridge.StatusChangeEvent) {
 			}
 		// Ignore `offline` status changes to prevent bouncing between being marked away and not.
 		case "offline":
-			logger.Debugf("doing nothing as status %s", event.Status)
+			logger.Tracef("doing nothing as status %s", event.Status)
 		default:
 			if !u.away.Load() {
 				logger.Debug("setting myself away")

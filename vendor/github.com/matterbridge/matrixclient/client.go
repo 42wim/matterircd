@@ -155,6 +155,8 @@ func New(ctx context.Context, cred Credentials, h Handler, opts ...Option) (*Cli
 		return nil, errors.New("matrixclient: unexpected syncer type")
 	}
 
+	syncer.FilterJSON = newSyncFilter()
+
 	c.register(syncer)
 
 	// Ready is called from the sync goroutine, after the events of the first
@@ -329,6 +331,44 @@ func (c *Client) register(s *mautrix.DefaultSyncer) {
 	onState(event.StateEncryption, c.handleEncryption)
 	onState(event.StateSpaceChild, c.handleSpaceChild)
 	s.OnEventType(event.EphemeralEventPresence, c.handlePresence)
+}
+
+// newSyncFilter returns a /sync denylist filter that suppresses high-volume
+// unused events (such as read receipts, per-room account data, stickers, and
+// call signaling) while keeping the default timeline limit of 50 and letting
+// unknown/future events through.
+func newSyncFilter() *mautrix.Filter {
+	ignoredState := []event.Type{
+		event.StateRoomAvatar,
+		event.StateServerACL,
+		event.StateGuestAccess,
+		event.StatePowerLevels,
+	}
+
+	ignoredTimeline := make([]event.Type, 0, len(ignoredState)+2)
+	ignoredTimeline = append(ignoredTimeline, ignoredState...)
+	ignoredTimeline = append(ignoredTimeline,
+		event.EventSticker,
+		event.Type{Type: "m.call.*"},
+	)
+
+	return &mautrix.Filter{
+		Room: &mautrix.RoomFilter{
+			AccountData: &mautrix.FilterPart{
+				NotTypes: []event.Type{{Type: "*"}},
+			},
+			Ephemeral: &mautrix.FilterPart{
+				NotTypes: []event.Type{event.EphemeralEventReceipt},
+			},
+			State: &mautrix.FilterPart{
+				NotTypes: ignoredState,
+			},
+			Timeline: &mautrix.FilterPart{
+				Limit:    50,
+				NotTypes: ignoredTimeline,
+			},
+		},
+	}
 }
 
 func (c *Client) syncLoop() {
