@@ -310,10 +310,49 @@ func (sc *stateCache) upsertSubscription(s *Subscription) bool {
 	sc.mu.Lock()
 	_, existed := sc.subsByRoomID[cp.RoomID]
 	sc.subsByRoomID[cp.RoomID] = cp
+	ensureRoomFromSubLocked(sc.roomsByID, cp)
 	delete(sc.invitations, cp.RoomID)
 	sc.mu.Unlock()
 
 	return existed
+}
+
+func ensureRoomFromSubLocked(rooms map[string]*Room, s *Subscription) {
+	if s == nil || s.RoomID == "" {
+		return
+	}
+
+	if existing, ok := rooms[s.RoomID]; ok && existing != nil {
+		if existing.Name == "" && s.Name != "" {
+			existing.Name = s.Name
+		}
+
+		if existing.FName == "" && s.FName != "" {
+			existing.FName = s.FName
+		}
+
+		if existing.Type == "" && s.Type != "" {
+			existing.Type = s.Type
+		}
+
+		return
+	}
+
+	room := &Room{
+		ID:          s.RoomID,
+		Type:        s.Type,
+		Name:        s.Name,
+		FName:       s.FName,
+		LastMessage: s.Timestamp,
+		UpdatedAt:   s.UpdatedAt,
+	}
+
+	if s.User != nil {
+		u := *s.User
+		room.Owner = &u
+	}
+
+	rooms[s.RoomID] = room
 }
 
 func (sc *stateCache) removeSubscription(roomID string) {
@@ -364,8 +403,10 @@ func (sc *stateCache) hydrateRoomsAndSubs(rooms []Room, subs []Subscription) {
 			continue
 		}
 
-		sc.subsByRoomID[subs[i].RoomID] = cloneSubscription(&subs[i])
-		delete(sc.invitations, subs[i].RoomID)
+		cp := cloneSubscription(&subs[i])
+		sc.subsByRoomID[cp.RoomID] = cp
+		ensureRoomFromSubLocked(sc.roomsByID, cp)
+		delete(sc.invitations, cp.RoomID)
 	}
 }
 

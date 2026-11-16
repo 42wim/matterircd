@@ -78,6 +78,7 @@ type RocketChat struct {
 	msgAuthorCache   *lru.Cache[string, rocketchatclient.UserRef]
 	msgParentCache   *lru.Cache[string, string]
 	msgLastSentCache *lru.Cache[string, string]
+	replayedMsgCache *lru.Cache[string, struct{}]
 
 	roomMetaMu sync.Mutex
 	roomMeta   map[string]roomSnapshot
@@ -116,6 +117,7 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 	r.msgAuthorCache, _ = lru.New[string, rocketchatclient.UserRef](msgTextCacheSize)
 	r.msgParentCache, _ = lru.New[string, string](200)
 	r.msgLastSentCache, _ = lru.New[string, string](10)
+	r.replayedMsgCache, _ = lru.New[string, struct{}](msgRoomCacheSize)
 	r.roomMeta = make(map[string]roomSnapshot)
 
 	defer close(r.initDone)
@@ -239,6 +241,12 @@ func (r *RocketChat) OnReconnect(downtime time.Duration) {
 // OnMessage implements rocketchatclient.Handler.
 func (r *RocketChat) OnMessage(msg *rocketchatclient.Message) {
 	if !r.ready.Load() || msg == nil || msg.RoomID == "" {
+		return
+	}
+
+	if r.replayedMsgCache != nil && msg.ID != "" && r.replayedMsgCache.Contains(msg.ID) {
+		r.replayedMsgCache.Remove(msg.ID)
+
 		return
 	}
 
@@ -1292,20 +1300,6 @@ func (r *RocketChat) userPhotoURL(username string) string {
 	return base + "/avatar/" + url.PathEscape(username)
 }
 
-// UserDetails implements bridge.UserDetailer for WHOIS photo queries.
-func (r *RocketChat) UserDetails(ctx context.Context, userID string) (string, bool) {
-	if userID == "" {
-		return "", false
-	}
-
-	u := r.GetUser(ctx, userID)
-	if u == nil {
-		return "", false
-	}
-
-	return r.userPhotoURL(u.Username), false
-}
-
 func expandDirectoryURL(tmpl, nick, username, email string) string {
 	if tmpl == "" {
 		return ""
@@ -1643,12 +1637,31 @@ func (r *RocketChat) GetChannels() []*bridge.ChannelInfo {
 }
 
 func (r *RocketChat) GetChannel(ctx context.Context, channelID string) (*bridge.ChannelInfo, error) {
-	room, ok := r.rc.Room(channelID)
-	if !ok {
+	if channelID == "" || strings.HasPrefix(channelID, "&") {
 		return nil, errors.New("channel not found")
 	}
 
-	return r.toChannelInfo(room), nil
+	if room, ok := r.rc.Room(channelID); ok {
+		return r.toChannelInfo(room), nil
+	}
+
+	if sub, ok := r.rc.Subscription(channelID); ok {
+		return &bridge.ChannelInfo{
+			Name:        cmp.Or(sub.Name, sub.FName, sub.RoomID),
+			ID:          sub.RoomID,
+			DM:          sub.Type == rocketchatclient.RoomTypeDirect,
+			Private:     sub.Type == rocketchatclient.RoomTypePrivate,
+			DisplayName: cmp.Or(sub.FName, sub.Name),
+			LastPostAt:  sub.Timestamp.Time.UnixMilli(),
+		}, nil
+	}
+
+	room, err := r.rc.GetChannelInfo(ctx, channelID, "")
+	if err == nil && room != nil {
+		return r.toChannelInfo(room), nil
+	}
+
+	return nil, errors.New("channel not found")
 }
 
 func (r *RocketChat) GetChannelCount() int {
@@ -1660,16 +1673,32 @@ func (r *RocketChat) GetChannelName(ctx context.Context, channelID string) strin
 		return channelID
 	}
 
-	room, ok := r.rc.Room(channelID)
-	if !ok {
-		return ""
+	if room, ok := r.rc.Room(channelID); ok {
+		if r.isOneToOneDM(room) {
+			return room.ID
+		}
+
+		return "#" + r.roomName(room)
 	}
 
-	if r.isOneToOneDM(room) {
-		return room.ID
+	if sub, ok := r.rc.Subscription(channelID); ok {
+		if sub.Type == rocketchatclient.RoomTypeDirect {
+			return sub.RoomID
+		}
+
+		return "#" + cmp.Or(sub.Name, sub.FName, sub.RoomID)
 	}
 
-	return "#" + r.roomName(room)
+	room, err := r.rc.GetChannelInfo(ctx, channelID, "")
+	if err == nil && room != nil {
+		if r.isOneToOneDM(room) {
+			return room.ID
+		}
+
+		return "#" + r.roomName(room)
+	}
+
+	return ""
 }
 
 func (r *RocketChat) GetChannelID(ctx context.Context, name, teamID string) string {
@@ -2118,7 +2147,25 @@ func (r *RocketChat) GetPostThread(ctx context.Context, postID string) []*bridge
 }
 
 func (r *RocketChat) GetReplayEvents(ctx context.Context, channelID string, since int64) []*bridge.Event {
-	return r.historySince(ctx, channelID, since, "replay")
+	events := r.historySince(ctx, channelID, since, "replay")
+	if r.replayedMsgCache == nil {
+		return events
+	}
+
+	for _, ev := range events {
+		switch e := ev.Data.(type) {
+		case *bridge.ChannelMessageEvent:
+			if e.MessageID != "" {
+				r.replayedMsgCache.Add(e.MessageID, struct{}{})
+			}
+		case *bridge.DirectMessageEvent:
+			if e.MessageID != "" {
+				r.replayedMsgCache.Add(e.MessageID, struct{}{})
+			}
+		}
+	}
+
+	return events
 }
 
 func (r *RocketChat) historySince(ctx context.Context, channelID string, since int64, eventType string) []*bridge.Event {

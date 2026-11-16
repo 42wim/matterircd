@@ -375,3 +375,32 @@ func TestDDPMessageAndNotificationDispatch(t *testing.T) {
 		t.Fatalf("unexpected reaction diff events: %+v", h.reactions)
 	}
 }
+
+func TestSubscriptionSeedsRoomAndSuppressesSelfSystemJoin(t *testing.T) {
+	h := &recordingHandler{}
+	c := newUnitClient(t, "https://chat.example.com", h)
+
+	// Subscription event arriving before rooms-changed must immediately make Room() available.
+	c.handleSubscriptionsChanged("inserted", json.RawMessage(`{"rid":"NEWROOM1234567890","name":"sandbox","t":"c","open":true}`), true)
+
+	room, ok := c.Room("NEWROOM1234567890")
+	if !ok || room.Name != "sandbox" || room.Type != RoomTypeChannel {
+		t.Fatalf("expected seeded room sandbox from subscription, got ok=%v room=%+v", ok, room)
+	}
+
+	if len(h.members) != 1 || h.members[0].Action != memberActionJoin {
+		t.Fatalf("expected 1 join MemberEvent from subscription, got %+v", h.members)
+	}
+
+	// Subsequent self "uj" system message must not emit a duplicate self join.
+	c.handleSystemMessage(t.Context(), &Message{
+		ID:     "ujMsg123456789012",
+		RoomID: "NEWROOM1234567890",
+		Type:   "uj",
+		User:   UserRef{ID: c.UserID(), Username: "me"},
+	})
+
+	if len(h.members) != 1 {
+		t.Fatalf("expected duplicate self uj suppressed, got %d MemberEvents", len(h.members))
+	}
+}

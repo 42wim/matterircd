@@ -22,7 +22,7 @@ const (
 	defaultRateWait     = 3 * time.Second
 	maxRateLimitWait    = 60 * time.Second
 	userListPageLimit   = 100
-	maxRoomMemberPages  = 10
+	maxRoomMemberPages  = 5
 	roomMemberTimeout   = 15 * time.Second
 	defaultHistoryCount = 20
 	historyPageLimit    = 100
@@ -260,12 +260,11 @@ func (c *Client) GetRooms(ctx context.Context, updatedSince *time.Time) (*RoomsR
 	return &resp, nil
 }
 
-// ListUsers fetches a page of workspace users.
+// ListUsers fetches a page of workspace users using the server's default projection.
 func (c *Client) ListUsers(ctx context.Context, offset, count int) (*UsersListResponse, error) {
 	query := url.Values{}
 	query.Set("offset", strconv.Itoa(offset))
 	query.Set("count", strconv.Itoa(count))
-	query.Set("fields", `{"username":1,"name":1,"status":1,"statusText":1,"type":1,"active":1,"roles":1,"utcOffset":1}`)
 
 	var resp UsersListResponse
 
@@ -421,20 +420,22 @@ func (c *Client) SendMessage(ctx context.Context, roomID, text, threadID string)
 
 	req := struct {
 		Message struct {
-			ID       string `json:"_id"`
-			RoomID   string `json:"rid"`
-			Text     string `json:"msg"`
-			ThreadID string `json:"tmid,omitempty"`
+			ID         string `json:"_id"`
+			RoomID     string `json:"rid"`
+			Text       string `json:"msg"`
+			ThreadID   string `json:"tmid,omitempty"`
+			ThreadShow bool   `json:"tshow,omitempty"`
 		} `json:"message"`
 	}{}
 	req.Message.ID = msgID
 	req.Message.RoomID = roomID
 	req.Message.Text = text
 	req.Message.ThreadID = threadID
+	req.Message.ThreadShow = threadID != ""
 
 	var resp struct {
 		Message *Message `json:"message"`
-		Success bool     `json:"success"`
+		Success *bool    `json:"success"`
 	}
 
 	err := c.doJSON(ctx, http.MethodPost, "/api/v1/chat.sendMessage", nil, req, &resp, true)
@@ -444,12 +445,18 @@ func (c *Client) SendMessage(ctx context.Context, roomID, text, threadID string)
 		return "", err
 	}
 
-	if resp.Message != nil {
-		c.cache.cacheMessage(resp.Message)
+	if (resp.Success != nil && !*resp.Success) || resp.Message == nil {
+		c.cache.unmarkSent(sentKey)
 
-		if resp.Message.ID != "" {
-			return resp.Message.ID, nil
-		}
+		return "", errors.New("rocketchatclient: chat.sendMessage did not return a created message")
+	}
+
+	c.logger.Debugf("chat.sendMessage: rid=%s threadID=%s reqID=%s respID=%s", roomID, threadID, msgID, resp.Message.ID)
+
+	c.cache.cacheMessage(resp.Message)
+
+	if resp.Message.ID != "" {
+		return resp.Message.ID, nil
 	}
 
 	return msgID, nil
@@ -1413,11 +1420,11 @@ func checkEnvelopeError(statusCode int, respBytes []byte) error {
 	}
 
 	var envelope struct {
-		Status    string `json:"status"`
-		Success   *bool  `json:"success"`
-		Error     string `json:"error"`
-		ErrorType string `json:"errorType"`
-		Message   string `json:"message"`
+		Status    string          `json:"status"`
+		Success   *bool           `json:"success"`
+		Error     string          `json:"error"`
+		ErrorType string          `json:"errorType"`
+		Message   json.RawMessage `json:"message"`
 	}
 
 	err := json.Unmarshal(respBytes, &envelope)
@@ -1434,7 +1441,11 @@ func checkEnvelopeError(statusCode int, respBytes []byte) error {
 		code = envelope.Error
 	}
 
-	msg := envelope.Message
+	var msg string
+	if len(envelope.Message) > 0 && envelope.Message[0] == '"' {
+		_ = json.Unmarshal(envelope.Message, &msg)
+	}
+
 	if msg == "" && envelope.Error != "" && envelope.Error != code {
 		msg = envelope.Error
 	}
