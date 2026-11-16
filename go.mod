@@ -12,7 +12,7 @@ require (
 	github.com/matterbridge/logrus-prefixed-formatter v0.5.3-0.20200523233437-d971309a77ba
 	github.com/matterbridge/matrixclient v0.0.0-20261115085835-0916e721c70f
 	github.com/matterbridge/matterclient v0.0.0-20261113045522-74f90fb9f942
-	github.com/matterbridge/rocketchatclient v0.0.0
+	github.com/matterbridge/rocketchatclient v0.0.0-20261116082210-070dd382e09f
 	github.com/matterbridge/slackclient v0.0.0-20261115030427-106d1142aa66
 	github.com/mattermost/mattermost/server/public v0.3.0
 	github.com/mattn/go-mastodon v0.0.6
@@ -99,5 +99,3 @@ require (
 go 1.26.2
 
 replace github.com/mattn/go-sqlite3 => github.com/mattn/go-sqlite3 v1.14.34
-
-replace github.com/matterbridge/rocketchatclient => ./vendor/github.com/matterbridge/rocketchatclient
