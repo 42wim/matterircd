@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/42wim/matterircd/bridge"
 	"github.com/42wim/matterircd/utils"
 	"github.com/sorcix/irc"
 )
@@ -595,12 +596,25 @@ func (ch *channel) Names() []string {
 	users := ch.Users()
 	names := make([]string, 0, len(users))
 
-	for _, u := range users {
-		if strings.Contains(u.Roles, "system_admin") {
-			names = append(names, "@"+u.Nick)
-		} else {
-			names = append(names, u.Nick)
+	var rolePrefixer bridge.ChannelRolePrefixer
+
+	if bp, ok := ch.server.(interface{ userBridge() bridge.Bridger }); ok {
+		if br := bp.userBridge(); br != nil {
+			rolePrefixer, _ = br.(bridge.ChannelRolePrefixer)
 		}
+	}
+
+	chID := ch.ID()
+
+	for _, u := range users {
+		prefix := ""
+		if rolePrefixer != nil {
+			prefix = rolePrefixer.ChannelUserPrefix(chID, u.User)
+		} else if strings.Contains(u.Roles, "system_admin") {
+			prefix = "@"
+		}
+
+		names = append(names, prefix+u.Nick)
 	}
 
 	// TODO: Append in sorted order?

@@ -19,17 +19,19 @@ import (
 )
 
 const (
-	ddpHandshakeTimeout = 15 * time.Second
-	ddpMethodTimeout    = 15 * time.Second
-	ddpPingInterval     = 30 * time.Second
-	ddpReadTimeout      = 75 * time.Second
-	ddpWriteTimeout     = 10 * time.Second
-	maxReconnectBackoff = time.Minute
-	eventQueueSize      = 2048
-	maxInitialRoomSubs  = 100
-	maxInitialUserPages = 5
-	userHydrateTimeout  = 10 * time.Second
-	parentFetchTimeout  = 3 * time.Second
+	ddpHandshakeTimeout  = 15 * time.Second
+	ddpMethodTimeout     = 15 * time.Second
+	ddpPingInterval      = 30 * time.Second
+	ddpReadTimeout       = 75 * time.Second
+	ddpWriteTimeout      = 10 * time.Second
+	maxReconnectBackoff  = time.Minute
+	eventQueueSize       = 2048
+	maxInitialRoomSubs   = 100
+	maxInitialUserPages  = 5
+	userHydrateTimeout   = 10 * time.Second
+	parentFetchTimeout   = 3 * time.Second
+	reconnectSyncOverlap = 5 * time.Second
+	reconnectSyncTimeout = 30 * time.Second
 
 	ddpFieldMsg        = "msg"
 	streamRoomMessages = "stream-room-messages"
@@ -37,6 +39,8 @@ const (
 	streamNotifyLogged = "stream-notify-logged"
 	streamNotifyRoom   = "stream-notify-room"
 	actionRemoved      = "removed"
+	memberActionJoin   = "join"
+	memberActionLeave  = "leave"
 )
 
 type ddpEnvelope struct {
@@ -89,6 +93,10 @@ const (
 	ddpEventReady ddpEventKind = iota
 	ddpEventReconnect
 	ddpEventChanged
+	ddpEventSyncedMsg
+	ddpEventSyncedDelete
+	ddpEventRoomChange
+	ddpEventMember
 )
 
 type ddpEvent struct {
@@ -96,6 +104,11 @@ type ddpEvent struct {
 	downtime   time.Duration
 	collection string
 	fields     *ddpFields
+	msg        *Message
+	roomID     string
+	msgID      string
+	room       *Room
+	member     *MemberEvent
 }
 
 type ddpConn struct {
@@ -636,12 +649,164 @@ func (c *Client) connectOnce(parentCtx context.Context) (bool, error) {
 
 	c.connected.Store(true)
 
+	prevSyncNS := c.lastSync.Load()
 	prevDisconnect := c.lastDisconnect.Swap(0)
+
+	if wasReady && prevSyncNS > 0 {
+		c.syncAfterReconnect(connCtx, conn, time.Unix(0, prevSyncNS))
+	}
+
 	c.lastSync.Store(time.Now().UnixNano())
 
 	c.emitReadyOrReconnect(connCtx, conn, wasReady, prevDisconnect)
 
 	return c.waitConnectionClose(connCtx, conn)
+}
+
+func (c *Client) syncAfterReconnect(ctx context.Context, conn *ddpConn, prevSync time.Time) {
+	since := prevSync.Add(-reconnectSyncOverlap)
+
+	syncCtx, cancel := context.WithTimeout(ctx, reconnectSyncTimeout)
+	defer cancel()
+
+	subsResp, err := c.GetSubscriptions(syncCtx, &since)
+	if err == nil {
+		c.applyReconnectSubscriptions(syncCtx, conn, subsResp)
+	} else {
+		c.logger.Warnf("reconnect subscriptions.get: %s", err)
+	}
+
+	roomsResp, err := c.GetRooms(syncCtx, &since)
+	if err == nil {
+		c.applyReconnectRooms(syncCtx, conn, roomsResp)
+	} else {
+		c.logger.Warnf("reconnect rooms.get: %s", err)
+	}
+
+	c.syncOpenRoomsMessages(syncCtx, conn, since)
+}
+
+func (c *Client) applyReconnectSubscriptions(ctx context.Context, conn *ddpConn, resp *SubscriptionsResponse) {
+	meID := c.UserID()
+
+	for i := range resp.Remove {
+		sub := &resp.Remove[i]
+		if sub.RoomID == "" {
+			continue
+		}
+
+		c.cache.removeSubscription(sub.RoomID)
+		_ = c.UnsubscribeRoom(ctx, sub.RoomID)
+
+		c.enqueueEvent(ctx, conn, ddpEvent{
+			kind: ddpEventMember,
+			member: &MemberEvent{
+				RoomID: sub.RoomID,
+				UserID: meID,
+				Action: memberActionLeave,
+			},
+		})
+	}
+
+	for i := range resp.Update {
+		sub := &resp.Update[i]
+		if sub.RoomID == "" {
+			continue
+		}
+
+		existed := c.cache.upsertSubscription(sub)
+		if sub.Open {
+			c.ensureRoomSubscribed(sub.RoomID)
+		}
+
+		if !existed {
+			c.enqueueEvent(ctx, conn, ddpEvent{
+				kind: ddpEventMember,
+				member: &MemberEvent{
+					RoomID: sub.RoomID,
+					UserID: meID,
+					Action: memberActionJoin,
+				},
+			})
+		}
+	}
+}
+
+func (c *Client) applyReconnectRooms(ctx context.Context, conn *ddpConn, resp *RoomsResponse) {
+	for i := range resp.Remove {
+		if resp.Remove[i].ID != "" {
+			c.cache.removeRoom(resp.Remove[i].ID)
+		}
+	}
+
+	for i := range resp.Update {
+		room := &resp.Update[i]
+		if room.ID == "" {
+			continue
+		}
+
+		c.cache.upsertRoom(room)
+		c.enqueueEvent(ctx, conn, ddpEvent{
+			kind: ddpEventRoomChange,
+			room: cloneRoom(room),
+		})
+	}
+}
+
+func (c *Client) syncOpenRoomsMessages(ctx context.Context, conn *ddpConn, since time.Time) {
+	subs := c.Subscriptions()
+	count := 0
+
+	for _, sub := range subs {
+		if ctx.Err() != nil {
+			return
+		}
+
+		if !sub.Open || sub.RoomID == "" {
+			continue
+		}
+
+		syncResp, err := c.SyncMessages(ctx, sub.RoomID, since)
+		if err != nil {
+			c.logger.Debugf("reconnect chat.syncMessages %s: %s", sub.RoomID, err)
+
+			continue
+		}
+
+		for i := range syncResp.Result.Updated {
+			m := syncResp.Result.Updated[i]
+			c.enqueueEvent(ctx, conn, ddpEvent{
+				kind: ddpEventSyncedMsg,
+				msg:  &m,
+			})
+		}
+
+		for i := range syncResp.Result.Deleted {
+			del := &syncResp.Result.Deleted[i]
+			if del.ID == "" {
+				continue
+			}
+
+			c.enqueueEvent(ctx, conn, ddpEvent{
+				kind:   ddpEventSyncedDelete,
+				roomID: sub.RoomID,
+				msgID:  del.ID,
+			})
+		}
+
+		count++
+		if count >= maxInitialRoomSubs {
+			break
+		}
+	}
+}
+
+func (c *Client) enqueueEvent(ctx context.Context, conn *ddpConn, ev ddpEvent) {
+	select {
+	case c.eventCh <- ev:
+	case <-conn.closed:
+	case <-ctx.Done():
+	}
 }
 
 func (c *Client) waitConnectionClose(ctx context.Context, conn *ddpConn) (bool, error) {
@@ -827,23 +992,64 @@ func (c *Client) eventLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case ev := <-c.eventCh:
-			switch ev.kind {
-			case ddpEventReady:
-				consumerReady = true
-
-				if c.handler != nil {
-					c.handler.Ready()
-				}
-			case ddpEventReconnect:
-				if consumerReady && c.handler != nil {
-					if rh, ok := c.handler.(ReconnectHandler); ok {
-						rh.OnReconnect(ev.downtime)
-					}
-				}
-			case ddpEventChanged:
-				c.processDDPChanged(ctx, ev.collection, ev.fields, consumerReady)
-			}
+			c.dispatchEvent(ctx, &ev, &consumerReady)
 		}
+	}
+}
+
+func (c *Client) dispatchEvent(ctx context.Context, ev *ddpEvent, consumerReady *bool) {
+	switch ev.kind {
+	case ddpEventReady:
+		*consumerReady = true
+
+		if c.handler != nil {
+			c.handler.Ready()
+		}
+
+		return
+	case ddpEventChanged:
+		c.processDDPChanged(ctx, ev.collection, ev.fields, *consumerReady)
+
+		return
+	}
+
+	if !*consumerReady {
+		return
+	}
+
+	c.dispatchLiveEvent(ctx, ev)
+}
+
+func (c *Client) dispatchLiveEvent(ctx context.Context, ev *ddpEvent) {
+	switch ev.kind {
+	case ddpEventReconnect:
+		if rh, ok := c.handler.(ReconnectHandler); ok && c.handler != nil {
+			rh.OnReconnect(ev.downtime)
+		}
+	case ddpEventSyncedMsg:
+		if ev.msg != nil {
+			c.processIncomingMessage(ctx, ev.msg)
+		}
+	case ddpEventSyncedDelete:
+		c.processDeletedMessage(ev.roomID, ev.msgID)
+	case ddpEventRoomChange:
+		if c.handler != nil && ev.room != nil {
+			c.handler.OnRoomChange(ev.room)
+		}
+	case ddpEventMember:
+		if ev.member != nil {
+			c.emitMember(ev.member)
+		}
+	}
+}
+
+func (c *Client) emitMember(ev *MemberEvent) {
+	if c.handler == nil || ev == nil {
+		return
+	}
+
+	if mh, ok := c.handler.(MemberHandler); ok {
+		mh.OnMember(ev)
 	}
 }
 
@@ -998,40 +1204,67 @@ func (c *Client) handleNotifyUser(fields *ddpFields, emit bool) {
 
 	switch {
 	case strings.HasSuffix(fields.EventName, "/rooms-changed"):
-		var room Room
-
-		err = json.Unmarshal(fields.Args[1], &room)
-		if err != nil || room.ID == "" {
-			return
-		}
-
-		if action == actionRemoved {
-			c.cache.removeRoom(room.ID)
-		} else {
-			c.cache.upsertRoom(&room)
-		}
-
-		if emit && c.handler != nil && action != actionRemoved {
-			c.handler.OnRoomChange(&room)
-		}
+		c.handleRoomsChanged(action, fields.Args[1], emit)
 	case strings.HasSuffix(fields.EventName, "/subscriptions-changed"):
-		var sub Subscription
+		c.handleSubscriptionsChanged(action, fields.Args[1], emit)
+	}
+}
 
-		err = json.Unmarshal(fields.Args[1], &sub)
-		if err != nil || sub.RoomID == "" {
-			return
+func (c *Client) handleRoomsChanged(action string, raw json.RawMessage, emit bool) {
+	var room Room
+
+	err := json.Unmarshal(raw, &room)
+	if err != nil || room.ID == "" {
+		return
+	}
+
+	if action == actionRemoved {
+		c.cache.removeRoom(room.ID)
+
+		return
+	}
+
+	c.cache.upsertRoom(&room)
+
+	if emit && c.handler != nil {
+		c.handler.OnRoomChange(&room)
+	}
+}
+
+func (c *Client) handleSubscriptionsChanged(action string, raw json.RawMessage, emit bool) {
+	var sub Subscription
+
+	err := json.Unmarshal(raw, &sub)
+	if err != nil || sub.RoomID == "" {
+		return
+	}
+
+	if action == actionRemoved {
+		c.cache.removeSubscription(sub.RoomID)
+		_ = c.UnsubscribeRoom(c.ctx, sub.RoomID)
+
+		if emit {
+			c.emitMember(&MemberEvent{
+				RoomID: sub.RoomID,
+				UserID: c.UserID(),
+				Action: memberActionLeave,
+			})
 		}
 
-		if action == actionRemoved {
-			c.cache.removeSubscription(sub.RoomID)
-			_ = c.UnsubscribeRoom(c.ctx, sub.RoomID)
-		} else {
-			c.cache.upsertSubscription(&sub)
+		return
+	}
 
-			if sub.Open {
-				c.ensureRoomSubscribed(sub.RoomID)
-			}
-		}
+	existed := c.cache.upsertSubscription(&sub)
+	if sub.Open {
+		c.ensureRoomSubscribed(sub.RoomID)
+	}
+
+	if emit && !existed {
+		c.emitMember(&MemberEvent{
+			RoomID: sub.RoomID,
+			UserID: c.UserID(),
+			Action: memberActionJoin,
+		})
 	}
 }
 
@@ -1054,14 +1287,28 @@ func (c *Client) handleNotifyRoom(fields *ddpFields, emit bool) {
 		return
 	}
 
-	c.cache.forgetMessage(deleted.ID)
+	if !emit {
+		c.cache.forgetMessage(deleted.ID)
 
-	if c.cache.consumeSent("del:" + deleted.ID) {
 		return
 	}
 
-	if emit && c.handler != nil {
-		c.handler.OnDelete(roomID, deleted.ID)
+	c.processDeletedMessage(roomID, deleted.ID)
+}
+
+func (c *Client) processDeletedMessage(roomID, msgID string) {
+	if roomID == "" || msgID == "" {
+		return
+	}
+
+	c.cache.forgetMessage(msgID)
+
+	if c.cache.consumeSent("del:" + msgID) {
+		return
+	}
+
+	if c.handler != nil {
+		c.handler.OnDelete(roomID, msgID)
 	}
 }
 
@@ -1133,9 +1380,23 @@ func (c *Client) handleStreamRoomMessage(ctx context.Context, fields *ddpFields,
 	}
 
 	c.ensureRoomSubscribed(msg.RoomID)
+	c.lastSync.Store(time.Now().UnixNano())
+	c.processIncomingMessage(ctx, &msg)
+}
 
-	prevMeta, seen := c.cache.recordSeenMessage(&msg)
-	c.cache.cacheMessage(&msg)
+func (c *Client) processIncomingMessage(ctx context.Context, msg *Message) {
+	if c.handler == nil || msg == nil || msg.ID == "" {
+		return
+	}
+
+	if msg.Type != "" {
+		c.handleSystemMessage(ctx, msg)
+
+		return
+	}
+
+	prevMeta, seen := c.cache.recordSeenMessage(msg)
+	c.cache.cacheMessage(msg)
 
 	isEdit := msg.EditedAt != nil && !msg.EditedAt.Time.IsZero()
 
@@ -1145,7 +1406,7 @@ func (c *Client) handleStreamRoomMessage(ctx context.Context, fields *ddpFields,
 	}
 
 	if !seen {
-		c.handleUnseenStreamMessage(ctx, &msg, isEdit)
+		c.handleUnseenStreamMessage(ctx, msg, isEdit)
 
 		return
 	}
@@ -1164,7 +1425,68 @@ func (c *Client) handleStreamRoomMessage(ctx context.Context, fields *ddpFields,
 	}
 
 	c.prefetchThreadParent(ctx, msg.ThreadID)
-	c.handler.OnEdit(&msg)
+	c.handler.OnEdit(msg)
+}
+
+func (c *Client) handleSystemMessage(ctx context.Context, msg *Message) {
+	switch msg.Type {
+	case "uj":
+		c.emitMember(&MemberEvent{
+			RoomID:   msg.RoomID,
+			UserID:   msg.User.ID,
+			Username: msg.User.Username,
+			Action:   memberActionJoin,
+		})
+	case "ul":
+		c.emitMember(&MemberEvent{
+			RoomID:   msg.RoomID,
+			UserID:   msg.User.ID,
+			Username: msg.User.Username,
+			Action:   memberActionLeave,
+		})
+	case "au":
+		c.emitTargetedMember(ctx, msg, memberActionJoin)
+	case "ru":
+		c.emitTargetedMember(ctx, msg, memberActionLeave)
+	case "room_changed_topic":
+		if room, ok := c.cache.updateRoomTopic(msg.RoomID, msg.Text); ok && c.handler != nil {
+			c.handler.OnRoomChange(room)
+		}
+	case "r":
+		if room, ok := c.cache.updateRoomName(msg.RoomID, msg.Text); ok && c.handler != nil {
+			c.handler.OnRoomChange(room)
+		}
+	}
+}
+
+func (c *Client) emitTargetedMember(ctx context.Context, msg *Message, action string) {
+	username := strings.TrimSpace(msg.Text)
+	if username == "" {
+		return
+	}
+
+	targetID := ""
+
+	if u, ok := c.cache.userByUsername(username); ok {
+		targetID = u.ID
+	} else {
+		lookupCtx, cancel := context.WithTimeout(ctx, parentFetchTimeout)
+		u, err := c.GetUserInfo(lookupCtx, "", username)
+
+		cancel()
+
+		if err == nil && u != nil {
+			targetID = u.ID
+		}
+	}
+
+	c.emitMember(&MemberEvent{
+		RoomID:   msg.RoomID,
+		UserID:   targetID,
+		Username: username,
+		Sender:   msg.User.ID,
+		Action:   action,
+	})
 }
 
 func (c *Client) handleUnseenStreamMessage(ctx context.Context, msg *Message, isEdit bool) {

@@ -294,6 +294,18 @@ func (s *server) HasChannel(channelID string) (Channel, bool) {
 	return ch, exists
 }
 
+func (s *server) userBridge() bridge.Bridger {
+	s.RLock()
+	u := s.u
+	s.RUnlock()
+
+	if u == nil {
+		return nil
+	}
+
+	return u.currentBridge()
+}
+
 // channelNameOr returns name, or the current name of the channel if it is empty, which
 // the bridge may have to look up.
 func channelNameOr(u *User, channelID, name string) string {
