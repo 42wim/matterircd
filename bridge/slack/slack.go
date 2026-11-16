@@ -2712,8 +2712,11 @@ func (s *Slack) createUser(slackuser *slack.User) *bridge.UserInfo {
 	rc := s.cfg.Current()
 	nick := s.resolveSlackNick(slackuser, rc)
 
-	var me bool
-	var teamID, teamDomain string
+	var (
+		me                 bool
+		teamID, teamDomain string
+	)
+
 	if s.sc != nil {
 		me = slackuser.ID != "" && slackuser.ID == s.sc.UserID()
 		teamID = s.sc.TeamID()
