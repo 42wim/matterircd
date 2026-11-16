@@ -7,6 +7,11 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2"
 )
 
+type seenMessageMeta struct {
+	text     string
+	editedAt int64
+}
+
 type stateCache struct {
 	mu sync.RWMutex
 
@@ -17,12 +22,18 @@ type stateCache struct {
 	invitations  map[string]Invitation
 
 	sentIDs       *lru.Cache[string, struct{}]
+	seenMsgs      *lru.Cache[string, seenMessageMeta]
 	msgCache      *lru.Cache[string, *Message]
 	reactionCache *lru.Cache[string, map[string][]string]
 }
 
 func newStateCache(sentSize, msgSize, reactionSize int) (*stateCache, error) {
 	sentIDs, err := lru.New[string, struct{}](sentSize)
+	if err != nil {
+		return nil, err
+	}
+
+	seenMsgs, err := lru.New[string, seenMessageMeta](msgSize)
 	if err != nil {
 		return nil, err
 	}
@@ -44,6 +55,7 @@ func newStateCache(sentSize, msgSize, reactionSize int) (*stateCache, error) {
 		subsByRoomID:  make(map[string]*Subscription),
 		invitations:   make(map[string]Invitation),
 		sentIDs:       sentIDs,
+		seenMsgs:      seenMsgs,
 		msgCache:      msgCache,
 		reactionCache: reactionCache,
 	}, nil
@@ -397,4 +409,164 @@ func (sc *stateCache) invitationsSnapshot() []Invitation {
 	}
 
 	return out
+}
+
+func (sc *stateCache) markSent(key string) {
+	sc.sentIDs.Add(key, struct{}{})
+}
+
+func (sc *stateCache) unmarkSent(key string) {
+	sc.sentIDs.Remove(key)
+}
+
+func (sc *stateCache) consumeSent(key string) bool {
+	if sc.sentIDs.Contains(key) {
+		sc.sentIDs.Remove(key)
+
+		return true
+	}
+
+	return false
+}
+
+func (sc *stateCache) cacheMessage(msg *Message) {
+	if msg == nil || msg.ID == "" {
+		return
+	}
+
+	cp := *msg
+	sc.msgCache.Add(msg.ID, &cp)
+}
+
+func (sc *stateCache) cachedMessage(id string) (*Message, bool) {
+	if id == "" {
+		return nil, false
+	}
+
+	msg, ok := sc.msgCache.Get(id)
+	if !ok || msg == nil {
+		return nil, false
+	}
+
+	cp := *msg
+
+	return &cp, true
+}
+
+func (sc *stateCache) recordSeenMessage(msg *Message) (seenMessageMeta, bool) {
+	if msg == nil || msg.ID == "" {
+		return seenMessageMeta{}, false
+	}
+
+	var editedAt int64
+	if msg.EditedAt != nil && !msg.EditedAt.Time.IsZero() {
+		editedAt = msg.EditedAt.Time.UnixNano()
+	}
+
+	prev, seen := sc.seenMsgs.Get(msg.ID)
+	sc.seenMsgs.Add(msg.ID, seenMessageMeta{
+		text:     msg.Text,
+		editedAt: editedAt,
+	})
+
+	return prev, seen
+}
+
+func (sc *stateCache) forgetMessage(msgID string) {
+	if msgID == "" {
+		return
+	}
+
+	sc.msgCache.Remove(msgID)
+	sc.seenMsgs.Remove(msgID)
+	sc.reactionCache.Remove(msgID)
+}
+
+func snapshotReactions(incoming map[string]ReactionSet) map[string][]string {
+	if len(incoming) == 0 {
+		return nil
+	}
+
+	snap := make(map[string][]string, len(incoming))
+	for emoji, set := range incoming {
+		if len(set.Usernames) == 0 {
+			continue
+		}
+
+		snap[emoji] = slices.Clone(set.Usernames)
+	}
+
+	if len(snap) == 0 {
+		return nil
+	}
+
+	return snap
+}
+
+func (sc *stateCache) seedReactions(msgID string, incoming map[string]ReactionSet) {
+	if msgID == "" {
+		return
+	}
+
+	snap := snapshotReactions(incoming)
+	if snap == nil {
+		sc.reactionCache.Remove(msgID)
+
+		return
+	}
+
+	sc.reactionCache.Add(msgID, snap)
+}
+
+func (sc *stateCache) appendReactionDiff(events []ReactionEvent, roomID, msgID string, from, against map[string][]string, added bool) []ReactionEvent {
+	for emoji, users := range from {
+		var other []string
+		if against != nil {
+			other = against[emoji]
+		}
+
+		for _, uname := range users {
+			if slices.Contains(other, uname) {
+				continue
+			}
+
+			uid := ""
+			if u, ok := sc.userByUsername(uname); ok {
+				uid = u.ID
+			}
+
+			events = append(events, ReactionEvent{
+				RoomID:    roomID,
+				MessageID: msgID,
+				UserID:    uid,
+				Username:  uname,
+				Emoji:     emoji,
+				Added:     added,
+			})
+		}
+	}
+
+	return events
+}
+
+func (sc *stateCache) diffReactions(roomID, msgID string, incoming map[string]ReactionSet) []ReactionEvent {
+	if msgID == "" {
+		return nil
+	}
+
+	prev, _ := sc.reactionCache.Get(msgID)
+	next := snapshotReactions(incoming)
+
+	if next == nil {
+		sc.reactionCache.Remove(msgID)
+	} else {
+		sc.reactionCache.Add(msgID, next)
+	}
+
+	var events []ReactionEvent
+
+	events = sc.appendReactionDiff(events, roomID, msgID, prev, next, false)
+	events = sc.appendReactionDiff(events, roomID, msgID, next, prev, true)
+
+	return events
 }

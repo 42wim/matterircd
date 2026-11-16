@@ -950,7 +950,7 @@ func (u *User) handleChannelUpdateEvent(e *bridge.ChannelUpdateEvent) {
 	u.RLock()
 
 	for ch := range u.channels {
-		if ch.ID() == ID(e.ChannelID) && ch.String() != newIRCChanStr {
+		if (ch.ID() == e.ChannelID || ch.ID() == ID(e.ChannelID)) && ch.String() != newIRCChanStr {
 			staleChannels = append(staleChannels, ch)
 		}
 	}
