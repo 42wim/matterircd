@@ -303,9 +303,40 @@ func extractEventBody(ev *event.Event) string {
 	return event.TrimReplyFallbackText(body)
 }
 
+// fetchEventWithBody fetches eventID (or its latest tracked edit) and extracts its body.
+func (m *Matrix) fetchEventWithBody(ctx context.Context, roomID id.RoomID, eventID id.EventID) (*event.Event, string, error) {
+	var (
+		latestEditID id.EventID
+		hasEdit      bool
+	)
+
+	if m.latestEditIDs != nil {
+		m.editMu.Lock()
+		latestEditID, hasEdit = m.latestEditIDs.Get(eventID)
+		m.editMu.Unlock()
+	}
+
+	if hasEdit && latestEditID != "" {
+		ev, err := m.mc.Event(ctx, roomID, latestEditID)
+		if err == nil {
+			body := extractEventBody(ev)
+			if body != "" {
+				return ev, body, nil
+			}
+		}
+	}
+
+	ev, err := m.mc.Event(ctx, roomID, eventID)
+	if err != nil {
+		return nil, "", err
+	}
+
+	return ev, extractEventBody(ev), nil
+}
+
 // fetchText looks up the full text of a message for pin notifications and seeds the
 // short-text cache if absent. It returns an empty string if the lookup fails or the
-// event is encrypted, so callers can fall back to the cached summary.
+// event cannot be decrypted, so callers can fall back to the cached summary.
 func (m *Matrix) fetchText(roomID id.RoomID, eventID id.EventID) string {
 	if m.mc == nil || !m.allowPinFetch() {
 		return ""
@@ -314,30 +345,14 @@ func (m *Matrix) fetchText(roomID id.RoomID, eventID id.EventID) string {
 	ctx, cancel := context.WithTimeout(m.ctx, fetchTextTimeout)
 	defer cancel()
 
-	m.editMu.Lock()
-	latestEditID, hasEdit := m.latestEditIDs.Get(eventID)
-	m.editMu.Unlock()
-
-	if hasEdit && latestEditID != "" {
-		ev, err := m.mc.Event(ctx, roomID, latestEditID)
-		if err == nil {
-			if body := extractEventBody(ev); body != "" {
-				m.cacheTextIfAbsent(eventID, body)
-
-				return body
-			}
-		}
-	}
-
-	ev, err := m.mc.Event(ctx, roomID, eventID)
+	// Undecryptable events leave no plaintext body to show.
+	_, body, err := m.fetchEventWithBody(ctx, roomID, eventID)
 	if err != nil {
 		logger.Debugf("Unable to get post %s for pin: %s", eventID, err)
 
 		return ""
 	}
 
-	// Encrypted content is not decrypted by Event, so there is no body to show.
-	body := extractEventBody(ev)
 	m.cacheTextIfAbsent(eventID, body)
 
 	return body

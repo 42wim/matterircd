@@ -23,27 +23,13 @@ type UserInfo struct {
 // messageFromEvent converts a fetched event, returning nil for anything that
 // is not a plain message, decrypting it first if needed (edits are folded into their original by the server).
 func (c *Client) messageFromEvent(ctx context.Context, ev *event.Event) *Message {
-	if ev != nil && ev.Type == event.EventEncrypted && c.crypto != nil {
-		// Events from /messages only carry raw content; Decrypt needs it parsed.
-		if ev.Content.Parsed == nil {
-			err := ev.Content.ParseRaw(event.EventEncrypted)
-			if err != nil {
-				c.logger.Warnf("failed to parse encrypted event %s: %s", ev.ID, err)
-
-				return nil
-			}
-		}
-
-		// Undecryptable history, e.g. a missing room key, is skipped like any non-message.
-		dec, err := c.crypto.Decrypt(ctx, ev)
-		if err != nil {
-			c.logger.Debugf("failed to decrypt event %s in %s (%s): %s", ev.ID, c.roomLabel(ev.RoomID), ev.RoomID, err)
-
-			return nil
-		}
-
-		ev = dec
+	// Undecryptable history, e.g. a missing room key, is skipped like any non-message.
+	dec, err := c.decryptEvent(ctx, ev)
+	if err != nil {
+		return nil
 	}
+
+	ev = dec
 
 	if ev == nil || ev.Type != event.EventMessage {
 		return nil

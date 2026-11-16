@@ -1131,11 +1131,20 @@ func (c *Client) SendDirect(ctx context.Context, userID id.UserID, parentID id.E
 	return c.Send(ctx, roomID, parentID, text)
 }
 
-// Event fetches a single event.
+// Event fetches a single event, decrypting it if encrypted and crypto is configured.
 func (c *Client) Event(ctx context.Context, roomID id.RoomID, eventID id.EventID) (*event.Event, error) {
 	for attempt := 0; ; attempt++ {
 		ev, err := c.mc.GetEvent(ctx, roomID, eventID)
 		if err == nil {
+			if ev != nil && ev.RoomID == "" {
+				ev.RoomID = roomID
+			}
+
+			dec, derr := c.decryptEvent(ctx, ev)
+			if derr == nil && dec != nil {
+				return dec, nil
+			}
+
 			return ev, nil
 		}
 
@@ -1148,4 +1157,29 @@ func (c *Client) Event(ctx context.Context, roomID id.RoomID, eventID id.EventID
 			return nil, err
 		}
 	}
+}
+
+func (c *Client) decryptEvent(ctx context.Context, ev *event.Event) (*event.Event, error) {
+	if ev == nil || ev.Type != event.EventEncrypted || c.crypto == nil {
+		return ev, nil
+	}
+
+	// Events from REST endpoints (/event, /messages) only carry raw content; Decrypt needs it parsed.
+	if ev.Content.Parsed == nil {
+		err := ev.Content.ParseRaw(event.EventEncrypted)
+		if err != nil {
+			c.logger.Warnf("failed to parse encrypted event %s: %s", ev.ID, err)
+
+			return nil, err
+		}
+	}
+
+	dec, err := c.crypto.Decrypt(ctx, ev)
+	if err != nil {
+		c.logger.Debugf("failed to decrypt event %s in %s (%s): %s", ev.ID, c.roomLabel(ev.RoomID), ev.RoomID, err)
+
+		return nil, err
+	}
+
+	return dec, nil
 }
