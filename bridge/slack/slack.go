@@ -2668,15 +2668,33 @@ func buildSlackUserInfo(slackuser *slack.User, nick, teamID, directoryURL string
 	}
 }
 
-func (s *Slack) createUser(slackuser *slack.User) *bridge.UserInfo {
-	if slackuser == nil {
-		return &bridge.UserInfo{}
+// slackDirectoryURL expands slack.DirectoryURL for members of the current workspace,
+// excluding external Slack Connect users and (when DefaultWorkspace is set)
+// connections to other workspaces.
+func slackDirectoryURL(slackuser *slack.User, nick, teamID, teamDomain string, rc *config.RuntimeConfig) string {
+	if slackuser == nil || rc == nil || rc.Slack.Bridge.DirectoryURL == "" {
+		return ""
 	}
 
-	rc := s.cfg.Current()
-	nick := s.resolveSlackNick(slackuser, rc)
-	me := slackuser.ID != "" && slackuser.ID == s.sc.UserID()
-	directoryURL := utils.ExpandDirectoryURL(
+	if slackuser.IsStranger {
+		return ""
+	}
+
+	if userTeam := cmp.Or(slackuser.TeamID, slackuser.Profile.Team); userTeam != "" && teamID != "" && !strings.EqualFold(userTeam, teamID) {
+		return ""
+	}
+
+	if target := strings.TrimSpace(rc.Slack.DefaultWorkspace); target != "" {
+		targetDomain := strings.TrimSuffix(strings.ToLower(target), ".slack.com")
+		matchesDomain := teamDomain != "" && strings.EqualFold(teamDomain, targetDomain)
+		matchesID := teamID != "" && strings.EqualFold(teamID, target)
+
+		if !matchesDomain && !matchesID {
+			return ""
+		}
+	}
+
+	return utils.ExpandDirectoryURL(
 		rc.Slack.Bridge.DirectoryURL,
 		nick,
 		slackuser.Name,
@@ -2684,10 +2702,32 @@ func (s *Slack) createUser(slackuser *slack.User) *bridge.UserInfo {
 		slackuser.Profile.FirstName,
 		slackuser.Profile.LastName,
 	)
+}
 
-	info := buildSlackUserInfo(slackuser, nick, s.sc.TeamID(), directoryURL, me)
-	if s.sc != nil && s.sc.TeamDomain() != "" {
-		info.Host = s.sc.TeamDomain() + ".slack.com"
+func (s *Slack) createUser(slackuser *slack.User) *bridge.UserInfo {
+	if slackuser == nil {
+		return &bridge.UserInfo{}
+	}
+
+	rc := s.cfg.Current()
+	nick := s.resolveSlackNick(slackuser, rc)
+
+	var (
+		me                 bool
+		teamID, teamDomain string
+	)
+
+	if s.sc != nil {
+		me = slackuser.ID != "" && slackuser.ID == s.sc.UserID()
+		teamID = s.sc.TeamID()
+		teamDomain = s.sc.TeamDomain()
+	}
+
+	directoryURL := slackDirectoryURL(slackuser, nick, teamID, teamDomain, rc)
+
+	info := buildSlackUserInfo(slackuser, nick, teamID, directoryURL, me)
+	if teamDomain != "" {
+		info.Host = teamDomain + ".slack.com"
 	}
 
 	return info
