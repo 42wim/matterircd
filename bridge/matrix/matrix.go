@@ -1002,18 +1002,27 @@ func (m *Matrix) ModifyPost(ctx context.Context, msgID, text string) error {
 		return errors.New("unknown message " + msgID)
 	}
 
-	m.msgParentCache.Remove(id.EventID(msgID))
+	targetID := id.EventID(msgID)
+	m.msgParentCache.Remove(targetID)
 
 	if text == "" {
-		return m.mc.Delete(ctx, roomID, id.EventID(msgID))
+		return m.mc.Delete(ctx, roomID, targetID)
 	}
 
-	_, err := m.mc.Edit(ctx, roomID, id.EventID(msgID), text)
+	editID, err := m.mc.Edit(ctx, roomID, targetID, text)
 	if err != nil {
 		return err
 	}
 
-	m.cacheText(id.EventID(msgID), text)
+	m.editMu.Lock()
+	m.cacheText(targetID, text)
+
+	if editID != "" {
+		m.editEventIDs.Add(editID, targetID)
+		m.latestEditIDs.Add(targetID, editID)
+	}
+
+	m.editMu.Unlock()
 
 	return nil
 }
@@ -1598,13 +1607,12 @@ func (m *Matrix) addParentMsg(ctx context.Context, roomID id.RoomID, parentID id
 }
 
 func (m *Matrix) createParentReply(ctx context.Context, roomID id.RoomID, parentID id.EventID, newLen int, uncounted string) (string, error) {
-	resp, err := m.mc.Event(ctx, roomID, parentID)
+	resp, body, err := m.fetchEventWithBody(ctx, roomID, parentID)
 	if err != nil {
 		return "", err
 	}
 
-	body := extractEventBody(resp)
-	if body == "" {
+	if body == "" && m.msgTextCache != nil {
 		body, _ = m.msgTextCache.Get(parentID)
 	}
 
