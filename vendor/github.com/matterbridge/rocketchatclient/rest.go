@@ -1179,6 +1179,61 @@ func (c *Client) SetStatus(ctx context.Context, status, message string) error {
 	return c.doJSON(ctx, http.MethodPost, "/api/v1/users.setStatus", nil, req, nil, true)
 }
 
+// SetDisplayName updates the authenticated user's display name via users.updateOwnBasicInfo.
+func (c *Client) SetDisplayName(ctx context.Context, name string) error {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return errors.New("rocketchatclient: display name is required")
+	}
+
+	req := struct {
+		Data struct {
+			Name string `json:"name"`
+		} `json:"data"`
+	}{}
+	req.Data.Name = trimmed
+
+	err := c.doJSON(ctx, http.MethodPost, "/api/v1/users.updateOwnBasicInfo", nil, req, nil, true)
+	if err != nil {
+		return err
+	}
+
+	c.authMu.Lock()
+
+	var updated *User
+
+	if c.me != nil {
+		c.me.Name = trimmed
+		updated = cloneUser(c.me)
+	}
+
+	c.authMu.Unlock()
+
+	if updated != nil {
+		c.cache.upsertUser(updated)
+	}
+
+	return nil
+}
+
+// RefreshRoomsAndSubs refreshes cached rooms and subscriptions from the Rocket.Chat REST API.
+func (c *Client) RefreshRoomsAndSubs(ctx context.Context) error {
+	subsResp, err := c.GetSubscriptions(ctx, nil)
+	if err != nil {
+		return err
+	}
+
+	roomsResp, err := c.GetRooms(ctx, nil)
+	if err != nil {
+		return err
+	}
+
+	c.cache.hydrateRoomsAndSubs(roomsResp.Update, subsResp.Update)
+	c.seedUsersFromRooms(roomsResp.Update)
+
+	return nil
+}
+
 func (c *Client) seedMessageUsers(msg *Message) {
 	if msg == nil {
 		return

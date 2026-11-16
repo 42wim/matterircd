@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	"net/url"
 	"regexp"
 	"slices"
 	"strings"
@@ -31,6 +32,7 @@ const (
 	defaultSearchCount   = 20
 	maxSearchRooms       = 25
 	searchTimeout        = 15 * time.Second
+	typingSendTimeout    = 3 * time.Second
 )
 
 // roomMentionRegexp matches Rocket.Chat's @all and @here along with Mattermost/Matrix @channel and @room.
@@ -567,6 +569,71 @@ func (r *RocketChat) OnPresence(userID, status string) {
 	})
 }
 
+// OnTyping implements rocketchatclient.TypingHandler.
+func (r *RocketChat) OnTyping(roomID, username string) {
+	if !r.ready.Load() || roomID == "" || username == "" {
+		return
+	}
+
+	sender := r.GetUserByUsername(r.ctx, username)
+	if sender == nil || sender.Me {
+		return
+	}
+
+	room, ok := r.rc.Room(roomID)
+	channelType := ""
+	receiver := r.GetMe()
+
+	if ok && r.isOneToOneDM(room) {
+		channelType = "D"
+
+		if peer := r.dmPeer(room); peer != nil {
+			receiver = sender
+			sender = peer
+		}
+	}
+
+	r.sendEvent(&bridge.Event{
+		Type: "typing",
+		Data: &bridge.TypingEvent{
+			ChannelID:   roomID,
+			ChannelType: channelType,
+			Receiver:    receiver,
+			Sender:      sender,
+		},
+	})
+}
+
+// OnInvite implements rocketchatclient.InviteHandler.
+func (r *RocketChat) OnInvite(inv *rocketchatclient.Invitation) {
+	if !r.ready.Load() || inv == nil || inv.RoomID == "" {
+		return
+	}
+
+	var inviter *bridge.UserInfo
+	if inv.Sender != "" {
+		inviter = r.GetUserByUsername(r.ctx, inv.Sender)
+		if inviter == nil {
+			inviter = &bridge.UserInfo{
+				Nick:     inv.Sender,
+				User:     inv.Sender,
+				Username: inv.Sender,
+				Ghost:    true,
+			}
+		}
+	}
+
+	r.sendEvent(&bridge.Event{
+		Type: "channel_invite",
+		Data: &bridge.ChannelInviteEvent{
+			Inviter:   inviter,
+			ChannelID: inv.RoomID,
+			Name:      inv.RoomName,
+			Direct:    inv.Direct,
+		},
+	})
+}
+
 func (r *RocketChat) dispatchText(roomID, msgID, parentID, eventType, msgType, text string, sender *bridge.UserInfo, createAt int64) {
 	room, ok := r.rc.Room(roomID)
 	if ok && r.isOneToOneDM(room) {
@@ -647,12 +714,7 @@ func (r *RocketChat) dispatchFiles(roomID, msgID, parentID string, files []*brid
 }
 
 func (r *RocketChat) formatIncomingText(msg *rocketchatclient.Message, isDM bool) (string, string) {
-	text := msg.Text
-	if text == "" && msg.File != nil && len(msg.Attachments) > 0 && msg.Attachments[0].Description != "" {
-		text = msg.Attachments[0].Description
-	}
-
-	text = r.resolveMentions(msg, text)
+	text := r.rawIncomingText(msg)
 	rcCfg := r.cfg.RocketChat()
 
 	if rcCfg.DisableDefaultMentions {
@@ -672,6 +734,170 @@ func (r *RocketChat) formatIncomingText(msg *rocketchatclient.Message, isDM bool
 	}
 
 	return text, ""
+}
+
+func (r *RocketChat) rawIncomingText(msg *rocketchatclient.Message) string {
+	text := msg.Text
+	if text == "" && msg.File != nil && len(msg.Attachments) > 0 {
+		text = msg.Attachments[0].Description
+	}
+
+	text = r.resolveMentions(msg, text)
+
+	if extra := r.formatRichAttachments(msg); extra != "" {
+		if text != "" {
+			text += "\n"
+		}
+
+		text += extra
+	}
+
+	return text
+}
+
+func (r *RocketChat) formatRichAttachments(msg *rocketchatclient.Message) string {
+	if msg == nil || len(msg.Attachments) == 0 {
+		return ""
+	}
+
+	rcCfg := r.cfg.RocketChat()
+	prefixChar, spaceChar := "|", " "
+
+	if rcCfg.Formatter.Unicode {
+		prefixChar = "🮇"
+		spaceChar = "\u00a0"
+	}
+
+	var sb strings.Builder
+
+	for i := range msg.Attachments {
+		att := &msg.Attachments[i]
+		if !isRichAttachment(att) {
+			continue
+		}
+
+		if sb.Len() == 0 {
+			sb.WriteString(utils.AttachmentMarkerStart)
+			sb.WriteByte('\n')
+		}
+
+		prefix := attachmentBarPrefix(att.Color, prefixChar, spaceChar, rcCfg.Formatter.EnableIRCHexColors)
+		r.appendSingleAttachment(&sb, att, prefix, spaceChar, rcCfg)
+	}
+
+	if sb.Len() == 0 {
+		return ""
+	}
+
+	sb.WriteString(utils.AttachmentMarkerEnd)
+
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+func isRichAttachment(att *rocketchatclient.Attachment) bool {
+	if att == nil {
+		return false
+	}
+
+	// File upload wrappers duplicate msg.File + Description; skip them unless rich fields exist.
+	if strings.Contains(att.TitleLink, "/file-upload/") && att.Text == "" && att.AuthorName == "" && len(att.Fields) == 0 {
+		return false
+	}
+
+	return att.AuthorName != "" || att.Title != "" || att.Text != "" || len(att.Fields) > 0
+}
+
+func attachmentBarPrefix(color, prefixChar, spaceChar string, enableHex bool) string {
+	switch {
+	case color == "danger":
+		return "\x0304" + prefixChar + "\x0f" + spaceChar
+	case color == "good":
+		return "\x0303" + prefixChar + "\x0f" + spaceChar
+	case color == "warning":
+		return "\x0308" + prefixChar + "\x0f" + spaceChar
+	case strings.HasPrefix(color, "#"):
+		hex := strings.TrimPrefix(color, "#")
+		if enableHex {
+			return "\x02\x04" + strings.ToUpper(hex) + prefixChar + "\x0f" + spaceChar
+		}
+
+		return "\x02\x03" + utils.FindClosestIRCColor(hex) + prefixChar + "\x0f" + spaceChar
+	default:
+		return "\x02" + prefixChar + "\x0f" + spaceChar
+	}
+}
+
+func (r *RocketChat) appendSingleAttachment(sb *strings.Builder, att *rocketchatclient.Attachment, prefix, spaceChar string, rcCfg *config.RocketChatConfig) {
+	if att.AuthorName != "" {
+		sb.WriteString(prefix + "@" + att.AuthorName + "\n")
+	}
+
+	if att.Title != "" {
+		titleLine := "\x02" + att.Title + "\x02"
+		if att.TitleLink != "" && !strings.Contains(att.TitleLink, "/file-upload/") {
+			titleLine += spaceChar + r.rc.ResolveAttachmentURL(att.TitleLink)
+		}
+
+		sb.WriteString(prefix + titleLine + "\n")
+	}
+
+	if att.Text != "" {
+		body := r.resolveMentions(nil, att.Text)
+		for line := range strings.SplitSeq(body, "\n") {
+			line = strings.TrimSuffix(line, "\r")
+			if line != "" {
+				sb.WriteString(prefix + line + "\n")
+			}
+		}
+	}
+
+	r.appendAttachmentFields(sb, att.Fields, prefix, rcCfg)
+}
+
+func (r *RocketChat) appendAttachmentFields(sb *strings.Builder, fields []rocketchatclient.AttachmentField, prefix string, rcCfg *config.RocketChatConfig) {
+	maxShortLen := rcCfg.MessageAttachmentShortFieldMaxLineLength
+	if maxShortLen <= 0 {
+		maxShortLen = 100
+	}
+
+	var shortBuf strings.Builder
+
+	flushShort := func() {
+		if shortBuf.Len() > 0 {
+			sb.WriteString(prefix + shortBuf.String() + "\n")
+			shortBuf.Reset()
+		}
+	}
+
+	for i := range fields {
+		f := &fields[i]
+		entry := f.Value
+
+		if !rcCfg.MessageAttachmentOmitFieldTitles && f.Title != "" {
+			entry = "\x02" + f.Title + "\x02: " + f.Value
+		}
+
+		if f.Short && !strings.Contains(entry, "\n") && shortBuf.Len()+len(entry)+3 <= maxShortLen {
+			if shortBuf.Len() > 0 {
+				shortBuf.WriteString(" | ")
+			}
+
+			shortBuf.WriteString(entry)
+
+			continue
+		}
+
+		flushShort()
+
+		for line := range strings.SplitSeq(entry, "\n") {
+			line = strings.TrimSuffix(line, "\r")
+			if line != "" {
+				sb.WriteString(prefix + line + "\n")
+			}
+		}
+	}
+
+	flushShort()
 }
 
 func hasRoomMention(msg *rocketchatclient.Message) bool {
@@ -1001,7 +1227,13 @@ func (r *RocketChat) toBridgeUser(u *rocketchatclient.User) *bridge.UserInfo {
 		return nil
 	}
 
+	rcCfg := r.cfg.RocketChat()
+
 	nick := cmp.Or(u.Username, u.ID)
+	if rcCfg.PreferNickname && isValidNick(u.Name) {
+		nick = u.Name
+	}
+
 	realName := cmp.Or(u.Name, nick)
 	meID := r.rc.UserID()
 
@@ -1014,18 +1246,108 @@ func (r *RocketChat) toBridgeUser(u *rocketchatclient.User) *bridge.UserInfo {
 		}
 	}
 
+	email := ""
+	if len(u.Emails) > 0 {
+		email = u.Emails[0].Address
+	}
+
 	return &bridge.UserInfo{
 		Nick:        nick,
 		User:        u.ID,
 		Real:        realName,
+		Host:        r.serverHost(),
 		Roles:       roles,
 		DisplayName: u.Name,
 		Ghost:       u.ID != meID,
 		Me:          u.ID == meID,
 		Username:    u.Username,
 		FirstName:   u.Name,
+		Email:       email,
+		Directory:   expandDirectoryURL(rcCfg.Bridge.DirectoryURL, nick, u.Username, email),
+		Photo:       r.userPhotoURL(u.Username),
 		MentionKeys: mentionKeysForUser(u, nick, u.ID == meID),
 	}
+}
+
+func (r *RocketChat) serverHost() string {
+	base := r.rc.BaseURL()
+	if base == "" {
+		return ""
+	}
+
+	u, err := url.Parse(base)
+	if err != nil {
+		return ""
+	}
+
+	return u.Host
+}
+
+func (r *RocketChat) userPhotoURL(username string) string {
+	base := r.rc.BaseURL()
+	if base == "" || username == "" {
+		return ""
+	}
+
+	return base + "/avatar/" + url.PathEscape(username)
+}
+
+// UserDetails implements bridge.UserDetailer for WHOIS photo queries.
+func (r *RocketChat) UserDetails(ctx context.Context, userID string) (string, bool) {
+	if userID == "" {
+		return "", false
+	}
+
+	u := r.GetUser(ctx, userID)
+	if u == nil {
+		return "", false
+	}
+
+	return r.userPhotoURL(u.Username), false
+}
+
+func expandDirectoryURL(tmpl, nick, username, email string) string {
+	if tmpl == "" {
+		return ""
+	}
+
+	pathPart, queryPart, hasQuery := strings.Cut(tmpl, "?")
+
+	pathReplacer := strings.NewReplacer(
+		"{nick}", url.PathEscape(nick),
+		"{username}", url.PathEscape(username),
+		"{email}", url.PathEscape(email),
+	)
+	out := pathReplacer.Replace(pathPart)
+
+	if hasQuery {
+		queryReplacer := strings.NewReplacer(
+			"{nick}", url.QueryEscape(nick),
+			"{username}", url.QueryEscape(username),
+			"{email}", url.QueryEscape(email),
+		)
+		out += "?" + queryReplacer.Replace(queryPart)
+	}
+
+	return out
+}
+
+func isValidNick(s string) bool {
+	if len(s) < 1 || len(s) > 27 {
+		return false
+	}
+
+	if s[0] != ';' && (s[0] < 'A' || s[0] > '}') {
+		return false
+	}
+
+	for i := 1; i < len(s); i++ {
+		if s[i] != '-' && s[i] != ';' && (s[i] < 'A' || s[i] > '}') && (s[i] < '0' || s[i] > '9') {
+			return false
+		}
+	}
+
+	return true
 }
 
 func mentionKeysForUser(u *rocketchatclient.User, nick string, me bool) []string {
@@ -1190,10 +1512,13 @@ func (r *RocketChat) Connected() bool {
 
 func (r *RocketChat) Logout(ctx context.Context) error {
 	r.connected.Store(false)
+	r.ready.Store(false)
 
 	if r.unregisterReloadHook != nil {
 		r.unregisterReloadHook()
 	}
+
+	r.sendLogoutEvent(ctx)
 
 	if r.rc != nil {
 		r.rc.Logout()
@@ -1202,6 +1527,22 @@ func (r *RocketChat) Logout(ctx context.Context) error {
 	r.cancel()
 
 	return nil
+}
+
+func (r *RocketChat) sendLogoutEvent(ctx context.Context) {
+	if r.eventChan == nil {
+		return
+	}
+
+	timer := time.NewTimer(time.Second)
+	defer timer.Stop()
+
+	select {
+	case r.eventChan <- &bridge.Event{Type: "logout", Data: &bridge.LogoutEvent{}}:
+	case <-ctx.Done():
+	case <-r.ctx.Done():
+	case <-timer.C:
+	}
 }
 
 func (r *RocketChat) Ping(ctx context.Context, proto ...string) error {
@@ -1600,6 +1941,13 @@ func (r *RocketChat) GetLastViewedAt(ctx context.Context, channelID string) int6
 }
 
 func (r *RocketChat) UpdateChannels(ctx context.Context) error {
+	err := r.rc.RefreshRoomsAndSubs(ctx)
+	if err != nil {
+		return err
+	}
+
+	r.seedRoomMeta()
+
 	return nil
 }
 
@@ -1633,7 +1981,75 @@ func (r *RocketChat) UpdateLastViewedUser(ctx context.Context, userID string) er
 	return r.rc.MarkRead(ctx, roomID)
 }
 
-func (r *RocketChat) SendTyping(ctx context.Context, channelName string) {}
+func (r *RocketChat) SendTyping(ctx context.Context, channelName string) {
+	rc := r.cfg.Current()
+	if !rc.EnableTyping || rc.DisableSendTyping || channelName == "" || strings.HasPrefix(channelName, "&") {
+		return
+	}
+
+	roomID := r.GetChannelID(ctx, channelName, "")
+	if roomID == "" {
+		return
+	}
+
+	go func(parentCtx context.Context) {
+		typingCtx, cancel := context.WithTimeout(parentCtx, typingSendTimeout)
+		defer cancel()
+
+		err := r.rc.SendTyping(typingCtx, roomID)
+		if err != nil && !errors.Is(err, context.Canceled) {
+			logger.Debugf("rocketchat: SendTyping %s: %s", roomID, err)
+		}
+	}(ctx)
+}
+
+// PostURL returns the Rocket.Chat message permalink for DETAILS output.
+func (r *RocketChat) PostURL(ctx context.Context, postID string, events []*bridge.Event) string {
+	base := r.rc.BaseURL()
+	if base == "" || postID == "" {
+		return ""
+	}
+
+	roomID := ""
+
+	if len(events) > 0 {
+		switch e := events[0].Data.(type) {
+		case *bridge.ChannelMessageEvent:
+			roomID = e.ChannelID
+		case *bridge.DirectMessageEvent:
+			roomID = e.ChannelID
+		}
+	}
+
+	if roomID == "" {
+		roomID = r.GetPostChannelID(ctx, postID)
+	}
+
+	if roomID == "" {
+		return ""
+	}
+
+	room, ok := r.rc.Room(roomID)
+	if !ok {
+		return base + "/direct/" + url.PathEscape(roomID) + "?msg=" + url.QueryEscape(postID)
+	}
+
+	var prefix, target string
+
+	switch room.Type {
+	case rocketchatclient.RoomTypePrivate:
+		prefix = "/group/"
+		target = cmp.Or(room.Name, room.ID)
+	case rocketchatclient.RoomTypeDirect:
+		prefix = "/direct/"
+		target = room.ID
+	default:
+		prefix = "/channel/"
+		target = cmp.Or(room.Name, room.ID)
+	}
+
+	return base + prefix + url.PathEscape(target) + "?msg=" + url.QueryEscape(postID)
+}
 
 func (r *RocketChat) GetFilesInfo(ctx context.Context, fileIDs []string) []*bridge.File {
 	files := make([]*bridge.File, 0, len(fileIDs))
@@ -1990,7 +2406,7 @@ func (r *RocketChat) Kick(ctx context.Context, channelID, username string) error
 }
 
 func (r *RocketChat) Nick(ctx context.Context, name string) error {
-	return errors.New("rocketchat: Nick not implemented yet")
+	return r.rc.SetDisplayName(ctx, name)
 }
 
 func (r *RocketChat) MsgUser(ctx context.Context, userID, text string) (string, error) {
@@ -2021,6 +2437,13 @@ func (r *RocketChat) MsgChannel(ctx context.Context, channelID, text string) (st
 }
 
 func (r *RocketChat) MsgChannelThread(ctx context.Context, channelID, parentID, text string) (string, error) {
+	if parentID != "" {
+		msg, err := r.rc.ResolveMessage(ctx, parentID)
+		if err == nil && msg != nil && msg.ThreadID != "" {
+			parentID = msg.ThreadID
+		}
+	}
+
 	sendText := rocketChatActionText(text)
 
 	msgID, err := r.rc.SendMessage(ctx, channelID, sendText, parentID)

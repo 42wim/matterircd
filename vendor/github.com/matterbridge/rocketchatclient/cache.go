@@ -74,6 +74,10 @@ func cloneUser(u *User) *User {
 		cp.Roles = slices.Clone(u.Roles)
 	}
 
+	if u.Emails != nil {
+		cp.Emails = slices.Clone(u.Emails)
+	}
+
 	return &cp
 }
 
