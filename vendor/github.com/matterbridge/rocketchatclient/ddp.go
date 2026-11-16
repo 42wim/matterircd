@@ -1389,11 +1389,13 @@ func (c *Client) processIncomingMessage(ctx context.Context, msg *Message) {
 		return
 	}
 
-	if msg.Type != "" {
+	if msg.Type != "" && msg.Type != "me" {
 		c.handleSystemMessage(ctx, msg)
 
 		return
 	}
+
+	c.seedMessageUsers(msg)
 
 	prevMeta, seen := c.cache.recordSeenMessage(msg)
 	c.cache.cacheMessage(msg)

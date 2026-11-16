@@ -3,6 +3,7 @@ package rocketchatclient
 import (
 	"slices"
 	"sync"
+	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 )
@@ -164,6 +165,28 @@ func (sc *stateCache) upsertUsers(users []User) {
 	}
 }
 
+func (sc *stateCache) seedUserRef(ref UserRef) {
+	if ref.ID == "" || ref.Username == "" || ref.ID == "all" || ref.ID == "here" {
+		return
+	}
+
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+
+	if _, ok := sc.usersByID[ref.ID]; ok {
+		return
+	}
+
+	u := &User{
+		ID:       ref.ID,
+		Username: ref.Username,
+		Name:     ref.Name,
+	}
+
+	sc.usersByID[u.ID] = u
+	sc.usersByName[u.Username] = u
+}
+
 func (sc *stateCache) updateUserPresence(userID, username, status, statusText string) (string, bool) {
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
@@ -297,6 +320,27 @@ func (sc *stateCache) removeSubscription(roomID string) {
 	sc.mu.Lock()
 	delete(sc.subsByRoomID, roomID)
 	sc.mu.Unlock()
+}
+
+func (sc *stateCache) markRoomRead(roomID string, seenAt time.Time) {
+	if roomID == "" {
+		return
+	}
+
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+
+	sub, ok := sc.subsByRoomID[roomID]
+	if !ok || sub == nil {
+		return
+	}
+
+	if seenAt.After(sub.LastSeen.Time) {
+		sub.LastSeen = Timestamp{Time: seenAt}
+	}
+
+	sub.Alert = false
+	sub.Unread = 0
 }
 
 func (sc *stateCache) hydrateRoomsAndSubs(rooms []Room, subs []Subscription) {
