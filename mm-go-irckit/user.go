@@ -483,11 +483,12 @@ const (
 	serviceMatrix     = "matrix"
 	serviceSlack      = "slack"
 	serviceMastodon   = "mastodon"
+	serviceRocketChat = "rocketchat"
 )
 
 // isServiceBot tells if nick is one of the service bots (the ones to login to and to send commands to).
 func isServiceBot(nick string) bool {
-	return nick == serviceSlack || nick == serviceMattermost || nick == serviceMastodon || nick == serviceMatrix
+	return nick == serviceSlack || nick == serviceMattermost || nick == serviceMastodon || nick == serviceMatrix || nick == serviceRocketChat
 }
 
 // incomingLogLine describes a message from the client for the log, without the credentials in it.
@@ -587,7 +588,7 @@ func isSensitiveServiceMsg(msg *irc.Message) bool {
 		return false
 	}
 
-	if msg.Name != serviceSlack && msg.Name != serviceMattermost && msg.Name != serviceMatrix {
+	if msg.Name != serviceSlack && msg.Name != serviceMattermost && msg.Name != serviceMatrix && msg.Name != serviceRocketChat {
 		return false
 	}
 

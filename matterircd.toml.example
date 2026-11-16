@@ -464,6 +464,29 @@ PrefixContext = false
 
 
 #############################
+##### ROCKET.CHAT EXAMPLE ###
+#############################
+# Connect to matterircd and /msg rocketchat login <server> <user> <pass> [2fa=<code>]
+# or /msg rocketchat login <server> token=<userId>:<authToken>
+[rocketchat]
+#Default Rocket.Chat server URL (optional, allows omitting <server> on LOGIN)
+#Server = "https://open.rocket.chat"
+#Restrict logins to specific Rocket.Chat server(s)
+#Restrict = ["https://open.rocket.chat"]
+#SkipTLSVerify = false
+#Insecure = false
+#DisableAutoView = false
+#PrefixContext = false
+#ThreadContext = "rocketchat"
+#ShowTopic = false
+#JoinExclude = ["#off-topic"]
+#JoinInclude = ["#general"]
+#RocketchatclientLogLevel = "info"
+#Optional per-protocol DB path; falls back to [mattermost] LastViewedSaveFile when unset.
+#LastViewedSaveFile = "matterircd-rocketchat-lastsaved.db"
+
+
+#############################
 ##### MASTODON EXAMPLE ######
 #############################
 [mastodon]
