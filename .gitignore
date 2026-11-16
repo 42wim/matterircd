@@ -4,3 +4,6 @@ matterircd-lastsaved.db
 matterircd-lastsaved-*.db
 matterircd-*-lastsaved.db
 TODO*
+vendor/github.com/matterbridge/*client/AGENTS.md
+vendor/github.com/matterbridge/*client/CLAUDE.md
+vendor/github.com/matterbridge/*client/GEMINI.md
