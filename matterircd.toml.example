@@ -395,7 +395,7 @@ PrefixContext = false
 #ThreadContext = "slack"
 #DirectoryURL = "https://directory.mydomain.local/people/{nick}"  # {nick}, {username}, {email}, {firstname}, and {lastname}
 # Restrict DirectoryURL to a specific Slack workspace (team domain like "myorg" or team ID like "T01234567"); external Slack Connect users are always excluded.
-#DirectoryWorkspace = "myorg"
+#DefaultWorkspace = "myorg"
 #ShowOwnReactions = false
 #HideReactions = false
 #DisableShowOwnModified = true

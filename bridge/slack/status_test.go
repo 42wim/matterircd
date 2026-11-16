@@ -785,7 +785,7 @@ func TestSlackDirectoryURL(t *testing.T) {
 	otherProfileTeamUser := &slack.User{ID: "U4", Name: "partner2", Profile: slack.UserProfile{Team: "T2"}}
 	noTeamUser := &slack.User{ID: "U5", Name: "minimal"}
 
-	// Without DirectoryWorkspace: local users and users without TeamID get the URL;
+	// Without DefaultWorkspace: local users and users without TeamID get the URL;
 	// Slack Connect strangers and users from other teams do not.
 	assert.Equal(t, "https://directory.mydomain.local/people/hloeung", slackDirectoryURL(localUser, "hloeung", "T1", "myorg", rc))
 	assert.Equal(t, "https://directory.mydomain.local/people/minimal", slackDirectoryURL(noTeamUser, "minimal", "T1", "myorg", rc))
@@ -793,15 +793,15 @@ func TestSlackDirectoryURL(t *testing.T) {
 	assert.Empty(t, slackDirectoryURL(otherTeamUser, "partner", "T1", "myorg", rc))
 	assert.Empty(t, slackDirectoryURL(otherProfileTeamUser, "partner2", "T1", "myorg", rc))
 
-	// With DirectoryWorkspace set by domain (or domain.slack.com) or team ID.
-	rc.Slack.DirectoryWorkspace = "myorg"
+	// With DefaultWorkspace set by domain (or domain.slack.com) or team ID.
+	rc.Slack.DefaultWorkspace = "myorg"
 	assert.Equal(t, "https://directory.mydomain.local/people/hloeung", slackDirectoryURL(localUser, "hloeung", "T1", "myorg", rc))
 	assert.Empty(t, slackDirectoryURL(localUser, "hloeung", "T9", "other-ws", rc))
 
-	rc.Slack.DirectoryWorkspace = "myorg.slack.com"
+	rc.Slack.DefaultWorkspace = "myorg.slack.com"
 	assert.Equal(t, "https://directory.mydomain.local/people/hloeung", slackDirectoryURL(localUser, "hloeung", "T1", "myorg", rc))
 
-	rc.Slack.DirectoryWorkspace = "T1"
+	rc.Slack.DefaultWorkspace = "T1"
 	assert.Equal(t, "https://directory.mydomain.local/people/hloeung", slackDirectoryURL(localUser, "hloeung", "T1", "myorg", rc))
 	assert.Empty(t, slackDirectoryURL(strangerUser, "external", "T1", "myorg", rc))
 	assert.Empty(t, slackDirectoryURL(localUser, "hloeung", "T9", "other-ws", rc))

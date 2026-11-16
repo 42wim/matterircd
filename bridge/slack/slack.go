@@ -2669,7 +2669,7 @@ func buildSlackUserInfo(slackuser *slack.User, nick, teamID, directoryURL string
 }
 
 // slackDirectoryURL expands slack.DirectoryURL for members of the current workspace,
-// excluding external Slack Connect users and (when DirectoryWorkspace is set)
+// excluding external Slack Connect users and (when DefaultWorkspace is set)
 // connections to other workspaces.
 func slackDirectoryURL(slackuser *slack.User, nick, teamID, teamDomain string, rc *config.RuntimeConfig) string {
 	if slackuser == nil || rc == nil || rc.Slack.Bridge.DirectoryURL == "" {
@@ -2684,7 +2684,7 @@ func slackDirectoryURL(slackuser *slack.User, nick, teamID, teamDomain string, r
 		return ""
 	}
 
-	if target := strings.TrimSpace(rc.Slack.DirectoryWorkspace); target != "" {
+	if target := strings.TrimSpace(rc.Slack.DefaultWorkspace); target != "" {
 		targetDomain := strings.TrimSuffix(strings.ToLower(target), ".slack.com")
 		matchesDomain := teamDomain != "" && strings.EqualFold(teamDomain, targetDomain)
 		matchesID := teamID != "" && strings.EqualFold(teamID, target)
