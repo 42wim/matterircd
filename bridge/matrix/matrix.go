@@ -1603,7 +1603,10 @@ func (m *Matrix) createParentReply(ctx context.Context, roomID id.RoomID, parent
 		return "", err
 	}
 
-	body, _ := resp.Content.Raw["body"].(string)
+	body := extractEventBody(resp)
+	if body == "" {
+		body, _ = m.msgTextCache.Get(parentID)
+	}
 
 	nick := resp.Sender.String()
 	if parentUser := m.GetUser(ctx, resp.Sender.String()); parentUser != nil {

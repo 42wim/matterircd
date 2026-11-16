@@ -305,7 +305,7 @@ func extractEventBody(ev *event.Event) string {
 
 // fetchText looks up the full text of a message for pin notifications and seeds the
 // short-text cache if absent. It returns an empty string if the lookup fails or the
-// event is encrypted, so callers can fall back to the cached summary.
+// event cannot be decrypted, so callers can fall back to the cached summary.
 func (m *Matrix) fetchText(roomID id.RoomID, eventID id.EventID) string {
 	if m.mc == nil || !m.allowPinFetch() {
 		return ""
@@ -336,7 +336,7 @@ func (m *Matrix) fetchText(roomID id.RoomID, eventID id.EventID) string {
 		return ""
 	}
 
-	// Encrypted content is not decrypted by Event, so there is no body to show.
+	// Undecryptable events leave no plaintext body to show.
 	body := extractEventBody(ev)
 	m.cacheTextIfAbsent(eventID, body)
 
