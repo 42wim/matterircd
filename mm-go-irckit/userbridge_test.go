@@ -2,6 +2,7 @@ package irckit
 
 import (
 	"context"
+	"encoding/binary"
 	"io"
 	"net"
 	"os"
@@ -559,8 +560,118 @@ func TestAddUsersToChannelsDrainsPendingOnCancel(t *testing.T) {
 			if u.isPendingReplay(ch.ID) {
 				return false
 			}
+
+			if _, ok := u.getSavedSinceSnap(ch.ID); ok {
+				return false
+			}
 		}
 
 		return true
 	}, 2*time.Second, 10*time.Millisecond)
+}
+
+func writeRawLastViewed(t *testing.T, db *bolt.DB, bucket []byte, channelID string, ts int64) {
+	t.Helper()
+
+	err := db.Update(func(tx *bolt.Tx) error {
+		b, err := tx.CreateBucketIfNotExists(bucket)
+		if err != nil {
+			return err
+		}
+
+		buf := make([]byte, 8)
+
+		//nolint:gosec // test timestamps are non-negative UnixMilli values
+		binary.LittleEndian.PutUint64(buf, uint64(ts))
+
+		return b.Put([]byte(channelID), buf)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSavedSinceSnapshotPinsPreSyncCursor(t *testing.T) {
+	const (
+		chSeeded = "ch-snap-seeded"
+		chAbsent = "ch-snap-absent"
+		chLegacy = "ch-snap-legacy"
+	)
+
+	br := &replayTestBridge{protocol: serviceMattermost}
+	u, db := newTestUserBridge(t, "[mattermost]\nReplayStrategy = \"saved\"\n", br)
+
+	seededTS := time.Now().Add(-2 * time.Hour).UnixMilli()
+	laterTS := time.Now().Add(-time.Minute).UnixMilli()
+	cutoff := time.Now().Add(-24 * time.Hour).UnixMilli()
+
+	u.saveLastViewedAt(chSeeded, seededTS)
+	writeRawLastViewed(t, db, []byte(u.User), chLegacy, seededTS)
+
+	channels := []*bridge.ChannelInfo{{ID: chSeeded}, {ID: chAbsent}, {ID: chLegacy}}
+	u.markPendingReplay(channels)
+
+	// Bypass saveLastViewedAt to verify getChannelSince reads the upfront BoltDB snapshot.
+	writeRawLastViewed(t, db, u.dbBucketName(), chSeeded, laterTS)
+	writeRawLastViewed(t, db, u.dbBucketName(), chAbsent, laterTS)
+	writeRawLastViewed(t, db, []byte(u.User), chLegacy, laterTS)
+
+	since, src, inDB := u.getChannelSince(context.Background(), &bridge.ChannelInfo{ID: chSeeded, Name: "seeded"}, cutoff)
+	assert.Equal(t, seededTS, since)
+	assert.Equal(t, "stored", src)
+	assert.True(t, inDB)
+
+	since, src, inDB = u.getChannelSince(context.Background(), &bridge.ChannelInfo{ID: chAbsent, Name: "absent"}, cutoff)
+	assert.Equal(t, cutoff, since)
+	assert.Equal(t, "cutoff-fallback", src)
+	assert.False(t, inDB)
+
+	since, _, inDB = u.getChannelSince(context.Background(), &bridge.ChannelInfo{ID: chLegacy, Name: "legacy"}, cutoff)
+	assert.Equal(t, seededTS, since)
+	assert.True(t, inDB)
+
+	for _, ch := range channels {
+		u.clearPendingReplay(ch.ID)
+		_, ok := u.getSavedSinceSnap(ch.ID)
+		assert.False(t, ok)
+	}
+
+	since, _, inDB = u.getChannelSince(context.Background(), &bridge.ChannelInfo{ID: chSeeded, Name: "seeded"}, cutoff)
+	assert.Equal(t, laterTS, since)
+	assert.True(t, inDB)
+}
+
+func TestSavedSinceSnapshotRefcountAndServerOnly(t *testing.T) {
+	const chRef = "ch-snap-ref"
+
+	br := &replayTestBridge{protocol: serviceMattermost}
+	u, db := newTestUserBridge(t, "[mattermost]\nReplayStrategy = \"hybrid\"\n", br)
+
+	seededTS := time.Now().Add(-2 * time.Hour).UnixMilli()
+	laterTS := time.Now().Add(-time.Minute).UnixMilli()
+	cutoff := time.Now().Add(-24 * time.Hour).UnixMilli()
+
+	u.saveLastViewedAt(chRef, seededTS)
+
+	u.markPendingReplay([]*bridge.ChannelInfo{{ID: chRef}})
+	u.markPendingReplay([]*bridge.ChannelInfo{{ID: chRef}})
+	writeRawLastViewed(t, db, u.dbBucketName(), chRef, laterTS)
+
+	u.clearPendingReplay(chRef)
+
+	since, _, inDB := u.getChannelSince(context.Background(), &bridge.ChannelInfo{ID: chRef, Name: "ref"}, cutoff)
+	assert.Equal(t, seededTS, since)
+	assert.True(t, inDB)
+
+	u.clearPendingReplay(chRef)
+
+	since, _, inDB = u.getChannelSince(context.Background(), &bridge.ChannelInfo{ID: chRef, Name: "ref"}, cutoff)
+	assert.Equal(t, laterTS, since)
+	assert.True(t, inDB)
+
+	uServerOnly, _ := newTestUserBridge(t, "[mattermost]\nReplayStrategy = \"server-only\"\n", &replayTestBridge{protocol: serviceMattermost})
+	uServerOnly.markPendingReplay([]*bridge.ChannelInfo{{ID: chRef}})
+	_, ok := uServerOnly.getSavedSinceSnap(chRef)
+	assert.False(t, ok)
+	uServerOnly.clearPendingReplay(chRef)
 }
