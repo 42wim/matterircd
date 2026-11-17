@@ -268,7 +268,7 @@ func (s *Slack) logout(ctx context.Context) error {
 	s.connected.Store(false)
 
 	if s.done != nil {
-		defer close(s.done)
+		close(s.done)
 	}
 
 	if s.unregisterReloadHook != nil {
@@ -278,6 +278,10 @@ func (s *Slack) logout(ctx context.Context) error {
 	if s.wsCancel != nil {
 		s.wsCancel()
 	}
+
+	s.Lock()
+	clear(s.userByNick)
+	s.Unlock()
 
 	var err error
 	if s.sc != nil {
@@ -597,12 +601,12 @@ func slackChannelToInfo(teamID string, ch *slack.Channel) *bridge.ChannelInfo {
 }
 
 func (s *Slack) GetChannels() []*bridge.ChannelInfo {
-	var channels []*bridge.ChannelInfo
-
+	rawChannels := s.sc.GetChannels()
+	channels := make([]*bridge.ChannelInfo, 0, len(rawChannels))
 	teamID := s.sc.TeamID()
 
-	for _, mmchannel := range s.sc.GetChannels() {
-		channels = append(channels, slackChannelToInfo(teamID, &mmchannel))
+	for i := range rawChannels {
+		channels = append(channels, slackChannelToInfo(teamID, &rawChannels[i]))
 	}
 
 	return channels
@@ -639,17 +643,19 @@ func (s *Slack) GetChannel(ctx context.Context, channelID string) (*bridge.Chann
 		channelID = chID
 	}
 
-	channels := s.GetChannels()
-	for _, channel := range channels {
-		if channel.ID == channelID {
-			return channel, nil
+	teamID := s.sc.TeamID()
+	rawChannels := s.sc.GetChannels()
+
+	for i := range rawChannels {
+		if rawChannels[i].ID == channelID {
+			return slackChannelToInfo(teamID, &rawChannels[i]), nil
 		}
 	}
 
 	if s.sc != nil {
 		ch, err := s.sc.GetConversationInfo(ctx, channelID)
 		if err == nil && ch != nil {
-			return slackChannelToInfo(s.sc.TeamID(), ch), nil
+			return slackChannelToInfo(teamID, ch), nil
 		}
 	}
 
@@ -702,8 +708,14 @@ func (s *Slack) lookupUserIDByNick(nick string) string {
 		return ""
 	}
 
+	lower := strings.ToLower(nick)
+
 	s.RLock()
 	defer s.RUnlock()
+
+	if uid, ok := s.userByNick[lower]; ok {
+		return uid
+	}
 
 	if uid, ok := s.userByNick[nick]; ok {
 		return uid
@@ -1678,14 +1690,21 @@ func (s *Slack) resolveDMReceiver(ghost *bridge.UserInfo, channelID string) *bri
 			return dmUser
 		}
 
+		meID := s.sc.UserID()
+
 		members, _ := s.sc.GetUsersInConversation(channelID)
 		for _, member := range members {
-			if member == s.GetMe().User {
+			if member == meID {
 				continue
 			}
 
+			if cached := s.sc.GetUser(member); cached != nil {
+				return s.createUser(cached)
+			}
+
 			ghostuser, _ := s.sc.GetUserInfo(member)
-			receiver = s.createUser(ghostuser)
+
+			return s.createUser(ghostuser)
 		}
 	}
 
@@ -1714,9 +1733,14 @@ func (s *Slack) handleSlackReaction(ctx context.Context, userID, channelID, ts, 
 		return
 	}
 
-	suser, err := s.sc.GetUserInfo(userID)
-	if err != nil {
-		return
+	suser := s.sc.GetUser(userID)
+	if suser == nil {
+		var err error
+
+		suser, err = s.sc.GetUserInfo(userID)
+		if err != nil {
+			return
+		}
 	}
 
 	ghost := s.createUser(suser)
@@ -1809,9 +1833,14 @@ func (s *Slack) handleItemPin(ctx context.Context, userID, channelID string, ite
 }
 
 func (s *Slack) handleActionMisc(userID, channelID, msgID, parentID, msg, eventType string, createAt int64) {
-	suser, err := s.sc.GetUserInfo(userID)
-	if err != nil {
-		return
+	suser := s.sc.GetUser(userID)
+	if suser == nil {
+		var err error
+
+		suser, err = s.sc.GetUserInfo(userID)
+		if err != nil {
+			return
+		}
 	}
 
 	// create new "ghost" user
@@ -2589,14 +2618,25 @@ func (s *Slack) resolveSlackNick(slackuser *slack.User, rc *config.RuntimeConfig
 		nick += "-" + strings.ToLower(slackuser.ID)
 	}
 
+	lower := strings.ToLower(nick)
+
+	s.RLock()
+	owner, taken := s.userByNick[lower]
+	s.RUnlock()
+
+	if taken && owner == slackuser.ID {
+		return nick
+	}
+
 	s.Lock()
 	defer s.Unlock()
 
-	if owner, taken := s.userByNick[nick]; taken && owner != slackuser.ID {
+	if owner, taken = s.userByNick[lower]; taken && owner != slackuser.ID {
 		nick += "-" + strings.ToLower(slackuser.ID)
+		lower = strings.ToLower(nick)
 	}
 
-	s.userByNick[nick] = slackuser.ID
+	s.userByNick[lower] = slackuser.ID
 
 	return nick
 }
