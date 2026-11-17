@@ -361,14 +361,32 @@ func (c *Client) noteTimeline(res *mautrix.RespSync) {
 	}
 }
 
+func (c *Client) shouldTrackTimeline(ev *event.Event, live bool) bool {
+	if ev == nil || ev.ID == "" {
+		return false
+	}
+
+	switch ev.Type {
+	case event.EventMessage:
+		return true
+	case event.EventEncrypted:
+		// Without crypto an encrypted event is never delivered, so it would stay pending.
+		return c.crypto != nil
+	case event.EventReaction, event.EventRedaction:
+		return live
+	default:
+		return false
+	}
+}
+
 func (c *Client) noteTimelineLocked(roomID id.RoomID, events []*event.Event) {
 	var ch *Channel
 
 	now := time.Now()
+	live := c.synced.Load()
 
 	for _, ev := range events {
-		// Without crypto an encrypted event is never delivered, so it would stay pending.
-		if ev.Type != event.EventMessage && (ev.Type != event.EventEncrypted || c.crypto == nil) {
+		if !c.shouldTrackTimeline(ev, live) {
 			continue
 		}
 
@@ -381,12 +399,25 @@ func (c *Client) noteTimelineLocked(roomID id.RoomID, events []*event.Event) {
 			}
 		}
 
+		if prev, dup := ch.eventSeq[ev.ID]; dup {
+			ch.removePendingLocked(prev.seq)
+		}
+
 		ch.nextSeq++
-		ch.eventSeq[ev.ID] = pendingSeq{seq: ch.nextSeq, at: now}
+		p := pendingSeq{seq: ch.nextSeq, at: now}
+		ch.eventSeq[ev.ID] = p
+
+		if live {
+			ch.pending = append(ch.pending, p)
+		}
 	}
 
 	if ch == nil {
 		return
+	}
+
+	if len(ch.held) == 0 {
+		ch.expirePendingLocked(now, false)
 	}
 
 	if len(ch.eventSeq) > max(ch.pruneAt, pruneThreshold) {
@@ -406,6 +437,7 @@ func pruneEventSeq(ch *Channel, expire bool) {
 	for evID, p := range ch.eventSeq {
 		if p.seq <= ch.lastSeq || (expire && now.Sub(p.at) > pendingTTL) {
 			delete(ch.eventSeq, evID)
+			ch.removePendingLocked(p.seq)
 		}
 	}
 
@@ -413,33 +445,24 @@ func pruneEventSeq(ch *Channel, expire bool) {
 	ch.pruneAt = 2 * len(ch.eventSeq)
 }
 
-// dropPending forgets the position of a message that will not advance LastEventID.
-func (c *Client) dropPending(roomID id.RoomID, eventID id.EventID) {
-	c.RLock()
-	ch, ok := c.channels[roomID]
-	c.RUnlock()
-
-	if !ok {
-		return
-	}
-
-	ch.Lock()
-	delete(ch.eventSeq, eventID)
-	ch.Unlock()
-}
-
 // noteDecryptFailure drops the position of a message the Crypto gave up on, as
 // it is never delivered.
 // The failure itself is logged by the caller's handler.
 func (c *Client) noteDecryptFailure(ev *event.Event, _ error) {
-	c.dropPending(ev.RoomID, ev.ID)
+	c.resolvePending(ev.RoomID, ev.ID)
 }
 
-// noteDecrypted drops the position of a decrypted event that is not a message,
-// as it never reaches noteActivity.
+// noteDecrypted drops the position of a decrypted event whose type is not
+// dispatched by ordered timeline delivery.
 func (c *Client) noteDecrypted(ev *event.Event) {
-	if ev.Mautrix.WasEncrypted && ev.Type != event.EventMessage {
-		c.dropPending(ev.RoomID, ev.ID)
+	if !ev.Mautrix.WasEncrypted {
+		return
+	}
+
+	switch ev.Type {
+	case event.EventMessage, event.EventReaction, event.EventRedaction:
+	default:
+		c.resolvePending(ev.RoomID, ev.ID)
 	}
 }
 
@@ -447,28 +470,11 @@ func (c *Client) noteDecrypted(ev *event.Event) {
 // those of the initial sync which are not delivered to the handler. It returns the
 // timeline position of the message, 0 if it is unknown, for noteDelivered.
 func (c *Client) noteActivity(roomID id.RoomID, eventID id.EventID, ts int64) uint64 {
-	c.Lock()
-	defer c.Unlock()
-
-	ch := c.channelLocked(roomID)
+	ch := c.ensureChannel(roomID)
 
 	ch.Lock()
-	ch.LastActivity = max(ch.LastActivity, ts)
-
-	var seq uint64
-
-	// The timeline position, not the arrival or decryption order, decides the
-	// newest event, as origin_server_ts is not monotonic either.
-	if p, ok := ch.eventSeq[eventID]; ok {
-		delete(ch.eventSeq, eventID)
-
-		seq = p.seq
-
-		if p.seq > ch.lastSeq {
-			ch.lastSeq, ch.LastEventID = p.seq, eventID
-		}
-	}
-
+	seq := ch.consumeSeqLocked(eventID)
+	ch.noteActivityLocked(eventID, ts, seq)
 	ch.Unlock()
 
 	return seq
@@ -491,48 +497,20 @@ func (c *Client) noteDelivered(roomID id.RoomID, eventID id.EventID, seq uint64)
 	}
 
 	ch.Lock()
-
-	if seq > ch.deliveredSeq {
-		ch.deliveredSeq, ch.DeliveredEventID = seq, eventID
-	}
-
+	ch.noteDeliveredLocked(eventID, seq)
 	ch.Unlock()
 }
 
 func (c *Client) handleMessage(_ context.Context, ev *event.Event) {
 	content := ev.Content.AsMessage()
 	if content == nil {
-		c.dropPending(ev.RoomID, ev.ID)
+		c.resolvePending(ev.RoomID, ev.ID)
 
 		return
 	}
 
-	// Also on the early returns below, where nothing is delivered.
-	defer c.noteDelivered(ev.RoomID, ev.ID, c.noteActivity(ev.RoomID, ev.ID, ev.Timestamp))
-
-	if targetID := content.RelatesTo.GetReplaceID(); targetID != "" { //nolint:nestif
-		if h, ok := c.handler.(EditHandler); ok {
-			if !c.synced.Load() {
-				return
-			}
-
-			text := content.Body
-			if content.NewContent != nil {
-				text = content.NewContent.Body
-			}
-
-			h.OnEdit(&Edit{
-				RoomID:    ev.RoomID,
-				EventID:   ev.ID,
-				TargetID:  targetID,
-				Sender:    ev.Sender,
-				Text:      text,
-				Direct:    c.IsDirect(ev.RoomID),
-				Timestamp: ev.Timestamp,
-			})
-
-			return
-		}
+	if c.handleEditMessage(ev, content) {
+		return
 	}
 
 	if ev.Sender != c.mc.UserID {
@@ -540,6 +518,8 @@ func (c *Client) handleMessage(_ context.Context, ev *event.Event) {
 	}
 
 	if !c.synced.Load() {
+		c.noteDelivered(ev.RoomID, ev.ID, c.noteActivity(ev.RoomID, ev.ID, ev.Timestamp))
+
 		return
 	}
 
@@ -560,20 +540,58 @@ func (c *Client) handleMessage(_ context.Context, ev *event.Event) {
 		msg.ParentID = content.RelatesTo.EventID
 	}
 
-	c.handler.OnMessage(msg)
+	c.deliverOrdered(ev.RoomID, ev.ID, ev.Timestamp, true, msg)
+}
+
+func (c *Client) handleEditMessage(ev *event.Event, content *event.MessageEventContent) bool {
+	targetID := content.RelatesTo.GetReplaceID()
+	if targetID == "" {
+		return false
+	}
+
+	if _, ok := c.handler.(EditHandler); !ok {
+		return false
+	}
+
+	if !c.synced.Load() {
+		c.noteDelivered(ev.RoomID, ev.ID, c.noteActivity(ev.RoomID, ev.ID, ev.Timestamp))
+
+		return true
+	}
+
+	text := content.Body
+	if content.NewContent != nil {
+		text = content.NewContent.Body
+	}
+
+	c.deliverOrdered(ev.RoomID, ev.ID, ev.Timestamp, true, &Edit{
+		RoomID:    ev.RoomID,
+		EventID:   ev.ID,
+		TargetID:  targetID,
+		Sender:    ev.Sender,
+		Text:      text,
+		Direct:    c.IsDirect(ev.RoomID),
+		Timestamp: ev.Timestamp,
+	})
+
+	return true
 }
 
 func (c *Client) handleReaction(_ context.Context, ev *event.Event) {
 	if !c.synced.Load() {
+		c.resolvePending(ev.RoomID, ev.ID)
+
 		return
 	}
 
 	content := ev.Content.AsReaction()
 	if content == nil || content.RelatesTo.EventID == "" {
+		c.resolvePending(ev.RoomID, ev.ID)
+
 		return
 	}
 
-	c.handler.OnReaction(&Reaction{
+	c.deliverOrdered(ev.RoomID, ev.ID, 0, false, &Reaction{
 		RoomID:   ev.RoomID,
 		EventID:  ev.ID,
 		ParentID: content.RelatesTo.EventID,
@@ -584,8 +602,10 @@ func (c *Client) handleReaction(_ context.Context, ev *event.Event) {
 }
 
 func (c *Client) handleRedaction(ctx context.Context, ev *event.Event) {
-	h, ok := c.handler.(RedactionHandler)
+	_, ok := c.handler.(RedactionHandler)
 	if !ok || !c.synced.Load() {
+		c.resolvePending(ev.RoomID, ev.ID)
+
 		return
 	}
 
@@ -595,12 +615,14 @@ func (c *Client) handleRedaction(ctx context.Context, ev *event.Event) {
 	}
 
 	if targetID == "" {
+		c.resolvePending(ev.RoomID, ev.ID)
+
 		return
 	}
 
 	targetType, isEdit := c.redactedTarget(ctx, ev.RoomID, targetID)
 
-	h.OnRedaction(&Redaction{
+	c.deliverOrdered(ev.RoomID, ev.ID, 0, false, &Redaction{
 		RoomID:     ev.RoomID,
 		TargetID:   targetID,
 		Sender:     ev.Sender,

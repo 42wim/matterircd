@@ -490,8 +490,8 @@ func (m *Matrix) handleTopic(t *matrixclient.TopicChange, direct bool, peer id.U
 
 // OnRoomName implements matrixclient.RoomNameHandler.
 func (m *Matrix) OnRoomName(r *matrixclient.RoomRename) {
-	// Queued with the messages, not with roomUpdateLoop, so that a drop does not
-	// unlink the channel before the messages synced ahead of it are delivered.
+	// Queued directly, without coalescing via queueRoomUpdate, so a drop or restore
+	// stays in sync order after messages synced ahead of it.
 	m.enqueueEvent(newRoomUpdate(r.RoomID, r.Name, r.DisplayName, r.Kind))
 }
 
@@ -557,7 +557,7 @@ func (m *Matrix) queueRoomUpdate(roomID id.RoomID, name, displayName string, kin
 	}
 }
 
-// roomUpdateLoop sends the queued renames until ctx is done.
+// roomUpdateLoop forwards coalesced background renames to eventLoop until ctx is done.
 func (m *Matrix) roomUpdateLoop(ctx context.Context) {
 	for {
 		select {
@@ -580,7 +580,7 @@ func (m *Matrix) roomUpdateLoop(ctx context.Context) {
 			m.roomUpdates = m.roomUpdates[1:]
 			m.roomUpdateMu.Unlock()
 
-			m.sendRoomUpdate(ctx, update)
+			m.enqueueEvent(update)
 		}
 	}
 }

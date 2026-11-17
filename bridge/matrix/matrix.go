@@ -361,19 +361,15 @@ func (m *Matrix) Ready() {
 	go m.verificationLoop()
 
 	// Invitations of the initial sync are not delivered to OnInvite. The snapshot
-	// is taken here, on the sync goroutine, so a later invite cannot be missed or
-	// duplicated, and sent from another goroutine as the event loop starts after
-	// onConnect.
+	// is taken here on the sync goroutine ahead of later syncs and enqueued
+	// through eventLoop (after onConnect starts, in case more than eventQueueSize
+	// invites exist) so they cannot race live events or be missed/duplicated.
 	invites := m.mc.Invitations()
 
 	go m.onConnect()
 
-	if len(invites) > 0 {
-		go func() {
-			for i := range invites {
-				m.sendInvite(&invites[i])
-			}
-		}()
+	for i := range invites {
+		m.enqueueEvent(&invites[i])
 	}
 }
 
