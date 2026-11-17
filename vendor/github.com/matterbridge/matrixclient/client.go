@@ -157,6 +157,19 @@ func New(ctx context.Context, cred Credentials, h Handler, opts ...Option) (*Cli
 
 	syncer.FilterJSON = newSyncFilter()
 
+	baseParseError := syncer.ParseErrorHandler
+	syncer.ParseErrorHandler = func(ev *event.Event, err error) bool {
+		if baseParseError != nil && baseParseError(ev, err) {
+			return true
+		}
+
+		if ev != nil {
+			c.resolvePending(ev.RoomID, ev.ID)
+		}
+
+		return false
+	}
+
 	c.register(syncer)
 
 	// Ready is called from the sync goroutine, after the events of the first
@@ -543,6 +556,7 @@ func (r *readySyncer) Dispatch(ctx context.Context, ev *event.Event) {
 func (c *Client) Logout() {
 	c.connected.Store(false)
 	c.cancel()
+	c.stopHoldbacks()
 
 	if c.crypto != nil {
 		_ = c.crypto.Close()

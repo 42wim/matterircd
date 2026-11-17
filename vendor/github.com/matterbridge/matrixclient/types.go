@@ -91,13 +91,29 @@ type Channel struct {
 	nextSeq, lastSeq uint64                    // sync timeline positions, lastSeq belongs to LastEventID
 	deliveredSeq     uint64                    // timeline position of DeliveredEventID
 	pruneAt          int                       // eventSeq size that triggers the next prune
-	eventSeq         map[id.EventID]pendingSeq // positions of messages not yet delivered to handleMessage
+	eventSeq         map[id.EventID]pendingSeq // timeline positions of tracked events not yet delivered
+
+	deliveringEvents bool         // an ordered event callback is running in this room
+	pending          []pendingSeq // sorted live timeline positions awaiting dispatch or holdback expiry
+	held             []heldEvent  // sorted events waiting behind an earlier entry in pending
+	holdbackTimer    *time.Timer  // fires when the oldest blocker for held exceeds holdbackTimeout
+	holdbackDeadline time.Time    // target time for holdbackTimer
+	holdbackGen      uint64       // guards against stale AfterFunc callbacks
 }
 
 // pendingSeq is the sync timeline position of a message and when it was seen.
 type pendingSeq struct {
 	seq uint64
 	at  time.Time
+}
+
+// heldEvent is a handler-ready event waiting behind earlier unresolved timeline positions.
+type heldEvent struct {
+	seq           uint64
+	eventID       id.EventID
+	ts            int64
+	trackActivity bool
+	payload       any
 }
 
 // pendingAssoc is a direct room association not yet seen in a synced m.direct.
@@ -207,10 +223,10 @@ type Reaction struct {
 
 // Handler receives events from the client. All methods, including Ready, are
 // called from the sync goroutine and must not block for long. The exception
-// are encrypted messages whose room key arrives late: they are delivered from
-// another goroutine once decrypted, possibly after Ready, so a handler must
-// be safe for concurrent use. VerificationHandler has separate concurrency and
-// reentrancy rules; see its documentation.
+// are encrypted messages whose room key arrives late, and events held behind
+// them: they are delivered from another goroutine once unblocked, possibly
+// after Ready, so a handler must be safe for concurrent use. VerificationHandler
+// has separate concurrency and reentrancy rules; see its documentation.
 type Handler interface {
 	// Ready is called once, after the events of the initial sync were processed.
 	// The messages, reactions, redactions and typing events of the initial sync
