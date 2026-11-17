@@ -85,6 +85,7 @@ type RocketChat struct {
 
 	lastTypingSent sync.Map
 
+	logoutOnce           sync.Once
 	unregisterReloadHook func()
 }
 
@@ -1518,21 +1519,24 @@ func (r *RocketChat) Connected() bool {
 }
 
 func (r *RocketChat) Logout(ctx context.Context) error {
-	r.connected.Store(false)
-	r.ready.Store(false)
+	r.logoutOnce.Do(func() {
+		r.connected.Store(false)
+		r.ready.Store(false)
 
-	if r.unregisterReloadHook != nil {
-		r.unregisterReloadHook()
-	}
+		if r.unregisterReloadHook != nil {
+			r.unregisterReloadHook()
+		}
 
-	r.sendLogoutEvent(ctx)
+		r.sendLogoutEvent(ctx)
+		// Cancel r.ctx before r.rc.Logout() so callbacks blocked on sendEvent or REST unblock cleanly.
+		r.cancel()
 
-	if r.rc != nil {
-		r.rc.Logout()
-	}
+		if r.rc != nil {
+			r.rc.Logout()
+		}
 
-	r.cancel()
-	r.purgeCaches()
+		r.purgeCaches()
+	})
 
 	return nil
 }

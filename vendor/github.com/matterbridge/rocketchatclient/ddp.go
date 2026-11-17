@@ -92,6 +92,8 @@ type ddpEventKind int
 const (
 	ddpEventReady ddpEventKind = iota
 	ddpEventReconnect
+	ddpEventSyncStart
+	ddpEventSyncEnd
 	ddpEventChanged
 	ddpEventSyncedMsg
 	ddpEventSyncedDelete
@@ -640,6 +642,9 @@ func (c *Client) connectOnce(parentCtx context.Context) (bool, error) {
 		}
 	}
 
+	endReconnectSync := c.prepareReconnectSync(connCtx, wasReady)
+	defer endReconnectSync()
+
 	err = c.subscribeCoreStreams(connCtx, conn)
 	if err != nil {
 		return false, err
@@ -649,7 +654,12 @@ func (c *Client) connectOnce(parentCtx context.Context) (bool, error) {
 	c.subscribeInitialRooms(connCtx)
 
 	c.connected.Store(true)
+	c.finishSessionSync(connCtx, conn, wasReady, endReconnectSync)
 
+	return c.waitConnectionClose(connCtx, conn)
+}
+
+func (c *Client) finishSessionSync(connCtx context.Context, conn *ddpConn, wasReady bool, endReconnectSync func()) {
 	prevSyncNS := c.lastSync.Load()
 	prevDisconnect := c.lastDisconnect.Swap(0)
 
@@ -658,10 +668,32 @@ func (c *Client) connectOnce(parentCtx context.Context) (bool, error) {
 	}
 
 	c.lastSync.Store(time.Now().UnixNano())
+	endReconnectSync()
 
 	c.emitReadyOrReconnect(connCtx, conn, wasReady, prevDisconnect)
+}
 
-	return c.waitConnectionClose(connCtx, conn)
+func (c *Client) prepareReconnectSync(connCtx context.Context, wasReady bool) func() {
+	if !wasReady {
+		return func() {}
+	}
+
+	c.enqueueSyncMarker(connCtx, ddpEventSyncStart)
+
+	var done atomic.Bool
+
+	return func() {
+		if done.CompareAndSwap(false, true) {
+			c.enqueueSyncMarker(c.ctx, ddpEventSyncEnd)
+		}
+	}
+}
+
+func (c *Client) enqueueSyncMarker(ctx context.Context, kind ddpEventKind) {
+	select {
+	case c.eventCh <- ddpEvent{kind: kind}:
+	case <-ctx.Done():
+	}
 }
 
 func (c *Client) syncAfterReconnect(ctx context.Context, conn *ddpConn, prevSync time.Time) {
@@ -779,6 +811,8 @@ func (c *Client) syncOpenRoomsMessages(ctx context.Context, conn *ddpConn, since
 
 			continue
 		}
+
+		sortMessagesChronological(syncResp.Result.Updated)
 
 		for i := range syncResp.Result.Updated {
 			m := syncResp.Result.Updated[i]
@@ -993,15 +1027,55 @@ func (c *Client) eventLoop(ctx context.Context) {
 	defer c.wg.Done()
 
 	consumerReady := false
+	syncBuffering := false
+
+	var deferred []ddpEvent
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case ev := <-c.eventCh:
-			c.dispatchEvent(ctx, &ev, &consumerReady)
+			c.handleLoopEvent(ctx, &ev, &consumerReady, &syncBuffering, &deferred)
 		}
 	}
+}
+
+func (c *Client) handleLoopEvent(ctx context.Context, ev *ddpEvent, consumerReady, syncBuffering *bool, deferred *[]ddpEvent) {
+	switch ev.kind {
+	case ddpEventSyncStart:
+		*syncBuffering = true
+
+		return
+	case ddpEventSyncEnd:
+		*syncBuffering = false
+
+		c.flushDeferredDDP(ctx, *consumerReady, deferred)
+
+		return
+	case ddpEventChanged:
+		if *syncBuffering {
+			if len(*deferred) >= eventQueueSize {
+				c.flushDeferredDDP(ctx, *consumerReady, deferred)
+			}
+
+			*deferred = append(*deferred, *ev)
+
+			return
+		}
+	}
+
+	c.dispatchEvent(ctx, ev, consumerReady)
+}
+
+func (c *Client) flushDeferredDDP(ctx context.Context, emit bool, deferred *[]ddpEvent) {
+	for i := range *deferred {
+		d := &(*deferred)[i]
+		c.processDDPChanged(ctx, d.collection, d.fields, emit)
+	}
+
+	clear(*deferred)
+	*deferred = nil
 }
 
 func (c *Client) dispatchEvent(ctx context.Context, ev *ddpEvent, consumerReady *bool) {

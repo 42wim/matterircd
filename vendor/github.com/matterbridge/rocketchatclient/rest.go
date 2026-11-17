@@ -456,6 +456,10 @@ func (c *Client) SendMessage(ctx context.Context, roomID, text, threadID string)
 	c.cache.cacheMessage(resp.Message)
 
 	if resp.Message.ID != "" {
+		if resp.Message.ID != msgID {
+			c.cache.markSent("send:" + resp.Message.ID)
+		}
+
 		return resp.Message.ID, nil
 	}
 
