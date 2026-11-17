@@ -66,18 +66,67 @@ func (c *Client) PostMessage(channelID, text string) (string, error) {
 	return c.PostMessageThread(context.Background(), channelID, "", text)
 }
 
+const (
+	maxRecentSent      = 32
+	ownEchoWaitTimeout = 500 * time.Millisecond
+)
+
+func (c *Client) recordSentLocked(chID, msgID string) {
+	if c.recentSent == nil {
+		c.recentSent = make(map[string][]string)
+	}
+
+	sent := c.recentSent[chID]
+	if len(sent) >= maxRecentSent {
+		copy(sent, sent[1:])
+		sent[len(sent)-1] = msgID
+		c.recentSent[chID] = sent
+
+		return
+	}
+
+	c.recentSent[chID] = append(sent, msgID)
+}
+
+func (c *Client) broadcastSentLocked() {
+	if c.sentCh != nil {
+		close(c.sentCh)
+		c.sentCh = make(chan struct{})
+	}
+}
+
 func (c *Client) PostMessageThread(ctx context.Context, channelID, threadTS, text string) (string, error) {
 	chID := strings.ToUpper(channelID)
 	opts := c.createSlackMsgOption(text, threadTS)
 
+	c.Lock()
+	if c.sending == nil {
+		c.sending = make(map[string]int)
+	}
+
+	c.sending[chID]++
+	c.Unlock()
+
 	_, msgID, err := c.sc.PostMessageContext(ctx, chID, opts...)
+
+	c.Lock()
+
+	if c.sending[chID] <= 1 {
+		delete(c.sending, chID)
+	} else {
+		c.sending[chID]--
+	}
+
+	if err == nil && msgID != "" {
+		c.recordSentLocked(chID, msgID)
+	}
+
+	c.broadcastSentLocked()
+	c.Unlock()
+
 	if err != nil {
 		return "", err
 	}
-
-	c.Lock()
-	c.msgLast[chID] = msgID
-	c.Unlock()
 
 	return msgID, nil
 }
@@ -143,25 +192,64 @@ func (c *Client) GetPermalink(ctx context.Context, channelID, ts string) (string
 	})
 }
 
+// IsOwnMessageEcho reports whether a Slack RTM message from ourselves echoes a
+// post sent via PostMessageThread. If a send in the same channel is still in
+// flight, it waits briefly for the API response so fast RTM echoes aren't missed.
 func (c *Client) IsOwnMessageEcho(userID, channelID, timestamp string) bool {
-	if c.info == nil || c.info.User == nil || userID == "" || userID != c.info.User.ID {
+	if c.info == nil || c.info.User == nil || userID == "" || userID != c.info.User.ID || timestamp == "" {
 		return false
 	}
 
+	chID := strings.ToUpper(channelID)
+
 	c.RLock()
-	lastmsg := c.msgLast[channelID]
+	matched := slices.Contains(c.recentSent[chID], timestamp)
+	inFlight := c.sending[chID] > 0
 	c.RUnlock()
 
-	// Slack can be faster in sending new message than replying to POST
-	if lastmsg < timestamp {
-		time.Sleep(100 * time.Millisecond)
-
-		c.RLock()
-		lastmsg = c.msgLast[channelID]
-		c.RUnlock()
+	if matched {
+		return true
 	}
 
-	return lastmsg == timestamp
+	if !inFlight {
+		return false
+	}
+
+	return c.waitOwnEcho(chID, timestamp)
+}
+
+func (c *Client) waitOwnEcho(chID, timestamp string) bool {
+	timer := time.NewTimer(ownEchoWaitTimeout)
+	defer timer.Stop()
+
+	for {
+		c.Lock()
+
+		if slices.Contains(c.recentSent[chID], timestamp) {
+			c.Unlock()
+
+			return true
+		}
+
+		if c.sending[chID] == 0 {
+			c.Unlock()
+
+			return false
+		}
+
+		if c.sentCh == nil {
+			c.sentCh = make(chan struct{})
+		}
+
+		waitCh := c.sentCh
+		c.Unlock()
+
+		select {
+		case <-waitCh:
+		case <-timer.C:
+			return false
+		}
+	}
 }
 
 func (c *Client) GetConversationHistory(ctx context.Context, channelID, oldest string, limit int) ([]slack.Message, error) {
