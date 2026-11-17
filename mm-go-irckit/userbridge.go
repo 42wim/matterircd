@@ -78,6 +78,12 @@ type UserBridge struct {
 
 	pendingReplayMu sync.Mutex
 	pendingReplay   map[string]int
+	savedSinceSnap  map[string]savedSinceSnapshot
+}
+
+type savedSinceSnapshot struct {
+	since int64
+	inDB  bool
 }
 
 func NewUserBridge(c net.Conn, srv Server, cfg *config.Config, dbs map[string]*bolt.DB) *User {
@@ -99,6 +105,7 @@ func NewUserBridge(c net.Conn, srv Server, cfg *config.Config, dbs map[string]*b
 	u.msgCounter = make(map[string]int)
 	u.updateCounter = make(map[string]time.Time)
 	u.pendingReplay = make(map[string]int)
+	u.savedSinceSnap = make(map[string]savedSinceSnapshot)
 	u.eventChan = make(chan *bridge.Event, 1000)
 
 	initialMap := make(map[string]struct{})
@@ -1489,31 +1496,63 @@ func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(nick, msg, timeTa
 	}
 }
 
+const (
+	replayStrategyHybrid = "hybrid"
+	replayStrategySaved  = "saved"
+	replayStrategyServer = "server"
+)
+
+func normalizeReplayStrategy(strategy string) string {
+	if strategy == "" {
+		return replayStrategyHybrid
+	}
+
+	switch strategy {
+	case "saved+server", "server+saved", "stored+server", "server+stored":
+		return replayStrategyHybrid
+	case "stored":
+		return replayStrategySaved
+	case "server-only":
+		return replayStrategyServer
+	default:
+		return strategy
+	}
+}
+
+func readSavedSinceFromBuckets(primary, legacy *bolt.Bucket, channelID string) (int64, bool) {
+	var v []byte
+	if primary != nil {
+		v = primary.Get([]byte(channelID))
+	}
+
+	if v == nil && legacy != nil {
+		v = legacy.Get([]byte(channelID))
+	}
+
+	if v != nil {
+		val := binary.LittleEndian.Uint64(v)
+		if val <= math.MaxInt64 {
+			return int64(val), true
+		}
+	}
+
+	return 0, false
+}
+
 // getChannelSince calculates the 'since' timestamp for a channel based on the configured strategy.
 //
 //nolint:funlen,gocognit,gocyclo
 func (u *User) getChannelSince(ctx context.Context, brchannel *bridge.ChannelInfo, replayCutoff int64) (int64, string, bool) {
 	// Fetch server-side last viewed if strategy allows
-	strategy := u.sharedCfg().ReplayStrategy
-	if strategy == "" {
-		strategy = "hybrid" //nolint:goconst
-	}
-
-	// Support alias normalizations
-	switch strategy {
-	case "saved+server", "server+saved", "stored+server", "server+stored":
-		strategy = "hybrid"
-	case "stored":
-		strategy = "saved" //nolint:goconst
-	}
+	strategy := normalizeReplayStrategy(u.sharedCfg().ReplayStrategy)
 
 	var serverSince int64
-	if strategy != "saved" {
+	if strategy != replayStrategySaved {
 		serverSince = u.br.GetLastViewedAt(ctx, brchannel.ID)
 	}
 
-	// If strategy is server-only, return immediately
-	if strategy == "server-only" {
+	// If strategy is server, return immediately
+	if strategy == replayStrategyServer {
 		if serverSince == 0 {
 			if brchannel.LastPostAt > replayCutoff {
 				return brchannel.LastPostAt, "lastpost-fallback", false
@@ -1526,7 +1565,7 @@ func (u *User) getChannelSince(ctx context.Context, brchannel *bridge.ChannelInf
 			return replayCutoff, "server-clamped", false
 		}
 
-		return serverSince, "server", false //nolint:goconst
+		return serverSince, replayStrategyServer, false
 	}
 
 	var (
@@ -1535,31 +1574,17 @@ func (u *User) getChannelSince(ctx context.Context, brchannel *bridge.ChannelInf
 	)
 
 	// Fetch locally saved BoltDB last viewed if strategy allows
-	if strategy == "saved" || strategy == "hybrid" { //nolint:nestif
-		db := u.getDB()
-		if db != nil {
+	if strategy == replayStrategySaved || strategy == replayStrategyHybrid {
+		if snap, ok := u.getSavedSinceSnap(brchannel.ID); ok {
+			savedSince = snap.since
+			inDB = snap.inDB
+		} else if db := u.getDB(); db != nil {
 			_ = db.View(func(tx *bolt.Tx) error {
-				var v []byte
-
-				b := tx.Bucket(u.dbBucketName())
-				if b != nil {
-					v = b.Get([]byte(brchannel.ID))
-				}
-
-				if v == nil {
-					legacyBucket := tx.Bucket([]byte(u.User))
-					if legacyBucket != nil {
-						v = legacyBucket.Get([]byte(brchannel.ID))
-					}
-				}
-
-				if v != nil {
-					val := binary.LittleEndian.Uint64(v)
-					if val <= math.MaxInt64 {
-						savedSince = int64(val)
-						inDB = true
-					}
-				}
+				savedSince, inDB = readSavedSinceFromBuckets(
+					tx.Bucket(u.dbBucketName()),
+					tx.Bucket([]byte(u.User)),
+					brchannel.ID,
+				)
 
 				return nil
 			})
@@ -1567,9 +1592,9 @@ func (u *User) getChannelSince(ctx context.Context, brchannel *bridge.ChannelInf
 	}
 
 	bestSince := serverSince
-	source := "server"
+	source := replayStrategyServer
 
-	if strategy == "saved" || savedSince > bestSince {
+	if strategy == replayStrategySaved || savedSince > bestSince {
 		bestSince = savedSince
 		source = "stored"
 	}
@@ -1577,7 +1602,7 @@ func (u *User) getChannelSince(ctx context.Context, brchannel *bridge.ChannelInf
 	// If both server and BoltDB are 0 (or we don't have it in DB for a DM)
 	isDM := u.br.IsDMChannelName(brchannel.Name)
 
-	if strategy == "saved" && !inDB {
+	if strategy == replayStrategySaved && !inDB {
 		return replayCutoff, "cutoff-fallback", false
 	}
 
@@ -1614,10 +1639,7 @@ func (u *User) getChannelSince(ctx context.Context, brchannel *bridge.ChannelInf
 
 //nolint:funlen,cyclop,gocognit,gocyclo
 func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throttle *time.Ticker, logger *logrus.Entry) {
-	strategy := u.sharedCfg().ReplayStrategy
-	if strategy == "" {
-		strategy = "hybrid"
-	}
+	strategy := normalizeReplayStrategy(u.sharedCfg().ReplayStrategy)
 
 	replayDuration := u.sharedCfg().MaxReplayDuration
 	if replayDuration == 0 {
@@ -1715,14 +1737,14 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			// Explicitly whitelisted channels bypass this!
 			if lazyJoin && !brchannel.DM && !isWhitelisted { //nolint:nestif
 				// Strategy "saved": require prior presence in local BoltDB
-				if strategy == "saved" && !inDB {
+				if strategy == replayStrategySaved && !inDB {
 					u.clearPendingReplay(brchannel.ID)
 
 					continue
 				}
 
 				// Strategies "server" & "hybrid": consult server channel state and skip deleted channels
-				if (strategy == "server" || strategy == "hybrid") && brchannel.DeleteAt > 0 {
+				if (strategy == replayStrategyServer || strategy == replayStrategyHybrid) && brchannel.DeleteAt > 0 {
 					u.clearPendingReplay(brchannel.ID)
 
 					continue
@@ -2680,6 +2702,8 @@ func (u *User) markPendingReplay(channels []*bridge.ChannelInfo) {
 		return
 	}
 
+	var needSnap []string
+
 	u.pendingReplayMu.Lock()
 
 	if u.pendingReplay == nil {
@@ -2689,10 +2713,87 @@ func (u *User) markPendingReplay(channels []*bridge.ChannelInfo) {
 	for _, ch := range channels {
 		if ch != nil && ch.ID != "" {
 			u.pendingReplay[ch.ID]++
+
+			if _, ok := u.savedSinceSnap[ch.ID]; !ok {
+				needSnap = append(needSnap, ch.ID)
+			}
 		}
 	}
 
 	u.pendingReplayMu.Unlock()
+
+	if len(needSnap) == 0 {
+		return
+	}
+
+	snaps := u.snapshotSavedSince(needSnap)
+	if len(snaps) == 0 {
+		return
+	}
+
+	u.pendingReplayMu.Lock()
+
+	if u.savedSinceSnap == nil {
+		u.savedSinceSnap = make(map[string]savedSinceSnapshot, len(snaps))
+	}
+
+	for id, snap := range snaps {
+		if u.pendingReplay[id] > 0 {
+			if _, exists := u.savedSinceSnap[id]; !exists {
+				u.savedSinceSnap[id] = snap
+			}
+		}
+	}
+
+	u.pendingReplayMu.Unlock()
+}
+
+func (u *User) snapshotSavedSince(channelIDs []string) map[string]savedSinceSnapshot {
+	if len(channelIDs) == 0 {
+		return nil
+	}
+
+	if u.cfg != nil && normalizeReplayStrategy(u.sharedCfg().ReplayStrategy) == replayStrategyServer {
+		return nil
+	}
+
+	db := u.getDB()
+	if db == nil {
+		return nil
+	}
+
+	snaps := make(map[string]savedSinceSnapshot, len(channelIDs))
+	bucketName := u.dbBucketName()
+	legacyName := []byte(u.User)
+
+	err := db.View(func(tx *bolt.Tx) error {
+		primary := tx.Bucket(bucketName)
+		legacy := tx.Bucket(legacyName)
+
+		for _, id := range channelIDs {
+			ts, inDB := readSavedSinceFromBuckets(primary, legacy, id)
+			snaps[id] = savedSinceSnapshot{since: ts, inDB: inDB}
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil
+	}
+
+	return snaps
+}
+
+func (u *User) getSavedSinceSnap(channelID string) (savedSinceSnapshot, bool) {
+	if channelID == "" {
+		return savedSinceSnapshot{}, false
+	}
+
+	u.pendingReplayMu.Lock()
+	snap, ok := u.savedSinceSnap[channelID]
+	u.pendingReplayMu.Unlock()
+
+	return snap, ok
 }
 
 func (u *User) clearPendingReplay(channelID string) {
@@ -2704,6 +2805,7 @@ func (u *User) clearPendingReplay(channelID string) {
 
 	if count := u.pendingReplay[channelID]; count <= 1 {
 		delete(u.pendingReplay, channelID)
+		delete(u.savedSinceSnap, channelID)
 	} else {
 		u.pendingReplay[channelID] = count - 1
 	}
