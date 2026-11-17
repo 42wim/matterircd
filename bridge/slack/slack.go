@@ -131,7 +131,6 @@ func New(cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Eve
 	})
 
 	s.sc = sc
-	s.sc.InitUsers()
 
 	return s, nil
 }
@@ -776,7 +775,8 @@ func (s *Slack) GetPostsSince(ctx context.Context, channelID string, since int64
 
 	oldest := ""
 	if since > 0 {
-		oldest = fmt.Sprintf("%.6f", float64(since)/1000.0)
+		// Append 999us so the last millisecond-truncated message is not replayed again.
+		oldest = fmt.Sprintf("%d.%06d", since/1000, (since%1000)*1000+999)
 	}
 
 	msgs, err := s.sc.GetConversationHistory(ctx, channelID, oldest, 0)
@@ -1310,6 +1310,9 @@ func (s *Slack) loginToSlack() (*slackclient.Client, error) {
 		return nil, err
 	}
 
+	// Populate the user cache before live RTM events and onConnect read it.
+	sc.InitUsers()
+
 	wsCtx, wsCancel := context.WithCancel(context.Background())
 	s.wsCancel = wsCancel
 
@@ -1806,7 +1809,7 @@ func (s *Slack) handleItemMisc(ctx context.Context, userID, channelID string, it
 	parentID, replySuffix := s.resolveItemParent(ctx, channelID, itemMsg)
 	msg := s.cleanupMessage(action+" ("+itemMsg.Text+")") + replySuffix
 
-	s.handleActionMisc(userID, channelID, msgID, parentID, msg, "", slackTSMillis(itemMsg.Timestamp))
+	s.handleActionMisc(userID, channelID, msgID, parentID, msg, "post_starred", slackTSMillis(itemMsg.Timestamp))
 }
 
 func formatPinnedSlackMsg(cleanup func(string) string, unicode bool, itemMsg *slack.Message, replySuffix, kind string) string {
@@ -1849,7 +1852,7 @@ func (s *Slack) handleActionMisc(userID, channelID, msgID, parentID, msg, eventT
 	// direct message
 	if strings.HasPrefix(channelID, "D") {
 		receiver := s.resolveDMReceiver(ghost, channelID)
-		s.sendDirectMessage(ghost, receiver, msg, channelID, msgID, parentID, createAt)
+		s.sendDirectMessage(ghost, receiver, msg, channelID, msgID, parentID, eventType, createAt)
 
 		return
 	}
@@ -1895,7 +1898,7 @@ func (s *Slack) handleMemberJoinedChannel(ctx context.Context, rmsg *slack.Membe
 	s.sendEvent(event)
 }
 
-func (s *Slack) sendDirectMessage(sender, receiver *bridge.UserInfo, msg, channelID, msgID, parentID string, createAt int64) {
+func (s *Slack) sendDirectMessage(sender, receiver *bridge.UserInfo, msg, channelID, msgID, parentID, eventType string, createAt int64) {
 	event := &bridge.Event{
 		Type: "direct_message",
 	}
@@ -1905,6 +1908,7 @@ func (s *Slack) sendDirectMessage(sender, receiver *bridge.UserInfo, msg, channe
 		ChannelID: channelID,
 		MessageID: msgID,
 		ParentID:  parentID,
+		Event:     eventType,
 		CreateAt:  createAt,
 	}
 
@@ -2364,7 +2368,7 @@ func (s *Slack) handleSlackMessageDeleted(ctx context.Context, rmsg *slack.Messa
 
 	if strings.HasPrefix(channelID, "D") {
 		receiver := s.resolveDMReceiver(ghost, channelID)
-		s.sendDirectMessage(ghost, receiver, msg, channelID, msgID, parentID, createAt)
+		s.sendDirectMessage(ghost, receiver, msg, channelID, msgID, parentID, "post_deleted", createAt)
 
 		return
 	}
@@ -2462,7 +2466,9 @@ func (s *Slack) handleSlackActionPost(ctx context.Context, rmsg *slack.MessageEv
 			return
 		}
 
-		if !isUnfurl {
+		if isUnfurl {
+			eventType = "post_unfurl"
+		} else {
 			eventType = "post_edited"
 		}
 
@@ -2540,7 +2546,7 @@ func (s *Slack) sendSlackActionPostMessage(
 
 	if strings.HasPrefix(channelID, "D") {
 		receiver := s.resolveDMReceiver(ghost, channelID)
-		s.sendDirectMessage(ghost, receiver, msg, channelID, msgID, parentID, createAt)
+		s.sendDirectMessage(ghost, receiver, msg, channelID, msgID, parentID, eventType, createAt)
 
 		return
 	}
