@@ -3591,7 +3591,7 @@ func getServerVersion(ctx context.Context, cfg *config.Config, cred bridge.Crede
 }
 
 func isSupportedVersion(version string) bool {
-	prefixes := [...]string{"7.", "8.", "9.", "10.", "11."}
+	prefixes := [...]string{"7.", "8.", "9.", "10.", "11.", "12."}
 	for _, prefix := range prefixes {
 		if strings.HasPrefix(version, prefix) {
 			return true
