@@ -96,6 +96,7 @@ const (
 	ddpEventSyncedMsg
 	ddpEventSyncedDelete
 	ddpEventRoomChange
+	ddpEventRoomRemove
 	ddpEventMember
 )
 
@@ -664,6 +665,8 @@ func (c *Client) connectOnce(parentCtx context.Context) (bool, error) {
 }
 
 func (c *Client) syncAfterReconnect(ctx context.Context, conn *ddpConn, prevSync time.Time) {
+	c.cache.invalidateRoomMembers()
+
 	since := prevSync.Add(-reconnectSyncOverlap)
 
 	syncCtx, cancel := context.WithTimeout(ctx, reconnectSyncTimeout)
@@ -736,6 +739,10 @@ func (c *Client) applyReconnectRooms(ctx context.Context, conn *ddpConn, resp *R
 	for i := range resp.Remove {
 		if resp.Remove[i].ID != "" {
 			c.cache.removeRoom(resp.Remove[i].ID)
+			c.enqueueEvent(ctx, conn, ddpEvent{
+				kind:   ddpEventRoomRemove,
+				roomID: resp.Remove[i].ID,
+			})
 		}
 	}
 
@@ -1036,6 +1043,8 @@ func (c *Client) dispatchLiveEvent(ctx context.Context, ev *ddpEvent) {
 		if c.handler != nil && ev.room != nil {
 			c.handler.OnRoomChange(ev.room)
 		}
+	case ddpEventRoomRemove:
+		c.emitRoomRemove(ev.roomID)
 	case ddpEventMember:
 		if ev.member != nil {
 			c.emitMember(ev.member)
@@ -1043,8 +1052,32 @@ func (c *Client) dispatchLiveEvent(ctx context.Context, ev *ddpEvent) {
 	}
 }
 
+func (c *Client) emitRoomRemove(roomID string) {
+	if c.handler == nil || roomID == "" {
+		return
+	}
+
+	if rrh, ok := c.handler.(RoomRemoveHandler); ok {
+		rrh.OnRoomRemove(roomID)
+	}
+}
+
 func (c *Client) emitMember(ev *MemberEvent) {
-	if c.handler == nil || ev == nil {
+	if ev == nil {
+		return
+	}
+
+	switch ev.Action {
+	case memberActionJoin:
+		if ev.UserID != "" {
+			c.cache.seedUserRef(UserRef{ID: ev.UserID, Username: ev.Username})
+			c.cache.addRoomMember(ev.RoomID, ev.UserID)
+		}
+	case memberActionLeave:
+		c.cache.removeRoomMember(ev.RoomID, ev.UserID)
+	}
+
+	if c.handler == nil {
 		return
 	}
 
@@ -1275,6 +1308,10 @@ func (c *Client) handleRoomsChanged(action string, raw json.RawMessage, emit boo
 
 	if action == actionRemoved {
 		c.cache.removeRoom(room.ID)
+
+		if emit {
+			c.emitRoomRemove(room.ID)
+		}
 
 		return
 	}
@@ -1523,6 +1560,8 @@ func (c *Client) handleSystemMessage(ctx context.Context, msg *Message) {
 	switch msg.Type {
 	case "uj":
 		if msg.User.ID == c.UserID() {
+			c.cache.seedUserRef(msg.User)
+			c.cache.addRoomMember(msg.RoomID, msg.User.ID)
 			c.ensureRoomSubscribed(msg.RoomID)
 
 			return
@@ -1536,6 +1575,8 @@ func (c *Client) handleSystemMessage(ctx context.Context, msg *Message) {
 		})
 	case "ul":
 		if msg.User.ID == c.UserID() {
+			c.cache.removeRoomMember(msg.RoomID, msg.User.ID)
+
 			return
 		}
 

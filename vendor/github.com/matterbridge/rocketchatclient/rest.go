@@ -877,6 +877,19 @@ func (c *Client) CreateRoom(ctx context.Context, name string, private bool) (*Ro
 	return cloneRoom(room), nil
 }
 
+// RoomMembers returns cached members for roomID when known, otherwise fetching them via GetRoomMembers.
+func (c *Client) RoomMembers(ctx context.Context, roomID string) ([]*User, error) {
+	if roomID == "" {
+		return nil, errors.New("rocketchatclient: roomID is required")
+	}
+
+	if members, ok := c.cache.roomMemberUsers(roomID); ok {
+		return members, nil
+	}
+
+	return c.GetRoomMembers(ctx, roomID)
+}
+
 // GetRoomMembers fetches members (and room roles when permitted) for roomID.
 func (c *Client) GetRoomMembers(ctx context.Context, roomID string) ([]*User, error) {
 	if roomID == "" {
@@ -927,6 +940,8 @@ func (c *Client) GetRoomMembers(ctx context.Context, roomID string) ([]*User, er
 			break
 		}
 	}
+
+	c.cache.setRoomMembers(roomID, members)
 
 	if roomType == RoomTypeChannel || roomType == RoomTypePrivate {
 		c.fetchRoomRoles(memberCtx, roomID, roomType)
@@ -1236,6 +1251,7 @@ func (c *Client) RefreshRoomsAndSubs(ctx context.Context) error {
 	}
 
 	c.cache.hydrateRoomsAndSubs(roomsResp.Update, subsResp.Update)
+	c.cache.invalidateRoomMembers()
 	c.seedUsersFromRooms(roomsResp.Update)
 
 	return nil
@@ -1399,19 +1415,55 @@ func (c *Client) handleJSONResponse(method, endpoint string, resp *http.Response
 		return 0, parseAPIError(resp.StatusCode, respBytes)
 	}
 
-	err := checkEnvelopeError(resp.StatusCode, respBytes)
-	if err != nil {
-		return 0, err
+	if out == nil || hasEnvelopeErrorHint(respBytes) {
+		err := checkEnvelopeError(resp.StatusCode, respBytes)
+		if err != nil {
+			return 0, err
+		}
 	}
 
 	if out != nil && len(respBytes) > 0 {
-		err = json.Unmarshal(respBytes, out)
+		err := json.Unmarshal(respBytes, out)
 		if err != nil {
 			return 0, fmt.Errorf("rocketchatclient: decode %s %s: %w", method, endpoint, err)
 		}
 	}
 
 	return 0, nil
+}
+
+var (
+	jsonKeySuccess = []byte(`"success"`)
+	jsonValFalse   = []byte(`false`)
+	jsonKeyStatus  = []byte(`"status"`)
+	jsonValError   = []byte(`"error"`)
+)
+
+func hasEnvelopeErrorHint(respBytes []byte) bool {
+	return hasJSONKeyValue(respBytes, jsonKeySuccess, jsonValFalse) ||
+		hasJSONKeyValue(respBytes, jsonKeyStatus, jsonValError)
+}
+
+func hasJSONKeyValue(data, key, value []byte) bool {
+	search := data
+	for len(search) > 0 {
+		idx := bytes.Index(search, key)
+		if idx < 0 {
+			return false
+		}
+
+		rest := bytes.TrimLeft(search[idx+len(key):], " \t\r\n")
+		if len(rest) > 0 && rest[0] == ':' {
+			afterColon := bytes.TrimLeft(rest[1:], " \t\r\n")
+			if bytes.HasPrefix(afterColon, value) {
+				return true
+			}
+		}
+
+		search = search[idx+len(key):]
+	}
+
+	return false
 }
 
 func checkEnvelopeError(statusCode int, respBytes []byte) error {

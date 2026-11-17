@@ -83,6 +83,8 @@ type RocketChat struct {
 	roomMetaMu sync.Mutex
 	roomMeta   map[string]roomSnapshot
 
+	lastTypingSent sync.Map
+
 	unregisterReloadHook func()
 }
 
@@ -480,6 +482,17 @@ func (r *RocketChat) OnRoomChange(room *rocketchatclient.Room) {
 			},
 		})
 	}
+}
+
+// OnRoomRemove implements rocketchatclient.RoomRemoveHandler.
+func (r *RocketChat) OnRoomRemove(roomID string) {
+	if roomID == "" {
+		return
+	}
+
+	r.roomMetaMu.Lock()
+	delete(r.roomMeta, roomID)
+	r.roomMetaMu.Unlock()
 }
 
 // OnMember implements rocketchatclient.MemberHandler.
@@ -1519,8 +1532,30 @@ func (r *RocketChat) Logout(ctx context.Context) error {
 	}
 
 	r.cancel()
+	r.purgeCaches()
 
 	return nil
+}
+
+func (r *RocketChat) purgeCaches() {
+	purgeLRU(r.msgRoomCache)
+	purgeLRU(r.msgTextCache)
+	purgeLRU(r.msgAuthorCache)
+	purgeLRU(r.msgParentCache)
+	purgeLRU(r.msgLastSentCache)
+	purgeLRU(r.replayedMsgCache)
+
+	r.roomMetaMu.Lock()
+	clear(r.roomMeta)
+	r.roomMetaMu.Unlock()
+
+	r.lastTypingSent.Clear()
+}
+
+func purgeLRU[K comparable, V any](c *lru.Cache[K, V]) {
+	if c != nil {
+		c.Purge()
+	}
 }
 
 func (r *RocketChat) sendLogoutEvent(ctx context.Context) {
@@ -1722,7 +1757,7 @@ func (r *RocketChat) GetChannelID(ctx context.Context, name, teamID string) stri
 }
 
 func (r *RocketChat) GetChannelUsers(ctx context.Context, channelID string) ([]*bridge.UserInfo, error) {
-	members, err := r.rc.GetRoomMembers(ctx, channelID)
+	members, err := r.rc.RoomMembers(ctx, channelID)
 	if err == nil {
 		out := make([]*bridge.UserInfo, 0, len(members))
 		for _, m := range members {
@@ -2016,7 +2051,32 @@ func (r *RocketChat) SendTyping(ctx context.Context, channelName string) {
 		return
 	}
 
-	roomID := r.GetChannelID(ctx, channelName, "")
+	const typingDebounceSec = 4
+
+	lastVal, ok := r.lastTypingSent.Load(channelName)
+	if !ok {
+		lastVal, _ = r.lastTypingSent.LoadOrStore(channelName, new(atomic.Int64))
+	}
+
+	lastPtr, ok := lastVal.(*atomic.Int64)
+	if !ok {
+		return
+	}
+
+	now := time.Now().Unix()
+	last := lastPtr.Load()
+
+	if now-last < typingDebounceSec || !lastPtr.CompareAndSwap(last, now) {
+		return
+	}
+
+	var roomID string
+	if pID, ok := strings.CutPrefix(channelName, "@@"); ok {
+		roomID = r.GetPostChannelID(ctx, pID)
+	} else {
+		roomID = r.GetChannelID(ctx, channelName, "")
+	}
+
 	if roomID == "" {
 		return
 	}
@@ -2436,7 +2496,14 @@ func (r *RocketChat) Join(ctx context.Context, channelName string) (string, stri
 }
 
 func (r *RocketChat) Part(ctx context.Context, channel string) error {
-	return r.rc.LeaveRoom(ctx, channel)
+	err := r.rc.LeaveRoom(ctx, channel)
+	if err != nil {
+		return err
+	}
+
+	r.OnRoomRemove(channel)
+
+	return nil
 }
 
 func (r *RocketChat) SetTopic(ctx context.Context, channelID, text string) error {
