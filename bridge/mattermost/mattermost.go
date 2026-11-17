@@ -3403,13 +3403,14 @@ func (m *Mattermost) postListToEvents(ctx context.Context, postlist any, eventTy
 
 	// Enforce strict newest-first sorting before the backwards loop processes it.
 	// This fixes the Mattermost API quirk where thread root posts are placed at index 0.
-	sort.Slice(mmPostList.Order, func(i, j int) bool {
-		pI, okI := mmPostList.Posts[mmPostList.Order[i]]
+	sort.SliceStable(mmPostList.Order, func(i, j int) bool {
+		pI := mmPostList.Posts[mmPostList.Order[i]]
 
-		pJ, okJ := mmPostList.Posts[mmPostList.Order[j]]
-		if !okI || !okJ {
-			return false
+		pJ := mmPostList.Posts[mmPostList.Order[j]]
+		if pI == nil || pJ == nil {
+			return pI != nil
 		}
+
 		// Sort descending (newest first) so the backwards loop below prints oldest first
 		return pI.CreateAt > pJ.CreateAt
 	})
