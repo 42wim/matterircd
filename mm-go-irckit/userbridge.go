@@ -36,6 +36,9 @@ const systemUser = "system"
 // maxInviteTextLen keeps an invitation notice well below the IRC line limit.
 const maxInviteTextLen = 400
 
+// eventChanBufferSize gives bridges headroom while loginTo completes startup sync.
+const eventChanBufferSize = 1000
+
 type UserBridge struct {
 	Srv          Server
 	Credentials  bridge.Credentials
@@ -106,7 +109,7 @@ func NewUserBridge(c net.Conn, srv Server, cfg *config.Config, dbs map[string]*b
 	u.updateCounter = make(map[string]time.Time)
 	u.pendingReplay = make(map[string]int)
 	u.savedSinceSnap = make(map[string]savedSinceSnapshot)
-	u.eventChan = make(chan *bridge.Event, 1000)
+	u.eventChan = make(chan *bridge.Event, eventChanBufferSize)
 
 	initialMap := make(map[string]struct{})
 	u.requestedChannels.Store(&initialMap)
@@ -2359,7 +2362,7 @@ func (u *User) loginTo(protocol string) error {
 	// addUsersToChannels, which hands the channel to the event loop.
 	u.eventLoopMutex.Lock()
 	u.eventLoopStarted = false
-	u.eventChan = make(chan *bridge.Event)
+	u.eventChan = make(chan *bridge.Event, eventChanBufferSize)
 	eventChan := u.eventChan
 	u.eventLoopMutex.Unlock()
 
