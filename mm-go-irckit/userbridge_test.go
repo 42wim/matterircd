@@ -669,9 +669,15 @@ func TestSavedSinceSnapshotRefcountAndServerOnly(t *testing.T) {
 	assert.Equal(t, laterTS, since)
 	assert.True(t, inDB)
 
+	uServer, _ := newTestUserBridge(t, "[mattermost]\nReplayStrategy = \"server\"\n", &replayTestBridge{protocol: serviceMattermost})
+	uServer.markPendingReplay([]*bridge.ChannelInfo{{ID: chRef}})
+	_, ok := uServer.getSavedSinceSnap(chRef)
+	assert.False(t, ok)
+	uServer.clearPendingReplay(chRef)
+
 	uServerOnly, _ := newTestUserBridge(t, "[mattermost]\nReplayStrategy = \"server-only\"\n", &replayTestBridge{protocol: serviceMattermost})
 	uServerOnly.markPendingReplay([]*bridge.ChannelInfo{{ID: chRef}})
-	_, ok := uServerOnly.getSavedSinceSnap(chRef)
+	_, ok = uServerOnly.getSavedSinceSnap(chRef)
 	assert.False(t, ok)
 	uServerOnly.clearPendingReplay(chRef)
 }

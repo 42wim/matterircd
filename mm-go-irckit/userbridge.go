@@ -1499,6 +1499,7 @@ func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(nick, msg, timeTa
 const (
 	replayStrategyHybrid = "hybrid"
 	replayStrategySaved  = "saved"
+	replayStrategyServer = "server"
 )
 
 func normalizeReplayStrategy(strategy string) string {
@@ -1511,6 +1512,8 @@ func normalizeReplayStrategy(strategy string) string {
 		return replayStrategyHybrid
 	case "stored":
 		return replayStrategySaved
+	case "server-only":
+		return replayStrategyServer
 	default:
 		return strategy
 	}
@@ -1548,8 +1551,8 @@ func (u *User) getChannelSince(ctx context.Context, brchannel *bridge.ChannelInf
 		serverSince = u.br.GetLastViewedAt(ctx, brchannel.ID)
 	}
 
-	// If strategy is server-only, return immediately
-	if strategy == "server-only" {
+	// If strategy is server, return immediately
+	if strategy == replayStrategyServer {
 		if serverSince == 0 {
 			if brchannel.LastPostAt > replayCutoff {
 				return brchannel.LastPostAt, "lastpost-fallback", false
@@ -1562,7 +1565,7 @@ func (u *User) getChannelSince(ctx context.Context, brchannel *bridge.ChannelInf
 			return replayCutoff, "server-clamped", false
 		}
 
-		return serverSince, "server", false //nolint:goconst
+		return serverSince, replayStrategyServer, false
 	}
 
 	var (
@@ -1589,7 +1592,7 @@ func (u *User) getChannelSince(ctx context.Context, brchannel *bridge.ChannelInf
 	}
 
 	bestSince := serverSince
-	source := "server"
+	source := replayStrategyServer
 
 	if strategy == replayStrategySaved || savedSince > bestSince {
 		bestSince = savedSince
@@ -1636,10 +1639,7 @@ func (u *User) getChannelSince(ctx context.Context, brchannel *bridge.ChannelInf
 
 //nolint:funlen,cyclop,gocognit,gocyclo
 func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throttle *time.Ticker, logger *logrus.Entry) {
-	strategy := u.sharedCfg().ReplayStrategy
-	if strategy == "" {
-		strategy = "hybrid"
-	}
+	strategy := normalizeReplayStrategy(u.sharedCfg().ReplayStrategy)
 
 	replayDuration := u.sharedCfg().MaxReplayDuration
 	if replayDuration == 0 {
@@ -1737,14 +1737,14 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			// Explicitly whitelisted channels bypass this!
 			if lazyJoin && !brchannel.DM && !isWhitelisted { //nolint:nestif
 				// Strategy "saved": require prior presence in local BoltDB
-				if strategy == "saved" && !inDB {
+				if strategy == replayStrategySaved && !inDB {
 					u.clearPendingReplay(brchannel.ID)
 
 					continue
 				}
 
 				// Strategies "server" & "hybrid": consult server channel state and skip deleted channels
-				if (strategy == "server" || strategy == "hybrid") && brchannel.DeleteAt > 0 {
+				if (strategy == replayStrategyServer || strategy == replayStrategyHybrid) && brchannel.DeleteAt > 0 {
 					u.clearPendingReplay(brchannel.ID)
 
 					continue
@@ -2753,7 +2753,7 @@ func (u *User) snapshotSavedSince(channelIDs []string) map[string]savedSinceSnap
 		return nil
 	}
 
-	if u.cfg != nil && normalizeReplayStrategy(u.sharedCfg().ReplayStrategy) == "server-only" {
+	if u.cfg != nil && normalizeReplayStrategy(u.sharedCfg().ReplayStrategy) == replayStrategyServer {
 		return nil
 	}
 
