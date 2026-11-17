@@ -75,6 +75,9 @@ type UserBridge struct {
 
 	updateCounterMutex sync.Mutex
 	updateCounter      map[string]time.Time
+
+	pendingReplayMu sync.Mutex
+	pendingReplay   map[string]int
 }
 
 func NewUserBridge(c net.Conn, srv Server, cfg *config.Config, dbs map[string]*bolt.DB) *User {
@@ -95,6 +98,7 @@ func NewUserBridge(c net.Conn, srv Server, cfg *config.Config, dbs map[string]*b
 	u.msgMapIndex = make(map[string]map[int]string)
 	u.msgCounter = make(map[string]int)
 	u.updateCounter = make(map[string]time.Time)
+	u.pendingReplay = make(map[string]int)
 	u.eventChan = make(chan *bridge.Event, 1000)
 
 	initialMap := make(map[string]struct{})
@@ -1322,6 +1326,7 @@ func (u *User) addUsersToChannels() {
 	})
 
 	channels := make(chan *bridge.ChannelInfo, len(joinChannels))
+	u.markPendingReplay(joinChannels)
 
 	var wg sync.WaitGroup
 
@@ -1354,6 +1359,10 @@ func (u *User) addUsersToChannels() {
 	go func() {
 		wg.Wait()
 		throttle.Stop()
+
+		for brchannel := range channels {
+			u.clearPendingReplay(brchannel.ID)
+		}
 
 		// Now that every worker has successfully finished syncing, move the watermark forward.
 		u.eventLoopMutex.Lock()
@@ -1642,12 +1651,16 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			// Interruptible throttle wait
 			select {
 			case <-u.ctx.Done():
+				u.clearPendingReplay(brchannel.ID)
 				logger.Debug("addUserToChannelWorker aborted via context during throttle")
+
 				return
 			case <-throttle.C:
 			}
 
 			if u.ctx.Err() != nil || u.br == nil {
+				u.clearPendingReplay(brchannel.ID)
+
 				return
 			}
 
@@ -1691,6 +1704,8 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			// If JoinDM is disabled and this GM is not whitelisted or explicitly in join-lists, skip joining it on boot
 			// unless the IRC user has already joined it (e.g. via live traffic or prior to a reconnect).
 			if !u.br.BridgeConfig().JoinDM && isGM && !isWhitelisted && !isJoinListMatched && !u.Srv.Channel(brchannel.ID).HasUser(u) {
+				u.clearPendingReplay(brchannel.ID)
+
 				continue
 			}
 
@@ -1701,11 +1716,15 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			if lazyJoin && !brchannel.DM && !isWhitelisted { //nolint:nestif
 				// Strategy "saved": require prior presence in local BoltDB
 				if strategy == "saved" && !inDB {
+					u.clearPendingReplay(brchannel.ID)
+
 					continue
 				}
 
 				// Strategies "server" & "hybrid": consult server channel state and skip deleted channels
 				if (strategy == "server" || strategy == "hybrid") && brchannel.DeleteAt > 0 {
+					u.clearPendingReplay(brchannel.ID)
+
 					continue
 				}
 
@@ -1725,6 +1744,8 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 				// Evaluate dormancy using the ACTUAL Mattermost server activity
 				if brchannel.LastPostAt < cutoff {
 					logger.Debugf("Smart Lazy-join: Skipping dormant public channel %s (LastPost: %v)", channelName, time.UnixMilli(brchannel.LastPostAt).Format("2006-01-02 15:04:05"))
+					u.clearPendingReplay(brchannel.ID)
+
 					continue
 				}
 			}
@@ -1757,6 +1778,8 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 
 					// Fast exit on disconnect / shutdown
 					if errors.Is(syncErr, context.Canceled) || u.ctx.Err() != nil {
+						u.clearPendingReplay(brchannel.ID)
+
 						return
 					}
 
@@ -1765,6 +1788,8 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 					// Wait 5 seconds before retrying, but abort if the bridge is shutting down
 					select {
 					case <-u.ctx.Done():
+						u.clearPendingReplay(brchannel.ID)
+
 						return
 					case <-time.After(time.Second * 5):
 					}
@@ -1776,12 +1801,15 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			if !success {
 				logger.Errorf("Giving up on syncing %s. Skipping replay to PRESERVE history for next startup.", channelName)
 				u.sendServerNotice(fmt.Sprintf("replay failed for %s, use REPLAY service", channelName))
+				u.clearPendingReplay(brchannel.ID)
 
 				continue
 			}
 
 			// If mayJoin rejected joining the channel, abort replay so messages aren't spoofed into an empty buffer
 			if !isDM && !u.Srv.Channel(brchannel.ID).HasUser(u) {
+				u.clearPendingReplay(brchannel.ID)
+
 				continue
 			}
 
@@ -1789,9 +1817,12 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 				logger.Debugf("Skipping history replay for excluded channel %s (%s)", channelName, brchannel.ID)
 			} else if !u.replayHistory(brchannel, since, sinceStr) {
 				logger.Warnf("Replay of %s failed, keeping its saved position for the next startup", channelName)
+				u.clearPendingReplay(brchannel.ID)
 
 				continue
 			}
+
+			u.clearPendingReplay(brchannel.ID)
 
 			if u.hasSharedCfg() && !u.sharedCfg().DisableAutoView && !u.replayHidesHistory(brchannel.ID) {
 				u.updateLastViewed(brchannel.ID)
@@ -2644,8 +2675,56 @@ func (u *User) stopEventLoop() {
 // lastViewedMaxDelay is the maximum random delay before the server is told that a channel has been read.
 var lastViewedMaxDelay = 3 * time.Second
 
+func (u *User) markPendingReplay(channels []*bridge.ChannelInfo) {
+	if len(channels) == 0 {
+		return
+	}
+
+	u.pendingReplayMu.Lock()
+
+	if u.pendingReplay == nil {
+		u.pendingReplay = make(map[string]int, len(channels))
+	}
+
+	for _, ch := range channels {
+		if ch != nil && ch.ID != "" {
+			u.pendingReplay[ch.ID]++
+		}
+	}
+
+	u.pendingReplayMu.Unlock()
+}
+
+func (u *User) clearPendingReplay(channelID string) {
+	if channelID == "" {
+		return
+	}
+
+	u.pendingReplayMu.Lock()
+
+	if count := u.pendingReplay[channelID]; count <= 1 {
+		delete(u.pendingReplay, channelID)
+	} else {
+		u.pendingReplay[channelID] = count - 1
+	}
+
+	u.pendingReplayMu.Unlock()
+}
+
+func (u *User) isPendingReplay(channelID string) bool {
+	if channelID == "" {
+		return false
+	}
+
+	u.pendingReplayMu.Lock()
+	pending := u.pendingReplay[channelID] > 0
+	u.pendingReplayMu.Unlock()
+
+	return pending
+}
+
 func (u *User) updateLastViewed(channelID string) {
-	if u.currentBridge() == nil {
+	if u.currentBridge() == nil || u.isPendingReplay(channelID) {
 		return
 	}
 
@@ -2668,9 +2747,9 @@ func (u *User) updateLastViewed(channelID string) {
 			return
 		}
 
-		// We could have logged out while waiting.
+		// We could have logged out or started replaying this channel while waiting.
 		br := u.currentBridge()
-		if br == nil {
+		if br == nil || u.isPendingReplay(channelID) {
 			return
 		}
 
@@ -2767,7 +2846,7 @@ func (u *User) clearChannelState(channelID string) {
 }
 
 func (u *User) saveLastViewedAt(channelID string, ts ...int64) {
-	if channelID == "" {
+	if channelID == "" || u.isPendingReplay(channelID) {
 		return
 	}
 
