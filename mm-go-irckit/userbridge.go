@@ -1251,6 +1251,7 @@ func (u *User) addUsersToChannels() {
 
 	u.eventLoopMutex.Lock()
 	lastSyncThreshold := u.lastSync
+	isReconnect := u.eventLoopStarted
 	isHeavySync := !u.eventLoopStarted || time.Since(u.lastSync.Round(0)) > syncThresh
 	u.eventLoopMutex.Unlock()
 
@@ -1388,7 +1389,7 @@ func (u *User) addUsersToChannels() {
 		workerLogger := logger.WithField("prefix", fmt.Sprintf("%saddUserToChannelWorker%d", currentPrefix, i))
 
 		wg.Go(func() {
-			u.addUserToChannelWorker(channels, throttle, workerLogger)
+			u.addUserToChannelWorkerWithMode(channels, throttle, workerLogger, isReconnect)
 		})
 	}
 
@@ -1681,8 +1682,12 @@ func (u *User) getChannelSince(ctx context.Context, brchannel *bridge.ChannelInf
 	return bestSince, source, inDB
 }
 
-//nolint:funlen,cyclop,gocognit,gocyclo
 func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throttle *time.Ticker, logger *logrus.Entry) {
+	u.addUserToChannelWorkerWithMode(channels, throttle, logger, false)
+}
+
+//nolint:funlen,cyclop,gocognit,gocyclo
+func (u *User) addUserToChannelWorkerWithMode(channels <-chan *bridge.ChannelInfo, throttle *time.Ticker, logger *logrus.Entry, isReconnect bool) {
 	strategy := normalizeReplayStrategy(u.sharedCfg().ReplayStrategy)
 
 	replayDuration := u.sharedCfg().MaxReplayDuration
@@ -1881,7 +1886,7 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 
 			if u.isReplayExcluded(brchannel, channelName) {
 				logger.Debugf("Skipping history replay for excluded channel %s (%s)", channelName, brchannel.ID)
-			} else if !u.replayHistory(brchannel, since, sinceStr) {
+			} else if !u.replaySyncHistory(brchannel, since, sinceStr, isReconnect) {
 				logger.Warnf("Replay of %s failed, keeping its saved position for the next startup", channelName)
 				u.clearPendingReplay(brchannel.ID)
 
@@ -1906,13 +1911,21 @@ func (u *User) replayHidesHistory(channelID string) bool {
 	return ok && h.ReplayHidesHistory(channelID)
 }
 
-// replayHistory handles the actual fetching and spoofing of historical channel messages.
+func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSince string) bool {
+	return u.replayHistoryEvents(brchannel, since, logSince, false, false)
+}
+
+func (u *User) replaySyncHistory(brchannel *bridge.ChannelInfo, since int64, logSince string, isReconnect bool) bool {
+	return u.replayHistoryEvents(brchannel, since, logSince, true, isReconnect)
+}
+
+// replayHistoryEvents handles the actual fetching and spoofing of historical channel messages.
 //
 // It returns false when the history couldn't be fetched, so callers keep the saved position
 // and read marker and the next startup retries instead of skipping the history.
 //
 //nolint:funlen,gocognit,gocyclo
-func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSince string) bool {
+func (u *User) replayHistoryEvents(brchannel *bridge.ChannelInfo, since int64, logSince string, isSync, isReconnect bool) bool {
 	if since == 0 || u.ctx.Err() != nil || u.br == nil {
 		return true
 	}
@@ -1925,7 +1938,20 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 	}
 
 	// Post everything to the channel we haven't seen yet
-	events := u.br.GetReplayEvents(u.ctx, brchannel.ID, since)
+	var events []*bridge.Event
+
+	if isSync {
+		if sr, ok := u.br.(interface {
+			GetSyncReplayEvents(ctx context.Context, channelID string, since int64, reconnect bool) []*bridge.Event
+		}); ok {
+			events = sr.GetSyncReplayEvents(u.ctx, brchannel.ID, since, isReconnect)
+		} else {
+			events = u.br.GetReplayEvents(u.ctx, brchannel.ID, since)
+		}
+	} else {
+		events = u.br.GetReplayEvents(u.ctx, brchannel.ID, since)
+	}
+
 	if len(events) == 0 {
 		// If the channel is not from the primary team id, we can't get posts
 		if events == nil && brchannel.TeamID == u.br.GetMe().TeamID {

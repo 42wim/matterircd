@@ -124,9 +124,18 @@ func (c *Client) GetMessages(ctx context.Context, roomID id.RoomID, limit int) (
 // GetMessagesSince returns the messages of a room newer than since (unix
 // milliseconds), oldest first. At most historyMaxPages pages are fetched.
 func (c *Client) GetMessagesSince(ctx context.Context, roomID id.RoomID, since int64) ([]*Message, error) {
-	var msgs []*Message
+	return c.getMessagesSince(ctx, roomID, since, "")
+}
 
-	token := ""
+// GetMessagesSinceFrom returns the messages of a room newer than since (unix
+// milliseconds) older than the pagination token from (or the latest event when
+// empty), oldest first. At most historyMaxPages pages are fetched.
+func (c *Client) GetMessagesSinceFrom(ctx context.Context, roomID id.RoomID, since int64, from string) ([]*Message, error) {
+	return c.getMessagesSince(ctx, roomID, since, from)
+}
+
+func (c *Client) getMessagesSince(ctx context.Context, roomID id.RoomID, since int64, token string) ([]*Message, error) {
+	var msgs []*Message
 
 	for range historyMaxPages {
 		page, next, err := c.messagesPage(ctx, roomID, token, historyPageSize)
