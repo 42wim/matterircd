@@ -57,6 +57,11 @@ PasteBufferTimeout = 2500
 # Set to false if you prefer leaving oversized tokens unbroken. (default: true)
 #HardLineSplit = true
 
+# Maximum length in bytes per wrapped IRC message line. (default: 460)
+# Values above 460 allow longer lines up to the 16384-byte wire limit for clients
+# that support them.
+#MaxLineLength = 460
+
 # EXPERIMENTAL: Enable IRCv3 CAP +typing message-tags
 #EnableTyping = true
 #DisableSendTyping = true

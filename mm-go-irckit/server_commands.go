@@ -1504,7 +1504,8 @@ func CmdWhois(s Server, u *User, msg *irc.Message) error {
 		allChannels = append(allChannels, uChannels...)
 		allChannels = append(allChannels, otherChannels...)
 
-		const maxTrailingLen = 460
+		maxLineLen := u.maxLineLength()
+		maxTrailingLen := max(min(maxLineLen, wireTextBudget(s.Prefix(), irc.RPL_WHOISCHANNELS, u.Nick+" "+other.Nick, maxLineLen)), 1)
 
 		var line strings.Builder
 		for _, chStr := range allChannels {

@@ -137,7 +137,7 @@ func (ch *channel) ID() string {
 }
 
 func (ch *channel) Message(from *User, text string) {
-	text = utils.WrapMessage(text, 460)
+	text = utils.WrapMessage(text, ch.server.MaxLineLength())
 
 	msg := irc.Message{
 		Prefix:        from.Prefix(),
@@ -628,9 +628,16 @@ func (ch *channel) spoof(from string, text string, cmd string, maxlen ...int) er
 }
 
 // wireTextBudget returns how many bytes of text fit in a ":prefix CMD target :text\r\n"
-// line within IRC's 512 bytes limit.
-func wireTextBudget(prefix *irc.Prefix, cmd, target string) int {
-	return 505 - prefix.Len() - len(cmd) - len(target)
+// line within the IRC wire limit.
+func wireTextBudget(prefix *irc.Prefix, cmd, target string, maxLineLen int) int {
+	// Default 460 targets IRC's 512-byte wire limit (505 after framing); larger values
+	// scale up to vendored sorcix/irc's 16384-byte ceiling (16377 after framing).
+	wireMax := 505
+	if maxLineLen > defaultMaxLineLength {
+		wireMax = min(maxLineLen+45, 16377)
+	}
+
+	return wireMax - prefix.Len() - len(cmd) - len(target)
 }
 
 func (ch *channel) SpoofWithPrefix(prefix *irc.Prefix, text string, cmd string, maxlen ...int) {
@@ -646,7 +653,9 @@ func (ch *channel) SpoofWithPrefixTime(prefix *irc.Prefix, text string, cmd stri
 }
 
 func (ch *channel) spoofWithPrefixTime(prefix *irc.Prefix, text string, cmd string, timeTag string, maxlen ...int) error {
-	limit := 460
+	maxLineLen := ch.server.MaxLineLength()
+
+	limit := maxLineLen
 	if len(maxlen) > 0 {
 		limit = maxlen[0]
 	}
@@ -656,7 +665,7 @@ func (ch *channel) spoofWithPrefixTime(prefix *irc.Prefix, text string, cmd stri
 
 	if hardSplit {
 		// At least one byte per line, as WrapMessage doesn't wrap at zero or below.
-		limit = max(min(limit, wireTextBudget(prefix, cmd, ch.name)), 1)
+		limit = max(min(limit, wireTextBudget(prefix, cmd, ch.name, maxLineLen)), 1)
 
 		// A CTCP ACTION must keep its envelope on every fragment.
 		isAction = strings.HasPrefix(text, "\x01ACTION ") && strings.HasSuffix(text, "\x01")
@@ -729,7 +738,7 @@ func (ch *channel) SpoofMessage(from string, text string, maxlen ...int) {
 
 func (ch *channel) spoofMessage(from string, text string, maxlen ...int) error {
 	if len(maxlen) == 0 {
-		return ch.spoof(from, text, irc.PRIVMSG, 460)
+		return ch.spoof(from, text, irc.PRIVMSG, ch.server.MaxLineLength())
 	}
 
 	return ch.spoof(from, text, irc.PRIVMSG, maxlen[0])
@@ -757,7 +766,7 @@ func spoofChannelWithPrefixTime(ch Channel, prefix *irc.Prefix, text string, cmd
 
 func (ch *channel) SpoofNotice(from string, text string, maxlen ...int) {
 	if len(maxlen) == 0 {
-		ch.Spoof(from, text, irc.NOTICE, 460)
+		ch.Spoof(from, text, irc.NOTICE, ch.server.MaxLineLength())
 	} else {
 		ch.Spoof(from, text, irc.NOTICE, maxlen[0])
 	}
