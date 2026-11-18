@@ -697,7 +697,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) bool
 	prefix := ""
 	suffix := ""
 	showContext := false
-	maxlen := 460
+	maxlen := u.maxLineLength()
 
 	if u.Nick == systemUser || (event.Sender != nil && event.Sender.Nick == systemUser) {
 		text = "\x1d" + text + "\x1d"
@@ -734,7 +734,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) bool
 
 	// Context is added after wrapping, so reserve it or the line gets split again when sent.
 	if hardLineSplit && showContext {
-		maxlen = max(min(maxlen, wireTextBudget(senderPrefix, cmd, ch.String())-len(prefix)-len(suffix)), 1)
+		maxlen = max(min(maxlen, wireTextBudget(senderPrefix, cmd, ch.String(), u.maxLineLength())-len(prefix)-len(suffix)), 1)
 	}
 
 	// Keep a CTCP ACTION whole here, SpoofWithPrefix splits it keeping the envelope.
@@ -1501,7 +1501,7 @@ func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(nick, msg, timeTa
 		}
 
 		isAction := strings.HasPrefix(msg, "\x01ACTION ") && strings.HasSuffix(msg, "\x01")
-		wrapLimit := 460
+		wrapLimit := u.maxLineLength()
 
 		if isAction {
 			msg = msg[8 : len(msg)-1]
@@ -2028,7 +2028,7 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 			showReplayHdr = false
 		}
 
-		wrapLimit := 460
+		wrapLimit := u.maxLineLength()
 		if (u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext) && nick != systemUser {
 			wrapLimit -= len(u.prefixContext(brchannel.ID, msgID, parentID, "replay")) + 1
 		}
@@ -2169,7 +2169,7 @@ func (u *User) msgSpoofDMTime(sender, receiver *bridge.UserInfo, text, timeTag s
 func (u *User) msgSpoofUserTime(sender *User, rcvuser, text, timeTag string, maxlen ...int) error {
 	hardLineSplit := u.cfg.Current().HardLineSplit
 	if len(maxlen) == 0 {
-		text = utils.WrapMessage(text, 460, hardLineSplit)
+		text = utils.WrapMessage(text, u.maxLineLength(), hardLineSplit)
 	} else {
 		text = utils.WrapMessage(text, maxlen[0], hardLineSplit)
 	}
@@ -3190,10 +3190,22 @@ func (u *User) handleBannerChangeEvent(e *bridge.BannerChangeEvent) {
 	}
 }
 
+func (u *User) maxLineLength() int {
+	if u == nil || u.cfg == nil {
+		return defaultMaxLineLength
+	}
+
+	if n := u.cfg.Current().MaxLineLength; n > 0 {
+		return n
+	}
+
+	return defaultMaxLineLength
+}
+
 func (u *User) handleMessageThreadContext(channelID, messageID, parentID, event, text string) (string, string, string, bool, int) {
 	prefix := ""
 	suffix := ""
-	maxlen := 460
+	maxlen := u.maxLineLength()
 	showContext := false
 
 	newText := text

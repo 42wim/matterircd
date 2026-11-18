@@ -44,6 +44,9 @@ type Server interface { //nolint:interfacebloat
 	// HardLineSplit returns whether lines exceeding IRC's line length limit are split.
 	HardLineSplit() bool
 
+	// MaxLineLength returns the configured maximum byte length per wrapped IRC line.
+	MaxLineLength() int
+
 	// Connect starts the handshake for a new user, blocks until it's completed or failed with an error.
 	Connect(*User) error //nolint:inamedparam
 
@@ -175,6 +178,8 @@ func (s *server) Motd() []string {
 	return s.config.Motd
 }
 
+const defaultMaxLineLength = 460
+
 // HardLineSplit defaults to true while no user is connected, like the config default.
 func (s *server) HardLineSplit() bool {
 	s.RLock()
@@ -186,6 +191,19 @@ func (s *server) HardLineSplit() bool {
 	}
 
 	return u.cfg.Current().HardLineSplit
+}
+
+// MaxLineLength defaults to 460 while no user is connected, like the config default.
+func (s *server) MaxLineLength() int {
+	s.RLock()
+	u := s.u
+	s.RUnlock()
+
+	if u == nil {
+		return defaultMaxLineLength
+	}
+
+	return u.maxLineLength()
 }
 
 func (s *server) Close() error {
