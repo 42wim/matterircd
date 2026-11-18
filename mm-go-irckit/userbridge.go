@@ -124,7 +124,7 @@ func NewUserBridge(c net.Conn, srv Server, cfg *config.Config, dbs map[string]*b
 	return u
 }
 
-//nolint:funlen,gocyclo
+//nolint:funlen,gocognit,gocyclo
 func (u *User) handleEventChan(ctx context.Context, eventChan <-chan *bridge.Event) {
 	// Flush to disk every 2 minutes to prevent I/O bottlenecks
 	flushTicker := time.NewTicker(2 * time.Minute)
@@ -146,21 +146,25 @@ func (u *User) handleEventChan(ctx context.Context, eventChan <-chan *bridge.Eve
 			case *bridge.BannerChangeEvent:
 				u.handleBannerChangeEvent(e)
 			case *bridge.ChannelMessageEvent:
-				u.updateLastEventTime(e.CreateAt)
-				u.handleChannelMessageEvent(e)
+				if u.handleChannelMessageEvent(e) {
+					u.updateLastEventTime(e.CreateAt)
+				}
 			case *bridge.DirectMessageEvent:
-				u.updateLastEventTime(e.CreateAt)
-				u.handleDirectMessageEvent(e)
+				if u.handleDirectMessageEvent(e) {
+					u.updateLastEventTime(e.CreateAt)
+				}
 			case *bridge.ChannelTopicEvent:
 				u.handleChannelTopicEvent(e)
 			case *bridge.FileEvent:
 				u.handleFileEvent(e)
 			case *bridge.ChannelAddEvent:
-				u.updateLastEventTime(e.CreateAt)
-				u.handleChannelAddEvent(e)
+				if u.handleChannelAddEvent(e) {
+					u.updateLastEventTime(e.CreateAt)
+				}
 			case *bridge.ChannelRemoveEvent:
-				u.updateLastEventTime(e.CreateAt)
-				u.handleChannelRemoveEvent(e)
+				if u.handleChannelRemoveEvent(e) {
+					u.updateLastEventTime(e.CreateAt)
+				}
 			case *bridge.ChannelInviteEvent:
 				u.handleChannelInviteEvent(e)
 			case *bridge.ChannelCreateEvent:
@@ -199,7 +203,7 @@ func (u *User) handleEventChan(ctx context.Context, eventChan <-chan *bridge.Eve
 	}
 }
 
-func (u *User) handleChannelTopicEvent(event *bridge.ChannelTopicEvent) {
+func (u *User) handleChannelTopicEvent(event *bridge.ChannelTopicEvent) bool {
 	tu, ok := u.Srv.HasUserID(event.UserID)
 	if event.UserID == u.User {
 		ok = true
@@ -242,14 +246,19 @@ func (u *User) handleChannelTopicEvent(event *bridge.ChannelTopicEvent) {
 			customEmoji,
 		)
 
-		ch.Topic(tu, topic)
+		err := setChannelTopic(ch, tu, topic)
+		if err != nil {
+			return false
+		}
 
 		u.saveLastViewedAt(event.ChannelID)
 
-		return
+		return true
 	}
 
 	logger.Errorf("topic change failure: userID %s not found", event.UserID)
+
+	return true
 }
 
 const (
@@ -293,7 +302,7 @@ func (u *User) getMarkdownBlockCodePrefix() (string, string) {
 }
 
 //nolint:funlen,gocognit,gocyclo
-func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
+func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) bool {
 	if u.hasSharedCfg() && u.sharedCfg().ShowMentions {
 		for _, m := range u.MentionKeys {
 			if m == u.Nick || m == "" {
@@ -386,25 +395,19 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 
 	timeTag := formatLiveTimeTag(event.CreateAt, event.Event)
 
+	var sendErr error
+
 	emitLine := func(line string) {
+		if sendErr != nil {
+			return
+		}
+
 		if showContext || addPrefix {
 			line = prefix + line + suffix
 			addPrefix = false
 		}
 
-		if event.Sender.Me {
-			if event.Receiver.Me {
-				u.msgSpoofUserTime(u, u.Nick, line, timeTag, len(line))
-			} else {
-				// Outbound DM (e.g. from history replay)
-				// Spoof as us, but target THEIR nick so it routes to their query window
-				u.msgSpoofUserTime(u, u.createUserFromInfo(event.Receiver).Nick, line, timeTag, len(line))
-			}
-		} else {
-			// Inbound DM
-			// Spoof as them, target OUR nick
-			u.msgSpoofUserTime(u.createUserFromInfo(event.Sender), u.Nick, line, timeTag, len(line))
-		}
+		sendErr = u.msgSpoofDMTime(event.Sender, event.Receiver, line, timeTag, len(line))
 	}
 
 	var (
@@ -444,15 +447,21 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 		}
 	}
 
+	if sendErr != nil {
+		return false
+	}
+
 	if u.hasSharedCfg() && !u.sharedCfg().DisableAutoView {
 		u.updateLastViewed(event.ChannelID)
 	}
 
 	u.saveLastViewedAt(event.ChannelID, event.CreateAt)
+
+	return true
 }
 
-//nolint:gocyclo
-func (u *User) handleChannelAddEvent(event *bridge.ChannelAddEvent) {
+//nolint:gocognit,gocyclo
+func (u *User) handleChannelAddEvent(event *bridge.ChannelAddEvent) bool {
 	ch := u.Srv.Channel(event.ChannelID)
 
 	for _, added := range event.Added {
@@ -478,7 +487,9 @@ func (u *User) handleChannelAddEvent(event *bridge.ChannelAddEvent) {
 
 			since := time.Now().Add(-replayDur).UnixMilli()
 
-			u.replayHistory(brchannel, since, replayDur.String())
+			if !u.replayHistory(brchannel, since, replayDur.String()) {
+				return false
+			}
 
 			continue
 		}
@@ -496,7 +507,10 @@ func (u *User) handleChannelAddEvent(event *bridge.ChannelAddEvent) {
 			}
 
 			if u.sanitizeNick(added.Nick) != adderNick {
-				ch.SpoofMessage(systemUser, "\x1dadded "+u.sanitizeNick(added.Nick)+" to the channel by "+adderNick+"\x1d")
+				err := spoofChannelMessage(ch, systemUser, "\x1dadded "+u.sanitizeNick(added.Nick)+" to the channel by "+adderNick+"\x1d")
+				if err != nil {
+					return false
+				}
 			}
 		}
 	}
@@ -507,6 +521,8 @@ func (u *User) handleChannelAddEvent(event *bridge.ChannelAddEvent) {
 	}
 
 	u.saveLastViewedAt(event.ChannelID, event.CreateAt)
+
+	return true
 }
 
 // handleChannelInviteEvent shows an invitation as an IRC INVITE. Joining the
@@ -551,7 +567,7 @@ func (u *User) handleChannelInviteEvent(event *bridge.ChannelInviteEvent) {
 	u.MsgUser(svc, "Accept with /join "+target)
 }
 
-func (u *User) handleChannelRemoveEvent(event *bridge.ChannelRemoveEvent) {
+func (u *User) handleChannelRemoveEvent(event *bridge.ChannelRemoveEvent) bool {
 	ch := u.Srv.Channel(event.ChannelID)
 
 	for _, removed := range event.Removed {
@@ -576,12 +592,17 @@ func (u *User) handleChannelRemoveEvent(event *bridge.ChannelRemoveEvent) {
 			}
 
 			if u.sanitizeNick(removed.Nick) != removerNick {
-				ch.SpoofMessage(systemUser, "\x1dremoved "+u.sanitizeNick(removed.Nick)+" from the channel by "+removerNick+"\x1d")
+				err := spoofChannelMessage(ch, systemUser, "\x1dremoved "+u.sanitizeNick(removed.Nick)+" from the channel by "+removerNick+"\x1d")
+				if err != nil {
+					return false
+				}
 			}
 		}
 	}
 
 	u.saveLastViewedAt(event.ChannelID, event.CreateAt)
+
+	return true
 }
 
 func (u *User) getMessageChannel(channelID string, sender *bridge.UserInfo) Channel {
@@ -620,7 +641,7 @@ func (u *User) getMessageChannelUser(channelID string, sender *bridge.UserInfo) 
 }
 
 //nolint:funlen,gocognit,gocyclo
-func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
+func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) bool {
 	/*
 		CHANNEL_OPEN                   = "O"
 		CHANNEL_PRIVATE                = "P"
@@ -642,7 +663,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 
 	if event.ChannelType != "D" && ch.ID() == "&messages" { //nolint:goconst
 		if u.br.BridgeConfig().ShowOnlyJoined {
-			return
+			return true
 		}
 
 		nick += "/" + u.Srv.Channel(event.ChannelID).String()
@@ -651,8 +672,9 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 	}
 
 	if event.Event == "channel_purpose" {
-		ch.SpoofMessage(systemUser, "\x1d"+nick+" "+event.Text+"\x1d")
-		return
+		err := spoofChannelMessage(ch, systemUser, "\x1d"+nick+" "+event.Text+"\x1d")
+
+		return err == nil
 	}
 
 	if u.hasSharedCfg() && u.sharedCfg().ShowMentions {
@@ -755,13 +777,19 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 
 	timeTag := formatLiveTimeTag(event.CreateAt, event.Event)
 
+	var sendErr error
+
 	emitLine := func(line string) {
+		if sendErr != nil {
+			return
+		}
+
 		if showContext || addPrefix {
 			line = prefix + line + suffix
 			addPrefix = false
 		}
 
-		ch.SpoofWithPrefixTime(senderPrefix, line, cmd, timeTag, len(line))
+		sendErr = spoofChannelWithPrefixTime(ch, senderPrefix, line, cmd, timeTag, len(line))
 	}
 
 	var (
@@ -801,11 +829,17 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		}
 	}
 
+	if sendErr != nil {
+		return false
+	}
+
 	if u.hasSharedCfg() && !u.sharedCfg().DisableAutoView {
 		u.updateLastViewed(event.ChannelID)
 	}
 
 	u.saveLastViewedAt(event.ChannelID, event.CreateAt)
+
+	return true
 }
 
 func (u *User) handleFileEvent(event *bridge.FileEvent) {
@@ -833,14 +867,9 @@ func (u *User) handleFileEvent(event *bridge.FileEvent) {
 
 		switch event.ChannelType {
 		case "D":
-			if event.Sender.Me {
-				if event.Receiver.Me {
-					u.msgSpoofUserTime(u, u.Nick, fileMsg, timeTag)
-				} else {
-					u.msgSpoofUserTime(u, u.createUserFromInfo(event.Receiver).Nick, fileMsg, timeTag)
-				}
-			} else {
-				u.msgSpoofUserTime(u.createUserFromInfo(event.Sender), u.Nick, fileMsg, timeTag)
+			err := u.msgSpoofDMTime(event.Sender, event.Receiver, fileMsg, timeTag)
+			if err != nil {
+				return
 			}
 		default:
 			ch := u.getMessageChannel(event.ChannelID, event.Sender)
@@ -854,7 +883,10 @@ func (u *User) handleFileEvent(event *bridge.FileEvent) {
 				prefix = sender.Prefix()
 			}
 
-			ch.SpoofWithPrefixTime(prefix, fileMsg, irc.PRIVMSG, timeTag)
+			err := spoofChannelWithPrefixTime(ch, prefix, fileMsg, irc.PRIVMSG, timeTag)
+			if err != nil {
+				return
+			}
 		}
 	}
 }
@@ -1037,10 +1069,10 @@ func (u *User) handleReactionEvent(event any) {
 		parentID = e.ParentID
 	}
 
-	defer u.saveLastViewedAt(channelID)
-
 	if u.hasSharedCfg() && u.sharedCfg().HideReactions {
 		logger.Debug("Not showing reaction: " + text + reaction)
+		u.saveLastViewedAt(channelID)
+
 		return
 	}
 
@@ -1061,7 +1093,9 @@ func (u *User) handleReactionEvent(event any) {
 			ParentID:  parentID,
 		}
 
-		u.handleDirectMessageEvent(e)
+		if u.handleDirectMessageEvent(e) {
+			u.saveLastViewedAt(channelID)
+		}
 
 		return
 	}
@@ -1076,7 +1110,9 @@ func (u *User) handleReactionEvent(event any) {
 		ParentID:    parentID,
 	}
 
-	u.handleChannelMessageEvent(e)
+	if u.handleChannelMessageEvent(e) {
+		u.saveLastViewedAt(channelID)
+	}
 }
 
 func (u *User) CreateUserFromInfo(info *bridge.UserInfo) *User {
@@ -1416,7 +1452,7 @@ func (u *User) addUsersToChannels() {
 }
 
 //nolint:funlen,gocognit,gocyclo
-func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(nick, msg, timeTag string) {
+func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(nick, msg, timeTag string) error {
 	isDM := u.br.IsDMChannelName(mmchannel.Name)
 
 	var (
@@ -1435,7 +1471,7 @@ func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(nick, msg, timeTa
 
 	prefixes := make(map[string]*irc.Prefix)
 
-	return func(nick, msg, timeTag string) {
+	return func(nick, msg, timeTag string) error {
 		target := channelTarget
 
 		if isDM {
@@ -1447,7 +1483,7 @@ func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(nick, msg, timeTa
 		} else {
 			ch, ok := u.Srv.HasChannel(target)
 			if !ok || !ch.HasUser(u) {
-				return
+				return nil
 			}
 		}
 
@@ -1488,14 +1524,19 @@ func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(nick, msg, timeTa
 				msgPrefix = nil
 			}
 
-			_ = u.Encode(&irc.Message{
+			err := u.Encode(&irc.Message{
 				Prefix:        msgPrefix,
 				Command:       cmd,
 				Params:        []string{target},
 				Trailing:      line,
 				EmptyTrailing: true,
 			})
+			if err != nil {
+				return err
+			}
 		}
+
+		return nil
 	}
 }
 
@@ -1951,7 +1992,9 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 				u.Srv.Channel(brchannel.ID).Part(ghost, "")
 			}
 		case *bridge.ChannelTopicEvent:
-			u.handleChannelTopicEvent(e)
+			if !u.handleChannelTopicEvent(e) {
+				return false
+			}
 		default:
 			continue
 		}
@@ -1975,7 +2018,11 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 				target = nick
 			}
 
-			spoof(target, "\x1d\x02Replaying msgs since "+dateStr+"\x02 ("+logSince+")\x1d", "")
+			err := spoof(target, "\x1d\x02Replaying msgs since "+dateStr+"\x02 ("+logSince+")\x1d", "")
+			if err != nil {
+				return false
+			}
+
 			logger.Infof("Replaying msgs for %s (%s) since %s (%s)", channame, brchannel.ID, dateStr, logSince)
 
 			showReplayHdr = false
@@ -2037,7 +2084,10 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 				replayMsg = "\x01ACTION " + replayMsg + "\x01"
 			}
 
-			spoof(nick, replayMsg, timeTag)
+			err := spoof(nick, replayMsg, timeTag)
+			if err != nil {
+				return false
+			}
 		}
 
 		for i, f := range files {
@@ -2057,7 +2107,10 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 				fileMsg = "[" + tsStr + "] " + fileMsg
 			}
 
-			spoof(nick, fileMsg, timeTag)
+			err := spoof(nick, fileMsg, timeTag)
+			if err != nil {
+				return false
+			}
 		}
 	}
 
@@ -2097,10 +2150,23 @@ func formatLiveTimeTag(createAt int64, eventType string) string {
 }
 
 func (u *User) MsgSpoofUser(sender *User, rcvuser string, text string, maxlen ...int) {
-	u.msgSpoofUserTime(sender, rcvuser, text, "", maxlen...)
+	_ = u.msgSpoofUserTime(sender, rcvuser, text, "", maxlen...)
 }
 
-func (u *User) msgSpoofUserTime(sender *User, rcvuser, text, timeTag string, maxlen ...int) {
+func (u *User) msgSpoofDMTime(sender, receiver *bridge.UserInfo, text, timeTag string, maxlen ...int) error {
+	if sender.Me {
+		if receiver.Me {
+			return u.msgSpoofUserTime(u, u.Nick, text, timeTag, maxlen...)
+		}
+
+		// Outbound DM (e.g. from history replay): spoof as us targeting their nick.
+		return u.msgSpoofUserTime(u, u.createUserFromInfo(receiver).Nick, text, timeTag, maxlen...)
+	}
+
+	return u.msgSpoofUserTime(u.createUserFromInfo(sender), u.Nick, text, timeTag, maxlen...)
+}
+
+func (u *User) msgSpoofUserTime(sender *User, rcvuser, text, timeTag string, maxlen ...int) error {
 	hardLineSplit := u.cfg.Current().HardLineSplit
 	if len(maxlen) == 0 {
 		text = utils.WrapMessage(text, 460, hardLineSplit)
@@ -2131,7 +2197,10 @@ func (u *User) msgSpoofUserTime(sender *User, rcvuser, text, timeTag string, max
 		line = strings.TrimSuffix(line, "\r")
 		msg.Trailing = line
 
-		u.Encode(&msg) //nolint:errcheck
+		err := u.Encode(&msg)
+		if err != nil {
+			return err
+		}
 
 		if !found {
 			break
@@ -2139,6 +2208,8 @@ func (u *User) msgSpoofUserTime(sender *User, rcvuser, text, timeTag string, max
 
 		text = rest
 	}
+
+	return nil
 }
 
 func (u *User) syncChannel(id string, name string) error {
