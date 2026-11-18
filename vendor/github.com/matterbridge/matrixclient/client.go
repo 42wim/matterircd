@@ -432,7 +432,7 @@ type readySyncer struct {
 	once         sync.Once
 	ready        func()
 	synced       func() (bool, time.Duration)
-	reconnected  func(time.Duration)
+	reconnected  func(ReconnectInfo)
 	named        func(*mautrix.RespSync)
 	track        func(*mautrix.RespSync)
 	summary      func(*mautrix.RespSync)
@@ -495,7 +495,22 @@ func (r *readySyncer) ProcessResponse(ctx context.Context, res *mautrix.RespSync
 	r.once.Do(r.ready)
 
 	if reconnected && r.reconnected != nil {
-		r.reconnected(downtime)
+		var limited map[id.RoomID]string
+
+		for roomID, room := range res.Rooms.Join {
+			if room != nil && room.Timeline.Limited {
+				if limited == nil {
+					limited = make(map[id.RoomID]string)
+				}
+
+				limited[roomID] = room.Timeline.PrevBatch
+			}
+		}
+
+		r.reconnected(ReconnectInfo{
+			Downtime:     downtime,
+			LimitedRooms: limited,
+		})
 	}
 
 	readyDuration := time.Since(readyStart)

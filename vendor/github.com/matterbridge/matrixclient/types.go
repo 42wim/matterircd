@@ -333,3 +333,15 @@ type PresenceHandler interface {
 type ReconnectHandler interface {
 	OnReconnect(downtime time.Duration)
 }
+
+// ReconnectInfo describes the sync response that recovered a disconnected sync loop.
+type ReconnectInfo struct {
+	Downtime     time.Duration
+	LimitedRooms map[id.RoomID]string // joined rooms whose timeline was truncated (roomID -> prev_batch)
+}
+
+// ReconnectInfoHandler can optionally be implemented instead of ReconnectHandler
+// to also receive which rooms had truncated timelines in the recovery sync.
+type ReconnectInfoHandler interface {
+	OnReconnectInfo(info ReconnectInfo)
+}
