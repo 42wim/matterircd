@@ -306,12 +306,16 @@ func (ch *channel) Invite(from Prefixer, u *User) error {
 
 // Topic sets the topic of the channel (handler for TOPIC).
 func (ch *channel) Topic(from Prefixer, text string) {
+	_ = ch.setTopic(from, text)
+}
+
+func (ch *channel) setTopic(from Prefixer, text string) error {
 	ch.mu.Lock()
 
 	// this probably an echo
 	if ch.topic == text {
 		ch.mu.Unlock()
-		return
+		return nil
 	}
 
 	// no newlines in topic
@@ -336,10 +340,27 @@ func (ch *channel) Topic(from Prefixer, text string) {
 
 	ch.mu.Unlock()
 
+	var firstErr error
+
 	// only send topic messages to real users
 	for _, to := range users {
-		to.Encode(msg) //nolint:errcheck
+		err := to.Encode(msg)
+		if err != nil && firstErr == nil {
+			firstErr = err
+		}
 	}
+
+	return firstErr
+}
+
+func setChannelTopic(ch Channel, from Prefixer, text string) error {
+	if c, ok := ch.(*channel); ok {
+		return c.setTopic(from, text)
+	}
+
+	ch.Topic(from, text)
+
+	return nil
 }
 
 // SendNamesResponse sends a User messages indicating the current members of the Channel.
@@ -593,13 +614,17 @@ func (ch *channel) Len() int {
 }
 
 func (ch *channel) Spoof(from string, text string, cmd string, maxlen ...int) {
+	_ = ch.spoof(from, text, cmd, maxlen...)
+}
+
+func (ch *channel) spoof(from string, text string, cmd string, maxlen ...int) error {
 	// Match the user/host shown in WHOIS when the sender is a known user.
 	prefix := &irc.Prefix{Name: from, User: from, Host: ch.server.Name()}
 	if sender, ok := ch.server.HasUser(from); ok {
 		prefix = sender.Prefix()
 	}
 
-	ch.SpoofWithPrefix(prefix, text, cmd, maxlen...)
+	return ch.spoofWithPrefix(prefix, text, cmd, maxlen...)
 }
 
 // wireTextBudget returns how many bytes of text fit in a ":prefix CMD target :text\r\n"
@@ -609,10 +634,18 @@ func wireTextBudget(prefix *irc.Prefix, cmd, target string) int {
 }
 
 func (ch *channel) SpoofWithPrefix(prefix *irc.Prefix, text string, cmd string, maxlen ...int) {
-	ch.SpoofWithPrefixTime(prefix, text, cmd, "", maxlen...)
+	_ = ch.spoofWithPrefix(prefix, text, cmd, maxlen...)
+}
+
+func (ch *channel) spoofWithPrefix(prefix *irc.Prefix, text string, cmd string, maxlen ...int) error {
+	return ch.spoofWithPrefixTime(prefix, text, cmd, "", maxlen...)
 }
 
 func (ch *channel) SpoofWithPrefixTime(prefix *irc.Prefix, text string, cmd string, timeTag string, maxlen ...int) {
+	_ = ch.spoofWithPrefixTime(prefix, text, cmd, timeTag, maxlen...)
+}
+
+func (ch *channel) spoofWithPrefixTime(prefix *irc.Prefix, text string, cmd string, timeTag string, maxlen ...int) error {
 	limit := 460
 	if len(maxlen) > 0 {
 		limit = maxlen[0]
@@ -658,12 +691,9 @@ func (ch *channel) SpoofWithPrefixTime(prefix *irc.Prefix, text string, cmd stri
 			timeMsg.Trailing = line
 		}
 
-		for _, to := range users {
-			if timeMsg != nil && to.HasCapability("server-time") {
-				to.Encode(timeMsg) //nolint:errcheck
-			} else {
-				to.Encode(&msg) //nolint:errcheck
-			}
+		err := encodeChannelMessage(users, &msg, timeMsg)
+		if err != nil {
+			return err
 		}
 
 		if !found {
@@ -672,14 +702,57 @@ func (ch *channel) SpoofWithPrefixTime(prefix *irc.Prefix, text string, cmd stri
 
 		text = rest
 	}
+
+	return nil
+}
+
+func encodeChannelMessage(users []*User, msg, timeMsg *irc.Message) error {
+	for _, to := range users {
+		var err error
+		if timeMsg != nil && to.HasCapability("server-time") {
+			err = to.Encode(timeMsg)
+		} else {
+			err = to.Encode(msg)
+		}
+
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (ch *channel) SpoofMessage(from string, text string, maxlen ...int) {
+	_ = ch.spoofMessage(from, text, maxlen...)
+}
+
+func (ch *channel) spoofMessage(from string, text string, maxlen ...int) error {
 	if len(maxlen) == 0 {
-		ch.Spoof(from, text, irc.PRIVMSG, 460)
-	} else {
-		ch.Spoof(from, text, irc.PRIVMSG, maxlen[0])
+		return ch.spoof(from, text, irc.PRIVMSG, 460)
 	}
+
+	return ch.spoof(from, text, irc.PRIVMSG, maxlen[0])
+}
+
+func spoofChannelMessage(ch Channel, from string, text string, maxlen ...int) error {
+	if c, ok := ch.(*channel); ok {
+		return c.spoofMessage(from, text, maxlen...)
+	}
+
+	ch.SpoofMessage(from, text, maxlen...)
+
+	return nil
+}
+
+func spoofChannelWithPrefixTime(ch Channel, prefix *irc.Prefix, text string, cmd string, timeTag string, maxlen ...int) error {
+	if c, ok := ch.(*channel); ok {
+		return c.spoofWithPrefixTime(prefix, text, cmd, timeTag, maxlen...)
+	}
+
+	ch.SpoofWithPrefixTime(prefix, text, cmd, timeTag, maxlen...)
+
+	return nil
 }
 
 func (ch *channel) SpoofNotice(from string, text string, maxlen ...int) {
