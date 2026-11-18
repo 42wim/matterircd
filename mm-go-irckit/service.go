@@ -1795,18 +1795,18 @@ func summarize(u *User, toUser *User, args []string, service string) {
 	case ai.AIClaudeProvider, ai.AIAnthropicProvider:
 		baseURL := cfg.GetBaseURL(provider)
 
-		logger.Debugf("AI summarization for %s (provider: %s, model: %s, thinking: %s, url: %s)", contextLabel, provider, model, thinking, baseURL)
+		logger.Infof("AI summarization for %s requested by %s (provider: %s, model: %s, thinking: %s, url: %s)", contextLabel, u.Nick, provider, model, thinking, baseURL)
 	case ai.AICopilotProvider, ai.AIGitHubProvider:
-		logger.Debugf("AI summarization for %s (provider: %s, model: %s, thinking: %s)", contextLabel, provider, model, thinking)
+		logger.Infof("AI summarization for %s requested by %s (provider: %s, model: %s, thinking: %s)", contextLabel, u.Nick, provider, model, thinking)
 	case ai.AIOpenAIProvider, ai.AIDeepSeekProvider, ai.AIXAIProvider, ai.AIGrokProvider, ai.AIMuseProvider, ai.AIMetaProvider, ai.AIHetznerProvider, ai.AIOllamaProvider, ai.AILocalProvider, ai.AIvLLMProvider:
 		baseURL := cfg.GetBaseURL(provider)
 
-		logger.Debugf("AI summarization for %s (provider: %s, model: %s, thinking: %s, url: %s)", contextLabel, provider, model, thinking, baseURL)
+		logger.Infof("AI summarization for %s requested by %s (provider: %s, model: %s, thinking: %s, url: %s)", contextLabel, u.Nick, provider, model, thinking, baseURL)
 	default:
 		if cfg.ServiceAccountFile == "" {
 			baseURL := cfg.GetBaseURL(provider)
 
-			logger.Debugf("AI summarization for %s (provider: %s, model: %s, thinking: %s, url: %s)", contextLabel, provider, model, thinking, baseURL)
+			logger.Infof("AI summarization for %s requested by %s (provider: %s, model: %s, thinking: %s, url: %s)", contextLabel, u.Nick, provider, model, thinking, baseURL)
 
 			break
 		}
@@ -1816,9 +1816,9 @@ func summarize(u *User, toUser *User, args []string, service string) {
 			region = "us"
 		}
 
-		logger.Debugf(
-			"AI summarization for %s (provider: %s, model: %s, thinking: %s, project: %s, region: %s)",
-			contextLabel, provider, model, thinking, project, region,
+		logger.Infof(
+			"AI summarization for %s requested by %s (provider: %s, model: %s, thinking: %s, project: %s, region: %s)",
+			contextLabel, u.Nick, provider, model, thinking, project, region,
 		)
 	}
 
@@ -1826,6 +1826,7 @@ func summarize(u *User, toUser *User, args []string, service string) {
 
 	summaryResult, err := aiClient.Summarize(u.ctx, prompt, query.Thinking)
 	if err != nil {
+		logger.Warnf("AI summarization failed for %s requested by %s: %v", contextLabel, u.Nick, err)
 		u.MsgUser(toUser, fmt.Sprintf("Summarization failed: %v", err))
 
 		return
@@ -1865,7 +1866,10 @@ func summarize(u *User, toUser *User, args []string, service string) {
 	})
 
 	u.MsgUser(toUser, strings.Repeat("=", headingLen))
-	u.MsgUser(toUser, formatSummarizeStats(len(events), transcript.Len(), summaryResult.Usage, duration))
+
+	stats := formatSummarizeStats(len(events), transcript.Len(), summaryResult.Usage, duration)
+	u.MsgUser(toUser, stats)
+	logger.Infof("AI summarization completed for %s requested by %s %s", contextLabel, u.Nick, stats)
 }
 
 func formatSummarizeStats(postCount, contentBytes int, usage ai.Usage, duration time.Duration) string {
