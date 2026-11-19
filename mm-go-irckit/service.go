@@ -1515,7 +1515,7 @@ func parseSummarizeAIProvider(arg string) (string, bool) {
 		return ai.AIXAIProvider, true
 	case ai.AIMuseProvider, ai.AIMetaProvider:
 		return ai.AIMuseProvider, true
-	case ai.AIOpenAIProvider, ai.AIDeepSeekProvider, ai.AIHetznerProvider, ai.AIOllamaProvider, ai.AILocalProvider, ai.AIvLLMProvider:
+	case ai.AIOpenAIProvider, ai.AIOpenRouterProvider, ai.AIDeepSeekProvider, ai.AIHetznerProvider, ai.AIOllamaProvider, ai.AILocalProvider, ai.AIvLLMProvider:
 		return strings.ToLower(strings.TrimSpace(arg)), true
 	default:
 		return "", false
@@ -1539,7 +1539,7 @@ func parseSummarizeAIThinkingMode(arg string) (string, bool) {
 	}
 }
 
-const invalidSummarizeOptionMsg = "invalid option: expected post count (e.g. 50), duration (e.g. 24h), thinking mode (off, low, medium, high), provider (claude, copilot, deepseek, gemini, muse, openai, xai), or model (e.g. gemini-4-hydrogen)"
+const invalidSummarizeOptionMsg = "invalid option: expected post count (e.g. 50), duration (e.g. 24h), thinking mode (off, low, medium, high), provider (claude, copilot, deepseek, gemini, muse, openai, openrouter, xai), or model (e.g. gemini-4-hydrogen)"
 
 func hasNonEmptyPrefix(s, prefix string) bool {
 	return strings.HasPrefix(s, prefix) && len(s) > len(prefix)
@@ -1754,6 +1754,21 @@ func summarize(u *User, toUser *User, args []string, service string) {
 
 			return
 		}
+	case ai.AIOpenRouterProvider:
+		if token == "" {
+			u.MsgUser(toUser, "OpenRouter AI is not configured (missing token).")
+
+			return
+		}
+
+		baseURL := cfg.GetBaseURL(provider)
+
+		aiClient, err = ai.NewOpenRouterClient(token, baseURL, model)
+		if err != nil {
+			u.MsgUser(toUser, fmt.Sprintf("Failed to initialize OpenRouter client: %v", err))
+
+			return
+		}
 	case ai.AIOpenAIProvider, ai.AIDeepSeekProvider, ai.AIXAIProvider, ai.AIGrokProvider, ai.AIMuseProvider, ai.AIMetaProvider, ai.AIHetznerProvider, ai.AIOllamaProvider, ai.AILocalProvider, ai.AIvLLMProvider:
 		baseURL := cfg.GetBaseURL(provider)
 		if baseURL == "" {
@@ -1874,7 +1889,7 @@ func summarize(u *User, toUser *User, args []string, service string) {
 		logger.Infof("AI summarization for %s requested by %s (provider: %s, model: %s, thinking: %s, url: %s)", contextLabel, u.Nick, provider, model, thinking, baseURL)
 	case ai.AICopilotProvider, ai.AIGitHubProvider:
 		logger.Infof("AI summarization for %s requested by %s (provider: %s, model: %s, thinking: %s)", contextLabel, u.Nick, provider, model, thinking)
-	case ai.AIOpenAIProvider, ai.AIDeepSeekProvider, ai.AIXAIProvider, ai.AIGrokProvider, ai.AIMuseProvider, ai.AIMetaProvider, ai.AIHetznerProvider, ai.AIOllamaProvider, ai.AILocalProvider, ai.AIvLLMProvider:
+	case ai.AIOpenAIProvider, ai.AIOpenRouterProvider, ai.AIDeepSeekProvider, ai.AIXAIProvider, ai.AIGrokProvider, ai.AIMuseProvider, ai.AIMetaProvider, ai.AIHetznerProvider, ai.AIOllamaProvider, ai.AILocalProvider, ai.AIvLLMProvider:
 		baseURL := cfg.GetBaseURL(provider)
 
 		logger.Infof("AI summarization for %s requested by %s (provider: %s, model: %s, thinking: %s, url: %s)", contextLabel, u.Nick, provider, model, thinking, baseURL)
@@ -1943,12 +1958,12 @@ func summarize(u *User, toUser *User, args []string, service string) {
 
 	u.MsgUser(toUser, strings.Repeat("=", headingLen))
 
-	stats := formatSummarizeStats(len(events), transcript.Len(), summaryResult.Usage, duration)
+	stats := formatSummarizeStats(len(events), transcript.Len(), model, summaryResult, duration)
 	u.MsgUser(toUser, stats)
 	logger.Infof("AI summarization completed for %s requested by %s %s", contextLabel, u.Nick, stats)
 }
 
-func formatSummarizeStats(postCount, contentBytes int, usage ai.Usage, duration time.Duration) string {
+func formatSummarizeStats(postCount, contentBytes int, requestedModel string, result *ai.SummaryResult, duration time.Duration) string {
 	var parts []string
 
 	postStr := fmt.Sprintf("%d posts", postCount)
@@ -1965,13 +1980,37 @@ func formatSummarizeStats(postCount, contentBytes int, usage ai.Usage, duration 
 
 	parts = append(parts, postStr+", "+sizeStr)
 
-	if usage.TotalTokens > 0 || usage.PromptTokens > 0 || usage.CompletionTokens > 0 {
-		parts = append(parts, formatTokenUsage(usage))
+	if result != nil {
+		resolvedModel := strings.TrimSpace(result.Model)
+		if resolvedModel != "" && !strings.EqualFold(resolvedModel, requestedModel) {
+			parts = append(parts, "Model: "+resolvedModel)
+		}
+
+		if result.Usage.TotalTokens > 0 || result.Usage.PromptTokens > 0 || result.Usage.CompletionTokens > 0 {
+			parts = append(parts, formatTokenUsage(result.Usage))
+		}
+
+		if result.Usage.Cost > 0 {
+			parts = append(parts, "Cost: "+formatSummarizeCost(result.Usage.Cost))
+		}
 	}
 
 	parts = append(parts, fmt.Sprintf("%.1fs", duration.Seconds()))
 
 	return fmt.Sprintf("[%s]", strings.Join(parts, " | "))
+}
+
+func formatSummarizeCost(cost float64) string {
+	switch {
+	case cost < 0.000001:
+		return "<$0.000001"
+	case cost < 0.0001:
+		return fmt.Sprintf("$%.6f", cost)
+	case cost < 0.01:
+		return fmt.Sprintf("$%.5f", cost)
+	default:
+		return fmt.Sprintf("$%.4f", cost)
+	}
 }
 
 func formatTokenUsage(usage ai.Usage) string {
