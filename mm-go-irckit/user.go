@@ -341,7 +341,7 @@ func (u *User) Decode() {
 				// get merged with the lines around them or wait for the timer.
 				if msg.Command != irc.PRIVMSG ||
 					len(msg.Params) == 0 ||
-					isServiceBot(msg.Params[0]) ||
+					u.isActiveServiceBot(msg.Params[0]) ||
 					strings.HasPrefix(msg.Trailing, "\x01") ||
 					modifyRegExp.MatchString(msg.Trailing) ||
 					(strings.HasPrefix(msg.Trailing, "@@") && parseReactionToMsgRegExp.MatchString(msg.Trailing)) {
@@ -485,9 +485,30 @@ const (
 	serviceMastodon   = "mastodon"
 )
 
+var loginServices = [...]string{
+	serviceMattermost,
+	serviceSlack,
+	serviceMatrix,
+	serviceMastodon,
+}
+
 // isServiceBot tells if nick is one of the service bots (the ones to login to and to send commands to).
 func isServiceBot(nick string) bool {
 	return nick == serviceSlack || nick == serviceMattermost || nick == serviceMastodon || nick == serviceMatrix
+}
+
+// isServiceUser reports whether target is one of the local bridge service bots, not a remote user with the same nick.
+func isServiceUser(target *User) bool {
+	return target != nil && target.Conn == nil && target.Host == serviceName && isServiceBot(target.Nick)
+}
+
+// isActiveServiceBot reports whether nick is a service bot reachable in the user's current login state.
+func (u *User) isActiveServiceBot(nick string) bool {
+	if br := u.currentBridge(); br != nil {
+		return nick == br.Protocol()
+	}
+
+	return isServiceBot(nick)
 }
 
 // incomingLogLine describes a message from the client for the log, without the credentials in it.
@@ -534,6 +555,25 @@ func (u *User) createService(nick string, what string) {
 			Host:  "service",
 			Ghost: true,
 		})
+}
+
+func (u *User) createLoginServices() {
+	for _, svc := range loginServices {
+		u.createService(svc, "loginservice")
+	}
+}
+
+func (u *User) pruneInactiveServices(active string) {
+	srv, ok := u.Srv.(*server)
+	if !ok {
+		return
+	}
+
+	for _, svc := range loginServices {
+		if svc != active {
+			srv.removeService(svc)
+		}
+	}
 }
 
 // ShouldNotifyAway checks if the away cooldown has elapsed and returns

@@ -115,10 +115,7 @@ func NewUserBridge(c net.Conn, srv Server, cfg *config.Config, dbs map[string]*b
 	u.requestedChannels.Store(&initialMap)
 
 	// used for login
-	u.createService(serviceMattermost, "loginservice")
-	u.createService(serviceSlack, "loginservice")
-	u.createService(serviceMatrix, "loginservice")
-	u.createService(serviceMastodon, "loginservice")
+	u.createLoginServices()
 	u.createService("matterircd", "systemservice")
 
 	return u
@@ -2552,6 +2549,8 @@ func (u *User) loginTo(protocol string) error {
 		}
 	}
 
+	u.pruneInactiveServices(protocol)
+
 	return nil
 }
 
@@ -2588,6 +2587,7 @@ func (u *User) logoutFrom(protocol string) error {
 	}
 
 	u.Srv.Logout(u)
+	u.createLoginServices()
 
 	return nil
 }
