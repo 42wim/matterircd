@@ -1074,9 +1074,9 @@ var cmds = map[string]Command{
 	"scrollback":       {handler: scrollback, login: true, minParams: 1, maxParams: 3},
 	"search":           {handler: search, login: true, minParams: 1, maxParams: -1},
 	"searchusers":      {handler: searchUsers, login: true, minParams: 1, maxParams: -1},
-	"summarize":        {handler: summarize, login: true, minParams: 1, maxParams: 4},
-	"summary":          {handler: summarize, login: true, minParams: 1, maxParams: 4},
-	"tldr":             {handler: summarize, login: true, minParams: 1, maxParams: 4},
+	"summarize":        {handler: summarize, login: true, minParams: 1, maxParams: 5},
+	"summary":          {handler: summarize, login: true, minParams: 1, maxParams: 5},
+	"tldr":             {handler: summarize, login: true, minParams: 1, maxParams: 5},
 	"updatelastviewed": {handler: updatelastviewed, login: true, minParams: 1, maxParams: 1},
 	"verify":           {handler: verify, login: true, minParams: 1, maxParams: 2},
 }
@@ -1426,6 +1426,7 @@ type summarizeQuery struct {
 	Since int64
 
 	Provider string
+	Model    string
 	Thinking string
 }
 
@@ -1526,7 +1527,34 @@ func parseSummarizeAIThinkingMode(arg string) (string, bool) {
 	}
 }
 
-//nolint:funlen,gocyclo
+const invalidSummarizeOptionMsg = "invalid option: expected post count (e.g. 50), duration (e.g. 24h), thinking mode (off, low, medium, high), provider (claude, copilot, deepseek, gemini, muse, openai, xai), or model (e.g. gemini-4-hydrogen)"
+
+func hasNonEmptyPrefix(s, prefix string) bool {
+	return strings.HasPrefix(s, prefix) && len(s) > len(prefix)
+}
+
+func inferSummarizeAIProviderFromModel(model string) (string, bool) {
+	m := strings.ToLower(strings.TrimSpace(model))
+
+	switch {
+	case hasNonEmptyPrefix(m, "gemini-"),
+		hasNonEmptyPrefix(m, "models/gemini-"),
+		hasNonEmptyPrefix(m, "publishers/google/models/gemini-"):
+		return ai.AIGeminiProvider, true
+	case hasNonEmptyPrefix(m, "claude-"):
+		return ai.AIClaudeProvider, true
+	case hasNonEmptyPrefix(m, "deepseek-"):
+		return ai.AIDeepSeekProvider, true
+	case hasNonEmptyPrefix(m, "grok-"):
+		return ai.AIXAIProvider, true
+	case hasNonEmptyPrefix(m, "muse-"):
+		return ai.AIMuseProvider, true
+	default:
+		return "", false
+	}
+}
+
+//nolint:funlen,gocyclo,gocognit
 func parseSummarizeLimit(extraArgs []string, defaultLimit, maxLimit int) (summarizeQuery, error) {
 	if maxLimit == 0 {
 		maxLimit = 100
@@ -1540,6 +1568,7 @@ func parseSummarizeLimit(extraArgs []string, defaultLimit, maxLimit int) (summar
 	hasLimit := false
 
 	for _, arg := range extraArgs {
+		arg = strings.TrimSpace(arg)
 		if arg == "" {
 			continue
 		}
@@ -1582,22 +1611,47 @@ func parseSummarizeLimit(extraArgs []string, defaultLimit, maxLimit int) (summar
 			continue
 		}
 
-		// Fall back to parsing as an integer count (e.g. 50)
+		// Try parsing as an integer count (e.g. 50)
 		val, err := strconv.Atoi(arg)
-		if err != nil || val <= 0 {
-			return summarizeQuery{}, errors.New("invalid option: expected post count (e.g. 50), duration (e.g. 24h), thinking mode (off, low, medium, high), or provider (claude, copilot, deepseek, gemini, muse, openai, xai)")
+		if err == nil {
+			if val <= 0 {
+				return summarizeQuery{}, errors.New("post count must be positive")
+			}
+
+			if hasLimit {
+				return summarizeQuery{}, errors.New("limit or duration specified more than once")
+			}
+
+			if val > maxLimit {
+				val = maxLimit
+			}
+
+			query.Count = val
+			hasLimit = true
+
+			continue
 		}
 
-		if hasLimit {
-			return summarizeQuery{}, errors.New("limit or duration specified more than once")
+		if query.Model != "" {
+			if query.Provider == "" {
+				if _, ok := inferSummarizeAIProviderFromModel(query.Model); !ok {
+					return summarizeQuery{}, errors.New(invalidSummarizeOptionMsg)
+				}
+			}
+
+			return summarizeQuery{}, errors.New("model specified more than once")
 		}
 
-		if val > maxLimit {
-			val = maxLimit
+		query.Model = arg
+	}
+
+	if query.Model != "" && query.Provider == "" {
+		provider, ok := inferSummarizeAIProviderFromModel(query.Model)
+		if !ok {
+			return summarizeQuery{}, errors.New(invalidSummarizeOptionMsg)
 		}
 
-		query.Count = val
-		hasLimit = true
+		query.Provider = provider
 	}
 
 	return query, nil
@@ -1622,9 +1676,9 @@ func summarize(u *User, toUser *User, args []string, service string) {
 		return
 	}
 
-	if len(args) == 0 || len(args) > 4 {
-		u.MsgUser(toUser, "Usage: SUMMARIZE <#channel | user | @@thread_id> [post_count | duration] [thinking] [claude | copilot | deepseek | gemini | muse | openai | xai]")
-		u.MsgUser(toUser, "e.g. SUMMARIZE #dev 50, SUMMARIZE #dev 24h gemini high, SUMMARIZE @@q3kz9... openai, SUMMARIZE someuser 30m")
+	if len(args) == 0 || len(args) > 5 {
+		u.MsgUser(toUser, "Usage: SUMMARIZE <#channel | user | @@thread_id> [post_count | duration] [thinking] [provider [model] | model]")
+		u.MsgUser(toUser, "e.g. SUMMARIZE #dev 50, SUMMARIZE #dev 24h gemini high, SUMMARIZE #dev 1h gemini hydrogen, SUMMARIZE #dev 1h gemini-4-hydrogen, SUMMARIZE @@q3kz9... openai")
 
 		return
 	}
@@ -1645,7 +1699,13 @@ func summarize(u *User, toUser *User, args []string, service string) {
 		provider = ai.AIGeminiProvider
 	}
 
-	model := ai.GetModel(provider, cfg.Model, cfg.Models)
+	defaultModel := ai.GetModel(provider, cfg.Model, cfg.Models)
+
+	model := defaultModel
+	if query.Model != "" {
+		model = query.Model
+	}
+
 	token := cfg.GetToken(provider)
 
 	var (
@@ -1743,6 +1803,10 @@ func summarize(u *User, toUser *User, args []string, service string) {
 		u.MsgUser(toUser, "No messages found to summarize.")
 
 		return
+	}
+
+	if geminiClient, ok := aiClient.(*ai.GeminiClient); ok {
+		model = geminiClient.ResolveModel(u.ctx, defaultModel)
 	}
 
 	ellipsis := "..."
