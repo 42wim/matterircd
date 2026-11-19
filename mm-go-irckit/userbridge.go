@@ -1451,7 +1451,7 @@ func (u *User) addUsersToChannels() {
 }
 
 //nolint:funlen,gocognit,gocyclo
-func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(nick, msg, timeTag string) error {
+func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(nick, msg, timeTag string, ircCmd ...string) error {
 	isDM := u.br.IsDMChannelName(mmchannel.Name)
 
 	var (
@@ -1470,7 +1470,7 @@ func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(nick, msg, timeTa
 
 	prefixes := make(map[string]*irc.Prefix)
 
-	return func(nick, msg, timeTag string) error {
+	return func(nick, msg, timeTag string, ircCmd ...string) error {
 		target := channelTarget
 
 		if isDM {
@@ -1516,10 +1516,14 @@ func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(nick, msg, timeTa
 			}
 
 			cmd := irc.PRIVMSG
+			if len(ircCmd) > 0 && ircCmd[0] != "" {
+				cmd = ircCmd[0]
+			}
+
 			msgPrefix := prefix
 
 			if timeTag != "" {
-				cmd = timeTag + " :" + prefix.String() + " PRIVMSG"
+				cmd = timeTag + " :" + prefix.String() + " " + cmd
 				msgPrefix = nil
 			}
 
@@ -2038,11 +2042,14 @@ func (u *User) replayHistoryEvents(brchannel *bridge.ChannelInfo, since int64, l
 			dateStr := time.UnixMilli(createAt).Format("2006-01-02 15:04:05")
 
 			target := "matterircd"
+			cmd := irc.NOTICE
+
 			if u.br.IsDMChannelName(brchannel.Name) {
 				target = nick
+				cmd = irc.PRIVMSG
 			}
 
-			err := spoof(target, "\x1d\x02Replaying msgs since "+dateStr+"\x02 ("+logSince+")\x1d", "")
+			err := spoof(target, "\x1d\x02Replaying msgs since "+dateStr+"\x02 ("+logSince+")\x1d", "", cmd)
 			if err != nil {
 				return false
 			}
