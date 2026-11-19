@@ -103,10 +103,11 @@ type part struct {
 }
 
 type geminiUsageMetadata struct {
-	PromptTokenCount     int `json:"promptTokenCount"`
-	CandidatesTokenCount int `json:"candidatesTokenCount"`
-	TotalTokenCount      int `json:"totalTokenCount"`
-	ThoughtsTokenCount   int `json:"thoughtsTokenCount"`
+	PromptTokenCount        int `json:"promptTokenCount"`
+	CachedContentTokenCount int `json:"cachedContentTokenCount"`
+	CandidatesTokenCount    int `json:"candidatesTokenCount"`
+	TotalTokenCount         int `json:"totalTokenCount"`
+	ThoughtsTokenCount      int `json:"thoughtsTokenCount"`
 }
 
 type generateResponse struct {
@@ -129,15 +130,20 @@ func parseGeminiUsage(m *geminiUsageMetadata) Usage {
 		return Usage{}
 	}
 
+	cacheHit := max(m.CachedContentTokenCount, 0)
+	cacheMiss := max(m.PromptTokenCount-cacheHit, 0)
+
 	res := Usage{
 		PromptTokens:     m.PromptTokenCount,
+		CacheHitTokens:   cacheHit,
+		CacheMissTokens:  cacheMiss,
 		CompletionTokens: m.CandidatesTokenCount,
 		TotalTokens:      m.TotalTokenCount,
 		ReasoningTokens:  m.ThoughtsTokenCount,
 	}
 
 	if res.TotalTokens == 0 && (res.PromptTokens > 0 || res.CompletionTokens > 0) {
-		res.TotalTokens = res.PromptTokens + res.CompletionTokens
+		res.TotalTokens = res.PromptTokens + res.CompletionTokens + res.ReasoningTokens
 	}
 
 	return res

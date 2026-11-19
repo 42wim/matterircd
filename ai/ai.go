@@ -17,6 +17,8 @@ type Summarizer interface {
 
 type Usage struct {
 	PromptTokens     int
+	CacheHitTokens   int
+	CacheMissTokens  int
 	CompletionTokens int
 	TotalTokens      int
 	ReasoningTokens  int
@@ -33,9 +35,14 @@ type chatMessage struct {
 }
 
 type chatUsage struct {
-	PromptTokens            int `json:"prompt_tokens"`
-	CompletionTokens        int `json:"completion_tokens"`
-	TotalTokens             int `json:"total_tokens"`
+	PromptTokens          int `json:"prompt_tokens"`
+	CompletionTokens      int `json:"completion_tokens"`
+	TotalTokens           int `json:"total_tokens"`
+	PromptCacheHitTokens  int `json:"prompt_cache_hit_tokens"`
+	PromptCacheMissTokens int `json:"prompt_cache_miss_tokens"`
+	PromptTokensDetails   *struct {
+		CachedTokens int `json:"cached_tokens"`
+	} `json:"prompt_tokens_details,omitempty"`
 	CompletionTokensDetails *struct {
 		ReasoningTokens int `json:"reasoning_tokens"`
 	} `json:"completion_tokens_details,omitempty"`
@@ -58,8 +65,28 @@ func parseChatUsage(u *chatUsage) Usage {
 		return Usage{}
 	}
 
+	cacheHit := u.PromptCacheHitTokens
+	if u.PromptTokensDetails != nil && u.PromptTokensDetails.CachedTokens > 0 {
+		cacheHit = u.PromptTokensDetails.CachedTokens
+	}
+
+	cacheHit = max(cacheHit, 0)
+
+	cacheMiss := max(u.PromptCacheMissTokens, 0)
+
+	promptTokens := u.PromptTokens
+	if promptTokens == 0 && (cacheHit > 0 || cacheMiss > 0) {
+		promptTokens = cacheHit + cacheMiss
+	}
+
+	if cacheMiss == 0 && promptTokens > 0 {
+		cacheMiss = max(promptTokens-cacheHit, 0)
+	}
+
 	res := Usage{
-		PromptTokens:     u.PromptTokens,
+		PromptTokens:     promptTokens,
+		CacheHitTokens:   cacheHit,
+		CacheMissTokens:  cacheMiss,
 		CompletionTokens: u.CompletionTokens,
 		TotalTokens:      u.TotalTokens,
 	}
