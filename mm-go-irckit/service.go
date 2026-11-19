@@ -1083,6 +1083,18 @@ var cmds = map[string]Command{
 
 func (u *User) handleServiceBot(service string, toUser *User, msg string) {
 	// func (u *User) handleMMServiceBot(toUser *User, msg string) {
+	br, protocol, reachable := u.resolveService(service)
+	if !reachable {
+		_ = u.Srv.EncodeMessage(u, irc.ERR_NOSUCHNICK, []string{u.Nick, service}, "No such nick/channel")
+		return
+	}
+
+	// The generic bot can't tell which bridge to login to.
+	if protocol == "" {
+		u.MsgUser(toUser, "You're not logged in. Use /msg <mattermost|slack|matrix|mastodon> login")
+		return
+	}
+
 	commands, err := parseCommandString(msg)
 	if err != nil {
 		u.MsgUser(toUser, fmt.Sprintf("\"%s\" is improperly formatted", msg))
@@ -1111,7 +1123,7 @@ func (u *User) handleServiceBot(service string, toUser *User, msg string) {
 	}
 
 	if cmd.login {
-		if u.br == nil {
+		if br == nil {
 			u.MsgUser(toUser, "You're not logged in. Use LOGIN first.")
 			return
 		}
@@ -1127,7 +1139,7 @@ func (u *User) handleServiceBot(service string, toUser *User, msg string) {
 		return
 	}
 
-	cmd.handler(u, toUser, commands[1:], service)
+	cmd.handler(u, toUser, commands[1:], protocol)
 }
 
 //nolint:gocyclo,funlen

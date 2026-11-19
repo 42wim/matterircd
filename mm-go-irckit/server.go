@@ -228,6 +228,12 @@ func (s *server) HasUser(nick string) (*User, bool) {
 	s.RLock()
 	defer s.RUnlock()
 
+	// Service bots are keyed by their nick. Check that first as the scan below is in random
+	// map order, which would make a remote user with the same nick shadow the service bot.
+	if u, ok := s.users[strings.ToLower(nick)]; ok && u.Nick == nick {
+		return u, true
+	}
+
 	for _, u := range s.users {
 		if u.Nick == nick {
 			return u, true
@@ -686,6 +692,16 @@ func (s *server) add(u *User) bool {
 	s.users[id] = u
 
 	return true
+}
+
+func (s *server) removeService(nick string) {
+	s.Lock()
+	defer s.Unlock()
+
+	id := strings.ToLower(nick)
+	if usr, ok := s.users[id]; ok && usr.Conn == nil && usr.Host == serviceName {
+		delete(s.users, id)
+	}
 }
 
 //nolint:funlen,gocognit,gocyclo
