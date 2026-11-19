@@ -30,8 +30,10 @@ type claudeThinking struct {
 }
 
 type claudeUsage struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
+	InputTokens              int `json:"input_tokens"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+	OutputTokens             int `json:"output_tokens"`
 }
 
 type claudeResponse struct {
@@ -51,10 +53,16 @@ func parseClaudeUsage(u *claudeUsage) Usage {
 		return Usage{}
 	}
 
+	cacheHit := max(u.CacheReadInputTokens, 0)
+	cacheMiss := max(u.InputTokens+u.CacheCreationInputTokens, 0)
+	promptTokens := cacheHit + cacheMiss
+
 	return Usage{
-		PromptTokens:     u.InputTokens,
+		PromptTokens:     promptTokens,
+		CacheHitTokens:   cacheHit,
+		CacheMissTokens:  cacheMiss,
 		CompletionTokens: u.OutputTokens,
-		TotalTokens:      u.InputTokens + u.OutputTokens,
+		TotalTokens:      promptTokens + u.OutputTokens,
 	}
 }
 

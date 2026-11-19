@@ -1965,33 +1965,46 @@ func formatSummarizeStats(postCount, contentBytes int, usage ai.Usage, duration 
 
 	parts = append(parts, postStr+", "+sizeStr)
 
-	if usage.TotalTokens > 0 || usage.PromptTokens > 0 {
-		var tokenStr string
-
-		switch {
-		case usage.ReasoningTokens > 0:
-			tokenStr = fmt.Sprintf("Tokens: %s prompt + %s reply (thinking: %s) = %s total",
-				formatTokenNumber(usage.PromptTokens),
-				formatTokenNumber(usage.CompletionTokens),
-				formatTokenNumber(usage.ReasoningTokens),
-				formatTokenNumber(usage.TotalTokens),
-			)
-		case usage.PromptTokens > 0 && usage.CompletionTokens > 0:
-			tokenStr = fmt.Sprintf("Tokens: %s prompt + %s reply = %s total",
-				formatTokenNumber(usage.PromptTokens),
-				formatTokenNumber(usage.CompletionTokens),
-				formatTokenNumber(usage.TotalTokens),
-			)
-		default:
-			tokenStr = fmt.Sprintf("Tokens: %s total", formatTokenNumber(usage.TotalTokens))
-		}
-
-		parts = append(parts, tokenStr)
+	if usage.TotalTokens > 0 || usage.PromptTokens > 0 || usage.CompletionTokens > 0 {
+		parts = append(parts, formatTokenUsage(usage))
 	}
 
 	parts = append(parts, fmt.Sprintf("%.1fs", duration.Seconds()))
 
 	return fmt.Sprintf("[%s]", strings.Join(parts, " | "))
+}
+
+func formatTokenUsage(usage ai.Usage) string {
+	if usage.PromptTokens == 0 && usage.CompletionTokens == 0 {
+		return fmt.Sprintf("Tokens: %s total", formatTokenNumber(usage.TotalTokens))
+	}
+
+	cacheHit := max(usage.CacheHitTokens, 0)
+
+	cacheMiss := usage.CacheMissTokens
+	if cacheMiss == 0 && usage.PromptTokens > cacheHit {
+		cacheMiss = usage.PromptTokens - cacheHit
+	}
+
+	inputStr := fmt.Sprintf("%s input (%s cache hit, %s cache miss)",
+		formatTokenNumber(usage.PromptTokens),
+		formatTokenNumber(cacheHit),
+		formatTokenNumber(cacheMiss),
+	)
+
+	outputStr := fmt.Sprintf("%s output", formatTokenNumber(usage.CompletionTokens))
+	if usage.ReasoningTokens > 0 {
+		outputStr = fmt.Sprintf("%s output (thinking: %s)",
+			formatTokenNumber(usage.CompletionTokens),
+			formatTokenNumber(usage.ReasoningTokens),
+		)
+	}
+
+	return fmt.Sprintf("Tokens: %s + %s = %s total",
+		inputStr,
+		outputStr,
+		formatTokenNumber(usage.TotalTokens),
+	)
 }
 
 func formatTokenNumber(n int) string {
