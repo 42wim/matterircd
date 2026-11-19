@@ -112,6 +112,12 @@ Connect with your favorite irc-client to localhost:6667
 For TLS support you'll need to generate certificates.  
 You can use this program [generate_cert.go](https://golang.org/src/crypto/tls/generate_cert.go) to generate key.pem and cert.pem
 
+### Generic `service` user
+
+Once logged in, the commands below can also be sent to `service`, which hands them to whichever bridge (Mattermost, Slack, Matrix or Mastodon) is logged in, e.g. `/msg service search 10 query` or `/msg service scrollback #bugs 100`.
+
+Only the service of the logged in bridge is available; `/msg` to the others (e.g. `/msg mattermost ...` while connected to Slack) gets *No such nick/channel*. Logging in still has to go through the bridge's own service as `service` can't tell which one you want, e.g. `/msg slack login ...`.
+
 ### Mattermost user commands
 
 Login with user/pass

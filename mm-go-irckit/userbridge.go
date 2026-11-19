@@ -116,6 +116,7 @@ func NewUserBridge(c net.Conn, srv Server, cfg *config.Config, dbs map[string]*b
 
 	// used for login
 	u.createLoginServices()
+	u.createService(serviceAlias, "service")
 	u.createService("matterircd", "systemservice")
 
 	return u

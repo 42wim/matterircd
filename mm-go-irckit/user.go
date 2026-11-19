@@ -483,6 +483,9 @@ const (
 	serviceMatrix     = "matrix"
 	serviceSlack      = "slack"
 	serviceMastodon   = "mastodon"
+
+	// serviceAlias is the service bot that handles the commands of whichever bridge is logged in.
+	serviceAlias = "service"
 )
 
 var loginServices = [...]string{
@@ -494,7 +497,7 @@ var loginServices = [...]string{
 
 // isServiceBot tells if nick is one of the service bots (the ones to login to and to send commands to).
 func isServiceBot(nick string) bool {
-	return nick == serviceSlack || nick == serviceMattermost || nick == serviceMastodon || nick == serviceMatrix
+	return nick == serviceSlack || nick == serviceMattermost || nick == serviceMastodon || nick == serviceMatrix || nick == serviceAlias
 }
 
 // isServiceUser reports whether target is one of the local bridge service bots, not a remote user with the same nick.
@@ -502,13 +505,32 @@ func isServiceUser(target *User) bool {
 	return target != nil && target.Conn == nil && target.Host == serviceName && isServiceBot(target.Nick)
 }
 
-// isActiveServiceBot reports whether nick is a service bot reachable in the user's current login state.
-func (u *User) isActiveServiceBot(nick string) bool {
-	if br := u.currentBridge(); br != nil {
-		return nick == br.Protocol()
+// resolveService maps a service bot nick to the active bridge and protocol it handles, and reports
+// whether the bot is reachable in the user's current login state. The generic bot handles the
+// logged in bridge's protocol, which is empty when not logged in.
+func (u *User) resolveService(nick string) (bridge.Bridger, string, bool) {
+	br := u.currentBridge()
+
+	if nick == serviceAlias {
+		if br == nil {
+			return nil, "", true
+		}
+
+		return br, br.Protocol(), true
 	}
 
-	return isServiceBot(nick)
+	return br, nick, br == nil || br.Protocol() == nick
+}
+
+// isActiveServiceBot reports whether nick is a service bot reachable in the user's current login state.
+func (u *User) isActiveServiceBot(nick string) bool {
+	if !isServiceBot(nick) {
+		return false
+	}
+
+	_, _, ok := u.resolveService(nick)
+
+	return ok
 }
 
 // incomingLogLine describes a message from the client for the log, without the credentials in it.
@@ -627,7 +649,7 @@ func isSensitiveServiceMsg(msg *irc.Message) bool {
 		return false
 	}
 
-	if msg.Name != serviceSlack && msg.Name != serviceMattermost && msg.Name != serviceMatrix {
+	if msg.Name != serviceSlack && msg.Name != serviceMattermost && msg.Name != serviceMatrix && msg.Name != serviceAlias {
 		return false
 	}
 

@@ -720,7 +720,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 	if toUser, exists := s.HasUser(query); exists { //nolint:nestif
 		switch {
 		case isServiceUser(toUser):
-			if br := u.currentBridge(); br != nil && br.Protocol() != query {
+			if _, _, ok := u.resolveService(query); !ok {
 				return s.EncodeMessage(u, irc.ERR_NOSUCHNICK, []string{u.Nick, query}, "No such nick/channel")
 			}
 
