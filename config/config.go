@@ -35,6 +35,7 @@ type AIConfig struct {
 	HetznerToken       string            // API key for Hetzner
 	MuseToken          string            // API key for Meta Muse
 	OpenAIToken        string            // API key for OpenAI
+	OpenRouterToken    string            // API key for OpenRouter
 	XAIToken           string            // API key for xAI (Grok)
 	URL                string            // Fallback base URL for configured Provider
 	URLs               map[string]string // Provider-specific base URLs
@@ -334,6 +335,7 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 		HetznerToken:       c.v.GetString("ai.hetzner_token"),
 		MuseToken:          museToken,
 		OpenAIToken:        c.v.GetString("ai.openai_token"),
+		OpenRouterToken:    c.v.GetString("ai.openrouter_token"),
 		XAIToken:           xaiToken,
 		URL:                unquoteString(aiURL),
 		URLs:               c.v.GetStringMapString("ai.urls"),
@@ -666,6 +668,12 @@ func (c *AIConfig) GetBaseURL(provider string) string {
 		}
 
 		return ai.DefaultOpenAIBaseURL
+	case ai.AIOpenRouterProvider:
+		if cfgP == ai.AIOpenRouterProvider && c.URL != "" {
+			return strings.TrimRight(c.URL, "/")
+		}
+
+		return ai.DefaultOpenRouterBaseURL
 	case ai.AIOllamaProvider, ai.AILocalProvider, ai.AIvLLMProvider:
 		if (cfgP == p || cfgP == ai.AILocalProvider || cfgP == ai.AIOllamaProvider || cfgP == ai.AIvLLMProvider || cfgP == "" || cfgP == ai.AIGeminiProvider) && c.URL != "" {
 			return strings.TrimRight(c.URL, "/")
@@ -746,6 +754,14 @@ func (c *AIConfig) GetToken(provider string) string {
 		}
 
 		if strings.EqualFold(c.Provider, ai.AIOpenAIProvider) {
+			return c.Token
+		}
+	case ai.AIOpenRouterProvider:
+		if c.OpenRouterToken != "" {
+			return c.OpenRouterToken
+		}
+
+		if strings.EqualFold(c.Provider, ai.AIOpenRouterProvider) {
 			return c.Token
 		}
 	case ai.AIOllamaProvider, ai.AILocalProvider, ai.AIvLLMProvider:
