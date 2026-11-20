@@ -2042,14 +2042,12 @@ func (u *User) replayHistoryEvents(brchannel *bridge.ChannelInfo, since int64, l
 			dateStr := time.UnixMilli(createAt).Format("2006-01-02 15:04:05")
 
 			target := "matterircd"
-			cmd := irc.NOTICE
 
 			if u.br.IsDMChannelName(brchannel.Name) {
 				target = nick
-				cmd = irc.PRIVMSG
 			}
 
-			err := spoof(target, "\x1d\x02Replaying msgs since "+dateStr+"\x02 ("+logSince+")\x1d", "", cmd)
+			err := spoof(target, "\x1d\x02Replaying msgs since "+dateStr+"\x02 ("+logSince+")\x1d", "", irc.NOTICE)
 			if err != nil {
 				return false
 			}
