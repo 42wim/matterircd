@@ -1,6 +1,9 @@
 name: docker
 
 on:
+  push:
+    tags:
+      - 'v*'
   workflow_run:
     workflows: ["Development"]
     types:
@@ -12,14 +15,15 @@ jobs:
   docker:
     runs-on: ubuntu-26.04
     if: >-
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'push' &&
-      github.event.workflow_run.head_branch == 'master'
+      github.event_name == 'push' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'master')
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.ref }}
 
       -
         name: Set up QEMU
