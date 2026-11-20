@@ -3,7 +3,22 @@ on:
   push:
     branches:
       - 'master'
+    paths:
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'vendor/**'
+      - '.golangci.yaml'
+      - '.github/workflows/development.yml'
+      - 'Dockerfile'
   pull_request:
+    paths:
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'vendor/**'
+      - '.golangci.yaml'
+      - '.github/workflows/development.yml'
 jobs:
   lint:
     name: golangci-lint
