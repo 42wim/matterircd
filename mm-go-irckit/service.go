@@ -618,7 +618,7 @@ func details(u *User, toUser *User, args []string, service string) {
 		ts := time.Unix(0, createAt*int64(time.Millisecond)).Format("2006-01-02 15:04:05")
 		u.MsgUser(toUser, prefix+"["+ts+"] <"+nick+"> in "+channel)
 
-		textToProcess := utils.WrapMessage(text, 460)
+		textToProcess := utils.WrapMessage(text, u.maxLineLength())
 
 		utils.ProcessMessageText(textToProcess, opts, func(line string) {
 			// Visually translate actions for the details view
@@ -931,7 +931,7 @@ func dispatchHistoricalEvent(u *User, toUser *User, event *bridge.Event, searchC
 		PreserveNewLines:   preserveNewLines,
 	}
 
-	textToProcess := utils.WrapMessage(text, 460)
+	textToProcess := utils.WrapMessage(text, u.maxLineLength())
 
 	var lines []string
 
@@ -1073,7 +1073,7 @@ func (u *User) sendScrollback(target, from, msg, timeTag string) {
 	}
 
 	isAction := strings.HasPrefix(msg, "\x01ACTION ") && strings.HasSuffix(msg, "\x01")
-	wrapLimit := 460
+	wrapLimit := u.maxLineLength()
 
 	if isAction {
 		msg = msg[8 : len(msg)-1]
@@ -1183,15 +1183,27 @@ var cmds = map[string]Command{
 	"scrollback":       {handler: scrollback, login: true, minParams: 1, maxParams: 3},
 	"search":           {handler: search, login: true, minParams: 1, maxParams: -1},
 	"searchusers":      {handler: searchUsers, login: true, minParams: 1, maxParams: -1},
-	"summarize":        {handler: summarize, login: true, minParams: 1, maxParams: 4},
-	"summary":          {handler: summarize, login: true, minParams: 1, maxParams: 4},
-	"tldr":             {handler: summarize, login: true, minParams: 1, maxParams: 4},
+	"summarize":        {handler: summarize, login: true, minParams: 1, maxParams: 5},
+	"summary":          {handler: summarize, login: true, minParams: 1, maxParams: 5},
+	"tldr":             {handler: summarize, login: true, minParams: 1, maxParams: 5},
 	"updatelastviewed": {handler: updatelastviewed, login: true, minParams: 1, maxParams: 1},
 	"verify":           {handler: verify, login: true, minParams: 1, maxParams: 2},
 }
 
 func (u *User) handleServiceBot(service string, toUser *User, msg string) {
 	// func (u *User) handleMMServiceBot(toUser *User, msg string) {
+	br, protocol, reachable := u.resolveService(service)
+	if !reachable {
+		_ = u.Srv.EncodeMessage(u, irc.ERR_NOSUCHNICK, []string{u.Nick, service}, "No such nick/channel")
+		return
+	}
+
+	// The generic bot can't tell which bridge to login to.
+	if protocol == "" {
+		u.MsgUser(toUser, "You're not logged in. Use /msg <mattermost|slack|matrix|mastodon> login")
+		return
+	}
+
 	commands, err := parseCommandString(msg)
 	if err != nil {
 		u.MsgUser(toUser, fmt.Sprintf("\"%s\" is improperly formatted", msg))
@@ -1220,7 +1232,7 @@ func (u *User) handleServiceBot(service string, toUser *User, msg string) {
 	}
 
 	if cmd.login {
-		if u.br == nil {
+		if br == nil {
 			u.MsgUser(toUser, "You're not logged in. Use LOGIN first.")
 			return
 		}
@@ -1236,7 +1248,7 @@ func (u *User) handleServiceBot(service string, toUser *User, msg string) {
 		return
 	}
 
-	cmd.handler(u, toUser, commands[1:], service)
+	cmd.handler(u, toUser, commands[1:], protocol)
 }
 
 //nolint:gocyclo,funlen
@@ -1535,6 +1547,7 @@ type summarizeQuery struct {
 	Since int64
 
 	Provider string
+	Model    string
 	Thinking string
 }
 
@@ -1611,7 +1624,7 @@ func parseSummarizeAIProvider(arg string) (string, bool) {
 		return ai.AIXAIProvider, true
 	case ai.AIMuseProvider, ai.AIMetaProvider:
 		return ai.AIMuseProvider, true
-	case ai.AIOpenAIProvider, ai.AIDeepSeekProvider, ai.AIHetznerProvider, ai.AIOllamaProvider, ai.AILocalProvider, ai.AIvLLMProvider:
+	case ai.AIOpenAIProvider, ai.AIOpenRouterProvider, ai.AIDeepSeekProvider, ai.AIHetznerProvider, ai.AIOllamaProvider, ai.AILocalProvider, ai.AIvLLMProvider:
 		return strings.ToLower(strings.TrimSpace(arg)), true
 	default:
 		return "", false
@@ -1635,7 +1648,34 @@ func parseSummarizeAIThinkingMode(arg string) (string, bool) {
 	}
 }
 
-//nolint:funlen,gocyclo
+const invalidSummarizeOptionMsg = "invalid option: expected post count (e.g. 50), duration (e.g. 24h), thinking mode (off, low, medium, high), provider (claude, copilot, deepseek, gemini, muse, openai, openrouter, xai), or model (e.g. gemini-4-hydrogen)"
+
+func hasNonEmptyPrefix(s, prefix string) bool {
+	return strings.HasPrefix(s, prefix) && len(s) > len(prefix)
+}
+
+func inferSummarizeAIProviderFromModel(model string) (string, bool) {
+	m := strings.ToLower(strings.TrimSpace(model))
+
+	switch {
+	case hasNonEmptyPrefix(m, "gemini-"),
+		hasNonEmptyPrefix(m, "models/gemini-"),
+		hasNonEmptyPrefix(m, "publishers/google/models/gemini-"):
+		return ai.AIGeminiProvider, true
+	case hasNonEmptyPrefix(m, "claude-"):
+		return ai.AIClaudeProvider, true
+	case hasNonEmptyPrefix(m, "deepseek-"):
+		return ai.AIDeepSeekProvider, true
+	case hasNonEmptyPrefix(m, "grok-"):
+		return ai.AIXAIProvider, true
+	case hasNonEmptyPrefix(m, "muse-"):
+		return ai.AIMuseProvider, true
+	default:
+		return "", false
+	}
+}
+
+//nolint:funlen,gocyclo,gocognit
 func parseSummarizeLimit(extraArgs []string, defaultLimit, maxLimit int) (summarizeQuery, error) {
 	if maxLimit == 0 {
 		maxLimit = 100
@@ -1649,6 +1689,7 @@ func parseSummarizeLimit(extraArgs []string, defaultLimit, maxLimit int) (summar
 	hasLimit := false
 
 	for _, arg := range extraArgs {
+		arg = strings.TrimSpace(arg)
 		if arg == "" {
 			continue
 		}
@@ -1691,22 +1732,47 @@ func parseSummarizeLimit(extraArgs []string, defaultLimit, maxLimit int) (summar
 			continue
 		}
 
-		// Fall back to parsing as an integer count (e.g. 50)
+		// Try parsing as an integer count (e.g. 50)
 		val, err := strconv.Atoi(arg)
-		if err != nil || val <= 0 {
-			return summarizeQuery{}, errors.New("invalid option: expected post count (e.g. 50), duration (e.g. 24h), thinking mode (off, low, medium, high), or provider (claude, copilot, deepseek, gemini, muse, openai, xai)")
+		if err == nil {
+			if val <= 0 {
+				return summarizeQuery{}, errors.New("post count must be positive")
+			}
+
+			if hasLimit {
+				return summarizeQuery{}, errors.New("limit or duration specified more than once")
+			}
+
+			if val > maxLimit {
+				val = maxLimit
+			}
+
+			query.Count = val
+			hasLimit = true
+
+			continue
 		}
 
-		if hasLimit {
-			return summarizeQuery{}, errors.New("limit or duration specified more than once")
+		if query.Model != "" {
+			if query.Provider == "" {
+				if _, ok := inferSummarizeAIProviderFromModel(query.Model); !ok {
+					return summarizeQuery{}, errors.New(invalidSummarizeOptionMsg)
+				}
+			}
+
+			return summarizeQuery{}, errors.New("model specified more than once")
 		}
 
-		if val > maxLimit {
-			val = maxLimit
+		query.Model = arg
+	}
+
+	if query.Model != "" && query.Provider == "" {
+		provider, ok := inferSummarizeAIProviderFromModel(query.Model)
+		if !ok {
+			return summarizeQuery{}, errors.New(invalidSummarizeOptionMsg)
 		}
 
-		query.Count = val
-		hasLimit = true
+		query.Provider = provider
 	}
 
 	return query, nil
@@ -1731,9 +1797,9 @@ func summarize(u *User, toUser *User, args []string, service string) {
 		return
 	}
 
-	if len(args) == 0 || len(args) > 4 {
-		u.MsgUser(toUser, "Usage: SUMMARIZE <#channel | user | @@thread_id> [post_count | duration] [thinking] [claude | copilot | deepseek | gemini | muse | openai | xai]")
-		u.MsgUser(toUser, "e.g. SUMMARIZE #dev 50, SUMMARIZE #dev 24h gemini high, SUMMARIZE @@q3kz9... openai, SUMMARIZE someuser 30m")
+	if len(args) == 0 || len(args) > 5 {
+		u.MsgUser(toUser, "Usage: SUMMARIZE <#channel | user | @@thread_id> [post_count | duration] [thinking] [provider [model] | model]")
+		u.MsgUser(toUser, "e.g. SUMMARIZE #dev 50, SUMMARIZE #dev 24h gemini high, SUMMARIZE #dev 1h gemini hydrogen, SUMMARIZE #dev 1h gemini-4-hydrogen, SUMMARIZE @@q3kz9... openai")
 
 		return
 	}
@@ -1754,7 +1820,13 @@ func summarize(u *User, toUser *User, args []string, service string) {
 		provider = ai.AIGeminiProvider
 	}
 
-	model := ai.GetModel(provider, cfg.Model, cfg.Models)
+	defaultModel := ai.GetModel(provider, cfg.Model, cfg.Models)
+
+	model := defaultModel
+	if query.Model != "" {
+		model = query.Model
+	}
+
 	token := cfg.GetToken(provider)
 
 	var (
@@ -1788,6 +1860,21 @@ func summarize(u *User, toUser *User, args []string, service string) {
 		aiClient, err = ai.NewCopilotClient(token, model)
 		if err != nil {
 			u.MsgUser(toUser, fmt.Sprintf("Failed to initialize Copilot AI: %v", err))
+
+			return
+		}
+	case ai.AIOpenRouterProvider:
+		if token == "" {
+			u.MsgUser(toUser, "OpenRouter AI is not configured (missing token).")
+
+			return
+		}
+
+		baseURL := cfg.GetBaseURL(provider)
+
+		aiClient, err = ai.NewOpenRouterClient(token, baseURL, model)
+		if err != nil {
+			u.MsgUser(toUser, fmt.Sprintf("Failed to initialize OpenRouter client: %v", err))
 
 			return
 		}
@@ -1854,6 +1941,10 @@ func summarize(u *User, toUser *User, args []string, service string) {
 		return
 	}
 
+	if geminiClient, ok := aiClient.(*ai.GeminiClient); ok {
+		model = geminiClient.ResolveModel(u.ctx, defaultModel)
+	}
+
 	ellipsis := "..."
 	if u.br.FormatterConfig().Unicode {
 		ellipsis = "…"
@@ -1904,18 +1995,18 @@ func summarize(u *User, toUser *User, args []string, service string) {
 	case ai.AIClaudeProvider, ai.AIAnthropicProvider:
 		baseURL := cfg.GetBaseURL(provider)
 
-		logger.Debugf("AI summarization for %s (provider: %s, model: %s, thinking: %s, url: %s)", contextLabel, provider, model, thinking, baseURL)
+		logger.Infof("AI summarization for %s requested by %s (provider: %s, model: %s, thinking: %s, url: %s)", contextLabel, u.Nick, provider, model, thinking, baseURL)
 	case ai.AICopilotProvider, ai.AIGitHubProvider:
-		logger.Debugf("AI summarization for %s (provider: %s, model: %s, thinking: %s)", contextLabel, provider, model, thinking)
-	case ai.AIOpenAIProvider, ai.AIDeepSeekProvider, ai.AIXAIProvider, ai.AIGrokProvider, ai.AIMuseProvider, ai.AIMetaProvider, ai.AIHetznerProvider, ai.AIOllamaProvider, ai.AILocalProvider, ai.AIvLLMProvider:
+		logger.Infof("AI summarization for %s requested by %s (provider: %s, model: %s, thinking: %s)", contextLabel, u.Nick, provider, model, thinking)
+	case ai.AIOpenAIProvider, ai.AIOpenRouterProvider, ai.AIDeepSeekProvider, ai.AIXAIProvider, ai.AIGrokProvider, ai.AIMuseProvider, ai.AIMetaProvider, ai.AIHetznerProvider, ai.AIOllamaProvider, ai.AILocalProvider, ai.AIvLLMProvider:
 		baseURL := cfg.GetBaseURL(provider)
 
-		logger.Debugf("AI summarization for %s (provider: %s, model: %s, thinking: %s, url: %s)", contextLabel, provider, model, thinking, baseURL)
+		logger.Infof("AI summarization for %s requested by %s (provider: %s, model: %s, thinking: %s, url: %s)", contextLabel, u.Nick, provider, model, thinking, baseURL)
 	default:
 		if cfg.ServiceAccountFile == "" {
 			baseURL := cfg.GetBaseURL(provider)
 
-			logger.Debugf("AI summarization for %s (provider: %s, model: %s, thinking: %s, url: %s)", contextLabel, provider, model, thinking, baseURL)
+			logger.Infof("AI summarization for %s requested by %s (provider: %s, model: %s, thinking: %s, url: %s)", contextLabel, u.Nick, provider, model, thinking, baseURL)
 
 			break
 		}
@@ -1925,9 +2016,9 @@ func summarize(u *User, toUser *User, args []string, service string) {
 			region = "us"
 		}
 
-		logger.Debugf(
-			"AI summarization for %s (provider: %s, model: %s, thinking: %s, project: %s, region: %s)",
-			contextLabel, provider, model, thinking, project, region,
+		logger.Infof(
+			"AI summarization for %s requested by %s (provider: %s, model: %s, thinking: %s, project: %s, region: %s)",
+			contextLabel, u.Nick, provider, model, thinking, project, region,
 		)
 	}
 
@@ -1935,6 +2026,7 @@ func summarize(u *User, toUser *User, args []string, service string) {
 
 	summaryResult, err := aiClient.Summarize(u.ctx, prompt, query.Thinking)
 	if err != nil {
+		logger.Warnf("AI summarization failed for %s requested by %s: %v", contextLabel, u.Nick, err)
 		u.MsgUser(toUser, fmt.Sprintf("Summarization failed: %v", err))
 
 		return
@@ -1974,10 +2066,13 @@ func summarize(u *User, toUser *User, args []string, service string) {
 	})
 
 	u.MsgUser(toUser, strings.Repeat("=", headingLen))
-	u.MsgUser(toUser, formatSummarizeStats(len(events), transcript.Len(), summaryResult.Usage, duration))
+
+	stats := formatSummarizeStats(len(events), transcript.Len(), model, summaryResult, duration)
+	u.MsgUser(toUser, stats)
+	logger.Infof("AI summarization completed for %s requested by %s %s", contextLabel, u.Nick, stats)
 }
 
-func formatSummarizeStats(postCount, contentBytes int, usage ai.Usage, duration time.Duration) string {
+func formatSummarizeStats(postCount, contentBytes int, requestedModel string, result *ai.SummaryResult, duration time.Duration) string {
 	var parts []string
 
 	postStr := fmt.Sprintf("%d posts", postCount)
@@ -1994,33 +2089,70 @@ func formatSummarizeStats(postCount, contentBytes int, usage ai.Usage, duration 
 
 	parts = append(parts, postStr+", "+sizeStr)
 
-	if usage.TotalTokens > 0 || usage.PromptTokens > 0 {
-		var tokenStr string
-
-		switch {
-		case usage.ReasoningTokens > 0:
-			tokenStr = fmt.Sprintf("Tokens: %s prompt + %s reply (thinking: %s) = %s total",
-				formatTokenNumber(usage.PromptTokens),
-				formatTokenNumber(usage.CompletionTokens),
-				formatTokenNumber(usage.ReasoningTokens),
-				formatTokenNumber(usage.TotalTokens),
-			)
-		case usage.PromptTokens > 0 && usage.CompletionTokens > 0:
-			tokenStr = fmt.Sprintf("Tokens: %s prompt + %s reply = %s total",
-				formatTokenNumber(usage.PromptTokens),
-				formatTokenNumber(usage.CompletionTokens),
-				formatTokenNumber(usage.TotalTokens),
-			)
-		default:
-			tokenStr = fmt.Sprintf("Tokens: %s total", formatTokenNumber(usage.TotalTokens))
+	if result != nil {
+		resolvedModel := strings.TrimSpace(result.Model)
+		if resolvedModel != "" && !strings.EqualFold(resolvedModel, requestedModel) {
+			parts = append(parts, "Model: "+resolvedModel)
 		}
 
-		parts = append(parts, tokenStr)
+		if result.Usage.TotalTokens > 0 || result.Usage.PromptTokens > 0 || result.Usage.CompletionTokens > 0 {
+			parts = append(parts, formatTokenUsage(result.Usage))
+		}
+
+		if result.Usage.Cost > 0 {
+			parts = append(parts, "Cost: "+formatSummarizeCost(result.Usage.Cost))
+		}
 	}
 
 	parts = append(parts, fmt.Sprintf("%.1fs", duration.Seconds()))
 
 	return fmt.Sprintf("[%s]", strings.Join(parts, " | "))
+}
+
+func formatSummarizeCost(cost float64) string {
+	switch {
+	case cost < 0.000001:
+		return "<$0.000001"
+	case cost < 0.0001:
+		return fmt.Sprintf("$%.6f", cost)
+	case cost < 0.01:
+		return fmt.Sprintf("$%.5f", cost)
+	default:
+		return fmt.Sprintf("$%.4f", cost)
+	}
+}
+
+func formatTokenUsage(usage ai.Usage) string {
+	if usage.PromptTokens == 0 && usage.CompletionTokens == 0 {
+		return fmt.Sprintf("Tokens: %s total", formatTokenNumber(usage.TotalTokens))
+	}
+
+	cacheHit := max(usage.CacheHitTokens, 0)
+
+	cacheMiss := usage.CacheMissTokens
+	if cacheMiss == 0 && usage.PromptTokens > cacheHit {
+		cacheMiss = usage.PromptTokens - cacheHit
+	}
+
+	inputStr := fmt.Sprintf("%s input (%s cache hit, %s cache miss)",
+		formatTokenNumber(usage.PromptTokens),
+		formatTokenNumber(cacheHit),
+		formatTokenNumber(cacheMiss),
+	)
+
+	outputStr := fmt.Sprintf("%s output", formatTokenNumber(usage.CompletionTokens))
+	if usage.ReasoningTokens > 0 {
+		outputStr = fmt.Sprintf("%s output (thinking: %s)",
+			formatTokenNumber(usage.CompletionTokens),
+			formatTokenNumber(usage.ReasoningTokens),
+		)
+	}
+
+	return fmt.Sprintf("Tokens: %s + %s = %s total",
+		inputStr,
+		outputStr,
+		formatTokenNumber(usage.TotalTokens),
+	)
 }
 
 func formatTokenNumber(n int) string {

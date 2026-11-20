@@ -88,9 +88,15 @@ func (c *Client) onSynced() (bool, time.Duration) {
 	return true, downtime
 }
 
-func (c *Client) notifyReconnect(downtime time.Duration) {
+func (c *Client) notifyReconnect(info ReconnectInfo) {
+	if h, ok := c.handler.(ReconnectInfoHandler); ok {
+		h.OnReconnectInfo(info)
+
+		return
+	}
+
 	if h, ok := c.handler.(ReconnectHandler); ok {
-		h.OnReconnect(downtime)
+		h.OnReconnect(info.Downtime)
 	}
 }
 

@@ -61,7 +61,9 @@ type Client struct {
 	channelMembers    map[string]channelMembersEntry
 	userChannels      map[string]userChannelsEntry
 	dmChannels        map[string]string
-	msgLast           map[string]string
+	recentSent        map[string][]string
+	sending           map[string]int
+	sentCh            chan struct{}
 	pongCh            chan struct{}
 	connected         atomic.Bool
 
@@ -99,7 +101,9 @@ func New(cred Credentials) *Client {
 		channelMembers: make(map[string]channelMembersEntry),
 		userChannels:   make(map[string]userChannelsEntry),
 		dmChannels:     make(map[string]string),
-		msgLast:        make(map[string]string),
+		recentSent:     make(map[string][]string),
+		sending:        make(map[string]int),
+		sentCh:         make(chan struct{}),
 		pongCh:         make(chan struct{}, 1),
 		rootLogger:     rootLogger,
 		logger:         rootLogger.WithFields(logrus.Fields{"prefix": "slackclient"}),
@@ -199,6 +203,12 @@ func (c *Client) Logout() error {
 
 	c.sc = nil
 	c.connected.Store(false)
+
+	c.Lock()
+	c.recentSent = nil
+	c.sending = nil
+	c.broadcastSentLocked()
+	c.Unlock()
 
 	c.logger.Info("logout succeeded")
 

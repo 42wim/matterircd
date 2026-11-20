@@ -218,6 +218,21 @@ func main() {
 			}
 
 			logger.Infof("AI summarization enabled (default provider: %s, model: %s)", provider, model)
+		case ai.AIOpenRouterProvider:
+			if token == "" {
+				logger.Warn("AI summarization enabled, but token is missing")
+				break
+			}
+
+			baseURL := aiCfg.GetBaseURL(provider)
+
+			client, err := ai.NewOpenRouterClient(token, baseURL, model)
+			if err != nil {
+				logger.Errorf("AI summarization setup error: %v", err)
+				break
+			}
+
+			logger.Infof("AI summarization enabled (default provider: %s, model: %s, url: %s)", provider, model, client.BaseURL())
 		case ai.AIOpenAIProvider, ai.AIHetznerProvider, ai.AIOllamaProvider, ai.AILocalProvider, ai.AIvLLMProvider:
 			baseURL := aiCfg.GetBaseURL(provider)
 			if baseURL == "" {

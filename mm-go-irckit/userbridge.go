@@ -37,6 +37,9 @@ const systemUser = "system"
 // maxInviteTextLen keeps an invitation notice well below the IRC line limit.
 const maxInviteTextLen = 400
 
+// eventChanBufferSize gives bridges headroom while loginTo completes startup sync.
+const eventChanBufferSize = 1000
+
 type UserBridge struct {
 	Srv          Server
 	Credentials  bridge.Credentials
@@ -76,6 +79,15 @@ type UserBridge struct {
 
 	updateCounterMutex sync.Mutex
 	updateCounter      map[string]time.Time
+
+	pendingReplayMu sync.Mutex
+	pendingReplay   map[string]int
+	savedSinceSnap  map[string]savedSinceSnapshot
+}
+
+type savedSinceSnapshot struct {
+	since int64
+	inDB  bool
 }
 
 func NewUserBridge(c net.Conn, srv Server, cfg *config.Config, dbs map[string]*bolt.DB) *User {
@@ -96,23 +108,22 @@ func NewUserBridge(c net.Conn, srv Server, cfg *config.Config, dbs map[string]*b
 	u.msgMapIndex = make(map[string]map[int]string)
 	u.msgCounter = make(map[string]int)
 	u.updateCounter = make(map[string]time.Time)
-	u.eventChan = make(chan *bridge.Event, 1000)
+	u.pendingReplay = make(map[string]int)
+	u.savedSinceSnap = make(map[string]savedSinceSnapshot)
+	u.eventChan = make(chan *bridge.Event, eventChanBufferSize)
 
 	initialMap := make(map[string]struct{})
 	u.requestedChannels.Store(&initialMap)
 
 	// used for login
-	u.createService(serviceMattermost, "loginservice")
-	u.createService(serviceSlack, "loginservice")
-	u.createService(serviceMatrix, "loginservice")
-	u.createService(serviceMastodon, "loginservice")
-	u.createService(serviceRocketChat, "loginservice")
+	u.createLoginServices()
+	u.createService(serviceAlias, "service")
 	u.createService("matterircd", "systemservice")
 
 	return u
 }
 
-//nolint:funlen,gocyclo
+//nolint:funlen,gocognit,gocyclo
 func (u *User) handleEventChan(ctx context.Context, eventChan <-chan *bridge.Event) {
 	// Flush to disk every 2 minutes to prevent I/O bottlenecks
 	flushTicker := time.NewTicker(2 * time.Minute)
@@ -134,21 +145,25 @@ func (u *User) handleEventChan(ctx context.Context, eventChan <-chan *bridge.Eve
 			case *bridge.BannerChangeEvent:
 				u.handleBannerChangeEvent(e)
 			case *bridge.ChannelMessageEvent:
-				u.updateLastEventTime(e.CreateAt)
-				u.handleChannelMessageEvent(e)
+				if u.handleChannelMessageEvent(e) {
+					u.updateLastEventTime(e.CreateAt)
+				}
 			case *bridge.DirectMessageEvent:
-				u.updateLastEventTime(e.CreateAt)
-				u.handleDirectMessageEvent(e)
+				if u.handleDirectMessageEvent(e) {
+					u.updateLastEventTime(e.CreateAt)
+				}
 			case *bridge.ChannelTopicEvent:
 				u.handleChannelTopicEvent(e)
 			case *bridge.FileEvent:
 				u.handleFileEvent(e)
 			case *bridge.ChannelAddEvent:
-				u.updateLastEventTime(e.CreateAt)
-				u.handleChannelAddEvent(e)
+				if u.handleChannelAddEvent(e) {
+					u.updateLastEventTime(e.CreateAt)
+				}
 			case *bridge.ChannelRemoveEvent:
-				u.updateLastEventTime(e.CreateAt)
-				u.handleChannelRemoveEvent(e)
+				if u.handleChannelRemoveEvent(e) {
+					u.updateLastEventTime(e.CreateAt)
+				}
 			case *bridge.ChannelInviteEvent:
 				u.handleChannelInviteEvent(e)
 			case *bridge.ChannelCreateEvent:
@@ -187,7 +202,7 @@ func (u *User) handleEventChan(ctx context.Context, eventChan <-chan *bridge.Eve
 	}
 }
 
-func (u *User) handleChannelTopicEvent(event *bridge.ChannelTopicEvent) {
+func (u *User) handleChannelTopicEvent(event *bridge.ChannelTopicEvent) bool {
 	tu, ok := u.Srv.HasUserID(event.UserID)
 	if event.UserID == u.User {
 		ok = true
@@ -230,14 +245,19 @@ func (u *User) handleChannelTopicEvent(event *bridge.ChannelTopicEvent) {
 			customEmoji,
 		)
 
-		ch.Topic(tu, topic)
+		err := setChannelTopic(ch, tu, topic)
+		if err != nil {
+			return false
+		}
 
 		u.saveLastViewedAt(event.ChannelID)
 
-		return
+		return true
 	}
 
 	logger.Errorf("topic change failure: userID %s not found", event.UserID)
+
+	return true
 }
 
 const (
@@ -281,7 +301,7 @@ func (u *User) getMarkdownBlockCodePrefix() (string, string) {
 }
 
 //nolint:funlen,gocognit,gocyclo
-func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
+func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) bool {
 	if u.hasSharedCfg() && u.sharedCfg().ShowMentions {
 		for _, m := range u.MentionKeys {
 			if m == u.Nick || m == "" {
@@ -374,25 +394,19 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 
 	timeTag := formatLiveTimeTag(event.CreateAt, event.Event)
 
+	var sendErr error
+
 	emitLine := func(line string) {
+		if sendErr != nil {
+			return
+		}
+
 		if showContext || addPrefix {
 			line = prefix + line + suffix
 			addPrefix = false
 		}
 
-		if event.Sender.Me {
-			if event.Receiver.Me {
-				u.msgSpoofUserTime(u, u.Nick, line, timeTag, len(line))
-			} else {
-				// Outbound DM (e.g. from history replay)
-				// Spoof as us, but target THEIR nick so it routes to their query window
-				u.msgSpoofUserTime(u, u.createUserFromInfo(event.Receiver).Nick, line, timeTag, len(line))
-			}
-		} else {
-			// Inbound DM
-			// Spoof as them, target OUR nick
-			u.msgSpoofUserTime(u.createUserFromInfo(event.Sender), u.Nick, line, timeTag, len(line))
-		}
+		sendErr = u.msgSpoofDMTime(event.Sender, event.Receiver, line, timeTag, len(line))
 	}
 
 	var (
@@ -432,15 +446,21 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) {
 		}
 	}
 
+	if sendErr != nil {
+		return false
+	}
+
 	if u.hasSharedCfg() && !u.sharedCfg().DisableAutoView {
 		u.updateLastViewed(event.ChannelID)
 	}
 
 	u.saveLastViewedAt(event.ChannelID, event.CreateAt)
+
+	return true
 }
 
-//nolint:gocyclo
-func (u *User) handleChannelAddEvent(event *bridge.ChannelAddEvent) {
+//nolint:gocognit,gocyclo
+func (u *User) handleChannelAddEvent(event *bridge.ChannelAddEvent) bool {
 	ch := u.Srv.Channel(event.ChannelID)
 
 	for _, added := range event.Added {
@@ -466,7 +486,9 @@ func (u *User) handleChannelAddEvent(event *bridge.ChannelAddEvent) {
 
 			since := time.Now().Add(-replayDur).UnixMilli()
 
-			u.replayHistory(brchannel, since, replayDur.String())
+			if !u.replayHistory(brchannel, since, replayDur.String()) {
+				return false
+			}
 
 			continue
 		}
@@ -484,7 +506,10 @@ func (u *User) handleChannelAddEvent(event *bridge.ChannelAddEvent) {
 			}
 
 			if u.sanitizeNick(added.Nick) != adderNick {
-				ch.SpoofMessage(systemUser, "\x1dadded "+u.sanitizeNick(added.Nick)+" to the channel by "+adderNick+"\x1d")
+				err := spoofChannelMessage(ch, systemUser, "\x1dadded "+u.sanitizeNick(added.Nick)+" to the channel by "+adderNick+"\x1d")
+				if err != nil {
+					return false
+				}
 			}
 		}
 	}
@@ -495,6 +520,8 @@ func (u *User) handleChannelAddEvent(event *bridge.ChannelAddEvent) {
 	}
 
 	u.saveLastViewedAt(event.ChannelID, event.CreateAt)
+
+	return true
 }
 
 // handleChannelInviteEvent shows an invitation as an IRC INVITE. Joining the
@@ -539,7 +566,7 @@ func (u *User) handleChannelInviteEvent(event *bridge.ChannelInviteEvent) {
 	u.MsgUser(svc, "Accept with /join "+target)
 }
 
-func (u *User) handleChannelRemoveEvent(event *bridge.ChannelRemoveEvent) {
+func (u *User) handleChannelRemoveEvent(event *bridge.ChannelRemoveEvent) bool {
 	ch := u.Srv.Channel(event.ChannelID)
 
 	for _, removed := range event.Removed {
@@ -564,12 +591,17 @@ func (u *User) handleChannelRemoveEvent(event *bridge.ChannelRemoveEvent) {
 			}
 
 			if u.sanitizeNick(removed.Nick) != removerNick {
-				ch.SpoofMessage(systemUser, "\x1dremoved "+u.sanitizeNick(removed.Nick)+" from the channel by "+removerNick+"\x1d")
+				err := spoofChannelMessage(ch, systemUser, "\x1dremoved "+u.sanitizeNick(removed.Nick)+" from the channel by "+removerNick+"\x1d")
+				if err != nil {
+					return false
+				}
 			}
 		}
 	}
 
 	u.saveLastViewedAt(event.ChannelID, event.CreateAt)
+
+	return true
 }
 
 func (u *User) getMessageChannel(channelID string, sender *bridge.UserInfo) Channel {
@@ -608,7 +640,7 @@ func (u *User) getMessageChannelUser(channelID string, sender *bridge.UserInfo) 
 }
 
 //nolint:funlen,gocognit,gocyclo
-func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
+func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) bool {
 	/*
 		CHANNEL_OPEN                   = "O"
 		CHANNEL_PRIVATE                = "P"
@@ -630,7 +662,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 
 	if event.ChannelType != "D" && ch.ID() == "&messages" { //nolint:goconst
 		if u.br.BridgeConfig().ShowOnlyJoined {
-			return
+			return true
 		}
 
 		nick += "/" + u.Srv.Channel(event.ChannelID).String()
@@ -639,8 +671,9 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 	}
 
 	if event.Event == "channel_purpose" {
-		ch.SpoofMessage(systemUser, "\x1d"+nick+" "+event.Text+"\x1d")
-		return
+		err := spoofChannelMessage(ch, systemUser, "\x1d"+nick+" "+event.Text+"\x1d")
+
+		return err == nil
 	}
 
 	if u.hasSharedCfg() && u.sharedCfg().ShowMentions {
@@ -663,7 +696,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 	prefix := ""
 	suffix := ""
 	showContext := false
-	maxlen := 460
+	maxlen := u.maxLineLength()
 
 	if u.Nick == systemUser || (event.Sender != nil && event.Sender.Nick == systemUser) {
 		text = "\x1d" + text + "\x1d"
@@ -700,7 +733,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 
 	// Context is added after wrapping, so reserve it or the line gets split again when sent.
 	if hardLineSplit && showContext {
-		maxlen = max(min(maxlen, wireTextBudget(senderPrefix, cmd, ch.String())-len(prefix)-len(suffix)), 1)
+		maxlen = max(min(maxlen, wireTextBudget(senderPrefix, cmd, ch.String(), u.maxLineLength())-len(prefix)-len(suffix)), 1)
 	}
 
 	// Keep a CTCP ACTION whole here, SpoofWithPrefix splits it keeping the envelope.
@@ -743,13 +776,19 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 
 	timeTag := formatLiveTimeTag(event.CreateAt, event.Event)
 
+	var sendErr error
+
 	emitLine := func(line string) {
+		if sendErr != nil {
+			return
+		}
+
 		if showContext || addPrefix {
 			line = prefix + line + suffix
 			addPrefix = false
 		}
 
-		ch.SpoofWithPrefixTime(senderPrefix, line, cmd, timeTag, len(line))
+		sendErr = spoofChannelWithPrefixTime(ch, senderPrefix, line, cmd, timeTag, len(line))
 	}
 
 	var (
@@ -789,11 +828,17 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) {
 		}
 	}
 
+	if sendErr != nil {
+		return false
+	}
+
 	if u.hasSharedCfg() && !u.sharedCfg().DisableAutoView {
 		u.updateLastViewed(event.ChannelID)
 	}
 
 	u.saveLastViewedAt(event.ChannelID, event.CreateAt)
+
+	return true
 }
 
 func (u *User) handleFileEvent(event *bridge.FileEvent) {
@@ -821,14 +866,9 @@ func (u *User) handleFileEvent(event *bridge.FileEvent) {
 
 		switch event.ChannelType {
 		case "D":
-			if event.Sender.Me {
-				if event.Receiver.Me {
-					u.msgSpoofUserTime(u, u.Nick, fileMsg, timeTag)
-				} else {
-					u.msgSpoofUserTime(u, u.createUserFromInfo(event.Receiver).Nick, fileMsg, timeTag)
-				}
-			} else {
-				u.msgSpoofUserTime(u.createUserFromInfo(event.Sender), u.Nick, fileMsg, timeTag)
+			err := u.msgSpoofDMTime(event.Sender, event.Receiver, fileMsg, timeTag)
+			if err != nil {
+				return
 			}
 		default:
 			ch := u.getMessageChannel(event.ChannelID, event.Sender)
@@ -842,7 +882,10 @@ func (u *User) handleFileEvent(event *bridge.FileEvent) {
 				prefix = sender.Prefix()
 			}
 
-			ch.SpoofWithPrefixTime(prefix, fileMsg, irc.PRIVMSG, timeTag)
+			err := spoofChannelWithPrefixTime(ch, prefix, fileMsg, irc.PRIVMSG, timeTag)
+			if err != nil {
+				return
+			}
 		}
 	}
 }
@@ -966,7 +1009,7 @@ func (u *User) handleStatusChangeEvent(event *bridge.StatusChangeEvent) {
 			}
 		// Ignore `offline` status changes to prevent bouncing between being marked away and not.
 		case "offline":
-			logger.Debugf("doing nothing as status %s", event.Status)
+			logger.Tracef("doing nothing as status %s", event.Status)
 		default:
 			if !u.away.Load() {
 				logger.Debug("setting myself away")
@@ -1025,10 +1068,10 @@ func (u *User) handleReactionEvent(event any) {
 		parentID = e.ParentID
 	}
 
-	defer u.saveLastViewedAt(channelID)
-
 	if u.hasSharedCfg() && u.sharedCfg().HideReactions {
 		logger.Debug("Not showing reaction: " + text + reaction)
+		u.saveLastViewedAt(channelID)
+
 		return
 	}
 
@@ -1049,7 +1092,9 @@ func (u *User) handleReactionEvent(event any) {
 			ParentID:  parentID,
 		}
 
-		u.handleDirectMessageEvent(e)
+		if u.handleDirectMessageEvent(e) {
+			u.saveLastViewedAt(channelID)
+		}
 
 		return
 	}
@@ -1064,7 +1109,9 @@ func (u *User) handleReactionEvent(event any) {
 		ParentID:    parentID,
 	}
 
-	u.handleChannelMessageEvent(e)
+	if u.handleChannelMessageEvent(e) {
+		u.saveLastViewedAt(channelID)
+	}
 }
 
 func (u *User) CreateUserFromInfo(info *bridge.UserInfo) *User {
@@ -1203,6 +1250,7 @@ func (u *User) addUsersToChannels() {
 
 	u.eventLoopMutex.Lock()
 	lastSyncThreshold := u.lastSync
+	isReconnect := u.eventLoopStarted
 	isHeavySync := !u.eventLoopStarted || time.Since(u.lastSync.Round(0)) > syncThresh
 	u.eventLoopMutex.Unlock()
 
@@ -1324,6 +1372,7 @@ func (u *User) addUsersToChannels() {
 	})
 
 	channels := make(chan *bridge.ChannelInfo, len(joinChannels))
+	u.markPendingReplay(joinChannels)
 
 	var wg sync.WaitGroup
 
@@ -1339,7 +1388,7 @@ func (u *User) addUsersToChannels() {
 		workerLogger := logger.WithField("prefix", fmt.Sprintf("%saddUserToChannelWorker%d", currentPrefix, i))
 
 		wg.Go(func() {
-			u.addUserToChannelWorker(channels, throttle, workerLogger)
+			u.addUserToChannelWorkerWithMode(channels, throttle, workerLogger, isReconnect)
 		})
 	}
 
@@ -1356,6 +1405,10 @@ func (u *User) addUsersToChannels() {
 	go func() {
 		wg.Wait()
 		throttle.Stop()
+
+		for brchannel := range channels {
+			u.clearPendingReplay(brchannel.ID)
+		}
 
 		// Now that every worker has successfully finished syncing, move the watermark forward.
 		u.eventLoopMutex.Lock()
@@ -1399,7 +1452,7 @@ func (u *User) addUsersToChannels() {
 }
 
 //nolint:funlen,gocognit,gocyclo
-func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(nick, msg, timeTag string) {
+func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(nick, msg, timeTag string, ircCmd ...string) error {
 	isDM := u.br.IsDMChannelName(mmchannel.Name)
 
 	var (
@@ -1418,7 +1471,7 @@ func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(nick, msg, timeTa
 
 	prefixes := make(map[string]*irc.Prefix)
 
-	return func(nick, msg, timeTag string) {
+	return func(nick, msg, timeTag string, ircCmd ...string) error {
 		target := channelTarget
 
 		if isDM {
@@ -1430,7 +1483,7 @@ func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(nick, msg, timeTa
 		} else {
 			ch, ok := u.Srv.HasChannel(target)
 			if !ok || !ch.HasUser(u) {
-				return
+				return nil
 			}
 		}
 
@@ -1448,7 +1501,7 @@ func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(nick, msg, timeTa
 		}
 
 		isAction := strings.HasPrefix(msg, "\x01ACTION ") && strings.HasSuffix(msg, "\x01")
-		wrapLimit := 460
+		wrapLimit := u.maxLineLength()
 
 		if isAction {
 			msg = msg[8 : len(msg)-1]
@@ -1464,22 +1517,74 @@ func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(nick, msg, timeTa
 			}
 
 			cmd := irc.PRIVMSG
+			if len(ircCmd) > 0 && ircCmd[0] != "" {
+				cmd = ircCmd[0]
+			}
+
 			msgPrefix := prefix
 
 			if timeTag != "" {
-				cmd = timeTag + " :" + prefix.String() + " PRIVMSG"
+				cmd = timeTag + " :" + prefix.String() + " " + cmd
 				msgPrefix = nil
 			}
 
-			_ = u.Encode(&irc.Message{
+			err := u.Encode(&irc.Message{
 				Prefix:        msgPrefix,
 				Command:       cmd,
 				Params:        []string{target},
 				Trailing:      line,
 				EmptyTrailing: true,
 			})
+			if err != nil {
+				return err
+			}
+		}
+
+		return nil
+	}
+}
+
+const (
+	replayStrategyHybrid = "hybrid"
+	replayStrategySaved  = "saved"
+	replayStrategyServer = "server"
+)
+
+func normalizeReplayStrategy(strategy string) string {
+	if strategy == "" {
+		return replayStrategyHybrid
+	}
+
+	switch strategy {
+	case "saved+server", "server+saved", "stored+server", "server+stored":
+		return replayStrategyHybrid
+	case "stored":
+		return replayStrategySaved
+	case "server-only":
+		return replayStrategyServer
+	default:
+		return strategy
+	}
+}
+
+func readSavedSinceFromBuckets(primary, legacy *bolt.Bucket, channelID string) (int64, bool) {
+	var v []byte
+	if primary != nil {
+		v = primary.Get([]byte(channelID))
+	}
+
+	if v == nil && legacy != nil {
+		v = legacy.Get([]byte(channelID))
+	}
+
+	if v != nil {
+		val := binary.LittleEndian.Uint64(v)
+		if val <= math.MaxInt64 {
+			return int64(val), true
 		}
 	}
+
+	return 0, false
 }
 
 // getChannelSince calculates the 'since' timestamp for a channel based on the configured strategy.
@@ -1487,26 +1592,15 @@ func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(nick, msg, timeTa
 //nolint:funlen,gocognit,gocyclo
 func (u *User) getChannelSince(ctx context.Context, brchannel *bridge.ChannelInfo, replayCutoff int64) (int64, string, bool) {
 	// Fetch server-side last viewed if strategy allows
-	strategy := u.sharedCfg().ReplayStrategy
-	if strategy == "" {
-		strategy = "hybrid" //nolint:goconst
-	}
-
-	// Support alias normalizations
-	switch strategy {
-	case "saved+server", "server+saved", "stored+server", "server+stored":
-		strategy = "hybrid"
-	case "stored":
-		strategy = "saved" //nolint:goconst
-	}
+	strategy := normalizeReplayStrategy(u.sharedCfg().ReplayStrategy)
 
 	var serverSince int64
-	if strategy != "saved" {
+	if strategy != replayStrategySaved {
 		serverSince = u.br.GetLastViewedAt(ctx, brchannel.ID)
 	}
 
-	// If strategy is server-only, return immediately
-	if strategy == "server-only" {
+	// If strategy is server, return immediately
+	if strategy == replayStrategyServer {
 		if serverSince == 0 {
 			if brchannel.LastPostAt > replayCutoff {
 				return brchannel.LastPostAt, "lastpost-fallback", false
@@ -1519,7 +1613,7 @@ func (u *User) getChannelSince(ctx context.Context, brchannel *bridge.ChannelInf
 			return replayCutoff, "server-clamped", false
 		}
 
-		return serverSince, "server", false //nolint:goconst
+		return serverSince, replayStrategyServer, false
 	}
 
 	var (
@@ -1528,31 +1622,17 @@ func (u *User) getChannelSince(ctx context.Context, brchannel *bridge.ChannelInf
 	)
 
 	// Fetch locally saved BoltDB last viewed if strategy allows
-	if strategy == "saved" || strategy == "hybrid" { //nolint:nestif
-		db := u.getDB()
-		if db != nil {
+	if strategy == replayStrategySaved || strategy == replayStrategyHybrid {
+		if snap, ok := u.getSavedSinceSnap(brchannel.ID); ok {
+			savedSince = snap.since
+			inDB = snap.inDB
+		} else if db := u.getDB(); db != nil {
 			_ = db.View(func(tx *bolt.Tx) error {
-				var v []byte
-
-				b := tx.Bucket(u.dbBucketName())
-				if b != nil {
-					v = b.Get([]byte(brchannel.ID))
-				}
-
-				if v == nil {
-					legacyBucket := tx.Bucket([]byte(u.User))
-					if legacyBucket != nil {
-						v = legacyBucket.Get([]byte(brchannel.ID))
-					}
-				}
-
-				if v != nil {
-					val := binary.LittleEndian.Uint64(v)
-					if val <= math.MaxInt64 {
-						savedSince = int64(val)
-						inDB = true
-					}
-				}
+				savedSince, inDB = readSavedSinceFromBuckets(
+					tx.Bucket(u.dbBucketName()),
+					tx.Bucket([]byte(u.User)),
+					brchannel.ID,
+				)
 
 				return nil
 			})
@@ -1560,9 +1640,9 @@ func (u *User) getChannelSince(ctx context.Context, brchannel *bridge.ChannelInf
 	}
 
 	bestSince := serverSince
-	source := "server"
+	source := replayStrategyServer
 
-	if strategy == "saved" || savedSince > bestSince {
+	if strategy == replayStrategySaved || savedSince > bestSince {
 		bestSince = savedSince
 		source = "stored"
 	}
@@ -1570,7 +1650,7 @@ func (u *User) getChannelSince(ctx context.Context, brchannel *bridge.ChannelInf
 	// If both server and BoltDB are 0 (or we don't have it in DB for a DM)
 	isDM := u.br.IsDMChannelName(brchannel.Name)
 
-	if strategy == "saved" && !inDB {
+	if strategy == replayStrategySaved && !inDB {
 		return replayCutoff, "cutoff-fallback", false
 	}
 
@@ -1605,12 +1685,13 @@ func (u *User) getChannelSince(ctx context.Context, brchannel *bridge.ChannelInf
 	return bestSince, source, inDB
 }
 
-//nolint:funlen,cyclop,gocognit,gocyclo
 func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throttle *time.Ticker, logger *logrus.Entry) {
-	strategy := u.sharedCfg().ReplayStrategy
-	if strategy == "" {
-		strategy = "hybrid"
-	}
+	u.addUserToChannelWorkerWithMode(channels, throttle, logger, false)
+}
+
+//nolint:funlen,cyclop,gocognit,gocyclo
+func (u *User) addUserToChannelWorkerWithMode(channels <-chan *bridge.ChannelInfo, throttle *time.Ticker, logger *logrus.Entry, isReconnect bool) {
+	strategy := normalizeReplayStrategy(u.sharedCfg().ReplayStrategy)
 
 	replayDuration := u.sharedCfg().MaxReplayDuration
 	if replayDuration == 0 {
@@ -1644,12 +1725,16 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			// Interruptible throttle wait
 			select {
 			case <-u.ctx.Done():
+				u.clearPendingReplay(brchannel.ID)
 				logger.Debug("addUserToChannelWorker aborted via context during throttle")
+
 				return
 			case <-throttle.C:
 			}
 
 			if u.ctx.Err() != nil || u.br == nil {
+				u.clearPendingReplay(brchannel.ID)
+
 				return
 			}
 
@@ -1693,6 +1778,8 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			// If JoinDM is disabled and this GM is not whitelisted or explicitly in join-lists, skip joining it on boot
 			// unless the IRC user has already joined it (e.g. via live traffic or prior to a reconnect).
 			if !u.br.BridgeConfig().JoinDM && isGM && !isWhitelisted && !isJoinListMatched && !u.Srv.Channel(brchannel.ID).HasUser(u) {
+				u.clearPendingReplay(brchannel.ID)
+
 				continue
 			}
 
@@ -1702,12 +1789,16 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			// Explicitly whitelisted channels bypass this!
 			if lazyJoin && !brchannel.DM && !isWhitelisted { //nolint:nestif
 				// Strategy "saved": require prior presence in local BoltDB
-				if strategy == "saved" && !inDB {
+				if strategy == replayStrategySaved && !inDB {
+					u.clearPendingReplay(brchannel.ID)
+
 					continue
 				}
 
 				// Strategies "server" & "hybrid": consult server channel state and skip deleted channels
-				if (strategy == "server" || strategy == "hybrid") && brchannel.DeleteAt > 0 {
+				if (strategy == replayStrategyServer || strategy == replayStrategyHybrid) && brchannel.DeleteAt > 0 {
+					u.clearPendingReplay(brchannel.ID)
+
 					continue
 				}
 
@@ -1727,6 +1818,8 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 				// Evaluate dormancy using the ACTUAL Mattermost server activity
 				if brchannel.LastPostAt < cutoff {
 					logger.Debugf("Smart Lazy-join: Skipping dormant public channel %s (LastPost: %v)", channelName, time.UnixMilli(brchannel.LastPostAt).Format("2006-01-02 15:04:05"))
+					u.clearPendingReplay(brchannel.ID)
+
 					continue
 				}
 			}
@@ -1759,6 +1852,8 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 
 					// Fast exit on disconnect / shutdown
 					if errors.Is(syncErr, context.Canceled) || u.ctx.Err() != nil {
+						u.clearPendingReplay(brchannel.ID)
+
 						return
 					}
 
@@ -1767,6 +1862,8 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 					// Wait 5 seconds before retrying, but abort if the bridge is shutting down
 					select {
 					case <-u.ctx.Done():
+						u.clearPendingReplay(brchannel.ID)
+
 						return
 					case <-time.After(time.Second * 5):
 					}
@@ -1778,22 +1875,28 @@ func (u *User) addUserToChannelWorker(channels <-chan *bridge.ChannelInfo, throt
 			if !success {
 				logger.Errorf("Giving up on syncing %s. Skipping replay to PRESERVE history for next startup.", channelName)
 				u.sendServerNotice(fmt.Sprintf("replay failed for %s, use REPLAY service", channelName))
+				u.clearPendingReplay(brchannel.ID)
 
 				continue
 			}
 
 			// If mayJoin rejected joining the channel, abort replay so messages aren't spoofed into an empty buffer
 			if !isDM && !u.Srv.Channel(brchannel.ID).HasUser(u) {
+				u.clearPendingReplay(brchannel.ID)
+
 				continue
 			}
 
 			if u.isReplayExcluded(brchannel, channelName) {
 				logger.Debugf("Skipping history replay for excluded channel %s (%s)", channelName, brchannel.ID)
-			} else if !u.replayHistory(brchannel, since, sinceStr) {
+			} else if !u.replaySyncHistory(brchannel, since, sinceStr, isReconnect) {
 				logger.Warnf("Replay of %s failed, keeping its saved position for the next startup", channelName)
+				u.clearPendingReplay(brchannel.ID)
 
 				continue
 			}
+
+			u.clearPendingReplay(brchannel.ID)
 
 			if u.hasSharedCfg() && !u.sharedCfg().DisableAutoView && !u.replayHidesHistory(brchannel.ID) {
 				u.updateLastViewed(brchannel.ID)
@@ -1811,13 +1914,21 @@ func (u *User) replayHidesHistory(channelID string) bool {
 	return ok && h.ReplayHidesHistory(channelID)
 }
 
-// replayHistory handles the actual fetching and spoofing of historical channel messages.
+func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSince string) bool {
+	return u.replayHistoryEvents(brchannel, since, logSince, false, false)
+}
+
+func (u *User) replaySyncHistory(brchannel *bridge.ChannelInfo, since int64, logSince string, isReconnect bool) bool {
+	return u.replayHistoryEvents(brchannel, since, logSince, true, isReconnect)
+}
+
+// replayHistoryEvents handles the actual fetching and spoofing of historical channel messages.
 //
 // It returns false when the history couldn't be fetched, so callers keep the saved position
 // and read marker and the next startup retries instead of skipping the history.
 //
 //nolint:funlen,gocognit,gocyclo
-func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSince string) bool {
+func (u *User) replayHistoryEvents(brchannel *bridge.ChannelInfo, since int64, logSince string, isSync, isReconnect bool) bool {
 	if since == 0 || u.ctx.Err() != nil || u.br == nil {
 		return true
 	}
@@ -1830,7 +1941,20 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 	}
 
 	// Post everything to the channel we haven't seen yet
-	events := u.br.GetReplayEvents(u.ctx, brchannel.ID, since)
+	var events []*bridge.Event
+
+	if isSync {
+		if sr, ok := u.br.(interface {
+			GetSyncReplayEvents(ctx context.Context, channelID string, since int64, reconnect bool) []*bridge.Event
+		}); ok {
+			events = sr.GetSyncReplayEvents(u.ctx, brchannel.ID, since, isReconnect)
+		} else {
+			events = u.br.GetReplayEvents(u.ctx, brchannel.ID, since)
+		}
+	} else {
+		events = u.br.GetReplayEvents(u.ctx, brchannel.ID, since)
+	}
+
 	if len(events) == 0 {
 		// If the channel is not from the primary team id, we can't get posts
 		if events == nil && brchannel.TeamID == u.br.GetMe().TeamID {
@@ -1897,7 +2021,9 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 				u.Srv.Channel(brchannel.ID).Part(ghost, "")
 			}
 		case *bridge.ChannelTopicEvent:
-			u.handleChannelTopicEvent(e)
+			if !u.handleChannelTopicEvent(e) {
+				return false
+			}
 		default:
 			continue
 		}
@@ -1917,17 +2043,24 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 			dateStr := time.UnixMilli(createAt).Format("2006-01-02 15:04:05")
 
 			target := "matterircd"
+			cmd := irc.NOTICE
+
 			if u.br.IsDMChannelName(brchannel.Name) {
 				target = nick
+				cmd = irc.PRIVMSG
 			}
 
-			spoof(target, "\x1d\x02Replaying msgs since "+dateStr+"\x02 ("+logSince+")\x1d", "")
+			err := spoof(target, "\x1d\x02Replaying msgs since "+dateStr+"\x02 ("+logSince+")\x1d", "", cmd)
+			if err != nil {
+				return false
+			}
+
 			logger.Infof("Replaying msgs for %s (%s) since %s (%s)", channame, brchannel.ID, dateStr, logSince)
 
 			showReplayHdr = false
 		}
 
-		wrapLimit := 460
+		wrapLimit := u.maxLineLength()
 		if (u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext) && nick != systemUser {
 			wrapLimit -= len(u.prefixContext(brchannel.ID, msgID, parentID, "replay")) + 1
 		}
@@ -1983,7 +2116,10 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 				replayMsg = "\x01ACTION " + replayMsg + "\x01"
 			}
 
-			spoof(nick, replayMsg, timeTag)
+			err := spoof(nick, replayMsg, timeTag)
+			if err != nil {
+				return false
+			}
 		}
 
 		for i, f := range files {
@@ -2003,7 +2139,10 @@ func (u *User) replayHistory(brchannel *bridge.ChannelInfo, since int64, logSinc
 				fileMsg = "[" + tsStr + "] " + fileMsg
 			}
 
-			spoof(nick, fileMsg, timeTag)
+			err := spoof(nick, fileMsg, timeTag)
+			if err != nil {
+				return false
+			}
 		}
 	}
 
@@ -2043,13 +2182,26 @@ func formatLiveTimeTag(createAt int64, eventType string) string {
 }
 
 func (u *User) MsgSpoofUser(sender *User, rcvuser string, text string, maxlen ...int) {
-	u.msgSpoofUserTime(sender, rcvuser, text, "", maxlen...)
+	_ = u.msgSpoofUserTime(sender, rcvuser, text, "", maxlen...)
 }
 
-func (u *User) msgSpoofUserTime(sender *User, rcvuser, text, timeTag string, maxlen ...int) {
+func (u *User) msgSpoofDMTime(sender, receiver *bridge.UserInfo, text, timeTag string, maxlen ...int) error {
+	if sender.Me {
+		if receiver.Me {
+			return u.msgSpoofUserTime(u, u.Nick, text, timeTag, maxlen...)
+		}
+
+		// Outbound DM (e.g. from history replay): spoof as us targeting their nick.
+		return u.msgSpoofUserTime(u, u.createUserFromInfo(receiver).Nick, text, timeTag, maxlen...)
+	}
+
+	return u.msgSpoofUserTime(u.createUserFromInfo(sender), u.Nick, text, timeTag, maxlen...)
+}
+
+func (u *User) msgSpoofUserTime(sender *User, rcvuser, text, timeTag string, maxlen ...int) error {
 	hardLineSplit := u.cfg.Current().HardLineSplit
 	if len(maxlen) == 0 {
-		text = utils.WrapMessage(text, 460, hardLineSplit)
+		text = utils.WrapMessage(text, u.maxLineLength(), hardLineSplit)
 	} else {
 		text = utils.WrapMessage(text, maxlen[0], hardLineSplit)
 	}
@@ -2077,7 +2229,10 @@ func (u *User) msgSpoofUserTime(sender *User, rcvuser, text, timeTag string, max
 		line = strings.TrimSuffix(line, "\r")
 		msg.Trailing = line
 
-		u.Encode(&msg) //nolint:errcheck
+		err := u.Encode(&msg)
+		if err != nil {
+			return err
+		}
 
 		if !found {
 			break
@@ -2085,6 +2240,8 @@ func (u *User) msgSpoofUserTime(sender *User, rcvuser, text, timeTag string, max
 
 		text = rest
 	}
+
+	return nil
 }
 
 func (u *User) syncChannel(id string, name string) error {
@@ -2333,7 +2490,7 @@ func (u *User) loginTo(protocol string) error {
 	// addUsersToChannels, which hands the channel to the event loop.
 	u.eventLoopMutex.Lock()
 	u.eventLoopStarted = false
-	u.eventChan = make(chan *bridge.Event)
+	u.eventChan = make(chan *bridge.Event, eventChanBufferSize)
 	eventChan := u.eventChan
 	u.eventLoopMutex.Unlock()
 
@@ -2416,6 +2573,8 @@ func (u *User) loginTo(protocol string) error {
 		}
 	}
 
+	u.pruneInactiveServices(protocol)
+
 	return nil
 }
 
@@ -2452,6 +2611,7 @@ func (u *User) logoutFrom(protocol string) error {
 	}
 
 	u.Srv.Logout(u)
+	u.createLoginServices()
 
 	return nil
 }
@@ -2665,8 +2825,136 @@ func (u *User) stopEventLoop() {
 // lastViewedMaxDelay is the maximum random delay before the server is told that a channel has been read.
 var lastViewedMaxDelay = 3 * time.Second
 
+func (u *User) markPendingReplay(channels []*bridge.ChannelInfo) {
+	if len(channels) == 0 {
+		return
+	}
+
+	var needSnap []string
+
+	u.pendingReplayMu.Lock()
+
+	if u.pendingReplay == nil {
+		u.pendingReplay = make(map[string]int, len(channels))
+	}
+
+	for _, ch := range channels {
+		if ch != nil && ch.ID != "" {
+			u.pendingReplay[ch.ID]++
+
+			if _, ok := u.savedSinceSnap[ch.ID]; !ok {
+				needSnap = append(needSnap, ch.ID)
+			}
+		}
+	}
+
+	u.pendingReplayMu.Unlock()
+
+	if len(needSnap) == 0 {
+		return
+	}
+
+	snaps := u.snapshotSavedSince(needSnap)
+	if len(snaps) == 0 {
+		return
+	}
+
+	u.pendingReplayMu.Lock()
+
+	if u.savedSinceSnap == nil {
+		u.savedSinceSnap = make(map[string]savedSinceSnapshot, len(snaps))
+	}
+
+	for id, snap := range snaps {
+		if u.pendingReplay[id] > 0 {
+			if _, exists := u.savedSinceSnap[id]; !exists {
+				u.savedSinceSnap[id] = snap
+			}
+		}
+	}
+
+	u.pendingReplayMu.Unlock()
+}
+
+func (u *User) snapshotSavedSince(channelIDs []string) map[string]savedSinceSnapshot {
+	if len(channelIDs) == 0 {
+		return nil
+	}
+
+	if u.cfg != nil && normalizeReplayStrategy(u.sharedCfg().ReplayStrategy) == replayStrategyServer {
+		return nil
+	}
+
+	db := u.getDB()
+	if db == nil {
+		return nil
+	}
+
+	snaps := make(map[string]savedSinceSnapshot, len(channelIDs))
+	bucketName := u.dbBucketName()
+	legacyName := []byte(u.User)
+
+	err := db.View(func(tx *bolt.Tx) error {
+		primary := tx.Bucket(bucketName)
+		legacy := tx.Bucket(legacyName)
+
+		for _, id := range channelIDs {
+			ts, inDB := readSavedSinceFromBuckets(primary, legacy, id)
+			snaps[id] = savedSinceSnapshot{since: ts, inDB: inDB}
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil
+	}
+
+	return snaps
+}
+
+func (u *User) getSavedSinceSnap(channelID string) (savedSinceSnapshot, bool) {
+	if channelID == "" {
+		return savedSinceSnapshot{}, false
+	}
+
+	u.pendingReplayMu.Lock()
+	snap, ok := u.savedSinceSnap[channelID]
+	u.pendingReplayMu.Unlock()
+
+	return snap, ok
+}
+
+func (u *User) clearPendingReplay(channelID string) {
+	if channelID == "" {
+		return
+	}
+
+	u.pendingReplayMu.Lock()
+
+	if count := u.pendingReplay[channelID]; count <= 1 {
+		delete(u.pendingReplay, channelID)
+		delete(u.savedSinceSnap, channelID)
+	} else {
+		u.pendingReplay[channelID] = count - 1
+	}
+
+	u.pendingReplayMu.Unlock()
+}
+
+func (u *User) isPendingReplay(channelID string) bool {
+	if channelID == "" {
+		return false
+	}
+
+	u.pendingReplayMu.Lock()
+	pending := u.pendingReplay[channelID] > 0
+	u.pendingReplayMu.Unlock()
+
+	return pending
+}
+
 func (u *User) updateLastViewed(channelID string) {
-	if u.currentBridge() == nil {
+	if u.currentBridge() == nil || u.isPendingReplay(channelID) {
 		return
 	}
 
@@ -2689,9 +2977,9 @@ func (u *User) updateLastViewed(channelID string) {
 			return
 		}
 
-		// We could have logged out while waiting.
+		// We could have logged out or started replaying this channel while waiting.
 		br := u.currentBridge()
-		if br == nil {
+		if br == nil || u.isPendingReplay(channelID) {
 			return
 		}
 
@@ -2788,7 +3076,7 @@ func (u *User) clearChannelState(channelID string) {
 }
 
 func (u *User) saveLastViewedAt(channelID string, ts ...int64) {
-	if channelID == "" {
+	if channelID == "" || u.isPendingReplay(channelID) {
 		return
 	}
 
@@ -2956,10 +3244,22 @@ func (u *User) handleBannerChangeEvent(e *bridge.BannerChangeEvent) {
 	}
 }
 
+func (u *User) maxLineLength() int {
+	if u == nil || u.cfg == nil {
+		return defaultMaxLineLength
+	}
+
+	if n := u.cfg.Current().MaxLineLength; n > 0 {
+		return n
+	}
+
+	return defaultMaxLineLength
+}
+
 func (u *User) handleMessageThreadContext(channelID, messageID, parentID, event, text string) (string, string, string, bool, int) {
 	prefix := ""
 	suffix := ""
-	maxlen := 460
+	maxlen := u.maxLineLength()
 	showContext := false
 
 	newText := text

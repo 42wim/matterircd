@@ -162,6 +162,12 @@ type Matrix struct {
 	// roomProgressMu guards roomProgress, see UpdateLastViewed.
 	roomProgressMu sync.Mutex
 	roomProgress   map[id.RoomID]*roomProgress
+
+	// syncedMsgIDs records message event IDs received via /sync after Ready so
+	// sync replay never duplicates events already queued from /sync.
+	syncedMsgIDs   *lru.Cache[id.EventID, struct{}]
+	reconnectMu    sync.Mutex
+	pendingLimited map[id.RoomID]string // truncated recovery sync rooms (roomID -> prev_batch)
 }
 
 type cachedUser struct {
@@ -254,6 +260,8 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 	m.reactionCache, _ = lru.New[string, id.EventID](reactionCacheSize)
 	m.reactionMetaCache, _ = lru.New[id.EventID, reactionMeta](reactionCacheSize * 5)
 	m.sentCache, _ = lru.New[id.EventID, struct{}](sentCacheSize)
+	m.syncedMsgIDs, _ = lru.New[id.EventID, struct{}](msgRoomCacheSize)
+	m.pendingLimited = make(map[id.RoomID]string)
 	m.userResolveCache, _ = lru.New[string, id.UserID](2048)
 	m.userInfoCache, _ = lru.New[id.UserID, cachedUser](2048)
 
@@ -361,24 +369,25 @@ func (m *Matrix) Ready() {
 	go m.verificationLoop()
 
 	// Invitations of the initial sync are not delivered to OnInvite. The snapshot
-	// is taken here, on the sync goroutine, so a later invite cannot be missed or
-	// duplicated, and sent from another goroutine as the event loop starts after
-	// onConnect.
+	// is taken here on the sync goroutine ahead of later syncs and enqueued
+	// through eventLoop (after onConnect starts, in case more than eventQueueSize
+	// invites exist) so they cannot race live events or be missed/duplicated.
 	invites := m.mc.Invitations()
 
 	go m.onConnect()
 
-	if len(invites) > 0 {
-		go func() {
-			for i := range invites {
-				m.sendInvite(&invites[i])
-			}
-		}()
+	for i := range invites {
+		m.enqueueEvent(&invites[i])
 	}
 }
 
 // OnReconnect implements matrixclient.ReconnectHandler.
 func (m *Matrix) OnReconnect(downtime time.Duration) {
+	m.OnReconnectInfo(matrixclient.ReconnectInfo{Downtime: downtime})
+}
+
+// OnReconnectInfo implements matrixclient.ReconnectInfoHandler.
+func (m *Matrix) OnReconnectInfo(info matrixclient.ReconnectInfo) {
 	if !m.ready.Load() || m.ctx.Err() != nil || m.onConnect == nil {
 		return
 	}
@@ -388,11 +397,30 @@ func (m *Matrix) OnReconnect(downtime time.Duration) {
 		thresh = 15 * time.Minute
 	}
 
-	if downtime < thresh {
+	if info.Downtime < thresh {
 		return
 	}
 
-	logger.Infof("matrix sync recovered after %s, triggering channel synchronization", downtime.Round(time.Second))
+	if len(info.LimitedRooms) > 0 {
+		m.reconnectMu.Lock()
+
+		if m.pendingLimited == nil {
+			m.pendingLimited = make(map[id.RoomID]string, len(info.LimitedRooms))
+		}
+
+		for roomID, prevBatch := range info.LimitedRooms {
+			if _, exists := m.pendingLimited[roomID]; exists {
+				// Overlapping truncated reconnects: fall back to fetching from present and filtering syncedMsgIDs.
+				m.pendingLimited[roomID] = ""
+			} else {
+				m.pendingLimited[roomID] = prevBatch
+			}
+		}
+
+		m.reconnectMu.Unlock()
+	}
+
+	logger.Infof("matrix sync recovered after %s, triggering channel synchronization", info.Downtime.Round(time.Second))
 
 	go m.onConnect()
 }
@@ -602,6 +630,10 @@ func (m *Matrix) enqueueEvent(ev any) {
 
 // OnMessage implements matrixclient.Handler.
 func (m *Matrix) OnMessage(msg *matrixclient.Message) {
+	if m.ready.Load() && m.syncedMsgIDs != nil && msg != nil && msg.EventID != "" {
+		m.syncedMsgIDs.Add(msg.EventID, struct{}{})
+	}
+
 	m.enqueueEvent(msg)
 }
 
@@ -1002,18 +1034,27 @@ func (m *Matrix) ModifyPost(ctx context.Context, msgID, text string) error {
 		return errors.New("unknown message " + msgID)
 	}
 
-	m.msgParentCache.Remove(id.EventID(msgID))
+	targetID := id.EventID(msgID)
+	m.msgParentCache.Remove(targetID)
 
 	if text == "" {
-		return m.mc.Delete(ctx, roomID, id.EventID(msgID))
+		return m.mc.Delete(ctx, roomID, targetID)
 	}
 
-	_, err := m.mc.Edit(ctx, roomID, id.EventID(msgID), text)
+	editID, err := m.mc.Edit(ctx, roomID, targetID, text)
 	if err != nil {
 		return err
 	}
 
-	m.cacheText(id.EventID(msgID), text)
+	m.editMu.Lock()
+	m.cacheText(targetID, text)
+
+	if editID != "" {
+		m.editEventIDs.Add(editID, targetID)
+		m.latestEditIDs.Add(targetID, editID)
+	}
+
+	m.editMu.Unlock()
 
 	return nil
 }
@@ -1598,12 +1639,14 @@ func (m *Matrix) addParentMsg(ctx context.Context, roomID id.RoomID, parentID id
 }
 
 func (m *Matrix) createParentReply(ctx context.Context, roomID id.RoomID, parentID id.EventID, newLen int, uncounted string) (string, error) {
-	resp, err := m.mc.Event(ctx, roomID, parentID)
+	resp, body, err := m.fetchEventWithBody(ctx, roomID, parentID)
 	if err != nil {
 		return "", err
 	}
 
-	body, _ := resp.Content.Raw["body"].(string)
+	if body == "" && m.msgTextCache != nil {
+		body, _ = m.msgTextCache.Get(parentID)
+	}
 
 	nick := resp.Sender.String()
 	if parentUser := m.GetUser(ctx, resp.Sender.String()); parentUser != nil {
@@ -1709,6 +1752,76 @@ func (m *Matrix) GetPostThread(ctx context.Context, postID string) []*bridge.Eve
 
 func (m *Matrix) GetReplayEvents(ctx context.Context, channelID string, since int64) []*bridge.Event {
 	return m.historySince(ctx, channelID, since, "replay")
+}
+
+// GetSyncReplayEvents returns history for startup or reconnect channel sync.
+// On reconnect, Matrix /sync already delivers missed events unless a room's
+// timeline was truncated, so only truncated rooms fetch older history (from
+// their prev_batch token), and events already queued via /sync are skipped.
+func (m *Matrix) GetSyncReplayEvents(ctx context.Context, channelID string, since int64, reconnect bool) []*bridge.Event {
+	roomID := id.RoomID(channelID)
+
+	if !reconnect {
+		msgs, err := m.mc.GetMessagesSince(ctx, roomID, since)
+		if err != nil {
+			logger.Errorf("matrix: fetching messages of %s: %s", m.roomLabel(roomID), err)
+
+			return nil
+		}
+
+		return m.msgsToEvents(m.filterSyncedMessages(msgs), "replay")
+	}
+
+	m.reconnectMu.Lock()
+	prevBatch, limited := m.pendingLimited[roomID]
+
+	if limited {
+		delete(m.pendingLimited, roomID)
+	}
+
+	m.reconnectMu.Unlock()
+
+	if !limited {
+		return []*bridge.Event{}
+	}
+
+	msgs, err := m.mc.GetMessagesSinceFrom(ctx, roomID, since, prevBatch)
+	if err != nil {
+		logger.Errorf("matrix: fetching messages of %s: %s", m.roomLabel(roomID), err)
+
+		m.reconnectMu.Lock()
+
+		if m.pendingLimited == nil {
+			m.pendingLimited = make(map[id.RoomID]string)
+		}
+
+		if _, exists := m.pendingLimited[roomID]; !exists {
+			m.pendingLimited[roomID] = prevBatch
+		}
+
+		m.reconnectMu.Unlock()
+
+		return nil
+	}
+
+	return m.msgsToEvents(m.filterSyncedMessages(msgs), "replay")
+}
+
+func (m *Matrix) filterSyncedMessages(msgs []*matrixclient.Message) []*matrixclient.Message {
+	if m.syncedMsgIDs == nil || len(msgs) == 0 {
+		return msgs
+	}
+
+	filtered := msgs[:0]
+	for _, msg := range msgs {
+		if msg != nil && msg.EventID != "" && m.syncedMsgIDs.Contains(msg.EventID) {
+			continue
+		}
+
+		filtered = append(filtered, msg)
+	}
+
+	return filtered
 }
 
 func (m *Matrix) SearchPosts(ctx context.Context, search string) []*bridge.Event {

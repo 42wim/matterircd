@@ -719,7 +719,11 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 	// or a user
 	if toUser, exists := s.HasUser(query); exists { //nolint:nestif
 		switch {
-		case isServiceBot(query):
+		case isServiceUser(toUser):
+			if _, _, ok := u.resolveService(query); !ok {
+				return s.EncodeMessage(u, irc.ERR_NOSUCHNICK, []string{u.Nick, query}, "No such nick/channel")
+			}
+
 			go u.handleServiceBot(query, toUser, msg.Trailing)
 
 			msg.Trailing = "<redacted>"
@@ -780,7 +784,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 	}
 
 	// no channel or user
-	return s.EncodeMessage(u, irc.ERR_NOSUCHNICK, msg.Params, "No such nick/channel")
+	return s.EncodeMessage(u, irc.ERR_NOSUCHNICK, []string{u.Nick, query}, "No such nick/channel")
 }
 
 func awayNotice(s Server, u *User, br bridge.Bridger, toUser *User) {
@@ -1504,7 +1508,8 @@ func CmdWhois(s Server, u *User, msg *irc.Message) error {
 		allChannels = append(allChannels, uChannels...)
 		allChannels = append(allChannels, otherChannels...)
 
-		const maxTrailingLen = 460
+		maxLineLen := u.maxLineLength()
+		maxTrailingLen := max(min(maxLineLen, wireTextBudget(s.Prefix(), irc.RPL_WHOISCHANNELS, u.Nick+" "+other.Nick, maxLineLen)), 1)
 
 		var line strings.Builder
 		for _, chStr := range allChannels {
@@ -1616,7 +1621,7 @@ func CmdWhois(s Server, u *User, msg *irc.Message) error {
 			}
 		}
 
-		if isServiceBot(other.Nick) || strings.Contains(other.Roles, "bot") || (otherUser != nil && strings.Contains(otherUser.Roles, "bot")) {
+		if isServiceUser(other) || strings.Contains(other.Roles, "bot") || (otherUser != nil && strings.Contains(otherUser.Roles, "bot")) {
 			protocol := "Mattermost"
 
 			if p := u.br.Protocol(); p != "" {

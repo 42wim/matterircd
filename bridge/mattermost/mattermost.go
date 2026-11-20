@@ -151,8 +151,8 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 
 	if !rc.Mattermost.IgnoreServerVersion {
 		ver := getServerVersion(ctx, cfg, cred)
-		if !isSupportedVersion(ver) {
-			return nil, nil, fmt.Errorf("mattermost version %s not supported", ver)
+		if ver != "" && !isSupportedVersion(ver) {
+			logger.Warnf("mattermost version %s is below minimum supported version (%d)", ver, minSupportedMajorVersion)
 		}
 	}
 
@@ -3403,13 +3403,14 @@ func (m *Mattermost) postListToEvents(ctx context.Context, postlist any, eventTy
 
 	// Enforce strict newest-first sorting before the backwards loop processes it.
 	// This fixes the Mattermost API quirk where thread root posts are placed at index 0.
-	sort.Slice(mmPostList.Order, func(i, j int) bool {
-		pI, okI := mmPostList.Posts[mmPostList.Order[i]]
+	sort.SliceStable(mmPostList.Order, func(i, j int) bool {
+		pI := mmPostList.Posts[mmPostList.Order[i]]
 
-		pJ, okJ := mmPostList.Posts[mmPostList.Order[j]]
-		if !okI || !okJ {
-			return false
+		pJ := mmPostList.Posts[mmPostList.Order[j]]
+		if pI == nil || pJ == nil {
+			return pI != nil
 		}
+
 		// Sort descending (newest first) so the backwards loop below prints oldest first
 		return pI.CreateAt > pJ.CreateAt
 	})
@@ -3590,13 +3591,15 @@ func getServerVersion(ctx context.Context, cfg *config.Config, cred bridge.Crede
 	return resp.Header.Get("X-Version-Id")
 }
 
+const minSupportedMajorVersion = 7
+
 func isSupportedVersion(version string) bool {
-	prefixes := [...]string{"7.", "8.", "9.", "10.", "11."}
-	for _, prefix := range prefixes {
-		if strings.HasPrefix(version, prefix) {
-			return true
-		}
+	majorStr, _, _ := strings.Cut(version, ".")
+
+	major, err := strconv.Atoi(majorStr)
+	if err != nil {
+		return false
 	}
 
-	return false
+	return major >= minSupportedMajorVersion
 }

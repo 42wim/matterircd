@@ -17,13 +17,17 @@ type Summarizer interface {
 
 type Usage struct {
 	PromptTokens     int
+	CacheHitTokens   int
+	CacheMissTokens  int
 	CompletionTokens int
 	TotalTokens      int
 	ReasoningTokens  int
+	Cost             float64
 }
 
 type SummaryResult struct {
 	Content string
+	Model   string
 	Usage   Usage
 }
 
@@ -33,15 +37,22 @@ type chatMessage struct {
 }
 
 type chatUsage struct {
-	PromptTokens            int `json:"prompt_tokens"`
-	CompletionTokens        int `json:"completion_tokens"`
-	TotalTokens             int `json:"total_tokens"`
+	PromptTokens          int     `json:"prompt_tokens"`
+	CompletionTokens      int     `json:"completion_tokens"`
+	TotalTokens           int     `json:"total_tokens"`
+	PromptCacheHitTokens  int     `json:"prompt_cache_hit_tokens"`
+	PromptCacheMissTokens int     `json:"prompt_cache_miss_tokens"`
+	Cost                  float64 `json:"cost,omitempty"`
+	PromptTokensDetails   *struct {
+		CachedTokens int `json:"cached_tokens"`
+	} `json:"prompt_tokens_details,omitempty"`
 	CompletionTokensDetails *struct {
 		ReasoningTokens int `json:"reasoning_tokens"`
 	} `json:"completion_tokens_details,omitempty"`
 }
 
 type chatResponse struct {
+	Model   string `json:"model,omitempty"`
 	Choices []struct {
 		Message struct {
 			Content string `json:"content"`
@@ -58,14 +69,38 @@ func parseChatUsage(u *chatUsage) Usage {
 		return Usage{}
 	}
 
+	cacheHit := u.PromptCacheHitTokens
+	if u.PromptTokensDetails != nil && u.PromptTokensDetails.CachedTokens > 0 {
+		cacheHit = u.PromptTokensDetails.CachedTokens
+	}
+
+	cacheHit = max(cacheHit, 0)
+
+	cacheMiss := max(u.PromptCacheMissTokens, 0)
+
+	promptTokens := u.PromptTokens
+	if promptTokens == 0 && (cacheHit > 0 || cacheMiss > 0) {
+		promptTokens = cacheHit + cacheMiss
+	}
+
+	if cacheMiss == 0 && promptTokens > 0 {
+		cacheMiss = max(promptTokens-cacheHit, 0)
+	}
+
 	res := Usage{
-		PromptTokens:     u.PromptTokens,
+		PromptTokens:     promptTokens,
+		CacheHitTokens:   cacheHit,
+		CacheMissTokens:  cacheMiss,
 		CompletionTokens: u.CompletionTokens,
 		TotalTokens:      u.TotalTokens,
 	}
 
 	if u.CompletionTokensDetails != nil {
 		res.ReasoningTokens = u.CompletionTokensDetails.ReasoningTokens
+	}
+
+	if u.Cost > 0 {
+		res.Cost = u.Cost
 	}
 
 	if res.TotalTokens == 0 && (res.PromptTokens > 0 || res.CompletionTokens > 0) {
@@ -76,44 +111,54 @@ func parseChatUsage(u *chatUsage) Usage {
 }
 
 const (
-	AIAnthropicProvider = "anthropic"
-	AIClaudeProvider    = "claude"
-	AICopilotProvider   = "copilot"
-	AIDeepSeekProvider  = "deepseek"
-	AIGeminiProvider    = "gemini"
-	AIGitHubProvider    = "github"
-	AIGoogleProvider    = "google"
-	AIGrokProvider      = "grok"
-	AIHetznerProvider   = "hetzner"
-	AILocalProvider     = "local"
-	AIMetaProvider      = "meta"
-	AIMuseProvider      = "muse"
-	AIOllamaProvider    = "ollama"
-	AIOpenAIProvider    = "openai"
-	AIvLLMProvider      = "vllm"
-	AIXAIProvider       = "xai"
+	AIAnthropicProvider  = "anthropic"
+	AIClaudeProvider     = "claude"
+	AICopilotProvider    = "copilot"
+	AIDeepSeekProvider   = "deepseek"
+	AIGeminiProvider     = "gemini"
+	AIGitHubProvider     = "github"
+	AIGoogleProvider     = "google"
+	AIGrokProvider       = "grok"
+	AIHetznerProvider    = "hetzner"
+	AILocalProvider      = "local"
+	AIMetaProvider       = "meta"
+	AIMuseProvider       = "muse"
+	AIOllamaProvider     = "ollama"
+	AIOpenAIProvider     = "openai"
+	AIOpenRouterProvider = "openrouter"
+	AIvLLMProvider       = "vllm"
+	AIXAIProvider        = "xai"
 
 	roleUser          = "user"
 	headerContentType = "Content-Type"
 	contentTypeJSON   = "application/json"
 
-	DefaultClaudeModel   = "claude-sonnet-5"
-	DefaultCopilotModel  = "gpt-6-luna"
-	DefaultDeepSeekModel = "deepseek-chat"
-	DefaultGeminiModel   = "gemini-4-hydrogen"
-	DefaultHetznerModel  = "meta-llama/Meta-Llama-3.1-70B-Instruct"
-	DefaultLocalModel    = "llama3.2"
-	DefaultMuseModel     = "muse-spark-1.3"
-	DefaultOpenAIModel   = "gpt-6-luna"
-	DefaultXAIModel      = "grok-2"
+	thinkingOff    = "off"
+	thinkingNone   = "none"
+	thinkingLow    = "low"
+	thinkingMedium = "medium"
+	thinkingMed    = "med"
+	thinkingHigh   = "high"
 
-	DefaultClaudeBaseURL   = "https://api.anthropic.com/v1"
-	DefaultDeepSeekBaseURL = "https://api.deepseek.com"
-	DefaultGeminiBaseURL   = "https://generativelanguage.googleapis.com/v1beta"
-	DefaultHetznerBaseURL  = "https://inference.hetzner.com/api/v1"
-	DefaultMuseBaseURL     = "https://api.meta.ai/v1"
-	DefaultOpenAIBaseURL   = "https://api.openai.com/v1"
-	DefaultXAIBaseURL      = "https://api.x.ai/v1"
+	DefaultClaudeModel     = "claude-sonnet-5"
+	DefaultCopilotModel    = "gpt-6-luna"
+	DefaultDeepSeekModel   = "deepseek-chat"
+	DefaultGeminiModel     = "gemini-4-hydrogen"
+	DefaultHetznerModel    = "meta-llama/Meta-Llama-3.1-70B-Instruct"
+	DefaultLocalModel      = "llama3.2"
+	DefaultMuseModel       = "muse-spark-1.3"
+	DefaultOpenAIModel     = "gpt-6-luna"
+	DefaultOpenRouterModel = "google/gemini-4-hydrogen"
+	DefaultXAIModel        = "grok-2"
+
+	DefaultClaudeBaseURL     = "https://api.anthropic.com/v1"
+	DefaultDeepSeekBaseURL   = "https://api.deepseek.com"
+	DefaultGeminiBaseURL     = "https://generativelanguage.googleapis.com/v1beta"
+	DefaultHetznerBaseURL    = "https://inference.hetzner.com/api/v1"
+	DefaultMuseBaseURL       = "https://api.meta.ai/v1"
+	DefaultOpenAIBaseURL     = "https://api.openai.com/v1"
+	DefaultOpenRouterBaseURL = "https://openrouter.ai/api/v1"
+	DefaultXAIBaseURL        = "https://api.x.ai/v1"
 
 	AnthropicAPIVersion = "2023-06-01"
 )
@@ -153,6 +198,8 @@ func GetModel(provider, fallbackModel string, models map[string]string) string {
 		return DefaultMuseModel
 	case AIOpenAIProvider:
 		return DefaultOpenAIModel
+	case AIOpenRouterProvider:
+		return DefaultOpenRouterModel
 	case AIOllamaProvider, AILocalProvider, AIvLLMProvider:
 		return DefaultLocalModel
 	case AIXAIProvider, AIGrokProvider:
@@ -164,19 +211,19 @@ func GetModel(provider, fallbackModel string, models map[string]string) string {
 
 func resolveThinkingBudget(mode string) *int {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case "off", "none":
+	case thinkingOff, thinkingNone:
 		b := 0
 
 		return &b
-	case "low":
+	case thinkingLow:
 		b := 1024
 
 		return &b
-	case "medium", "med":
+	case thinkingMedium, thinkingMed:
 		b := 4096
 
 		return &b
-	case "high":
+	case thinkingHigh:
 		b := 16384
 
 		return &b

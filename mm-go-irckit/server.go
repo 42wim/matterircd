@@ -44,6 +44,9 @@ type Server interface { //nolint:interfacebloat
 	// HardLineSplit returns whether lines exceeding IRC's line length limit are split.
 	HardLineSplit() bool
 
+	// MaxLineLength returns the configured maximum byte length per wrapped IRC line.
+	MaxLineLength() int
+
 	// Connect starts the handshake for a new user, blocks until it's completed or failed with an error.
 	Connect(*User) error //nolint:inamedparam
 
@@ -175,6 +178,8 @@ func (s *server) Motd() []string {
 	return s.config.Motd
 }
 
+const defaultMaxLineLength = 460
+
 // HardLineSplit defaults to true while no user is connected, like the config default.
 func (s *server) HardLineSplit() bool {
 	s.RLock()
@@ -186,6 +191,19 @@ func (s *server) HardLineSplit() bool {
 	}
 
 	return u.cfg.Current().HardLineSplit
+}
+
+// MaxLineLength defaults to 460 while no user is connected, like the config default.
+func (s *server) MaxLineLength() int {
+	s.RLock()
+	u := s.u
+	s.RUnlock()
+
+	if u == nil {
+		return defaultMaxLineLength
+	}
+
+	return u.maxLineLength()
 }
 
 func (s *server) Close() error {
@@ -209,6 +227,12 @@ func (s *server) Prefix() *irc.Prefix {
 func (s *server) HasUser(nick string) (*User, bool) {
 	s.RLock()
 	defer s.RUnlock()
+
+	// Service bots are keyed by their nick. Check that first as the scan below is in random
+	// map order, which would make a remote user with the same nick shadow the service bot.
+	if u, ok := s.users[strings.ToLower(nick)]; ok && u.Nick == nick {
+		return u, true
+	}
 
 	for _, u := range s.users {
 		if u.Nick == nick {
@@ -668,6 +692,16 @@ func (s *server) add(u *User) bool {
 	s.users[id] = u
 
 	return true
+}
+
+func (s *server) removeService(nick string) {
+	s.Lock()
+	defer s.Unlock()
+
+	id := strings.ToLower(nick)
+	if usr, ok := s.users[id]; ok && usr.Conn == nil && usr.Host == serviceName {
+		delete(s.users, id)
+	}
 }
 
 //nolint:funlen,gocognit,gocyclo

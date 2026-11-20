@@ -155,6 +155,21 @@ func New(ctx context.Context, cred Credentials, h Handler, opts ...Option) (*Cli
 		return nil, errors.New("matrixclient: unexpected syncer type")
 	}
 
+	syncer.FilterJSON = newSyncFilter()
+
+	baseParseError := syncer.ParseErrorHandler
+	syncer.ParseErrorHandler = func(ev *event.Event, err error) bool {
+		if baseParseError != nil && baseParseError(ev, err) {
+			return true
+		}
+
+		if ev != nil {
+			c.resolvePending(ev.RoomID, ev.ID)
+		}
+
+		return false
+	}
+
 	c.register(syncer)
 
 	// Ready is called from the sync goroutine, after the events of the first
@@ -331,6 +346,44 @@ func (c *Client) register(s *mautrix.DefaultSyncer) {
 	s.OnEventType(event.EphemeralEventPresence, c.handlePresence)
 }
 
+// newSyncFilter returns a /sync denylist filter that suppresses high-volume
+// unused events (such as read receipts, per-room account data, stickers, and
+// call signaling) while keeping the default timeline limit of 50 and letting
+// unknown/future events through.
+func newSyncFilter() *mautrix.Filter {
+	ignoredState := []event.Type{
+		event.StateRoomAvatar,
+		event.StateServerACL,
+		event.StateGuestAccess,
+		event.StatePowerLevels,
+	}
+
+	ignoredTimeline := make([]event.Type, 0, len(ignoredState)+2)
+	ignoredTimeline = append(ignoredTimeline, ignoredState...)
+	ignoredTimeline = append(ignoredTimeline,
+		event.EventSticker,
+		event.Type{Type: "m.call.*"},
+	)
+
+	return &mautrix.Filter{
+		Room: &mautrix.RoomFilter{
+			AccountData: &mautrix.FilterPart{
+				NotTypes: []event.Type{{Type: "*"}},
+			},
+			Ephemeral: &mautrix.FilterPart{
+				NotTypes: []event.Type{event.EphemeralEventReceipt},
+			},
+			State: &mautrix.FilterPart{
+				NotTypes: ignoredState,
+			},
+			Timeline: &mautrix.FilterPart{
+				Limit:    50,
+				NotTypes: ignoredTimeline,
+			},
+		},
+	}
+}
+
 func (c *Client) syncLoop() {
 	backoff := time.Second
 
@@ -379,7 +432,7 @@ type readySyncer struct {
 	once         sync.Once
 	ready        func()
 	synced       func() (bool, time.Duration)
-	reconnected  func(time.Duration)
+	reconnected  func(ReconnectInfo)
 	named        func(*mautrix.RespSync)
 	track        func(*mautrix.RespSync)
 	summary      func(*mautrix.RespSync)
@@ -442,7 +495,22 @@ func (r *readySyncer) ProcessResponse(ctx context.Context, res *mautrix.RespSync
 	r.once.Do(r.ready)
 
 	if reconnected && r.reconnected != nil {
-		r.reconnected(downtime)
+		var limited map[id.RoomID]string
+
+		for roomID, room := range res.Rooms.Join {
+			if room != nil && room.Timeline.Limited {
+				if limited == nil {
+					limited = make(map[id.RoomID]string)
+				}
+
+				limited[roomID] = room.Timeline.PrevBatch
+			}
+		}
+
+		r.reconnected(ReconnectInfo{
+			Downtime:     downtime,
+			LimitedRooms: limited,
+		})
 	}
 
 	readyDuration := time.Since(readyStart)
@@ -503,6 +571,7 @@ func (r *readySyncer) Dispatch(ctx context.Context, ev *event.Event) {
 func (c *Client) Logout() {
 	c.connected.Store(false)
 	c.cancel()
+	c.stopHoldbacks()
 
 	if c.crypto != nil {
 		_ = c.crypto.Close()
@@ -1091,11 +1160,20 @@ func (c *Client) SendDirect(ctx context.Context, userID id.UserID, parentID id.E
 	return c.Send(ctx, roomID, parentID, text)
 }
 
-// Event fetches a single event.
+// Event fetches a single event, decrypting it if encrypted and crypto is configured.
 func (c *Client) Event(ctx context.Context, roomID id.RoomID, eventID id.EventID) (*event.Event, error) {
 	for attempt := 0; ; attempt++ {
 		ev, err := c.mc.GetEvent(ctx, roomID, eventID)
 		if err == nil {
+			if ev != nil && ev.RoomID == "" {
+				ev.RoomID = roomID
+			}
+
+			dec, derr := c.decryptEvent(ctx, ev)
+			if derr == nil && dec != nil {
+				return dec, nil
+			}
+
 			return ev, nil
 		}
 
@@ -1108,4 +1186,29 @@ func (c *Client) Event(ctx context.Context, roomID id.RoomID, eventID id.EventID
 			return nil, err
 		}
 	}
+}
+
+func (c *Client) decryptEvent(ctx context.Context, ev *event.Event) (*event.Event, error) {
+	if ev == nil || ev.Type != event.EventEncrypted || c.crypto == nil {
+		return ev, nil
+	}
+
+	// Events from REST endpoints (/event, /messages) only carry raw content; Decrypt needs it parsed.
+	if ev.Content.Parsed == nil {
+		err := ev.Content.ParseRaw(event.EventEncrypted)
+		if err != nil {
+			c.logger.Warnf("failed to parse encrypted event %s: %s", ev.ID, err)
+
+			return nil, err
+		}
+	}
+
+	dec, err := c.crypto.Decrypt(ctx, ev)
+	if err != nil {
+		c.logger.Debugf("failed to decrypt event %s in %s (%s): %s", ev.ID, c.roomLabel(ev.RoomID), ev.RoomID, err)
+
+		return nil, err
+	}
+
+	return dec, nil
 }

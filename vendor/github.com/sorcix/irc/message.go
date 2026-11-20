@@ -16,7 +16,7 @@ const (
 	prefixHost byte = 0x40 // Hostname
 	space      byte = 0x20 // Separator
 
-	maxLength = 998 // Maximum length is 1000 - 2 for the line endings.
+	maxLength = 16384 // Maximum length (before \r\n line endings).
 )
 
 func cutsetFunc(r rune) bool {

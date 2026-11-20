@@ -131,7 +131,6 @@ func New(cfg *config.Config, cred bridge.Credentials, eventChan chan *bridge.Eve
 	})
 
 	s.sc = sc
-	s.sc.InitUsers()
 
 	return s, nil
 }
@@ -268,7 +267,7 @@ func (s *Slack) logout(ctx context.Context) error {
 	s.connected.Store(false)
 
 	if s.done != nil {
-		defer close(s.done)
+		close(s.done)
 	}
 
 	if s.unregisterReloadHook != nil {
@@ -278,6 +277,10 @@ func (s *Slack) logout(ctx context.Context) error {
 	if s.wsCancel != nil {
 		s.wsCancel()
 	}
+
+	s.Lock()
+	clear(s.userByNick)
+	s.Unlock()
 
 	var err error
 	if s.sc != nil {
@@ -597,12 +600,12 @@ func slackChannelToInfo(teamID string, ch *slack.Channel) *bridge.ChannelInfo {
 }
 
 func (s *Slack) GetChannels() []*bridge.ChannelInfo {
-	var channels []*bridge.ChannelInfo
-
+	rawChannels := s.sc.GetChannels()
+	channels := make([]*bridge.ChannelInfo, 0, len(rawChannels))
 	teamID := s.sc.TeamID()
 
-	for _, mmchannel := range s.sc.GetChannels() {
-		channels = append(channels, slackChannelToInfo(teamID, &mmchannel))
+	for i := range rawChannels {
+		channels = append(channels, slackChannelToInfo(teamID, &rawChannels[i]))
 	}
 
 	return channels
@@ -639,17 +642,19 @@ func (s *Slack) GetChannel(ctx context.Context, channelID string) (*bridge.Chann
 		channelID = chID
 	}
 
-	channels := s.GetChannels()
-	for _, channel := range channels {
-		if channel.ID == channelID {
-			return channel, nil
+	teamID := s.sc.TeamID()
+	rawChannels := s.sc.GetChannels()
+
+	for i := range rawChannels {
+		if rawChannels[i].ID == channelID {
+			return slackChannelToInfo(teamID, &rawChannels[i]), nil
 		}
 	}
 
 	if s.sc != nil {
 		ch, err := s.sc.GetConversationInfo(ctx, channelID)
 		if err == nil && ch != nil {
-			return slackChannelToInfo(s.sc.TeamID(), ch), nil
+			return slackChannelToInfo(teamID, ch), nil
 		}
 	}
 
@@ -702,8 +707,14 @@ func (s *Slack) lookupUserIDByNick(nick string) string {
 		return ""
 	}
 
+	lower := strings.ToLower(nick)
+
 	s.RLock()
 	defer s.RUnlock()
+
+	if uid, ok := s.userByNick[lower]; ok {
+		return uid
+	}
 
 	if uid, ok := s.userByNick[nick]; ok {
 		return uid
@@ -764,7 +775,8 @@ func (s *Slack) GetPostsSince(ctx context.Context, channelID string, since int64
 
 	oldest := ""
 	if since > 0 {
-		oldest = fmt.Sprintf("%.6f", float64(since)/1000.0)
+		// Append 999us so the last millisecond-truncated message is not replayed again.
+		oldest = fmt.Sprintf("%d.%06d", since/1000, (since%1000)*1000+999)
 	}
 
 	msgs, err := s.sc.GetConversationHistory(ctx, channelID, oldest, 0)
@@ -1298,6 +1310,9 @@ func (s *Slack) loginToSlack() (*slackclient.Client, error) {
 		return nil, err
 	}
 
+	// Populate the user cache before live RTM events and onConnect read it.
+	sc.InitUsers()
+
 	wsCtx, wsCancel := context.WithCancel(context.Background())
 	s.wsCancel = wsCancel
 
@@ -1678,14 +1693,21 @@ func (s *Slack) resolveDMReceiver(ghost *bridge.UserInfo, channelID string) *bri
 			return dmUser
 		}
 
+		meID := s.sc.UserID()
+
 		members, _ := s.sc.GetUsersInConversation(channelID)
 		for _, member := range members {
-			if member == s.GetMe().User {
+			if member == meID {
 				continue
 			}
 
+			if cached := s.sc.GetUser(member); cached != nil {
+				return s.createUser(cached)
+			}
+
 			ghostuser, _ := s.sc.GetUserInfo(member)
-			receiver = s.createUser(ghostuser)
+
+			return s.createUser(ghostuser)
 		}
 	}
 
@@ -1714,9 +1736,14 @@ func (s *Slack) handleSlackReaction(ctx context.Context, userID, channelID, ts, 
 		return
 	}
 
-	suser, err := s.sc.GetUserInfo(userID)
-	if err != nil {
-		return
+	suser := s.sc.GetUser(userID)
+	if suser == nil {
+		var err error
+
+		suser, err = s.sc.GetUserInfo(userID)
+		if err != nil {
+			return
+		}
 	}
 
 	ghost := s.createUser(suser)
@@ -1782,7 +1809,7 @@ func (s *Slack) handleItemMisc(ctx context.Context, userID, channelID string, it
 	parentID, replySuffix := s.resolveItemParent(ctx, channelID, itemMsg)
 	msg := s.cleanupMessage(action+" ("+itemMsg.Text+")") + replySuffix
 
-	s.handleActionMisc(userID, channelID, msgID, parentID, msg, "", slackTSMillis(itemMsg.Timestamp))
+	s.handleActionMisc(userID, channelID, msgID, parentID, msg, "post_starred", slackTSMillis(itemMsg.Timestamp))
 }
 
 func formatPinnedSlackMsg(cleanup func(string) string, unicode bool, itemMsg *slack.Message, replySuffix, kind string) string {
@@ -1809,9 +1836,14 @@ func (s *Slack) handleItemPin(ctx context.Context, userID, channelID string, ite
 }
 
 func (s *Slack) handleActionMisc(userID, channelID, msgID, parentID, msg, eventType string, createAt int64) {
-	suser, err := s.sc.GetUserInfo(userID)
-	if err != nil {
-		return
+	suser := s.sc.GetUser(userID)
+	if suser == nil {
+		var err error
+
+		suser, err = s.sc.GetUserInfo(userID)
+		if err != nil {
+			return
+		}
 	}
 
 	// create new "ghost" user
@@ -1820,7 +1852,7 @@ func (s *Slack) handleActionMisc(userID, channelID, msgID, parentID, msg, eventT
 	// direct message
 	if strings.HasPrefix(channelID, "D") {
 		receiver := s.resolveDMReceiver(ghost, channelID)
-		s.sendDirectMessage(ghost, receiver, msg, channelID, msgID, parentID, createAt)
+		s.sendDirectMessage(ghost, receiver, msg, channelID, msgID, parentID, eventType, createAt)
 
 		return
 	}
@@ -1866,7 +1898,7 @@ func (s *Slack) handleMemberJoinedChannel(ctx context.Context, rmsg *slack.Membe
 	s.sendEvent(event)
 }
 
-func (s *Slack) sendDirectMessage(sender, receiver *bridge.UserInfo, msg, channelID, msgID, parentID string, createAt int64) {
+func (s *Slack) sendDirectMessage(sender, receiver *bridge.UserInfo, msg, channelID, msgID, parentID, eventType string, createAt int64) {
 	event := &bridge.Event{
 		Type: "direct_message",
 	}
@@ -1876,6 +1908,7 @@ func (s *Slack) sendDirectMessage(sender, receiver *bridge.UserInfo, msg, channe
 		ChannelID: channelID,
 		MessageID: msgID,
 		ParentID:  parentID,
+		Event:     eventType,
 		CreateAt:  createAt,
 	}
 
@@ -2335,7 +2368,7 @@ func (s *Slack) handleSlackMessageDeleted(ctx context.Context, rmsg *slack.Messa
 
 	if strings.HasPrefix(channelID, "D") {
 		receiver := s.resolveDMReceiver(ghost, channelID)
-		s.sendDirectMessage(ghost, receiver, msg, channelID, msgID, parentID, createAt)
+		s.sendDirectMessage(ghost, receiver, msg, channelID, msgID, parentID, "post_deleted", createAt)
 
 		return
 	}
@@ -2433,7 +2466,9 @@ func (s *Slack) handleSlackActionPost(ctx context.Context, rmsg *slack.MessageEv
 			return
 		}
 
-		if !isUnfurl {
+		if isUnfurl {
+			eventType = "post_unfurl"
+		} else {
 			eventType = "post_edited"
 		}
 
@@ -2511,7 +2546,7 @@ func (s *Slack) sendSlackActionPostMessage(
 
 	if strings.HasPrefix(channelID, "D") {
 		receiver := s.resolveDMReceiver(ghost, channelID)
-		s.sendDirectMessage(ghost, receiver, msg, channelID, msgID, parentID, createAt)
+		s.sendDirectMessage(ghost, receiver, msg, channelID, msgID, parentID, eventType, createAt)
 
 		return
 	}
@@ -2589,14 +2624,25 @@ func (s *Slack) resolveSlackNick(slackuser *slack.User, rc *config.RuntimeConfig
 		nick += "-" + strings.ToLower(slackuser.ID)
 	}
 
+	lower := strings.ToLower(nick)
+
+	s.RLock()
+	owner, taken := s.userByNick[lower]
+	s.RUnlock()
+
+	if taken && owner == slackuser.ID {
+		return nick
+	}
+
 	s.Lock()
 	defer s.Unlock()
 
-	if owner, taken := s.userByNick[nick]; taken && owner != slackuser.ID {
+	if owner, taken = s.userByNick[lower]; taken && owner != slackuser.ID {
 		nick += "-" + strings.ToLower(slackuser.ID)
+		lower = strings.ToLower(nick)
 	}
 
-	s.userByNick[nick] = slackuser.ID
+	s.userByNick[lower] = slackuser.ID
 
 	return nick
 }

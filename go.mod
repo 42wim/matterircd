@@ -10,10 +10,10 @@ require (
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/kenshaw/emoji v0.6.2
 	github.com/matterbridge/logrus-prefixed-formatter v0.5.3-0.20200523233437-d971309a77ba
-	github.com/matterbridge/matrixclient v0.0.0-20261115085835-0916e721c70f
-	github.com/matterbridge/matterclient v0.0.0-20261113045522-74f90fb9f942
+	github.com/matterbridge/matrixclient v0.0.0-20261118201436-c19b4ef13462
+	github.com/matterbridge/matterclient v0.0.0-20261116034806-3087b48d325c
 	github.com/matterbridge/rocketchatclient v0.0.0-20261116082210-070dd382e09f
-	github.com/matterbridge/slackclient v0.0.0-20261115030427-106d1142aa66
+  github.com/matterbridge/slackclient v0.0.0-20261117092932-0a28e681e8a0
 	github.com/mattermost/mattermost/server/public v0.3.0
 	github.com/mattn/go-mastodon v0.0.6
 	github.com/mitchellh/mapstructure v1.5.0
@@ -53,7 +53,7 @@ require (
 	github.com/mattermost/logr/v2 v2.0.22 // indirect
 	github.com/mattn/go-colorable v0.1.16 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
-	github.com/mattn/go-sqlite3 v2.0.3+incompatible // indirect
+	github.com/mattn/go-sqlite3 v1.14.52 // indirect
 	github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d // indirect
 	github.com/nxadm/tail v1.4.11 // indirect
 	github.com/oklog/run v1.2.0 // indirect
@@ -97,5 +97,3 @@ require (
 )
 
 go 1.26.2
-
-replace github.com/mattn/go-sqlite3 => github.com/mattn/go-sqlite3 v1.14.34

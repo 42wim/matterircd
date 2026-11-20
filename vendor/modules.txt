@@ -117,17 +117,17 @@ github.com/kenshaw/emoji
 # github.com/matterbridge/logrus-prefixed-formatter v0.5.3-0.20200523233437-d971309a77ba
 ## explicit
 github.com/matterbridge/logrus-prefixed-formatter
-# github.com/matterbridge/matrixclient v0.0.0-20261115085835-0916e721c70f
+# github.com/matterbridge/matrixclient v0.0.0-20261118201436-c19b4ef13462
 ## explicit; go 1.26.0
 github.com/matterbridge/matrixclient
 github.com/matterbridge/matrixclient/e2ee
-# github.com/matterbridge/matterclient v0.0.0-20261113045522-74f90fb9f942
+# github.com/matterbridge/matterclient v0.0.0-20261116034806-3087b48d325c
 ## explicit; go 1.26.2
 github.com/matterbridge/matterclient
 # github.com/matterbridge/rocketchatclient v0.0.0-20261116082210-070dd382e09f
 ## explicit; go 1.26.2
 github.com/matterbridge/rocketchatclient
-# github.com/matterbridge/slackclient v0.0.0-20261115030427-106d1142aa66
+# github.com/matterbridge/slackclient v0.0.0-20261117092932-0a28e681e8a0
 ## explicit; go 1.26.2
 github.com/matterbridge/slackclient
 # github.com/mattermost/go-i18n v1.11.1-0.20211013152124-5c415071e404
@@ -163,8 +163,8 @@ github.com/mattn/go-isatty
 # github.com/mattn/go-mastodon v0.0.6
 ## explicit; go 1.16
 github.com/mattn/go-mastodon
-# github.com/mattn/go-sqlite3 v2.0.3+incompatible => github.com/mattn/go-sqlite3 v1.14.34
-## explicit; go 1.19
+# github.com/mattn/go-sqlite3 v1.14.52
+## explicit; go 1.21
 github.com/mattn/go-sqlite3
 # github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d
 ## explicit
@@ -536,4 +536,3 @@ maunium.net/go/mautrix/id
 maunium.net/go/mautrix/oauth
 maunium.net/go/mautrix/pushrules
 maunium.net/go/mautrix/sqlstatestore
-# github.com/mattn/go-sqlite3 => github.com/mattn/go-sqlite3 v1.14.34
