@@ -34,3 +34,9 @@ type ReconnectHandler interface {
 type TypingHandler interface {
 	OnTyping(roomID, username string)
 }
+
+// RoomRemoveHandler can optionally be implemented by a Handler to be notified when a
+// room is removed from the client's active room set.
+type RoomRemoveHandler interface {
+	OnRoomRemove(roomID string)
+}

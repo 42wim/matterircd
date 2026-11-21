@@ -21,6 +21,7 @@ type stateCache struct {
 	roomsByID    map[string]*Room
 	subsByRoomID map[string]*Subscription
 	roomRoles    map[string]map[string][]string
+	roomMembers  map[string][]string
 	invitations  map[string]Invitation
 
 	sentIDs       *lru.Cache[string, struct{}]
@@ -56,6 +57,7 @@ func newStateCache(sentSize, msgSize, reactionSize int) (*stateCache, error) {
 		roomsByID:     make(map[string]*Room),
 		subsByRoomID:  make(map[string]*Subscription),
 		roomRoles:     make(map[string]map[string][]string),
+		roomMembers:   make(map[string][]string),
 		invitations:   make(map[string]Invitation),
 		sentIDs:       sentIDs,
 		seenMsgs:      seenMsgs,
@@ -296,6 +298,7 @@ func (sc *stateCache) removeRoom(roomID string) {
 	delete(sc.roomsByID, roomID)
 	delete(sc.subsByRoomID, roomID)
 	delete(sc.roomRoles, roomID)
+	delete(sc.roomMembers, roomID)
 	delete(sc.invitations, roomID)
 	sc.mu.Unlock()
 }
@@ -362,6 +365,88 @@ func (sc *stateCache) removeSubscription(roomID string) {
 
 	sc.mu.Lock()
 	delete(sc.subsByRoomID, roomID)
+	delete(sc.roomMembers, roomID)
+	sc.mu.Unlock()
+}
+
+func (sc *stateCache) setRoomMembers(roomID string, members []*User) {
+	if roomID == "" {
+		return
+	}
+
+	uids := make([]string, 0, len(members))
+	seen := make(map[string]struct{}, len(members))
+
+	for _, m := range members {
+		if m == nil || m.ID == "" {
+			continue
+		}
+
+		if _, exists := seen[m.ID]; exists {
+			continue
+		}
+
+		seen[m.ID] = struct{}{}
+		uids = append(uids, m.ID)
+	}
+
+	sc.mu.Lock()
+	sc.roomMembers[roomID] = uids
+	sc.mu.Unlock()
+}
+
+func (sc *stateCache) addRoomMember(roomID, userID string) {
+	if roomID == "" || userID == "" {
+		return
+	}
+
+	sc.mu.Lock()
+	if uids, cached := sc.roomMembers[roomID]; cached && !slices.Contains(uids, userID) {
+		sc.roomMembers[roomID] = append(uids, userID)
+	}
+	sc.mu.Unlock()
+}
+
+func (sc *stateCache) removeRoomMember(roomID, userID string) {
+	if roomID == "" || userID == "" {
+		return
+	}
+
+	sc.mu.Lock()
+	if uids, cached := sc.roomMembers[roomID]; cached {
+		sc.roomMembers[roomID] = slices.DeleteFunc(uids, func(id string) bool {
+			return id == userID
+		})
+	}
+	sc.mu.Unlock()
+}
+
+func (sc *stateCache) roomMemberUsers(roomID string) ([]*User, bool) {
+	if roomID == "" {
+		return nil, false
+	}
+
+	sc.mu.RLock()
+	defer sc.mu.RUnlock()
+
+	uids, ok := sc.roomMembers[roomID]
+	if !ok {
+		return nil, false
+	}
+
+	out := make([]*User, 0, len(uids))
+	for _, uid := range uids {
+		if u, found := sc.usersByID[uid]; found && u != nil {
+			out = append(out, cloneUser(u))
+		}
+	}
+
+	return out, true
+}
+
+func (sc *stateCache) invalidateRoomMembers() {
+	sc.mu.Lock()
+	clear(sc.roomMembers)
 	sc.mu.Unlock()
 }
 
