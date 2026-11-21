@@ -124,6 +124,9 @@ github.com/matterbridge/matrixclient/e2ee
 # github.com/matterbridge/matterclient v0.0.0-20261116034806-3087b48d325c
 ## explicit; go 1.26.2
 github.com/matterbridge/matterclient
+# github.com/matterbridge/msteamsclient v0.0.0-20261121015707-00f0394f278d
+## explicit; go 1.26.2
+github.com/matterbridge/msteamsclient
 # github.com/matterbridge/slackclient v0.0.0-20261117092932-0a28e681e8a0
 ## explicit; go 1.26.2
 github.com/matterbridge/slackclient

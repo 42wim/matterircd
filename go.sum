@@ -143,6 +143,8 @@ github.com/matterbridge/matrixclient v0.0.0-20261118201436-c19b4ef13462 h1:G0kpr
 github.com/matterbridge/matrixclient v0.0.0-20261118201436-c19b4ef13462/go.mod h1:14RGANRRPwjJ3OxEs2tHGGdvvBjrP3nWTVONogCkhsw=
 github.com/matterbridge/matterclient v0.0.0-20261116034806-3087b48d325c h1:+gdD53Aj1qYoq4H98U5S1XHO8jQFPmxnPxx3HC8WBBY=
 github.com/matterbridge/matterclient v0.0.0-20261116034806-3087b48d325c/go.mod h1:69rJRgvrpV13ZyoA7q1HjHwaM6CSkXQPhCdDFRxwNj0=
+github.com/matterbridge/msteamsclient v0.0.0-20261121015707-00f0394f278d h1:U2wygrUl5mi12HdOK+OUpkDy0NAMzXuzGP5+hzTGjmk=
+github.com/matterbridge/msteamsclient v0.0.0-20261121015707-00f0394f278d/go.mod h1:CXH2cfC81TdlIm2Zh8rP3B4uethFeW2hwiWOWxIAJqg=
 github.com/matterbridge/slackclient v0.0.0-20261117092932-0a28e681e8a0 h1:9DefaVe2V6V8+8YwvoQC77hzIt6vNHAPlSKoMNX5UaI=
 github.com/matterbridge/slackclient v0.0.0-20261117092932-0a28e681e8a0/go.mod h1:+S9vGZleeXISC013UlwXeZSjfWsStvPZ0WdtbcDVMZo=
 github.com/mattermost/go-i18n v1.11.1-0.20211013152124-5c415071e404 h1:Khvh6waxG1cHc4Cz5ef9n3XVCxRWpAKUtqg9PJl5+y8=
