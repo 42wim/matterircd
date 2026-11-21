@@ -27,7 +27,7 @@
 
 [![Join the IRC chat at https://web.libera.chat/gamja/?channels=#matterircd](https://img.shields.io/badge/IRC-matterircd-green.svg)](https://web.libera.chat/gamja/?channels=#matterircd)
 
-Minimal IRC server which integrates with [mattermost](https://www.mattermost.org), [slack](https://www.slack.com), [matrix](https://matrix.org), Microsoft Teams, Rocket.Chat, and Mastodon.  
+Minimal IRC server which integrates with [mattermost](https://www.mattermost.org), [slack](https://www.slack.com), [matrix](https://matrix.org), [Microsoft Teams](https://teams.cloud.microsoft/), [Rocket.Chat](https://rocket.chat/), and Mastodon.  
 Tested on FreeBSD / Linux / Windows
 
 ## Compatibility
