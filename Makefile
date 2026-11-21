@@ -33,7 +33,7 @@ release:
 	cd dist && set -e; \
 	for i in $$(awk '{ print $$2 }' checksums.txt); do \
 		dist_arch=$$(echo $$i | awk -F- '{ print $$(NF-1) "-" $$NF }' | sed -e 's/-/_/g' -e 's/.exe//g' -e 's/armv6/arm_6/g'); \
-		mv matterircd_$${dist_arch}*/matterircd* $$i; \
+		mv matterircd*_$${dist_arch}*/matterircd* $$i; \
 	done; \
 	rm -f artifacts.json config.yaml
 
