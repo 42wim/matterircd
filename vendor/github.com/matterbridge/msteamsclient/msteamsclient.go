@@ -51,6 +51,7 @@ type UsersCache struct {
 	conversations       map[string]*Conversation
 	teams               map[string]*Team
 	channelMembers      map[string]map[string]struct{}
+	channelAdmins       map[string]map[string]struct{}
 	joinedChannels      map[string]struct{}
 	channelLastViewedAt map[string]int64
 	presences           map[string]*Presence
@@ -63,6 +64,7 @@ func newUsersCache() *UsersCache {
 		conversations:       make(map[string]*Conversation),
 		teams:               make(map[string]*Team),
 		channelMembers:      make(map[string]map[string]struct{}),
+		channelAdmins:       make(map[string]map[string]struct{}),
 		joinedChannels:      make(map[string]struct{}),
 		channelLastViewedAt: make(map[string]int64),
 		presences:           make(map[string]*Presence),

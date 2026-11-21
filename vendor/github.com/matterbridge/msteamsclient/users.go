@@ -36,6 +36,10 @@ type rawUserProfile struct {
 	UserPrincipalName string `json:"userPrincipalName"`
 	JobTitle          string `json:"jobTitle"`
 	Department        string `json:"department"`
+	OfficeLocation    string `json:"officeLocation"`
+	City              string `json:"city"`
+	Country           string `json:"country"`
+	TimeZone          string `json:"timeZone"`
 	TenantName        string `json:"tenantName"`
 	Type              string `json:"type"`
 	IsExternal        bool   `json:"isExternal"`
@@ -44,14 +48,83 @@ type rawUserProfile struct {
 type rawPresenceEntry struct {
 	MRI      string `json:"mri"`
 	Presence struct {
-		Availability  string `json:"availability"`
-		Activity      string `json:"activity"`
+		Availability   string `json:"availability"`
+		Activity       string `json:"activity"`
+		LastActiveTime string `json:"lastActiveTime"`
+		Note           struct {
+			Message string `json:"message"`
+			Expiry  string `json:"expiry"`
+		} `json:"note"`
 		StatusMessage struct {
 			Message struct {
 				Content string `json:"content"`
 			} `json:"message"`
+			ExpiryDateTime struct {
+				DateTime string `json:"dateTime"`
+			} `json:"expiryDateTime"`
 		} `json:"statusMessage"`
 	} `json:"presence"`
+}
+
+func (e *rawPresenceEntry) statusNote() (string, int64) {
+	var note string
+	if e.Presence.Note.Message != "" {
+		note = HTMLToText(e.Presence.Note.Message)
+	} else {
+		note = HTMLToText(e.Presence.StatusMessage.Message.Content)
+	}
+
+	if note == "" {
+		return "", 0
+	}
+
+	exp := parsePresenceExpiry(e.Presence.Note.Expiry)
+	if exp == 0 {
+		exp = parsePresenceExpiry(e.Presence.StatusMessage.ExpiryDateTime.DateTime)
+	}
+
+	if exp > 0 && time.Now().Unix() >= exp {
+		return "", 0
+	}
+
+	return note, exp
+}
+
+func parsePresenceExpiry(raw string) int64 {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return 0
+	}
+
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02T15:04:05"} {
+		t, err := time.Parse(layout, s)
+		if err == nil {
+			// Teams uses year 9999 as a sentinel for "never expires".
+			if t.Year() <= 1970 || t.Year() >= 9999 {
+				return 0
+			}
+
+			return t.Unix()
+		}
+	}
+
+	return 0
+}
+
+func (e *rawPresenceEntry) lastActiveAt() int64 {
+	raw := strings.TrimSpace(e.Presence.LastActiveTime)
+	if raw == "" {
+		return 0
+	}
+
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
+		t, err := time.Parse(layout, raw)
+		if err == nil && t.Year() > 1970 {
+			return t.Unix()
+		}
+	}
+
+	return 0
 }
 
 // CacheUser merges u into UsersCache without overwriting richer fields with empty ones.
@@ -105,6 +178,14 @@ func mergeUserFields(dst, src *User) {
 
 	if src.Department != "" {
 		dst.Department = src.Department
+	}
+
+	if src.Location != "" {
+		dst.Location = src.Location
+	}
+
+	if src.TimeZone != "" {
+		dst.TimeZone = src.TimeZone
 	}
 
 	if src.TenantID != "" {
@@ -187,6 +268,10 @@ func (c *Client) ResolveUsers(ctx context.Context, mris []string) (map[string]*U
 
 	ep := c.Endpoints()
 	if ep.MiddleTier == "" {
+		return result, nil
+	}
+
+	if c.effectiveAccountType() == AccountPersonal && c.currentRefreshToken() == "" {
 		return result, nil
 	}
 
@@ -344,6 +429,37 @@ func (c *Client) GetPresence(ctx context.Context, mri string) (*Presence, error)
 	return res[mri], nil
 }
 
+// GetPresenceFresh bypasses the presence TTL cache and fetches the current
+// presence for mri directly from the Teams presence service (falling back to
+// any cached entry on error). Mirrors matterclient.GetStatusFresh.
+func (c *Client) GetPresenceFresh(ctx context.Context, mri string) *Presence {
+	if mri == "" {
+		return nil
+	}
+
+	ep := c.Endpoints()
+	if ep.Presence != "" {
+		now := time.Now().Unix()
+		result := make(map[string]*Presence, 1)
+		c.fetchPresenceBatch(ctx, ep.Presence+"/v1/presence/getpresence/", []string{mri}, now, result)
+
+		if p, ok := result[mri]; ok {
+			return p
+		}
+	}
+
+	c.Users.mu.RLock()
+	defer c.Users.mu.RUnlock()
+
+	if p, ok := c.Users.presences[mri]; ok {
+		cp := *p
+
+		return &cp
+	}
+
+	return nil
+}
+
 // GetPresences returns presences for mris, batch-fetching expired entries from
 // the Teams presence service.
 func (c *Client) GetPresences(ctx context.Context, mris []string) (map[string]*Presence, error) {
@@ -421,12 +537,16 @@ func (c *Client) fetchPresenceBatch(ctx context.Context, presenceURL string, chu
 			continue
 		}
 
+		note, noteExpiry := entry.statusNote()
+
 		p := &Presence{
-			MRI:          entry.MRI,
-			Availability: entry.Presence.Availability,
-			Activity:     entry.Presence.Activity,
-			StatusNote:   HTMLToText(entry.Presence.StatusMessage.Message.Content),
-			UpdatedAt:    now,
+			MRI:                 entry.MRI,
+			Availability:        entry.Presence.Availability,
+			Activity:            entry.Presence.Activity,
+			StatusNote:          note,
+			StatusNoteExpiresAt: noteExpiry,
+			LastActiveAt:        entry.lastActiveAt(),
+			UpdatedAt:           now,
 		}
 
 		c.Users.presences[p.MRI] = p
@@ -455,15 +575,183 @@ func (c *Client) SetPresence(ctx context.Context, status string) error {
 
 	if me := c.Me(); me != nil && me.MRI != "" {
 		c.Users.mu.Lock()
+
+		note := ""
+		noteExpiry := int64(0)
+
+		if prev, ok := c.Users.presences[me.MRI]; ok {
+			note = prev.StatusNote
+			noteExpiry = prev.StatusNoteExpiresAt
+		}
+
 		c.Users.presences[me.MRI] = &Presence{
-			MRI:          me.MRI,
-			Availability: availability,
-			UpdatedAt:    time.Now().Unix(),
+			MRI:                 me.MRI,
+			Availability:        availability,
+			StatusNote:          note,
+			StatusNoteExpiresAt: noteExpiry,
+			UpdatedAt:           time.Now().Unix(),
 		}
 		c.Users.mu.Unlock()
 	}
 
 	return nil
+}
+
+// SetStatusNote sets or clears the authenticated user's Teams custom status note.
+func (c *Client) SetStatusNote(ctx context.Context, message string, expiry time.Time) error {
+	ep := c.Endpoints()
+	if ep.Presence == "" {
+		return errors.New("msteamsclient: presence endpoint unavailable")
+	}
+
+	payload := map[string]any{
+		"message": message,
+	}
+
+	if !expiry.IsZero() {
+		payload["expiry"] = expiry.UTC().Format(time.RFC3339)
+	}
+
+	reqURL := ep.Presence + "/v1/me/publishnote"
+
+	err := c.doJSON(ctx, http.MethodPut, reqURL, authSkypeAndBearer, c.presenceScope(), payload, nil)
+	if err != nil {
+		return fmt.Errorf("msteamsclient: set status note: %w", err)
+	}
+
+	if me := c.Me(); me != nil && me.MRI != "" {
+		var expUnix int64
+		if !expiry.IsZero() && expiry.Year() < 9999 {
+			expUnix = expiry.Unix()
+		}
+
+		c.Users.mu.Lock()
+
+		if prev, ok := c.Users.presences[me.MRI]; ok {
+			prev.StatusNote = message
+			prev.StatusNoteExpiresAt = expUnix
+			prev.UpdatedAt = time.Now().Unix()
+		} else {
+			c.Users.presences[me.MRI] = &Presence{
+				MRI:                 me.MRI,
+				StatusNote:          message,
+				StatusNoteExpiresAt: expUnix,
+				UpdatedAt:           time.Now().Unix(),
+			}
+		}
+
+		c.Users.mu.Unlock()
+	}
+
+	return nil
+}
+
+// GetStatusNote returns the active (non-expired) cached custom status note for mri, or "".
+func (c *Client) GetStatusNote(mri string) string {
+	c.Users.mu.RLock()
+	defer c.Users.mu.RUnlock()
+
+	p, ok := c.Users.presences[mri]
+	if !ok || p.StatusNote == "" {
+		return ""
+	}
+
+	if p.StatusNoteExpiresAt > 0 && time.Now().Unix() >= p.StatusNoteExpiresAt {
+		return ""
+	}
+
+	return p.StatusNote
+}
+
+// FormatStatusNote returns the active custom status note for mri, appending
+// " (Until ...)" when an expiry timestamp is set (matching matterclient).
+func (c *Client) FormatStatusNote(mri string) string {
+	c.Users.mu.RLock()
+
+	p, ok := c.Users.presences[mri]
+	if !ok || p.StatusNote == "" {
+		c.Users.mu.RUnlock()
+
+		return ""
+	}
+
+	note := p.StatusNote
+	expUnix := p.StatusNoteExpiresAt
+
+	tz := ""
+	if u, hasUser := c.Users.users[mri]; hasUser {
+		tz = strings.TrimSpace(u.TimeZone)
+	}
+
+	c.Users.mu.RUnlock()
+
+	if expUnix == 0 {
+		return note
+	}
+
+	now := time.Now()
+	if now.Unix() >= expUnix {
+		return ""
+	}
+
+	return note + " (Until " + formatStatusExpiry(now, time.Unix(expUnix, 0), tz) + ")"
+}
+
+func formatStatusExpiry(now, expiry time.Time, userTZ string) string {
+	loc := now.Location()
+	expLocal := expiry.In(loc)
+	timeStr := expLocal.Format("15:04")
+
+	nowDate := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+	expDate := time.Date(expLocal.Year(), expLocal.Month(), expLocal.Day(), 0, 0, 0, 0, loc)
+	daysDiff := int(expDate.Sub(nowDate).Hours() / 24)
+
+	var dateStr string
+
+	switch daysDiff {
+	case 0:
+		dateStr = "Today at " + timeStr
+	case 1:
+		dateStr = "Tomorrow at " + timeStr
+	default:
+		dateStr = expLocal.Format("Mon, 02 Jan 15:04")
+	}
+
+	if userTZ != "" {
+		userLoc, err := time.LoadLocation(userTZ)
+		if err == nil {
+			userTimeStr := expiry.In(userLoc).Format("15:04")
+			if userTimeStr != timeStr {
+				dateStr += ", local time: " + userTimeStr
+			}
+		}
+	}
+
+	return dateStr
+}
+
+// GetUserLocalTime returns the formatted local time (e.g. "15:04 AEDT") for
+// mri if their profile carries a valid IANA TimeZone, or "" otherwise.
+func (c *Client) GetUserLocalTime(mri string) string {
+	c.Users.mu.RLock()
+
+	tz := ""
+	if u, ok := c.Users.users[mri]; ok {
+		tz = strings.TrimSpace(u.TimeZone)
+	}
+
+	c.Users.mu.RUnlock()
+
+	if tz == "" {
+		return ""
+	}
+
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
+		return ""
+	}
+
+	return time.Now().In(loc).Format("15:04 MST")
 }
 
 // GetStatus returns the cached canonical status ("online", "away", "dnd", "offline") for mri.
@@ -556,6 +844,20 @@ func parseRawUserProfile(rp *rawUserProfile) *User {
 		name = strings.TrimSpace(rp.GivenName + " " + rp.Surname)
 	}
 
+	location := strings.TrimSpace(rp.OfficeLocation)
+	if location == "" {
+		parts := make([]string, 0, 2)
+		if c := strings.TrimSpace(rp.City); c != "" {
+			parts = append(parts, c)
+		}
+
+		if c := strings.TrimSpace(rp.Country); c != "" {
+			parts = append(parts, c)
+		}
+
+		location = strings.Join(parts, ", ")
+	}
+
 	return &User{
 		MRI:         rp.MRI,
 		ObjectID:    rp.ObjectID,
@@ -566,6 +868,8 @@ func parseRawUserProfile(rp *rawUserProfile) *User {
 		UPN:         rp.UserPrincipalName,
 		JobTitle:    rp.JobTitle,
 		Department:  rp.Department,
+		Location:    location,
+		TimeZone:    strings.TrimSpace(rp.TimeZone),
 		TenantID:    rp.TenantName,
 		IsBot:       strings.HasPrefix(rp.MRI, "28:") || strings.EqualFold(rp.Type, "Bot"),
 		IsExternal:  rp.IsExternal,

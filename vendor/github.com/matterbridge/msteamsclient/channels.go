@@ -525,6 +525,21 @@ func (c *Client) IsChannelMember(channelID string) bool {
 	return ok
 }
 
+// IsChannelAdmin reports whether mri has an Admin or Owner role in channelID.
+func (c *Client) IsChannelAdmin(channelID, mri string) bool {
+	c.Users.mu.RLock()
+	defer c.Users.mu.RUnlock()
+
+	admins, ok := c.Users.channelAdmins[channelID]
+	if !ok {
+		return false
+	}
+
+	_, isAdmin := admins[mri]
+
+	return isAdmin
+}
+
 // GetChannelMembers returns the member MRIs of conversationID, fetching them
 // from chatsvc if not already cached.
 func (c *Client) GetChannelMembers(ctx context.Context, conversationID string) ([]string, error) {
@@ -555,12 +570,18 @@ func (c *Client) GetChannelMembers(ctx context.Context, conversationID string) (
 	}
 
 	members := make([]string, 0, len(resp.Members))
+	admins := make([]string, 0)
+
 	for _, m := range resp.Members {
-		if m.ID == "" {
+		if !isUserMRI(m.ID) {
 			continue
 		}
 
 		members = append(members, m.ID)
+
+		if strings.EqualFold(m.Role, "admin") || strings.EqualFold(m.Role, "owner") {
+			admins = append(admins, m.ID)
+		}
 
 		if m.FriendlyName != "" {
 			c.CacheUser(&User{
@@ -570,7 +591,7 @@ func (c *Client) GetChannelMembers(ctx context.Context, conversationID string) (
 		}
 	}
 
-	c.updateThreadMembersCache(conversationID, members, resp.Properties.Topic)
+	c.updateThreadMembersCache(conversationID, members, admins, resp.Properties.Topic)
 
 	return members, nil
 }
@@ -592,11 +613,22 @@ func (c *Client) cachedChannelMembers(conversationID string) []string {
 	return members
 }
 
-func (c *Client) updateThreadMembersCache(conversationID string, members []string, topic string) {
+func (c *Client) updateThreadMembersCache(conversationID string, members, admins []string, topic string) {
 	c.Users.mu.Lock()
 	defer c.Users.mu.Unlock()
 
 	c.setMembersLocked(conversationID, members)
+
+	if len(admins) > 0 {
+		adminSet := make(map[string]struct{}, len(admins))
+		for _, a := range admins {
+			adminSet[a] = struct{}{}
+		}
+
+		c.Users.channelAdmins[conversationID] = adminSet
+	} else {
+		delete(c.Users.channelAdmins, conversationID)
+	}
 
 	if conv, ok := c.Users.conversations[conversationID]; ok {
 		conv.Members = slices.Clone(members)
@@ -686,6 +718,8 @@ func (c *Client) createThread(ctx context.Context, memberMRIs []string, topic st
 	payload := buildCreateThreadPayload(memberMRIs, topic, oneOnOne)
 	reqURL := ep.ChatService + "/v1/threads"
 
+	existing := c.conversationIDSet()
+
 	var resp struct {
 		ID string `json:"id"`
 	}
@@ -702,6 +736,10 @@ func (c *Client) createThread(ctx context.Context, memberMRIs []string, topic st
 			if id := c.GetDMConversationID(memberMRIs[1]); id != "" {
 				return c.GetChannel(id), nil
 			}
+		}
+
+		if created := c.findCreatedConversation(existing, topic); created != nil {
+			return created, nil
 		}
 
 		return nil, errors.New("msteamsclient: create thread succeeded without returning a thread ID")
@@ -727,6 +765,46 @@ func (c *Client) createThread(ctx context.Context, memberMRIs []string, topic st
 	c.Users.mu.Unlock()
 
 	return conv, nil
+}
+
+func (c *Client) conversationIDSet() map[string]struct{} {
+	c.Users.mu.RLock()
+	defer c.Users.mu.RUnlock()
+
+	ids := make(map[string]struct{}, len(c.Users.conversations))
+	for id := range c.Users.conversations {
+		ids[id] = struct{}{}
+	}
+
+	return ids
+}
+
+func (c *Client) findCreatedConversation(existing map[string]struct{}, topic string) *Conversation {
+	c.Users.mu.RLock()
+	defer c.Users.mu.RUnlock()
+
+	var fallback *Conversation
+
+	for id, conv := range c.Users.conversations {
+		if _, had := existing[id]; had {
+			continue
+		}
+
+		cp := *conv
+		if topic != "" && strings.EqualFold(conv.Topic, topic) {
+			return &cp
+		}
+
+		if fallback == nil {
+			fallback = &cp
+		}
+	}
+
+	return fallback
+}
+
+func isUserMRI(mri string) bool {
+	return strings.HasPrefix(mri, "8:") || strings.HasPrefix(mri, "28:")
 }
 
 func buildCreateThreadPayload(memberMRIs []string, topic string, oneOnOne bool) map[string]any {

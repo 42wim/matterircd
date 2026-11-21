@@ -200,6 +200,8 @@ type User struct {
 	UPN         string
 	JobTitle    string
 	Department  string
+	Location    string
+	TimeZone    string
 	TenantID    string
 	IsBot       bool
 	IsExternal  bool
@@ -207,9 +209,11 @@ type User struct {
 
 // Presence represents a user's availability and status message.
 type Presence struct {
-	MRI          string
-	Availability string
-	Activity     string
-	StatusNote   string
-	UpdatedAt    int64
+	MRI                 string
+	Availability        string
+	Activity            string
+	StatusNote          string
+	StatusNoteExpiresAt int64
+	LastActiveAt        int64
+	UpdatedAt           int64
 }
