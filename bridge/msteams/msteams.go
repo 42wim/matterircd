@@ -411,9 +411,13 @@ func (m *MSTeams) PostURL(_ context.Context, postID string, _ []*bridge.Event) s
 	return teamsMessageURL(m.mc.TokenState().AccountType, convID, rawMsgID)
 }
 
-// UserDetails implements bridge.UserDetailer for /whois profile photo URLs.
-func (m *MSTeams) UserDetails(_ context.Context, userID string) (string, bool) {
-	return m.mc.GetUserAvatarURL(userID), false
+// ChannelUserPrefix implements bridge.ChannelRolePrefixer for Teams channel/chat owners and admins.
+func (m *MSTeams) ChannelUserPrefix(channelID, userID string) string {
+	if m.mc.IsChannelAdmin(channelID, userID) {
+		return "@"
+	}
+
+	return ""
 }
 
 func (m *MSTeams) UpdateChannels(ctx context.Context) error {
@@ -620,8 +624,8 @@ func (m *MSTeams) RemoveReaction(ctx context.Context, msgID, emoji string) error
 	return m.mc.RemoveReaction(ctx, convID, rawMsgID, key)
 }
 
-func (m *MSTeams) HasCustomStatus(_ string) bool {
-	return false
+func (m *MSTeams) HasCustomStatus(userID string) bool {
+	return m.mc.GetStatusNote(userID) != ""
 }
 
 func (m *MSTeams) IsOnline(status string) bool {
@@ -634,16 +638,51 @@ func (m *MSTeams) IsOnline(status string) bool {
 }
 
 func (m *MSTeams) StatusUser(ctx context.Context, userID string) (string, error) {
-	p, err := m.mc.GetPresence(ctx, userID)
-	if err != nil {
-		return "offline", err
-	}
-
+	p := m.mc.GetPresenceFresh(ctx, userID)
 	if p == nil {
 		return m.mc.GetStatus(userID), nil
 	}
 
-	return msteamsclient.MapAvailabilityToStatus(p.Availability), nil
+	status := msteamsclient.MapAvailabilityToStatus(p.Availability)
+	localTime := m.mc.GetUserLocalTime(userID)
+
+	var lastOnline string
+
+	if p.LastActiveAt > 0 {
+		diff := max(0, time.Now().Unix()-p.LastActiveAt)
+		if status == "online" {
+			lastOnline = utils.FormatLastOnline(p.LastActiveAt, true)
+		} else if diff >= 20*60 {
+			lastOnline = utils.FormatLastOnline(p.LastActiveAt)
+		}
+	}
+
+	return formatStatusWithDetails(status, lastOnline, localTime, m.mc.FormatStatusNote(userID)), nil
+}
+
+func formatStatusWithDetails(status, lastOnline, localTime, note string) string {
+	var details string
+
+	switch {
+	case lastOnline != "" && localTime != "":
+		details = fmt.Sprintf("%s, local time: %s", lastOnline, localTime)
+	case lastOnline != "":
+		details = lastOnline
+	case localTime != "":
+		details = fmt.Sprintf("local time: %s", localTime)
+	default:
+		if note != "" {
+			return fmt.Sprintf("%s: %s", status, note)
+		}
+
+		return status
+	}
+
+	if note != "" {
+		return fmt.Sprintf("%s (%s): %s", status, details, note)
+	}
+
+	return fmt.Sprintf("%s (%s)", status, details)
 }
 
 func (m *MSTeams) StatusUsers(ctx context.Context) (map[string]string, error) {
@@ -1174,6 +1213,15 @@ func (m *MSTeams) userToUserInfo(u *msteamsclient.User) *bridge.UserInfo {
 		u.Surname,
 	)
 
+	position := u.JobTitle
+	if u.Location != "" {
+		if position != "" {
+			position = position + " (" + u.Location + ")"
+		} else {
+			position = u.Location
+		}
+	}
+
 	return &bridge.UserInfo{
 		Nick:        nick,
 		User:        u.MRI,
@@ -1188,7 +1236,7 @@ func (m *MSTeams) userToUserInfo(u *msteamsclient.User) *bridge.UserInfo {
 		LastName:    u.Surname,
 		Email:       u.Email,
 		Directory:   dirURL,
-		Position:    u.JobTitle,
+		Position:    position,
 	}
 }
 

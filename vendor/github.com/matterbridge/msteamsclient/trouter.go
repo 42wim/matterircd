@@ -978,7 +978,15 @@ func (c *Client) handleTopicActivity(convID, fromMRI, content string) {
 }
 
 func (c *Client) handleMemberActivity(convID, fromMRI, content string, added bool) {
-	targets := extractAllXMLTagValues(content, "target")
+	rawTargets := extractAllXMLTagValues(content, "target")
+	targets := make([]string, 0, len(rawTargets))
+
+	for _, mri := range rawTargets {
+		if isUserMRI(mri) {
+			targets = append(targets, mri)
+		}
+	}
+
 	if len(targets) == 0 {
 		return
 	}
@@ -1067,12 +1075,16 @@ func (c *Client) handleTrouterPresenceEvent(resource json.RawMessage) {
 		return
 	}
 
+	note, noteExpiry := entry.statusNote()
+
 	p := &Presence{
-		MRI:          entry.MRI,
-		Availability: entry.Presence.Availability,
-		Activity:     entry.Presence.Activity,
-		StatusNote:   HTMLToText(entry.Presence.StatusMessage.Message.Content),
-		UpdatedAt:    time.Now().Unix(),
+		MRI:                 entry.MRI,
+		Availability:        entry.Presence.Availability,
+		Activity:            entry.Presence.Activity,
+		StatusNote:          note,
+		StatusNoteExpiresAt: noteExpiry,
+		LastActiveAt:        entry.lastActiveAt(),
+		UpdatedAt:           time.Now().Unix(),
 	}
 
 	c.Users.mu.Lock()
