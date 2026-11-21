@@ -32,7 +32,7 @@ import (
 
 var (
 	project = "matterircd"
-	version = "0.35.0-dev"
+	version = "0.35.0"
 	githash string
 	logger  *logrus.Entry
 	cfg     *config.Config
