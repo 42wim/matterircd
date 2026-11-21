@@ -12,7 +12,8 @@ require (
 	github.com/matterbridge/logrus-prefixed-formatter v0.5.3-0.20200523233437-d971309a77ba
 	github.com/matterbridge/matrixclient v0.0.0-20261118201436-c19b4ef13462
 	github.com/matterbridge/matterclient v0.0.0-20261116034806-3087b48d325c
-	github.com/matterbridge/slackclient v0.0.0-20261117092932-0a28e681e8a0
+	github.com/matterbridge/rocketchatclient v0.0.0-20261116082210-070dd382e09f
+  github.com/matterbridge/slackclient v0.0.0-20261117092932-0a28e681e8a0
 	github.com/mattermost/mattermost/server/public v0.3.0
 	github.com/mattn/go-mastodon v0.0.6
 	github.com/mitchellh/mapstructure v1.5.0
