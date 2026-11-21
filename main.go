@@ -153,10 +153,16 @@ func main() {
 		slFile = mmFile
 	}
 
+	rcFile := rc.RocketChat.LastViewedSaveFile
+	if rcFile == "" {
+		rcFile = mmFile
+	}
+
 	protoFiles := map[string]string{
 		"mattermost": mmFile,
 		"matrix":     mxFile,
 		"slack":      slFile,
+		"rocketchat": rcFile,
 	}
 
 	openedDBs := make(map[string]*bolt.DB)
@@ -315,11 +321,12 @@ func main() {
 func setupDBReloadHook(cfg *config.Config) {
 	rc := cfg.Current()
 
-	var lastMMFile, lastMXFile, lastSLFile atomic.Value
+	var lastMMFile, lastMXFile, lastSLFile, lastRCFile atomic.Value
 
 	lastMMFile.Store(rc.Mattermost.LastViewedSaveFile)
 	lastMXFile.Store(rc.Matrix.LastViewedSaveFile)
 	lastSLFile.Store(rc.Slack.LastViewedSaveFile)
+	lastRCFile.Store(rc.RocketChat.LastViewedSaveFile)
 
 	cfg.RegisterReloadHook(func(newRC *config.RuntimeConfig) {
 		newMM := newRC.Mattermost.LastViewedSaveFile
@@ -341,6 +348,13 @@ func setupDBReloadHook(cfg *config.Config) {
 
 		if lastSL != newSL {
 			logger.Warnf("slack.LastViewedSaveFile changed from %q to %q, a matterircd restart is required for it to take effect", lastSL, newSL)
+		}
+
+		newRCFile := newRC.RocketChat.LastViewedSaveFile
+		lastRC := lastRCFile.Swap(newRCFile)
+
+		if lastRC != newRCFile {
+			logger.Warnf("rocketchat.LastViewedSaveFile changed from %q to %q, a matterircd restart is required for it to take effect", lastRC, newRCFile)
 		}
 	})
 }

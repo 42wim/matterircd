@@ -23,6 +23,7 @@ import (
 	"github.com/42wim/matterircd/bridge/mastodon"
 	"github.com/42wim/matterircd/bridge/matrix"
 	"github.com/42wim/matterircd/bridge/mattermost"
+	"github.com/42wim/matterircd/bridge/rocketchat"
 	"github.com/42wim/matterircd/bridge/slack"
 	"github.com/42wim/matterircd/config"
 	"github.com/42wim/matterircd/utils"
@@ -949,7 +950,7 @@ func (u *User) handleChannelUpdateEvent(e *bridge.ChannelUpdateEvent) {
 	u.RLock()
 
 	for ch := range u.channels {
-		if ch.ID() == ID(e.ChannelID) && ch.String() != newIRCChanStr {
+		if (ch.ID() == e.ChannelID || ch.ID() == ID(e.ChannelID)) && ch.String() != newIRCChanStr {
 			staleChannels = append(staleChannels, ch)
 		}
 	}
@@ -1960,8 +1961,8 @@ func (u *User) replayHistoryEvents(brchannel *bridge.ChannelInfo, since int64, l
 			logger.Errorf("something wrong with GetReplayEvents for %s for channel %s (%s)", u.Nick, channame, brchannel.ID)
 		}
 
-		// Only Matrix reports a failed fetch as nil, an empty result is not one.
-		return events != nil || u.br.Protocol() != serviceMatrix
+		// Only Matrix and RocketChat report a failed fetch as nil, an empty result is not one.
+		return events != nil || (u.br.Protocol() != serviceMatrix && u.br.Protocol() != serviceRocketChat)
 	}
 
 	showReplayHdr := true
@@ -2354,7 +2355,7 @@ func (u *User) mayJoin(channelID string) bool {
 
 // hasSharedCfg reports whether the bridge takes the options of config.SharedConfig.
 func (u *User) hasSharedCfg() bool {
-	return u.br != nil && (u.br.Protocol() == serviceMattermost || u.br.Protocol() == serviceMatrix || u.br.Protocol() == serviceSlack)
+	return u.br != nil && (u.br.Protocol() == serviceMattermost || u.br.Protocol() == serviceMatrix || u.br.Protocol() == serviceSlack || u.br.Protocol() == serviceRocketChat)
 }
 
 // sharedCfg returns the shared options of the bridge's protocol, Mattermost's for the others.
@@ -2365,6 +2366,8 @@ func (u *User) sharedCfg() *config.SharedConfig {
 			return &u.cfg.Matrix().SharedConfig
 		case serviceSlack:
 			return &u.cfg.Slack().SharedConfig
+		case serviceRocketChat:
+			return &u.cfg.RocketChat().SharedConfig
 		}
 	}
 
@@ -2413,6 +2416,9 @@ func (u *User) isValidServer(server, protocol string) bool {
 	case serviceMastodon:
 		restrict = u.cfg.Mastodon().Bridge.Restrict
 
+	case serviceRocketChat:
+		restrict = u.cfg.RocketChat().Bridge.Restrict
+
 	default:
 		return true
 	}
@@ -2443,18 +2449,38 @@ func (u *User) serviceForPass(pass []string) string {
 		return serviceSlack
 	case slices.Contains(u.cfg.Mastodon().Bridge.Restrict, pass[0]):
 		return serviceMastodon
+	case slices.Contains(u.cfg.RocketChat().Bridge.Restrict, pass[0]):
+		return serviceRocketChat
 	}
 
 	return ""
 }
 
+func (u *User) openBridge(protocol string, eventChan chan *bridge.Event, onWsError func(error)) (bridge.Bridger, error) {
+	switch protocol {
+	case serviceMastodon:
+		return mastodon.New(u.cfg, u.Credentials, eventChan, u.addUsersToChannels)
+	case serviceMatrix:
+		br, _, err := matrix.New(u.ctx, u.cfg, u.Credentials, eventChan, u.addUsersToChannels)
+
+		return br, err
+	case serviceSlack:
+		return slack.New(u.cfg, u.Credentials, eventChan, u.addUsersToChannels, onWsError)
+	case serviceMattermost:
+		br, _, err := mattermost.New(u.ctx, u.cfg, u.Credentials, eventChan, u.addUsersToChannels, onWsError)
+
+		return br, err
+	case serviceRocketChat:
+		br, _, err := rocketchat.New(u.ctx, u.cfg, u.Credentials, eventChan, u.addUsersToChannels)
+
+		return br, err
+	default:
+		return nil, fmt.Errorf("unknown protocol %q", protocol)
+	}
+}
+
 //nolint:funlen
 func (u *User) loginTo(protocol string) error {
-	var (
-		br  bridge.Bridger
-		err error
-	)
-
 	u.loginReady.Store(false)
 
 	// Reset the event loop tracker in case this User struct is recycled.
@@ -2475,17 +2501,7 @@ func (u *User) loginTo(protocol string) error {
 		u.handleBridgeDisconnect("")
 	}
 
-	switch protocol {
-	case serviceMastodon:
-		br, err = mastodon.New(u.cfg, u.Credentials, eventChan, u.addUsersToChannels)
-	case serviceMatrix:
-		br, _, err = matrix.New(u.ctx, u.cfg, u.Credentials, eventChan, u.addUsersToChannels)
-	case serviceSlack:
-		br, err = slack.New(u.cfg, u.Credentials, eventChan, u.addUsersToChannels, onWsError)
-	case serviceMattermost:
-		br, _, err = mattermost.New(u.ctx, u.cfg, u.Credentials, eventChan, u.addUsersToChannels, onWsError)
-	}
-
+	br, err := u.openBridge(protocol, eventChan, onWsError)
 	if err != nil {
 		u.eventLoopMutex.Lock()
 		u.br = nil
@@ -2700,6 +2716,12 @@ func (u *User) formatContextMessage(ts, threadMsgID, msg string) string {
 	return formattedMsg
 }
 
+func isNativeThreadContext(tc string) bool {
+	base := strings.TrimSuffix(tc, "+post")
+
+	return base == serviceMattermost || base == serviceMatrix || base == serviceSlack || base == serviceRocketChat
+}
+
 func (u *User) prefixContext(channelID, messageID, parentID, event string) string {
 	logger.Tracef("prefixContext ch %s msg %s parent %s event %s", channelID, messageID, parentID, event)
 
@@ -2715,14 +2737,12 @@ func (u *User) prefixContext(channelID, messageID, parentID, event string) strin
 	}
 
 	tc := u.br.BridgeConfig().ThreadContext
-	if tc == serviceMattermost || tc == serviceMattermost+"+post" ||
-		tc == serviceMatrix || tc == serviceMatrix+"+post" ||
-		tc == serviceSlack || tc == serviceSlack+"+post" {
+	if isNativeThreadContext(tc) {
 		if parentID == "" {
 			return "[@@" + messageID + "]"
 		}
 
-		if tc == serviceMattermost || tc == serviceMatrix || tc == serviceSlack || parentID == messageID {
+		if !strings.HasSuffix(tc, "+post") || parentID == messageID {
 			return "[" + prefixChar + "@@" + parentID + "]"
 		}
 
@@ -3314,10 +3334,7 @@ func (u *User) handleTyping(e *bridge.TypingEvent) {
 
 	parentID := e.ParentID
 	if parentID != "" {
-		tc := u.br.BridgeConfig().ThreadContext
-		if tc != serviceMattermost && tc != serviceMattermost+"+post" &&
-			tc != serviceMatrix && tc != serviceMatrix+"+post" &&
-			tc != serviceSlack && tc != serviceSlack+"+post" {
+		if !isNativeThreadContext(u.br.BridgeConfig().ThreadContext) {
 			parentID = u.getMsgCounterHex(e.ChannelID, parentID)
 		}
 
@@ -3571,6 +3588,8 @@ func (u *User) protocolServerName(service ...string) string {
 		return "Slack"
 	case serviceMastodon:
 		return "Mastodon"
+	case serviceRocketChat:
+		return "Rocket.Chat"
 	default:
 		if proto != "" {
 			return strings.ToUpper(proto[:1]) + proto[1:]

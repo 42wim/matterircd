@@ -222,8 +222,8 @@ func (u *User) Encode(msgs ...*irc.Message) error {
 }
 
 var (
-	replyRegExp  = regexp.MustCompile(`^\@\@(?:!!|[0-9a-z]{26}|[0-9a-f]{3}|\$[0-9A-Za-z\-_\.\+\/]{43}|sl[0-9a-v]{34,80})\s`)
-	modifyRegExp = regexp.MustCompile(`^s/(?:!!|[0-9a-z]{26}|[0-9a-f]{3}|\$[0-9A-Za-z\-_\.\+\/]{43}|sl[0-9a-v]{34,80})?/`)
+	replyRegExp  = regexp.MustCompile(`^\@\@(?:!!|[0-9a-z]{26}|[0-9A-Za-z]{17}|[0-9a-f]{3}|\$[0-9A-Za-z\-_\.\+\/]{43}|sl[0-9a-v]{34,80})\s`)
+	modifyRegExp = regexp.MustCompile(`^s/(?:!!|[0-9a-z]{26}|[0-9A-Za-z]{17}|[0-9a-f]{3}|\$[0-9A-Za-z\-_\.\+\/]{43}|sl[0-9a-v]{34,80})?/`)
 )
 
 // threadPrefix returns the thread ("@@id ") that text is a reply to, or an empty string.
@@ -483,7 +483,7 @@ const (
 	serviceMatrix     = "matrix"
 	serviceSlack      = "slack"
 	serviceMastodon   = "mastodon"
-	serviceRocketChat = "rocket.chat"
+	serviceRocketChat = "rocketchat"
 	serviceMsTeams    = "msteams"
 
 	// serviceAlias is the service bot that handles the commands of whichever bridge is logged in.
@@ -501,7 +501,7 @@ var loginServices = [...]string{
 
 // isServiceBot tells if nick is one of the service bots (the ones to login to and to send commands to).
 func isServiceBot(nick string) bool {
-	return nick == serviceSlack || nick == serviceMattermost || nick == serviceMastodon || nick == serviceMatrix || nick == serviceAlias
+	return nick == serviceSlack || nick == serviceMattermost || nick == serviceMastodon || nick == serviceMatrix || nick == serviceMsTeams || nick == serviceRocketChat || nick == serviceAlias
 }
 
 // isServiceUser reports whether target is one of the local bridge service bots, not a remote user with the same nick.
@@ -648,12 +648,13 @@ func (u *User) ResetAwayNotified() {
 	u.awayNotifiedGen++
 }
 
+//nolint:gocyclo
 func isSensitiveServiceMsg(msg *irc.Message) bool {
 	if msg == nil || msg.Prefix == nil || msg.Command != irc.PRIVMSG || msg.Host != "service" {
 		return false
 	}
 
-	if msg.Name != serviceSlack && msg.Name != serviceMattermost && msg.Name != serviceMatrix && msg.Name != serviceAlias {
+	if msg.Name != serviceSlack && msg.Name != serviceMattermost && msg.Name != serviceMatrix && msg.Name != serviceMsTeams && msg.Name != serviceRocketChat && msg.Name != serviceAlias {
 		return false
 	}
 

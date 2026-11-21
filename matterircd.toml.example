@@ -472,6 +472,61 @@ PrefixContext = false
 
 
 #############################
+##### ROCKET.CHAT EXAMPLE ###
+#############################
+# Connect to matterircd and /msg rocketchat login <server> <user> <pass> [2fa=<code>]
+# or /msg rocketchat login <server> token=<userId>:<authToken>
+[rocketchat]
+#Default Rocket.Chat server URL (optional, allows omitting <server> on LOGIN)
+#Server = "https://open.rocket.chat"
+#Restrict logins to specific Rocket.Chat server(s)
+#Restrict = ["https://open.rocket.chat"]
+#SkipTLSVerify = false
+#Insecure = false
+
+#Display Rocket.Chat full display name (when IRC-nick compatible) instead of username
+#PreferNickname = false
+
+#Append a URL directory to WHOIS for each user. {nick}, {username} and {email} are replaced.
+#DirectoryURL = "https://directory.mydomain.local/people/{nick}"
+
+#Mentions & formatting
+#ShowMentions = false
+#DisableDefaultMentions = false
+#HideReplies = false
+#ShortenRepliesTo = 0
+#ShowOwnReactions = false
+#HideReactions = false
+#DisableShowOwnModified = false
+#DisableEmoji = false
+#DisableMarkdown = false
+#Unicode = false
+#EnableIRCHexColors = false
+#MessageAttachmentShortFieldMaxLineLength = 100
+#MessageAttachmentOmitFieldTitles = false
+
+#Threading, replay & channel sync (set ThreadContext = "rocketchat" for native 17-char @@id refs)
+#PrefixContext = false
+#SuffixContext = false
+#ShowContextMulti = false
+#ThreadContext = "rocketchat"
+#ShowTopic = false
+#ShowJoinPart = false
+#ShowOnlyJoined = false
+#JoinDM = false
+#JoinExclude = ["#off-topic"]
+#JoinInclude = ["#general"]
+#DisableAutoView = false
+#ReplayStrategy = "hybrid"
+#ReplayExclude = []
+#EnableLazyJoin = false
+#LazyJoinExclude = []
+#RocketchatclientLogLevel = "info"
+#Optional per-protocol DB path; falls back to [mattermost] LastViewedSaveFile when unset.
+#LastViewedSaveFile = "matterircd-rocketchat-lastsaved.db"
+
+
+#############################
 ##### MASTODON EXAMPLE ######
 #############################
 [mastodon]
