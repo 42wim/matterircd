@@ -493,7 +493,7 @@ PrefixContext = false
 #Optional OAuth2 public client ID override
 #ClientID = ""
 
-#Optional path to a 0600 JSON file for persisting rotated refresh tokens across restarts
+#Optional path to a 0600 JSON file for persisting rotated refresh tokens (or a browser-extracted skypetoken) across restarts
 #TokenSaveFile = "matterircd-msteams-tokens.json"
 
 #Restrict logins to specific tenants / account types
