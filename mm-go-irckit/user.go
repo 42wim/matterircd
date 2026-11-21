@@ -483,6 +483,8 @@ const (
 	serviceMatrix     = "matrix"
 	serviceSlack      = "slack"
 	serviceMastodon   = "mastodon"
+	serviceRocketChat = "rocket.chat"
+	serviceMsTeams    = "msteams"
 
 	// serviceAlias is the service bot that handles the commands of whichever bridge is logged in.
 	serviceAlias = "service"
@@ -493,6 +495,8 @@ var loginServices = [...]string{
 	serviceSlack,
 	serviceMatrix,
 	serviceMastodon,
+	serviceRocketChat,
+	serviceMsTeams,
 }
 
 // isServiceBot tells if nick is one of the service bots (the ones to login to and to send commands to).
