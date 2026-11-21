@@ -1325,7 +1325,12 @@ func (u *User) addUsersToChannels() {
 
 			formatChannelDesc := func() string {
 				if mUser := u.br.GetDMUser(u.ctx, brchannel.Name); mUser != nil {
-					return fmt.Sprintf("DM with %s (%s)", u.sanitizeNick(mUser.Nick), mUser.User)
+					nick := u.sanitizeNick(mUser.Nick)
+					if mUser.Me {
+						nick = u.Nick
+					}
+
+					return fmt.Sprintf("DM with %s (%s)", nick, mUser.User)
 				}
 
 				if u.br.IsDMChannelName(brchannel.Name) {
@@ -1464,7 +1469,10 @@ func (u *User) createSpoof(mmchannel *bridge.ChannelInfo) func(nick, msg, timeTa
 
 	// Resolve the other participant's IRC nick for DMs
 	if isDM {
-		if dmUser := u.br.GetDMUser(u.ctx, mmchannel.Name); dmUser != nil {
+		dmUser := u.br.GetDMUser(u.ctx, mmchannel.Name)
+		if dmUser != nil && dmUser.Me {
+			otherNick = u.Nick
+		} else if dmUser != nil {
 			otherNick = u.sanitizeNick(dmUser.Nick)
 		}
 	} else {
@@ -3610,7 +3618,7 @@ func (u *User) protocolServerName(service ...string) string {
 	case serviceMastodon:
 		return "Mastodon"
 	case serviceMsTeams:
-		return "Microsoft Teams"
+		return "MSTeams"
 	case serviceRocketChat:
 		return "Rocket.Chat"
 	default:

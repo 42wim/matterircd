@@ -136,6 +136,10 @@ func renderElementNode(b *strings.Builder, n *html.Node, inPre bool) {
 		renderWrapped(b, n, "~~", "~~", inPre)
 
 		return
+	case "u":
+		renderWrapped(b, n, "\x1f", "\x1f", inPre)
+
+		return
 	case "code":
 		if inPre {
 			renderChildren(b, n, true)
@@ -227,15 +231,22 @@ func renderWrapped(b *strings.Builder, n *html.Node, openTag, closeTag string, i
 	renderChildren(&inner, n, inPre)
 
 	content := inner.String()
-	if strings.TrimSpace(content) == "" {
+
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
 		b.WriteString(content)
 
 		return
 	}
 
+	lead := content[:len(content)-len(strings.TrimLeft(content, " \t\u00a0"))]
+	trail := content[len(strings.TrimRight(content, " \t\u00a0")):]
+
+	b.WriteString(lead)
 	b.WriteString(openTag)
-	b.WriteString(content)
+	b.WriteString(trimmed)
 	b.WriteString(closeTag)
+	b.WriteString(trail)
 }
 
 func renderAnchor(b *strings.Builder, n *html.Node, inPre bool) {
@@ -285,6 +296,8 @@ func collapseInlineWhitespace(s string) string {
 	if s == "" {
 		return ""
 	}
+
+	s = strings.ReplaceAll(s, "\u00a0", " ")
 
 	var b strings.Builder
 

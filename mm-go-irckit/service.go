@@ -572,7 +572,7 @@ func replay(u *User, toUser *User, args []string, service string) {
 		}
 	}
 
-	channelID := u.br.GetChannelID(u.ctx, channelName, channelTeamID)
+	channelID := resolveReplayChannelID(u, args[0], channelName, channelTeamID)
 
 	brchannel, err := u.br.GetChannel(u.ctx, channelID)
 	if err != nil {
@@ -606,6 +606,21 @@ func replay(u *User, toUser *User, args []string, service string) {
 	}
 
 	u.replayHistory(brchannel, since, logSince)
+}
+
+func resolveReplayChannelID(u *User, rawTarget, channelName, teamID string) string {
+	channelID := u.br.GetChannelID(u.ctx, channelName, teamID)
+	if channelID != "" || strings.HasPrefix(rawTarget, "#") {
+		return channelID
+	}
+
+	if replayUser, exists := u.Srv.HasUser(channelName); exists && (replayUser.Ghost || replayUser == u) {
+		dmName := u.br.GetDMChannelName(u.User, replayUser.User)
+
+		return u.br.GetChannelID(u.ctx, dmName, teamID)
+	}
+
+	return ""
 }
 
 type postURLFormatter interface {
@@ -916,7 +931,7 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 	case strings.HasPrefix(search, "#"):
 		channelName := strings.ReplaceAll(search, "#", "")
 		channelID = u.br.GetChannelID(u.ctx, channelName, u.br.GetMe().TeamID)
-	case exists && scrollbackUser.Ghost:
+	case exists && (scrollbackUser.Ghost || scrollbackUser == u):
 		dmName := u.br.GetDMChannelName(u.User, scrollbackUser.User)
 		channelID = u.br.GetChannelID(u.ctx, dmName, u.br.GetMe().TeamID)
 	case service == serviceMatrix || service == serviceSlack || service == serviceMsTeams || service == serviceRocketChat:

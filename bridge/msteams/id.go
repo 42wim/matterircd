@@ -12,49 +12,103 @@ import (
 )
 
 const (
-	teamsIDPrefix    = "mt"
-	teamsIDAlphabet  = "0123456789abcdefghijklmnopqrstuv"
-	teamsIDPayloadSz = 13 // 8-byte uint64 msgID + 5-byte sha256(convID)[:5]
-	teamsIDEncodedLn = 23 // len("mt") + ceil(13*8/5) = 2 + 21
+	teamsIDPrefix      = "mt"
+	teamsIDAlphabet    = "0123456789abcdefghijklmnopqrstuv"
+	teamsIDPayloadSz   = 10 // 6-byte uint48 msgID (ms, valid through year 10889) + 4-byte sha256(convID)[:4]
+	teamsIDEncodedLn   = 18 // len("mt") + (10*8/5) = 2 + 16
+	teamsIDFeistelHead = 4
+	maxUint48          = (uint64(1) << 48) - 1
 )
 
 var teamsIDEncoding = base32.NewEncoding(teamsIDAlphabet).WithPadding(base32.NoPadding)
 
-func convFingerprint(convID string) [5]byte {
+func xorMask(dst, mask []byte) {
+	for i := range dst {
+		dst[i] ^= mask[i]
+	}
+}
+
+func feistelMask(round byte, in []byte, n int) []byte {
+	out := make([]byte, 0, n+sha256.Size)
+	buf := make([]byte, 2+len(in))
+	buf[0] = round
+	copy(buf[2:], in)
+
+	for ctr := byte(0); len(out) < n; ctr++ {
+		buf[1] = ctr
+		sum := sha256.Sum256(buf)
+		out = append(out, sum[:]...)
+	}
+
+	return out[:n]
+}
+
+// mixTeamsPayload applies (or reverses) a deterministic 4-round Feistel mix so
+// encoded IDs appear uniform rather than sharing timestamp prefixes.
+func mixTeamsPayload(data []byte, forward bool) {
+	if len(data) <= teamsIDFeistelHead {
+		return
+	}
+
+	h := data[:teamsIDFeistelHead]
+	b := data[teamsIDFeistelHead:]
+
+	if forward {
+		xorMask(b, feistelMask(1, h, len(b)))
+		xorMask(h, feistelMask(2, b, teamsIDFeistelHead))
+		xorMask(b, feistelMask(3, h, len(b)))
+		xorMask(h, feistelMask(4, b, teamsIDFeistelHead))
+
+		return
+	}
+
+	xorMask(h, feistelMask(4, b, teamsIDFeistelHead))
+	xorMask(b, feistelMask(3, h, len(b)))
+	xorMask(h, feistelMask(2, b, teamsIDFeistelHead))
+	xorMask(b, feistelMask(1, h, len(b)))
+}
+
+func convFingerprint(convID string) [4]byte {
 	sum := sha256.Sum256([]byte(convID))
 
-	var out [5]byte
-	copy(out[:], sum[:5])
+	var out [4]byte
+	copy(out[:], sum[:4])
 
 	return out
 }
 
 // encodeTeamsID packs a Teams (conversationID, messageID) pair into a fixed
-// 23-character lowercase identifier prefixed with "mt" (mt[0-9a-v]{21}).
-// It is unambiguous against Mattermost (26 chars), Matrix ($...), and Slack (sl...).
+// 18-character lowercase identifier prefixed with "mt" (mt[0-9a-v]{16}).
+// It is unambiguous against Mattermost (26 chars), Rocket.Chat (17 chars),
+// Matrix ($...), and Slack (sl...).
 func encodeTeamsID(convID, msgID string) string {
 	if convID == "" || msgID == "" {
 		return msgID
 	}
 
 	num, err := strconv.ParseUint(msgID, 10, 64)
-	if err != nil {
+	if err != nil || num > maxUint48 {
 		return msgID
 	}
 
+	var be8 [8]byte
+	binary.BigEndian.PutUint64(be8[:], num)
+
 	var buf [teamsIDPayloadSz]byte
-	binary.BigEndian.PutUint64(buf[:8], num)
+	copy(buf[:6], be8[2:])
 
 	fp := convFingerprint(convID)
-	copy(buf[8:], fp[:])
+	copy(buf[6:], fp[:])
+
+	mixTeamsPayload(buf[:], true)
 
 	return teamsIDPrefix + teamsIDEncoding.EncodeToString(buf[:])
 }
 
-// decodeTeamsID decodes an mt[0-9a-v]{21} identifier into its numeric Teams
-// message ID and 40-bit conversation fingerprint.
-func decodeTeamsID(encoded string) (string, [5]byte, bool) {
-	var zero [5]byte
+// decodeTeamsID decodes an mt[0-9a-v]{16} identifier into its numeric Teams
+// message ID and 32-bit conversation fingerprint.
+func decodeTeamsID(encoded string) (string, [4]byte, bool) {
+	var zero [4]byte
 
 	s := strings.ToLower(strings.TrimSpace(encoded))
 	if len(s) != teamsIDEncodedLn || !strings.HasPrefix(s, teamsIDPrefix) {
@@ -66,10 +120,15 @@ func decodeTeamsID(encoded string) (string, [5]byte, bool) {
 		return "", zero, false
 	}
 
-	num := binary.BigEndian.Uint64(raw[:8])
+	mixTeamsPayload(raw, false)
 
-	var fp [5]byte
-	copy(fp[:], raw[8:])
+	var be8 [8]byte
+	copy(be8[2:], raw[:6])
+
+	num := binary.BigEndian.Uint64(be8[:])
+
+	var fp [4]byte
+	copy(fp[:], raw[6:])
 
 	return strconv.FormatUint(num, 10), fp, true
 }

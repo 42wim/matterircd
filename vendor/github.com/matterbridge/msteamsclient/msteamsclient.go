@@ -457,6 +457,11 @@ func (c *Client) applyAuthHeaders(ctx context.Context, req *http.Request, kind a
 
 		req.Header.Set("X-Skypetoken", skypeToken)
 
+		if c.effectiveAccountType() == AccountPersonal {
+			req.Header.Set("X-Ms-Client-Type", "web")
+			req.Header.Set("X-Ms-Client-Consumer-Type", "teams4life")
+		}
+
 		if scope != "" {
 			bearer, bearerErr := c.AccessToken(ctx, scope)
 			if bearerErr == nil && bearer != "" {

@@ -136,6 +136,8 @@ func (m *MSTeams) handlePostDeleted(msg *msteamsclient.Message) {
 		}
 	}
 
+	m.msgParentCache.Remove(encodedID)
+
 	ev := m.chatMessageToEvent(m.ctx, post, "post_deleted")
 	if ev != nil {
 		m.sendEvent(ev)
@@ -170,6 +172,16 @@ func (m *MSTeams) handleReaction(msg *msteamsclient.Message, added bool) {
 
 	parentUser, parentText := m.reactionParentContext(encodedMsgID, msg.Post, rc.MSTeams.ShortenRepliesTo)
 
+	replySuffix := ""
+
+	if !rc.MSTeams.HideReplies && parentText != "" {
+		if parentUser != nil && parentUser.Nick != "" {
+			replySuffix = " (re @" + parentUser.Nick + ": " + parentText + ")"
+		} else {
+			replySuffix = " (re: " + parentText + ")"
+		}
+	}
+
 	evData := &bridge.ReactionAddEvent{
 		Receiver:    m.dmReceiverFor(r.ConversationID, sender),
 		Sender:      sender,
@@ -178,7 +190,7 @@ func (m *MSTeams) handleReaction(msg *msteamsclient.Message, added bool) {
 		Reaction:    teamsEmotionToIRC(r.Key),
 		ChannelType: m.bridgeChannelType(r.ConversationID),
 		ParentUser:  parentUser,
-		Message:     parentText,
+		Message:     replySuffix,
 		ParentID:    parentID,
 	}
 
@@ -344,15 +356,21 @@ func (m *MSTeams) chatMessageToEvent(ctx context.Context, post *msteamsclient.Ch
 	}
 
 	rc := m.cfg.Current()
-	text := m.formatIncomingText(post, eventKind, encodedID, parentID, rc)
+	text := m.formatIncomingText(post, eventKind, parentID, rc)
 
 	files := attachmentsToBridgeFiles(post.Attachments)
 	if text == "" && len(files) == 0 {
 		return nil
 	}
 
-	m.cachePostContext(encodedID, parentID, sender, post.ContentText, rc.MSTeams.ShortenRepliesTo)
+	if eventKind != "post_deleted" {
+		m.cachePostContext(encodedID, parentID, sender, post.ContentText, rc.MSTeams.ShortenRepliesTo)
+	}
 
+	return m.buildMessageBridgeEvent(post, sender, files, text, encodedID, parentID, eventKind)
+}
+
+func (m *MSTeams) buildMessageBridgeEvent(post *msteamsclient.ChatMessage, sender *bridge.UserInfo, files []*bridge.File, text, encodedID, parentID, eventKind string) *bridge.Event {
 	if m.isDMConversation(post.ConversationID) {
 		return &bridge.Event{
 			Type: "direct_message",
@@ -386,25 +404,21 @@ func (m *MSTeams) chatMessageToEvent(ctx context.Context, post *msteamsclient.Ch
 	}
 }
 
-func (m *MSTeams) formatIncomingText(post *msteamsclient.ChatMessage, eventKind, encodedID, parentID string, rc *config.RuntimeConfig) string {
+func (m *MSTeams) formatIncomingText(post *msteamsclient.ChatMessage, eventKind, parentID string, rc *config.RuntimeConfig) string {
 	text := post.ContentText
 	useUnicode := rc.MSTeams.Formatter.Unicode
+
+	if parentID != "" && !rc.MSTeams.HideReplies {
+		if parent, ok := m.msgParentCache.Get(parentID); ok && parent.ParentUser != nil && parent.ReplyMsg != "" {
+			text = text + " (re @" + parent.ParentUser.Nick + ": " + parent.ReplyMsg + ")"
+		}
+	}
 
 	switch eventKind {
 	case "post_edited":
 		text = utils.AppendMessageSuffix(text, utils.FormatActionSuffix(utils.SuffixEdited, useUnicode))
 	case "post_deleted":
 		text = utils.AppendMessageSuffix(text, utils.FormatActionSuffix(utils.SuffixDeleted, useUnicode))
-	}
-
-	if parentID != "" && !rc.MSTeams.HideReplies && eventKind == "posted" {
-		if parent, ok := m.msgParentCache.Get(parentID); ok && parent.ParentUser != nil && parent.ReplyMsg != "" {
-			if rc.MSTeams.Bridge.PrefixContext || rc.MSTeams.Bridge.SuffixContext {
-				_ = encodedID
-			} else {
-				text = text + " (re @" + parent.ParentUser.Nick + ": " + parent.ReplyMsg + ")"
-			}
-		}
 	}
 
 	return text
@@ -518,6 +532,14 @@ func teamsEmotionToIRC(key string) string {
 		return "cry"
 	case emotionAngry:
 		return emotionAngry
+	case "hearteyes":
+		return "heart_eyes"
+	case "thumbsdown":
+		return "-1"
+	case "clap":
+		return "clap"
+	case "100":
+		return "100"
 	default:
 		return key
 	}
