@@ -105,18 +105,25 @@ type UserRef struct {
 	Name     string `json:"name"`
 }
 
+// UserEmail holds an email entry on a Rocket.Chat user profile.
+type UserEmail struct {
+	Address  string `json:"address"`
+	Verified bool   `json:"verified"`
+}
+
 // User represents a normalized Rocket.Chat user.
 type User struct {
-	ID         string   `json:"_id"`
-	Username   string   `json:"username"`
-	Name       string   `json:"name"`
-	Status     string   `json:"status"`
-	StatusConn string   `json:"statusConnection,omitempty"`
-	StatusText string   `json:"statusText,omitempty"`
-	Type       string   `json:"type,omitempty"`
-	Active     bool     `json:"active"`
-	Roles      []string `json:"roles,omitempty"`
-	UTCOffset  float64  `json:"utcOffset,omitempty"`
+	ID         string      `json:"_id"`
+	Username   string      `json:"username"`
+	Name       string      `json:"name"`
+	Emails     []UserEmail `json:"emails,omitempty"`
+	Status     string      `json:"status"`
+	StatusConn string      `json:"statusConnection,omitempty"`
+	StatusText string      `json:"statusText,omitempty"`
+	Type       string      `json:"type,omitempty"`
+	Active     bool        `json:"active"`
+	Roles      []string    `json:"roles,omitempty"`
+	UTCOffset  float64     `json:"utcOffset,omitempty"`
 }
 
 // Room represents a Rocket.Chat public channel, private group, or direct message room.
@@ -163,19 +170,28 @@ type File struct {
 	Type string `json:"type"`
 }
 
+// AttachmentField describes a structured field inside a rich attachment.
+type AttachmentField struct {
+	Title string `json:"title"`
+	Value string `json:"value"`
+	Short bool   `json:"short"`
+}
+
 // Attachment describes a rich or quoted attachment on a Rocket.Chat message.
 type Attachment struct {
-	Title       string `json:"title"`
-	TitleLink   string `json:"title_link"`
-	Description string `json:"description"`
-	Text        string `json:"text"`
-	AuthorName  string `json:"author_name"`
-	AuthorIcon  string `json:"author_icon"`
-	ImageURL    string `json:"image_url"`
-	ImageSize   int64  `json:"image_size"`
-	AudioURL    string `json:"audio_url"`
-	VideoURL    string `json:"video_url"`
-	MessageLink string `json:"message_link"`
+	Color       string            `json:"color"`
+	Title       string            `json:"title"`
+	TitleLink   string            `json:"title_link"`
+	Description string            `json:"description"`
+	Text        string            `json:"text"`
+	AuthorName  string            `json:"author_name"`
+	AuthorIcon  string            `json:"author_icon"`
+	ImageURL    string            `json:"image_url"`
+	ImageSize   int64             `json:"image_size"`
+	AudioURL    string            `json:"audio_url"`
+	VideoURL    string            `json:"video_url"`
+	MessageLink string            `json:"message_link"`
+	Fields      []AttachmentField `json:"fields"`
 }
 
 // ReactionSet holds the usernames that reacted with a given emoji.

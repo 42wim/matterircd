@@ -29,3 +29,8 @@ type MemberHandler interface {
 type ReconnectHandler interface {
 	OnReconnect(downtime time.Duration)
 }
+
+// TypingHandler can optionally be implemented by a Handler to receive typing notifications.
+type TypingHandler interface {
+	OnTyping(roomID, username string)
+}

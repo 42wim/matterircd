@@ -160,6 +160,37 @@ func TestSlackIDPatterns(t *testing.T) {
 	assert.Equal(t, "new text", modMatches[2])
 }
 
+func TestRocketChatIDPatterns(t *testing.T) {
+	rcID := "YACts33rHTTfW6Eum"
+
+	assert.True(t, isBareThreadID("@@"+rcID))
+	assert.False(t, isBareThreadID("@@"+rcID+" reply text"))
+	assert.False(t, isBareThreadID("@@short"))
+
+	assert.Equal(t, "@@"+rcID+" ", threadPrefix("@@"+rcID+" hello"))
+	assert.True(t, modifyRegExp.MatchString("s/"+rcID+"/updated"))
+
+	threadMatches := parseThreadIDRegExp.FindStringSubmatch("@@" + rcID + " hello\nworld")
+	assert.Len(t, threadMatches, 3)
+	assert.Equal(t, rcID, threadMatches[1])
+	assert.Equal(t, "hello\nworld", threadMatches[2])
+
+	reactMatches := parseReactionToMsgRegExp.FindStringSubmatch("@@" + rcID + " +:thumbsup:")
+	assert.Len(t, reactMatches, 4)
+	assert.Equal(t, rcID, reactMatches[1])
+	assert.Equal(t, "+", reactMatches[2])
+	assert.Equal(t, "thumbsup", reactMatches[3])
+
+	modMatches := parseModifyMsgRegExp.FindStringSubmatch("s/" + rcID + "/new text")
+	assert.Len(t, modMatches, 3)
+	assert.Equal(t, "/"+rcID+"/", modMatches[1])
+	assert.Equal(t, "new text", modMatches[2])
+
+	id, body := parseThreadID(&User{}, &irc.Message{Trailing: "@@" + rcID + " threaded reply"}, "GENERAL")
+	assert.Equal(t, rcID, id)
+	assert.Equal(t, "threaded reply", body)
+}
+
 func TestIsSensitiveServiceMsg(t *testing.T) {
 	const serviceHost = "service"
 

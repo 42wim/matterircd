@@ -196,7 +196,7 @@ func (d *ddpConn) sendPong(id string) {
 	}
 }
 
-func (d *ddpConn) callMethod(ctx context.Context, method string, params ...any) (json.RawMessage, error) {
+func (d *ddpConn) callMethod(ctx context.Context, method string, params ...any) error {
 	id := strconv.FormatUint(d.nextID.Add(1), 10)
 	ch := make(chan ddpMethodResult, 1)
 
@@ -221,7 +221,7 @@ func (d *ddpConn) callMethod(ctx context.Context, method string, params ...any) 
 	if err != nil {
 		cleanup()
 
-		return nil, err
+		return err
 	}
 
 	timer := time.NewTimer(ddpMethodTimeout)
@@ -229,19 +229,19 @@ func (d *ddpConn) callMethod(ctx context.Context, method string, params ...any) 
 
 	select {
 	case res := <-ch:
-		return res.result, res.err
+		return res.err
 	case <-d.closed:
 		cleanup()
 
-		return nil, errors.New("rocketchatclient: websocket closed during method call")
+		return errors.New("rocketchatclient: websocket closed during method call")
 	case <-timer.C:
 		cleanup()
 
-		return nil, fmt.Errorf("rocketchatclient: DDP method %q timed out", method)
+		return fmt.Errorf("rocketchatclient: DDP method %q timed out", method)
 	case <-ctx.Done():
 		cleanup()
 
-		return nil, ctx.Err()
+		return ctx.Err()
 	}
 }
 
@@ -884,7 +884,7 @@ func (c *Client) handshakeAndLogin(ctx context.Context, conn *ddpConn) error {
 
 	_, authToken := c.authCredentials()
 
-	_, err = conn.callMethod(ctx, "login", map[string]string{"resume": authToken})
+	err = conn.callMethod(ctx, "login", map[string]string{"resume": authToken})
 	if err != nil {
 		return fmt.Errorf("rocketchatclient: DDP login failed: %w", err)
 	}
@@ -1074,6 +1074,7 @@ func (c *Client) setActiveConn(conn *ddpConn) {
 	c.connMu.Lock()
 	c.activeConn = conn
 	clear(c.roomDeleteSubs)
+	clear(c.roomTypingSubs)
 	c.connMu.Unlock()
 }
 
@@ -1082,6 +1083,7 @@ func (c *Client) clearActiveConn(conn *ddpConn) {
 	if c.activeConn == conn {
 		c.activeConn = nil
 		clear(c.roomDeleteSubs)
+		clear(c.roomTypingSubs)
 	}
 
 	c.connMu.Unlock()
@@ -1148,10 +1150,26 @@ func (c *Client) SubscribeRoom(ctx context.Context, roomID string) error {
 	c.roomDeleteSubs[roomID] = subID
 	c.connMu.Unlock()
 
+	typingSubID, typingErr := conn.subscribe(ctx, streamNotifyRoom, roomID+"/typing", false)
+	if typingErr == nil && typingSubID != "" {
+		c.connMu.Lock()
+		if c.activeConn == conn {
+			if _, dup := c.roomTypingSubs[roomID]; !dup {
+				c.roomTypingSubs[roomID] = typingSubID
+				typingSubID = ""
+			}
+		}
+		c.connMu.Unlock()
+
+		if typingSubID != "" {
+			_ = conn.unsubscribe(ctx, typingSubID)
+		}
+	}
+
 	return nil
 }
 
-// UnsubscribeRoom removes the per-room deleteMessage subscription for roomID.
+// UnsubscribeRoom removes the per-room deleteMessage and typing subscriptions for roomID.
 func (c *Client) UnsubscribeRoom(ctx context.Context, roomID string) error {
 	if roomID == "" {
 		return nil
@@ -1161,13 +1179,50 @@ func (c *Client) UnsubscribeRoom(ctx context.Context, roomID string) error {
 	conn := c.activeConn
 	subID, exists := c.roomDeleteSubs[roomID]
 	delete(c.roomDeleteSubs, roomID)
+	typingSubID, typingExists := c.roomTypingSubs[roomID]
+	delete(c.roomTypingSubs, roomID)
 	c.connMu.Unlock()
 
-	if conn == nil || !exists || subID == "" {
+	if conn == nil {
 		return nil
 	}
 
-	return conn.unsubscribe(ctx, subID)
+	var firstErr error
+
+	if exists && subID != "" {
+		firstErr = conn.unsubscribe(ctx, subID)
+	}
+
+	if typingExists && typingSubID != "" {
+		err := conn.unsubscribe(ctx, typingSubID)
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
+
+	return firstErr
+}
+
+// SendTyping publishes a transient typing notification for the logged-in user in roomID.
+func (c *Client) SendTyping(ctx context.Context, roomID string) error {
+	if roomID == "" {
+		return nil
+	}
+
+	me := c.Me()
+	if me == nil || me.Username == "" {
+		return nil
+	}
+
+	c.connMu.Lock()
+	conn := c.activeConn
+	c.connMu.Unlock()
+
+	if conn == nil {
+		return nil
+	}
+
+	return conn.callMethod(ctx, streamNotifyRoom, roomID+"/typing", me.Username, true)
 }
 
 func (c *Client) ensureRoomSubscribed(roomID string) {
@@ -1269,6 +1324,12 @@ func (c *Client) handleSubscriptionsChanged(action string, raw json.RawMessage, 
 }
 
 func (c *Client) handleNotifyRoom(fields *ddpFields, emit bool) {
+	if roomID, ok := strings.CutSuffix(fields.EventName, "/typing"); ok {
+		c.handleRoomTyping(roomID, fields.Args, emit)
+
+		return
+	}
+
 	if !strings.HasSuffix(fields.EventName, "/deleteMessage") {
 		return
 	}
@@ -1294,6 +1355,34 @@ func (c *Client) handleNotifyRoom(fields *ddpFields, emit bool) {
 	}
 
 	c.processDeletedMessage(roomID, deleted.ID)
+}
+
+func (c *Client) handleRoomTyping(roomID string, args []json.RawMessage, emit bool) {
+	if !emit || roomID == "" || len(args) < 2 || c.handler == nil {
+		return
+	}
+
+	th, ok := c.handler.(TypingHandler)
+	if !ok {
+		return
+	}
+
+	var (
+		username string
+		typing   bool
+	)
+
+	err := json.Unmarshal(args[0], &username)
+	if err != nil || username == "" {
+		return
+	}
+
+	err = json.Unmarshal(args[1], &typing)
+	if err != nil || !typing {
+		return
+	}
+
+	th.OnTyping(roomID, username)
 }
 
 func (c *Client) processDeletedMessage(roomID, msgID string) {

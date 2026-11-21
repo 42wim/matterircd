@@ -51,6 +51,7 @@ type Client struct {
 	connMu         sync.Mutex
 	activeConn     *ddpConn
 	roomDeleteSubs map[string]string
+	roomTypingSubs map[string]string
 }
 
 func resolveClientOptions(cred Credentials, opts []Option) options {
@@ -103,6 +104,7 @@ func New(ctx context.Context, cred Credentials, h Handler, opts ...Option) (*Cli
 		cache:          cache,
 		eventCh:        make(chan ddpEvent, eventQueueSize),
 		roomDeleteSubs: make(map[string]string),
+		roomTypingSubs: make(map[string]string),
 	}
 
 	c.httpClient = &http.Client{
@@ -162,6 +164,11 @@ func (c *Client) Logout() {
 
 	c.cancel()
 	c.wg.Wait()
+}
+
+// BaseURL returns the normalized HTTP base URL of the connected Rocket.Chat server.
+func (c *Client) BaseURL() string {
+	return c.httpURL
 }
 
 // Connected reports whether the DDP WebSocket connection is currently active.
