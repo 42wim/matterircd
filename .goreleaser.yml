@@ -1,3 +1,4 @@
+version: 2
 release:
   prerelease: auto
   name_template: "{{.ProjectName}} v{{.Version}}"
@@ -46,18 +47,17 @@ builds:
       env:
         - CGO_ENABLED=1
         - CC=aarch64-linux-gnu-gcc
-        - CXX=aarch64-linux-gnu-g++
   ldflags:
     - -s -w -X main.githash={{.ShortCommit}}
 
 archives:
   -
     id: matterircd
-    builds:
+    ids:
     - matterircd
     - matterircd-e2ee
     name_template: "{{ .Binary }}-{{ .Version }}-{{ .Os }}-{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}"
-    format: binary
+    formats: [binary]
     files:
       - none*
 
