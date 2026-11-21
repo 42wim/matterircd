@@ -10,6 +10,9 @@
     - [Usage](#usage)
         - [Mattermost user commands](#mattermost-user-commands)
         - [Slack user commands](#slack-user-commands)
+        - [Matrix user commands](#matrix-user-commands)
+        - [Microsoft Teams user commands](#microsoft-teams-user-commands)
+        - [Rocket.Chat user commands](#rocketchat-user-commands)
         - [Mastodon user commands](#mastodon-user-commands)
     - [Docker](#docker)
     - [FreeBSD](#freebsd)
@@ -24,12 +27,13 @@
 
 [![Join the IRC chat at https://web.libera.chat/gamja/?channels=#matterircd](https://img.shields.io/badge/IRC-matterircd-green.svg)](https://web.libera.chat/gamja/?channels=#matterircd)
 
-Minimal IRC server which integrates with [mattermost](https://www.mattermost.org) and [slack](https://www.slack.com).  
+Minimal IRC server which integrates with [mattermost](https://www.mattermost.org), [slack](https://www.slack.com), [matrix](https://matrix.org), [Microsoft Teams](https://teams.cloud.microsoft/), [Rocket.Chat](https://rocket.chat/), and Mastodon.  
 Tested on FreeBSD / Linux / Windows
 
 ## Compatibility
 
-- Matterircd works with slack, mastodon and mattermost 10.x, 11.x
+- Matterircd works with mattermost 10.x, 11.x, slack, matrix, and mastodon
+- Microsoft Teams (EXPERIMENTAL) and Rocket.Chat (EXPERIMENTAL) support is also available
 
 Master branch of matterircd should always work against latest STABLE mattermost release.
 
@@ -114,7 +118,7 @@ You can use this program [generate_cert.go](https://golang.org/src/crypto/tls/ge
 
 ### Generic `service` user
 
-Once logged in, the commands below can also be sent to `service`, which hands them to whichever bridge (Mattermost, Slack, Matrix or Mastodon) is logged in, e.g. `/msg service search 10 query` or `/msg service scrollback #bugs 100`.
+Once logged in, the commands below can also be sent to `service`, which hands them to whichever bridge (Mattermost, Slack, Matrix, Microsoft Teams, Rocket.Chat or Mastodon) is logged in, e.g. `/msg service search 10 query` or `/msg service scrollback #bugs 100`.
 
 Only the service of the logged in bridge is available; `/msg` to the others (e.g. `/msg mattermost ...` while connected to Slack) gets *No such nick/channel*. Logging in still has to go through the bridge's own service as `service` can't tell which one you want, e.g. `/msg slack login ...`.
 
@@ -200,8 +204,6 @@ Now you can connect with your IRC client to port 6667 on your docker host.
 
 ### Matrix user commands
 
-(EXPERIMENTAL, work in progress)
-
 Login
 
 ```
@@ -217,6 +219,45 @@ or with an existing access token (it cannot be renewed once it expires)
 Room invitations are shown as an IRC `INVITE` with a message from the `matrix` user. Accept one with the `/join` it names, e.g. `/join #!roomid:example.org`.
 
 Settings are in the `[matrix]` section in [matterircd.toml.example](https://github.com/42wim/matterircd/blob/master/matterircd.toml.example)
+
+### Microsoft Teams user commands
+
+(EXPERIMENTAL, work in progress)
+
+Supports both Work/School (Entra ID) and Personal (MSA / Consumer Teams) accounts.
+
+Interactive login via OAuth2 Device Code (matterircd sends the verification URL and code via IRC `NOTICE` and waits until browser sign-in completes):
+
+```
+/msg msteams login [work|personal|<tenant>]
+```
+
+Or log in with a refresh token or browser-extracted `skypetoken`:
+
+```
+/msg msteams login refresh <refresh_token> [work|personal|<tenant>]
+/msg msteams login token <skypetoken> [chat_service_url]
+```
+
+Settings are in the `[msteams]` section in [matterircd.toml.example](https://github.com/42wim/matterircd/blob/master/matterircd.toml.example) (including optional `TokenSaveFile` for persisting rotated refresh tokens across restarts).
+
+### Rocket.Chat user commands
+
+(EXPERIMENTAL, work in progress)
+
+Login with user/pass (with optional 2FA code):
+
+```
+/msg rocketchat login <server> <user> <pass> [2fa=<code>]
+```
+
+Or with a personal access token (`<userId>:<authToken>`):
+
+```
+/msg rocketchat login <server> token=<userId>:<authToken>
+```
+
+Settings are in the `[rocketchat]` section in [matterircd.toml.example](https://github.com/42wim/matterircd/blob/master/matterircd.toml.example)
 
 ### Mastodon user commands
 

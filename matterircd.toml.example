@@ -472,6 +472,83 @@ PrefixContext = false
 
 
 #############################
+### MICROSOFT TEAMS EXAMPLE #
+#############################
+# Connect to matterircd and:
+#   /msg msteams login [work|personal|<tenant>]
+#   /msg msteams login refresh <refresh_token> [work|personal|<tenant>]
+#   /msg msteams login token <skypetoken> [chat_service_url]
+# During interactive login, matterircd sends the Microsoft Device Code URL and
+# code via IRC NOTICE and waits until browser sign-in completes.
+[msteams]
+#Disable Microsoft Teams support
+#Disable = false
+
+#Account type: "auto", "work" (Entra ID), or "personal" (MSA / Consumer Teams)
+#AccountType = "auto"
+
+#Optional Entra ID tenant ID / domain (defaults to "organizations" for work accounts)
+#TenantID = ""
+
+#Optional OAuth2 public client ID override
+#ClientID = ""
+
+#Optional path to a 0600 JSON file for persisting rotated refresh tokens across restarts
+#TokenSaveFile = "matterircd-msteams-tokens.json"
+
+#Restrict logins to specific tenants / account types
+#Restrict = ["work", "personal"]
+
+#Skip TLS verification (not recommended)
+#SkipTLSVerify = false
+
+#Prefix channels of the primary Team with the Team name (#team-channel)
+#PrefixMainTeam = false
+
+#Force a full channel/conversation resync after Trouter reconnects
+#ForceSyncOnReconnect = false
+
+#Fall back to periodic chatsvc polling if Trouter WebSockets repeatedly fail
+#PollFallback = false
+
+#Append a URL directory to WHOIS for each user. {nick}, {username} and {email} are replaced.
+#DirectoryURL = "https://directory.mydomain.local/people/{nick}"
+
+#Mentions & formatting
+#ShowMentions = false
+#DisableDefaultMentions = false
+#HideReplies = false
+#ShortenRepliesTo = 0
+#ShowOwnReactions = false
+#HideReactions = false
+#DisableShowOwnModified = false
+#DisableEmoji = false
+#DisableMarkdown = false
+#Unicode = false
+#EnableIRCHexColors = false
+
+#Threading, replay & channel sync (set ThreadContext = "msteams" for native 23-char mt... @@id refs)
+#PrefixContext = false
+#SuffixContext = false
+#ShowContextMulti = false
+#ThreadContext = "msteams"
+#ShowJoinPart = false
+#ShowOnlyJoined = false
+#PartFake = false
+#JoinDM = false
+#JoinExclude = ["#general"]
+#JoinInclude = ["#engineering-.*"]
+#DisableAutoView = false
+#ReplayStrategy = "hybrid"
+#ReplayExclude = []
+#EnableLazyJoin = false
+#LazyJoinExclude = []
+#MsTeamsclientLogLevel = "info"
+#Optional per-protocol DB path; falls back to [mattermost] LastViewedSaveFile when unset.
+#LastViewedSaveFile = "matterircd-msteams-lastsaved.db"
+
+
+#############################
 ##### ROCKET.CHAT EXAMPLE ###
 #############################
 # Connect to matterircd and /msg rocketchat login <server> <user> <pass> [2fa=<code>]
