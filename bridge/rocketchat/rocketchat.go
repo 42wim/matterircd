@@ -11,12 +11,27 @@ import (
 
 	"github.com/42wim/matterircd/bridge"
 	"github.com/42wim/matterircd/config"
+	"github.com/42wim/matterircd/utils"
+	lru "github.com/hashicorp/golang-lru/v2"
 	prefixed "github.com/matterbridge/logrus-prefixed-formatter"
 	"github.com/matterbridge/rocketchatclient"
 	"github.com/sirupsen/logrus"
 )
 
-const defaultPostSizeLimit = 5000
+const (
+	protocolName         = "rocketchat"
+	defaultPostSizeLimit = 5000
+	lastSentSummaryLen   = 90
+	msgRoomCacheSize     = 2000
+	msgTextCacheSize     = 2000
+	msgTextMaxBytes      = 1024
+)
+
+var markdownReplacer = strings.NewReplacer(
+	"\n", " ",
+	"```", "`",
+	"~~~", "`",
+)
 
 var logger = newLogger()
 
@@ -47,6 +62,12 @@ type RocketChat struct {
 	connected atomic.Bool
 	ready     atomic.Bool
 
+	msgRoomCache     *lru.Cache[string, string]
+	msgTextCache     *lru.Cache[string, string]
+	msgAuthorCache   *lru.Cache[string, rocketchatclient.UserRef]
+	msgParentCache   *lru.Cache[string, string]
+	msgLastSentCache *lru.Cache[string, string]
+
 	unregisterReloadHook func()
 }
 
@@ -70,6 +91,12 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 		initDone:  make(chan struct{}),
 		readyCh:   make(chan struct{}),
 	}
+
+	r.msgRoomCache, _ = lru.New[string, string](msgRoomCacheSize)
+	r.msgTextCache, _ = lru.New[string, string](msgTextCacheSize)
+	r.msgAuthorCache, _ = lru.New[string, rocketchatclient.UserRef](msgTextCacheSize)
+	r.msgParentCache, _ = lru.New[string, string](200)
+	r.msgLastSentCache, _ = lru.New[string, string](10)
 
 	defer close(r.initDone)
 
@@ -177,22 +204,191 @@ func (r *RocketChat) OnReconnect(downtime time.Duration) {
 
 // OnMessage implements rocketchatclient.Handler.
 func (r *RocketChat) OnMessage(msg *rocketchatclient.Message) {
-	r.dispatchMessage(msg, "")
+	if !r.ready.Load() || msg == nil || msg.RoomID == "" {
+		return
+	}
+
+	r.cacheMessageMeta(msg)
+
+	text := msg.Text
+	rcCfg := r.cfg.RocketChat()
+
+	if !rcCfg.HideReplies && msg.ThreadID != "" {
+		text = r.withParentPrefix(msg.ThreadID, text)
+	}
+
+	r.dispatchText(msg.RoomID, msg.ID, msg.ThreadID, "", text, r.senderInfo(msg.User), msg.Timestamp.Time.UnixMilli())
 }
 
 // OnEdit implements rocketchatclient.Handler.
 func (r *RocketChat) OnEdit(msg *rocketchatclient.Message) {
-	r.dispatchMessage(msg, "edited")
+	if !r.ready.Load() || msg == nil || msg.RoomID == "" {
+		return
+	}
+
+	sender := r.senderInfo(msg.User)
+	rcCfg := r.cfg.RocketChat()
+
+	r.msgParentCache.Remove(msg.ID)
+	r.cacheMessageMeta(msg)
+
+	if sender.Me && rcCfg.DisableShowOwnModified {
+		return
+	}
+
+	text := msg.Text
+	if !rcCfg.HideReplies && msg.ThreadID != "" {
+		text = r.withParentPrefix(msg.ThreadID, text)
+	}
+
+	text = utils.AppendMessageSuffix(text, utils.FormatActionSuffix(utils.SuffixEdited, rcCfg.Formatter.Unicode))
+
+	r.dispatchText(msg.RoomID, msg.ID, msg.ThreadID, "post_edited", text, sender, msg.Timestamp.Time.UnixMilli())
 }
 
 // OnDelete implements rocketchatclient.Handler.
 func (r *RocketChat) OnDelete(roomID, msgID string) {
-	logger.Debugf("onDelete room=%s msg=%s", roomID, msgID)
+	if !r.ready.Load() || roomID == "" || msgID == "" {
+		return
+	}
+
+	rcCfg := r.cfg.RocketChat()
+
+	authorRef, hasAuthor := r.msgAuthorCache.Get(msgID)
+	r.msgAuthorCache.Remove(msgID)
+
+	if hasAuthor && authorRef.ID == r.rc.UserID() && rcCfg.DisableShowOwnModified {
+		r.msgTextCache.Remove(msgID)
+		r.msgParentCache.Remove(msgID)
+
+		return
+	}
+
+	text, _ := r.msgTextCache.Get(msgID)
+	r.msgTextCache.Remove(msgID)
+	r.msgParentCache.Remove(msgID)
+
+	summary := ""
+	if text != "" {
+		summary = r.formatSummary(text, rcCfg.ShortenRepliesTo, "")
+	}
+
+	summary = utils.AppendMessageSuffix(summary, utils.FormatActionSuffix(utils.SuffixDeleted, rcCfg.Formatter.Unicode))
+
+	var sender *bridge.UserInfo
+	if hasAuthor {
+		sender = r.senderInfo(authorRef)
+	} else {
+		sender = &bridge.UserInfo{
+			Nick:  protocolName,
+			User:  protocolName,
+			Ghost: true,
+		}
+	}
+
+	r.dispatchText(roomID, msgID, "", "post_deleted", summary, sender, 0)
 }
 
 // OnReaction implements rocketchatclient.Handler.
 func (r *RocketChat) OnReaction(ev *rocketchatclient.ReactionEvent) {
-	logger.Debugf("onReaction room=%s msg=%s emoji=%s added=%v", ev.RoomID, ev.MessageID, ev.Emoji, ev.Added)
+	if !r.ready.Load() || ev == nil || ev.RoomID == "" || ev.MessageID == "" {
+		return
+	}
+
+	rcCfg := r.cfg.RocketChat()
+	if rcCfg.HideReactions {
+		return
+	}
+
+	sender := r.reactionSender(ev)
+	if sender == nil || (sender.Me && !rcCfg.ShowOwnReactions) {
+		return
+	}
+
+	r.msgRoomCache.Add(ev.MessageID, ev.RoomID)
+
+	var text string
+	if !rcCfg.HideReplies {
+		text = r.withParentPrefix(ev.MessageID, "")
+	}
+
+	emoji := strings.Trim(ev.Emoji, ":")
+	room, ok := r.rc.Room(ev.RoomID)
+
+	var (
+		receiver *bridge.UserInfo
+		chType   string
+	)
+
+	if ok && r.isOneToOneDM(room) {
+		receiver = r.dmPeer(room)
+		if receiver == nil {
+			receiver = sender
+		}
+
+		chType = "D"
+	} else {
+		chType = r.channelType(room)
+	}
+
+	r.emitReaction(ev, sender, receiver, chType, emoji, text)
+}
+
+func (r *RocketChat) emitReaction(ev *rocketchatclient.ReactionEvent, sender, receiver *bridge.UserInfo, chType, emoji, text string) {
+	data := bridge.ReactionAddEvent{
+		ChannelID:   ev.RoomID,
+		MessageID:   ev.MessageID,
+		Receiver:    receiver,
+		Sender:      sender,
+		Reaction:    emoji,
+		ChannelType: chType,
+		Message:     text,
+	}
+
+	if ev.Added {
+		r.sendEvent(&bridge.Event{
+			Type: "reaction_add",
+			Data: &data,
+		})
+
+		return
+	}
+
+	rem := bridge.ReactionRemoveEvent(data)
+	r.sendEvent(&bridge.Event{
+		Type: "reaction_remove",
+		Data: &rem,
+	})
+}
+
+func (r *RocketChat) reactionSender(ev *rocketchatclient.ReactionEvent) *bridge.UserInfo {
+	if ev.UserID != "" {
+		if u := r.GetUser(r.ctx, ev.UserID); u != nil {
+			return u
+		}
+	}
+
+	if ev.Username != "" {
+		if u := r.GetUserByUsername(r.ctx, ev.Username); u != nil {
+			return u
+		}
+	}
+
+	if ev.UserID == "" && ev.Username == "" {
+		return nil
+	}
+
+	id := cmp.Or(ev.UserID, ev.Username)
+	nick := cmp.Or(ev.Username, ev.UserID)
+
+	return &bridge.UserInfo{
+		Nick:     nick,
+		User:     id,
+		Real:     nick,
+		Username: ev.Username,
+		Ghost:    id != r.rc.UserID(),
+		Me:       id == r.rc.UserID(),
+	}
 }
 
 // OnRoomChange implements rocketchatclient.Handler.
@@ -233,16 +429,9 @@ func (r *RocketChat) OnPresence(userID, status string) {
 	})
 }
 
-func (r *RocketChat) dispatchMessage(msg *rocketchatclient.Message, eventType string) {
-	if !r.ready.Load() || msg == nil || msg.RoomID == "" {
-		return
-	}
-
-	sender := r.senderInfo(msg.User)
-	createAt := msg.Timestamp.Time.UnixMilli()
-
-	room, ok := r.rc.Room(msg.RoomID)
-	if ok && isOneToOneDM(room) {
+func (r *RocketChat) dispatchText(roomID, msgID, parentID, eventType, text string, sender *bridge.UserInfo, createAt int64) {
+	room, ok := r.rc.Room(roomID)
+	if ok && r.isOneToOneDM(room) {
 		peer := r.dmPeer(room)
 		if peer == nil {
 			peer = sender
@@ -251,13 +440,13 @@ func (r *RocketChat) dispatchMessage(msg *rocketchatclient.Message, eventType st
 		r.sendEvent(&bridge.Event{
 			Type: "direct_message",
 			Data: &bridge.DirectMessageEvent{
-				Text:      msg.Text,
-				ChannelID: msg.RoomID,
+				Text:      text,
+				ChannelID: roomID,
 				Receiver:  peer,
 				Sender:    sender,
-				MessageID: msg.ID,
+				MessageID: msgID,
 				Event:     eventType,
-				ParentID:  msg.ThreadID,
+				ParentID:  parentID,
 				CreateAt:  createAt,
 			},
 		})
@@ -268,15 +457,131 @@ func (r *RocketChat) dispatchMessage(msg *rocketchatclient.Message, eventType st
 	r.sendEvent(&bridge.Event{
 		Type: "channel_message",
 		Data: &bridge.ChannelMessageEvent{
-			Text:        msg.Text,
-			ChannelID:   msg.RoomID,
+			Text:        text,
+			ChannelID:   roomID,
 			Sender:      sender,
-			ChannelType: channelType(room),
-			MessageID:   msg.ID,
+			ChannelType: r.channelType(room),
+			MessageID:   msgID,
 			Event:       eventType,
-			ParentID:    msg.ThreadID,
+			ParentID:    parentID,
 			CreateAt:    createAt,
 		},
+	})
+}
+
+func (r *RocketChat) cacheMessageMeta(msg *rocketchatclient.Message) {
+	if msg == nil || msg.ID == "" {
+		return
+	}
+
+	if msg.RoomID != "" {
+		r.msgRoomCache.Add(msg.ID, msg.RoomID)
+	}
+
+	if msg.User.ID != "" || msg.User.Username != "" {
+		r.msgAuthorCache.Add(msg.ID, msg.User)
+	}
+
+	short := r.shortText(msg.Text)
+	if short == "" {
+		r.msgTextCache.Remove(msg.ID)
+
+		return
+	}
+
+	r.msgTextCache.Add(msg.ID, short)
+}
+
+func (r *RocketChat) shortText(text string) string {
+	line, rest, multiline := strings.Cut(text, "\n")
+	if line == "" {
+		return ""
+	}
+
+	truncated := multiline && strings.TrimSpace(rest) != ""
+
+	limit := msgTextMaxBytes
+	if n := r.cfg.RocketChat().ShortenRepliesTo; n > 0 {
+		limit = min(n*4, msgTextMaxBytes)
+	}
+
+	if len(line) > limit {
+		line = strings.ToValidUTF8(line[:limit], "")
+		truncated = true
+	}
+
+	line = strings.Clone(line)
+
+	if truncated {
+		if r.cfg.RocketChat().Formatter.Unicode {
+			line += "…"
+		} else {
+			line += "..."
+		}
+	}
+
+	return line
+}
+
+func (r *RocketChat) withParentPrefix(parentID, text string) string {
+	if parentID == "" {
+		return text
+	}
+
+	if cached, ok := r.msgParentCache.Get(parentID); ok {
+		return strings.TrimRight(text, "\n") + cached
+	}
+
+	parentMsg, err := r.rc.ResolveMessage(r.ctx, parentID)
+	if err != nil || parentMsg == nil {
+		return text
+	}
+
+	nick := cmp.Or(parentMsg.User.Username, parentMsg.User.ID)
+	if u := r.senderInfo(parentMsg.User); u != nil && u.Nick != "" {
+		nick = u.Nick
+	}
+
+	rcCfg := r.cfg.RocketChat()
+	summary := r.formatSummary(parentMsg.Text, rcCfg.ShortenRepliesTo, "@")
+
+	if rcCfg.DisableDefaultMentions {
+		summary = utils.SanitizeDefaultMentions(summary, rcCfg.Formatter.Unicode)
+	}
+
+	reply := " (re @" + nick + ": " + summary + ")"
+	r.msgParentCache.Add(parentID, reply)
+
+	return strings.TrimRight(text, "\n") + reply
+}
+
+func (r *RocketChat) formatSummary(msg string, maxLen int, uncounted string) string {
+	fc := &r.cfg.RocketChat().Formatter
+	unicode := fc.Unicode
+
+	if !fc.DisableMarkdown {
+		msg = markdownReplacer.Replace(msg)
+
+		blockquoteChar := "|"
+		if unicode {
+			blockquoteChar = "▕"
+		}
+
+		msg = utils.Markdown2irc(msg, blockquoteChar, fc.MarkdownInlineCode)
+	} else {
+		msg = strings.ReplaceAll(msg, "\n", " ")
+	}
+
+	if !fc.DisableEmoji {
+		msg = utils.EmojiReplaceAliases(msg, fc.CustomEmoji)
+	}
+
+	return utils.FormatAndShortenSummary(msg, utils.SummaryOpts{
+		DisableMarkdown: true,
+		DisableEmoji:    true,
+		MaxLength:       maxLen,
+		UncountedPrefix: uncounted,
+		Unicode:         unicode,
 	})
 }
 
@@ -334,18 +639,30 @@ func (r *RocketChat) toBridgeUser(u *rocketchatclient.User) *bridge.UserInfo {
 	}
 }
 
-func isOneToOneDM(room *rocketchatclient.Room) bool {
-	return room != nil && room.Type == rocketchatclient.RoomTypeDirect && len(room.UIDs) == 2
+func (r *RocketChat) isOneToOneDM(room *rocketchatclient.Room) bool {
+	if room == nil || room.Type != rocketchatclient.RoomTypeDirect {
+		return false
+	}
+
+	if len(room.UIDs) == 2 {
+		return true
+	}
+
+	return len(room.UIDs) == 1 && room.UIDs[0] == r.rc.UserID()
 }
 
-func channelType(room *rocketchatclient.Room) string {
+func (r *RocketChat) channelType(room *rocketchatclient.Room) string {
 	if room == nil {
 		return "O"
 	}
 
 	switch room.Type {
 	case rocketchatclient.RoomTypeDirect:
-		return "D"
+		if r.isOneToOneDM(room) {
+			return "D"
+		}
+
+		return "G"
 	case rocketchatclient.RoomTypePrivate:
 		return "P"
 	default:
@@ -358,7 +675,7 @@ func (r *RocketChat) roomName(room *rocketchatclient.Room) string {
 		return ""
 	}
 
-	if isOneToOneDM(room) {
+	if r.isOneToOneDM(room) {
 		return room.ID
 	}
 
@@ -419,11 +736,15 @@ func (r *RocketChat) toChannelInfo(room *rocketchatclient.Room) *bridge.ChannelI
 }
 
 func (r *RocketChat) dmPeer(room *rocketchatclient.Room) *bridge.UserInfo {
-	if !isOneToOneDM(room) {
+	if !r.isOneToOneDM(room) {
 		return nil
 	}
 
 	meID := r.rc.UserID()
+	if len(room.UIDs) == 1 && room.UIDs[0] == meID {
+		return r.GetMe()
+	}
+
 	for _, uid := range room.UIDs {
 		if uid != meID {
 			return r.GetUser(r.ctx, uid)
@@ -434,7 +755,7 @@ func (r *RocketChat) dmPeer(room *rocketchatclient.Room) *bridge.UserInfo {
 }
 
 func (r *RocketChat) Protocol() string {
-	return "rocketchat"
+	return protocolName
 }
 
 func (r *RocketChat) Connected() bool {
@@ -568,12 +889,20 @@ func (r *RocketChat) GetChannelCount() int {
 }
 
 func (r *RocketChat) GetChannelName(ctx context.Context, channelID string) string {
+	if channelID == "" || strings.HasPrefix(channelID, "&") || strings.HasPrefix(channelID, "#") {
+		return channelID
+	}
+
 	room, ok := r.rc.Room(channelID)
 	if !ok {
 		return ""
 	}
 
-	return r.roomName(room)
+	if r.isOneToOneDM(room) {
+		return room.ID
+	}
+
+	return "#" + r.roomName(room)
 }
 
 func (r *RocketChat) GetChannelID(ctx context.Context, name, teamID string) string {
@@ -664,8 +993,12 @@ func (r *RocketChat) GetDMChannelID(ctx context.Context, userID string) string {
 	meID := r.rc.UserID()
 
 	for _, room := range r.rc.Rooms() {
-		if !isOneToOneDM(room) {
+		if !r.isOneToOneDM(room) {
 			continue
+		}
+
+		if userID == meID && len(room.UIDs) == 1 && room.UIDs[0] == meID {
+			return room.ID
 		}
 
 		if slices.Contains(room.UIDs, userID) && slices.Contains(room.UIDs, meID) {
@@ -727,7 +1060,7 @@ func (r *RocketChat) GetDMOtherUserID(channelName, myUserID string) (string, boo
 func (r *RocketChat) IsDMChannelName(channelName string) bool {
 	room, ok := r.rc.Room(channelName)
 
-	return ok && isOneToOneDM(room)
+	return ok && r.isOneToOneDM(room)
 }
 
 func (r *RocketChat) StatusUser(ctx context.Context, userID string) (string, error) {
@@ -783,7 +1116,16 @@ func (r *RocketChat) GetPostSizeLimit() int {
 }
 
 func (r *RocketChat) GetLastSentMsgs() []string {
-	return nil
+	keys := r.msgLastSentCache.Keys()
+	out := make([]string, 0, len(keys))
+
+	for _, k := range slices.Backward(keys) {
+		if v, ok := r.msgLastSentCache.Get(k); ok {
+			out = append(out, k+" "+v)
+		}
+	}
+
+	return out
 }
 
 func (r *RocketChat) NormalizePostID(msgID string) string {
@@ -823,7 +1165,22 @@ func (r *RocketChat) GetPosts(ctx context.Context, channelID string, limit int) 
 }
 
 func (r *RocketChat) GetPostChannelID(ctx context.Context, postID string) string {
-	return ""
+	if postID == "" {
+		return ""
+	}
+
+	if roomID, ok := r.msgRoomCache.Get(postID); ok {
+		return roomID
+	}
+
+	msg, err := r.rc.ResolveMessage(ctx, postID)
+	if err != nil || msg == nil {
+		return ""
+	}
+
+	r.cacheMessageMeta(msg)
+
+	return msg.RoomID
 }
 
 func (r *RocketChat) GetPostThread(ctx context.Context, postID string) []*bridge.Event {
@@ -863,31 +1220,108 @@ func (r *RocketChat) Nick(ctx context.Context, name string) error {
 }
 
 func (r *RocketChat) MsgUser(ctx context.Context, userID, text string) (string, error) {
-	return "", errors.New("rocketchat: MsgUser not implemented yet (Phase 2)")
+	return r.MsgUserThread(ctx, userID, "", text)
 }
 
 func (r *RocketChat) MsgUserThread(ctx context.Context, userID, parentID, text string) (string, error) {
-	return "", errors.New("rocketchat: MsgUserThread not implemented yet (Phase 2)")
+	roomID := r.GetDMChannelID(ctx, userID)
+	if roomID == "" {
+		u := r.GetUser(ctx, userID)
+		if u == nil || u.Username == "" {
+			return "", errors.New("rocketchat: direct room not found for user " + userID)
+		}
+
+		room, err := r.rc.CreateDM(ctx, u.Username)
+		if err != nil {
+			return "", err
+		}
+
+		roomID = room.ID
+	}
+
+	return r.MsgChannelThread(ctx, roomID, parentID, text)
 }
 
 func (r *RocketChat) MsgChannel(ctx context.Context, channelID, text string) (string, error) {
-	return "", errors.New("rocketchat: MsgChannel not implemented yet (Phase 2)")
+	return r.MsgChannelThread(ctx, channelID, "", text)
 }
 
 func (r *RocketChat) MsgChannelThread(ctx context.Context, channelID, parentID, text string) (string, error) {
-	return "", errors.New("rocketchat: MsgChannelThread not implemented yet (Phase 2)")
+	msgID, err := r.rc.SendMessage(ctx, channelID, text, parentID)
+	if err != nil {
+		return "", err
+	}
+
+	r.recordSent(ctx, channelID, msgID, parentID, text)
+
+	return msgID, nil
+}
+
+func (r *RocketChat) recordSent(ctx context.Context, channelID, msgID, parentID, text string) {
+	if msgID == "" {
+		return
+	}
+
+	r.msgRoomCache.Add(msgID, channelID)
+
+	if short := r.shortText(text); short != "" {
+		r.msgTextCache.Add(msgID, short)
+	}
+
+	name := cmp.Or(r.GetChannelName(ctx, channelID), channelID)
+	summary := r.formatSummary(text, lastSentSummaryLen, "@")
+
+	if parentID == "" {
+		r.msgLastSentCache.Add(msgID, name+": "+summary)
+
+		return
+	}
+
+	if !r.cfg.RocketChat().HideReplies {
+		summary = r.withParentPrefix(parentID, summary)
+	}
+
+	r.msgLastSentCache.Add(parentID, name+": "+summary)
 }
 
 func (r *RocketChat) ModifyPost(ctx context.Context, msgID, text string) error {
-	return errors.New("rocketchat: ModifyPost not implemented yet (Phase 2)")
+	roomID := r.GetPostChannelID(ctx, msgID)
+	if roomID == "" {
+		return errors.New("rocketchat: unknown message " + msgID)
+	}
+
+	r.msgParentCache.Remove(msgID)
+
+	if text == "" {
+		err := r.rc.DeleteMessage(ctx, roomID, msgID)
+		if err != nil {
+			return err
+		}
+
+		r.msgTextCache.Remove(msgID)
+		r.msgAuthorCache.Remove(msgID)
+
+		return nil
+	}
+
+	err := r.rc.UpdateMessage(ctx, roomID, msgID, text)
+	if err != nil {
+		return err
+	}
+
+	if short := r.shortText(text); short != "" {
+		r.msgTextCache.Add(msgID, short)
+	}
+
+	return nil
 }
 
 func (r *RocketChat) AddReaction(ctx context.Context, msgID, emoji string) error {
-	return errors.New("rocketchat: AddReaction not implemented yet (Phase 2)")
+	return r.rc.React(ctx, msgID, emoji, true)
 }
 
 func (r *RocketChat) RemoveReaction(ctx context.Context, msgID, emoji string) error {
-	return errors.New("rocketchat: RemoveReaction not implemented yet (Phase 2)")
+	return r.rc.React(ctx, msgID, emoji, false)
 }
 
 func (r *RocketChat) SetStatus(ctx context.Context, status string) error {

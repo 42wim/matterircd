@@ -26,11 +26,16 @@ const (
 	ddpWriteTimeout     = 10 * time.Second
 	maxReconnectBackoff = time.Minute
 	eventQueueSize      = 2048
+	maxInitialRoomSubs  = 100
+	maxInitialUserPages = 5
+	userHydrateTimeout  = 10 * time.Second
+	parentFetchTimeout  = 3 * time.Second
 
 	ddpFieldMsg        = "msg"
 	streamRoomMessages = "stream-room-messages"
 	streamNotifyUser   = "stream-notify-user"
 	streamNotifyLogged = "stream-notify-logged"
+	streamNotifyRoom   = "stream-notify-room"
 	actionRemoved      = "removed"
 )
 
@@ -278,6 +283,19 @@ func (d *ddpConn) subscribe(ctx context.Context, name string, params ...any) (st
 
 		return "", ctx.Err()
 	}
+}
+
+func (d *ddpConn) unsubscribe(ctx context.Context, subID string) error {
+	if subID == "" {
+		return nil
+	}
+
+	req := map[string]any{
+		ddpFieldMsg: "unsub",
+		"id":        subID,
+	}
+
+	return d.sendRaw(ctx, req)
 }
 
 func (c *Client) writeLoop(ctx context.Context, conn *ddpConn) {
@@ -589,6 +607,7 @@ func (c *Client) connectOnce(parentCtx context.Context) (bool, error) {
 	go c.readLoop(connCtx, conn)
 
 	defer func() {
+		c.clearActiveConn(conn)
 		conn.close()
 		connCancel()
 		conn.wg.Wait()
@@ -612,6 +631,9 @@ func (c *Client) connectOnce(parentCtx context.Context) (bool, error) {
 		return false, err
 	}
 
+	c.setActiveConn(conn)
+	c.subscribeInitialRooms(connCtx)
+
 	c.connected.Store(true)
 
 	prevDisconnect := c.lastDisconnect.Swap(0)
@@ -619,16 +641,20 @@ func (c *Client) connectOnce(parentCtx context.Context) (bool, error) {
 
 	c.emitReadyOrReconnect(connCtx, conn, wasReady, prevDisconnect)
 
+	return c.waitConnectionClose(connCtx, conn)
+}
+
+func (c *Client) waitConnectionClose(ctx context.Context, conn *ddpConn) (bool, error) {
 	select {
 	case <-conn.closed:
 		c.connected.Store(false)
 		c.lastDisconnect.Store(time.Now().UnixNano())
 
 		return true, errors.New("connection closed")
-	case <-connCtx.Done():
+	case <-ctx.Done():
 		c.connected.Store(false)
 
-		return true, connCtx.Err()
+		return true, ctx.Err()
 	}
 }
 
@@ -737,40 +763,68 @@ func (c *Client) hydrateState(ctx context.Context) error {
 	}
 
 	c.cache.hydrateRoomsAndSubs(roomsResp.Update, subsResp.Update)
+	c.seedUsersFromRooms(roomsResp.Update)
 
-	for offset := 0; ; {
-		usersResp, err := c.ListUsers(ctx, offset, userListPageLimit)
+	userCtx, cancel := context.WithTimeout(ctx, userHydrateTimeout)
+	defer cancel()
+
+	loaded := 0
+
+	for page := range maxInitialUserPages {
+		usersResp, err := c.ListUsers(userCtx, loaded, userListPageLimit)
 		if err != nil {
-			var apiErr *APIError
-			if errors.As(err, &apiErr) && (apiErr.StatusCode == http.StatusForbidden || apiErr.StatusCode == http.StatusUnauthorized) {
-				c.logger.Warnf("users.list restricted (%s); continuing with lazy user lookups", apiErr)
+			c.logger.Warnf("users.list stopped after %d user(s) (%s); continuing with lazy user lookups", loaded, err)
 
-				break
-			}
-
-			return fmt.Errorf("rocketchatclient: users.list: %w", err)
-		}
-
-		c.cache.upsertUsers(usersResp.Users)
-
-		if len(usersResp.Users) == 0 || offset+len(usersResp.Users) >= usersResp.Total {
 			break
 		}
 
-		offset += len(usersResp.Users)
+		c.cache.upsertUsers(usersResp.Users)
+		loaded += len(usersResp.Users)
+
+		if len(usersResp.Users) == 0 || loaded >= usersResp.Total {
+			break
+		}
+
+		if page+1 == maxInitialUserPages && loaded < usersResp.Total {
+			c.logger.Infof("users.list capped at %d/%d users during startup; remaining users will resolve lazily", loaded, usersResp.Total)
+		}
 	}
 
 	return nil
 }
 
-func (c *Client) eventLoop() {
+func (c *Client) seedUsersFromRooms(rooms []Room) {
+	for i := range rooms {
+		r := &rooms[i]
+		if len(r.UIDs) == 0 || len(r.UIDs) != len(r.Usernames) {
+			continue
+		}
+
+		for idx, uid := range r.UIDs {
+			uname := r.Usernames[idx]
+			if uid == "" || uname == "" {
+				continue
+			}
+
+			if _, ok := c.cache.user(uid); !ok {
+				c.cache.upsertUser(&User{
+					ID:       uid,
+					Username: uname,
+					Active:   true,
+				})
+			}
+		}
+	}
+}
+
+func (c *Client) eventLoop(ctx context.Context) {
 	defer c.wg.Done()
 
 	consumerReady := false
 
 	for {
 		select {
-		case <-c.ctx.Done():
+		case <-ctx.Done():
 			return
 		case ev := <-c.eventCh:
 			switch ev.kind {
@@ -787,13 +841,13 @@ func (c *Client) eventLoop() {
 					}
 				}
 			case ddpEventChanged:
-				c.processDDPChanged(ev.collection, ev.fields, consumerReady)
+				c.processDDPChanged(ctx, ev.collection, ev.fields, consumerReady)
 			}
 		}
 	}
 }
 
-func (c *Client) processDDPChanged(collection string, fields *ddpFields, emit bool) {
+func (c *Client) processDDPChanged(ctx context.Context, collection string, fields *ddpFields, emit bool) {
 	if fields == nil || len(fields.Args) == 0 {
 		return
 	}
@@ -803,9 +857,131 @@ func (c *Client) processDDPChanged(collection string, fields *ddpFields, emit bo
 		c.handleNotifyUser(fields, emit)
 	case streamNotifyLogged:
 		c.handleNotifyLogged(fields, emit)
+	case streamNotifyRoom:
+		c.handleNotifyRoom(fields, emit)
 	case streamRoomMessages:
-		c.handleStreamRoomMessage(fields, emit)
+		c.handleStreamRoomMessage(ctx, fields, emit)
 	}
+}
+
+func (c *Client) setActiveConn(conn *ddpConn) {
+	c.connMu.Lock()
+	c.activeConn = conn
+	clear(c.roomDeleteSubs)
+	c.connMu.Unlock()
+}
+
+func (c *Client) clearActiveConn(conn *ddpConn) {
+	c.connMu.Lock()
+	if c.activeConn == conn {
+		c.activeConn = nil
+		clear(c.roomDeleteSubs)
+	}
+
+	c.connMu.Unlock()
+}
+
+func (c *Client) subscribeInitialRooms(ctx context.Context) {
+	subs := c.Subscriptions()
+	count := 0
+
+	for _, sub := range subs {
+		if !sub.Open || sub.RoomID == "" {
+			continue
+		}
+
+		err := c.SubscribeRoom(ctx, sub.RoomID)
+		if err != nil {
+			c.logger.Debugf("subscribe deleteMessage for room %s: %s", sub.RoomID, err)
+
+			continue
+		}
+
+		count++
+		if count >= maxInitialRoomSubs {
+			break
+		}
+	}
+}
+
+// SubscribeRoom subscribes to per-room notifications (such as deleteMessage) for roomID.
+func (c *Client) SubscribeRoom(ctx context.Context, roomID string) error {
+	if roomID == "" {
+		return nil
+	}
+
+	c.connMu.Lock()
+	conn := c.activeConn
+	_, exists := c.roomDeleteSubs[roomID]
+	c.connMu.Unlock()
+
+	if conn == nil || exists {
+		return nil
+	}
+
+	subID, err := conn.subscribe(ctx, streamNotifyRoom, roomID+"/deleteMessage", false)
+	if err != nil {
+		return err
+	}
+
+	c.connMu.Lock()
+	if c.activeConn != conn {
+		c.connMu.Unlock()
+
+		return nil
+	}
+
+	if _, dup := c.roomDeleteSubs[roomID]; dup {
+		c.connMu.Unlock()
+
+		_ = conn.unsubscribe(ctx, subID)
+
+		return nil
+	}
+
+	c.roomDeleteSubs[roomID] = subID
+	c.connMu.Unlock()
+
+	return nil
+}
+
+// UnsubscribeRoom removes the per-room deleteMessage subscription for roomID.
+func (c *Client) UnsubscribeRoom(ctx context.Context, roomID string) error {
+	if roomID == "" {
+		return nil
+	}
+
+	c.connMu.Lock()
+	conn := c.activeConn
+	subID, exists := c.roomDeleteSubs[roomID]
+	delete(c.roomDeleteSubs, roomID)
+	c.connMu.Unlock()
+
+	if conn == nil || !exists || subID == "" {
+		return nil
+	}
+
+	return conn.unsubscribe(ctx, subID)
+}
+
+func (c *Client) ensureRoomSubscribed(roomID string) {
+	if roomID == "" {
+		return
+	}
+
+	c.connMu.Lock()
+	conn := c.activeConn
+	_, exists := c.roomDeleteSubs[roomID]
+	c.connMu.Unlock()
+
+	if conn == nil || exists {
+		return
+	}
+
+	// Subscribe asynchronously so eventLoop never blocks waiting on readLoop for "ready".
+	go func() {
+		_ = c.SubscribeRoom(c.ctx, roomID)
+	}()
 }
 
 func (c *Client) handleNotifyUser(fields *ddpFields, emit bool) {
@@ -848,9 +1024,44 @@ func (c *Client) handleNotifyUser(fields *ddpFields, emit bool) {
 
 		if action == actionRemoved {
 			c.cache.removeSubscription(sub.RoomID)
+			_ = c.UnsubscribeRoom(c.ctx, sub.RoomID)
 		} else {
 			c.cache.upsertSubscription(&sub)
+
+			if sub.Open {
+				c.ensureRoomSubscribed(sub.RoomID)
+			}
 		}
+	}
+}
+
+func (c *Client) handleNotifyRoom(fields *ddpFields, emit bool) {
+	if !strings.HasSuffix(fields.EventName, "/deleteMessage") {
+		return
+	}
+
+	roomID := strings.TrimSuffix(fields.EventName, "/deleteMessage")
+	if roomID == "" {
+		return
+	}
+
+	var deleted struct {
+		ID string `json:"_id"`
+	}
+
+	err := json.Unmarshal(fields.Args[0], &deleted)
+	if err != nil || deleted.ID == "" {
+		return
+	}
+
+	c.cache.forgetMessage(deleted.ID)
+
+	if c.cache.consumeSent("del:" + deleted.ID) {
+		return
+	}
+
+	if emit && c.handler != nil {
+		c.handler.OnDelete(roomID, deleted.ID)
 	}
 }
 
@@ -909,7 +1120,7 @@ func (c *Client) handleNotifyLogged(fields *ddpFields, emit bool) {
 	}
 }
 
-func (c *Client) handleStreamRoomMessage(fields *ddpFields, emit bool) {
+func (c *Client) handleStreamRoomMessage(ctx context.Context, fields *ddpFields, emit bool) {
 	if !emit || c.handler == nil {
 		return
 	}
@@ -921,15 +1132,79 @@ func (c *Client) handleStreamRoomMessage(fields *ddpFields, emit bool) {
 		return
 	}
 
-	c.cache.msgCache.Add(msg.ID, &msg)
+	c.ensureRoomSubscribed(msg.RoomID)
 
-	if msg.EditedAt != nil && !msg.EditedAt.Time.IsZero() {
-		c.handler.OnEdit(&msg)
+	prevMeta, seen := c.cache.recordSeenMessage(&msg)
+	c.cache.cacheMessage(&msg)
+
+	isEdit := msg.EditedAt != nil && !msg.EditedAt.Time.IsZero()
+
+	var editTS int64
+	if isEdit {
+		editTS = msg.EditedAt.Time.UnixNano()
+	}
+
+	if !seen {
+		c.handleUnseenStreamMessage(ctx, &msg, isEdit)
 
 		return
 	}
 
-	c.handler.OnMessage(&msg)
+	reactionEvents := c.cache.diffReactions(msg.RoomID, msg.ID, msg.Reactions)
+	for i := range reactionEvents {
+		c.handler.OnReaction(&reactionEvents[i])
+	}
+
+	if !isEdit || (editTS == prevMeta.editedAt && msg.Text == prevMeta.text) {
+		return
+	}
+
+	if c.cache.consumeSent("edit:" + msg.ID + "\x00" + msg.Text) {
+		return
+	}
+
+	c.prefetchThreadParent(ctx, msg.ThreadID)
+	c.handler.OnEdit(&msg)
+}
+
+func (c *Client) handleUnseenStreamMessage(ctx context.Context, msg *Message, isEdit bool) {
+	c.cache.seedReactions(msg.ID, msg.Reactions)
+
+	if !isEdit {
+		if c.cache.consumeSent("send:" + msg.ID) {
+			return
+		}
+
+		c.prefetchThreadParent(ctx, msg.ThreadID)
+		c.handler.OnMessage(msg)
+
+		return
+	}
+
+	if c.cache.consumeSent("edit:" + msg.ID + "\x00" + msg.Text) {
+		return
+	}
+
+	c.prefetchThreadParent(ctx, msg.ThreadID)
+	c.handler.OnEdit(msg)
+}
+
+func (c *Client) prefetchThreadParent(ctx context.Context, threadID string) {
+	if threadID == "" {
+		return
+	}
+
+	if _, ok := c.cache.cachedMessage(threadID); ok {
+		return
+	}
+
+	fetchCtx, cancel := context.WithTimeout(ctx, parentFetchTimeout)
+	defer cancel()
+
+	_, err := c.GetMessage(fetchCtx, threadID)
+	if err != nil {
+		c.logger.Debugf("prefetch thread parent %s: %s", threadID, err)
+	}
 }
 
 func mapStatusCode(code int) string {

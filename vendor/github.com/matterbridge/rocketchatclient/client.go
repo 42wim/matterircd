@@ -47,11 +47,13 @@ type Client struct {
 	cache   *stateCache
 	eventCh chan ddpEvent
 	wg      sync.WaitGroup
+
+	connMu         sync.Mutex
+	activeConn     *ddpConn
+	roomDeleteSubs map[string]string
 }
 
-// New authenticates with Rocket.Chat, starts the DDP WebSocket loop, hydrates initial
-// state, and invokes Handler.Ready once hydrated.
-func New(ctx context.Context, cred Credentials, h Handler, opts ...Option) (*Client, error) {
+func resolveClientOptions(cred Credentials, opts []Option) options {
 	o := defaultOptions()
 	for _, opt := range opts {
 		opt(&o)
@@ -64,6 +66,14 @@ func New(ctx context.Context, cred Credentials, h Handler, opts ...Option) (*Cli
 	if cred.NoTLS {
 		o.noTLS = true
 	}
+
+	return o
+}
+
+// New authenticates with Rocket.Chat, starts the DDP WebSocket loop, hydrates initial
+// state, and invokes Handler.Ready once hydrated.
+func New(ctx context.Context, cred Credentials, h Handler, opts ...Option) (*Client, error) {
+	o := resolveClientOptions(cred, opts)
 
 	httpURL, wsURL, err := normalizeServerURL(cred.Server, o.noTLS)
 	if err != nil {
@@ -79,19 +89,20 @@ func New(ctx context.Context, cred Credentials, h Handler, opts ...Option) (*Cli
 	clientCtx, cancel := context.WithCancel(ctx)
 
 	c := &Client{
-		cred:          cred,
-		opts:          o,
-		httpURL:       httpURL,
-		wsURL:         wsURL,
-		handler:       h,
-		ctx:           clientCtx,
-		cancel:        cancel,
-		rootLogger:    rootLogger,
-		logger:        rootLogger.WithFields(logrus.Fields{"prefix": "rocketchatclient"}),
-		rootAPILogger: rootAPILogger,
-		apiLogger:     rootAPILogger.WithFields(logrus.Fields{"prefix": "rocketchatclient: API"}),
-		cache:         cache,
-		eventCh:       make(chan ddpEvent, eventQueueSize),
+		cred:           cred,
+		opts:           o,
+		httpURL:        httpURL,
+		wsURL:          wsURL,
+		handler:        h,
+		ctx:            clientCtx,
+		cancel:         cancel,
+		rootLogger:     rootLogger,
+		logger:         rootLogger.WithFields(logrus.Fields{"prefix": "rocketchatclient"}),
+		rootAPILogger:  rootAPILogger,
+		apiLogger:      rootAPILogger.WithFields(logrus.Fields{"prefix": "rocketchatclient: API"}),
+		cache:          cache,
+		eventCh:        make(chan ddpEvent, eventQueueSize),
+		roomDeleteSubs: make(map[string]string),
 	}
 
 	c.httpClient = &http.Client{
@@ -108,7 +119,7 @@ func New(ctx context.Context, cred Credentials, h Handler, opts ...Option) (*Cli
 
 	c.wg.Add(2)
 
-	go c.eventLoop()
+	go c.eventLoop(clientCtx)
 	go c.runLoop()
 
 	return c, nil
@@ -233,6 +244,20 @@ func (c *Client) Subscriptions() []*Subscription {
 // Invitations returns a snapshot of pending room invitations.
 func (c *Client) Invitations() []Invitation {
 	return c.cache.invitationsSnapshot()
+}
+
+// CachedMessage returns a cached message by ID without making a REST call.
+func (c *Client) CachedMessage(msgID string) (*Message, bool) {
+	return c.cache.cachedMessage(msgID)
+}
+
+// ResolveMessage returns a message from the cache, falling back to GET /api/v1/chat.getMessage.
+func (c *Client) ResolveMessage(ctx context.Context, msgID string) (*Message, error) {
+	if msg, ok := c.cache.cachedMessage(msgID); ok {
+		return msg, nil
+	}
+
+	return c.GetMessage(ctx, msgID)
 }
 
 func (c *Client) authCredentials() (string, string) {

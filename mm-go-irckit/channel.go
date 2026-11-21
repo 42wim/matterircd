@@ -133,6 +133,10 @@ func (ch *channel) Created() time.Time {
 
 // ID returns a normalized unique identifier for the channel.
 func (ch *channel) ID() string {
+	if ch.service == serviceRocketChat || ch.service == serviceMatrix {
+		return ch.id
+	}
+
 	return ID(ch.id)
 }
 

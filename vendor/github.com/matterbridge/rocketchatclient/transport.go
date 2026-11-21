@@ -30,7 +30,7 @@ func newTransport(o *options) *http.Transport {
 		IdleConnTimeout:       120 * time.Second,
 		TLSHandshakeTimeout:   timeout,
 		ExpectContinueTimeout: 1 * time.Second,
-		ResponseHeaderTimeout: 20 * time.Second,
+		ResponseHeaderTimeout: 30 * time.Second,
 		HTTP2: &http.HTTP2Config{
 			SendPingTimeout: 45 * time.Second,
 			PingTimeout:     15 * time.Second,
