@@ -251,10 +251,7 @@ func TestRocketChatUserInfoRolesDirectoryAndDM(t *testing.T) {
 
 	assert.Equal(t, "AliceDev", alice.Nick)
 	assert.Contains(t, alice.Roles, "bot")
-
-	photo, secure := rc.UserDetails(t.Context(), testUserAliceID)
-	assert.Equal(t, baseURL+"/avatar/"+testUserAlice, photo)
-	assert.False(t, secure)
+	assert.Equal(t, baseURL+"/avatar/"+testUserAlice, alice.Photo)
 
 	members, err := rc.GetChannelUsers(t.Context(), testGenRoomID)
 	if err != nil {
@@ -394,7 +391,7 @@ func historySearchHandler(t *testing.T) http.HandlerFunc {
 }
 
 func TestRocketChatReplayAndSearch(t *testing.T) {
-	rc, _, baseURL := newTestBridge(t, "", historySearchHandler(t))
+	rc, evCh, baseURL := newTestBridge(t, "", historySearchHandler(t))
 
 	since := rc.GetLastViewedAt(t.Context(), testGenRoomID)
 	assert.Equal(t, time.Date(2026, 11, 16, 1, 0, 0, 0, time.UTC).UnixMilli(), since)
@@ -409,6 +406,15 @@ func TestRocketChatReplayAndSearch(t *testing.T) {
 		assert.Equal(t, "newReplay12345678", chEv.MessageID)
 		assert.Equal(t, "notice", chEv.MessageType)
 	}
+
+	// Live delivery of a message already returned by GetReplayEvents must be suppressed once.
+	rc.OnMessage(&rocketchatclient.Message{
+		ID:     "newReplay12345678",
+		RoomID: testGenRoomID,
+		Text:   "new @all",
+		User:   rocketchatclient.UserRef{ID: testUserAliceID, Username: testUserAlice},
+	})
+	assert.Empty(t, evCh)
 
 	err := rc.UpdateLastViewedUser(t.Context(), testUserAliceID)
 	if err != nil {

@@ -1522,6 +1522,12 @@ func (c *Client) processIncomingMessage(ctx context.Context, msg *Message) {
 func (c *Client) handleSystemMessage(ctx context.Context, msg *Message) {
 	switch msg.Type {
 	case "uj":
+		if msg.User.ID == c.UserID() {
+			c.ensureRoomSubscribed(msg.RoomID)
+
+			return
+		}
+
 		c.emitMember(&MemberEvent{
 			RoomID:   msg.RoomID,
 			UserID:   msg.User.ID,
@@ -1529,6 +1535,10 @@ func (c *Client) handleSystemMessage(ctx context.Context, msg *Message) {
 			Action:   memberActionJoin,
 		})
 	case "ul":
+		if msg.User.ID == c.UserID() {
+			return
+		}
+
 		c.emitMember(&MemberEvent{
 			RoomID:   msg.RoomID,
 			UserID:   msg.User.ID,
