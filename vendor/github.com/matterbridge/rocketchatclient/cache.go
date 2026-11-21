@@ -19,6 +19,7 @@ type stateCache struct {
 	usersByName  map[string]*User
 	roomsByID    map[string]*Room
 	subsByRoomID map[string]*Subscription
+	roomRoles    map[string]map[string][]string
 	invitations  map[string]Invitation
 
 	sentIDs       *lru.Cache[string, struct{}]
@@ -53,6 +54,7 @@ func newStateCache(sentSize, msgSize, reactionSize int) (*stateCache, error) {
 		usersByName:   make(map[string]*User),
 		roomsByID:     make(map[string]*Room),
 		subsByRoomID:  make(map[string]*Subscription),
+		roomRoles:     make(map[string]map[string][]string),
 		invitations:   make(map[string]Invitation),
 		sentIDs:       sentIDs,
 		seenMsgs:      seenMsgs,
@@ -266,21 +268,25 @@ func (sc *stateCache) removeRoom(roomID string) {
 	sc.mu.Lock()
 	delete(sc.roomsByID, roomID)
 	delete(sc.subsByRoomID, roomID)
+	delete(sc.roomRoles, roomID)
 	delete(sc.invitations, roomID)
 	sc.mu.Unlock()
 }
 
-func (sc *stateCache) upsertSubscription(s *Subscription) {
+func (sc *stateCache) upsertSubscription(s *Subscription) bool {
 	if s == nil || s.RoomID == "" {
-		return
+		return false
 	}
 
 	cp := cloneSubscription(s)
 
 	sc.mu.Lock()
+	_, existed := sc.subsByRoomID[cp.RoomID]
 	sc.subsByRoomID[cp.RoomID] = cp
 	delete(sc.invitations, cp.RoomID)
 	sc.mu.Unlock()
+
+	return existed
 }
 
 func (sc *stateCache) removeSubscription(roomID string) {
@@ -397,6 +403,83 @@ func (sc *stateCache) subscriptions() []*Subscription {
 	}
 
 	return out
+}
+
+func (sc *stateCache) setRoomRoles(roomID string, roles []RoomRole) {
+	if roomID == "" {
+		return
+	}
+
+	byUser := make(map[string][]string, len(roles))
+	for i := range roles {
+		if roles[i].User.ID == "" || len(roles[i].Roles) == 0 {
+			continue
+		}
+
+		byUser[roles[i].User.ID] = slices.Clone(roles[i].Roles)
+	}
+
+	sc.mu.Lock()
+	sc.roomRoles[roomID] = byUser
+	sc.mu.Unlock()
+}
+
+func (sc *stateCache) roomUserRoles(roomID, userID string) []string {
+	if roomID == "" || userID == "" {
+		return nil
+	}
+
+	sc.mu.RLock()
+	defer sc.mu.RUnlock()
+
+	if byUser, ok := sc.roomRoles[roomID]; ok {
+		if roles, exists := byUser[userID]; exists {
+			return slices.Clone(roles)
+		}
+	}
+
+	// Fallback to the self subscription roles if roomRoles wasn't fetched separately.
+	if sub, ok := sc.subsByRoomID[roomID]; ok && sub.User != nil && sub.User.ID == userID && len(sub.Roles) > 0 {
+		return slices.Clone(sub.Roles)
+	}
+
+	return nil
+}
+
+func (sc *stateCache) updateRoomTopic(roomID, topic string) (*Room, bool) {
+	if roomID == "" {
+		return nil, false
+	}
+
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+
+	r, ok := sc.roomsByID[roomID]
+	if !ok {
+		return nil, false
+	}
+
+	r.Topic = topic
+
+	return cloneRoom(r), true
+}
+
+func (sc *stateCache) updateRoomName(roomID, name string) (*Room, bool) {
+	if roomID == "" || name == "" {
+		return nil, false
+	}
+
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+
+	r, ok := sc.roomsByID[roomID]
+	if !ok {
+		return nil, false
+	}
+
+	r.Name = name
+
+	return cloneRoom(r), true
 }
 
 func (sc *stateCache) invitationsSnapshot() []Invitation {

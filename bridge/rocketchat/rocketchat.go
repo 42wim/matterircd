@@ -6,6 +6,7 @@ import (
 	"errors"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -68,7 +69,15 @@ type RocketChat struct {
 	msgParentCache   *lru.Cache[string, string]
 	msgLastSentCache *lru.Cache[string, string]
 
+	roomMetaMu sync.Mutex
+	roomMeta   map[string]roomSnapshot
+
 	unregisterReloadHook func()
+}
+
+type roomSnapshot struct {
+	name  string
+	topic string
 }
 
 // New authenticates with Rocket.Chat, starts the DDP event loop, and returns a bridge.Bridger.
@@ -97,6 +106,7 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 	r.msgAuthorCache, _ = lru.New[string, rocketchatclient.UserRef](msgTextCacheSize)
 	r.msgParentCache, _ = lru.New[string, string](200)
 	r.msgLastSentCache, _ = lru.New[string, string](10)
+	r.roomMeta = make(map[string]roomSnapshot)
 
 	defer close(r.initDone)
 
@@ -174,12 +184,26 @@ func (r *RocketChat) Ready() {
 		return
 	}
 
+	r.seedRoomMeta()
 	r.ready.Store(true)
 	close(r.readyCh)
 
 	if r.onConnect != nil {
 		go r.onConnect()
 	}
+}
+
+func (r *RocketChat) seedRoomMeta() {
+	rooms := r.rc.Rooms()
+
+	r.roomMetaMu.Lock()
+	for _, room := range rooms {
+		r.roomMeta[room.ID] = roomSnapshot{
+			name:  r.roomName(room),
+			topic: room.Topic,
+		}
+	}
+	r.roomMetaMu.Unlock()
 }
 
 // OnReconnect implements rocketchatclient.ReconnectHandler.
@@ -397,7 +421,28 @@ func (r *RocketChat) OnRoomChange(room *rocketchatclient.Room) {
 		return
 	}
 
-	if r.cfg.RocketChat().ShowTopic && room.Topic != "" {
+	newName := r.roomName(room)
+
+	r.roomMetaMu.Lock()
+	prev, seen := r.roomMeta[room.ID]
+	r.roomMeta[room.ID] = roomSnapshot{
+		name:  newName,
+		topic: room.Topic,
+	}
+	r.roomMetaMu.Unlock()
+
+	if seen && !r.isOneToOneDM(room) && newName != "" && newName != prev.name {
+		r.sendEvent(&bridge.Event{
+			Type: "channel_update",
+			Data: &bridge.ChannelUpdateEvent{
+				ChannelID:   room.ID,
+				Name:        newName,
+				DisplayName: cmp.Or(room.FName, room.Name),
+			},
+		})
+	}
+
+	if (!seen || room.Topic != prev.topic) && room.Topic != "" && (seen || r.cfg.RocketChat().ShowTopic) {
 		userID := ""
 		if room.Owner != nil {
 			userID = room.Owner.ID
@@ -411,6 +456,86 @@ func (r *RocketChat) OnRoomChange(room *rocketchatclient.Room) {
 				UserID:    userID,
 			},
 		})
+	}
+}
+
+// OnMember implements rocketchatclient.MemberHandler.
+func (r *RocketChat) OnMember(ev *rocketchatclient.MemberEvent) {
+	if !r.ready.Load() || ev == nil || ev.RoomID == "" {
+		return
+	}
+
+	if room, ok := r.rc.Room(ev.RoomID); ok && r.isOneToOneDM(room) {
+		return
+	}
+
+	target := r.memberTargetUser(ev)
+	if target == nil {
+		return
+	}
+
+	var actor *bridge.UserInfo
+	if ev.Sender != "" {
+		actor = r.GetUser(r.ctx, ev.Sender)
+	}
+
+	if actor == nil {
+		actor = &bridge.UserInfo{Nick: "system"}
+	}
+
+	switch ev.Action {
+	case "join":
+		r.sendEvent(&bridge.Event{
+			Type: "channel_add",
+			Data: &bridge.ChannelAddEvent{
+				Adder:     actor,
+				Added:     []*bridge.UserInfo{target},
+				ChannelID: ev.RoomID,
+			},
+		})
+	case "leave":
+		r.sendEvent(&bridge.Event{
+			Type: "channel_remove",
+			Data: &bridge.ChannelRemoveEvent{
+				Remover:   actor,
+				Removed:   []*bridge.UserInfo{target},
+				ChannelID: ev.RoomID,
+			},
+		})
+	}
+}
+
+func (r *RocketChat) memberTargetUser(ev *rocketchatclient.MemberEvent) *bridge.UserInfo {
+	if ev.UserID == r.rc.UserID() {
+		return r.GetMe()
+	}
+
+	if ev.UserID != "" {
+		if u := r.GetUser(r.ctx, ev.UserID); u != nil {
+			return u
+		}
+	}
+
+	if ev.Username != "" {
+		if u := r.GetUserByUsername(r.ctx, ev.Username); u != nil {
+			return u
+		}
+	}
+
+	if ev.UserID == "" && ev.Username == "" {
+		return nil
+	}
+
+	id := cmp.Or(ev.UserID, ev.Username)
+	nick := cmp.Or(ev.Username, ev.UserID)
+
+	return &bridge.UserInfo{
+		Nick:     nick,
+		User:     id,
+		Real:     nick,
+		Username: ev.Username,
+		Ghost:    id != r.rc.UserID(),
+		Me:       id == r.rc.UserID(),
 	}
 }
 
@@ -626,17 +751,44 @@ func (r *RocketChat) toBridgeUser(u *rocketchatclient.User) *bridge.UserInfo {
 	realName := cmp.Or(u.Name, nick)
 	meID := r.rc.UserID()
 
+	roles := strings.Join(u.Roles, ",")
+	if u.Type == "bot" && !slices.Contains(u.Roles, "bot") {
+		if roles == "" {
+			roles = "bot"
+		} else {
+			roles += ",bot"
+		}
+	}
+
 	return &bridge.UserInfo{
 		Nick:        nick,
 		User:        u.ID,
 		Real:        realName,
-		Roles:       strings.Join(u.Roles, ","),
+		Roles:       roles,
 		DisplayName: u.Name,
 		Ghost:       u.ID != meID,
 		Me:          u.ID == meID,
 		Username:    u.Username,
 		FirstName:   u.Name,
 	}
+}
+
+// ChannelUserPrefix implements bridge.ChannelRolePrefixer for Rocket.Chat NAMES modes.
+func (r *RocketChat) ChannelUserPrefix(channelID, userID string) string {
+	roles := r.rc.RoomUserRoles(channelID, userID)
+	if slices.Contains(roles, "owner") {
+		return "@"
+	}
+
+	if slices.Contains(roles, "moderator") {
+		return "+"
+	}
+
+	if u, ok := r.rc.User(userID); ok && slices.Contains(u.Roles, "admin") {
+		return "@"
+	}
+
+	return ""
 }
 
 func (r *RocketChat) isOneToOneDM(room *rocketchatclient.Room) bool {
@@ -918,9 +1070,25 @@ func (r *RocketChat) GetChannelID(ctx context.Context, name, teamID string) stri
 }
 
 func (r *RocketChat) GetChannelUsers(ctx context.Context, channelID string) ([]*bridge.UserInfo, error) {
+	members, err := r.rc.GetRoomMembers(ctx, channelID)
+	if err == nil {
+		out := make([]*bridge.UserInfo, 0, len(members))
+		for _, m := range members {
+			if u := r.toBridgeUser(m); u != nil {
+				out = append(out, u)
+			}
+		}
+
+		return out, nil
+	}
+
 	room, ok := r.rc.Room(channelID)
 	if !ok {
-		return nil, errors.New("channel not found")
+		return nil, err
+	}
+
+	if len(room.UIDs) == 0 {
+		return nil, err
 	}
 
 	out := make([]*bridge.UserInfo, 0, len(room.UIDs))
@@ -1195,24 +1363,61 @@ func (r *RocketChat) SearchPosts(ctx context.Context, search string) []*bridge.E
 	return nil
 }
 
+func (r *RocketChat) resolveUserID(ctx context.Context, userIDOrName string) (string, bool) {
+	if userIDOrName == "" {
+		return "", false
+	}
+
+	if u, ok := r.rc.User(userIDOrName); ok {
+		return u.ID, true
+	}
+
+	if u := r.GetUserByUsername(ctx, strings.TrimPrefix(userIDOrName, "@")); u != nil && u.User != "" {
+		return u.User, true
+	}
+
+	if u := r.GetUser(ctx, userIDOrName); u != nil && u.User != "" {
+		return u.User, true
+	}
+
+	return "", false
+}
+
 func (r *RocketChat) Invite(ctx context.Context, channelID, username string) error {
-	return errors.New("rocketchat: Invite not implemented yet (Phase 3)")
+	userID, ok := r.resolveUserID(ctx, username)
+	if !ok {
+		return errors.New("rocketchat: unknown user " + username)
+	}
+
+	return r.rc.InviteUser(ctx, channelID, userID)
 }
 
 func (r *RocketChat) Join(ctx context.Context, channelName string) (string, string, error) {
-	return "", "", errors.New("rocketchat: Join not implemented yet (Phase 3)")
+	channelID := r.GetChannelID(ctx, channelName, "")
+
+	room, err := r.rc.JoinChannel(ctx, channelID, channelName)
+	if err != nil {
+		return "", "", err
+	}
+
+	return room.ID, room.Topic, nil
 }
 
 func (r *RocketChat) Part(ctx context.Context, channel string) error {
-	return errors.New("rocketchat: Part not implemented yet (Phase 3)")
+	return r.rc.LeaveRoom(ctx, channel)
 }
 
 func (r *RocketChat) SetTopic(ctx context.Context, channelID, text string) error {
-	return errors.New("rocketchat: SetTopic not implemented yet (Phase 3)")
+	return r.rc.SetTopic(ctx, channelID, text)
 }
 
 func (r *RocketChat) Kick(ctx context.Context, channelID, username string) error {
-	return errors.New("rocketchat: Kick not implemented yet (Phase 3)")
+	userID, ok := r.resolveUserID(ctx, username)
+	if !ok {
+		return errors.New("rocketchat: unknown user " + username)
+	}
+
+	return r.rc.KickUser(ctx, channelID, userID)
 }
 
 func (r *RocketChat) Nick(ctx context.Context, name string) error {
@@ -1325,9 +1530,16 @@ func (r *RocketChat) RemoveReaction(ctx context.Context, msgID, emoji string) er
 }
 
 func (r *RocketChat) SetStatus(ctx context.Context, status string) error {
-	return errors.New("rocketchat: SetStatus not implemented yet (Phase 3)")
+	return errors.New("rocketchat: SetStatus not implemented yet (Phase 4)")
 }
 
 func (r *RocketChat) CreateChannel(ctx context.Context, channelName string, channelType string) (*bridge.ChannelInfo, error) {
-	return nil, errors.New("rocketchat: CreateChannel not implemented yet (Phase 3)")
+	private := strings.EqualFold(channelType, "P") || strings.EqualFold(channelType, "private")
+
+	room, err := r.rc.CreateRoom(ctx, channelName, private)
+	if err != nil {
+		return nil, err
+	}
+
+	return r.toChannelInfo(room), nil
 }

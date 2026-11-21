@@ -257,3 +257,29 @@ type UsersListResponse struct {
 	Total   int    `json:"total"`
 	Success bool   `json:"success"`
 }
+
+// RoomRole represents a user's roles within a specific Rocket.Chat room.
+type RoomRole struct {
+	ID     string   `json:"_id"`
+	RoomID string   `json:"rid"`
+	User   UserRef  `json:"u"`
+	Roles  []string `json:"roles"`
+}
+
+// MembersResponse is the paginated payload returned by channels.members, groups.members, and im.members.
+type MembersResponse struct {
+	Members []User `json:"members"`
+	Count   int    `json:"count"`
+	Offset  int    `json:"offset"`
+	Total   int    `json:"total"`
+	Success bool   `json:"success"`
+}
+
+// SyncMessagesResponse is the payload returned by GET /api/v1/chat.syncMessages.
+type SyncMessagesResponse struct {
+	Result struct {
+		Updated []Message `json:"updated"`
+		Deleted []Message `json:"deleted"`
+	} `json:"result"`
+	Success bool `json:"success"`
+}

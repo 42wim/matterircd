@@ -16,12 +16,15 @@ import (
 )
 
 const (
-	maxAPIRetries     = 5
-	defaultRateWait   = 3 * time.Second
-	maxRateLimitWait  = 60 * time.Second
-	userListPageLimit = 100
-	meteorIDLen       = 17
-	base62Alphabet    = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+	maxAPIRetries      = 5
+	defaultRateWait    = 3 * time.Second
+	maxRateLimitWait   = 60 * time.Second
+	userListPageLimit  = 100
+	maxRoomMemberPages = 10
+	roomMemberTimeout  = 15 * time.Second
+	meteorIDLen        = 17
+	base62Alphabet     = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+	roomActionLeave    = "leave"
 )
 
 // APIError represents an error payload returned by the Rocket.Chat REST API.
@@ -545,6 +548,404 @@ func (c *Client) GetMessage(ctx context.Context, msgID string) (*Message, error)
 	c.cache.cacheMessage(resp.Message)
 
 	return resp.Message, nil
+}
+
+func (c *Client) roomTypeFor(roomID string) string {
+	if room, ok := c.cache.room(roomID); ok && room.Type != "" {
+		return room.Type
+	}
+
+	if sub, ok := c.cache.subscription(roomID); ok && sub.Type != "" {
+		return sub.Type
+	}
+
+	return RoomTypeChannel
+}
+
+func roomEndpoint(roomType, suffix string) (string, error) {
+	switch roomType {
+	case RoomTypeChannel:
+		return "/api/v1/channels." + suffix, nil
+	case RoomTypePrivate:
+		return "/api/v1/groups." + suffix, nil
+	case RoomTypeDirect:
+		return "/api/v1/im." + suffix, nil
+	default:
+		return "", fmt.Errorf("rocketchatclient: unsupported room type %q", roomType)
+	}
+}
+
+// GetChannelInfo fetches public channel metadata by roomID or roomName and updates the cache.
+func (c *Client) GetChannelInfo(ctx context.Context, roomID, roomName string) (*Room, error) {
+	query := url.Values{}
+
+	switch {
+	case roomID != "":
+		query.Set("roomId", roomID)
+	case roomName != "":
+		query.Set("roomName", strings.TrimPrefix(roomName, "#"))
+	default:
+		return nil, errors.New("rocketchatclient: roomID or roomName is required")
+	}
+
+	var resp struct {
+		Channel *Room `json:"channel"`
+		Success bool  `json:"success"`
+	}
+
+	err := c.doJSON(ctx, http.MethodGet, "/api/v1/channels.info", query, nil, &resp, true)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.Channel == nil || resp.Channel.ID == "" {
+		return nil, errors.New("rocketchatclient: channels.info response missing channel")
+	}
+
+	c.cache.upsertRoom(resp.Channel)
+
+	return cloneRoom(resp.Channel), nil
+}
+
+func (c *Client) resolveJoinTarget(ctx context.Context, roomID, cleanName string) (string, *Room, error) {
+	if roomID != "" {
+		if room, ok := c.cache.room(roomID); ok && room.Type != RoomTypeChannel {
+			if _, subbed := c.cache.subscription(roomID); subbed {
+				_ = c.SubscribeRoom(ctx, roomID)
+
+				return roomID, room, nil
+			}
+
+			return "", nil, errors.New("rocketchatclient: cannot self-join private or direct room without invite")
+		}
+
+		return roomID, nil, nil
+	}
+
+	if cleanName == "" {
+		return "", nil, errors.New("rocketchatclient: roomID or roomName is required")
+	}
+
+	info, err := c.GetChannelInfo(ctx, "", cleanName)
+	if err != nil {
+		return "", nil, err
+	}
+
+	return info.ID, nil, nil
+}
+
+// JoinChannel joins a public channel by roomID or roomName (or returns an already-joined private room).
+func (c *Client) JoinChannel(ctx context.Context, roomID, roomName string) (*Room, error) {
+	cleanName := strings.TrimPrefix(roomName, "#")
+
+	targetID, alreadyJoined, err := c.resolveJoinTarget(ctx, roomID, cleanName)
+	if err != nil {
+		return nil, err
+	}
+
+	if alreadyJoined != nil {
+		return alreadyJoined, nil
+	}
+
+	req := struct {
+		RoomID string `json:"roomId"`
+	}{
+		RoomID: targetID,
+	}
+
+	var resp struct {
+		Channel *Room `json:"channel"`
+		Success bool  `json:"success"`
+	}
+
+	err = c.doJSON(ctx, http.MethodPost, "/api/v1/channels.join", nil, req, &resp, true)
+	if err != nil {
+		return nil, err
+	}
+
+	room := resp.Channel
+	if room == nil {
+		room, _ = c.cache.room(targetID)
+	}
+
+	if room == nil || room.ID == "" {
+		room = &Room{ID: targetID, Type: RoomTypeChannel, Name: cleanName}
+	}
+
+	c.cache.upsertRoom(room)
+
+	if _, subbed := c.cache.subscription(room.ID); !subbed {
+		c.cache.upsertSubscription(&Subscription{
+			RoomID: room.ID,
+			Name:   room.Name,
+			FName:  room.FName,
+			Type:   room.Type,
+			Open:   true,
+		})
+	}
+
+	_ = c.SubscribeRoom(ctx, room.ID)
+
+	return cloneRoom(room), nil
+}
+
+// LeaveRoom leaves a public channel, private group, or closes a direct room.
+func (c *Client) LeaveRoom(ctx context.Context, roomID string) error {
+	if roomID == "" {
+		return errors.New("rocketchatclient: roomID is required")
+	}
+
+	roomType := c.roomTypeFor(roomID)
+
+	suffix := roomActionLeave
+	if roomType == RoomTypeDirect {
+		suffix = "close"
+	}
+
+	endpoint, err := roomEndpoint(roomType, suffix)
+	if err != nil {
+		return err
+	}
+
+	req := struct {
+		RoomID string `json:"roomId"`
+	}{
+		RoomID: roomID,
+	}
+
+	err = c.doJSON(ctx, http.MethodPost, endpoint, nil, req, nil, true)
+	if err != nil {
+		return err
+	}
+
+	_ = c.UnsubscribeRoom(ctx, roomID)
+	c.cache.removeSubscription(roomID)
+
+	return nil
+}
+
+// InviteUser invites userID to roomID.
+func (c *Client) InviteUser(ctx context.Context, roomID, userID string) error {
+	return c.roomUserAction(ctx, roomID, userID, "invite")
+}
+
+// KickUser removes userID from roomID.
+func (c *Client) KickUser(ctx context.Context, roomID, userID string) error {
+	return c.roomUserAction(ctx, roomID, userID, "kick")
+}
+
+func (c *Client) roomUserAction(ctx context.Context, roomID, userID, action string) error {
+	if roomID == "" || userID == "" {
+		return errors.New("rocketchatclient: roomID and userID are required")
+	}
+
+	roomType := c.roomTypeFor(roomID)
+	if roomType == RoomTypeDirect {
+		return fmt.Errorf("rocketchatclient: cannot %s in a direct room", action)
+	}
+
+	endpoint, err := roomEndpoint(roomType, action)
+	if err != nil {
+		return err
+	}
+
+	req := struct {
+		RoomID string `json:"roomId"`
+		UserID string `json:"userId"`
+	}{
+		RoomID: roomID,
+		UserID: userID,
+	}
+
+	return c.doJSON(ctx, http.MethodPost, endpoint, nil, req, nil, true)
+}
+
+// SetTopic updates the topic of a public channel or private group.
+func (c *Client) SetTopic(ctx context.Context, roomID, topic string) error {
+	if roomID == "" {
+		return errors.New("rocketchatclient: roomID is required")
+	}
+
+	roomType := c.roomTypeFor(roomID)
+	if roomType == RoomTypeDirect {
+		return errors.New("rocketchatclient: cannot set topic on a direct room")
+	}
+
+	endpoint, err := roomEndpoint(roomType, "setTopic")
+	if err != nil {
+		return err
+	}
+
+	req := struct {
+		RoomID string `json:"roomId"`
+		Topic  string `json:"topic"`
+	}{
+		RoomID: roomID,
+		Topic:  topic,
+	}
+
+	err = c.doJSON(ctx, http.MethodPost, endpoint, nil, req, nil, true)
+	if err != nil {
+		return err
+	}
+
+	c.cache.updateRoomTopic(roomID, topic)
+
+	return nil
+}
+
+// CreateRoom creates a public channel or private group and caches the resulting room.
+func (c *Client) CreateRoom(ctx context.Context, name string, private bool) (*Room, error) {
+	cleanName := strings.TrimPrefix(strings.TrimSpace(name), "#")
+	if cleanName == "" {
+		return nil, errors.New("rocketchatclient: channel name is required")
+	}
+
+	endpoint := "/api/v1/channels.create"
+	if private {
+		endpoint = "/api/v1/groups.create"
+	}
+
+	req := struct {
+		Name string `json:"name"`
+	}{
+		Name: cleanName,
+	}
+
+	var resp struct {
+		Channel *Room `json:"channel"`
+		Group   *Room `json:"group"`
+		Success bool  `json:"success"`
+	}
+
+	err := c.doJSON(ctx, http.MethodPost, endpoint, nil, req, &resp, true)
+	if err != nil {
+		return nil, err
+	}
+
+	room := resp.Channel
+	if room == nil {
+		room = resp.Group
+	}
+
+	if room == nil || room.ID == "" {
+		return nil, errors.New("rocketchatclient: create room response missing room")
+	}
+
+	c.cache.upsertRoom(room)
+	c.cache.upsertSubscription(&Subscription{
+		RoomID: room.ID,
+		Name:   room.Name,
+		FName:  room.FName,
+		Type:   room.Type,
+		Open:   true,
+	})
+
+	_ = c.SubscribeRoom(ctx, room.ID)
+
+	return cloneRoom(room), nil
+}
+
+// GetRoomMembers fetches members (and room roles when permitted) for roomID.
+func (c *Client) GetRoomMembers(ctx context.Context, roomID string) ([]*User, error) {
+	if roomID == "" {
+		return nil, errors.New("rocketchatclient: roomID is required")
+	}
+
+	roomType := c.roomTypeFor(roomID)
+
+	endpoint, err := roomEndpoint(roomType, "members")
+	if err != nil {
+		return nil, err
+	}
+
+	memberCtx, cancel := context.WithTimeout(ctx, roomMemberTimeout)
+	defer cancel()
+
+	var members []*User
+
+	offset := 0
+
+	for range maxRoomMemberPages {
+		query := url.Values{}
+		query.Set("roomId", roomID)
+		query.Set("offset", strconv.Itoa(offset))
+		query.Set("count", strconv.Itoa(userListPageLimit))
+
+		var resp MembersResponse
+
+		err = c.doJSON(memberCtx, http.MethodGet, endpoint, query, nil, &resp, true)
+		if err != nil {
+			if len(members) > 0 {
+				c.logger.Warnf("%s truncated at %d member(s) for %s: %s", endpoint, len(members), roomID, err)
+
+				break
+			}
+
+			return nil, err
+		}
+
+		c.cache.upsertUsers(resp.Members)
+
+		for i := range resp.Members {
+			members = append(members, cloneUser(&resp.Members[i]))
+		}
+
+		offset += len(resp.Members)
+		if len(resp.Members) == 0 || offset >= resp.Total {
+			break
+		}
+	}
+
+	if roomType == RoomTypeChannel || roomType == RoomTypePrivate {
+		c.fetchRoomRoles(memberCtx, roomID, roomType)
+	}
+
+	return members, nil
+}
+
+func (c *Client) fetchRoomRoles(ctx context.Context, roomID, roomType string) {
+	endpoint, err := roomEndpoint(roomType, "roles")
+	if err != nil {
+		return
+	}
+
+	query := url.Values{}
+	query.Set("roomId", roomID)
+
+	var resp struct {
+		Roles   []RoomRole `json:"roles"`
+		Success bool       `json:"success"`
+	}
+
+	err = c.doJSON(ctx, http.MethodGet, endpoint, query, nil, &resp, true)
+	if err != nil {
+		c.logger.Debugf("%s for %s: %s", endpoint, roomID, err)
+
+		return
+	}
+
+	c.cache.setRoomRoles(roomID, resp.Roles)
+}
+
+// SyncMessages fetches updated and deleted messages in roomID since lastUpdate.
+func (c *Client) SyncMessages(ctx context.Context, roomID string, lastUpdate time.Time) (*SyncMessagesResponse, error) {
+	if roomID == "" {
+		return nil, errors.New("rocketchatclient: roomID is required")
+	}
+
+	query := url.Values{}
+	query.Set("roomId", roomID)
+	query.Set("lastUpdate", lastUpdate.UTC().Format(time.RFC3339Nano))
+
+	var resp SyncMessagesResponse
+
+	err := c.doJSON(ctx, http.MethodGet, "/api/v1/chat.syncMessages", query, nil, &resp, true)
+	if err != nil {
+		return nil, err
+	}
+
+	return &resp, nil
 }
 
 func (c *Client) doJSON(ctx context.Context, method, endpoint string, query url.Values, reqBody, out any, authenticated bool) error {

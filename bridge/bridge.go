@@ -128,6 +128,12 @@ type UserDetailer interface {
 	UserDetails(ctx context.Context, userID string) (photo string, secure bool)
 }
 
+// ChannelRolePrefixer is optionally implemented by bridges reporting per-channel
+// IRC membership prefixes ("@", "+") for NAMES replies.
+type ChannelRolePrefixer interface {
+	ChannelUserPrefix(channelID, userID string) string
+}
+
 type Credentials struct {
 	Login    string
 	Team     string

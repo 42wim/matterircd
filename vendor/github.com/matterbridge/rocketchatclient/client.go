@@ -246,6 +246,11 @@ func (c *Client) Invitations() []Invitation {
 	return c.cache.invitationsSnapshot()
 }
 
+// RoomUserRoles returns cached per-room roles (such as "owner" or "moderator") for userID.
+func (c *Client) RoomUserRoles(roomID, userID string) []string {
+	return c.cache.roomUserRoles(roomID, userID)
+}
+
 // CachedMessage returns a cached message by ID without making a REST call.
 func (c *Client) CachedMessage(msgID string) (*Message, bool) {
 	return c.cache.cachedMessage(msgID)
