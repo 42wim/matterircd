@@ -12,9 +12,10 @@ import (
 )
 
 const (
-	profileBatchSize = 50
-	presenceBatchMax = 100
-	presenceCacheTTL = 60 * time.Second
+	profileBatchSize         = 50
+	presenceBatchMax         = 100
+	presenceCacheTTL         = 60 * time.Second
+	freshPresenceMinInterval = 30 * time.Second
 
 	statusOnline  = "online"
 	statusAway    = "away"
@@ -429,17 +430,32 @@ func (c *Client) GetPresence(ctx context.Context, mri string) (*Presence, error)
 	return res[mri], nil
 }
 
-// GetPresenceFresh bypasses the presence TTL cache and fetches the current
-// presence for mri directly from the Teams presence service (falling back to
-// any cached entry on error). Mirrors matterclient.GetStatusFresh.
+// GetPresenceFresh fetches the current presence for mri from the Teams
+// presence service (rate-limited per user to freshPresenceMinInterval,
+// mirroring matterclient.GetStatusFresh), falling back to any cached entry on
+// error.
 func (c *Client) GetPresenceFresh(ctx context.Context, mri string) *Presence {
 	if mri == "" {
 		return nil
 	}
 
+	now := time.Now().Unix()
+
+	c.Users.mu.RLock()
+
+	cached, hasCached := c.Users.presences[mri]
+	if hasCached && now-cached.UpdatedAt < int64(freshPresenceMinInterval.Seconds()) {
+		cp := *cached
+
+		c.Users.mu.RUnlock()
+
+		return &cp
+	}
+
+	c.Users.mu.RUnlock()
+
 	ep := c.Endpoints()
 	if ep.Presence != "" {
-		now := time.Now().Unix()
 		result := make(map[string]*Presence, 1)
 		c.fetchPresenceBatch(ctx, ep.Presence+"/v1/presence/getpresence/", []string{mri}, now, result)
 
