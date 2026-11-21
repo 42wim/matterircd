@@ -222,8 +222,8 @@ func (u *User) Encode(msgs ...*irc.Message) error {
 }
 
 var (
-	replyRegExp  = regexp.MustCompile(`^\@\@(?:!!|[0-9a-z]{26}|[0-9A-Za-z]{17}|[0-9a-f]{3}|\$[0-9A-Za-z\-_\.\+\/]{43}|sl[0-9a-v]{34,80})\s`)
-	modifyRegExp = regexp.MustCompile(`^s/(?:!!|[0-9a-z]{26}|[0-9A-Za-z]{17}|[0-9a-f]{3}|\$[0-9A-Za-z\-_\.\+\/]{43}|sl[0-9a-v]{34,80})?/`)
+	replyRegExp  = regexp.MustCompile(`^\@\@(?:!!|[0-9a-z]{26}|[0-9A-Za-z]{17}|[0-9a-f]{3}|\$[0-9A-Za-z\-_\.\+\/]{43}|sl[0-9a-v]{34,80}|mt[0-9a-v]{21})\s`)
+	modifyRegExp = regexp.MustCompile(`^s/(?:!!|[0-9a-z]{26}|[0-9A-Za-z]{17}|[0-9a-f]{3}|\$[0-9A-Za-z\-_\.\+\/]{43}|sl[0-9a-v]{34,80}|mt[0-9a-v]{21})?/`)
 )
 
 // threadPrefix returns the thread ("@@id ") that text is a reply to, or an empty string.
@@ -483,8 +483,8 @@ const (
 	serviceMatrix     = "matrix"
 	serviceSlack      = "slack"
 	serviceMastodon   = "mastodon"
-	serviceRocketChat = "rocketchat"
 	serviceMsTeams    = "msteams"
+	serviceRocketChat = "rocketchat"
 
 	// serviceAlias is the service bot that handles the commands of whichever bridge is logged in.
 	serviceAlias = "service"
@@ -495,8 +495,8 @@ var loginServices = [...]string{
 	serviceSlack,
 	serviceMatrix,
 	serviceMastodon,
-	serviceRocketChat,
 	serviceMsTeams,
+	serviceRocketChat,
 }
 
 // isServiceBot tells if nick is one of the service bots (the ones to login to and to send commands to).

@@ -849,14 +849,24 @@ outerloop:
 
 			if u.Pass != nil {
 				service := u.serviceForPass(u.Pass)
+				passArgs := u.Pass
+
 				if service == "" {
-					service = serviceMattermost
-					if len(u.Pass) == 1 && !u.cfg.Slack().Disable && isSlackToken(u.Pass[0]) {
+					switch {
+					case len(u.Pass) == 1 && !u.cfg.Slack().Disable && isSlackToken(u.Pass[0]):
 						service = serviceSlack
+					case !u.cfg.MSTeams().Disable && len(u.Pass) >= 1 && strings.EqualFold(u.Pass[0], serviceMsTeams):
+						service = serviceMsTeams
+						passArgs = u.Pass[1:]
+					case !u.cfg.MSTeams().Disable && len(u.Pass) == 1 && strings.HasPrefix(u.Pass[0], "skypetoken="):
+						service = serviceMsTeams
+						passArgs = []string{loginArgToken, u.Pass[0]}
+					default:
+						service = serviceMattermost
 					}
 				}
 
-				login(u, nil, u.Pass, service)
+				login(u, nil, passArgs, service)
 			}
 
 			return nil

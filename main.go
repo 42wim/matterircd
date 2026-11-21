@@ -153,6 +153,11 @@ func main() {
 		slFile = mmFile
 	}
 
+	mtFile := rc.MSTeams.LastViewedSaveFile
+	if mtFile == "" {
+		mtFile = mmFile
+	}
+
 	rcFile := rc.RocketChat.LastViewedSaveFile
 	if rcFile == "" {
 		rcFile = mmFile
@@ -162,6 +167,7 @@ func main() {
 		"mattermost": mmFile,
 		"matrix":     mxFile,
 		"slack":      slFile,
+		"msteams":    mtFile,
 		"rocketchat": rcFile,
 	}
 
@@ -321,11 +327,12 @@ func main() {
 func setupDBReloadHook(cfg *config.Config) {
 	rc := cfg.Current()
 
-	var lastMMFile, lastMXFile, lastSLFile, lastRCFile atomic.Value
+	var lastMMFile, lastMXFile, lastSLFile, lastMTFile, lastRCFile atomic.Value
 
 	lastMMFile.Store(rc.Mattermost.LastViewedSaveFile)
 	lastMXFile.Store(rc.Matrix.LastViewedSaveFile)
 	lastSLFile.Store(rc.Slack.LastViewedSaveFile)
+	lastMTFile.Store(rc.MSTeams.LastViewedSaveFile)
 	lastRCFile.Store(rc.RocketChat.LastViewedSaveFile)
 
 	cfg.RegisterReloadHook(func(newRC *config.RuntimeConfig) {
@@ -348,6 +355,13 @@ func setupDBReloadHook(cfg *config.Config) {
 
 		if lastSL != newSL {
 			logger.Warnf("slack.LastViewedSaveFile changed from %q to %q, a matterircd restart is required for it to take effect", lastSL, newSL)
+		}
+
+		newMTFile := newRC.MSTeams.LastViewedSaveFile
+		lastMT := lastMTFile.Swap(newMTFile)
+
+		if lastMT != newMTFile {
+			logger.Warnf("msteams.LastViewedSaveFile changed from %q to %q, a matterircd restart is required for it to take effect", lastMT, newMTFile)
 		}
 
 		newRCFile := newRC.RocketChat.LastViewedSaveFile
