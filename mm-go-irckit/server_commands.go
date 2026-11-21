@@ -596,7 +596,7 @@ func isBareThreadID(msg string) bool {
 		return isAllInAlphabet(id[2:], "0123456789abcdefghijklmnopqrstuv")
 	}
 
-	if strings.HasPrefix(id, "mt") && len(id) == 23 {
+	if strings.HasPrefix(id, "mt") && len(id) == 18 {
 		return isAllInAlphabet(id[2:], "0123456789abcdefghijklmnopqrstuv")
 	}
 
@@ -846,9 +846,9 @@ func awayNotice(s Server, u *User, br bridge.Bridger, toUser *User) {
 }
 
 var (
-	parseModifyMsgRegExp     = regexp.MustCompile(`^s(\/(?:!!|[0-9a-f]{3}|[0-9A-Za-z]{17}|[0-9a-z]{26}|\$[0-9A-Za-z\-_\.\+\/]{43}|sl[0-9a-v]{34,80}|mt[0-9a-v]{21})?\/)(.*)`)
-	parseReactionToMsgRegExp = regexp.MustCompile(`^\@\@(!!|[0-9a-f]{3}|[0-9A-Za-z]{17}|[0-9a-z]{26}|\$[0-9A-Za-z\-_\.\+\/]{43}|sl[0-9a-v]{34,80}|mt[0-9a-v]{21})\s+([\-\+]):(\S+):\s*$`)
-	parseThreadIDRegExp      = regexp.MustCompile(`(?s)^\@\@(?:(!!|[0-9a-f]{3}|[0-9A-Za-z]{17}|[0-9a-z]{26}|\$[0-9A-Za-z\-_\.\+\/]{43}|sl[0-9a-v]{34,80}|mt[0-9a-v]{21})\s)(.*)`)
+	parseModifyMsgRegExp     = regexp.MustCompile(`^s(\/(?:!!|[0-9a-f]{3}|[0-9A-Za-z]{17}|[0-9a-z]{26}|\$[0-9A-Za-z\-_\.\+\/]{43}|sl[0-9a-v]{34,80}|mt[0-9a-v]{16})?\/)(.*)`)
+	parseReactionToMsgRegExp = regexp.MustCompile(`^\@\@(!!|[0-9a-f]{3}|[0-9A-Za-z]{17}|[0-9a-z]{26}|\$[0-9A-Za-z\-_\.\+\/]{43}|sl[0-9a-v]{34,80}|mt[0-9a-v]{16})\s+([\-\+]):(\S+):\s*$`)
+	parseThreadIDRegExp      = regexp.MustCompile(`(?s)^\@\@(?:(!!|[0-9a-f]{3}|[0-9A-Za-z]{17}|[0-9a-z]{26}|\$[0-9A-Za-z\-_\.\+\/]{43}|sl[0-9a-v]{34,80}|mt[0-9a-v]{16})\s)(.*)`)
 )
 
 func parseReactionToMsg(s Server, u *User, msg *irc.Message, channelID string) bool {
@@ -1053,7 +1053,7 @@ func parseThreadID(u *User, msg *irc.Message, channelID string) (string, string)
 	//   https://spec.matrix.org/latest/appendices/#common-identifier-format
 	case len(matches[1]) == 44:
 		return matches[1], matches[2]
-	case strings.HasPrefix(matches[1], "sl"):
+	case strings.HasPrefix(matches[1], "sl"), strings.HasPrefix(matches[1], "mt"):
 		return matches[1], matches[2]
 	default:
 		logger.Errorf("parseThreadID: could not parse reply ID %q", matches[1])

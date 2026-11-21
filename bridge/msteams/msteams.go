@@ -92,7 +92,7 @@ func New(
 	loggerOnce.Do(func() {
 		l := logrus.New()
 		l.SetFormatter(&prefixed.TextFormatter{
-			PrefixPadding: 18,
+			PrefixPadding: 13,
 			DisableColors: false,
 			FullTimestamp: true,
 		})
@@ -201,6 +201,8 @@ func buildClientCredentials(rc *config.RuntimeConfig, cred bridge.Credentials) m
 		saved, err := loadTokenState(rc.MSTeams.TokenSaveFile)
 		if err == nil && saved != nil {
 			clientCred.TokenState = saved
+		} else if err != nil && !os.IsNotExist(err) {
+			logger.Warnf("Failed to load Teams token state from %s: %v", rc.MSTeams.TokenSaveFile, err)
 		}
 	}
 
@@ -520,13 +522,15 @@ func (m *MSTeams) MsgUserThread(ctx context.Context, userID, parentID, text stri
 }
 
 func (m *MSTeams) MsgChannel(ctx context.Context, channelID, text string) (string, error) {
-	msg, err := m.mc.SendMessage(ctx, channelID, text)
+	sendText := msteamsActionText(text)
+
+	msg, err := m.mc.SendMessage(ctx, channelID, sendText)
 	if err != nil {
 		return "", err
 	}
 
 	encoded := encodeTeamsID(channelID, msg.ID)
-	m.recordSentPost(encoded, channelID, text)
+	m.recordSentPost(encoded, channelID, sendText)
 
 	return encoded, nil
 }
@@ -537,15 +541,25 @@ func (m *MSTeams) MsgChannelThread(ctx context.Context, channelID, parentID, tex
 		rawParentID = decodedID
 	}
 
-	msg, err := m.mc.SendMessageThread(ctx, channelID, rawParentID, text)
+	sendText := msteamsActionText(text)
+
+	msg, err := m.mc.SendMessageThread(ctx, channelID, rawParentID, sendText)
 	if err != nil {
 		return "", err
 	}
 
 	encoded := encodeTeamsID(channelID, msg.ID)
-	m.recordSentPost(encoded, channelID, text)
+	m.recordSentPost(encoded, channelID, sendText)
 
 	return encoded, nil
+}
+
+func msteamsActionText(text string) string {
+	if after, ok := strings.CutPrefix(text, "\x01ACTION "); ok {
+		return "\x1d" + strings.TrimSuffix(after, "\x01") + "\x1d"
+	}
+
+	return text
 }
 
 func (m *MSTeams) recordSentPost(encodedID, channelID, text string) {
@@ -1124,9 +1138,14 @@ func (m *MSTeams) resolveUserInfo(ctx context.Context, mri, fallbackDisplay stri
 			DisplayName: fallbackDisplay,
 		}
 		m.mc.CacheUser(u)
+
+		if fallbackDisplay != "" {
+			m.rebuildNames()
+		}
 	} else if u.DisplayName == "" && fallbackDisplay != "" {
 		u.DisplayName = fallbackDisplay
 		m.mc.CacheUser(u)
+		m.rebuildNames()
 	}
 
 	return m.userToUserInfo(u)

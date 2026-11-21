@@ -1,6 +1,7 @@
 package msteamsclient
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -33,28 +34,28 @@ type rawMessagesResponse struct {
 }
 
 type rawChatMessage struct {
-	ID                  string       `json:"id"`
-	ClientMessageID     string       `json:"clientmessageid"`
-	ConversationID      string       `json:"conversationid"`
-	ConversationLink    string       `json:"conversationLink"`
-	From                string       `json:"from"`
-	IMDisplayName       string       `json:"imdisplayname"`
-	MessageType         string       `json:"messagetype"`
-	ContentType         string       `json:"contenttype"`
-	Content             string       `json:"content"`
-	ComposeTime         string       `json:"composetime"`
-	OriginalArrivalTime string       `json:"originalarrivaltime"`
-	Version             string       `json:"version"`
-	Properties          rawMsgProps  `json:"properties"`
-	Emotions            []rawEmotion `json:"emotions"`
+	ID                  string          `json:"id"`
+	ClientMessageID     string          `json:"clientmessageid"`
+	ConversationID      string          `json:"conversationid"`
+	ConversationLink    string          `json:"conversationLink"`
+	From                string          `json:"from"`
+	IMDisplayName       string          `json:"imdisplayname"`
+	MessageType         string          `json:"messagetype"`
+	ContentType         string          `json:"contenttype"`
+	Content             string          `json:"content"`
+	ComposeTime         string          `json:"composetime"`
+	OriginalArrivalTime string          `json:"originalarrivaltime"`
+	Version             json.RawMessage `json:"version"`
+	Properties          rawMsgProps     `json:"properties"`
+	Emotions            []rawEmotion    `json:"emotions"`
 }
 
 type rawMsgProps struct {
-	EditTime   string       `json:"edittime"`
-	DeleteTime string       `json:"deletetime"`
-	Mentions   string       `json:"mentions"`
-	Files      string       `json:"files"`
-	Emotions   []rawEmotion `json:"emotions"`
+	EditTime   json.RawMessage `json:"edittime"`
+	DeleteTime json.RawMessage `json:"deletetime"`
+	Mentions   string          `json:"mentions"`
+	Files      string          `json:"files"`
+	Emotions   json.RawMessage `json:"emotions"`
 }
 
 type rawEmotion struct {
@@ -707,9 +708,9 @@ func (c *Client) parseRawChatMessage(raw *rawChatMessage, fallbackConvID string)
 		ContentHTML:     raw.Content,
 		ContentText:     text,
 		CreateAt:        parseTeamsTimeMillis(raw.ComposeTime, raw.OriginalArrivalTime),
-		EditAt:          parseInt64Millis(raw.Properties.EditTime),
-		DeleteAt:        parseInt64Millis(raw.Properties.DeleteTime),
-		Version:         raw.Version,
+		EditAt:          parseRawMillis(raw.Properties.EditTime),
+		DeleteAt:        parseRawMillis(raw.Properties.DeleteTime),
+		Version:         parseRawString(raw.Version),
 		Mentions:        parseRawMentions(raw.Properties.Mentions),
 		Attachments:     parseRawFiles(raw.Properties.Files),
 		Emotions:        emotions,
@@ -822,12 +823,31 @@ func parseTeamsTimeMillis(primary, fallback string) int64 {
 	return 0
 }
 
-func parseInt64Millis(raw string) int64 {
-	if raw == "" {
+func parseRawString(raw json.RawMessage) string {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return ""
+	}
+
+	if trimmed[0] == '"' {
+		var s string
+
+		err := json.Unmarshal(trimmed, &s)
+		if err == nil {
+			return s
+		}
+	}
+
+	return string(trimmed)
+}
+
+func parseRawMillis(raw json.RawMessage) int64 {
+	s := strings.TrimSpace(parseRawString(raw))
+	if s == "" {
 		return 0
 	}
 
-	ms, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
+	ms, err := strconv.ParseInt(s, 10, 64)
 	if err != nil {
 		return 0
 	}
@@ -835,8 +855,35 @@ func parseInt64Millis(raw string) int64 {
 	return ms
 }
 
-func parseRawEmotions(propEmotions, topEmotions []rawEmotion) map[string][]ReactionUser {
-	src := propEmotions
+func decodeRawEmotions(raw json.RawMessage) []rawEmotion {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return nil
+	}
+
+	if trimmed[0] == '"' {
+		var unquoted string
+
+		err := json.Unmarshal(trimmed, &unquoted)
+		if err != nil {
+			return nil
+		}
+
+		trimmed = bytes.TrimSpace([]byte(unquoted))
+	}
+
+	var list []rawEmotion
+
+	err := json.Unmarshal(trimmed, &list)
+	if err != nil {
+		return nil
+	}
+
+	return list
+}
+
+func parseRawEmotions(propRaw json.RawMessage, topEmotions []rawEmotion) map[string][]ReactionUser {
+	src := decodeRawEmotions(propRaw)
 	if len(src) == 0 {
 		src = topEmotions
 	}
@@ -932,11 +979,25 @@ func parseRawFiles(raw string) []Attachment {
 			ID:          f.ID,
 			Name:        name,
 			ContentType: f.FileType,
-			URL:         link,
+			URL:         sanitizeAttachmentURL(link),
 		})
 	}
 
 	return out
+}
+
+func sanitizeAttachmentURL(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+
+	u, err := url.Parse(trimmed)
+	if err != nil {
+		return strings.ReplaceAll(trimmed, " ", "%20")
+	}
+
+	return u.String()
 }
 
 func firstLineSnippet(text string, maxLen int) string {

@@ -168,6 +168,8 @@ func (c *Client) UpdateChannels(ctx context.Context) error {
 	c.Users.lastUpdated.Store(time.Now().Unix())
 	c.Users.mu.Unlock()
 
+	c.logger.Debugf("Synced %d conversations (%d teams, %d CSA channels)", len(convs), len(teams), len(csaChans))
+
 	return nil
 }
 
@@ -222,6 +224,10 @@ func (c *Client) fetchCSATeams(ctx context.Context, ep RegionEndpoints) (map[str
 	chatMembers := make(map[string][]string)
 
 	if ep.ChatsvcAgg == "" {
+		return teams, channels, chatMembers
+	}
+
+	if c.effectiveAccountType() == AccountPersonal && c.currentRefreshToken() == "" {
 		return teams, channels, chatMembers
 	}
 

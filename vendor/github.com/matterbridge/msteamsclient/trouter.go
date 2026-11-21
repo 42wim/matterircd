@@ -1,9 +1,12 @@
 package msteamsclient
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/rand"
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -27,6 +30,8 @@ const (
 	trouterWriteTimeout      = 15 * time.Second
 	trouterPollInterval      = 10 * time.Second
 	trouterMaxConsecFailures = 3
+	edgeRegistrarURL         = "https://edge.skype.com/registrar/prod/v2/registrations"
+	trouterRegistrationTTL   = 86400
 )
 
 type trouterAllocResponse struct {
@@ -34,7 +39,7 @@ type trouterAllocResponse struct {
 	SocketIO      string            `json:"socketio"`
 	SURL          string            `json:"surl"`
 	ConnectParams map[string]string `json:"connectparams"`
-	TTL           int               `json:"ttl"`
+	TTL           json.RawMessage   `json:"ttl"`
 }
 
 type trouterEnvelope struct {
@@ -50,6 +55,8 @@ type trouterBodyPayload struct {
 	ResourceType  string                `json:"resourceType"`
 	Resource      json.RawMessage       `json:"resource"`
 	Type          string                `json:"type"`
+	CP            string                `json:"cp"`
+	GP            string                `json:"gp"`
 }
 
 type trouterEventMessage struct {
@@ -78,6 +85,7 @@ type trouterSession struct {
 	wsConn       *websocket.Conn
 	heartbeatSec int
 	expiresAt    time.Time
+	useRegistrar bool
 }
 
 // startTrouter spawns the background Trouter v4 supervisor goroutine.
@@ -174,7 +182,7 @@ func (c *Client) runTrouterSession(ctx context.Context) error {
 }
 
 func (c *Client) establishTrouter(ctx context.Context) (*trouterSession, error) {
-	epid := randomHexID(16)
+	epid := randomUUID()
 
 	alloc, err := c.allocateTrouter(ctx, epid)
 	if err != nil {
@@ -186,14 +194,14 @@ func (c *Client) establishTrouter(ctx context.Context) (*trouterSession, error) 
 		return nil, err
 	}
 
-	endpointID, err := c.registerChatsvcEndpoint(ctx, alloc.SURL, epid)
+	endpointID, useRegistrar, err := c.registerChatsvcEndpoint(ctx, alloc.SURL, epid)
 	if err != nil {
 		_ = wsConn.Close()
 
 		return nil, err
 	}
 
-	ttl := time.Duration(alloc.TTL) * time.Second
+	ttl := parseTTLSeconds(alloc.TTL)
 	if ttl <= 0 {
 		ttl = 12 * time.Hour
 	}
@@ -205,6 +213,7 @@ func (c *Client) establishTrouter(ctx context.Context) (*trouterSession, error) 
 		wsConn:       wsConn,
 		heartbeatSec: heartbeatSec,
 		expiresAt:    time.Now().Add(ttl - 5*time.Minute),
+		useRegistrar: useRegistrar,
 	}, nil
 }
 
@@ -368,10 +377,21 @@ func (c *Client) negotiateSocketIO(ctx context.Context, handshakeURL, token stri
 	return parts[0], heartbeatSec, nil
 }
 
-func (c *Client) registerChatsvcEndpoint(ctx context.Context, surl, epid string) (string, error) {
+func (c *Client) registerChatsvcEndpoint(ctx context.Context, surl, epid string) (string, bool, error) {
 	ep := c.Endpoints()
 	if ep.ChatService == "" {
-		return "", errors.New("msteamsclient: chatService endpoint unavailable")
+		return "", false, errors.New("msteamsclient: chatService endpoint unavailable")
+	}
+
+	// Consumer msgapi does not support /v1/users/ME/endpoints (returns 410 Gone);
+	// register directly with the Skype/Teams edge registrar instead.
+	if c.effectiveAccountType() == AccountPersonal {
+		regErr := c.registerEdgeEndpoint(ctx, surl, epid)
+		if regErr != nil {
+			return "", false, fmt.Errorf("msteamsclient: register edge endpoint: %w", regErr)
+		}
+
+		return epid, true, nil
 	}
 
 	endpointID := "{" + epid + "}"
@@ -401,13 +421,67 @@ func (c *Client) registerChatsvcEndpoint(ctx context.Context, surl, epid string)
 
 		err = c.doJSON(ctx, http.MethodPost, postURL, authSkypeToken, "", payload, nil)
 		if err != nil {
-			return "", fmt.Errorf("msteamsclient: register chatsvc endpoint: %w", err)
+			// Consumer msgapi returns 410 Gone for /endpoints; use the edge registrar instead.
+			regErr := c.registerEdgeEndpoint(ctx, surl, epid)
+			if regErr == nil {
+				return epid, true, nil
+			}
+
+			return "", false, fmt.Errorf("msteamsclient: register chatsvc endpoint: %w (registrar: %v)", err, regErr)
 		}
 	}
 
 	_ = c.sendEndpointActive(ctx, endpointID)
 
-	return endpointID, nil
+	return endpointID, false, nil
+}
+
+func (c *Client) registerEdgeEndpoint(ctx context.Context, surl, epid string) error {
+	if c.effectiveAccountType() == AccountPersonal {
+		err := c.registerEdgeApp(ctx, "TeamsCDLWebWorker", "TeamsCDLWebWorker_2.6", surl, epid, "TFL", true)
+		if err != nil {
+			return err
+		}
+
+		// Secondary consumer worker registration without TFL productContext.
+		_ = c.registerEdgeApp(ctx, "TeamsCDLWebWorker", "TeamsCDLWebWorker_2.3", surl, randomUUID(), "", true)
+
+		return nil
+	}
+
+	return c.registerEdgeApp(ctx, "TeamsCDLWebWorker", "TeamsCDLWebWorker_2.1", surl, epid, "", false)
+}
+
+func (c *Client) registerEdgeApp(ctx context.Context, appID, templateKey, path, regID, productContext string, includeProductContext bool) error {
+	clientDesc := map[string]string{
+		"appId":             appID,
+		"aesKey":            "",
+		"languageId":        "en-US",
+		"platform":          "edge",
+		"templateKey":       templateKey,
+		"platformUIVersion": "27/1.0.0.2026010101",
+	}
+
+	if includeProductContext {
+		clientDesc["productContext"] = productContext
+	}
+
+	payload := map[string]any{
+		"clientDescription": clientDesc,
+		"registrationId":    regID,
+		"nodeId":            "",
+		"transports": map[string]any{
+			"TROUTER": []map[string]any{
+				{
+					"context": "",
+					"path":    path,
+					"ttl":     trouterRegistrationTTL,
+				},
+			},
+		},
+	}
+
+	return c.doJSON(ctx, http.MethodPost, edgeRegistrarURL, authSkypeToken, "", payload, nil)
 }
 
 func (c *Client) sendEndpointActive(ctx context.Context, endpointID string) error {
@@ -431,6 +505,8 @@ func (c *Client) trouterKeepaliveLoop(ctx context.Context, sess *trouterSession)
 	hbTicker := time.NewTicker(hbInterval)
 	defer hbTicker.Stop()
 
+	pingSeq := 0
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -443,7 +519,10 @@ func (c *Client) trouterKeepaliveLoop(ctx context.Context, sess *trouterSession)
 				return
 			}
 
-			err := c.writeWSFrame(sess.wsConn, "2::")
+			pingSeq++
+			pingFrame := fmt.Sprintf(`5:%d+::{"name":"ping"}`, pingSeq)
+
+			err := c.writeWSFrame(sess.wsConn, pingFrame)
 			if err != nil {
 				c.logger.Debugf("Trouter heartbeat write failed: %v", err)
 				c.closeActiveWS()
@@ -451,6 +530,10 @@ func (c *Client) trouterKeepaliveLoop(ctx context.Context, sess *trouterSession)
 				return
 			}
 		case <-activeTicker.C:
+			if sess.useRegistrar {
+				continue
+			}
+
 			err := c.sendEndpointActive(ctx, sess.endpointID)
 			if err != nil {
 				c.logger.Debugf("Endpoint /active keepalive failed: %v", err)
@@ -460,12 +543,14 @@ func (c *Client) trouterKeepaliveLoop(ctx context.Context, sess *trouterSession)
 }
 
 func (c *Client) readTrouterLoop(ctx context.Context, sess *trouterSession) error {
+	readTimeout := max(trouterReadTimeout, time.Duration(sess.heartbeatSec*2)*time.Second)
+
 	for {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 
-		_ = sess.wsConn.SetReadDeadline(time.Now().Add(trouterReadTimeout))
+		_ = sess.wsConn.SetReadDeadline(time.Now().Add(readTimeout))
 
 		_, data, err := sess.wsConn.ReadMessage()
 		if err != nil {
@@ -482,31 +567,63 @@ func (c *Client) readTrouterLoop(ctx context.Context, sess *trouterSession) erro
 }
 
 func (c *Client) handleSocketIOFrame(sess *trouterSession, frame string) error {
-	switch {
-	case frame == "0::" || strings.HasPrefix(frame, "0::"):
-		return errors.New("msteamsclient: trouter server requested disconnect")
-	case frame == "1::" || strings.HasPrefix(frame, "1::"):
-		c.logger.Debug("Trouter Socket.IO connected")
+	if frame == "2" {
+		return c.writeWSFrame(sess.wsConn, "3")
+	}
 
-		return nil
-	case frame == "2::" || frame == "2":
-		reply := "2::"
-		if frame == "2" {
-			reply = "3"
-		}
-
-		return c.writeWSFrame(sess.wsConn, reply)
-	case strings.HasPrefix(frame, "3:::"):
-		return c.handleTrouterMessageFrame(sess, frame[4:])
-	case strings.HasPrefix(frame, "5:::"):
-		c.handleSocketIOEvent(frame[4:])
-
-		return nil
-	case strings.HasPrefix(frame, "42"):
+	if strings.HasPrefix(frame, "42") {
 		c.handleSocketIOEvent(frame[2:])
 
 		return nil
+	}
+
+	parts := strings.SplitN(frame, ":", 4)
+	if len(parts) < 2 {
+		c.logger.Debugf("Trouter unhandled frame: %s", truncateBody([]byte(frame)))
+
+		return nil
+	}
+
+	packetType := parts[0]
+	msgID := parts[1]
+	data := ""
+
+	if len(parts) == 4 {
+		data = parts[3]
+	}
+
+	switch packetType {
+	case "0":
+		return errors.New("msteamsclient: trouter server requested disconnect")
+	case "1":
+		c.logger.Debugf("Trouter Socket.IO connected (heartbeat=%ds)", sess.heartbeatSec)
+
+		return nil
+	case "2":
+		return c.writeWSFrame(sess.wsConn, "2::")
+	case "3":
+		return c.handleTrouterMessageFrame(sess, data)
+	case "5":
+		if msgID != "" {
+			ackID := strings.TrimSuffix(msgID, "+")
+
+			ackErr := c.writeWSFrame(sess.wsConn, "6:::"+ackID)
+			if ackErr != nil {
+				return ackErr
+			}
+		}
+
+		c.logger.Debugf("Trouter event frame: %s", truncateBody([]byte(data)))
+		c.handleSocketIOEvent(data)
+
+		return nil
+	case "6":
+		c.logger.Tracef("Trouter ack frame: %s", frame)
+
+		return nil
 	default:
+		c.logger.Debugf("Trouter unhandled frame: %s", truncateBody([]byte(frame)))
+
 		return nil
 	}
 }
@@ -521,6 +638,8 @@ func (c *Client) handleTrouterMessageFrame(sess *trouterSession, payload string)
 		return nil
 	}
 
+	c.logger.Debugf("Trouter message frame: id=%d method=%s url=%s body_len=%d", env.ID, env.Method, env.URL, len(env.Body))
+
 	if env.ID != 0 {
 		ack := fmt.Sprintf(`3:::{"id":%d,"status":200,"headers":{},"body":""}`, env.ID)
 
@@ -534,38 +653,48 @@ func (c *Client) handleTrouterMessageFrame(sess *trouterSession, payload string)
 		return nil
 	}
 
-	c.dispatchTrouterBody(env.Body)
+	c.dispatchTrouterBody(env.Headers, env.Body)
 
 	return nil
 }
 
 func (c *Client) handleSocketIOEvent(raw string) {
 	if strings.Contains(raw, "trouter.message_loss") {
-		c.logger.Warn("Trouter signaled message_loss; triggering reconnect resync")
-		c.closeActiveWS()
+		c.logger.Debug("Trouter signaled message_loss")
 	}
 }
 
-func (c *Client) dispatchTrouterBody(rawBody json.RawMessage) {
-	bodyBytes := rawBody
-
-	// Trouter frequently encodes the inner body as a JSON-escaped string.
-	if len(rawBody) > 0 && rawBody[0] == '"' {
-		var unquoted string
-
-		err := json.Unmarshal(rawBody, &unquoted)
-		if err != nil {
-			return
-		}
-
-		bodyBytes = []byte(unquoted)
+func (c *Client) dispatchTrouterBody(headers map[string]any, rawBody json.RawMessage) {
+	bodyBytes := unwrapTrouterBody(headers, rawBody)
+	if len(bodyBytes) == 0 {
+		return
 	}
 
 	var payload trouterBodyPayload
 
 	err := json.Unmarshal(bodyBytes, &payload)
 	if err != nil {
+		c.logger.Debugf("Failed to decode trouter body JSON: %v", err)
+
 		return
+	}
+
+	if payload.CP != "" {
+		decoded, decErr := decodeGzipBase64(payload.CP)
+		if decErr == nil {
+			c.dispatchTrouterBody(nil, decoded)
+
+			return
+		}
+	}
+
+	if payload.GP != "" {
+		decoded, decErr := base64.StdEncoding.DecodeString(payload.GP)
+		if decErr == nil {
+			c.dispatchTrouterBody(nil, decoded)
+
+			return
+		}
 	}
 
 	if len(payload.EventMessages) > 0 {
@@ -583,6 +712,63 @@ func (c *Client) dispatchTrouterBody(rawBody json.RawMessage) {
 			Resource:     payload.Resource,
 		})
 	}
+}
+
+func unwrapTrouterBody(headers map[string]any, rawBody json.RawMessage) []byte {
+	bodyBytes := rawBody
+
+	// Trouter frequently encodes the inner body as a JSON-escaped string.
+	if len(rawBody) > 0 && rawBody[0] == '"' {
+		var unquoted string
+
+		err := json.Unmarshal(rawBody, &unquoted)
+		if err != nil {
+			return nil
+		}
+
+		bodyBytes = []byte(unquoted)
+	}
+
+	if hasGzipContentEncoding(headers) {
+		decoded, err := decodeGzipBase64(string(bodyBytes))
+		if err != nil {
+			return nil
+		}
+
+		return decoded
+	}
+
+	return bodyBytes
+}
+
+func hasGzipContentEncoding(headers map[string]any) bool {
+	for k, v := range headers {
+		if !strings.EqualFold(k, "X-Microsoft-Skype-Content-Encoding") {
+			continue
+		}
+
+		if s, ok := v.(string); ok && strings.EqualFold(s, "gzip") {
+			return true
+		}
+	}
+
+	return false
+}
+
+func decodeGzipBase64(encoded string) ([]byte, error) {
+	compressed, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return nil, err
+	}
+
+	gr, err := gzip.NewReader(bytes.NewReader(compressed))
+	if err != nil {
+		return nil, err
+	}
+
+	defer gr.Close()
+
+	return io.ReadAll(io.LimitReader(gr, maxAPIResponseSize))
 }
 
 func (c *Client) handleTrouterEvent(ev *trouterEventMessage) {
@@ -1058,9 +1244,34 @@ func extractAllXMLTagValues(xmlStr, tag string) []string {
 	return out
 }
 
-func randomHexID(numBytes int) string {
-	buf := make([]byte, numBytes)
-	_, _ = rand.Read(buf)
+func randomUUID() string {
+	var buf [16]byte
 
-	return hex.EncodeToString(buf)
+	_, _ = rand.Read(buf[:])
+
+	buf[6] = (buf[6] & 0x0f) | 0x40
+	buf[8] = (buf[8] & 0x3f) | 0x80
+
+	return fmt.Sprintf("%s-%s-%s-%s-%s",
+		hex.EncodeToString(buf[0:4]),
+		hex.EncodeToString(buf[4:6]),
+		hex.EncodeToString(buf[6:8]),
+		hex.EncodeToString(buf[8:10]),
+		hex.EncodeToString(buf[10:16]),
+	)
+}
+
+func parseTTLSeconds(raw json.RawMessage) time.Duration {
+	if len(raw) == 0 {
+		return 0
+	}
+
+	s := strings.Trim(strings.TrimSpace(string(raw)), `"`)
+
+	secs, err := strconv.Atoi(s)
+	if err == nil && secs > 0 {
+		return time.Duration(secs) * time.Second
+	}
+
+	return 0
 }

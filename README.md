@@ -226,20 +226,42 @@ Settings are in the `[matrix]` section in [matterircd.toml.example](https://gith
 
 Supports both Work/School (Entra ID) and Personal (MSA / Consumer Teams) accounts.
 
-Interactive login via OAuth2 Device Code (matterircd sends the verification URL and code via IRC `NOTICE` and waits until browser sign-in completes):
+#### 1. Interactive OAuth2 Device Code login
+
+`matterircd` sends the verification URL and code via IRC `NOTICE` and waits until browser sign-in completes:
 
 ```
 /msg msteams login [work|personal|<tenant>]
 ```
 
-Or log in with a refresh token or browser-extracted `skypetoken`:
+#### 2. Token / `TokenSaveFile` login (recommended for long browser tokens)
+
+You can log in with an OAuth2 refresh token or browser-extracted `skypetoken`:
 
 ```
 /msg msteams login refresh <refresh_token> [work|personal|<tenant>]
 /msg msteams login token <skypetoken> [chat_service_url]
 ```
 
-Settings are in the `[msteams]` section in [matterircd.toml.example](https://github.com/42wim/matterircd/blob/master/matterircd.toml.example) (including optional `TokenSaveFile` for persisting rotated refresh tokens across restarts).
+Because `skypetoken_asm` JWTs are often longer than IRC's 512-byte line limit (and may be truncated by clients such as `irssi`), you can instead configure `TokenSaveFile` under `[msteams]` in `matterircd.toml` and write a `0600` JSON file:
+
+```json
+{
+  "account_type": "personal",
+  "skype_token": "<skypetoken_asm value>"
+}
+```
+
+To extract `skypetoken_asm` from your browser:
+- Sign in to `https://teams.live.com` (Personal) or `https://teams.cloud.microsoft` (Work/School).
+- Open DevTools -> **Application** (Chrome/Edge) or **Storage** (Firefox) -> **Cookies** -> copy the value of `skypetoken_asm`.
+- Note: a standalone `skypetoken_asm` expires after ~24 hours; OAuth2 refresh tokens (when obtained via device-code login) auto-refresh and persist rotated tokens to `TokenSaveFile`.
+
+#### 3. Auto-login via IRC `PASS`
+
+To connect automatically without typing `/msg msteams login` every time, pass `msteams [work|personal|<tenant>]` as your IRC server password (e.g. `password = "msteams personal";` in `irssi`).
+
+Settings are in the `[msteams]` section in [matterircd.toml.example](https://github.com/42wim/matterircd/blob/master/matterircd.toml.example).
 
 ### Rocket.Chat user commands
 

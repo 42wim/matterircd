@@ -15,8 +15,12 @@ import (
 
 const (
 	// DefaultPublicClientID is the Microsoft Teams public client ID supporting
-	// OAuth2 device-code and refresh-token flows for Entra ID and MSA accounts.
+	// OAuth2 device-code and refresh-token flows for Work/School (Entra ID) accounts.
 	DefaultPublicClientID = "1fec8e78-bce4-4aaf-ab1b-5451cc387264"
+
+	// DefaultPersonalClientID is the Microsoft Teams public client ID enabled
+	// for Personal (MSA / Consumer Teams) accounts.
+	DefaultPersonalClientID = "8ec6bc83-69c8-4392-8f08-b3c986009232"
 
 	// msaTenantID is the fixed Microsoft Account (Personal/Consumer) tenant GUID
 	// present in the "tid" claim of consumer Entra/MSA JWTs.
@@ -104,6 +108,14 @@ func (c *Client) Authenticate(ctx context.Context) error {
 
 	if rawToken := strings.TrimSpace(c.cred.SkypeToken); rawToken != "" && c.currentRefreshToken() == "" {
 		return c.initFromSkypeToken(rawToken)
+	}
+
+	c.authMu.RLock()
+	savedSkypeToken := c.tokenState.SkypeToken
+	c.authMu.RUnlock()
+
+	if savedSkypeToken != "" && c.currentRefreshToken() == "" {
+		return c.initFromSkypeToken(savedSkypeToken)
 	}
 
 	if c.currentRefreshToken() != "" {
@@ -247,8 +259,6 @@ func (c *Client) loadInitialTokenState() {
 
 	if c.cred.ClientID != "" {
 		c.tokenState.ClientID = c.cred.ClientID
-	} else if c.tokenState.ClientID == "" {
-		c.tokenState.ClientID = DefaultPublicClientID
 	}
 
 	if c.cred.RefreshToken != "" {
@@ -265,6 +275,16 @@ func (c *Client) loadInitialTokenState() {
 
 	if c.cred.ChatServiceURL != "" {
 		c.tokenState.Endpoints.ChatService = strings.TrimRight(c.cred.ChatServiceURL, "/")
+	}
+
+	if c.tokenState.AccountType == AccountPersonal {
+		if strings.HasPrefix(c.tokenState.Endpoints.ChatService, "https://teams.live.com/api/chatsvc/") {
+			c.tokenState.Endpoints.ChatService = "https://msgapi.teams.live.com"
+		}
+
+		if c.tokenState.Endpoints.Trouter == "https://go.trouter.teams.live.com" {
+			c.tokenState.Endpoints.Trouter = "https://go.trouter.skype.com"
+		}
 	}
 
 	c.syncUserFromStateLocked()
@@ -309,6 +329,10 @@ func (c *Client) effectiveClientID() string {
 
 	if c.tokenState.ClientID != "" {
 		return c.tokenState.ClientID
+	}
+
+	if c.tokenState.AccountType == AccountPersonal {
+		return DefaultPersonalClientID
 	}
 
 	return DefaultPublicClientID
@@ -916,7 +940,7 @@ func applyWorkEndpointDefaults(ep *RegionEndpoints, reg string) {
 
 func applyConsumerEndpointDefaults(ep *RegionEndpoints, reg string) {
 	if ep.ChatService == "" {
-		ep.ChatService = "https://teams.live.com/api/chatsvc/" + reg
+		ep.ChatService = "https://msgapi.teams.live.com"
 	}
 
 	if ep.ChatsvcAgg == "" {
@@ -928,7 +952,7 @@ func applyConsumerEndpointDefaults(ep *RegionEndpoints, reg string) {
 	}
 
 	if ep.Trouter == "" {
-		ep.Trouter = "https://go.trouter.teams.live.com"
+		ep.Trouter = "https://go.trouter.skype.com"
 	}
 
 	if ep.Presence == "" {
