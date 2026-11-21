@@ -78,6 +78,7 @@ type RuntimeConfig struct {
 	Slack      SlackConfig
 	Mastodon   MastodonConfig
 	Matrix     MatrixConfig
+	MSTeams    MSTeamsConfig
 	RocketChat RocketChatConfig
 }
 
@@ -248,6 +249,27 @@ type MatrixConfig struct {
 	// Encrypted rooms, needs a build with -tags goolm and cgo.
 	EncryptionDir       string
 	EncryptionPickleKey string
+}
+
+type MSTeamsConfig struct {
+	SharedConfig
+
+	Bridge    BridgeConfig
+	Formatter FormatterConfig
+
+	Disable bool
+
+	MsTeamsclientLogLevel string
+
+	AccountType   string // "auto", "work", or "personal"
+	TenantID      string
+	ClientID      string
+	TokenSaveFile string
+
+	SkipTLSVerify        bool
+	PrefixMainTeam       bool
+	ForceSyncOnReconnect bool
+	PollFallback         bool
 }
 
 type RocketChatConfig struct {
@@ -441,6 +463,25 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 
 		DirectoryURL: c.v.GetString("matrix.DirectoryURL"),
 	}
+	mtBridge := BridgeConfig{
+		Restrict: append([]string(nil), c.v.GetStringSlice("msteams.Restrict")...),
+
+		JoinOnly:    append([]string(nil), c.v.GetStringSlice("msteams.JoinOnly")...),
+		JoinExclude: append([]string(nil), c.v.GetStringSlice("msteams.JoinExclude")...),
+		JoinInclude: append([]string(nil), c.v.GetStringSlice("msteams.JoinInclude")...),
+		JoinDM:      c.v.GetBool("msteams.JoinDM"),
+
+		ShowJoinPart:   c.v.GetBool("msteams.ShowJoinPart"),
+		ShowOnlyJoined: c.v.GetBool("msteams.ShowOnlyJoined"),
+		PartFake:       c.v.GetBool("msteams.PartFake"),
+
+		PrefixContext:    c.v.GetBool("msteams.PrefixContext"),
+		SuffixContext:    c.v.GetBool("msteams.SuffixContext"),
+		ShowContextMulti: c.v.GetBool("msteams.ShowContextMulti"),
+		ThreadContext:    c.v.GetString("msteams.ThreadContext"),
+
+		DirectoryURL: c.v.GetString("msteams.DirectoryURL"),
+	}
 
 	rcBridge := BridgeConfig{
 		Restrict: append([]string(nil), c.v.GetStringSlice("rocketchat.Restrict")...),
@@ -541,6 +582,26 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 		EnableIRCHexColors: c.v.GetBool("matrix.EnableIRCHexColors"),
 
 		PreserveNewLines: c.v.GetString("matrix.PreserveNewLines"),
+	}
+	mtFormatter := FormatterConfig{
+		DisableEmoji: c.v.GetBool("msteams.DisableEmoji"),
+		CustomEmoji:  parseCustomEmoji(c.v.GetStringSlice("msteams.CustomEmoji")),
+
+		DisableMarkdown:           c.v.GetBool("msteams.DisableMarkdown"),
+		DisableMarkdownBlockQuote: c.v.GetBool("msteams.DisableMarkdownBlockQuote"),
+		MarkdownBlockQuoteChar:    unquoteString(c.v.GetString("msteams.MarkdownBlockQuoteChar")),
+		MarkdownInlineCode:        unquoteString(c.v.GetString("msteams.MarkdownInlineCode")),
+
+		DisableCodeBlockPrefix: c.v.GetBool("msteams.DisableCodeBlockPrefix"),
+		CodeBlockPrefix:        unquoteString(c.v.GetString("msteams.CodeBlockPrefix")),
+		CodeBlockSeparator:     unquoteString(c.v.GetString("msteams.CodeBlockSeparator")),
+		SyntaxHighlighting:     c.v.GetString("msteams.SyntaxHighlighting"),
+
+		Unicode: c.v.GetBool("msteams.Unicode"),
+
+		EnableIRCHexColors: c.v.GetBool("msteams.EnableIRCHexColors"),
+
+		PreserveNewLines: c.v.GetString("msteams.PreserveNewLines"),
 	}
 	rcFormatter := FormatterConfig{
 		DisableEmoji: c.v.GetBool("rocketchat.DisableEmoji"),
@@ -646,6 +707,26 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 
 			EncryptionDir:       c.v.GetString("matrix.EncryptionDir"),
 			EncryptionPickleKey: c.v.GetString("matrix.EncryptionPickleKey"),
+		},
+
+		MSTeams: MSTeamsConfig{
+			Bridge:       mtBridge,
+			Formatter:    mtFormatter,
+			SharedConfig: c.buildSharedConfig("msteams"),
+
+			Disable: c.v.GetBool("msteams.Disable"),
+
+			MsTeamsclientLogLevel: c.v.GetString("msteams.MsTeamsclientLogLevel"),
+
+			AccountType:   c.v.GetString("msteams.AccountType"),
+			TenantID:      c.v.GetString("msteams.TenantID"),
+			ClientID:      c.v.GetString("msteams.ClientID"),
+			TokenSaveFile: c.v.GetString("msteams.TokenSaveFile"),
+
+			SkipTLSVerify:        c.v.GetBool("msteams.SkipTLSVerify"),
+			PrefixMainTeam:       c.v.GetBool("msteams.PrefixMainTeam"),
+			ForceSyncOnReconnect: c.v.GetBool("msteams.ForceSyncOnReconnect"),
+			PollFallback:         c.v.GetBool("msteams.PollFallback"),
 		},
 
 		RocketChat: RocketChatConfig{
@@ -865,6 +946,10 @@ func (c *Config) Matrix() *MatrixConfig {
 	return &c.Current().Matrix
 }
 
+func (c *Config) MSTeams() *MSTeamsConfig {
+	return &c.Current().MSTeams
+}
+
 func (c *Config) RocketChat() *RocketChatConfig {
 	return &c.Current().RocketChat
 }
@@ -890,6 +975,7 @@ func Load(cfgfile string, flags *pflag.FlagSet) (*Config, error) {
 	v.SetDefault("mattermost.JoinReplayDuration", "15m")
 	v.SetDefault("slack.JoinReplayDuration", "15m")
 	v.SetDefault("matrix.JoinReplayDuration", "15m")
+	v.SetDefault("msteams.JoinReplayDuration", "15m")
 	v.SetDefault("matrix.ReplaceColonChar", "[]")
 	v.SetDefault("rocketchat.JoinReplayDuration", "15m")
 

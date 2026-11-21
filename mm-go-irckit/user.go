@@ -484,6 +484,7 @@ const (
 	serviceSlack      = "slack"
 	serviceMastodon   = "mastodon"
 	serviceRocketChat = "rocketchat"
+	serviceMsTeams    = "msteams"
 
 	// serviceAlias is the service bot that handles the commands of whichever bridge is logged in.
 	serviceAlias = "service"
@@ -494,11 +495,13 @@ var loginServices = [...]string{
 	serviceSlack,
 	serviceMatrix,
 	serviceMastodon,
+	serviceRocketChat,
+	serviceMsTeams,
 }
 
 // isServiceBot tells if nick is one of the service bots (the ones to login to and to send commands to).
 func isServiceBot(nick string) bool {
-	return nick == serviceSlack || nick == serviceMattermost || nick == serviceMastodon || nick == serviceMatrix || nick == serviceRocketChat || nick == serviceAlias
+	return nick == serviceSlack || nick == serviceMattermost || nick == serviceMastodon || nick == serviceMatrix || nick == serviceMsTeams || nick == serviceRocketChat || nick == serviceAlias
 }
 
 // isServiceUser reports whether target is one of the local bridge service bots, not a remote user with the same nick.
@@ -645,12 +648,13 @@ func (u *User) ResetAwayNotified() {
 	u.awayNotifiedGen++
 }
 
+//nolint:gocyclo
 func isSensitiveServiceMsg(msg *irc.Message) bool {
 	if msg == nil || msg.Prefix == nil || msg.Command != irc.PRIVMSG || msg.Host != "service" {
 		return false
 	}
 
-	if msg.Name != serviceSlack && msg.Name != serviceMattermost && msg.Name != serviceMatrix && msg.Name != serviceRocketChat && msg.Name != serviceAlias {
+	if msg.Name != serviceSlack && msg.Name != serviceMattermost && msg.Name != serviceMatrix && msg.Name != serviceMsTeams && msg.Name != serviceRocketChat && msg.Name != serviceAlias {
 		return false
 	}
 

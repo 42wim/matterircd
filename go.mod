@@ -6,14 +6,16 @@ require (
 	github.com/desertbit/timer v0.0.0-20180107155436-c41aec40b27f
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/google/gops v0.3.27
+	github.com/gorilla/websocket v1.5.3
 	github.com/grokify/html-strip-tags-go v0.0.1
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/kenshaw/emoji v0.6.2
 	github.com/matterbridge/logrus-prefixed-formatter v0.5.3-0.20200523233437-d971309a77ba
 	github.com/matterbridge/matrixclient v0.0.0-20261118201436-c19b4ef13462
 	github.com/matterbridge/matterclient v0.0.0-20261116034806-3087b48d325c
-	github.com/matterbridge/rocketchatclient v0.0.0-20261116082210-070dd382e09f
-  github.com/matterbridge/slackclient v0.0.0-20261117092932-0a28e681e8a0
+	github.com/matterbridge/msteamsclient v0.0.0-20261121015707-00f0394f278d
+	github.com/matterbridge/rocketchatclient v0.0.0-20261117095619-335f44b67feb
+	github.com/matterbridge/slackclient v0.0.0-20261117092932-0a28e681e8a0
 	github.com/mattermost/mattermost/server/public v0.3.0
 	github.com/mattn/go-mastodon v0.0.6
 	github.com/mitchellh/mapstructure v1.5.0
@@ -41,7 +43,6 @@ require (
 	github.com/goccy/go-yaml v1.19.2 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-hclog v1.6.3 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
