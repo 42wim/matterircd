@@ -167,10 +167,12 @@ type File struct {
 type Attachment struct {
 	Title       string `json:"title"`
 	TitleLink   string `json:"title_link"`
+	Description string `json:"description"`
 	Text        string `json:"text"`
 	AuthorName  string `json:"author_name"`
 	AuthorIcon  string `json:"author_icon"`
 	ImageURL    string `json:"image_url"`
+	ImageSize   int64  `json:"image_size"`
 	AudioURL    string `json:"audio_url"`
 	VideoURL    string `json:"video_url"`
 	MessageLink string `json:"message_link"`
@@ -201,6 +203,7 @@ type Message struct {
 	ThreadShow  bool                   `json:"tshow"`
 	Type        string                 `json:"t"`
 	File        *File                  `json:"file"`
+	Files       []File                 `json:"files"`
 	Attachments []Attachment           `json:"attachments"`
 	Reactions   map[string]ReactionSet `json:"reactions"`
 	Mentions    []UserRef              `json:"mentions"`
@@ -282,4 +285,10 @@ type SyncMessagesResponse struct {
 		Deleted []Message `json:"deleted"`
 	} `json:"result"`
 	Success bool `json:"success"`
+}
+
+// MessagesResponse is the payload returned by history, thread, and search endpoints.
+type MessagesResponse struct {
+	Messages []Message `json:"messages"`
+	Success  bool      `json:"success"`
 }

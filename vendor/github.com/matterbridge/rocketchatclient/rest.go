@@ -2,6 +2,7 @@ package rocketchatclient
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/json"
@@ -10,21 +11,26 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 )
 
 const (
-	maxAPIRetries      = 5
-	defaultRateWait    = 3 * time.Second
-	maxRateLimitWait   = 60 * time.Second
-	userListPageLimit  = 100
-	maxRoomMemberPages = 10
-	roomMemberTimeout  = 15 * time.Second
-	meteorIDLen        = 17
-	base62Alphabet     = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
-	roomActionLeave    = "leave"
+	maxAPIRetries       = 5
+	defaultRateWait     = 3 * time.Second
+	maxRateLimitWait    = 60 * time.Second
+	userListPageLimit   = 100
+	maxRoomMemberPages  = 10
+	roomMemberTimeout   = 15 * time.Second
+	defaultHistoryCount = 20
+	historyPageLimit    = 100
+	maxHistoryPages     = 5
+	defaultSearchCount  = 20
+	meteorIDLen         = 17
+	base62Alphabet      = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+	roomActionLeave     = "leave"
 )
 
 // APIError represents an error payload returned by the Rocket.Chat REST API.
@@ -341,6 +347,24 @@ func (c *Client) DownloadURL(fileID, fileName string) string {
 	}
 
 	return c.httpURL + "/file-upload/" + url.PathEscape(fileID) + "/" + url.PathEscape(fileName)
+}
+
+// ResolveAttachmentURL normalizes a relative Rocket.Chat attachment path against the server base URL.
+func (c *Client) ResolveAttachmentURL(rawURL string) string {
+	trimmed := strings.TrimSpace(rawURL)
+	if trimmed == "" {
+		return ""
+	}
+
+	if strings.HasPrefix(trimmed, "http://") || strings.HasPrefix(trimmed, "https://") {
+		return trimmed
+	}
+
+	if strings.HasPrefix(trimmed, "/") {
+		return c.httpURL + trimmed
+	}
+
+	return c.httpURL + "/" + trimmed
 }
 
 func generateMeteorID() string {
@@ -946,6 +970,266 @@ func (c *Client) SyncMessages(ctx context.Context, roomID string, lastUpdate tim
 	}
 
 	return &resp, nil
+}
+
+// GetHistory fetches messages for roomID in chronological (oldest-first) order.
+// When oldest is non-zero, pagination walks back to oldest up to maxHistoryPages.
+func (c *Client) GetHistory(ctx context.Context, roomID string, count int, oldest time.Time) ([]Message, error) {
+	if roomID == "" {
+		return nil, errors.New("rocketchatclient: roomID is required")
+	}
+
+	endpoint, err := roomEndpoint(c.roomTypeFor(roomID), "history")
+	if err != nil {
+		return nil, err
+	}
+
+	targetCount := count
+	if targetCount <= 0 {
+		targetCount = defaultHistoryCount
+	}
+
+	targetCount = min(targetCount, historyPageLimit*maxHistoryPages)
+
+	pageSize := historyPageLimit
+	if oldest.IsZero() && targetCount < pageSize {
+		pageSize = targetCount
+	}
+
+	all, err := c.paginateHistory(ctx, endpoint, roomID, targetCount, pageSize, oldest)
+	if err != nil {
+		return nil, err
+	}
+
+	sortMessagesChronological(all)
+
+	if oldest.IsZero() && len(all) > targetCount {
+		all = all[len(all)-targetCount:]
+	}
+
+	return all, nil
+}
+
+func (c *Client) paginateHistory(ctx context.Context, endpoint, roomID string, targetCount, pageSize int, oldest time.Time) ([]Message, error) {
+	seen := make(map[string]struct{})
+	all := make([]Message, 0, min(targetCount, historyPageLimit))
+
+	var latest time.Time
+
+	for range maxHistoryPages {
+		msgs, err := c.fetchHistoryPage(ctx, endpoint, roomID, pageSize, oldest, latest)
+		if err != nil {
+			return nil, err
+		}
+
+		if len(msgs) == 0 {
+			break
+		}
+
+		minTS, added := c.collectUniqueMessages(&all, seen, msgs)
+		if added == 0 || len(msgs) < pageSize || (oldest.IsZero() && len(all) >= targetCount) {
+			break
+		}
+
+		if minTS.IsZero() || (!latest.IsZero() && !minTS.Before(latest)) {
+			break
+		}
+
+		latest = minTS
+	}
+
+	return all, nil
+}
+
+func (c *Client) fetchHistoryPage(ctx context.Context, endpoint, roomID string, count int, oldest, latest time.Time) ([]Message, error) {
+	query := url.Values{}
+	query.Set("roomId", roomID)
+	query.Set("count", strconv.Itoa(count))
+
+	if !oldest.IsZero() {
+		query.Set("oldest", oldest.UTC().Format(time.RFC3339Nano))
+		query.Set("inclusive", "false")
+	}
+
+	if !latest.IsZero() {
+		query.Set("latest", latest.UTC().Format(time.RFC3339Nano))
+	}
+
+	var resp MessagesResponse
+
+	err := c.doJSON(ctx, http.MethodGet, endpoint, query, nil, &resp, true)
+	if err != nil {
+		return nil, err
+	}
+
+	return resp.Messages, nil
+}
+
+// GetThreadMessages returns the root message followed by its thread replies in chronological order.
+func (c *Client) GetThreadMessages(ctx context.Context, msgID string) ([]Message, error) {
+	if msgID == "" {
+		return nil, errors.New("rocketchatclient: msgID is required")
+	}
+
+	tmid := msgID
+
+	root, err := c.ResolveMessage(ctx, msgID)
+	if err == nil && root != nil && root.ThreadID != "" {
+		tmid = root.ThreadID
+
+		parent, pErr := c.ResolveMessage(ctx, tmid)
+		if pErr == nil && parent != nil {
+			root = parent
+		}
+	}
+
+	query := url.Values{}
+	query.Set("tmid", tmid)
+	query.Set("count", strconv.Itoa(historyPageLimit))
+
+	var resp MessagesResponse
+
+	err = c.doJSON(ctx, http.MethodGet, "/api/v1/chat.getThreadMessages", query, nil, &resp, true)
+	if err != nil {
+		return nil, err
+	}
+
+	seen := make(map[string]struct{}, len(resp.Messages)+1)
+	out := make([]Message, 0, len(resp.Messages)+1)
+
+	if root != nil && root.ID != "" {
+		c.collectUniqueMessages(&out, seen, []Message{*root})
+	}
+
+	c.collectUniqueMessages(&out, seen, resp.Messages)
+	sortMessagesChronological(out)
+
+	return out, nil
+}
+
+// SearchMessages searches messages within roomID in chronological order.
+func (c *Client) SearchMessages(ctx context.Context, roomID, searchText string, count int) ([]Message, error) {
+	if roomID == "" || strings.TrimSpace(searchText) == "" {
+		return nil, errors.New("rocketchatclient: roomID and searchText are required")
+	}
+
+	if count <= 0 {
+		count = defaultSearchCount
+	}
+
+	count = min(count, historyPageLimit)
+
+	query := url.Values{}
+	query.Set("roomId", roomID)
+	query.Set("searchText", searchText)
+	query.Set("count", strconv.Itoa(count))
+
+	var resp MessagesResponse
+
+	err := c.doJSON(ctx, http.MethodGet, "/api/v1/chat.search", query, nil, &resp, true)
+	if err != nil {
+		return nil, err
+	}
+
+	seen := make(map[string]struct{}, len(resp.Messages))
+	out := make([]Message, 0, len(resp.Messages))
+	c.collectUniqueMessages(&out, seen, resp.Messages)
+	sortMessagesChronological(out)
+
+	return out, nil
+}
+
+// MarkRead marks roomID as read for the logged-in user and updates the cached lastSeen timestamp.
+func (c *Client) MarkRead(ctx context.Context, roomID string) error {
+	if roomID == "" {
+		return errors.New("rocketchatclient: roomID is required")
+	}
+
+	req := struct {
+		RoomID string `json:"rid"`
+	}{
+		RoomID: roomID,
+	}
+
+	err := c.doJSON(ctx, http.MethodPost, "/api/v1/subscriptions.read", nil, req, nil, true)
+	if err != nil {
+		return err
+	}
+
+	c.cache.markRoomRead(roomID, time.Now())
+
+	return nil
+}
+
+// SetStatus updates the authenticated user's presence status ("online", "away", "busy", "offline")
+// and optional custom status message.
+func (c *Client) SetStatus(ctx context.Context, status, message string) error {
+	if status == "" {
+		return errors.New("rocketchatclient: status is required")
+	}
+
+	req := struct {
+		Status  string `json:"status"`
+		Message string `json:"message,omitempty"`
+	}{
+		Status:  status,
+		Message: message,
+	}
+
+	return c.doJSON(ctx, http.MethodPost, "/api/v1/users.setStatus", nil, req, nil, true)
+}
+
+func (c *Client) seedMessageUsers(msg *Message) {
+	if msg == nil {
+		return
+	}
+
+	c.cache.seedUserRef(msg.User)
+
+	for i := range msg.Mentions {
+		c.cache.seedUserRef(msg.Mentions[i])
+	}
+}
+
+func (c *Client) collectUniqueMessages(dst *[]Message, seen map[string]struct{}, msgs []Message) (time.Time, int) {
+	var (
+		minTS time.Time
+		added int
+	)
+
+	for i := range msgs {
+		m := &msgs[i]
+		if m.ID == "" {
+			continue
+		}
+
+		c.cache.cacheMessage(m)
+		c.seedMessageUsers(m)
+
+		if ts := m.Timestamp.Time; !ts.IsZero() && (minTS.IsZero() || ts.Before(minTS)) {
+			minTS = ts
+		}
+
+		if _, exists := seen[m.ID]; exists {
+			continue
+		}
+
+		seen[m.ID] = struct{}{}
+		*dst = append(*dst, *m)
+		added++
+	}
+
+	return minTS, added
+}
+
+func sortMessagesChronological(msgs []Message) {
+	slices.SortStableFunc(msgs, func(a, b Message) int {
+		if c := a.Timestamp.Time.Compare(b.Timestamp.Time); c != 0 {
+			return c
+		}
+
+		return cmp.Compare(a.ID, b.ID)
+	})
 }
 
 func (c *Client) doJSON(ctx context.Context, method, endpoint string, query url.Values, reqBody, out any, authenticated bool) error {

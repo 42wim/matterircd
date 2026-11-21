@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -26,7 +27,14 @@ const (
 	msgRoomCacheSize     = 2000
 	msgTextCacheSize     = 2000
 	msgTextMaxBytes      = 1024
+	maxHistoryFetchLimit = 200
+	defaultSearchCount   = 20
+	maxSearchRooms       = 25
+	searchTimeout        = 15 * time.Second
 )
+
+// roomMentionRegexp matches Rocket.Chat's @all and @here along with Mattermost/Matrix @channel and @room.
+var roomMentionRegexp = regexp.MustCompile(`@(?:room|channel|all|here)(?:\W|$)`)
 
 var markdownReplacer = strings.NewReplacer(
 	"\n", " ",
@@ -234,14 +242,20 @@ func (r *RocketChat) OnMessage(msg *rocketchatclient.Message) {
 
 	r.cacheMessageMeta(msg)
 
-	text := msg.Text
-	rcCfg := r.cfg.RocketChat()
+	room, ok := r.rc.Room(msg.RoomID)
+	isDM := ok && r.isOneToOneDM(room)
+	text, msgType := r.formatIncomingText(msg, isDM)
+	files := r.extractFiles(msg)
+	sender := r.senderInfo(msg.User)
+	createAt := msg.Timestamp.Time.UnixMilli()
 
-	if !rcCfg.HideReplies && msg.ThreadID != "" {
-		text = r.withParentPrefix(msg.ThreadID, text)
+	if text != "" || len(files) == 0 {
+		r.dispatchText(msg.RoomID, msg.ID, msg.ThreadID, "", msgType, text, sender, createAt)
 	}
 
-	r.dispatchText(msg.RoomID, msg.ID, msg.ThreadID, "", text, r.senderInfo(msg.User), msg.Timestamp.Time.UnixMilli())
+	if len(files) > 0 {
+		r.dispatchFiles(msg.RoomID, msg.ID, msg.ThreadID, files, sender, createAt)
+	}
 }
 
 // OnEdit implements rocketchatclient.Handler.
@@ -260,14 +274,13 @@ func (r *RocketChat) OnEdit(msg *rocketchatclient.Message) {
 		return
 	}
 
-	text := msg.Text
-	if !rcCfg.HideReplies && msg.ThreadID != "" {
-		text = r.withParentPrefix(msg.ThreadID, text)
-	}
+	room, ok := r.rc.Room(msg.RoomID)
+	isDM := ok && r.isOneToOneDM(room)
+	text, msgType := r.formatIncomingText(msg, isDM)
 
 	text = utils.AppendMessageSuffix(text, utils.FormatActionSuffix(utils.SuffixEdited, rcCfg.Formatter.Unicode))
 
-	r.dispatchText(msg.RoomID, msg.ID, msg.ThreadID, "post_edited", text, sender, msg.Timestamp.Time.UnixMilli())
+	r.dispatchText(msg.RoomID, msg.ID, msg.ThreadID, "post_edited", msgType, text, sender, msg.Timestamp.Time.UnixMilli())
 }
 
 // OnDelete implements rocketchatclient.Handler.
@@ -310,7 +323,7 @@ func (r *RocketChat) OnDelete(roomID, msgID string) {
 		}
 	}
 
-	r.dispatchText(roomID, msgID, "", "post_deleted", summary, sender, 0)
+	r.dispatchText(roomID, msgID, "", "post_deleted", "", summary, sender, 0)
 }
 
 // OnReaction implements rocketchatclient.Handler.
@@ -554,7 +567,7 @@ func (r *RocketChat) OnPresence(userID, status string) {
 	})
 }
 
-func (r *RocketChat) dispatchText(roomID, msgID, parentID, eventType, text string, sender *bridge.UserInfo, createAt int64) {
+func (r *RocketChat) dispatchText(roomID, msgID, parentID, eventType, msgType, text string, sender *bridge.UserInfo, createAt int64) {
 	room, ok := r.rc.Room(roomID)
 	if ok && r.isOneToOneDM(room) {
 		peer := r.dmPeer(room)
@@ -585,6 +598,7 @@ func (r *RocketChat) dispatchText(roomID, msgID, parentID, eventType, text strin
 			Text:        text,
 			ChannelID:   roomID,
 			Sender:      sender,
+			MessageType: msgType,
 			ChannelType: r.channelType(room),
 			MessageID:   msgID,
 			Event:       eventType,
@@ -592,6 +606,246 @@ func (r *RocketChat) dispatchText(roomID, msgID, parentID, eventType, text strin
 			CreateAt:    createAt,
 		},
 	})
+}
+
+func (r *RocketChat) dispatchFiles(roomID, msgID, parentID string, files []*bridge.File, sender *bridge.UserInfo, createAt int64) {
+	if len(files) == 0 {
+		return
+	}
+
+	room, ok := r.rc.Room(roomID)
+	channelType := ""
+	receiver := r.GetMe()
+
+	if ok && r.isOneToOneDM(room) {
+		channelType = "D"
+
+		if sender != nil && sender.Me {
+			if peer := r.dmPeer(room); peer != nil {
+				receiver = peer
+			}
+		}
+	}
+
+	if receiver == nil {
+		receiver = sender
+	}
+
+	r.sendEvent(&bridge.Event{
+		Type: "file_event",
+		Data: &bridge.FileEvent{
+			Receiver:    receiver,
+			Sender:      sender,
+			ChannelID:   roomID,
+			ChannelType: channelType,
+			Files:       files,
+			MessageID:   msgID,
+			ParentID:    parentID,
+			CreateAt:    createAt,
+		},
+	})
+}
+
+func (r *RocketChat) formatIncomingText(msg *rocketchatclient.Message, isDM bool) (string, string) {
+	text := msg.Text
+	if text == "" && msg.File != nil && len(msg.Attachments) > 0 && msg.Attachments[0].Description != "" {
+		text = msg.Attachments[0].Description
+	}
+
+	text = r.resolveMentions(msg, text)
+	rcCfg := r.cfg.RocketChat()
+
+	if rcCfg.DisableDefaultMentions {
+		text = utils.SanitizeDefaultMentions(text, rcCfg.Formatter.Unicode)
+	}
+
+	if !rcCfg.HideReplies && msg.ThreadID != "" {
+		text = r.withParentPrefix(msg.ThreadID, text)
+	}
+
+	if msg.Type == "me" && text != "" {
+		text = "\x01ACTION " + text + "\x01"
+	}
+
+	if !rcCfg.DisableDefaultMentions && !isDM && (roomMentionRegexp.MatchString(text) || hasRoomMention(msg)) {
+		return text, "notice"
+	}
+
+	return text, ""
+}
+
+func hasRoomMention(msg *rocketchatclient.Message) bool {
+	if msg == nil {
+		return false
+	}
+
+	for i := range msg.Mentions {
+		m := &msg.Mentions[i]
+		if m.ID == "all" || m.ID == "here" || m.Username == "all" || m.Username == "here" {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (r *RocketChat) resolveMentions(msg *rocketchatclient.Message, text string) string {
+	if !strings.Contains(text, "<@") {
+		return text
+	}
+
+	var byID map[string]string
+	if msg != nil && len(msg.Mentions) > 0 {
+		byID = make(map[string]string, len(msg.Mentions))
+		for i := range msg.Mentions {
+			m := &msg.Mentions[i]
+			if m.ID != "" && m.Username != "" {
+				byID[m.ID] = m.Username
+			}
+		}
+	}
+
+	var sb strings.Builder
+
+	for {
+		idx := strings.Index(text, "<@")
+		if idx < 0 {
+			if sb.Len() == 0 {
+				return text
+			}
+
+			sb.WriteString(text)
+
+			return sb.String()
+		}
+
+		end := strings.IndexByte(text[idx+2:], '>')
+		if end < 0 {
+			if sb.Len() == 0 {
+				return text
+			}
+
+			sb.WriteString(text)
+
+			return sb.String()
+		}
+
+		sb.Grow(len(text))
+		sb.WriteString(text[:idx])
+
+		uid := strings.TrimPrefix(text[idx+2:idx+2+end], "!")
+		if name, _, hasPipe := strings.Cut(uid, "|"); hasPipe {
+			uid = name
+		}
+
+		resolved := r.resolveMentionName(byID, uid)
+		if resolved != "" {
+			sb.WriteByte('@')
+			sb.WriteString(resolved)
+		} else {
+			sb.WriteString(text[idx : idx+2+end+1])
+		}
+
+		text = text[idx+2+end+1:]
+	}
+}
+
+func (r *RocketChat) resolveMentionName(byID map[string]string, uid string) string {
+	if uid == "" {
+		return ""
+	}
+
+	if byID != nil {
+		if name, ok := byID[uid]; ok {
+			return name
+		}
+	}
+
+	if u, ok := r.rc.User(uid); ok && u.Username != "" {
+		return u.Username
+	}
+
+	return ""
+}
+
+func (r *RocketChat) extractFiles(msg *rocketchatclient.Message) []*bridge.File {
+	if msg == nil {
+		return nil
+	}
+
+	if msg.File == nil && len(msg.Files) == 0 {
+		return r.extractAttachmentFiles(msg.Attachments)
+	}
+
+	var firstAttSize int64
+	if len(msg.Attachments) > 0 {
+		firstAttSize = msg.Attachments[0].ImageSize
+	}
+
+	seen := make(map[string]struct{}, 1+len(msg.Files))
+	files := r.appendMessageFile(nil, seen, msg.File, firstAttSize)
+
+	for i := range msg.Files {
+		files = r.appendMessageFile(files, seen, &msg.Files[i], 0)
+	}
+
+	if len(files) > 0 {
+		return files
+	}
+
+	return r.extractAttachmentFiles(msg.Attachments)
+}
+
+func (r *RocketChat) appendMessageFile(files []*bridge.File, seen map[string]struct{}, f *rocketchatclient.File, size int64) []*bridge.File {
+	if f == nil || f.ID == "" {
+		return files
+	}
+
+	if _, exists := seen[f.ID]; exists {
+		return files
+	}
+
+	seen[f.ID] = struct{}{}
+
+	fileURL := r.rc.DownloadURL(f.ID, f.Name)
+	if fileURL == "" {
+		return files
+	}
+
+	return append(files, &bridge.File{
+		Name: cmp.Or(f.Name, f.ID),
+		Size: size,
+		URL:  fileURL,
+	})
+}
+
+func (r *RocketChat) extractAttachmentFiles(attachments []rocketchatclient.Attachment) []*bridge.File {
+	var files []*bridge.File
+
+	for i := range attachments {
+		att := &attachments[i]
+		if att.MessageLink != "" {
+			continue
+		}
+
+		raw := cmp.Or(att.TitleLink, att.ImageURL, att.AudioURL, att.VideoURL)
+		if !strings.Contains(raw, "/file-upload/") {
+			continue
+		}
+
+		resolved := r.rc.ResolveAttachmentURL(raw)
+		if resolved == "" {
+			continue
+		}
+
+		files = append(files, &bridge.File{
+			Name: cmp.Or(att.Title, "attachment"),
+			Size: att.ImageSize,
+			URL:  resolved,
+		})
+	}
+
+	return files
 }
 
 func (r *RocketChat) cacheMessageMeta(msg *rocketchatclient.Message) {
@@ -770,7 +1024,27 @@ func (r *RocketChat) toBridgeUser(u *rocketchatclient.User) *bridge.UserInfo {
 		Me:          u.ID == meID,
 		Username:    u.Username,
 		FirstName:   u.Name,
+		MentionKeys: mentionKeysForUser(u, nick, u.ID == meID),
 	}
+}
+
+func mentionKeysForUser(u *rocketchatclient.User, nick string, me bool) []string {
+	if !me || u == nil {
+		return nil
+	}
+
+	candidates := []string{nick, u.Username, u.Name, u.ID}
+
+	var keys []string
+
+	for _, c := range candidates {
+		c = strings.TrimSpace(c)
+		if c != "" && !slices.Contains(keys, c) {
+			keys = append(keys, c)
+		}
+	}
+
+	return keys
 }
 
 // ChannelUserPrefix implements bridge.ChannelRolePrefixer for Rocket.Chat NAMES modes.
@@ -1066,6 +1340,14 @@ func (r *RocketChat) GetChannelID(ctx context.Context, name, teamID string) stri
 		}
 	}
 
+	if strings.HasPrefix(name, "#") {
+		return ""
+	}
+
+	if uid, ok := r.resolveUserID(ctx, clean); ok {
+		return r.GetDMChannelID(ctx, uid)
+	}
+
 	return ""
 }
 
@@ -1305,31 +1587,84 @@ func (r *RocketChat) GetTeamName(ctx context.Context, teamID string) string {
 }
 
 func (r *RocketChat) GetLastViewedAt(ctx context.Context, channelID string) int64 {
-	return 0
+	if channelID == "" {
+		return 0
+	}
+
+	sub, ok := r.rc.Subscription(channelID)
+	if !ok || sub.LastSeen.Time.IsZero() {
+		return 0
+	}
+
+	return sub.LastSeen.Time.UnixMilli()
 }
 
 func (r *RocketChat) UpdateChannels(ctx context.Context) error {
 	return nil
 }
 
-func (r *RocketChat) UpdateLastViewed(ctx context.Context, channelID string) {}
+func (r *RocketChat) UpdateLastViewed(ctx context.Context, channelID string) {
+	if channelID == "" {
+		return
+	}
+
+	err := r.rc.MarkRead(ctx, channelID)
+	if err != nil && !errors.Is(err, context.Canceled) {
+		logger.Errorf("rocketchat: UpdateLastViewed %s: %s", channelID, err)
+	}
+}
 
 func (r *RocketChat) UpdateLastViewedUser(ctx context.Context, userID string) error {
-	return nil
+	if userID == "" {
+		return errors.New("rocketchat: userID is required")
+	}
+
+	roomID := r.GetDMChannelID(ctx, userID)
+	if roomID == "" {
+		if resolved, ok := r.resolveUserID(ctx, userID); ok {
+			roomID = r.GetDMChannelID(ctx, resolved)
+		}
+	}
+
+	if roomID == "" {
+		return errors.New("rocketchat: direct room not found for user " + userID)
+	}
+
+	return r.rc.MarkRead(ctx, roomID)
 }
 
 func (r *RocketChat) SendTyping(ctx context.Context, channelName string) {}
 
 func (r *RocketChat) GetFilesInfo(ctx context.Context, fileIDs []string) []*bridge.File {
-	return nil
+	files := make([]*bridge.File, 0, len(fileIDs))
+
+	for _, id := range fileIDs {
+		fileURL := r.rc.DownloadURL(id, "")
+		if fileURL != "" {
+			files = append(files, &bridge.File{Name: id, URL: fileURL})
+		}
+	}
+
+	return files
 }
 
 func (r *RocketChat) GetPostsSince(ctx context.Context, channelID string, since int64) []*bridge.Event {
-	return nil
+	return r.historySince(ctx, channelID, since, "scrollback")
 }
 
 func (r *RocketChat) GetPosts(ctx context.Context, channelID string, limit int) []*bridge.Event {
-	return nil
+	if channelID == "" {
+		return []*bridge.Event{}
+	}
+
+	msgs, err := r.rc.GetHistory(ctx, channelID, limit, time.Time{})
+	if err != nil {
+		logger.Errorf("rocketchat: GetPosts %s: %s", channelID, err)
+
+		return []*bridge.Event{}
+	}
+
+	return r.msgsToEvents(msgs, "scrollback", 0)
 }
 
 func (r *RocketChat) GetPostChannelID(ctx context.Context, postID string) string {
@@ -1352,15 +1687,249 @@ func (r *RocketChat) GetPostChannelID(ctx context.Context, postID string) string
 }
 
 func (r *RocketChat) GetPostThread(ctx context.Context, postID string) []*bridge.Event {
-	return nil
+	if postID == "" {
+		return []*bridge.Event{}
+	}
+
+	msgs, err := r.rc.GetThreadMessages(ctx, postID)
+	if err != nil {
+		logger.Errorf("rocketchat: GetPostThread %s: %s", postID, err)
+
+		return []*bridge.Event{}
+	}
+
+	return r.msgsToEvents(msgs, "details", 0)
 }
 
 func (r *RocketChat) GetReplayEvents(ctx context.Context, channelID string, since int64) []*bridge.Event {
-	return nil
+	return r.historySince(ctx, channelID, since, "replay")
+}
+
+func (r *RocketChat) historySince(ctx context.Context, channelID string, since int64, eventType string) []*bridge.Event {
+	if channelID == "" {
+		return []*bridge.Event{}
+	}
+
+	var oldest time.Time
+	if since > 0 {
+		oldest = time.UnixMilli(since)
+	}
+
+	msgs, err := r.rc.GetHistory(ctx, channelID, maxHistoryFetchLimit, oldest)
+	if err != nil {
+		logger.Errorf("rocketchat: fetching history for %s: %s", channelID, err)
+
+		// nil, unlike an empty slice, tells replay that the fetch failed.
+		return nil
+	}
+
+	return r.msgsToEvents(msgs, eventType, since)
 }
 
 func (r *RocketChat) SearchPosts(ctx context.Context, search string) []*bridge.Event {
-	return nil
+	query := strings.TrimSpace(search)
+	if query == "" {
+		return []*bridge.Event{}
+	}
+
+	if events, handled := r.searchScopedChannel(ctx, query); handled {
+		return events
+	}
+
+	roomIDs := r.searchRoomIDs()
+	if len(roomIDs) == 0 {
+		return []*bridge.Event{}
+	}
+
+	searchCtx, cancel := context.WithTimeout(ctx, searchTimeout)
+	defer cancel()
+
+	all := r.collectSearchMatches(searchCtx, roomIDs, query)
+
+	slices.SortStableFunc(all, func(a, b rocketchatclient.Message) int {
+		if c := a.Timestamp.Time.Compare(b.Timestamp.Time); c != 0 {
+			return c
+		}
+
+		return cmp.Compare(a.ID, b.ID)
+	})
+
+	return r.msgsToEvents(all, "search", 0)
+}
+
+// searchScopedChannel handles optional "#channel <query>" searches because Rocket.Chat chat.search requires a roomId.
+func (r *RocketChat) searchScopedChannel(ctx context.Context, query string) ([]*bridge.Event, bool) {
+	if !strings.HasPrefix(query, "#") {
+		return nil, false
+	}
+
+	chTok, rest, ok := strings.Cut(query, " ")
+	rest = strings.TrimSpace(rest)
+
+	if !ok || rest == "" {
+		return nil, false
+	}
+
+	roomID := r.GetChannelID(ctx, chTok, "")
+	if roomID == "" {
+		return nil, false
+	}
+
+	msgs, err := r.rc.SearchMessages(ctx, roomID, rest, 100)
+	if err != nil {
+		logger.Errorf("rocketchat: SearchPosts %s: %s", chTok, err)
+
+		return []*bridge.Event{}, true
+	}
+
+	return r.msgsToEvents(msgs, "search", 0), true
+}
+
+func (r *RocketChat) collectSearchMatches(ctx context.Context, roomIDs []string, query string) []rocketchatclient.Message {
+	seen := make(map[string]struct{})
+
+	var all []rocketchatclient.Message
+
+	for _, roomID := range roomIDs {
+		msgs, err := r.rc.SearchMessages(ctx, roomID, query, defaultSearchCount)
+		if err != nil {
+			if ctx.Err() != nil {
+				break
+			}
+
+			logger.Debugf("rocketchat: chat.search %s: %s", roomID, err)
+
+			continue
+		}
+
+		for i := range msgs {
+			m := &msgs[i]
+			if m.ID == "" {
+				continue
+			}
+
+			if _, exists := seen[m.ID]; exists {
+				continue
+			}
+
+			seen[m.ID] = struct{}{}
+			all = append(all, *m)
+		}
+	}
+
+	return all
+}
+
+func (r *RocketChat) searchRoomIDs() []string {
+	subs := r.rc.Subscriptions()
+	if len(subs) == 0 {
+		return nil
+	}
+
+	slices.SortFunc(subs, func(a, b *rocketchatclient.Subscription) int {
+		if a.Open != b.Open {
+			if a.Open {
+				return -1
+			}
+
+			return 1
+		}
+
+		return b.UpdatedAt.Time.Compare(a.UpdatedAt.Time)
+	})
+
+	limit := min(len(subs), maxSearchRooms)
+	roomIDs := make([]string, 0, limit)
+
+	for i := range limit {
+		if subs[i].RoomID != "" {
+			roomIDs = append(roomIDs, subs[i].RoomID)
+		}
+	}
+
+	return roomIDs
+}
+
+func (r *RocketChat) msgsToEvents(msgs []rocketchatclient.Message, eventType string, since int64) []*bridge.Event {
+	events := make([]*bridge.Event, 0, len(msgs))
+
+	for i := range msgs {
+		if ev := r.msgToEvent(&msgs[i], eventType, since); ev != nil {
+			events = append(events, ev)
+		}
+	}
+
+	return events
+}
+
+func (r *RocketChat) msgToEvent(msg *rocketchatclient.Message, eventType string, since int64) *bridge.Event {
+	if msg == nil || msg.ID == "" || msg.RoomID == "" {
+		return nil
+	}
+
+	if msg.Type != "" && msg.Type != "me" {
+		return nil
+	}
+
+	createAt := msg.Timestamp.Time.UnixMilli()
+	if since > 0 && createAt <= since {
+		return nil
+	}
+
+	r.cacheMessageMeta(msg)
+
+	room, ok := r.rc.Room(msg.RoomID)
+	isDM := ok && r.isOneToOneDM(room)
+	text, msgType := r.formatIncomingText(msg, isDM)
+	files := r.extractFiles(msg)
+
+	if text == "" && len(files) == 0 {
+		return nil
+	}
+
+	return r.buildHistoricalEvent(room, isDM, msg, eventType, msgType, text, files, createAt)
+}
+
+func (r *RocketChat) buildHistoricalEvent(room *rocketchatclient.Room, isDM bool, msg *rocketchatclient.Message, eventType, msgType, text string, files []*bridge.File, createAt int64) *bridge.Event {
+	sender := r.senderInfo(msg.User)
+
+	if isDM {
+		peer := r.dmPeer(room)
+		if peer == nil {
+			peer = sender
+		}
+
+		return &bridge.Event{
+			Type: "direct_message",
+			Data: &bridge.DirectMessageEvent{
+				Text:      text,
+				ChannelID: msg.RoomID,
+				Receiver:  peer,
+				Sender:    sender,
+				Files:     files,
+				MessageID: msg.ID,
+				Event:     eventType,
+				ParentID:  msg.ThreadID,
+				CreateAt:  createAt,
+			},
+		}
+	}
+
+	return &bridge.Event{
+		Type: "channel_message",
+		Data: &bridge.ChannelMessageEvent{
+			Text:        text,
+			ChannelID:   msg.RoomID,
+			Sender:      sender,
+			MessageType: msgType,
+			ChannelType: r.channelType(room),
+			Files:       files,
+			MessageID:   msg.ID,
+			Event:       eventType,
+			ParentID:    msg.ThreadID,
+			CreateAt:    createAt,
+		},
+	}
 }
 
 func (r *RocketChat) resolveUserID(ctx context.Context, userIDOrName string) (string, bool) {
@@ -1452,14 +2021,24 @@ func (r *RocketChat) MsgChannel(ctx context.Context, channelID, text string) (st
 }
 
 func (r *RocketChat) MsgChannelThread(ctx context.Context, channelID, parentID, text string) (string, error) {
-	msgID, err := r.rc.SendMessage(ctx, channelID, text, parentID)
+	sendText := rocketChatActionText(text)
+
+	msgID, err := r.rc.SendMessage(ctx, channelID, sendText, parentID)
 	if err != nil {
 		return "", err
 	}
 
-	r.recordSent(ctx, channelID, msgID, parentID, text)
+	r.recordSent(ctx, channelID, msgID, parentID, sendText)
 
 	return msgID, nil
+}
+
+func rocketChatActionText(text string) string {
+	if after, ok := strings.CutPrefix(text, "\x01ACTION "); ok {
+		return "_" + strings.TrimSuffix(after, "\x01") + "_"
+	}
+
+	return text
 }
 
 func (r *RocketChat) recordSent(ctx context.Context, channelID, msgID, parentID, text string) {
@@ -1530,7 +2109,17 @@ func (r *RocketChat) RemoveReaction(ctx context.Context, msgID, emoji string) er
 }
 
 func (r *RocketChat) SetStatus(ctx context.Context, status string) error {
-	return errors.New("rocketchat: SetStatus not implemented yet (Phase 4)")
+	normalized := strings.ToLower(strings.TrimSpace(status))
+
+	switch normalized {
+	case rocketchatclient.StatusOnline, rocketchatclient.StatusAway, rocketchatclient.StatusBusy, rocketchatclient.StatusOffline:
+	case "":
+		return errors.New("rocketchat: status is required")
+	default:
+		normalized = rocketchatclient.StatusAway
+	}
+
+	return r.rc.SetStatus(ctx, normalized, "")
 }
 
 func (r *RocketChat) CreateChannel(ctx context.Context, channelName string, channelType string) (*bridge.ChannelInfo, error) {
