@@ -91,6 +91,8 @@ func (m *MSTeams) handlePosted(msg *msteamsclient.Message) {
 		return
 	}
 
+	m.ensureConversationSynced(m.ctx, post.ConversationID)
+
 	ev := m.chatMessageToEvent(m.ctx, post, "posted")
 	if ev != nil {
 		m.sendEvent(ev)
@@ -255,9 +257,11 @@ func (m *MSTeams) handleTopicChange(msg *msteamsclient.Message) {
 }
 
 func (m *MSTeams) handleMemberChange(msg *msteamsclient.Message, added bool) {
-	if msg.Channel == "" || len(msg.Members) == 0 {
+	if msg.Channel == "" || len(msg.Members) == 0 || m.isDMConversation(msg.Channel) {
 		return
 	}
+
+	m.ensureConversationSynced(m.ctx, msg.Channel)
 
 	actor := m.resolveUserInfo(m.ctx, msg.UserID, "")
 	users := make([]*bridge.UserInfo, 0, len(msg.Members))
@@ -582,6 +586,17 @@ func (m *MSTeams) bridgeChannelType(convID string) string {
 		return channelTypeGroup
 	default:
 		return channelTypePublic
+	}
+}
+
+func (m *MSTeams) ensureConversationSynced(ctx context.Context, convID string) {
+	if convID == "" || m.isDMConversation(convID) || m.mc.GetChannel(convID) != nil {
+		return
+	}
+
+	err := m.UpdateChannels(ctx)
+	if err != nil {
+		logger.Debugf("ensureConversationSynced(%s) failed: %v", convID, err)
 	}
 }
 

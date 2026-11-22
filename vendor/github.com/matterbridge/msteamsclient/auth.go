@@ -277,7 +277,8 @@ func (c *Client) loadInitialTokenState() {
 		c.tokenState.Endpoints.ChatService = strings.TrimRight(c.cred.ChatServiceURL, "/")
 	}
 
-	if c.tokenState.AccountType == AccountPersonal {
+	switch c.tokenState.AccountType {
+	case AccountPersonal:
 		if strings.HasPrefix(c.tokenState.Endpoints.ChatService, "https://teams.live.com/api/chatsvc/") {
 			c.tokenState.Endpoints.ChatService = "https://msgapi.teams.live.com"
 		}
@@ -285,9 +286,26 @@ func (c *Client) loadInitialTokenState() {
 		if c.tokenState.Endpoints.Trouter == "https://go.trouter.teams.live.com" {
 			c.tokenState.Endpoints.Trouter = "https://go.trouter.skype.com"
 		}
+	case AccountWork:
+		c.migrateWorkEndpointsLocked()
 	}
 
 	c.syncUserFromStateLocked()
+}
+
+func (c *Client) migrateWorkEndpointsLocked() {
+	reg := c.tokenState.Region
+	if reg == "" {
+		reg = defaultRegion
+	}
+
+	if strings.Contains(c.tokenState.Endpoints.ChatsvcAgg, "/templates/api") {
+		c.tokenState.Endpoints.ChatsvcAgg = "https://teams.microsoft.com/api/csa/" + reg
+	}
+
+	if mt := c.tokenState.Endpoints.MiddleTier; mt != "" && !strings.HasSuffix(mt, "/beta") && !strings.HasSuffix(mt, "/v1") {
+		c.tokenState.Endpoints.MiddleTier = mt + "/beta"
+	}
 }
 
 func (c *Client) hasUsableSkypeToken() bool {
@@ -891,7 +909,7 @@ func buildRegionEndpoints(acctType AccountType, region string, gtms map[string]s
 		Region:         reg,
 		ChatService:    trimURL(lookupGTM(gtms, "chatService", "chatservice")),
 		ChatServiceAfd: trimURL(lookupGTM(gtms, "chatServiceAfd", "chatserviceafd")),
-		ChatsvcAgg:     trimURL(lookupGTM(gtms, "chatsvcAgg", "chatsvcagg", "teamsAndChannelsProvisioningService")),
+		ChatsvcAgg:     trimURL(lookupGTM(gtms, "chatsvcAgg", "chatsvcagg")),
 		MiddleTier:     trimURL(lookupGTM(gtms, "middleTier", "middletier")),
 		Trouter:        trimURL(lookupGTM(gtms, "trouter", "trouterurl", "trouterRegistrar")),
 		Presence:       trimURL(lookupGTM(gtms, "presence", "unifiedPresence")),
@@ -918,7 +936,9 @@ func applyWorkEndpointDefaults(ep *RegionEndpoints, reg string) {
 	}
 
 	if ep.MiddleTier == "" {
-		ep.MiddleTier = "https://teams.microsoft.com/api/mt/part/" + reg + "-01"
+		ep.MiddleTier = "https://teams.microsoft.com/api/mt/part/" + reg + "-01/beta"
+	} else if !strings.HasSuffix(ep.MiddleTier, "/beta") && !strings.HasSuffix(ep.MiddleTier, "/v1") {
+		ep.MiddleTier += "/beta"
 	}
 
 	if ep.Trouter == "" {

@@ -142,6 +142,7 @@ func New(
 
 	m.mc = mc
 	m.connected.Store(true)
+	m.resolveConversationMembers(bridgeCtx)
 	m.rebuildNames()
 
 	go m.handleMSTeams()
@@ -426,9 +427,41 @@ func (m *MSTeams) UpdateChannels(ctx context.Context) error {
 		return err
 	}
 
+	m.resolveConversationMembers(ctx)
 	m.rebuildNames()
 
 	return nil
+}
+
+func (m *MSTeams) resolveConversationMembers(ctx context.Context) {
+	seen := make(map[string]struct{})
+	mris := make([]string, 0)
+
+	for _, conv := range m.mc.GetChannels() {
+		members := conv.Members
+		if len(members) == 0 && conv.Topic == "" && conv.DisplayName == "" &&
+			(conv.Type == msteamsclient.ConversationGroup || conv.Type == msteamsclient.ConversationMeeting) {
+			fetched, err := m.mc.GetChannelMembers(ctx, conv.ID)
+			if err == nil {
+				members = fetched
+			}
+		}
+
+		for _, mri := range members {
+			if mri == "" {
+				continue
+			}
+
+			if _, dup := seen[mri]; !dup {
+				seen[mri] = struct{}{}
+				mris = append(mris, mri)
+			}
+		}
+	}
+
+	if len(mris) > 0 {
+		_, _ = m.mc.ResolveUsers(ctx, mris)
+	}
 }
 
 func (m *MSTeams) Invite(ctx context.Context, channelID, username string) error {
@@ -560,7 +593,7 @@ func (m *MSTeams) MsgChannelThread(ctx context.Context, channelID, parentID, tex
 
 func msteamsActionText(text string) string {
 	if after, ok := strings.CutPrefix(text, "\x01ACTION "); ok {
-		return "\x1d" + strings.TrimSuffix(after, "\x01") + "\x1d"
+		return "*" + strings.TrimSuffix(after, "\x01") + "*"
 	}
 
 	return text
