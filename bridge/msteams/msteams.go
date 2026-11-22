@@ -629,12 +629,11 @@ func (m *MSTeams) HasCustomStatus(userID string) bool {
 }
 
 func (m *MSTeams) IsOnline(status string) bool {
-	switch strings.ToLower(status) {
-	case "online", "away", "dnd":
+	if status == "online" {
 		return true
-	default:
-		return false
 	}
+
+	return strings.HasPrefix(status, "online (") && !strings.Contains(status, "): ")
 }
 
 func (m *MSTeams) StatusUser(ctx context.Context, userID string) (string, error) {
