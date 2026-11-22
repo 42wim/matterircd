@@ -581,11 +581,16 @@ func (c *Client) storeOAuthResponse(scope string, resp *oauthTokenResponse) {
 		mergeJWTClaims(&claims, idClaims)
 	}
 
+	expiresAt := time.Now().Add(ttl).Round(0)
+	if claims.Exp > 0 {
+		expiresAt = time.Unix(claims.Exp, 0)
+	}
+
 	c.authMu.Lock()
 
 	c.scopeTokens[scope] = accessTokenEntry{
 		token:     resp.AccessToken,
-		expiresAt: time.Now().Add(ttl),
+		expiresAt: expiresAt,
 	}
 
 	rotated := false
@@ -695,11 +700,11 @@ func (c *Client) postAuthsvc(ctx context.Context, endpoint, bearerToken string) 
 func (c *Client) applyAuthsvcResult(acctType AccountType, resp *authsvcResponse) {
 	skypeClaims := parseJWTClaims(resp.Tokens.SkypeToken)
 
-	expiry := time.Now().Add(defaultAuthTTL)
-	if resp.Tokens.ExpiresIn > 0 {
-		expiry = time.Now().Add(time.Duration(resp.Tokens.ExpiresIn) * time.Second)
-	} else if skypeClaims.Exp > 0 {
+	expiry := time.Now().Add(defaultAuthTTL).Round(0)
+	if skypeClaims.Exp > 0 {
 		expiry = time.Unix(skypeClaims.Exp, 0)
+	} else if resp.Tokens.ExpiresIn > 0 {
+		expiry = time.Now().Add(time.Duration(resp.Tokens.ExpiresIn) * time.Second).Round(0)
 	}
 
 	endpoints := buildRegionEndpoints(acctType, resp.Region, resp.RegionGtms)

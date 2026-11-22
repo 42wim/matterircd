@@ -13,7 +13,7 @@ require (
 	github.com/matterbridge/logrus-prefixed-formatter v0.5.3-0.20200523233437-d971309a77ba
 	github.com/matterbridge/matrixclient v0.0.0-20261118201436-c19b4ef13462
 	github.com/matterbridge/matterclient v0.0.0-20261116034806-3087b48d325c
-	github.com/matterbridge/msteamsclient v0.0.0-20261121235938-92f63f9d4ae7
+	github.com/matterbridge/msteamsclient v0.0.0-20261122073700-db309df6cf78
 	github.com/matterbridge/rocketchatclient v0.0.0-20261117095619-335f44b67feb
 	github.com/matterbridge/slackclient v0.0.0-20261117092932-0a28e681e8a0
 	github.com/mattermost/mattermost/server/public v0.3.0
