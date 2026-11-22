@@ -1,7 +1,8 @@
 // Package e2ee enables end-to-end encrypted rooms for matrixclient.
 //
-// Build with the goolm tag (pure Go olm) or have libolm installed, and with
-// cgo enabled for the sqlite database holding the keys:
+// Build with the goolm tag (pure Go olm) or have libolm installed. The sqlite
+// database holding the keys uses mattn/go-sqlite3 when cgo is enabled and
+// ncruces/go-sqlite3 otherwise:
 //
 //	go build -tags goolm
 package e2ee
@@ -314,7 +315,7 @@ func (h helper) UserVerified(ctx context.Context, userID id.UserID) (bool, error
 // Factory returns the option to pass to matrixclient.New.
 func Factory(cfg Config) matrixclient.Option {
 	return matrixclient.WithCrypto(func(mc *mautrix.Client, login *mautrix.ReqLogin) (matrixclient.Crypto, error) {
-		ch, err := cryptohelper.NewCryptoHelper(mc, cfg.PickleKey, cfg.DBPath)
+		ch, err := newCryptoHelper(mc, cfg)
 		if err != nil {
 			return nil, err
 		}

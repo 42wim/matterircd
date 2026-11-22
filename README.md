@@ -76,7 +76,7 @@ Go 1.26+ is required
 go build -tags goolm -ldflags="-X main.githash=$(git describe --always --dirty --exclude '*')"
 ```
 
-The `goolm` tag enables Matrix end-to-end encryption, which also needs cgo (`CGO_ENABLED=1` and a C compiler).
+The `goolm` tag enables Matrix end-to-end encryption (using `mattn/go-sqlite3` when built with `CGO_ENABLED=1`, or pure-Go `ncruces/go-sqlite3` when built with `CGO_ENABLED=0`).
 
 With encryption enabled, matterircd reports on login whether the session (device) is verified, and if not, how to verify it. Verify the session from the service bot with `VERIFY START`, accept it on your other device, then `VERIFY SAS`, compare the emoji and `VERIFY CONFIRM` (or `VERIFY MISMATCH`). Incoming requests are answered with `VERIFY ACCEPT` or `VERIFY CANCEL`. The request goes to all your other devices, not a selected one. To verify another user, use `VERIFY START <user>` (a direct message room with them is required), then continue with the same steps.
 
