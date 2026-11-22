@@ -662,12 +662,11 @@ func (m *MSTeams) HasCustomStatus(userID string) bool {
 }
 
 func (m *MSTeams) IsOnline(status string) bool {
-	switch strings.ToLower(status) {
-	case "online", "away", "dnd":
+	if status == "online" {
 		return true
-	default:
-		return false
 	}
+
+	return strings.HasPrefix(status, "online (") && !strings.Contains(status, "): ")
 }
 
 func (m *MSTeams) StatusUser(ctx context.Context, userID string) (string, error) {
@@ -740,7 +739,7 @@ func (m *MSTeams) SetStatus(ctx context.Context, status string) error {
 }
 
 func (m *MSTeams) CreateChannel(ctx context.Context, channelName, _ string) (*bridge.ChannelInfo, error) {
-	topic := strings.TrimPrefix(strings.TrimPrefix(channelName, "#"), groupChannelPrefix)
+	topic := strings.TrimPrefix(channelName, "#")
 
 	conv, err := m.mc.CreateGroupChat(ctx, nil, topic)
 	if err != nil {

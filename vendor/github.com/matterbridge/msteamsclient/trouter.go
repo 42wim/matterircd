@@ -31,6 +31,7 @@ const (
 	trouterPollInterval      = 10 * time.Second
 	trouterMaxConsecFailures = 3
 	edgeRegistrarURL         = "https://edge.skype.com/registrar/prod/v2/registrations"
+	workRegistrarURL         = "https://teams.microsoft.com/registrar/prod/V2/registrations"
 	trouterRegistrationTTL   = 86400
 )
 
@@ -212,7 +213,7 @@ func (c *Client) establishTrouter(ctx context.Context) (*trouterSession, error) 
 		endpointID:   endpointID,
 		wsConn:       wsConn,
 		heartbeatSec: heartbeatSec,
-		expiresAt:    time.Now().Add(ttl - 5*time.Minute),
+		expiresAt:    time.Now().Add(ttl - 5*time.Minute).Round(0),
 		useRegistrar: useRegistrar,
 	}, nil
 }
@@ -383,15 +384,16 @@ func (c *Client) registerChatsvcEndpoint(ctx context.Context, surl, epid string)
 		return "", false, errors.New("msteamsclient: chatService endpoint unavailable")
 	}
 
-	// Consumer msgapi does not support /v1/users/ME/endpoints (returns 410 Gone);
-	// register directly with the Skype/Teams edge registrar instead.
-	if c.effectiveAccountType() == AccountPersonal {
-		regErr := c.registerEdgeEndpoint(ctx, surl, epid)
-		if regErr != nil {
-			return "", false, fmt.Errorf("msteamsclient: register edge endpoint: %w", regErr)
-		}
-
+	// Register with the Teams/Skype v2 registrar first (modern Teams 2.x for both
+	// Personal and Work/School). For Work/School, fall back to legacy chatsvc
+	// /v1/users/ME/endpoints if the registrar rejects the request.
+	regErr := c.registerEdgeEndpoint(ctx, surl, epid)
+	if regErr == nil {
 		return epid, true, nil
+	}
+
+	if c.effectiveAccountType() == AccountPersonal {
+		return "", false, fmt.Errorf("msteamsclient: register edge endpoint: %w", regErr)
 	}
 
 	endpointID := "{" + epid + "}"
@@ -421,12 +423,6 @@ func (c *Client) registerChatsvcEndpoint(ctx context.Context, surl, epid string)
 
 		err = c.doJSON(ctx, http.MethodPost, postURL, authSkypeToken, "", payload, nil)
 		if err != nil {
-			// Consumer msgapi returns 410 Gone for /endpoints; use the edge registrar instead.
-			regErr := c.registerEdgeEndpoint(ctx, surl, epid)
-			if regErr == nil {
-				return epid, true, nil
-			}
-
 			return "", false, fmt.Errorf("msteamsclient: register chatsvc endpoint: %w (registrar: %v)", err, regErr)
 		}
 	}
@@ -481,7 +477,11 @@ func (c *Client) registerEdgeApp(ctx context.Context, appID, templateKey, path, 
 		},
 	}
 
-	return c.doJSON(ctx, http.MethodPost, edgeRegistrarURL, authSkypeToken, "", payload, nil)
+	if c.effectiveAccountType() == AccountPersonal {
+		return c.doJSON(ctx, http.MethodPost, edgeRegistrarURL, authSkypeToken, "", payload, nil)
+	}
+
+	return c.doJSON(ctx, http.MethodPost, workRegistrarURL, authSkypeAndBearer, ScopeSpacesWork, payload, nil)
 }
 
 func (c *Client) sendEndpointActive(ctx context.Context, endpointID string) error {

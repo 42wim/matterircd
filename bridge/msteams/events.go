@@ -601,6 +601,10 @@ func (m *MSTeams) ensureConversationSynced(ctx context.Context, convID string) {
 }
 
 func (m *MSTeams) isDMConversation(convID string) bool {
+	if convID == "48:notes" || strings.HasSuffix(convID, "@unq.gbl.spaces") {
+		return true
+	}
+
 	conv := m.mc.GetChannel(convID)
 	if conv == nil {
 		return false

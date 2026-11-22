@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -186,6 +187,9 @@ func (c *Client) initHTTPClient() {
 	c.httpClient = &http.Client{
 		Timeout:   timeout,
 		Transport: newAPILogTransport(transport, c.apiLogger),
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
 	}
 }
 
@@ -348,25 +352,13 @@ func (c *Client) doJSON(ctx context.Context, method, rawURL string, kind authKin
 
 	for attempt := range maxHTTPRetries + 1 {
 		respBytes, status, retryAfter, err := c.doRawOnce(ctx, method, rawURL, kind, scope, bodyBytes)
-		if err != nil {
-			return err
+
+		retry, retryErr := c.shouldRetryHTTP(ctx, method, rawURL, kind, scope, attempt, status, retryAfter, err)
+		if retryErr != nil {
+			return retryErr
 		}
 
-		if status == http.StatusUnauthorized && attempt == 0 {
-			refreshErr := c.handleUnauthorized(ctx, kind, scope)
-			if refreshErr == nil {
-				continue
-			}
-
-			return fmt.Errorf("msteamsclient: HTTP 401 unauthorized (refresh failed: %w)", refreshErr)
-		}
-
-		if status == http.StatusTooManyRequests && attempt < maxHTTPRetries {
-			waitErr := sleepContext(ctx, retryAfter)
-			if waitErr != nil {
-				return waitErr
-			}
-
+		if retry {
 			continue
 		}
 
@@ -387,44 +379,147 @@ func (c *Client) doJSON(ctx context.Context, method, rawURL string, kind authKin
 	return errors.New("msteamsclient: request exceeded retry limit")
 }
 
+func (c *Client) shouldRetryHTTP(ctx context.Context, method, rawURL string, kind authKind, scope string, attempt, status int, retryAfter time.Duration, reqErr error) (bool, error) {
+	if reqErr != nil {
+		if ctx.Err() != nil || attempt >= maxHTTPRetries {
+			return false, reqErr
+		}
+
+		backoff := time.Duration(attempt+1) * time.Second
+		c.logger.Warnf("Network error on %s %s (%v), backing off: %s (attempt %d/%d)",
+			method, sanitizeURLForErr(rawURL), reqErr, backoff, attempt+1, maxHTTPRetries)
+
+		return true, sleepContext(ctx, backoff)
+	}
+
+	switch {
+	case status == http.StatusUnauthorized && attempt == 0:
+		refreshErr := c.handleUnauthorized(ctx, kind, scope)
+		if refreshErr != nil {
+			return false, fmt.Errorf("msteamsclient: HTTP 401 unauthorized (refresh failed: %w)", refreshErr)
+		}
+
+		return true, nil
+	case status == http.StatusTooManyRequests && attempt < maxHTTPRetries:
+		c.logger.Warnf("Rate limited (429) on %s %s, waiting %s (attempt %d/%d)",
+			method, sanitizeURLForErr(rawURL), retryAfter, attempt+1, maxHTTPRetries)
+
+		return true, sleepContext(ctx, retryAfter)
+	case status >= http.StatusInternalServerError && attempt < maxHTTPRetries:
+		backoff := time.Duration(attempt+1) * time.Second
+		c.logger.Warnf("Transient error %d on %s %s, backing off: %s (attempt %d/%d)",
+			status, method, sanitizeURLForErr(rawURL), backoff, attempt+1, maxHTTPRetries)
+
+		return true, sleepContext(ctx, backoff)
+	default:
+		return false, nil
+	}
+}
+
 func (c *Client) doRawOnce(ctx context.Context, method, rawURL string, kind authKind, scope string, bodyBytes []byte) ([]byte, int, time.Duration, error) {
-	var bodyReader io.Reader
-	if len(bodyBytes) > 0 {
-		bodyReader = bytes.NewReader(bodyBytes)
+	const maxRedirects = 3
+
+	targetURL := rawURL
+
+	for redirect := range maxRedirects + 1 {
+		var bodyReader io.Reader
+		if len(bodyBytes) > 0 {
+			bodyReader = bytes.NewReader(bodyBytes)
+		}
+
+		req, err := http.NewRequestWithContext(ctx, method, targetURL, bodyReader)
+		if err != nil {
+			return nil, 0, 0, err
+		}
+
+		if len(bodyBytes) > 0 {
+			req.Header.Set("Content-Type", "application/json")
+		}
+
+		req.Header.Set("Accept", "application/json")
+		req.Header.Set("User-Agent", c.userAgent())
+
+		err = c.applyAuthHeaders(ctx, req, kind, scope)
+		if err != nil {
+			return nil, 0, 0, err
+		}
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return nil, 0, 0, err
+		}
+
+		if isRedirectStatus(resp.StatusCode) && redirect < maxRedirects {
+			nextURL, ok := resolveTrustedRedirect(req.URL, resp.Header.Get("Location"))
+			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+			_ = resp.Body.Close()
+
+			if ok {
+				c.rememberPresenceRedirect(req.URL.Hostname(), nextURL.Hostname())
+				targetURL = nextURL.String()
+
+				continue
+			}
+
+			return nil, resp.StatusCode, 0, fmt.Errorf("msteamsclient: untrusted redirect from %s", sanitizeURLForErr(targetURL))
+		}
+
+		respBytes, readErr := io.ReadAll(io.LimitReader(resp.Body, maxAPIResponseSize))
+		_ = resp.Body.Close()
+
+		if readErr != nil {
+			return nil, resp.StatusCode, 0, readErr
+		}
+
+		retryAfter := parseRetryAfter(resp.Header.Get("Retry-After"))
+
+		return respBytes, resp.StatusCode, retryAfter, nil
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, rawURL, bodyReader)
-	if err != nil {
-		return nil, 0, 0, err
+	return nil, 0, 0, errors.New("msteamsclient: too many redirects")
+}
+
+func isRedirectStatus(status int) bool {
+	return status == http.StatusMovedPermanently ||
+		status == http.StatusFound ||
+		status == http.StatusTemporaryRedirect ||
+		status == http.StatusPermanentRedirect
+}
+
+func resolveTrustedRedirect(base *url.URL, location string) (*url.URL, bool) {
+	if location == "" || base == nil {
+		return nil, false
 	}
 
-	if len(bodyBytes) > 0 {
-		req.Header.Set("Content-Type", "application/json")
+	next, err := base.Parse(location)
+	if err != nil || next.Scheme != "https" {
+		return nil, false
 	}
 
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", c.userAgent())
-
-	err = c.applyAuthHeaders(ctx, req, kind, scope)
-	if err != nil {
-		return nil, 0, 0, err
+	host := strings.ToLower(next.Hostname())
+	if strings.HasSuffix(host, ".teams.microsoft.com") ||
+		strings.HasSuffix(host, ".teams.live.com") ||
+		strings.HasSuffix(host, ".skype.com") ||
+		host == "teams.microsoft.com" ||
+		host == "teams.live.com" {
+		return next, true
 	}
 
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, 0, 0, err
+	return nil, false
+}
+
+func (c *Client) rememberPresenceRedirect(fromHost, toHost string) {
+	if !strings.EqualFold(fromHost, "presence.teams.microsoft.com") {
+		return
 	}
 
-	defer resp.Body.Close()
-
-	respBytes, err := io.ReadAll(io.LimitReader(resp.Body, maxAPIResponseSize))
-	if err != nil {
-		return nil, resp.StatusCode, 0, err
+	if !strings.HasSuffix(strings.ToLower(toHost), ".presence.teams.microsoft.com") {
+		return
 	}
 
-	retryAfter := parseRetryAfter(resp.Header.Get("Retry-After"))
-
-	return respBytes, resp.StatusCode, retryAfter, nil
+	c.authMu.Lock()
+	c.tokenState.Endpoints.Presence = "https://" + toHost
+	c.authMu.Unlock()
 }
 
 func (c *Client) applyAuthHeaders(ctx context.Context, req *http.Request, kind authKind, scope string) error {

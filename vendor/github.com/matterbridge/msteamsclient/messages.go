@@ -590,11 +590,14 @@ func (c *Client) SearchMessages(ctx context.Context, query string, limit int) ([
 	payload := map[string]any{
 		"EntityRequests": []map[string]any{
 			{
-				"EntityType": "Message",
+				"EntityType": "ChatMessage",
 				"Query":      map[string]string{"QueryString": query},
 				"From":       0,
 				"Size":       limit,
 			},
+		},
+		"Scenario": map[string]string{
+			"Name": "Teams.Search",
 		},
 	}
 
