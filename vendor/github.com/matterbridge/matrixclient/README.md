@@ -37,8 +37,9 @@ membership events independently of direct-room classification.
 
 ## Encrypted rooms
 
-End-to-end encryption is opt-in through the `e2ee` subpackage, as it needs cgo
-(sqlite for the key store) and either libolm or the pure Go `goolm` build tag:
+End-to-end encryption is opt-in through the `e2ee` subpackage, using sqlite
+for the key store (`mattn/go-sqlite3` when cgo is enabled, `ncruces/go-sqlite3`
+otherwise) and either libolm or the pure Go `goolm` build tag:
 
 ```go
 c, err := matrixclient.New(ctx, cred, handler, e2ee.Factory(e2ee.Config{
