@@ -834,7 +834,7 @@ func (c *Client) middleTierScope() string {
 		return ScopeSpacesPersonal
 	}
 
-	return ScopeChatsvcAgg
+	return ScopeSpacesWork
 }
 
 func (c *Client) presenceScope() string {

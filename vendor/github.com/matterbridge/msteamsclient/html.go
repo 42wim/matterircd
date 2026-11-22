@@ -15,7 +15,7 @@ const (
 )
 
 var (
-	mdCodeBlockRE = regexp.MustCompile("(?s)```(?:[a-zA-Z0-9_+-]+\\n)?(.*?)```")
+	mdCodeBlockRE = regexp.MustCompile("(?s)```(?:([a-zA-Z0-9_+-]+)\\n)?(.*?)```")
 	mdInlineCode  = regexp.MustCompile("`([^`\n]+)`")
 	mdBoldRE      = regexp.MustCompile(`\*\*([^\*\n]+)\*\*`)
 	mdStrikeRE    = regexp.MustCompile(`~~([^~\n]+)~~`)
@@ -152,7 +152,9 @@ func renderElementNode(b *strings.Builder, n *html.Node, inPre bool) {
 		return
 	case "pre":
 		ensureNewline(b)
-		b.WriteString("```\n")
+		b.WriteString("```")
+		b.WriteString(extractCodeLanguage(n))
+		b.WriteByte('\n')
 		renderChildren(b, n, true)
 		ensureNewline(b)
 		b.WriteString("```\n")
@@ -281,6 +283,71 @@ func getAttr(n *html.Node, key string) string {
 	return ""
 }
 
+func extractCodeLanguage(preNode *html.Node) string {
+	candidates := []*html.Node{preNode}
+	for c := preNode.FirstChild; c != nil; c = c.NextSibling {
+		if c.Type == html.ElementNode && c.Data == "code" {
+			candidates = append(candidates, c)
+		}
+	}
+
+	if preNode.Parent != nil && preNode.Parent.Type == html.ElementNode {
+		candidates = append(candidates, preNode.Parent)
+	}
+
+	for _, node := range candidates {
+		if lang := codeLanguageFromNode(node); lang != "" {
+			return lang
+		}
+	}
+
+	return ""
+}
+
+func codeLanguageFromNode(n *html.Node) string {
+	for _, attr := range []string{"data-language", "data-lang", "language", "lang"} {
+		if lang := normalizeCodeLanguage(getAttr(n, attr)); lang != "" {
+			return lang
+		}
+	}
+
+	for cls := range strings.FieldsSeq(getAttr(n, "class")) {
+		lower := strings.ToLower(cls)
+		if after, ok := strings.CutPrefix(lower, "language-"); ok {
+			if lang := normalizeCodeLanguage(after); lang != "" {
+				return lang
+			}
+		}
+
+		if after, ok := strings.CutPrefix(lower, "lang-"); ok {
+			if lang := normalizeCodeLanguage(after); lang != "" {
+				return lang
+			}
+		}
+	}
+
+	return ""
+}
+
+func normalizeCodeLanguage(raw string) string {
+	lang := strings.ToLower(strings.TrimSpace(raw))
+	switch lang {
+	case "", "plaintext", "plain", "text", "txt", "none", "auto":
+		return ""
+	}
+
+	for i := range len(lang) {
+		ch := lang[i]
+
+		isAlphaNum := (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9')
+		if !isAlphaNum && ch != '_' && ch != '+' && ch != '-' && ch != '#' {
+			return ""
+		}
+	}
+
+	return lang
+}
+
 func ensureNewline(b *strings.Builder) {
 	if b.Len() == 0 {
 		return
@@ -353,6 +420,25 @@ func normalizeRenderedText(s string) string {
 	return strings.Join(out, "\n")
 }
 
+func renderCodeBlockHTML(match string) string {
+	sub := mdCodeBlockRE.FindStringSubmatch(match)
+
+	lang := ""
+	code := ""
+
+	if len(sub) > 2 {
+		lang = normalizeCodeLanguage(sub[1])
+		code = sub[2]
+	}
+
+	openCode := "<code>"
+	if lang != "" {
+		openCode = `<code class="language-` + stdhtml.EscapeString(lang) + `">`
+	}
+
+	return "<pre>" + openCode + stdhtml.EscapeString(strings.TrimSuffix(code, "\n")) + "</code></pre>"
+}
+
 // TextToHTML converts plain or Markdown-formatted text into safe Teams
 // RichText/Html.
 func TextToHTML(text string) string {
@@ -364,15 +450,8 @@ func TextToHTML(text string) string {
 	var placeholders []string
 
 	replaced := mdCodeBlockRE.ReplaceAllStringFunc(text, func(match string) string {
-		sub := mdCodeBlockRE.FindStringSubmatch(match)
-
-		code := ""
-		if len(sub) > 1 {
-			code = sub[1]
-		}
-
 		idx := len(placeholders)
-		placeholders = append(placeholders, "<pre><code>"+stdhtml.EscapeString(strings.TrimSuffix(code, "\n"))+"</code></pre>")
+		placeholders = append(placeholders, renderCodeBlockHTML(match))
 
 		return fmt.Sprintf("\x00CODEBLOCK%d\x00", idx)
 	})
