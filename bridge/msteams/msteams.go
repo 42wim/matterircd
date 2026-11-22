@@ -707,7 +707,7 @@ func (m *MSTeams) SetStatus(ctx context.Context, status string) error {
 }
 
 func (m *MSTeams) CreateChannel(ctx context.Context, channelName, _ string) (*bridge.ChannelInfo, error) {
-	topic := strings.TrimPrefix(strings.TrimPrefix(channelName, "#"), groupChannelPrefix)
+	topic := strings.TrimPrefix(channelName, "#")
 
 	conv, err := m.mc.CreateGroupChat(ctx, nil, topic)
 	if err != nil {

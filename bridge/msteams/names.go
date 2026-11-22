@@ -13,7 +13,6 @@ import (
 const (
 	maxIRCChannelNameLen = 64
 	maxIRCNickLen        = 48
-	groupChannelPrefix   = "group-"
 )
 
 // rebuildNames computes deterministic, collision-free IRC channel names for all
@@ -113,17 +112,18 @@ func (m *MSTeams) baseChannelNameLocked(conv *msteamsclient.Conversation, primar
 		return chSlug
 
 	default:
-		// Group and meeting chats use #group-<topic-or-members>.
+		// Named group/meeting chats use #<topic>; unnamed ones use #<member1-member2-...>
+		// matching Mattermost's group-DM channel naming.
 		topicSlug := sanitizeIRCChannelPart(conv.Topic)
 		if topicSlug == "" {
 			topicSlug = sanitizeIRCChannelPart(conv.DisplayName)
 		}
 
 		if topicSlug != "" {
-			return groupChannelPrefix + topicSlug
+			return topicSlug
 		}
 
-		return groupChannelPrefix + m.groupMembersSlugLocked(conv)
+		return m.groupMembersSlugLocked(conv)
 	}
 }
 
@@ -135,7 +135,7 @@ func (m *MSTeams) groupMembersSlugLocked(conv *msteamsclient.Conversation) strin
 		myMRI = me.MRI
 	}
 
-	parts := make([]string, 0, 3)
+	parts := make([]string, 0, len(conv.Members))
 
 	for _, mri := range conv.Members {
 		if mri == "" || mri == myMRI {
@@ -155,15 +155,13 @@ func (m *MSTeams) groupMembersSlugLocked(conv *msteamsclient.Conversation) strin
 		if slug != "" {
 			parts = append(parts, slug)
 		}
-
-		if len(parts) == 3 {
-			break
-		}
 	}
 
 	if len(parts) == 0 {
 		return shortHash(conv.ID)
 	}
+
+	slices.Sort(parts)
 
 	return strings.Join(parts, "-")
 }
