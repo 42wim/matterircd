@@ -352,25 +352,13 @@ func (c *Client) doJSON(ctx context.Context, method, rawURL string, kind authKin
 
 	for attempt := range maxHTTPRetries + 1 {
 		respBytes, status, retryAfter, err := c.doRawOnce(ctx, method, rawURL, kind, scope, bodyBytes)
-		if err != nil {
-			return err
+
+		retry, retryErr := c.shouldRetryHTTP(ctx, method, rawURL, kind, scope, attempt, status, retryAfter, err)
+		if retryErr != nil {
+			return retryErr
 		}
 
-		if status == http.StatusUnauthorized && attempt == 0 {
-			refreshErr := c.handleUnauthorized(ctx, kind, scope)
-			if refreshErr == nil {
-				continue
-			}
-
-			return fmt.Errorf("msteamsclient: HTTP 401 unauthorized (refresh failed: %w)", refreshErr)
-		}
-
-		if status == http.StatusTooManyRequests && attempt < maxHTTPRetries {
-			waitErr := sleepContext(ctx, retryAfter)
-			if waitErr != nil {
-				return waitErr
-			}
-
+		if retry {
 			continue
 		}
 
@@ -389,6 +377,43 @@ func (c *Client) doJSON(ctx context.Context, method, rawURL string, kind authKin
 	}
 
 	return errors.New("msteamsclient: request exceeded retry limit")
+}
+
+func (c *Client) shouldRetryHTTP(ctx context.Context, method, rawURL string, kind authKind, scope string, attempt, status int, retryAfter time.Duration, reqErr error) (bool, error) {
+	if reqErr != nil {
+		if ctx.Err() != nil || attempt >= maxHTTPRetries {
+			return false, reqErr
+		}
+
+		backoff := time.Duration(attempt+1) * time.Second
+		c.logger.Warnf("Network error on %s %s (%v), backing off: %s (attempt %d/%d)",
+			method, sanitizeURLForErr(rawURL), reqErr, backoff, attempt+1, maxHTTPRetries)
+
+		return true, sleepContext(ctx, backoff)
+	}
+
+	switch {
+	case status == http.StatusUnauthorized && attempt == 0:
+		refreshErr := c.handleUnauthorized(ctx, kind, scope)
+		if refreshErr != nil {
+			return false, fmt.Errorf("msteamsclient: HTTP 401 unauthorized (refresh failed: %w)", refreshErr)
+		}
+
+		return true, nil
+	case status == http.StatusTooManyRequests && attempt < maxHTTPRetries:
+		c.logger.Warnf("Rate limited (429) on %s %s, waiting %s (attempt %d/%d)",
+			method, sanitizeURLForErr(rawURL), retryAfter, attempt+1, maxHTTPRetries)
+
+		return true, sleepContext(ctx, retryAfter)
+	case status >= http.StatusInternalServerError && attempt < maxHTTPRetries:
+		backoff := time.Duration(attempt+1) * time.Second
+		c.logger.Warnf("Transient error %d on %s %s, backing off: %s (attempt %d/%d)",
+			status, method, sanitizeURLForErr(rawURL), backoff, attempt+1, maxHTTPRetries)
+
+		return true, sleepContext(ctx, backoff)
+	default:
+		return false, nil
+	}
 }
 
 func (c *Client) doRawOnce(ctx context.Context, method, rawURL string, kind authKind, scope string, bodyBytes []byte) ([]byte, int, time.Duration, error) {

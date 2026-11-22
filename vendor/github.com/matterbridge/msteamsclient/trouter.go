@@ -213,7 +213,7 @@ func (c *Client) establishTrouter(ctx context.Context) (*trouterSession, error) 
 		endpointID:   endpointID,
 		wsConn:       wsConn,
 		heartbeatSec: heartbeatSec,
-		expiresAt:    time.Now().Add(ttl - 5*time.Minute),
+		expiresAt:    time.Now().Add(ttl - 5*time.Minute).Round(0),
 		useRegistrar: useRegistrar,
 	}, nil
 }
