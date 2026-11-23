@@ -999,9 +999,11 @@ func (c *Client) traceProtoMessageEvent(ev *protoEvent, body *protoEventBody, ev
 				creatorID = body.MessagePosted.Creator.ID
 			}
 
-			c.apiLogger.Tracef("webchannel recv: %s group=%s msg=%s user=%s system=%v",
+			c.apiLogger.Tracef("webchannel recv: %s group=%s msg=%s user=%s system=%v edited=%v",
 				kind, firstNonEmpty(body.MessagePosted.Group.ID, ev.Group.ID),
-				body.MessagePosted.MessageID, creatorID, body.MessagePosted.MessageType == protoMsgTypeSystem)
+				body.MessagePosted.MessageID, creatorID,
+				body.MessagePosted.MessageType == protoMsgTypeSystem,
+				body.MessagePosted.EditTimeUsec > 0)
 		}
 	case protoEventTopicCreated:
 		if body.TopicCreated != nil {
@@ -1071,11 +1073,26 @@ func (c *Client) handleMessageEventBody(ev *protoEvent, body *protoEventBody, is
 		return
 	}
 
-	if isEdit && msg.EditAt == 0 {
-		msg.EditAt = time.Now().UnixMilli()
+	if isEdit && c.isNonEditMessageUpdate(msg) {
+		c.cachePost(msg)
+
+		return
 	}
 
 	c.emitIncomingChatMessage(msg, prevTopic, hasPrevTopic, isEdit)
+}
+
+// isNonEditMessageUpdate reports whether a MESSAGE_UPDATED event is a
+// server-side metadata/link-preview unfurl rather than a user edit.
+func (c *Client) isNonEditMessageUpdate(msg *ChatMessage) bool {
+	prev := c.GetCachedPost(msg.ID)
+	sameContent := prev == nil || (prev.ContentText == msg.ContentText && len(prev.Attachments) == len(msg.Attachments))
+
+	if msg.EditAt == 0 {
+		return sameContent
+	}
+
+	return prev != nil && prev.EditAt == msg.EditAt && sameContent
 }
 
 func (c *Client) handleTopicCreatedBody(ev *protoEvent, body *protoEventBody) {
