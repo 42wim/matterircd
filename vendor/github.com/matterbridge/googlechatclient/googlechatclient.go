@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -21,17 +22,22 @@ import (
 )
 
 const (
-	defaultUserAgent     = "googlechatclient/0.0"
-	defaultHTTPTimeout   = 30 * time.Second
-	maxAPIResponseSize   = 16 << 20 // 16 MiB
-	maxAPIRetries        = 10
-	defaultRateLimitWait = 3 * time.Second
-	maxRateLimitWaitSecs = 300
-	cappedRateLimitWait  = 5 * time.Second
-	postCacheSize        = 2000
-	reactionCacheSize    = 2000
-	sentCacheSize        = 256
-	messageChanCap       = 100
+	defaultUserAgent            = "googlechatclient/0.0"
+	defaultHTTPTimeout          = 30 * time.Second
+	defaultDialTimeout          = 10 * time.Second
+	apiResponseHeaderTimeout    = 20 * time.Second
+	streamResponseHeaderTimeout = 90 * time.Second
+	http2SendPingTimeout        = 45 * time.Second
+	http2PingTimeout            = 15 * time.Second
+	maxAPIResponseSize          = 16 << 20 // 16 MiB
+	maxAPIRetries               = 10
+	defaultRateLimitWait        = 3 * time.Second
+	maxRateLimitWaitSecs        = 300
+	cappedRateLimitWait         = 5 * time.Second
+	postCacheSize               = 2000
+	reactionCacheSize           = 2000
+	sentCacheSize               = 256
+	messageChanCap              = 100
 )
 
 // UsersCache holds cached users, conversations, memberships, and presence data.
@@ -114,8 +120,10 @@ type Client struct {
 	streamCancel context.CancelFunc
 	activeSess   *webChannelSession
 
-	httpClient   *http.Client
-	streamClient *http.Client
+	apiTransport    *http.Transport
+	streamTransport *http.Transport
+	httpClient      *http.Client
+	streamClient    *http.Client
 
 	postCache     *lru.Cache[string, *ChatMessage]
 	reactionCache *lru.Cache[string, map[string][]ReactionUser]
@@ -166,36 +174,62 @@ func (c *Client) initHTTPClients() {
 		timeout = time.Duration(c.Timeout) * time.Second
 	}
 
-	baseTransport, ok := http.DefaultTransport.(*http.Transport)
-
-	var transport *http.Transport
-	if ok {
-		transport = baseTransport.Clone()
-	} else {
-		transport = &http.Transport{}
-	}
-
-	if c.cred.SkipTLSVerify {
-		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec
-	}
-
-	loggedTransport := newAPILogTransport(transport, c.apiLogger)
+	c.apiTransport = c.newBaseTransport(apiResponseHeaderTimeout)
+	c.streamTransport = c.newBaseTransport(streamResponseHeaderTimeout)
 
 	c.httpClient = &http.Client{
 		Timeout:   timeout,
-		Transport: loggedTransport,
+		Transport: newAPILogTransport(c.apiTransport, c.apiLogger),
 		CheckRedirect: func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
 	}
 
-	// WebChannel long-poll GET streams stay open indefinitely until server rollover or cancel.
+	// WebChannel long-poll GET streams stay open indefinitely until server rollover or cancel,
+	// isolated onto a separate transport pool so a wedged stream cannot stall API calls.
 	c.streamClient = &http.Client{
 		Timeout:   0,
-		Transport: loggedTransport,
+		Transport: newAPILogTransport(c.streamTransport, c.apiLogger),
 		CheckRedirect: func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
+	}
+}
+
+func (c *Client) newBaseTransport(responseHeaderTimeout time.Duration) *http.Transport {
+	t := &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   defaultDialTimeout,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		MaxIdleConnsPerHost:   10,
+		IdleConnTimeout:       120 * time.Second,
+		TLSHandshakeTimeout:   defaultDialTimeout,
+		ExpectContinueTimeout: 1 * time.Second,
+		ResponseHeaderTimeout: responseHeaderTimeout,
+		HTTP2: &http.HTTP2Config{
+			SendPingTimeout: http2SendPingTimeout,
+			PingTimeout:     http2PingTimeout,
+		},
+	}
+
+	if c.cred.SkipTLSVerify {
+		t.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec
+	}
+
+	return t
+}
+
+func (c *Client) closeIdleConnections() {
+	if c.apiTransport != nil {
+		c.apiTransport.CloseIdleConnections()
+	}
+
+	if c.streamTransport != nil {
+		c.streamTransport.CloseIdleConnections()
 	}
 }
 
