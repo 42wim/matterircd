@@ -193,6 +193,18 @@ func (g *GoogleChat) buildClient(
 		}
 	}
 	gc.OnWsDisconnect = onWsDisconnect
+	gc.ResolveMention = func(token string) (string, string) {
+		uid := g.userIDForNick(token)
+		if uid == "" {
+			return "", ""
+		}
+
+		if u := gc.GetUser(uid); u != nil && u.DisplayName != "" {
+			return uid, u.DisplayName
+		}
+
+		return uid, token
+	}
 
 	tokenFile := rc.GoogleChat.TokenSaveFile
 	if tokenFile != "" {

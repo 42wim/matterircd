@@ -91,7 +91,7 @@ func (c *Client) SendMessage(ctx context.Context, convID, text string) (*ChatMes
 	localID := newLocalMessageID()
 	c.recordSentIDs("", localID)
 
-	bodyText, anns := buildOutgoingAnnotations(text)
+	bodyText, anns := c.buildOutgoingAnnotations(text)
 	reqBytes := encodeCreateTopicRequest(ref, bodyText, localID, anns)
 
 	respBytes, err := c.doProto(ctx, "create_topic", reqBytes)
@@ -143,7 +143,7 @@ func (c *Client) SendMessageThread(ctx context.Context, convID, topicID, text st
 	localID := newLocalMessageID()
 	c.recordSentIDs("", localID)
 
-	bodyText, anns := buildOutgoingAnnotations(text)
+	bodyText, anns := c.buildOutgoingAnnotations(text)
 	reqBytes := encodeCreateMessageRequest(ref, topicID, bodyText, localID, anns)
 
 	respBytes, err := c.doProto(ctx, "create_message", reqBytes)
@@ -187,7 +187,7 @@ func (c *Client) EditMessage(ctx context.Context, convID, topicID, msgID, text s
 	}
 
 	ref := c.protoGroupRefFor(convID)
-	bodyText, anns := buildOutgoingAnnotations(text)
+	bodyText, anns := c.buildOutgoingAnnotations(text)
 	reqBytes := encodeEditMessageRequest(ref, topicID, msgID, bodyText, anns)
 
 	respBytes, err := c.doProto(ctx, "edit_message", reqBytes)
@@ -615,12 +615,62 @@ func (c *Client) protoMessageToChatMessage(pm *protoMessage, fallbackConvID, fal
 		EditAt:          usecToMillis(pm.EditTimeUsec),
 		DeleteAt:        usecToMillis(pm.DeleteTimeUsec),
 		IsSystem:        pm.MessageType == protoMsgTypeSystem,
+		QuotedMessage:   c.protoQuotedToQuotedMessage(pm.Quoted),
 		Mentions:        mentions,
 		Attachments:     attachments,
 		Reactions:       c.protoReactionsToMap(pm.Reactions),
 	}
 
 	return msg
+}
+
+func (c *Client) protoQuotedToQuotedMessage(pq *protoQuotedMessage) *QuotedMessage {
+	if pq == nil {
+		return nil
+	}
+
+	fromID, displayName := c.extractQuotedCreator(pq)
+
+	quotedText := pq.TextBody
+	if quotedText != "" && len(pq.Annotations) > 0 {
+		quotedText = c.formatAnnotatedText(quotedText, pq.Annotations)
+	}
+
+	if pq.MessageID == "" && quotedText == "" && !pq.Deleted {
+		return nil
+	}
+
+	return &QuotedMessage{
+		ID:          pq.MessageID,
+		TopicID:     pq.TopicID,
+		FromID:      fromID,
+		DisplayName: displayName,
+		Text:        quotedText,
+		Deleted:     pq.Deleted,
+	}
+}
+
+func (c *Client) extractQuotedCreator(pq *protoQuotedMessage) (string, string) {
+	if pq.Creator == nil {
+		return pq.CreatorID, ""
+	}
+
+	if u := protoUserToUser(pq.Creator); u != nil {
+		c.CacheUser(u)
+
+		if pq.CreatorID != "" {
+			return pq.CreatorID, u.DisplayName
+		}
+
+		return u.ID, u.DisplayName
+	}
+
+	fromID := pq.CreatorID
+	if fromID == "" {
+		fromID = pq.Creator.ID
+	}
+
+	return fromID, pq.Creator.Name
 }
 
 func (c *Client) extractMessageCreator(pm *protoMessage) (string, string) {
@@ -701,6 +751,11 @@ func cloneChatMessage(in *ChatMessage) *ChatMessage {
 	}
 
 	cp := *in
+	if in.QuotedMessage != nil {
+		qcp := *in.QuotedMessage
+		cp.QuotedMessage = &qcp
+	}
+
 	cp.Mentions = slices.Clone(in.Mentions)
 	cp.Attachments = slices.Clone(in.Attachments)
 	cp.Reactions = cloneReactionsMap(in.Reactions)

@@ -61,6 +61,8 @@ const (
 	protoMentionUser = 3
 	protoMentionAll  = 4
 
+	protoChipDoNotRender = 3
+
 	protoFormatBold             = 1
 	protoFormatItalic           = 2
 	protoFormatStrike           = 3
@@ -258,7 +260,7 @@ func encodeOutgoingAnnotation(ann outgoingAnnotation) []byte {
 	var b []byte
 
 	b = appendVarintField(b, 1, ann.Type)
-	if ann.StartIndex > 0 {
+	if ann.StartIndex >= 0 {
 		b = appendVarintField(b, 2, uint64(ann.StartIndex))
 	}
 
@@ -275,12 +277,14 @@ func encodeOutgoingAnnotation(ann outgoingAnnotation) []byte {
 		} else {
 			um = appendBytesField(um, 1, encodeUserID(ann.UserID))
 			um = appendVarintField(um, 2, protoMentionUser)
+			um = appendStringField(um, 4, ann.DisplayName)
 		}
 
 		b = appendBytesField(b, 5, um)
 	case protoAnnotationFormatData:
 		fm := appendVarintField(nil, 1, ann.FormatType)
 		b = appendBytesField(b, 8, fm)
+		b = appendVarintField(b, 20, protoChipDoNotRender)
 	}
 
 	return b
@@ -403,6 +407,7 @@ func encodeCreateMessageRequest(ref protoGroupRef, topicID, text, localID string
 	}
 
 	b = appendStringField(b, 4, localID)
+	b = appendBytesField(b, 7, encodeMessageInfo())
 	b = appendBytesField(b, 100, encodeRequestHeader())
 
 	return b

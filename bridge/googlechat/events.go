@@ -381,14 +381,9 @@ func (g *GoogleChat) chatMessageToEvent(ctx context.Context, post *googlechatcli
 	encodedID := encodeGoogleChatID(post.ID)
 	g.rememberMessageMeta(post.ID, post.ConversationID, post.TopicID, isDM)
 
-	parentID := ""
-	if post.RootMessageID != "" {
-		parentID = encodeGoogleChatID(post.RootMessageID)
-		g.rememberMessageMeta(post.RootMessageID, post.ConversationID, post.RootMessageID, isDM)
-	}
-
 	rc := g.cfg.Current()
-	text := g.formatIncomingText(post, eventKind, parentID, rc)
+	parentID := g.resolveIncomingParentID(ctx, post, isDM, rc.GoogleChat.ShortenRepliesTo)
+	text := g.formatIncomingText(ctx, post, eventKind, parentID, rc)
 
 	files := attachmentsToBridgeFiles(post.Attachments)
 	if text == "" && len(files) == 0 {
@@ -441,14 +436,62 @@ func (g *GoogleChat) buildMessageBridgeEvent(
 	}
 }
 
-func (g *GoogleChat) formatIncomingText(post *googlechatclient.ChatMessage, eventKind, parentID string, rc *config.RuntimeConfig) string {
+func (g *GoogleChat) resolveIncomingParentID(
+	ctx context.Context,
+	post *googlechatclient.ChatMessage,
+	isDM bool,
+	shorten int,
+) string {
+	quotedEncoded := ""
+	if post.QuotedMessage != nil && post.QuotedMessage.ID != "" {
+		quotedEncoded = g.cacheQuotedContext(ctx, post, isDM, shorten)
+	}
+
+	if post.RootMessageID != "" {
+		parentID := encodeGoogleChatID(post.RootMessageID)
+		g.rememberMessageMeta(post.RootMessageID, post.ConversationID, post.RootMessageID, isDM)
+
+		return parentID
+	}
+
+	return quotedEncoded
+}
+
+func (g *GoogleChat) cacheQuotedContext(
+	ctx context.Context,
+	post *googlechatclient.ChatMessage,
+	isDM bool,
+	shorten int,
+) string {
+	q := post.QuotedMessage
+	encoded := encodeGoogleChatID(q.ID)
+
+	topicID := q.TopicID
+	if topicID == "" {
+		topicID = q.ID
+	}
+
+	g.rememberMessageMeta(q.ID, post.ConversationID, topicID, isDM)
+
+	if q.Text != "" && !g.msgParentCache.Contains(encoded) {
+		quotedUser := g.resolveUserInfo(ctx, q.FromID, q.DisplayName)
+		g.cachePostContext(encoded, "", quotedUser, q.Text, shorten)
+	}
+
+	return encoded
+}
+
+func (g *GoogleChat) formatIncomingText(
+	ctx context.Context,
+	post *googlechatclient.ChatMessage,
+	eventKind, parentID string,
+	rc *config.RuntimeConfig,
+) string {
 	text := post.ContentText
 	useUnicode := rc.GoogleChat.Formatter.Unicode
 
-	if parentID != "" && !rc.GoogleChat.HideReplies {
-		if parent, ok := g.msgParentCache.Get(parentID); ok && parent.ParentUser != nil && parent.ReplyMsg != "" {
-			text = text + " (re @" + parent.ParentUser.Nick + ": " + parent.ReplyMsg + ")"
-		}
+	if !rc.GoogleChat.HideReplies {
+		text = g.appendReplyContext(ctx, text, post, parentID, rc.GoogleChat.ShortenRepliesTo)
 	}
 
 	switch eventKind {
@@ -456,6 +499,34 @@ func (g *GoogleChat) formatIncomingText(post *googlechatclient.ChatMessage, even
 		text = utils.AppendMessageSuffix(text, utils.FormatActionSuffix(utils.SuffixEdited, useUnicode))
 	case "post_deleted":
 		text = utils.AppendMessageSuffix(text, utils.FormatActionSuffix(utils.SuffixDeleted, useUnicode))
+	}
+
+	return text
+}
+
+func (g *GoogleChat) appendReplyContext(
+	ctx context.Context,
+	text string,
+	post *googlechatclient.ChatMessage,
+	parentID string,
+	shorten int,
+) string {
+	if post.QuotedMessage != nil && post.QuotedMessage.Text != "" {
+		summary := g.formatSummary(post.QuotedMessage.Text, shorten)
+		if summary != "" {
+			quotedUser := g.resolveUserInfo(ctx, post.QuotedMessage.FromID, post.QuotedMessage.DisplayName)
+			if quotedUser != nil && quotedUser.Nick != "" {
+				return text + " (re @" + quotedUser.Nick + ": " + summary + ")"
+			}
+
+			return text + " (re: " + summary + ")"
+		}
+	}
+
+	if parentID != "" {
+		if parent, ok := g.msgParentCache.Get(parentID); ok && parent.ParentUser != nil && parent.ReplyMsg != "" {
+			return text + " (re @" + parent.ParentUser.Nick + ": " + parent.ReplyMsg + ")"
+		}
 	}
 
 	return text

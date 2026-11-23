@@ -76,6 +76,7 @@ type Client struct {
 	OnChannelNameResolved func(channelID, name string)
 	OnTokenUpdate         func(state TokenState)
 	OnAuthPrompt          func(prompt AuthPrompt)
+	ResolveMention        func(token string) (userID, displayName string)
 
 	ForceSyncOnReconnect bool
 	CacheClearCutoff     time.Duration
