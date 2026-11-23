@@ -74,11 +74,11 @@ func main() {
 	pflag.Parse()
 
 	if flag.Lookup("version").Value.String() == "true" {
-		fmt.Printf("%s %s %s (%s)\n", project, version, githash, buildFeatures())
+		fmt.Printf("%s %s %s %s\n", project, version, githash, buildFeatures())
 		return
 	}
 
-	logger.Infof("Running version %s %s (%s)", version, githash, buildFeatures())
+	logger.Infof("Running version %s %s %s", version, githash, buildFeatures())
 
 	if strings.Contains(version, "-dev") {
 		logger.Infof("WARNING: THIS IS A DEVELOPMENT VERSION. Things may break.")
@@ -501,13 +501,19 @@ func start(socket net.Listener) {
 }
 
 func buildFeatures() string {
-	var features []string
+	var (
+		tags     []string
+		enabled  []string
+		disabled []string
+		hasGoolm bool
+	)
 
 	if info, ok := debug.ReadBuildInfo(); ok {
 		for _, setting := range info.Settings {
 			if setting.Key == "-tags" {
-				if slices.Contains(strings.Split(setting.Value, ","), "goolm") {
-					features = append(features, "goolm")
+				if setting.Value != "" {
+					tags = strings.Split(setting.Value, ",")
+					hasGoolm = slices.Contains(tags, "goolm")
 				}
 
 				break
@@ -515,7 +521,32 @@ func buildFeatures() string {
 		}
 	}
 
-	features = append(features, aiFeature)
+	if hasGoolm {
+		enabled = append(enabled, "E2EE")
+	} else {
+		disabled = append(disabled, "E2EE")
+	}
 
-	return strings.Join(features, ", ")
+	if aiEnabled {
+		enabled = append(enabled, "AI")
+	} else {
+		disabled = append(disabled, "AI")
+	}
+
+	var statusParts []string
+	if len(enabled) > 0 {
+		statusParts = append(statusParts, "enabled: "+strings.Join(enabled, ", "))
+	}
+
+	if len(disabled) > 0 {
+		statusParts = append(statusParts, "disabled: "+strings.Join(disabled, ", "))
+	}
+
+	featureStatus := "[" + strings.Join(statusParts, "; ") + "]"
+
+	if len(tags) > 0 {
+		return "[" + strings.Join(tags, ", ") + "] " + featureStatus
+	}
+
+	return featureStatus
 }

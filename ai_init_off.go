@@ -7,7 +7,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-const aiFeature = "noai"
+const aiEnabled = false
 
 func setAILogger(*logrus.Entry) {}
 

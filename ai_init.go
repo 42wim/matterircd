@@ -12,7 +12,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-const aiFeature = "ai"
+const aiEnabled = true
 
 func setAILogger(l *logrus.Entry) {
 	ai.SetLogger(l)
