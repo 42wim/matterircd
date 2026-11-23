@@ -1,0 +1,570 @@
+package googlechatclient
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"slices"
+	"strings"
+	"time"
+)
+
+const (
+	presenceBatchSize      = 50
+	memberBatchSize        = 50
+	presenceCacheTTL       = 2 * time.Minute
+	freshStatusMinInterval = 30 * time.Second
+	defaultDndHours        = 24
+
+	statusOnline  = "online"
+	statusAway    = "away"
+	statusDND     = "dnd"
+	statusOffline = "offline"
+)
+
+// CacheUser inserts or merges a user profile into the local cache.
+func (c *Client) CacheUser(u *User) {
+	if u == nil || u.ID == "" {
+		return
+	}
+
+	c.Users.mu.Lock()
+	defer c.Users.mu.Unlock()
+
+	existing := c.Users.users[u.ID]
+	if existing == nil {
+		cp := *u
+		c.Users.users[u.ID] = &cp
+
+		return
+	}
+
+	mergeUserFields(existing, u)
+}
+
+func mergeUserFields(dst, src *User) {
+	if src.DisplayName != "" {
+		dst.DisplayName = src.DisplayName
+	}
+
+	if src.FirstName != "" {
+		dst.FirstName = src.FirstName
+	}
+
+	if src.LastName != "" {
+		dst.LastName = src.LastName
+	}
+
+	if src.Email != "" {
+		dst.Email = src.Email
+	}
+
+	if src.AvatarURL != "" {
+		dst.AvatarURL = src.AvatarURL
+	}
+
+	if src.OrganizationID != "" {
+		dst.OrganizationID = src.OrganizationID
+	}
+
+	if src.OrganizationName != "" {
+		dst.OrganizationName = src.OrganizationName
+	}
+
+	if src.IsBot {
+		dst.IsBot = true
+	}
+
+	if src.IsExternal {
+		dst.IsExternal = true
+	}
+
+	if src.IsConsumer {
+		dst.IsConsumer = true
+	}
+}
+
+// GetUser returns a copy of the cached user profile for id, or nil.
+func (c *Client) GetUser(id string) *User {
+	if id == "" {
+		return nil
+	}
+
+	c.Users.mu.RLock()
+	defer c.Users.mu.RUnlock()
+
+	u := c.Users.users[id]
+	if u == nil {
+		return nil
+	}
+
+	cp := *u
+
+	return &cp
+}
+
+// GetUsers returns copies of all cached user profiles.
+func (c *Client) GetUsers() []*User {
+	c.Users.mu.RLock()
+	defer c.Users.mu.RUnlock()
+
+	out := make([]*User, 0, len(c.Users.users))
+
+	for _, u := range c.Users.users {
+		if u != nil {
+			cp := *u
+			out = append(out, &cp)
+		}
+	}
+
+	return out
+}
+
+// GetUserCount returns the number of cached user profiles.
+func (c *Client) GetUserCount() int {
+	c.Users.mu.RLock()
+	defer c.Users.mu.RUnlock()
+
+	return len(c.Users.users)
+}
+
+// GetUserByEmail finds a cached user by case-insensitive email address.
+func (c *Client) GetUserByEmail(email string) *User {
+	target := strings.ToLower(strings.TrimSpace(email))
+	if target == "" {
+		return nil
+	}
+
+	c.Users.mu.RLock()
+	defer c.Users.mu.RUnlock()
+
+	for _, u := range c.Users.users {
+		if u != nil && strings.EqualFold(u.Email, target) {
+			cp := *u
+
+			return &cp
+		}
+	}
+
+	return nil
+}
+
+// ResolveUsers batch-fetches missing user profiles via get_members.
+func (c *Client) ResolveUsers(ctx context.Context, ids []string) (map[string]*User, error) {
+	result := make(map[string]*User, len(ids))
+
+	var missing []string
+
+	for _, id := range dedupStrings(ids) {
+		if u := c.GetUser(id); u != nil && u.DisplayName != "" {
+			result[id] = u
+
+			continue
+		}
+
+		missing = append(missing, id)
+	}
+
+	for chunk := range slices.Chunk(missing, memberBatchSize) {
+		respBytes, err := c.doProto(ctx, "get_members", encodeGetMembersRequest(chunk))
+		if err != nil {
+			return result, fmt.Errorf("googlechatclient: get_members: %w", err)
+		}
+
+		users, err := decodeGetMembersResponse(respBytes)
+		if err != nil {
+			return result, fmt.Errorf("googlechatclient: decode get_members: %w", err)
+		}
+
+		for _, pu := range users {
+			u := protoUserToUser(pu)
+			if u == nil {
+				continue
+			}
+
+			c.CacheUser(u)
+			result[u.ID] = c.GetUser(u.ID)
+		}
+	}
+
+	return result, nil
+}
+
+// SearchUsers searches cached users by display name, email, or user ID.
+func (c *Client) SearchUsers(_ context.Context, query string, limit int) ([]*User, error) {
+	needle := strings.ToLower(strings.TrimSpace(query))
+	if needle == "" {
+		return nil, nil
+	}
+
+	if limit <= 0 {
+		limit = 25
+	}
+
+	users := c.GetUsers()
+
+	var out []*User
+
+	for _, u := range users {
+		if strings.Contains(strings.ToLower(u.DisplayName), needle) ||
+			strings.Contains(strings.ToLower(u.Email), needle) ||
+			strings.Contains(strings.ToLower(u.ID), needle) {
+			out = append(out, u)
+
+			if len(out) >= limit {
+				break
+			}
+		}
+	}
+
+	return out, nil
+}
+
+// GetPresence returns the cached presence for userID if fresh, otherwise fetches it.
+func (c *Client) GetPresence(ctx context.Context, userID string) (*Presence, error) {
+	if userID == "" {
+		return nil, errors.New("googlechatclient: empty user ID")
+	}
+
+	c.Users.mu.RLock()
+	cached := c.Users.presences[userID]
+	c.Users.mu.RUnlock()
+
+	if cached != nil && time.Since(time.UnixMilli(cached.UpdatedAt)) < presenceCacheTTL {
+		cp := *cached
+
+		return &cp, nil
+	}
+
+	return c.GetPresenceFresh(ctx, userID)
+}
+
+// GetPresenceFresh queries get_user_presence directly unless the user's cached
+// presence was fetched within freshStatusMinInterval (30s, matching matterclient).
+func (c *Client) GetPresenceFresh(ctx context.Context, userID string) (*Presence, error) {
+	if userID == "" {
+		return nil, errors.New("googlechatclient: empty user ID")
+	}
+
+	c.Users.mu.RLock()
+	cached := c.Users.presences[userID]
+	c.Users.mu.RUnlock()
+
+	if cached != nil && time.Since(time.UnixMilli(cached.UpdatedAt)) < freshStatusMinInterval {
+		cp := *cached
+
+		return &cp, nil
+	}
+
+	res, err := c.GetPresences(ctx, []string{userID})
+	if err != nil {
+		return nil, err
+	}
+
+	p := res[userID]
+	if p == nil {
+		return &Presence{
+			UserID:       userID,
+			Availability: statusOffline,
+			UpdatedAt:    time.Now().UnixMilli(),
+		}, nil
+	}
+
+	return p, nil
+}
+
+// GetPresences batch-queries user presence via get_user_presence.
+func (c *Client) GetPresences(ctx context.Context, userIDs []string) (map[string]*Presence, error) {
+	unique := dedupStrings(userIDs)
+	out := make(map[string]*Presence, len(unique))
+
+	for chunk := range slices.Chunk(unique, presenceBatchSize) {
+		respBytes, err := c.doProto(ctx, "get_user_presence", encodeGetUserPresenceRequest(chunk))
+		if err != nil {
+			return out, fmt.Errorf("googlechatclient: get_user_presence: %w", err)
+		}
+
+		items, err := decodeGetUserPresenceResponse(respBytes)
+		if err != nil {
+			return out, fmt.Errorf("googlechatclient: decode get_user_presence: %w", err)
+		}
+
+		for _, pp := range items {
+			p := protoPresenceToPresence(pp)
+			if p == nil {
+				continue
+			}
+
+			c.cachePresence(p)
+			cp := *p
+			out[p.UserID] = &cp
+		}
+	}
+
+	return out, nil
+}
+
+func (c *Client) cachePresence(p *Presence) {
+	if p == nil || p.UserID == "" {
+		return
+	}
+
+	c.Users.mu.Lock()
+	cp := *p
+	c.Users.presences[p.UserID] = &cp
+	c.Users.mu.Unlock()
+}
+
+// MapAvailabilityToStatus converts a Google Chat Presence into a matterircd-compatible
+// status string ("online", "dnd", "away", "offline").
+func MapAvailabilityToStatus(p *Presence) string {
+	if p == nil {
+		return statusOffline
+	}
+
+	if p.DND {
+		return statusDND
+	}
+
+	switch strings.ToLower(p.Availability) {
+	case statusOnline, "active":
+		return statusOnline
+	case statusAway, "inactive":
+		return statusAway
+	case statusDND:
+		return statusDND
+	default:
+		return statusOffline
+	}
+}
+
+// SetPresence updates the signed-in user's availability or DND state in Google Chat.
+func (c *Client) SetPresence(ctx context.Context, status string) error {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case statusOnline, "available", "active", "":
+		_, err := c.doProto(ctx, "set_dnd_duration", encodeSetDndDurationRequest(false, 0))
+		if err != nil {
+			return fmt.Errorf("googlechatclient: clear DND: %w", err)
+		}
+
+		_, err = c.doProto(ctx, "set_presence_shared", encodeSetPresenceSharedRequest(true))
+		if err != nil {
+			return fmt.Errorf("googlechatclient: set_presence_shared(true): %w", err)
+		}
+
+		return nil
+	case statusDND, "busy", "do_not_disturb":
+		durUsec := (defaultDndHours * time.Hour).Microseconds()
+
+		_, err := c.doProto(ctx, "set_dnd_duration", encodeSetDndDurationRequest(true, durUsec))
+		if err != nil {
+			return fmt.Errorf("googlechatclient: set_dnd_duration: %w", err)
+		}
+
+		return nil
+	case statusAway, statusOffline, "invisible":
+		_, err := c.doProto(ctx, "set_presence_shared", encodeSetPresenceSharedRequest(false))
+		if err != nil {
+			return fmt.Errorf("googlechatclient: set_presence_shared(false): %w", err)
+		}
+
+		return nil
+	default:
+		return fmt.Errorf("googlechatclient: unsupported status %q", status)
+	}
+}
+
+// SetStatusNote sets or clears the signed-in user's Google Chat custom status.
+func (c *Client) SetStatusNote(ctx context.Context, emoji, message string, expiry time.Time) error {
+	reqBytes := encodeSetCustomStatusRequest(strings.TrimSpace(emoji), strings.TrimSpace(message), expiry)
+
+	_, err := c.doProto(ctx, "set_custom_status", reqBytes)
+	if err != nil {
+		return fmt.Errorf("googlechatclient: set_custom_status: %w", err)
+	}
+
+	return nil
+}
+
+// GetStatus returns the normalized status string for userID, including any
+// active custom status text in the form "<base>: <note>".
+func (c *Client) GetStatus(ctx context.Context, userID string) string {
+	p, err := c.GetPresence(ctx, userID)
+	if err != nil || p == nil {
+		return statusOffline
+	}
+
+	return formatStatusWithNote(p)
+}
+
+// GetStatuses batch-fetches normalized status strings for userIDs.
+func (c *Client) GetStatuses(ctx context.Context, userIDs []string) map[string]string {
+	presences, err := c.GetPresences(ctx, userIDs)
+	if err != nil {
+		c.logger.Debugf("Batch presence lookup failed: %v", err)
+	}
+
+	out := make(map[string]string, len(userIDs))
+
+	for _, id := range userIDs {
+		if p := presences[id]; p != nil {
+			out[id] = formatStatusWithNote(p)
+		} else {
+			out[id] = statusOffline
+		}
+	}
+
+	return out
+}
+
+// GetStatusNote returns the active custom status note for userID, or "".
+func (c *Client) GetStatusNote(ctx context.Context, userID string) string {
+	p, err := c.GetPresence(ctx, userID)
+	if err != nil || p == nil {
+		return ""
+	}
+
+	return FormatStatusNote(p)
+}
+
+// FormatStatusNote formats a Presence's non-expired custom emoji + status text.
+func FormatStatusNote(p *Presence) string {
+	if p == nil {
+		return ""
+	}
+
+	if p.CustomStatusExpiresAt > 0 && time.Now().UnixMilli() > p.CustomStatusExpiresAt {
+		return ""
+	}
+
+	emoji := strings.TrimSpace(p.CustomEmoji)
+	text := strings.TrimSpace(p.CustomStatus)
+
+	switch {
+	case emoji != "" && text != "":
+		return emoji + " " + text
+	case text != "":
+		return text
+	default:
+		return emoji
+	}
+}
+
+func formatStatusWithNote(p *Presence) string {
+	base := MapAvailabilityToStatus(p)
+
+	note := FormatStatusNote(p)
+	if note != "" {
+		return fmt.Sprintf("%s: %s", base, note)
+	}
+
+	return base
+}
+
+// GetUserAvatarURL returns the cached avatar URL for userID, or "".
+func (c *Client) GetUserAvatarURL(userID string) string {
+	u := c.GetUser(userID)
+	if u == nil {
+		return ""
+	}
+
+	return u.AvatarURL
+}
+
+func protoUserToUser(pu *protoUser) *User {
+	if pu == nil || pu.ID == "" {
+		return nil
+	}
+
+	name := strings.TrimSpace(pu.Name)
+	if name == "" {
+		name = strings.TrimSpace(pu.FirstName + " " + pu.LastName)
+	}
+
+	return &User{
+		ID:             pu.ID,
+		DisplayName:    name,
+		FirstName:      strings.TrimSpace(pu.FirstName),
+		LastName:       strings.TrimSpace(pu.LastName),
+		Email:          strings.TrimSpace(pu.Email),
+		AvatarURL:      strings.TrimSpace(pu.AvatarURL),
+		OrganizationID: strings.TrimSpace(pu.OrganizationID),
+		IsBot:          pu.IsBot,
+		IsConsumer:     pu.IsConsumer,
+	}
+}
+
+func protoPresenceToPresence(pp *protoUserPresence) *Presence {
+	if pp == nil || pp.UserID == "" {
+		return nil
+	}
+
+	avail := statusOffline
+
+	switch pp.Presence {
+	case protoPresenceActive:
+		avail = statusOnline
+	case protoPresenceInactive:
+		avail = statusAway
+	}
+
+	p := &Presence{
+		UserID:       pp.UserID,
+		Availability: avail,
+		DND:          pp.DND,
+		ActiveUntil:  usecToMillis(pp.ActiveUntilUsec),
+		UpdatedAt:    time.Now().UnixMilli(),
+	}
+
+	if pp.Status != nil {
+		applyUserStatusToPresence(p, pp.Status)
+	}
+
+	return p
+}
+
+func applyUserStatusToPresence(p *Presence, st *protoUserStatus) {
+	if st == nil {
+		return
+	}
+
+	if st.DND {
+		p.DND = true
+	}
+
+	p.CustomEmoji = strings.TrimSpace(st.CustomEmoji)
+	p.CustomStatus = strings.TrimSpace(st.CustomText)
+	p.CustomStatusExpiresAt = usecToMillis(st.CustomExpiryUsec)
+}
+
+func (c *Client) applyUserStatusUpdate(st *protoUserStatus) *Presence {
+	if st == nil || st.UserID == "" {
+		return nil
+	}
+
+	c.Users.mu.Lock()
+	defer c.Users.mu.Unlock()
+
+	existing := c.Users.presences[st.UserID]
+
+	var p Presence
+	if existing != nil {
+		p = *existing
+	} else {
+		p = Presence{
+			UserID:       st.UserID,
+			Availability: statusOnline,
+		}
+	}
+
+	p.DND = st.DND
+	p.CustomEmoji = strings.TrimSpace(st.CustomEmoji)
+	p.CustomStatus = strings.TrimSpace(st.CustomText)
+	p.CustomStatusExpiresAt = usecToMillis(st.CustomExpiryUsec)
+	p.UpdatedAt = time.Now().UnixMilli()
+
+	cp := p
+	c.Users.presences[st.UserID] = &cp
+
+	return &p
+}

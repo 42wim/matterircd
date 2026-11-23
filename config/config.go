@@ -79,6 +79,7 @@ type RuntimeConfig struct {
 	Mastodon   MastodonConfig
 	Matrix     MatrixConfig
 	MSTeams    MSTeamsConfig
+	GoogleChat GoogleChatConfig
 	RocketChat RocketChatConfig
 }
 
@@ -268,6 +269,25 @@ type MSTeamsConfig struct {
 
 	SkipTLSVerify        bool
 	PrefixMainTeam       bool
+	ForceSyncOnReconnect bool
+	PollFallback         bool
+}
+
+type GoogleChatConfig struct {
+	SharedConfig
+
+	Bridge    BridgeConfig
+	Formatter FormatterConfig
+
+	Disable bool
+
+	GooglechatclientLogLevel string
+
+	AccountType   string // "auto", "work", or "personal"
+	AuthUser      int
+	TokenSaveFile string
+
+	SkipTLSVerify        bool
 	ForceSyncOnReconnect bool
 	PollFallback         bool
 }
@@ -483,6 +503,26 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 		DirectoryURL: c.v.GetString("msteams.DirectoryURL"),
 	}
 
+	gcBridge := BridgeConfig{
+		Restrict: append([]string(nil), c.v.GetStringSlice("googlechat.Restrict")...),
+
+		JoinOnly:    append([]string(nil), c.v.GetStringSlice("googlechat.JoinOnly")...),
+		JoinExclude: append([]string(nil), c.v.GetStringSlice("googlechat.JoinExclude")...),
+		JoinInclude: append([]string(nil), c.v.GetStringSlice("googlechat.JoinInclude")...),
+		JoinDM:      c.v.GetBool("googlechat.JoinDM"),
+
+		ShowJoinPart:   c.v.GetBool("googlechat.ShowJoinPart"),
+		ShowOnlyJoined: c.v.GetBool("googlechat.ShowOnlyJoined"),
+		PartFake:       c.v.GetBool("googlechat.PartFake"),
+
+		PrefixContext:    c.v.GetBool("googlechat.PrefixContext"),
+		SuffixContext:    c.v.GetBool("googlechat.SuffixContext"),
+		ShowContextMulti: c.v.GetBool("googlechat.ShowContextMulti"),
+		ThreadContext:    c.v.GetString("googlechat.ThreadContext"),
+
+		DirectoryURL: c.v.GetString("googlechat.DirectoryURL"),
+	}
+
 	rcBridge := BridgeConfig{
 		Restrict: append([]string(nil), c.v.GetStringSlice("rocketchat.Restrict")...),
 
@@ -602,6 +642,26 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 		EnableIRCHexColors: c.v.GetBool("msteams.EnableIRCHexColors"),
 
 		PreserveNewLines: c.v.GetString("msteams.PreserveNewLines"),
+	}
+	gcFormatter := FormatterConfig{
+		DisableEmoji: c.v.GetBool("googlechat.DisableEmoji"),
+		CustomEmoji:  parseCustomEmoji(c.v.GetStringSlice("googlechat.CustomEmoji")),
+
+		DisableMarkdown:           c.v.GetBool("googlechat.DisableMarkdown"),
+		DisableMarkdownBlockQuote: c.v.GetBool("googlechat.DisableMarkdownBlockQuote"),
+		MarkdownBlockQuoteChar:    unquoteString(c.v.GetString("googlechat.MarkdownBlockQuoteChar")),
+		MarkdownInlineCode:        unquoteString(c.v.GetString("googlechat.MarkdownInlineCode")),
+
+		DisableCodeBlockPrefix: c.v.GetBool("googlechat.DisableCodeBlockPrefix"),
+		CodeBlockPrefix:        unquoteString(c.v.GetString("googlechat.CodeBlockPrefix")),
+		CodeBlockSeparator:     unquoteString(c.v.GetString("googlechat.CodeBlockSeparator")),
+		SyntaxHighlighting:     c.v.GetString("googlechat.SyntaxHighlighting"),
+
+		Unicode: c.v.GetBool("googlechat.Unicode"),
+
+		EnableIRCHexColors: c.v.GetBool("googlechat.EnableIRCHexColors"),
+
+		PreserveNewLines: c.v.GetString("googlechat.PreserveNewLines"),
 	}
 	rcFormatter := FormatterConfig{
 		DisableEmoji: c.v.GetBool("rocketchat.DisableEmoji"),
@@ -727,6 +787,24 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 			PrefixMainTeam:       c.v.GetBool("msteams.PrefixMainTeam"),
 			ForceSyncOnReconnect: c.v.GetBool("msteams.ForceSyncOnReconnect"),
 			PollFallback:         c.v.GetBool("msteams.PollFallback"),
+		},
+
+		GoogleChat: GoogleChatConfig{
+			Bridge:       gcBridge,
+			Formatter:    gcFormatter,
+			SharedConfig: c.buildSharedConfig("googlechat"),
+
+			Disable: c.v.GetBool("googlechat.Disable"),
+
+			GooglechatclientLogLevel: c.v.GetString("googlechat.GooglechatclientLogLevel"),
+
+			AccountType:   c.v.GetString("googlechat.AccountType"),
+			AuthUser:      c.v.GetInt("googlechat.AuthUser"),
+			TokenSaveFile: c.v.GetString("googlechat.TokenSaveFile"),
+
+			SkipTLSVerify:        c.v.GetBool("googlechat.SkipTLSVerify"),
+			ForceSyncOnReconnect: c.v.GetBool("googlechat.ForceSyncOnReconnect"),
+			PollFallback:         c.v.GetBool("googlechat.PollFallback"),
 		},
 
 		RocketChat: RocketChatConfig{
@@ -950,6 +1028,10 @@ func (c *Config) MSTeams() *MSTeamsConfig {
 	return &c.Current().MSTeams
 }
 
+func (c *Config) GoogleChat() *GoogleChatConfig {
+	return &c.Current().GoogleChat
+}
+
 func (c *Config) RocketChat() *RocketChatConfig {
 	return &c.Current().RocketChat
 }
@@ -976,6 +1058,7 @@ func Load(cfgfile string, flags *pflag.FlagSet) (*Config, error) {
 	v.SetDefault("slack.JoinReplayDuration", "15m")
 	v.SetDefault("matrix.JoinReplayDuration", "15m")
 	v.SetDefault("msteams.JoinReplayDuration", "15m")
+	v.SetDefault("googlechat.JoinReplayDuration", "15m")
 	v.SetDefault("matrix.ReplaceColonChar", "[]")
 	v.SetDefault("rocketchat.JoinReplayDuration", "15m")
 
