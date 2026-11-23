@@ -549,6 +549,77 @@ PrefixContext = false
 
 
 #############################
+#### GOOGLE CHAT EXAMPLE ####
+#############################
+# Connect to matterircd and:
+#   /msg googlechat login [work|personal|<authuser>]
+#   /msg googlechat login cookie <cookie_string_or_json> [work|personal]
+# Browser session cookies from chat.google.com (SID, HSID, SSID, OSID, SAPISID,
+# COMPASS) are recommended to be stored in TokenSaveFile (0600 JSON or raw Cookie
+# header) since full Google cookie headers often exceed IRC's 512-byte line limit.
+[googlechat]
+#Disable Google Chat support
+#Disable = false
+
+#Account type: "auto", "work" (Google Workspace), or "personal" (@gmail.com)
+#AccountType = "auto"
+
+#Optional Google Multi-Login account index (/u/<n>/ and X-Goog-Authuser header, default 0)
+#AuthUser = 0
+
+#Path to a 0600 file holding browser cookies and persisted XSRF/session state across restarts
+#TokenSaveFile = "matterircd-googlechat-tokens.json"
+
+#Restrict logins to specific account types ("work", "personal") or AuthUser indices
+#Restrict = ["work", "personal"]
+
+#Skip TLS verification (not recommended)
+#SkipTLSVerify = false
+
+#Force a full Space/DM resync after WebChannel reconnects
+#ForceSyncOnReconnect = false
+
+#Fall back to periodic polling if WebChannel streaming repeatedly fails
+#PollFallback = false
+
+#Append a URL directory to WHOIS for each user. {nick}, {username} and {email} are replaced.
+#DirectoryURL = "https://directory.mydomain.local/people/{nick}"
+
+#Mentions & formatting
+#ShowMentions = false
+#DisableDefaultMentions = false
+#HideReplies = false
+#ShortenRepliesTo = 0
+#ShowOwnReactions = false
+#HideReactions = false
+#DisableShowOwnModified = false
+#DisableEmoji = false
+#DisableMarkdown = false
+#Unicode = false
+#EnableIRCHexColors = false
+
+#Threading, replay & channel sync (set ThreadContext = "googlechat" for native 13-char gc... @@id refs)
+#PrefixContext = false
+#SuffixContext = false
+#ShowContextMulti = false
+#ThreadContext = "googlechat"
+#ShowJoinPart = false
+#ShowOnlyJoined = false
+#PartFake = false
+#JoinDM = false
+#JoinExclude = ["#general"]
+#JoinInclude = ["#engineering-.*"]
+#DisableAutoView = false
+#ReplayStrategy = "hybrid"
+#ReplayExclude = []
+#EnableLazyJoin = false
+#LazyJoinExclude = []
+#GooglechatclientLogLevel = "info"
+#Optional per-protocol DB path; falls back to [mattermost] LastViewedSaveFile when unset.
+#LastViewedSaveFile = "matterircd-googlechat-lastsaved.db"
+
+
+#############################
 ##### ROCKET.CHAT EXAMPLE ###
 #############################
 # Connect to matterircd and /msg rocketchat login <server> <user> <pass> [2fa=<code>]

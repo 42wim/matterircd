@@ -67,6 +67,7 @@ type GoogleChat struct {
 	msgParentCache   *lru.Cache[string, CachedPost]
 	msgLastSentCache *lru.Cache[string, string]
 	msgMetaCache     *lru.Cache[string, msgMeta]
+	replayedMsgCache *lru.Cache[string, struct{}]
 
 	namesMu  sync.RWMutex
 	chanByID map[string]string
@@ -135,6 +136,7 @@ func New(
 	g.msgParentCache, _ = lru.New[string, CachedPost](256)
 	g.msgLastSentCache, _ = lru.New[string, string](128)
 	g.msgMetaCache, _ = lru.New[string, msgMeta](msgMetaCacheSize)
+	g.replayedMsgCache, _ = lru.New[string, struct{}](1024)
 
 	gc := g.buildClient(rc, cred, onWsConnect, onWsDisconnect, onAuthPrompt)
 
@@ -851,8 +853,12 @@ func (g *GoogleChat) GetUserChannels(_ context.Context, userID string) ([]string
 	out := make([]string, 0)
 
 	for _, conv := range convs {
+		if conv.IsHidden || conv.Type == googlechatclient.ConversationDM || conv.Type == googlechatclient.ConversationSelfNote {
+			continue
+		}
+
 		if slices.Contains(conv.Members, userID) {
-			out = append(out, conv.ID)
+			out = append(out, g.ircChannelName(conv.ID))
 		}
 	}
 
@@ -994,6 +1000,12 @@ func (g *GoogleChat) GetPostsSince(ctx context.Context, channelID string, since 
 		logger.Debugf("GetPostsSince(%s) failed: %v", channelID, err)
 
 		return nil
+	}
+
+	for _, msg := range msgs {
+		if msg != nil && msg.ID != "" {
+			g.replayedMsgCache.Add(msg.ID, struct{}{})
+		}
 	}
 
 	return g.chatMessagesToEvents(ctx, msgs, "replay")

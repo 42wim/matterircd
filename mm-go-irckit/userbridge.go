@@ -20,6 +20,7 @@ import (
 	bolt "go.etcd.io/bbolt"
 
 	"github.com/42wim/matterircd/bridge"
+	"github.com/42wim/matterircd/bridge/googlechat"
 	"github.com/42wim/matterircd/bridge/mastodon"
 	"github.com/42wim/matterircd/bridge/matrix"
 	"github.com/42wim/matterircd/bridge/mattermost"
@@ -29,6 +30,7 @@ import (
 	"github.com/42wim/matterircd/config"
 	"github.com/42wim/matterircd/utils"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/matterbridge/googlechatclient"
 	"github.com/matterbridge/msteamsclient"
 	"github.com/sirupsen/logrus"
 	"github.com/sorcix/irc"
@@ -1971,8 +1973,8 @@ func (u *User) replayHistoryEvents(brchannel *bridge.ChannelInfo, since int64, l
 			logger.Errorf("something wrong with GetReplayEvents for %s for channel %s (%s)", u.Nick, channame, brchannel.ID)
 		}
 
-		// Only Matrix, MSTeams, and RocketChat report a failed fetch as nil, an empty result is not one.
-		return events != nil || (u.br.Protocol() != serviceMatrix && u.br.Protocol() != serviceMsTeams && u.br.Protocol() != serviceRocketChat)
+		// Only Matrix, MSTeams, GoogleChat, and RocketChat report a failed fetch as nil, an empty result is not one.
+		return events != nil || (u.br.Protocol() != serviceMatrix && u.br.Protocol() != serviceMsTeams && u.br.Protocol() != serviceGoogleChat && u.br.Protocol() != serviceRocketChat)
 	}
 
 	showReplayHdr := true
@@ -2365,7 +2367,7 @@ func (u *User) mayJoin(channelID string) bool {
 
 // hasSharedCfg reports whether the bridge takes the options of config.SharedConfig.
 func (u *User) hasSharedCfg() bool {
-	return u.br != nil && (u.br.Protocol() == serviceMattermost || u.br.Protocol() == serviceMatrix || u.br.Protocol() == serviceSlack || u.br.Protocol() == serviceMsTeams || u.br.Protocol() == serviceRocketChat)
+	return u.br != nil && (u.br.Protocol() == serviceMattermost || u.br.Protocol() == serviceMatrix || u.br.Protocol() == serviceSlack || u.br.Protocol() == serviceMsTeams || u.br.Protocol() == serviceGoogleChat || u.br.Protocol() == serviceRocketChat)
 }
 
 // sharedCfg returns the shared options of the bridge's protocol, Mattermost's for the others.
@@ -2378,6 +2380,8 @@ func (u *User) sharedCfg() *config.SharedConfig {
 			return &u.cfg.Slack().SharedConfig
 		case serviceMsTeams:
 			return &u.cfg.MSTeams().SharedConfig
+		case serviceGoogleChat:
+			return &u.cfg.GoogleChat().SharedConfig
 		case serviceRocketChat:
 			return &u.cfg.RocketChat().SharedConfig
 		}
@@ -2431,6 +2435,9 @@ func (u *User) isValidServer(server, protocol string) bool {
 	case serviceMsTeams:
 		restrict = u.cfg.MSTeams().Bridge.Restrict
 
+	case serviceGoogleChat:
+		restrict = u.cfg.GoogleChat().Bridge.Restrict
+
 	case serviceRocketChat:
 		restrict = u.cfg.RocketChat().Bridge.Restrict
 
@@ -2466,6 +2473,8 @@ func (u *User) serviceForPass(pass []string) string {
 		return serviceMastodon
 	case !u.cfg.MSTeams().Disable && slices.Contains(u.cfg.MSTeams().Bridge.Restrict, pass[0]):
 		return serviceMsTeams
+	case !u.cfg.GoogleChat().Disable && slices.Contains(u.cfg.GoogleChat().Bridge.Restrict, pass[0]):
+		return serviceGoogleChat
 	case slices.Contains(u.cfg.RocketChat().Bridge.Restrict, pass[0]):
 		return serviceRocketChat
 	}
@@ -2497,6 +2506,14 @@ func (u *User) openBridge(protocol string, eventChan chan *bridge.Event, onWsErr
 		}
 
 		br, _, err := msteams.New(u.ctx, u.cfg, u.Credentials, eventChan, u.addUsersToChannels, onWsError, onAuthPrompt)
+
+		return br, err
+	case serviceGoogleChat:
+		onAuthPrompt := func(prompt googlechatclient.AuthPrompt) {
+			u.sendServerNotice(prompt.Message, serviceGoogleChat)
+		}
+
+		br, _, err := googlechat.New(u.ctx, u.cfg, u.Credentials, eventChan, u.addUsersToChannels, onWsError, onAuthPrompt)
 
 		return br, err
 	case serviceRocketChat:
@@ -2748,7 +2765,7 @@ func (u *User) formatContextMessage(ts, threadMsgID, msg string) string {
 func isNativeThreadContext(tc string) bool {
 	base := strings.TrimSuffix(tc, "+post")
 
-	return base == serviceMattermost || base == serviceMatrix || base == serviceSlack || base == serviceMsTeams || base == serviceRocketChat
+	return base == serviceMattermost || base == serviceMatrix || base == serviceSlack || base == serviceMsTeams || base == serviceGoogleChat || base == serviceRocketChat
 }
 
 func (u *User) prefixContext(channelID, messageID, parentID, event string) string {
@@ -3619,6 +3636,8 @@ func (u *User) protocolServerName(service ...string) string {
 		return "Mastodon"
 	case serviceMsTeams:
 		return "MSTeams"
+	case serviceGoogleChat:
+		return "GoogleChat"
 	case serviceRocketChat:
 		return "Rocket.Chat"
 	default:

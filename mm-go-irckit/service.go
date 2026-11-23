@@ -140,57 +140,68 @@ func loginMatrix(u *User, toUser *User, args []string) {
 }
 
 const (
-	loginArgToken     = "token"
-	msTeamsLoginUsage = "usage: LOGIN [work|personal|<tenant>] | LOGIN refresh <refresh_token> [work|personal|<tenant>] | LOGIN token <skypetoken> [chat_service_url]"
+	loginArgToken        = "token"
+	loginArgCookie       = "cookie"
+	msTeamsLoginUsage    = "usage: LOGIN [work|personal|<tenant>] | LOGIN refresh <refresh_token> [work|personal|<tenant>] | LOGIN token <skypetoken> [chat_service_url]"
+	googleChatLoginUsage = "usage: LOGIN [work|personal|<authuser>] | LOGIN cookie <cookie_string_or_json> [work|personal]"
 )
 
 func loginMSTeams(u *User, toUser *User, args []string) {
-	wMsg := "Microsoft Teams support is very much EXPERIMENTAL and a work in progress. Use at your own risk."
-	u.respondService(toUser, "WARNING: "+wMsg, serviceMsTeams)
+	cred, ok := parseMSTeamsCreds(args)
+	loginExperimentalService(u, toUser, serviceMsTeams, "Microsoft Teams", msTeamsLoginUsage, u.cfg.MSTeams().Disable, cred, ok)
+}
+
+func loginGoogleChat(u *User, toUser *User, args []string) {
+	cred, ok := parseGoogleChatCreds(args)
+	loginExperimentalService(u, toUser, serviceGoogleChat, "Google Chat", googleChatLoginUsage, u.cfg.GoogleChat().Disable, cred, ok)
+}
+
+func loginExperimentalService(u *User, toUser *User, service, displayName, usage string, disabled bool, cred bridge.Credentials, ok bool) {
+	wMsg := displayName + " support is very much EXPERIMENTAL and a work in progress. Use at your own risk."
+	u.respondService(toUser, "WARNING: "+wMsg, service)
 	logger.Warn(wMsg)
 
-	if u.cfg.MSTeams().Disable {
-		u.respondService(toUser, "Microsoft Teams support is disabled", serviceMsTeams)
+	if disabled {
+		u.respondService(toUser, displayName+" support is disabled", service)
 
 		return
 	}
 
-	cred, ok := parseMSTeamsCreds(args)
 	if !ok {
-		u.respondService(toUser, msTeamsLoginUsage, serviceMsTeams)
+		u.respondService(toUser, usage, service)
 
 		return
 	}
 
-	if cred.Server != "" && !u.isValidServer(cred.Server, serviceMsTeams) {
-		u.respondService(toUser, "not allowed to connect to "+cred.Server, serviceMsTeams)
+	if cred.Server != "" && !u.isValidServer(cred.Server, service) {
+		u.respondService(toUser, "not allowed to connect to "+cred.Server, service)
 
 		return
 	}
 
 	if !u.inprogress.CompareAndSwap(false, true) {
-		u.respondService(toUser, "login or logout in progress. Please wait", serviceMsTeams)
+		u.respondService(toUser, "login or logout in progress. Please wait", service)
 
 		return
 	}
 	defer u.inprogress.Store(false)
 
 	if br := u.currentBridge(); br != nil && br.Connected() {
-		u.respondService(toUser, "already logged in to msteams. Please log out first", serviceMsTeams)
+		u.respondService(toUser, "already logged in to "+service+". Please log out first", service)
 
 		return
 	}
 
 	u.Credentials = cred
 
-	err := u.loginTo(serviceMsTeams)
+	err := u.loginTo(service)
 	if err != nil {
-		u.respondService(toUser, err.Error(), serviceMsTeams)
+		u.respondService(toUser, err.Error(), service)
 
 		return
 	}
 
-	u.finishLogin(toUser, serviceMsTeams)
+	u.finishLogin(toUser, service)
 }
 
 func parseMSTeamsCreds(args []string) (bridge.Credentials, bool) {
@@ -235,6 +246,54 @@ func parseMSTeamsCreds(args []string) (bridge.Credentials, bool) {
 
 		return cred, false
 	}
+}
+
+func parseGoogleChatCreds(args []string) (bridge.Credentials, bool) {
+	var cred bridge.Credentials
+
+	if len(args) == 0 {
+		return cred, true
+	}
+
+	first := strings.ToLower(strings.TrimSpace(args[0]))
+	if first == helpArg {
+		return cred, false
+	}
+
+	if first == loginArgCookie {
+		if len(args) < 2 {
+			return cred, false
+		}
+
+		rest := args[1:]
+		if len(rest) >= 2 {
+			last := strings.ToLower(strings.TrimSpace(rest[len(rest)-1]))
+			if last == "work" || last == "personal" {
+				cred.Server = last
+				rest = rest[:len(rest)-1]
+			}
+		}
+
+		cred.Login = loginArgCookie
+		cred.Token = strings.Join(rest, " ")
+
+		return cred, strings.TrimSpace(cred.Token) != ""
+	}
+
+	if len(args) == 1 {
+		if strings.Contains(args[0], "SID=") || strings.HasPrefix(args[0], "{") || strings.HasPrefix(args[0], "[") {
+			cred.Login = loginArgCookie
+			cred.Token = args[0]
+
+			return cred, true
+		}
+
+		cred.Server = args[0]
+
+		return cred, true
+	}
+
+	return cred, false
 }
 
 func loginRocketChat(u *User, toUser *User, args []string) {
@@ -348,6 +407,12 @@ func login(u *User, toUser *User, args []string, service string) {
 
 	if service == serviceMsTeams {
 		loginMSTeams(u, toUser, args)
+
+		return
+	}
+
+	if service == serviceGoogleChat {
+		loginGoogleChat(u, toUser, args)
 
 		return
 	}
@@ -539,7 +604,7 @@ func login(u *User, toUser *User, args []string, service string) {
 
 //nolint:funlen
 func replay(u *User, toUser *User, args []string, service string) {
-	if !slices.Contains([]string{serviceMattermost, serviceMatrix, serviceSlack, serviceMsTeams, serviceRocketChat}, service) {
+	if !slices.Contains([]string{serviceMattermost, serviceMatrix, serviceSlack, serviceMsTeams, serviceGoogleChat, serviceRocketChat}, service) {
 		u.MsgUser(toUser, "not implemented")
 		return
 	}
@@ -629,7 +694,7 @@ type postURLFormatter interface {
 
 //nolint:funlen,gocyclo
 func details(u *User, toUser *User, args []string, service string) {
-	if service != serviceMattermost && service != serviceMatrix && service != serviceSlack && service != serviceMsTeams && service != serviceRocketChat {
+	if service != serviceMattermost && service != serviceMatrix && service != serviceSlack && service != serviceMsTeams && service != serviceGoogleChat && service != serviceRocketChat {
 		u.MsgUser(toUser, "not implemented")
 		return
 	}
@@ -651,7 +716,7 @@ func details(u *User, toUser *User, args []string, service string) {
 	postlistURL := proto + "://" + u.Credentials.Server + "/" + u.Credentials.Team + "/pl/"
 
 	switch {
-	case service == serviceMatrix || service == serviceSlack || service == serviceMsTeams || service == serviceRocketChat:
+	case service == serviceMatrix || service == serviceSlack || service == serviceMsTeams || service == serviceGoogleChat || service == serviceRocketChat:
 		postID = u.br.NormalizePostID(strings.TrimPrefix(postID, "@@"))
 		postlistURL = ""
 
@@ -663,6 +728,8 @@ func details(u *User, toUser *User, args []string, service string) {
 				u.MsgUser(toUser, "e.g. DETAILS $abc123...")
 			case serviceMsTeams:
 				u.MsgUser(toUser, "e.g. DETAILS mt...")
+			case serviceGoogleChat:
+				u.MsgUser(toUser, "e.g. DETAILS gc...")
 			case serviceRocketChat:
 				u.MsgUser(toUser, "e.g. DETAILS f6TRc4aouCzgCxKFb")
 			default:
@@ -753,7 +820,7 @@ func details(u *User, toUser *User, args []string, service string) {
 }
 
 func isChatService(service string) bool {
-	return service == serviceMattermost || service == serviceMatrix || service == serviceSlack || service == serviceMsTeams || service == serviceRocketChat
+	return service == serviceMattermost || service == serviceMatrix || service == serviceSlack || service == serviceMsTeams || service == serviceGoogleChat || service == serviceRocketChat
 }
 
 func search(u *User, toUser *User, args []string, service string) {
@@ -810,7 +877,7 @@ func search(u *User, toUser *User, args []string, service string) {
 }
 
 func searchUsers(u *User, toUser *User, args []string, service string) {
-	if service != serviceMattermost && service != serviceMatrix && service != serviceSlack && service != serviceMsTeams && service != serviceRocketChat {
+	if service != serviceMattermost && service != serviceMatrix && service != serviceSlack && service != serviceMsTeams && service != serviceGoogleChat && service != serviceRocketChat {
 		u.MsgUser(toUser, "not implemented")
 		return
 	}
@@ -881,7 +948,7 @@ func ping(u *User, toUser *User, args []string, service string) {
 
 //nolint:funlen,gocyclo,cyclop
 func scrollback(u *User, toUser *User, args []string, service string) {
-	if service != serviceMattermost && service != serviceMatrix && service != serviceSlack && service != serviceMsTeams && service != serviceRocketChat {
+	if service != serviceMattermost && service != serviceMatrix && service != serviceSlack && service != serviceMsTeams && service != serviceGoogleChat && service != serviceRocketChat {
 		u.MsgUser(toUser, "not implemented")
 		return
 	}
@@ -934,10 +1001,10 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 	case exists && (scrollbackUser.Ghost || scrollbackUser == u):
 		dmName := u.br.GetDMChannelName(u.User, scrollbackUser.User)
 		channelID = u.br.GetChannelID(u.ctx, dmName, u.br.GetMe().TeamID)
-	case service == serviceMatrix || service == serviceSlack || service == serviceMsTeams || service == serviceRocketChat:
+	case service == serviceMatrix || service == serviceSlack || service == serviceMsTeams || service == serviceGoogleChat || service == serviceRocketChat:
 		searchPostID = u.br.NormalizePostID(strings.TrimPrefix(search, "@@"))
 		if searchPostID == "" {
-			if service == serviceSlack || service == serviceMsTeams || service == serviceRocketChat {
+			if service == serviceSlack || service == serviceMsTeams || service == serviceGoogleChat || service == serviceRocketChat {
 				u.MsgUser(toUser, "need SCROLLBACK (#<channel>|<user>|<post/thread ID>) [lines] [server-time]")
 			} else {
 				u.MsgUser(toUser, "need SCROLLBACK (#<room>|<user>|<event ID>) [lines] [server-time]")
@@ -1226,7 +1293,7 @@ func (u *User) sendScrollback(target, from, msg, timeTag string) {
 }
 
 func updatelastviewed(u *User, toUser *User, args []string, service string) {
-	if service != serviceMattermost && service != serviceMatrix && service != serviceSlack && service != serviceMsTeams && service != serviceRocketChat {
+	if service != serviceMattermost && service != serviceMatrix && service != serviceSlack && service != serviceMsTeams && service != serviceGoogleChat && service != serviceRocketChat {
 		u.MsgUser(toUser, "not implemented")
 		return
 	}
@@ -1321,7 +1388,7 @@ func (u *User) handleServiceBot(service string, toUser *User, msg string) {
 
 	// The generic bot can't tell which bridge to login to.
 	if protocol == "" {
-		u.MsgUser(toUser, "You're not logged in. Use /msg <mattermost|slack|matrix|msteams|rocketchat|mastodon> login")
+		u.MsgUser(toUser, "You're not logged in. Use /msg <mattermost|slack|matrix|msteams|googlechat|rocketchat|mastodon> login")
 		return
 	}
 
@@ -1364,7 +1431,7 @@ func (u *User) handleServiceBot(service string, toUser *User, msg string) {
 			return
 		}
 	*/
-	if cmd.maxParams > -1 && len(commands[1:]) > cmd.maxParams {
+	if cmd.maxParams > -1 && len(commands[1:]) > cmd.maxParams && (protocol != serviceGoogleChat || !strings.EqualFold(commands[0], "login")) {
 		u.MsgUser(toUser, fmt.Sprintf("%s takes at most %v arguments", commands[0], cmd.maxParams))
 		return
 	}
@@ -1687,7 +1754,7 @@ func (u *User) isBareSummarizePostID(target string) bool {
 
 	proto := u.br.Protocol()
 
-	return (proto == serviceSlack || proto == serviceMsTeams) && u.br.NormalizePostID(target) != ""
+	return (proto == serviceSlack || proto == serviceMsTeams || proto == serviceGoogleChat) && u.br.NormalizePostID(target) != ""
 }
 
 func (u *User) getSummarizeEvents(target string, query summarizeQuery) (string, []*bridge.Event, error) {

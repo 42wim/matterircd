@@ -861,6 +861,9 @@ outerloop:
 					case !u.cfg.MSTeams().Disable && len(u.Pass) == 1 && strings.HasPrefix(u.Pass[0], "skypetoken="):
 						service = serviceMsTeams
 						passArgs = []string{loginArgToken, u.Pass[0]}
+					case !u.cfg.GoogleChat().Disable && len(u.Pass) >= 1 && strings.EqualFold(u.Pass[0], serviceGoogleChat):
+						service = serviceGoogleChat
+						passArgs = u.Pass[1:]
 					default:
 						service = serviceMattermost
 					}

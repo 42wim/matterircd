@@ -588,10 +588,22 @@ func (c *Client) processWebChannelFramePayload(payload json.RawMessage) {
 	}
 }
 
+func (c *Client) rememberGroupRef(ref protoGroupRef) {
+	if !ref.IsDM || ref.ID == "" {
+		return
+	}
+
+	c.Users.mu.Lock()
+	c.Users.dmGroupIDs[ref.ID] = struct{}{}
+	c.Users.mu.Unlock()
+}
+
 func (c *Client) handleProtoEvent(ev *protoEvent) {
 	if ev == nil {
 		return
 	}
+
+	c.rememberGroupRef(ev.Group)
 
 	if ev.WorldItem != nil {
 		c.upsertWorldItem(ev.WorldItem)
@@ -641,6 +653,8 @@ func (c *Client) handleMessageEventBody(ev *protoEvent, body *protoEventBody, is
 		return
 	}
 
+	c.rememberGroupRef(body.MessagePosted.Group)
+
 	msg := c.protoMessageToChatMessage(body.MessagePosted, ev.Group.ID, "")
 	if msg == nil {
 		return
@@ -672,6 +686,8 @@ func (c *Client) handleTopicCreatedBody(ev *protoEvent, body *protoEventBody) {
 	if body.TopicCreated == nil {
 		return
 	}
+
+	c.rememberGroupRef(body.TopicCreated.Group)
 
 	convID := body.TopicCreated.Group.ID
 	if convID == "" {
@@ -952,6 +968,8 @@ func (c *Client) handleMembershipChangedBody(ev *protoEvent, body *protoEventBod
 	if body.Membership == nil || body.Membership.UserID == "" {
 		return
 	}
+
+	c.rememberGroupRef(body.Membership.Group)
 
 	convID := body.Membership.Group.ID
 	if convID == "" {
