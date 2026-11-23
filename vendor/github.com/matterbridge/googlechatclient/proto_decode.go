@@ -80,6 +80,17 @@ type protoReaction struct {
 	Created int64
 }
 
+type protoQuotedMessage struct {
+	Group       protoGroupRef
+	TopicID     string
+	MessageID   string
+	CreatorID   string
+	Creator     *protoUser
+	TextBody    string
+	Annotations []protoAnnotation
+	Deleted     bool
+}
+
 type protoMessage struct {
 	Group          protoGroupRef
 	TopicID        string
@@ -93,6 +104,7 @@ type protoMessage struct {
 	LocalID        string
 	Annotations    []protoAnnotation
 	Reactions      []protoReaction
+	Quoted         *protoQuotedMessage
 	MessageType    int32
 	IsInlineReply  bool
 }
@@ -1092,7 +1104,46 @@ func decodeMessageField(num protowire.Number, typ protowire.Type, val []byte, m 
 		m.LocalID = decodeString(val)
 	case 21:
 		m.Reactions = append(m.Reactions, decodeReaction(decodeBytes(val)))
+	case 37:
+		m.Quoted = decodeQuotedMessageMetadata(decodeBytes(val))
 	}
+}
+
+func decodeQuotedMessageMetadata(b []byte) *protoQuotedMessage {
+	q := &protoQuotedMessage{}
+
+	_ = walkFields(b, func(num protowire.Number, typ protowire.Type, val []byte) error {
+		switch num {
+		case 1:
+			if typ == protowire.BytesType {
+				q.Group, q.TopicID, q.MessageID = decodeMessageID(decodeBytes(val))
+			}
+		case 3:
+			if typ == protowire.VarintType {
+				q.Deleted = decodeVarint(val) == 2
+			}
+		case 4:
+			if typ == protowire.BytesType {
+				q.CreatorID, _ = decodeUserID(decodeBytes(val))
+			}
+		case 5:
+			if typ == protowire.BytesType {
+				q.Creator = decodeUser(decodeBytes(val))
+			}
+		case 6:
+			if typ == protowire.BytesType {
+				q.TextBody = decodeString(val)
+			}
+		case 7:
+			if typ == protowire.BytesType {
+				q.Annotations = append(q.Annotations, decodeAnnotation(decodeBytes(val)))
+			}
+		}
+
+		return nil
+	})
+
+	return q
 }
 
 func decodeMessageVarintField(num protowire.Number, val []byte, m *protoMessage) {

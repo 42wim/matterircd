@@ -10,7 +10,7 @@ require (
 	github.com/grokify/html-strip-tags-go v0.0.1
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/kenshaw/emoji v0.6.2
-	github.com/matterbridge/googlechatclient v0.0.0-20261123042521-a5cf83cae8c9
+	github.com/matterbridge/googlechatclient v0.0.0-20261123044301-608e18ee44dc
 	github.com/matterbridge/logrus-prefixed-formatter v0.5.3-0.20200523233437-d971309a77ba
 	github.com/matterbridge/matrixclient v0.0.0-20261122225927-483cb4298971
 	github.com/matterbridge/matterclient v0.0.0-20261116034806-3087b48d325c

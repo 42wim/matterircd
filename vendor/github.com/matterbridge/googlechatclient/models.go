@@ -101,9 +101,20 @@ type ChatMessage struct {
 	EditAt          int64
 	DeleteAt        int64
 	IsSystem        bool
+	QuotedMessage   *QuotedMessage
 	Mentions        []Mention
 	Attachments     []Attachment
 	Reactions       map[string][]ReactionUser
+}
+
+// QuotedMessage describes the original message quoted by a Google Chat reply.
+type QuotedMessage struct {
+	ID          string
+	TopicID     string
+	FromID      string
+	DisplayName string
+	Text        string
+	Deleted     bool
 }
 
 // Mention records an @mention target embedded in a Google Chat message.

@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"unicode/utf8"
 )
 
 type textSpan struct {
@@ -18,12 +19,13 @@ type textSpan struct {
 }
 
 type outgoingAnnotation struct {
-	Type       uint64
-	StartIndex int32
-	Length     int32
-	UserID     string
-	MentionAll bool
-	FormatType uint64
+	Type        uint64
+	StartIndex  int32
+	Length      int32
+	UserID      string
+	DisplayName string
+	MentionAll  bool
+	FormatType  uint64
 }
 
 // buildAttachmentURL builds an authenticated Google Chat attachment download URL
@@ -578,63 +580,361 @@ func (c *Client) applySingleAnnotation(ann protoAnnotation, mentions *[]Mention,
 	}
 }
 
-// buildOutgoingAnnotations detects @all mentions and basic inline/italic
-// formatting spans when sending messages to Google Chat.
-func buildOutgoingAnnotations(text string) (string, []outgoingAnnotation) {
-	// Convert CTCP-style *italic action* text when the entire message is wrapped in single '*'.
-	if len(text) > 2 && strings.HasPrefix(text, "*") && strings.HasSuffix(text, "*") && !strings.HasPrefix(text, "**") {
-		inner := text[1 : len(text)-1]
-		if !strings.Contains(inner, "*") {
-			runeLen := int32(len([]rune(inner))) //nolint:gosec // message length is bounded <= 4096
+type outgoingBuilder struct {
+	out        strings.Builder
+	utf16Pos   int
+	anns       []outgoingAnnotation
+	resolveRef func(token string) (string, string)
+}
 
-			return inner, []outgoingAnnotation{
-				{
-					Type:       protoAnnotationFormatData,
-					StartIndex: 0,
-					Length:     runeLen,
-					FormatType: protoFormatItalic,
-				},
-			}
-		}
+func (b *outgoingBuilder) writeString(s string) {
+	b.out.WriteString(s)
+	b.utf16Pos += utf16Len(s)
+}
+
+func (b *outgoingBuilder) addFormat(start, end int, ft uint64) {
+	if end <= start {
+		return
 	}
 
-	var anns []outgoingAnnotation
+	b.anns = append(b.anns, outgoingAnnotation{
+		Type:       protoAnnotationFormatData,
+		StartIndex: int32(start),       //nolint:gosec // bounded message length <= 4096
+		Length:     int32(end - start), //nolint:gosec // bounded message length <= 4096
+		FormatType: ft,
+	})
+}
 
-	// Detect standalone @all mentions using rune offsets.
-	lower := strings.ToLower(text)
-	searchFrom := 0
+func (b *outgoingBuilder) addMention(start, end int, userID, displayName string, all bool) {
+	if end <= start {
+		return
+	}
 
-	for {
-		idx := strings.Index(lower[searchFrom:], "@all")
-		if idx < 0 {
+	b.anns = append(b.anns, outgoingAnnotation{
+		Type:        protoAnnotationUserMention,
+		StartIndex:  int32(start),       //nolint:gosec // bounded message length <= 4096
+		Length:      int32(end - start), //nolint:gosec // bounded message length <= 4096
+		UserID:      userID,
+		DisplayName: displayName,
+		MentionAll:  all,
+	})
+}
+
+// buildOutgoingAnnotations parses outgoing Markdown/IRC formatting and @mentions
+// into plain text plus Dynamite FormatMetadata / UserMentionMetadata annotations
+// using UTF-16 code unit offsets.
+func (c *Client) buildOutgoingAnnotations(text string) (string, []outgoingAnnotation) {
+	if text == "" {
+		return "", nil
+	}
+
+	// Fast path when there are no formatting markers or mention prefixes.
+	if !strings.ContainsAny(text, "*_~`\x1f>@") {
+		return text, nil
+	}
+
+	var resolveRef func(string) (string, string)
+	if c != nil {
+		resolveRef = c.ResolveMention
+	}
+
+	b := &outgoingBuilder{resolveRef: resolveRef}
+	b.out.Grow(len(text))
+	b.parseBlocks(text)
+
+	if len(b.anns) == 0 {
+		return b.out.String(), nil
+	}
+
+	return b.out.String(), b.anns
+}
+
+func (b *outgoingBuilder) parseBlocks(text string) {
+	lines := strings.Split(text, "\n")
+
+	for idx := 0; idx < len(lines); idx++ {
+		if idx > 0 {
+			b.writeString("\n")
+		}
+
+		if nextIdx, ok := b.consumeFencedBlock(lines, idx); ok {
+			idx = nextIdx
+
+			continue
+		}
+
+		line := lines[idx]
+		if after, ok := strings.CutPrefix(line, "> "); ok {
+			start := b.utf16Pos
+			b.parseInline(after)
+			b.addFormat(start, b.utf16Pos, protoFormatBlockquote)
+
+			continue
+		}
+
+		b.parseInline(line)
+	}
+}
+
+func (b *outgoingBuilder) consumeFencedBlock(lines []string, idx int) (int, bool) {
+	if !strings.HasPrefix(strings.TrimSpace(lines[idx]), "```") {
+		return idx, false
+	}
+
+	closeIdx := -1
+
+	for j := idx + 1; j < len(lines); j++ {
+		if strings.TrimSpace(lines[j]) == "```" {
+			closeIdx = j
+
 			break
 		}
-
-		pos := searchFrom + idx
-		end := pos + 4
-
-		beforeOK := pos == 0 || isMentionBoundary(text[pos-1])
-		afterOK := end == len(text) || isMentionBoundary(text[end])
-
-		if beforeOK && afterOK {
-			runeStart := int32(len([]rune(text[:pos]))) //nolint:gosec // bounded message length
-			anns = append(anns, outgoingAnnotation{
-				Type:       protoAnnotationUserMention,
-				StartIndex: runeStart,
-				Length:     4,
-				MentionAll: true,
-			})
-		}
-
-		searchFrom = end
 	}
 
-	return text, anns
+	if closeIdx < 0 {
+		return idx, false
+	}
+
+	content := strings.Join(lines[idx+1:closeIdx], "\n")
+	start := b.utf16Pos
+	b.writeString(content)
+	b.addFormat(start, b.utf16Pos, protoFormatMonospaceBlock)
+
+	return closeIdx, true
+}
+
+func (b *outgoingBuilder) parseInline(line string) {
+	for i := 0; i < len(line); {
+		if next, ok := b.tryInlineToken(line, i); ok {
+			i = next
+
+			continue
+		}
+
+		r, size := utf8.DecodeRuneInString(line[i:])
+		b.out.WriteString(line[i : i+size])
+		b.utf16Pos += utf16Width(r)
+		i += size
+	}
+}
+
+func (b *outgoingBuilder) tryInlineToken(line string, i int) (int, bool) {
+	switch line[i] {
+	case '`':
+		if j := strings.IndexByte(line[i+1:], '`'); j > 0 {
+			start := b.utf16Pos
+			b.writeString(line[i+1 : i+1+j])
+			b.addFormat(start, b.utf16Pos, protoFormatMonospace)
+
+			return i + 1 + j + 1, true
+		}
+
+		return i, false
+
+	case '\x1f':
+		if j := strings.IndexByte(line[i+1:], '\x1f'); j > 0 {
+			start := b.utf16Pos
+			b.parseInline(line[i+1 : i+1+j])
+			b.addFormat(start, b.utf16Pos, protoFormatUnderline)
+
+			return i + 1 + j + 1, true
+		}
+
+		return i, false
+
+	case '*', '_', '~':
+		return b.tryInlineStyle(line, i)
+
+	case '@':
+		return b.tryMention(line, i)
+
+	default:
+		return i, false
+	}
+}
+
+func (b *outgoingBuilder) tryInlineStyle(line string, i int) (int, bool) {
+	switch line[i] {
+	case '*':
+		if end, ok := findInlineDelim(line, i, "***", false); ok {
+			start := b.utf16Pos
+			b.parseInline(line[i+3 : end])
+			b.addFormat(start, b.utf16Pos, protoFormatBold)
+			b.addFormat(start, b.utf16Pos, protoFormatItalic)
+
+			return end + 3, true
+		}
+
+		if end, ok := findInlineDelim(line, i, "**", false); ok {
+			start := b.utf16Pos
+			b.parseInline(line[i+2 : end])
+			b.addFormat(start, b.utf16Pos, protoFormatBold)
+
+			return end + 2, true
+		}
+
+		if end, ok := findInlineDelim(line, i, "*", false); ok {
+			start := b.utf16Pos
+			b.parseInline(line[i+1 : end])
+			b.addFormat(start, b.utf16Pos, protoFormatItalic)
+
+			return end + 1, true
+		}
+
+	case '_':
+		if end, ok := findInlineDelim(line, i, "_", true); ok {
+			start := b.utf16Pos
+			b.parseInline(line[i+1 : end])
+			b.addFormat(start, b.utf16Pos, protoFormatItalic)
+
+			return end + 1, true
+		}
+
+	case '~':
+		if end, ok := findInlineDelim(line, i, "~~", false); ok {
+			start := b.utf16Pos
+			b.parseInline(line[i+2 : end])
+			b.addFormat(start, b.utf16Pos, protoFormatStrike)
+
+			return end + 2, true
+		}
+	}
+
+	return i, false
+}
+
+func (b *outgoingBuilder) tryMention(line string, i int) (int, bool) {
+	if i > 0 && !isMentionBoundary(line[i-1]) {
+		return i, false
+	}
+
+	token, nextIdx := scanMentionToken(line, i+1)
+	if token == "" {
+		return i, false
+	}
+
+	if strings.EqualFold(token, "all") {
+		start := b.utf16Pos
+		b.writeString(line[i:nextIdx])
+		b.addMention(start, b.utf16Pos, "", "", true)
+
+		return nextIdx, true
+	}
+
+	if b.resolveRef == nil {
+		return i, false
+	}
+
+	uid, display := b.resolveRef(token)
+	if uid == "" {
+		return i, false
+	}
+
+	label := strings.TrimSpace(display)
+	if label == "" {
+		label = token
+	}
+
+	start := b.utf16Pos
+	b.writeString("@" + label)
+	b.addMention(start, b.utf16Pos, uid, label, false)
+
+	return nextIdx, true
+}
+
+func findInlineDelim(s string, pos int, delim string, wordBoundary bool) (int, bool) {
+	dLen := len(delim)
+	dByte := delim[0]
+
+	if !isValidDelimOpen(s, pos, delim, wordBoundary) {
+		return 0, false
+	}
+
+	innerStart := pos + dLen
+
+	for search := innerStart; search < len(s); {
+		rel := strings.Index(s[search:], delim)
+		if rel < 0 {
+			return 0, false
+		}
+
+		closeIdx := search + rel
+		afterIdx := closeIdx + dLen
+
+		if isValidDelimClose(s, innerStart, closeIdx, afterIdx, dByte, wordBoundary) {
+			return closeIdx, true
+		}
+
+		search = afterIdx
+	}
+
+	return 0, false
+}
+
+func isValidDelimOpen(s string, pos int, delim string, wordBoundary bool) bool {
+	dByte := delim[0]
+	innerStart := pos + len(delim)
+
+	if !strings.HasPrefix(s[pos:], delim) || innerStart >= len(s) {
+		return false
+	}
+
+	if pos > 0 && s[pos-1] == dByte {
+		return false
+	}
+
+	if s[innerStart] == dByte || s[innerStart] == ' ' || s[innerStart] == '\t' {
+		return false
+	}
+
+	return !wordBoundary || pos == 0 || !isASCIIWordByte(s[pos-1])
+}
+
+func isValidDelimClose(s string, innerStart, closeIdx, afterIdx int, dByte byte, wordBoundary bool) bool {
+	if closeIdx == innerStart || s[closeIdx-1] == ' ' || s[closeIdx-1] == '\t' || s[closeIdx-1] == dByte {
+		return false
+	}
+
+	if afterIdx < len(s) && s[afterIdx] == dByte {
+		return false
+	}
+
+	return !wordBoundary || afterIdx >= len(s) || !isASCIIWordByte(s[afterIdx])
+}
+
+func scanMentionToken(s string, start int) (string, int) {
+	end := start
+	for end < len(s) && isMentionTokenByte(s[end]) {
+		end++
+	}
+
+	// Trim trailing sentence punctuation like "." or "-" so "@alice." matches "alice".
+	for end > start && (s[end-1] == '.' || s[end-1] == '-') {
+		end--
+	}
+
+	if end == start {
+		return "", start
+	}
+
+	if end < len(s) && !isMentionBoundary(s[end]) {
+		return "", start
+	}
+
+	return s[start:end], end
+}
+
+func isMentionTokenByte(b byte) bool {
+	return isASCIIWordByte(b) || b == '.' || b == '-'
+}
+
+func isASCIIWordByte(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') || b == '_'
 }
 
 func isMentionBoundary(b byte) bool {
 	switch b {
-	case ' ', '\t', '\n', '\r', ',', '.', ':', ';', '!', '?', '(', ')', '[', ']':
+	case ' ', '\t', '\n', '\r', ',', '.', ':', ';', '!', '?', '(', ')', '[', ']', '*', '_', '~':
 		return true
 	default:
 		return false
