@@ -787,11 +787,30 @@ func (g *GoogleChat) StatusUser(ctx context.Context, userID string) (string, err
 		return g.gc.GetStatus(ctx, userID), nil
 	}
 
-	status := googlechatclient.MapAvailabilityToStatus(p)
+	prefix := googlechatclient.MapAvailabilityToStatus(p)
+
+	// Presence activity is in milliseconds.
+	lastActivity := g.gc.GetUserLastActivity(userID) / 1000
+
+	var lastOnline string
+
+	if lastActivity > 0 {
+		diff := max(0, time.Now().Unix()-lastActivity)
+		if prefix == "online" {
+			lastOnline = utils.FormatLastOnline(lastActivity, true)
+		} else if diff >= 20*60 {
+			lastOnline = utils.FormatLastOnline(lastActivity)
+		}
+	}
+
+	status := prefix
+	if lastOnline != "" {
+		status += " (" + lastOnline + ")"
+	}
 
 	note := googlechatclient.FormatStatusNote(p)
 	if note != "" {
-		return fmt.Sprintf("%s: %s", status, note), nil
+		status += ": " + note
 	}
 
 	return status, nil
