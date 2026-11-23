@@ -69,11 +69,12 @@ type GoogleChat struct {
 	msgMetaCache     *lru.Cache[string, msgMeta]
 	replayedMsgCache *lru.Cache[string, struct{}]
 
-	namesMu  sync.RWMutex
-	chanByID map[string]string
-	idByChan map[string]string
-	nickByID map[string]string
-	idByNick map[string]string
+	namesMu     sync.RWMutex
+	chanByID    map[string]string
+	idByChan    map[string]string
+	nickByID    map[string]string
+	idByNick    map[string]string
+	tokenSaveMu sync.Mutex
 
 	cfg *config.Config
 
@@ -196,7 +197,10 @@ func (g *GoogleChat) buildClient(
 	tokenFile := rc.GoogleChat.TokenSaveFile
 	if tokenFile != "" {
 		gc.OnTokenUpdate = func(state googlechatclient.TokenState) {
+			g.tokenSaveMu.Lock()
 			saveErr := saveTokenState(tokenFile, state)
+			g.tokenSaveMu.Unlock()
+
 			if saveErr != nil {
 				logger.Warnf("Failed to persist Google Chat token state to %s: %v", tokenFile, saveErr)
 			}
@@ -569,7 +573,7 @@ func (g *GoogleChat) MsgUserThread(ctx context.Context, userID, parentID, text s
 }
 
 func (g *GoogleChat) MsgChannel(ctx context.Context, channelID, text string) (string, error) {
-	sendText := googleChatActionText(text)
+	sendText := g.prepareOutgoingText(text)
 
 	msg, err := g.gc.SendMessage(ctx, channelID, sendText)
 	if err != nil {
@@ -594,7 +598,7 @@ func (g *GoogleChat) MsgChannelThread(ctx context.Context, channelID, parentID, 
 		topicID = raw
 	}
 
-	sendText := googleChatActionText(text)
+	sendText := g.prepareOutgoingText(text)
 
 	msg, err := g.gc.SendMessageThread(ctx, channelID, topicID, sendText)
 	if err != nil {
@@ -605,6 +609,17 @@ func (g *GoogleChat) MsgChannelThread(ctx context.Context, channelID, parentID, 
 	g.recordSentPost(msg.ID, encoded, channelID, topicID, sendText)
 
 	return encoded, nil
+}
+
+func (g *GoogleChat) prepareOutgoingText(text string) string {
+	sendText := googleChatActionText(text)
+	fc := g.cfg.GoogleChat().Formatter
+
+	if !fc.DisableEmoji {
+		sendText = utils.EmojiReplaceAliases(sendText, fc.CustomEmoji)
+	}
+
+	return sendText
 }
 
 func googleChatActionText(text string) string {
@@ -648,7 +663,7 @@ func (g *GoogleChat) ModifyPost(ctx context.Context, msgID, text string) error {
 		return g.gc.DeleteMessage(ctx, rp.convID, rp.topicID, rp.rawMsgID)
 	}
 
-	_, err := g.gc.EditMessage(ctx, rp.convID, rp.topicID, rp.rawMsgID, text)
+	_, err := g.gc.EditMessage(ctx, rp.convID, rp.topicID, rp.rawMsgID, g.prepareOutgoingText(text))
 
 	return err
 }
@@ -786,7 +801,7 @@ func (g *GoogleChat) GetLastViewedAt(_ context.Context, channelID string) int64 
 }
 
 func (g *GoogleChat) UpdateLastViewed(ctx context.Context, channelID string) {
-	if g.cfg.GoogleChat().DisableAutoView || channelID == "" {
+	if channelID == "" {
 		return
 	}
 
@@ -797,10 +812,6 @@ func (g *GoogleChat) UpdateLastViewed(ctx context.Context, channelID string) {
 }
 
 func (g *GoogleChat) UpdateLastViewedUser(ctx context.Context, userID string) error {
-	if g.cfg.GoogleChat().DisableAutoView {
-		return nil
-	}
-
 	convID := g.GetDMChannelID(ctx, userID)
 	if convID == "" {
 		return nil

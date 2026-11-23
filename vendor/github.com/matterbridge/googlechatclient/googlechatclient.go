@@ -278,6 +278,10 @@ func (c *Client) Login(ctx context.Context) error {
 
 	c.connected.Store(true)
 
+	c.wg.Go(func() {
+		c.runCookieRotation(loginCtx)
+	})
+
 	if !c.DisableStream {
 		c.startWebChannel(loginCtx)
 	}

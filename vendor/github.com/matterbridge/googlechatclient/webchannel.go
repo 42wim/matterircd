@@ -665,6 +665,7 @@ func (c *Client) handleMessageEventBody(ev *protoEvent, body *protoEventBody, is
 	}
 
 	c.cachePost(msg)
+	c.touchConversation(msg.ConversationID, msg.CreateAt)
 
 	evType := EventPosted
 	if isEdit || msg.EditAt > 0 {
@@ -701,6 +702,7 @@ func (c *Client) handleTopicCreatedBody(ev *protoEvent, body *protoEventBody) {
 		}
 
 		c.cachePost(msg)
+		c.touchConversation(msg.ConversationID, msg.CreateAt)
 		c.emitMessage(&Message{
 			Type:      EventPosted,
 			Channel:   msg.ConversationID,

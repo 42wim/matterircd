@@ -84,38 +84,21 @@ func (g *GoogleChat) rebuildChannelNamesLocked(convs []*googlechatclient.Convers
 }
 
 func (g *GoogleChat) baseChannelNameLocked(conv *googlechatclient.Conversation) string {
-	switch conv.Type {
-	case googlechatclient.ConversationSpace:
-		slug := sanitizeIRCChannelPart(conv.DisplayName)
-		if slug == "" {
-			slug = shortHash(conv.ID)
-		}
-
+	// Named Spaces and Group DMs use #<sanitized-display-name>; unnamed ones
+	// (including modern Google Chat group chats stored as unnamed Spaces) use
+	// #<member1-member2-...> matching Mattermost's group-DM channel naming.
+	if slug := sanitizeIRCChannelPart(conv.DisplayName); slug != "" {
 		return slug
-
-	default:
-		// Named group DMs use #<name>; unnamed ones use #<member1-member2-...>
-		// matching Mattermost and MS Teams group-DM channel naming (no #group- prefix).
-		if slug := sanitizeIRCChannelPart(conv.DisplayName); slug != "" {
-			return slug
-		}
-
-		return g.groupMembersSlugLocked(conv)
 	}
+
+	return g.groupMembersSlugLocked(conv)
 }
 
 func (g *GoogleChat) groupMembersSlugLocked(conv *googlechatclient.Conversation) string {
-	me := g.gc.Me()
-
-	myID := ""
-	if me != nil {
-		myID = me.ID
-	}
-
 	parts := make([]string, 0, len(conv.Members))
 
 	for _, uid := range conv.Members {
-		if uid == "" || uid == myID {
+		if uid == "" {
 			continue
 		}
 

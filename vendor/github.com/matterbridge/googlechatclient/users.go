@@ -256,6 +256,13 @@ func (c *Client) GetPresenceFresh(ctx context.Context, userID string) (*Presence
 		return &cp, nil
 	}
 
+	if userID == c.selfUserID() {
+		p, err := c.fetchSelfPresence(ctx)
+		if err == nil && p != nil {
+			return p, nil
+		}
+	}
+
 	res, err := c.GetPresences(ctx, []string{userID})
 	if err != nil {
 		return nil, err
@@ -290,7 +297,7 @@ func (c *Client) GetPresences(ctx context.Context, userIDs []string) (map[string
 		}
 
 		for _, pp := range items {
-			p := protoPresenceToPresence(pp)
+			p := c.protoPresenceToPresence(pp)
 			if p == nil {
 				continue
 			}
@@ -352,6 +359,8 @@ func (c *Client) SetPresence(ctx context.Context, status string) error {
 			return fmt.Errorf("googlechatclient: set_presence_shared(true): %w", err)
 		}
 
+		c.updateSelfPresenceCache(statusOnline, false)
+
 		return nil
 	case statusDND, "busy", "do_not_disturb":
 		durUsec := (defaultDndHours * time.Hour).Microseconds()
@@ -361,12 +370,16 @@ func (c *Client) SetPresence(ctx context.Context, status string) error {
 			return fmt.Errorf("googlechatclient: set_dnd_duration: %w", err)
 		}
 
+		c.updateSelfPresenceCache(statusDND, true)
+
 		return nil
 	case statusAway, statusOffline, "invisible":
 		_, err := c.doProto(ctx, "set_presence_shared", encodeSetPresenceSharedRequest(false))
 		if err != nil {
 			return fmt.Errorf("googlechatclient: set_presence_shared(false): %w", err)
 		}
+
+		c.updateSelfPresenceCache(statusAway, false)
 
 		return nil
 	default:
@@ -376,14 +389,52 @@ func (c *Client) SetPresence(ctx context.Context, status string) error {
 
 // SetStatusNote sets or clears the signed-in user's Google Chat custom status.
 func (c *Client) SetStatusNote(ctx context.Context, emoji, message string, expiry time.Time) error {
-	reqBytes := encodeSetCustomStatusRequest(strings.TrimSpace(emoji), strings.TrimSpace(message), expiry)
+	cleanEmoji := strings.TrimSpace(emoji)
+	cleanMessage := strings.TrimSpace(message)
+	reqBytes := encodeSetCustomStatusRequest(cleanEmoji, cleanMessage, expiry)
 
 	_, err := c.doProto(ctx, "set_custom_status", reqBytes)
 	if err != nil {
 		return fmt.Errorf("googlechatclient: set_custom_status: %w", err)
 	}
 
+	c.updateSelfStatusNoteCache(cleanEmoji, cleanMessage, expiry)
+
 	return nil
+}
+
+func (c *Client) updateSelfStatusNoteCache(emoji, message string, expiry time.Time) {
+	myID := c.selfUserID()
+	if myID == "" {
+		return
+	}
+
+	c.Users.mu.Lock()
+	defer c.Users.mu.Unlock()
+
+	var p Presence
+	if existing := c.Users.presences[myID]; existing != nil {
+		p = *existing
+	} else {
+		p = Presence{
+			UserID:       myID,
+			Availability: statusOnline,
+		}
+	}
+
+	p.CustomEmoji = emoji
+	p.CustomStatus = message
+
+	if !expiry.IsZero() && (emoji != "" || message != "") {
+		p.CustomStatusExpiresAt = expiry.UnixMilli()
+	} else {
+		p.CustomStatusExpiresAt = 0
+	}
+
+	p.UpdatedAt = time.Now().UnixMilli()
+
+	cp := p
+	c.Users.presences[myID] = &cp
 }
 
 // GetStatus returns the normalized status string for userID, including any
@@ -427,26 +478,59 @@ func (c *Client) GetStatusNote(ctx context.Context, userID string) string {
 	return FormatStatusNote(p)
 }
 
-// FormatStatusNote formats a Presence's non-expired custom emoji + status text.
+// FormatStatusNote formats a Presence's non-expired custom emoji + status text,
+// appending "(Until ...)" when an expiry timestamp is set (matching matterclient/msteamsclient).
 func FormatStatusNote(p *Presence) string {
 	if p == nil {
 		return ""
 	}
 
-	if p.CustomStatusExpiresAt > 0 && time.Now().UnixMilli() > p.CustomStatusExpiresAt {
+	now := time.Now()
+	if p.CustomStatusExpiresAt > 0 && now.UnixMilli() >= p.CustomStatusExpiresAt {
 		return ""
 	}
 
 	emoji := strings.TrimSpace(p.CustomEmoji)
 	text := strings.TrimSpace(p.CustomStatus)
 
+	var note string
+
 	switch {
 	case emoji != "" && text != "":
-		return emoji + " " + text
+		note = emoji + " " + text
 	case text != "":
-		return text
+		note = text
 	default:
-		return emoji
+		note = emoji
+	}
+
+	if note == "" {
+		return ""
+	}
+
+	if p.CustomStatusExpiresAt > 0 {
+		return note + " (Until " + formatStatusExpiry(now, time.UnixMilli(p.CustomStatusExpiresAt)) + ")"
+	}
+
+	return note
+}
+
+func formatStatusExpiry(now, expiry time.Time) string {
+	loc := now.Location()
+	expLocal := expiry.In(loc)
+	timeStr := expLocal.Format("15:04")
+
+	nowDate := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+	expDate := time.Date(expLocal.Year(), expLocal.Month(), expLocal.Day(), 0, 0, 0, 0, loc)
+	daysDiff := int(expDate.Sub(nowDate).Hours() / 24)
+
+	switch daysDiff {
+	case 0:
+		return "Today at " + timeStr
+	case 1:
+		return "Tomorrow at " + timeStr
+	default:
+		return expLocal.Format("Mon, 02 Jan 15:04")
 	}
 }
 
@@ -494,7 +578,53 @@ func protoUserToUser(pu *protoUser) *User {
 	}
 }
 
-func protoPresenceToPresence(pp *protoUserPresence) *Presence {
+func (c *Client) fetchSelfPresence(ctx context.Context) (*Presence, error) {
+	respBytes, err := c.doProto(ctx, "get_self_user_status", encodeGetSelfUserStatusRequest())
+	if err != nil {
+		return nil, fmt.Errorf("googlechatclient: get_self_user_status: %w", err)
+	}
+
+	st, err := decodeGetSelfUserStatusResponse(respBytes)
+	if err != nil {
+		return nil, fmt.Errorf("googlechatclient: decode get_self_user_status: %w", err)
+	}
+
+	if st == nil {
+		return nil, errors.New("googlechatclient: empty self user status")
+	}
+
+	if st.UserID == "" {
+		st.UserID = c.selfUserID()
+	}
+
+	return c.applyUserStatusUpdate(st), nil
+}
+
+func (c *Client) updateSelfPresenceCache(avail string, dnd bool) {
+	myID := c.selfUserID()
+	if myID == "" {
+		return
+	}
+
+	c.Users.mu.Lock()
+	defer c.Users.mu.Unlock()
+
+	var p Presence
+	if existing := c.Users.presences[myID]; existing != nil {
+		p = *existing
+	} else {
+		p = Presence{UserID: myID}
+	}
+
+	p.Availability = avail
+	p.DND = dnd
+	p.UpdatedAt = time.Now().UnixMilli()
+
+	cp := p
+	c.Users.presences[myID] = &cp
+}
+
+func (c *Client) protoPresenceToPresence(pp *protoUserPresence) *Presence {
 	if pp == nil || pp.UserID == "" {
 		return nil
 	}
@@ -504,8 +634,12 @@ func protoPresenceToPresence(pp *protoUserPresence) *Presence {
 	switch pp.Presence {
 	case protoPresenceActive:
 		avail = statusOnline
-	case protoPresenceInactive:
+	case protoPresenceInactive, protoPresenceSharingDisabled:
 		avail = statusAway
+	}
+
+	if avail == statusOffline && pp.ActiveUntilUsec > time.Now().UnixMicro() {
+		avail = statusOnline
 	}
 
 	p := &Presence{
@@ -518,6 +652,13 @@ func protoPresenceToPresence(pp *protoUserPresence) *Presence {
 
 	if pp.Status != nil {
 		applyUserStatusToPresence(p, pp.Status)
+
+		if pp.Status.HasPresenceShared && !pp.Status.PresenceShared {
+			p.Availability = statusAway
+		} else if pp.UserID == c.selfUserID() && pp.Status.PresenceShared &&
+			(pp.Presence == 0 || pp.Presence == protoPresenceUnknown) {
+			p.Availability = statusOnline
+		}
 	}
 
 	return p
@@ -542,6 +683,8 @@ func (c *Client) applyUserStatusUpdate(st *protoUserStatus) *Presence {
 		return nil
 	}
 
+	isSelf := st.UserID == c.selfUserID()
+
 	c.Users.mu.Lock()
 	defer c.Users.mu.Unlock()
 
@@ -554,6 +697,14 @@ func (c *Client) applyUserStatusUpdate(st *protoUserStatus) *Presence {
 		p = Presence{
 			UserID:       st.UserID,
 			Availability: statusOnline,
+		}
+	}
+
+	if st.HasPresenceShared || isSelf {
+		if st.PresenceShared {
+			p.Availability = statusOnline
+		} else {
+			p.Availability = statusAway
 		}
 	}
 

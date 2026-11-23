@@ -107,6 +107,7 @@ func (c *Client) SendMessage(ctx context.Context, convID, text string) (*ChatMes
 	msg := c.extractSentMessageFromTopic(topic, convID, localID, bodyText)
 	c.recordSentIDs(msg.ID, localID)
 	c.cachePost(msg)
+	c.touchConversation(convID, msg.CreateAt)
 
 	return cloneChatMessage(msg), nil
 }
@@ -170,6 +171,7 @@ func (c *Client) SendMessageThread(ctx context.Context, convID, topicID, text st
 
 	c.recordSentIDs(msg.ID, localID)
 	c.cachePost(msg)
+	c.touchConversation(convID, msg.CreateAt)
 
 	return cloneChatMessage(msg), nil
 }
@@ -368,12 +370,22 @@ func (c *Client) catchUpMessagesSince(ctx context.Context, convID string, since 
 	}
 
 	sinceMs := since.UnixMilli()
-	seen := make(map[string]struct{})
-
-	var out []*ChatMessage
+	byID := make(map[string]*ChatMessage)
+	deleted := make(map[string]struct{})
 
 	for _, ev := range events {
-		c.collectCatchUpEventMessages(ev, convID, sinceMs, seen, &out)
+		c.applyCatchUpEvent(ev, convID, sinceMs, byID, deleted)
+	}
+
+	out := make([]*ChatMessage, 0, len(byID))
+
+	for id, msg := range byID {
+		if _, isDel := deleted[id]; isDel {
+			continue
+		}
+
+		c.cachePost(msg)
+		out = append(out, msg)
 	}
 
 	sortMessagesByTime(out)
@@ -385,37 +397,63 @@ func (c *Client) catchUpMessagesSince(ctx context.Context, convID string, since 
 	return out, nil
 }
 
-func (c *Client) collectCatchUpEventMessages(ev *protoEvent, convID string, sinceMs int64, seen map[string]struct{}, out *[]*ChatMessage) {
+func (c *Client) applyCatchUpEvent(
+	ev *protoEvent,
+	convID string,
+	sinceMs int64,
+	byID map[string]*ChatMessage,
+	deleted map[string]struct{},
+) {
 	if ev == nil {
 		return
 	}
 
 	for _, body := range ev.Bodies {
+		if body.DeletedMsgID != "" {
+			deleted[body.DeletedMsgID] = struct{}{}
+			delete(byID, body.DeletedMsgID)
+		}
+
 		if body.MessagePosted != nil {
-			c.appendCatchUpMessage(body.MessagePosted, convID, "", sinceMs, seen, out)
+			c.upsertCatchUpMessage(body.MessagePosted, convID, "", sinceMs, byID, deleted)
 		}
 
 		if body.TopicCreated != nil {
 			for _, pm := range body.TopicCreated.Replies {
-				c.appendCatchUpMessage(pm, convID, body.TopicCreated.TopicID, sinceMs, seen, out)
+				c.upsertCatchUpMessage(pm, convID, body.TopicCreated.TopicID, sinceMs, byID, deleted)
 			}
 		}
 	}
 }
 
-func (c *Client) appendCatchUpMessage(pm *protoMessage, convID, topicID string, sinceMs int64, seen map[string]struct{}, out *[]*ChatMessage) {
+func (c *Client) upsertCatchUpMessage(
+	pm *protoMessage,
+	convID, topicID string,
+	sinceMs int64,
+	byID map[string]*ChatMessage,
+	deleted map[string]struct{},
+) {
 	msg := c.protoMessageToChatMessage(pm, convID, topicID)
-	if msg == nil || msg.ID == "" || msg.CreateAt < sinceMs {
+	if msg == nil || msg.ID == "" {
 		return
 	}
 
-	if _, dup := seen[msg.ID]; dup {
+	if msg.DeleteAt > 0 {
+		deleted[msg.ID] = struct{}{}
+		delete(byID, msg.ID)
+
 		return
 	}
 
-	seen[msg.ID] = struct{}{}
-	c.cachePost(msg)
-	*out = append(*out, msg)
+	if msg.CreateAt < sinceMs {
+		return
+	}
+
+	if _, isDel := deleted[msg.ID]; isDel {
+		return
+	}
+
+	byID[msg.ID] = msg
 }
 
 // GetThreadMessages fetches all messages inside an inline thread via list_messages.
