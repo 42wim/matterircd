@@ -201,6 +201,9 @@ func (c *Client) runWebChannelSession(ctx context.Context, reconnecting bool) er
 	}()
 
 	if reconnecting {
+		// Evict any dead half-open HTTP/2 connections left over from a network
+		// drop or laptop suspend so registerWebChannel dials a fresh socket.
+		c.closeIdleConnections()
 		c.rotateCookiesIfStale(sessionCtx)
 	}
 
