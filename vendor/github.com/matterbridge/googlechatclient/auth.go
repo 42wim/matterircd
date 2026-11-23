@@ -344,13 +344,29 @@ func (c *Client) parseWizGlobalData(htmlBody string) error {
 		return errors.New("googlechatclient: missing XSRF token in WIZ_global_data")
 	}
 
-	sapisid, _ := wiz["WZsZ1e"].(string)
-	email, _ := wiz["oPEP7c"].(string)
-
 	c.authMu.Lock()
 	c.tokenState.XSRFToken = xsrf
+	c.applyWizTokensLocked(wiz)
+	c.tokenState.UpdatedAt = time.Now().UTC()
+	c.authMu.Unlock()
 
-	if sapisid != "" {
+	return nil
+}
+
+func (c *Client) applyWizTokensLocked(wiz map[string]any) {
+	if boqAT, _ := wiz["SNlM0e"].(string); boqAT != "" {
+		c.boqAT = boqAT
+	}
+
+	if boqSID, _ := wiz["FdrFJe"].(string); boqSID != "" {
+		c.boqSID = boqSID
+	}
+
+	if boqBL, _ := wiz["cfb2h"].(string); boqBL != "" {
+		c.boqBL = boqBL
+	}
+
+	if sapisid, _ := wiz["WZsZ1e"].(string); sapisid != "" {
 		if c.tokenState.Cookies == nil {
 			c.tokenState.Cookies = make(map[string]string)
 		}
@@ -358,14 +374,9 @@ func (c *Client) parseWizGlobalData(htmlBody string) error {
 		c.tokenState.Cookies["SAPISID"] = sapisid
 	}
 
-	if email != "" && c.tokenState.Email == "" {
+	if email, _ := wiz["oPEP7c"].(string); email != "" && c.tokenState.Email == "" {
 		c.tokenState.Email = email
 	}
-
-	c.tokenState.UpdatedAt = time.Now().UTC()
-	c.authMu.Unlock()
-
-	return nil
 }
 
 func (c *Client) fetchSelfIdentity(ctx context.Context) error {

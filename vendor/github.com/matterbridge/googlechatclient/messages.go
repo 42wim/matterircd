@@ -537,15 +537,32 @@ func (c *Client) GetThreadMessages(ctx context.Context, convID, topicID string, 
 	return out, nil
 }
 
-// SearchMessages searches cached and recent messages across the user's most
-// active Spaces and DMs for case-insensitive substring matches.
+// SearchMessages searches Google Chat messages using the server-side
+// batchexecute search RPC, falling back to scanning recent messages across
+// active Spaces and DMs if the server search fails.
 func (c *Client) SearchMessages(ctx context.Context, query string, limit int) ([]*ChatMessage, error) {
-	needle := strings.ToLower(strings.TrimSpace(query))
-	if needle == "" {
+	trimmed := strings.TrimSpace(query)
+	if trimmed == "" {
 		return nil, nil
 	}
 
 	limit = clampHistoryLimit(limit)
+
+	msgs, err := c.searchMessagesServer(ctx, trimmed, limit)
+	if err == nil {
+		return msgs, nil
+	}
+
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
+	c.logger.Debugf("Server-side search failed, falling back to local scan: %v", err)
+
+	return c.searchMessagesLocal(ctx, strings.ToLower(trimmed), limit)
+}
+
+func (c *Client) searchMessagesLocal(ctx context.Context, needle string, limit int) ([]*ChatMessage, error) {
 	convs := c.GetChannels()
 
 	slices.SortFunc(convs, func(a, b *Conversation) int {
