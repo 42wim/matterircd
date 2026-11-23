@@ -14,6 +14,8 @@ const (
 	memberBatchSize        = 50
 	presenceCacheTTL       = 2 * time.Minute
 	freshStatusMinInterval = 30 * time.Second
+	activeThreshold        = 20 * time.Minute
+	maintainPresenceEvery  = time.Minute
 	defaultDndHours        = 24
 
 	statusOnline  = "online"
@@ -284,10 +286,14 @@ func (c *Client) GetPresenceFresh(ctx context.Context, userID string) (*Presence
 	return p, nil
 }
 
-// GetPresences batch-queries user presence via get_user_presence.
+// GetPresences batch-queries user presence via get_user_presence and enriches
+// unknown results via PeopleStack GetAssistiveFeatures (and recent activity).
 func (c *Client) GetPresences(ctx context.Context, userIDs []string) (map[string]*Presence, error) {
 	unique := dedupStrings(userIDs)
 	out := make(map[string]*Presence, len(unique))
+	myID := c.selfUserID()
+
+	var unknownIDs []string
 
 	for chunk := range slices.Chunk(unique, presenceBatchSize) {
 		respBytes, err := c.doProto(ctx, "get_user_presence", encodeGetUserPresenceRequest(chunk))
@@ -306,13 +312,186 @@ func (c *Client) GetPresences(ctx context.Context, userIDs []string) (map[string
 				continue
 			}
 
+			if p.UserID != myID && p.Availability == statusOffline && !p.DND {
+				unknownIDs = append(unknownIDs, p.UserID)
+			}
+
 			c.cachePresence(p)
 			cp := *p
 			out[p.UserID] = &cp
 		}
 	}
 
+	c.enrichUnknownPresences(ctx, unknownIDs, out)
+
 	return out, nil
+}
+
+func (c *Client) enrichUnknownPresences(ctx context.Context, unknownIDs []string, out map[string]*Presence) {
+	if len(unknownIDs) == 0 {
+		return
+	}
+
+	assistive, err := c.fetchAssistivePresences(ctx, unknownIDs)
+	if err != nil {
+		c.logger.Debugf("GetAssistiveFeatures presence lookup failed: %v", err)
+	}
+
+	for _, uid := range unknownIDs {
+		p := out[uid]
+		if p == nil {
+			continue
+		}
+
+		if ap := assistive[uid]; ap != nil {
+			switch ap.Presence {
+			case assistivePresenceActive:
+				p.Availability = statusOnline
+				p.ActiveUntil = time.Now().Add(presenceCacheTTL).UnixMilli()
+			case assistivePresenceAway:
+				p.Availability = statusAway
+			}
+
+			if ap.DND {
+				p.DND = true
+			}
+		}
+
+		if p.Availability == statusOffline && !p.DND && c.isRecentlyActive(uid) {
+			p.Availability = statusOnline
+		}
+
+		c.cachePresence(p)
+		cp := *p
+		out[uid] = &cp
+	}
+}
+
+func (c *Client) recordUserActivity(userID string) {
+	if userID == "" || userID == c.selfUserID() {
+		return
+	}
+
+	now := time.Now().UnixMilli()
+
+	var changed *Presence
+
+	c.Users.mu.Lock()
+	c.Users.lastActivity[userID] = now
+
+	p := c.Users.presences[userID]
+	switch {
+	case p == nil:
+		np := &Presence{
+			UserID:         userID,
+			Availability:   statusOnline,
+			LastActivityAt: now,
+			UpdatedAt:      now,
+		}
+		c.Users.presences[userID] = np
+
+		cp := *np
+		changed = &cp
+	case !p.DND && p.Availability != statusOnline:
+		p.Availability = statusOnline
+		p.LastActivityAt = now
+		p.UpdatedAt = now
+
+		cp := *p
+		changed = &cp
+	default:
+		p.LastActivityAt = now
+	}
+
+	c.Users.mu.Unlock()
+
+	if changed != nil {
+		c.emitMessage(&Message{
+			Type:      EventPresenceChange,
+			UserID:    userID,
+			Presence:  changed,
+			Timestamp: time.UnixMilli(now),
+		})
+	}
+}
+
+func (c *Client) isRecentlyActive(userID string) bool {
+	if userID == "" {
+		return false
+	}
+
+	c.Users.mu.RLock()
+	last := c.Users.lastActivity[userID]
+	c.Users.mu.RUnlock()
+
+	return last > 0 && time.Since(time.UnixMilli(last)) < activeThreshold
+}
+
+// maintainPresence expires activity-based online presence after activeThreshold
+// and prunes stale entries for unknown users, matching matrixclient.
+func (c *Client) maintainPresence(ctx context.Context) {
+	ticker := time.NewTicker(maintainPresenceEvery)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			c.expirePresence(time.Now())
+		}
+	}
+}
+
+func (c *Client) expirePresence(now time.Time) {
+	nowMs := now.UnixMilli()
+	cutoff := now.Add(-activeThreshold).UnixMilli()
+	myID := c.selfUserID()
+
+	var expired []*Presence
+
+	c.Users.mu.Lock()
+
+	for userID := range c.Users.lastActivity {
+		if _, ok := c.Users.users[userID]; !ok {
+			delete(c.Users.lastActivity, userID)
+		}
+	}
+
+	for userID, p := range c.Users.presences {
+		if userID == myID {
+			continue
+		}
+
+		if _, ok := c.Users.users[userID]; !ok {
+			delete(c.Users.presences, userID)
+
+			continue
+		}
+
+		if p == nil || p.Availability != statusOnline || p.DND {
+			continue
+		}
+
+		if p.LastActivityAt > 0 && p.LastActivityAt < cutoff && (p.ActiveUntil == 0 || p.ActiveUntil < nowMs) {
+			p.Availability = statusOffline
+			p.UpdatedAt = nowMs
+
+			cp := *p
+			expired = append(expired, &cp)
+		}
+	}
+
+	c.Users.mu.Unlock()
+
+	for _, p := range expired {
+		c.emitMessage(&Message{
+			Type:      EventPresenceChange,
+			UserID:    p.UserID,
+			Presence:  p,
+			Timestamp: now,
+		})
+	}
 }
 
 func (c *Client) cachePresence(p *Presence) {
@@ -322,7 +501,12 @@ func (c *Client) cachePresence(p *Presence) {
 
 	c.Users.mu.Lock()
 	cp := *p
-	c.Users.presences[p.UserID] = &cp
+
+	if cp.LastActivityAt == 0 {
+		cp.LastActivityAt = c.Users.lastActivity[cp.UserID]
+	}
+
+	c.Users.presences[cp.UserID] = &cp
 	c.Users.mu.Unlock()
 }
 
@@ -480,6 +664,15 @@ func (c *Client) GetStatusNote(ctx context.Context, userID string) string {
 	}
 
 	return FormatStatusNote(p)
+}
+
+// GetUserLastActivity returns the last observed activity timestamp for userID
+// in Unix milliseconds, or 0 if no activity has been observed.
+func (c *Client) GetUserLastActivity(userID string) int64 {
+	c.Users.mu.RLock()
+	defer c.Users.mu.RUnlock()
+
+	return c.Users.lastActivity[userID]
 }
 
 // FormatStatusNote formats a Presence's non-expired custom emoji + status text,
@@ -672,7 +865,20 @@ func (c *Client) protoPresenceToPresence(pp *protoUserPresence) *Presence {
 		}
 	}
 
+	c.traceDecodedPresence(pp, p.Availability)
+
 	return p
+}
+
+func (c *Client) traceDecodedPresence(pp *protoUserPresence, avail string) {
+	var hasShared, shared bool
+	if pp.Status != nil {
+		hasShared = pp.Status.HasPresenceShared
+		shared = pp.Status.PresenceShared
+	}
+
+	c.logger.Tracef("Presence decoded for %s: raw_presence=%d dnd=%v active_until=%d has_shared=%v shared=%v -> %s",
+		pp.UserID, pp.Presence, pp.DND, pp.ActiveUntilUsec, hasShared, shared, avail)
 }
 
 func applyUserStatusToPresence(p *Presence, st *protoUserStatus) {

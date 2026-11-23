@@ -53,6 +53,7 @@ type UsersCache struct {
 	joinedChannels      map[string]struct{}
 	channelLastViewedAt map[string]int64
 	presences           map[string]*Presence
+	lastActivity        map[string]int64
 	lastUpdated         atomic.Int64
 }
 
@@ -66,6 +67,7 @@ func newUsersCache() *UsersCache {
 		joinedChannels:      make(map[string]struct{}),
 		channelLastViewedAt: make(map[string]int64),
 		presences:           make(map[string]*Presence),
+		lastActivity:        make(map[string]int64),
 	}
 }
 
@@ -113,6 +115,8 @@ type Client struct {
 	boqAT      string
 	boqSID     string
 	boqBL      string
+	apiKey     string
+	apiKeys    []string
 
 	// streamMu guards the active WebChannel session and HTTP cancel func so
 	// Reconnect/Logout and dynamic group subscriptions operate safely without blocking.
@@ -324,6 +328,10 @@ func (c *Client) Login(ctx context.Context) error {
 
 	c.wg.Go(func() {
 		c.runCookieRotation(loginCtx)
+	})
+
+	c.wg.Go(func() {
+		c.maintainPresence(loginCtx)
 	})
 
 	if !c.DisableStream {
