@@ -148,6 +148,9 @@ func (c *Client) Edit(ctx context.Context, roomID id.RoomID, eventID id.EventID,
 	for attempt := 0; ; attempt++ {
 		resp, err := c.mc.SendMessageEvent(ctx, roomID, event.EventMessage, &content, mautrix.ReqSendEvent{TransactionID: txnID})
 		if err == nil {
+			c.evictEvent(eventID)
+			c.cacheSentMessageEvent(roomID, resp.EventID, &content)
+
 			return resp.EventID, nil
 		}
 
@@ -176,6 +179,9 @@ func (c *Client) EditHTML(ctx context.Context, roomID id.RoomID, eventID id.Even
 	for attempt := 0; ; attempt++ {
 		resp, err := c.mc.SendMessageEvent(ctx, roomID, event.EventMessage, &content, mautrix.ReqSendEvent{TransactionID: txnID})
 		if err == nil {
+			c.evictEvent(eventID)
+			c.cacheSentMessageEvent(roomID, resp.EventID, &content)
+
 			return resp.EventID, nil
 		}
 
@@ -195,6 +201,8 @@ func (c *Client) Delete(ctx context.Context, roomID id.RoomID, eventID id.EventI
 	for attempt := 0; ; attempt++ {
 		_, err := c.mc.RedactEvent(ctx, roomID, eventID)
 		if err == nil {
+			c.evictEvent(eventID)
+
 			return nil
 		}
 

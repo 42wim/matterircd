@@ -883,6 +883,16 @@ func (m *Matrix) roomOf(eventID string) (id.RoomID, bool) {
 		return roomID, true
 	}
 
+	if m.mc == nil {
+		return "", false
+	}
+
+	if ev := m.mc.GetCachedEvent(evID); ev != nil && ev.RoomID != "" {
+		m.msgRoomCache.Add(evID, ev.RoomID)
+
+		return ev.RoomID, true
+	}
+
 	for _, r := range m.mc.Rooms() {
 		ev, err := m.mc.Event(m.ctx, r.ID, evID)
 		if err == nil && ev != nil {

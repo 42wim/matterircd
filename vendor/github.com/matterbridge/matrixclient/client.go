@@ -17,9 +17,12 @@ import (
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
 
+	lru "github.com/hashicorp/golang-lru/v2"
 	prefixed "github.com/matterbridge/logrus-prefixed-formatter"
 	"github.com/sirupsen/logrus"
 )
+
+const eventCacheSize = 2000
 
 // Client is a logged in Matrix client keeping track of rooms and users.
 type Client struct {
@@ -58,6 +61,7 @@ type Client struct {
 	presenceFetched map[id.UserID]int64
 	timezones       map[string]*time.Location
 	spaces          map[id.RoomID]*space
+	eventCache      *lru.Cache[id.EventID, *event.Event]
 
 	invitations map[id.RoomID]Invitation
 	// Accepted direct invites may not appear in m.direct, even after joining.
@@ -106,6 +110,8 @@ func New(ctx context.Context, cred Credentials, h Handler, opts ...Option) (*Cli
 		return nil, err
 	}
 
+	eventCache, _ := lru.New[id.EventID, *event.Event](eventCacheSize)
+
 	c := &Client{
 		mc:      mc,
 		handler: h,
@@ -126,6 +132,7 @@ func New(ctx context.Context, cred Credentials, h Handler, opts ...Option) (*Cli
 		presenceFetched: make(map[id.UserID]int64),
 		timezones:       make(map[string]*time.Location),
 		spaces:          make(map[id.RoomID]*space),
+		eventCache:      eventCache,
 
 		invitations:    make(map[id.RoomID]Invitation),
 		acceptedDirect: make(map[id.RoomID]id.UserID),
@@ -982,6 +989,8 @@ func (c *Client) Send(ctx context.Context, roomID id.RoomID, parentID id.EventID
 	for attempt := 0; ; attempt++ {
 		resp, err := c.mc.SendMessageEvent(ctx, roomID, event.EventMessage, &content, mautrix.ReqSendEvent{TransactionID: txnID})
 		if err == nil {
+			c.cacheSentMessageEvent(roomID, resp.EventID, &content)
+
 			return resp.EventID, nil
 		}
 
@@ -1160,8 +1169,87 @@ func (c *Client) SendDirect(ctx context.Context, userID id.UserID, parentID id.E
 	return c.Send(ctx, roomID, parentID, text)
 }
 
-// Event fetches a single event, decrypting it if encrypted and crypto is configured.
+func (c *Client) cacheEvent(ev *event.Event) {
+	if c.eventCache == nil || ev == nil || ev.ID == "" || ev.Type == event.EventEncrypted {
+		return
+	}
+
+	cp := *ev
+	c.eventCache.Add(cp.ID, &cp)
+}
+
+func (c *Client) evictEvent(eventID id.EventID) {
+	if c.eventCache == nil || eventID == "" {
+		return
+	}
+
+	c.eventCache.Remove(eventID)
+}
+
+// GetCachedEvent returns a shallow copy of the cached event for eventID, or nil if not cached.
+func (c *Client) GetCachedEvent(eventID id.EventID) *event.Event {
+	if c.eventCache == nil || eventID == "" {
+		return nil
+	}
+
+	ev, ok := c.eventCache.Get(eventID)
+	if !ok || ev == nil {
+		return nil
+	}
+
+	cp := *ev
+
+	return &cp
+}
+
+func (c *Client) cacheSentMessageEvent(roomID id.RoomID, eventID id.EventID, content *event.MessageEventContent) {
+	if c.eventCache == nil || eventID == "" || content == nil {
+		return
+	}
+
+	raw := map[string]any{
+		"msgtype": string(content.MsgType),
+		"body":    content.Body,
+	}
+
+	if content.RelatesTo != nil {
+		raw["m.relates_to"] = map[string]any{
+			"rel_type": string(content.RelatesTo.Type),
+			"event_id": string(content.RelatesTo.EventID),
+		}
+	}
+
+	if content.NewContent != nil {
+		raw["m.new_content"] = map[string]any{
+			"msgtype": string(content.NewContent.MsgType),
+			"body":    content.NewContent.Body,
+		}
+	}
+
+	copied := *content
+
+	ev := &event.Event{
+		ID:        eventID,
+		RoomID:    roomID,
+		Sender:    c.mc.UserID,
+		Type:      event.EventMessage,
+		Timestamp: time.Now().UnixMilli(),
+		Content: event.Content{
+			Parsed: &copied,
+			Raw:    raw,
+		},
+	}
+
+	c.cacheEvent(ev)
+}
+
+// Event returns a single event from the LRU cache if present, falling back to
+// the homeserver API and decrypting it if encrypted and crypto is configured.
 func (c *Client) Event(ctx context.Context, roomID id.RoomID, eventID id.EventID) (*event.Event, error) {
+	if ev := c.GetCachedEvent(eventID); ev != nil && (roomID == "" || ev.RoomID == "" || ev.RoomID == roomID) {
+		return ev, nil
+	}
+
 	for attempt := 0; ; attempt++ {
 		ev, err := c.mc.GetEvent(ctx, roomID, eventID)
 		if err == nil {
@@ -1171,8 +1259,12 @@ func (c *Client) Event(ctx context.Context, roomID id.RoomID, eventID id.EventID
 
 			dec, derr := c.decryptEvent(ctx, ev)
 			if derr == nil && dec != nil {
+				c.cacheEvent(dec)
+
 				return dec, nil
 			}
+
+			c.cacheEvent(ev)
 
 			return ev, nil
 		}
