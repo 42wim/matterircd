@@ -74,6 +74,7 @@ const (
 	protoFormatBulletedListItem = 11
 	protoFormatClientHidden     = 12
 	protoFormatSearchHighlight  = 13
+	protoFormatBlockquote       = 15
 
 	protoEventGroupViewed       = 3
 	protoEventGroupUpdated      = 5

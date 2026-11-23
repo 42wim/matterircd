@@ -211,6 +211,8 @@ func formatTypeDelimiters(ft int32) (string, string, int, bool, bool) {
 		return "```\n", "\n```", 10, true, true
 	case protoFormatBulletedListItem:
 		return "- ", "", 5, true, true
+	case protoFormatBlockquote:
+		return "> ", "", 5, true, true
 	default:
 		return "", "", 0, false, false
 	}
@@ -248,6 +250,10 @@ func isPlainURLText(vis, rawURL string) bool {
 }
 
 func appendNormalizedSpan(spans []textSpan, text string, sp textSpan, hidden [][2]int) []textSpan {
+	if sp.formatType == protoFormatBlockquote {
+		return appendBlockquoteLines(spans, text, sp, hidden)
+	}
+
 	if sp.block {
 		if visibleTextInRange(text, sp.start, sp.end, hidden) == "" {
 			return spans
@@ -281,6 +287,40 @@ func appendNormalizedSpan(spans []textSpan, text string, sp textSpan, hidden [][
 		if trimmed, ok := trimInlineSpan(text, sp, segStart, sp.end, hidden); ok {
 			spans = append(spans, trimmed)
 		}
+	}
+
+	return spans
+}
+
+func appendBlockquoteLines(spans []textSpan, text string, sp textSpan, hidden [][2]int) []textSpan {
+	segStart := sp.start
+	pos := 0
+
+	for _, r := range text {
+		w := utf16Width(r)
+
+		if r == '\n' && pos >= segStart && pos < sp.end {
+			if visibleTextInRange(text, segStart, pos, hidden) != "" {
+				lineSpan := sp
+				lineSpan.start = segStart
+				lineSpan.end = pos
+				spans = append(spans, lineSpan)
+			}
+
+			segStart = pos + w
+		}
+
+		pos += w
+		if pos >= sp.end {
+			break
+		}
+	}
+
+	if segStart < sp.end && visibleTextInRange(text, segStart, sp.end, hidden) != "" {
+		lineSpan := sp
+		lineSpan.start = segStart
+		lineSpan.end = sp.end
+		spans = append(spans, lineSpan)
 	}
 
 	return spans
