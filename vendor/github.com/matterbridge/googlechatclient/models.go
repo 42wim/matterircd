@@ -192,6 +192,7 @@ type User struct {
 	IsBot            bool
 	IsExternal       bool
 	IsConsumer       bool
+	Deleted          bool
 }
 
 // Presence represents a user's availability, DND state, and custom status.
