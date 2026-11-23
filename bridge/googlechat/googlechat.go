@@ -802,7 +802,7 @@ func (g *GoogleChat) StatusUsers(ctx context.Context) (map[string]string, error)
 	ids := make([]string, 0, len(users))
 
 	for _, u := range users {
-		if u.ID != "" && !u.IsBot {
+		if u.ID != "" && !u.IsBot && !u.Deleted {
 			ids = append(ids, u.ID)
 		}
 	}
@@ -915,6 +915,10 @@ func (g *GoogleChat) GetChannelUsers(ctx context.Context, channelID string) ([]*
 	users := make([]*bridge.UserInfo, 0, len(members))
 
 	for _, uid := range members {
+		if u := g.gc.GetUser(uid); u != nil && u.Deleted {
+			continue
+		}
+
 		if info := g.resolveUserInfo(ctx, uid, ""); info != nil {
 			users = append(users, info)
 		}
@@ -928,6 +932,10 @@ func (g *GoogleChat) GetUsers() []*bridge.UserInfo {
 	out := make([]*bridge.UserInfo, 0, len(rawUsers))
 
 	for _, u := range rawUsers {
+		if u == nil || u.Deleted {
+			continue
+		}
+
 		out = append(out, g.userToUserInfo(u))
 	}
 
@@ -956,7 +964,15 @@ func (g *GoogleChat) GetUserChannels(_ context.Context, userID string) ([]string
 }
 
 func (g *GoogleChat) GetUserCount() int {
-	return g.gc.GetUserCount()
+	count := 0
+
+	for _, u := range g.gc.GetUsers() {
+		if u != nil && !u.Deleted {
+			count++
+		}
+	}
+
+	return count
 }
 
 func (g *GoogleChat) GetMe() *bridge.UserInfo {
@@ -1000,6 +1016,10 @@ func (g *GoogleChat) SearchUsers(ctx context.Context, query string) ([]*bridge.U
 
 	out := make([]*bridge.UserInfo, 0, len(users))
 	for _, u := range users {
+		if u == nil || u.Deleted {
+			continue
+		}
+
 		out = append(out, g.userToUserInfo(u))
 	}
 

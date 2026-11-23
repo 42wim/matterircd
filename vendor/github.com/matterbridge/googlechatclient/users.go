@@ -82,6 +82,10 @@ func mergeUserFields(dst, src *User) {
 	if src.IsConsumer {
 		dst.IsConsumer = true
 	}
+
+	if src.Deleted {
+		dst.Deleted = true
+	}
 }
 
 // GetUser returns a copy of the cached user profile for id, or nil.
@@ -565,17 +569,24 @@ func protoUserToUser(pu *protoUser) *User {
 		name = strings.TrimSpace(pu.FirstName + " " + pu.LastName)
 	}
 
+	email := strings.TrimSpace(pu.Email)
+
 	return &User{
 		ID:             pu.ID,
 		DisplayName:    name,
 		FirstName:      strings.TrimSpace(pu.FirstName),
 		LastName:       strings.TrimSpace(pu.LastName),
-		Email:          strings.TrimSpace(pu.Email),
+		Email:          email,
 		AvatarURL:      strings.TrimSpace(pu.AvatarURL),
 		OrganizationID: strings.TrimSpace(pu.OrganizationID),
 		IsBot:          pu.IsBot,
 		IsConsumer:     pu.IsConsumer,
+		Deleted:        pu.Deleted || isDeletedUserPlaceholder(name, email),
 	}
+}
+
+func isDeletedUserPlaceholder(displayName, email string) bool {
+	return email == "" && strings.EqualFold(displayName, "Deleted User")
 }
 
 func (c *Client) fetchSelfPresence(ctx context.Context) (*Presence, error) {
