@@ -1039,8 +1039,16 @@ func (m *MSTeams) GetPostChannelID(_ context.Context, postID string) string {
 	return convID
 }
 
-func (m *MSTeams) GetPost(ctx context.Context, postID string) (*bridge.QuotedPost, error) {
+func (m *MSTeams) GetPost(ctx context.Context, channelID, postID string) (*bridge.QuotedPost, error) {
 	convID, rawMsgID, ok := m.resolvePostID(postID)
+	if !ok && channelID != "" {
+		if decodedID, _, decoded := decodeTeamsID(postID); decoded {
+			convID = channelID
+			rawMsgID = decodedID
+			ok = true
+		}
+	}
+
 	if !ok {
 		return nil, errors.New("unknown post " + postID)
 	}

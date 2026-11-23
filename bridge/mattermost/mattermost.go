@@ -2253,7 +2253,7 @@ func (m *Mattermost) GetPosts(ctx context.Context, channelID string, limit int) 
 	return m.postListToEvents(ctx, m.mc.GetPosts(ctx, channelID, limit), "scrollback", 0)
 }
 
-func (m *Mattermost) GetPost(ctx context.Context, postID string) (*bridge.QuotedPost, error) {
+func (m *Mattermost) GetPost(ctx context.Context, _, postID string) (*bridge.QuotedPost, error) {
 	post, err := m.mc.GetPost(ctx, postID)
 	if err != nil {
 		return nil, err

@@ -82,7 +82,34 @@ func newLocalMessageID() string {
 }
 
 // SendMessage sends a top-level message to a Space or DM via create_topic.
+func (c *Client) encodeQuoteRef(fallbackConvID string, quote *QuoteRef) []byte {
+	if quote == nil || quote.MessageID == "" {
+		return nil
+	}
+
+	convID := quote.ConversationID
+	if convID == "" {
+		convID = fallbackConvID
+	}
+
+	topicID := quote.TopicID
+	if topicID == "" {
+		topicID = quote.MessageID
+	}
+
+	return encodeQuotedMessagePayload(c.protoGroupRefFor(convID), topicID, quote.MessageID, quote.LastUpdateTimeUsec)
+}
+
 func (c *Client) SendMessage(ctx context.Context, convID, text string) (*ChatMessage, error) {
+	return c.sendMessage(ctx, convID, text, nil)
+}
+
+// SendQuotedMessage sends a top-level message with a native Google Chat "Quote in reply" attachment.
+func (c *Client) SendQuotedMessage(ctx context.Context, convID, text string, quote QuoteRef) (*ChatMessage, error) {
+	return c.sendMessage(ctx, convID, text, &quote)
+}
+
+func (c *Client) sendMessage(ctx context.Context, convID, text string, quote *QuoteRef) (*ChatMessage, error) {
 	if convID == "" {
 		return nil, errors.New("googlechatclient: empty conversation ID")
 	}
@@ -92,7 +119,7 @@ func (c *Client) SendMessage(ctx context.Context, convID, text string) (*ChatMes
 	c.recordSentIDs("", localID)
 
 	bodyText, anns := c.buildOutgoingAnnotations(text)
-	reqBytes := encodeCreateTopicRequest(ref, bodyText, localID, anns)
+	reqBytes := encodeCreateTopicRequest(ref, bodyText, localID, anns, c.encodeQuoteRef(convID, quote))
 
 	respBytes, err := c.doProto(ctx, "create_topic", reqBytes)
 	if err != nil {
@@ -122,19 +149,31 @@ func (c *Client) extractSentMessageFromTopic(topic *protoTopic, convID, localID,
 		topicID = topic.TopicID
 	}
 
+	now := time.Now()
+
 	return &ChatMessage{
-		ID:              topicID,
-		TopicID:         topicID,
-		ClientMessageID: localID,
-		ConversationID:  convID,
-		FromID:          c.selfUserID(),
-		ContentText:     text,
-		CreateAt:        time.Now().UnixMilli(),
+		ID:                 topicID,
+		TopicID:            topicID,
+		ClientMessageID:    localID,
+		ConversationID:     convID,
+		FromID:             c.selfUserID(),
+		ContentText:        text,
+		CreateAt:           now.UnixMilli(),
+		LastUpdateTimeUsec: now.UnixMicro(),
 	}
 }
 
 // SendMessageThread sends an inline thread reply within topicID via create_message.
 func (c *Client) SendMessageThread(ctx context.Context, convID, topicID, text string) (*ChatMessage, error) {
+	return c.sendMessageThread(ctx, convID, topicID, text, nil)
+}
+
+// SendQuotedMessageThread sends an inline thread reply with a native Google Chat "Quote in reply" attachment.
+func (c *Client) SendQuotedMessageThread(ctx context.Context, convID, topicID, text string, quote QuoteRef) (*ChatMessage, error) {
+	return c.sendMessageThread(ctx, convID, topicID, text, &quote)
+}
+
+func (c *Client) sendMessageThread(ctx context.Context, convID, topicID, text string, quote *QuoteRef) (*ChatMessage, error) {
 	if convID == "" || topicID == "" {
 		return nil, errors.New("googlechatclient: conversation ID and topic ID are required")
 	}
@@ -144,7 +183,7 @@ func (c *Client) SendMessageThread(ctx context.Context, convID, topicID, text st
 	c.recordSentIDs("", localID)
 
 	bodyText, anns := c.buildOutgoingAnnotations(text)
-	reqBytes := encodeCreateMessageRequest(ref, topicID, bodyText, localID, anns)
+	reqBytes := encodeCreateMessageRequest(ref, topicID, bodyText, localID, anns, c.encodeQuoteRef(convID, quote))
 
 	respBytes, err := c.doProto(ctx, "create_message", reqBytes)
 	if err != nil {
@@ -158,14 +197,17 @@ func (c *Client) SendMessageThread(ctx context.Context, convID, topicID, text st
 
 	msg := c.protoMessageToChatMessage(pm, convID, topicID)
 	if msg == nil {
+		now := time.Now()
+
 		msg = &ChatMessage{
-			TopicID:         topicID,
-			ClientMessageID: localID,
-			ConversationID:  convID,
-			RootMessageID:   topicID,
-			FromID:          c.selfUserID(),
-			ContentText:     bodyText,
-			CreateAt:        time.Now().UnixMilli(),
+			TopicID:            topicID,
+			ClientMessageID:    localID,
+			ConversationID:     convID,
+			RootMessageID:      topicID,
+			FromID:             c.selfUserID(),
+			ContentText:        bodyText,
+			CreateAt:           now.UnixMilli(),
+			LastUpdateTimeUsec: now.UnixMicro(),
 		}
 	}
 
@@ -619,24 +661,25 @@ func (c *Client) protoMessageToChatMessage(pm *protoMessage, fallbackConvID, fal
 	}
 
 	msg := &ChatMessage{
-		ID:              msgID,
-		TopicID:         topicID,
-		ClientMessageID: pm.LocalID,
-		ConversationID:  convID,
-		RootMessageID:   rootID,
-		FromID:          fromID,
-		DisplayName:     displayName,
-		ContentText:     text,
-		CreateAt:        usecToMillis(pm.CreateTimeUsec),
-		EditAt:          usecToMillis(pm.EditTimeUsec),
-		DeleteAt:        usecToMillis(pm.DeleteTimeUsec),
-		IsSystem:        isSystem,
-		TopicChanged:    topicChanged,
-		NewTopic:        newTopic,
-		QuotedMessage:   c.protoQuotedToQuotedMessage(pm.Quoted, convID, text),
-		Mentions:        mentions,
-		Attachments:     attachments,
-		Reactions:       c.protoReactionsToMap(pm.Reactions),
+		ID:                 msgID,
+		TopicID:            topicID,
+		ClientMessageID:    pm.LocalID,
+		ConversationID:     convID,
+		RootMessageID:      rootID,
+		FromID:             fromID,
+		DisplayName:        displayName,
+		ContentText:        text,
+		CreateAt:           usecToMillis(pm.CreateTimeUsec),
+		EditAt:             usecToMillis(pm.EditTimeUsec),
+		DeleteAt:           usecToMillis(pm.DeleteTimeUsec),
+		LastUpdateTimeUsec: max(pm.UpdateTimeUsec, pm.EditTimeUsec, pm.CreateTimeUsec),
+		IsSystem:           isSystem,
+		TopicChanged:       topicChanged,
+		NewTopic:           newTopic,
+		QuotedMessage:      c.protoQuotedToQuotedMessage(pm.Quoted, convID, text),
+		Mentions:           mentions,
+		Attachments:        attachments,
+		Reactions:          c.protoReactionsToMap(pm.Reactions),
 	}
 
 	return msg

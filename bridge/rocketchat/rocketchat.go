@@ -2195,7 +2195,7 @@ func (r *RocketChat) GetPostChannelID(ctx context.Context, postID string) string
 	return msg.RoomID
 }
 
-func (r *RocketChat) GetPost(ctx context.Context, postID string) (*bridge.QuotedPost, error) {
+func (r *RocketChat) GetPost(ctx context.Context, _, postID string) (*bridge.QuotedPost, error) {
 	msg, err := r.rc.ResolveMessage(ctx, postID)
 	if err != nil {
 		return nil, err

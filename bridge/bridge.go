@@ -143,9 +143,10 @@ type QuotedPost struct {
 }
 
 // PostGetter is optionally implemented by bridges that can retrieve a single post's
-// raw content and author for quote-in-reply formatting.
+// raw content and author for quote-in-reply formatting. channelID is the channel or
+// DM conversation ID where the quote was invoked (may be empty if unknown).
 type PostGetter interface {
-	GetPost(ctx context.Context, postID string) (*QuotedPost, error)
+	GetPost(ctx context.Context, channelID, postID string) (*QuotedPost, error)
 }
 
 // QuoteSender is optionally implemented by bridges that support native wire-level

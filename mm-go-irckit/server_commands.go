@@ -1398,7 +1398,12 @@ func sendMarkdownQuote(u *User, channelID, postID, text string, threaded, toUser
 		return "", "", errors.New("quoting is not supported on this bridge")
 	}
 
-	quotedPost, err := pg.GetPost(u.ctx, postID)
+	lookupChannelID := channelID
+	if toUser {
+		lookupChannelID = u.br.GetDMChannelID(u.ctx, channelID)
+	}
+
+	quotedPost, err := pg.GetPost(u.ctx, lookupChannelID, postID)
 	if err != nil {
 		return "", "", err
 	}

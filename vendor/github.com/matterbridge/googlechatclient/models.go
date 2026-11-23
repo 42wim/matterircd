@@ -89,24 +89,25 @@ type Message struct {
 
 // ChatMessage represents a normalized Google Chat message (top-level or inline reply).
 type ChatMessage struct {
-	ID              string
-	TopicID         string
-	ClientMessageID string
-	ConversationID  string
-	RootMessageID   string
-	FromID          string
-	DisplayName     string
-	ContentText     string
-	CreateAt        int64
-	EditAt          int64
-	DeleteAt        int64
-	IsSystem        bool
-	TopicChanged    bool
-	NewTopic        string
-	QuotedMessage   *QuotedMessage
-	Mentions        []Mention
-	Attachments     []Attachment
-	Reactions       map[string][]ReactionUser
+	ID                 string
+	TopicID            string
+	ClientMessageID    string
+	ConversationID     string
+	RootMessageID      string
+	FromID             string
+	DisplayName        string
+	ContentText        string
+	CreateAt           int64
+	EditAt             int64
+	DeleteAt           int64
+	LastUpdateTimeUsec int64
+	IsSystem           bool
+	TopicChanged       bool
+	NewTopic           string
+	QuotedMessage      *QuotedMessage
+	Mentions           []Mention
+	Attachments        []Attachment
+	Reactions          map[string][]ReactionUser
 }
 
 // QuotedMessage describes the original message quoted or forwarded by a Google Chat message.
@@ -119,6 +120,14 @@ type QuotedMessage struct {
 	Text           string
 	Deleted        bool
 	IsForwarded    bool
+}
+
+// QuoteRef identifies an existing message to attach as a native Google Chat "Quote in reply".
+type QuoteRef struct {
+	ConversationID     string
+	TopicID            string
+	MessageID          string
+	LastUpdateTimeUsec int64
 }
 
 // Mention records an @mention target embedded in a Google Chat message.
