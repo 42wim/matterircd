@@ -21,14 +21,17 @@ import (
 )
 
 const (
-	defaultUserAgent   = "googlechatclient/0.0"
-	defaultHTTPTimeout = 30 * time.Second
-	maxAPIResponseSize = 16 << 20 // 16 MiB
-	maxHTTPRetries     = 2
-	postCacheSize      = 2000
-	reactionCacheSize  = 2000
-	sentCacheSize      = 256
-	messageChanCap     = 100
+	defaultUserAgent     = "googlechatclient/0.0"
+	defaultHTTPTimeout   = 30 * time.Second
+	maxAPIResponseSize   = 16 << 20 // 16 MiB
+	maxAPIRetries        = 10
+	defaultRateLimitWait = 3 * time.Second
+	maxRateLimitWaitSecs = 300
+	cappedRateLimitWait  = 5 * time.Second
+	postCacheSize        = 2000
+	reactionCacheSize    = 2000
+	sentCacheSize        = 256
+	messageChanCap       = 100
 )
 
 // UsersCache holds cached users, conversations, memberships, and presence data.
@@ -91,6 +94,7 @@ type Client struct {
 	wg          sync.WaitGroup
 
 	connected      atomic.Bool
+	aborted        atomic.Bool
 	wsConnected    atomic.Bool
 	lastWsActivity atomic.Int64
 	apiReqSeq      atomic.Int64
@@ -101,10 +105,11 @@ type Client struct {
 	authMu     sync.RWMutex
 	tokenState TokenState
 
-	// streamMu guards the active WebChannel HTTP cancel func so Reconnect/Logout
-	// can abort an in-flight long-poll stream without blocking.
+	// streamMu guards the active WebChannel session and HTTP cancel func so
+	// Reconnect/Logout and dynamic group subscriptions operate safely without blocking.
 	streamMu     sync.Mutex
 	streamCancel context.CancelFunc
+	activeSess   *webChannelSession
 
 	httpClient   *http.Client
 	streamClient *http.Client
@@ -256,6 +261,7 @@ func (c *Client) TokenState() TokenState {
 // Login authenticates against Google Chat, syncs Spaces/DMs/users, and starts
 // the background WebChannel real-time event loop.
 func (c *Client) Login(ctx context.Context) error {
+	c.aborted.Store(false)
 	c.initHTTPClients()
 
 	loginCtx, cancel := context.WithCancel(ctx)
@@ -292,6 +298,7 @@ func (c *Client) Login(ctx context.Context) error {
 
 // Logout terminates background goroutines and marks the client disconnected.
 func (c *Client) Logout(_ context.Context) error {
+	c.aborted.Store(true)
 	c.connected.Store(false)
 
 	c.Lock()
@@ -316,36 +323,163 @@ func (c *Client) Ping(ctx context.Context) error {
 	return err
 }
 
+// IsAborted reports whether Logout has been called or ctx has been canceled.
+func (c *Client) IsAborted(ctx context.Context) bool {
+	if c.aborted.Load() {
+		return true
+	}
+
+	return ctx != nil && ctx.Err() != nil
+}
+
+// HandleRatelimit sleeps for the duration requested by an HTTP 429 response,
+// checking Retry-After first and falling back to X-RateLimit-Reset (mirroring matterclient).
+func (c *Client) HandleRatelimit(ctx context.Context, name string, resp *http.Response) error {
+	if resp == nil {
+		return fmt.Errorf("googlechatclient: got a nil response from %s", name)
+	}
+
+	if resp.StatusCode != http.StatusTooManyRequests {
+		return fmt.Errorf("googlechatclient: status code error: %d", resp.StatusCode)
+	}
+
+	waitSecs, hasHeader := parseRateLimitWaitSeconds(resp.Header)
+	if !hasHeader {
+		_, err := c.sleepWithContext(ctx, defaultRateLimitWait)
+
+		return err
+	}
+
+	if waitSecs < 1 {
+		waitSecs = 1
+	}
+
+	wait := time.Duration(waitSecs) * time.Second
+	if waitSecs > maxRateLimitWaitSecs {
+		c.logger.Warnf("Rate limit reset time (%d seconds) looks suspiciously long; capping sleep to %d seconds",
+			waitSecs, int(cappedRateLimitWait/time.Second))
+		wait = cappedRateLimitWait
+	} else {
+		c.logger.Warnf("Ratelimited on %s for %d seconds", name, waitSecs)
+	}
+
+	_, err := c.sleepWithContext(ctx, wait)
+
+	return err
+}
+
+// HandleRetry decides whether a failed API call should be retried, sleeping
+// before returning true (mirroring matterclient.HandleRetry).
+func (c *Client) HandleRetry(ctx context.Context, name string, err error, current, maxLimit int, resp *http.Response) (bool, error) {
+	if c.IsAborted(ctx) {
+		if ctx != nil && ctx.Err() != nil {
+			return false, ctx.Err()
+		}
+
+		return false, context.Canceled
+	}
+
+	if current >= maxLimit {
+		return false, nil
+	}
+
+	sleepDuration := time.Duration(current+1) * time.Second
+
+	if resp == nil {
+		c.logger.Warnf("Network error on %s (resp is nil, err: %v), backing off: %s (attempt %d/%d)",
+			name, err, sleepDuration, current+1, maxLimit)
+
+		return c.sleepWithContext(ctx, sleepDuration)
+	}
+
+	switch {
+	case resp.StatusCode == http.StatusTooManyRequests:
+		rlErr := c.HandleRatelimit(ctx, name, resp)
+		if rlErr != nil && c.IsAborted(ctx) {
+			return false, rlErr
+		}
+
+		return true, nil
+
+	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
+		return c.handleUnauthorizedRetry(ctx, name, current, resp.StatusCode), nil
+
+	case resp.StatusCode >= http.StatusInternalServerError:
+		c.logger.Warnf("Transient error %d on %s, backing off: %s (attempt %d/%d)",
+			resp.StatusCode, name, sleepDuration, current+1, maxLimit)
+
+		return c.sleepWithContext(ctx, sleepDuration)
+
+	case resp.StatusCode >= http.StatusMultipleChoices && resp.StatusCode < http.StatusInternalServerError:
+		// Client errors (4xx) should not be retried unless 429 or 401/403 above.
+		return false, nil
+
+	default:
+		return c.sleepWithContext(ctx, sleepDuration)
+	}
+}
+
+func (c *Client) handleUnauthorizedRetry(ctx context.Context, name string, current, status int) bool {
+	if current > 0 || c.IsAborted(ctx) {
+		return false
+	}
+
+	c.logger.Warnf("HTTP %d on %s, attempting session cookie/XSRF refresh", status, name)
+
+	refreshErr := c.handleUnauthorized(ctx)
+	if refreshErr != nil {
+		c.logger.Errorf("Session refresh failed on %s: %v", name, refreshErr)
+
+		return false
+	}
+
+	return true
+}
+
 func (c *Client) doProto(ctx context.Context, endpoint string, reqBytes []byte) ([]byte, error) {
 	seq := c.apiReqSeq.Add(1)
 	rawURL := fmt.Sprintf("%s/api/%s?c=%d&rt=b&alt=proto", c.chatBaseURL(), endpoint, seq)
+	opName := "/api/" + endpoint
 
-	for attempt := range maxHTTPRetries + 1 {
-		respBytes, status, retryAfter, err := c.doProtoOnce(ctx, rawURL, reqBytes)
+	for attempt := 0; ; attempt++ {
+		respBytes, status, header, err := c.doProtoOnce(ctx, rawURL, reqBytes)
+		if err == nil && status > 0 && status < http.StatusBadRequest {
+			return respBytes, nil
+		}
 
-		retry, retryErr := c.shouldRetryHTTP(ctx, endpoint, attempt, status, retryAfter, err)
+		var resp *http.Response
+		if status > 0 {
+			resp = &http.Response{
+				StatusCode: status,
+				Header:     header,
+			}
+		}
+
+		shouldRetry, retryErr := c.HandleRetry(ctx, opName, err, attempt, maxAPIRetries, resp)
 		if retryErr != nil {
 			return nil, retryErr
 		}
 
-		if retry {
+		if shouldRetry {
 			continue
 		}
 
-		if status >= http.StatusBadRequest {
-			return nil, fmt.Errorf("googlechatclient: POST /api/%s returned HTTP %d: %s", endpoint, status, truncateBody(respBytes))
+		if err != nil {
+			return nil, err
 		}
 
-		return respBytes, nil
-	}
+		if status > 0 {
+			return nil, fmt.Errorf("googlechatclient: POST %s returned HTTP %d: %s", opName, status, truncateBody(respBytes))
+		}
 
-	return nil, fmt.Errorf("googlechatclient: /api/%s exceeded retry limit", endpoint)
+		return nil, fmt.Errorf("googlechatclient: POST %s failed with nil response", opName)
+	}
 }
 
-func (c *Client) doProtoOnce(ctx context.Context, targetURL string, reqBytes []byte) ([]byte, int, time.Duration, error) {
+func (c *Client) doProtoOnce(ctx context.Context, targetURL string, reqBytes []byte) ([]byte, int, http.Header, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(reqBytes))
 	if err != nil {
-		return nil, 0, 0, err
+		return nil, 0, nil, err
 	}
 
 	req.Header.Set("Content-Type", "application/x-protobuf")
@@ -354,7 +488,7 @@ func (c *Client) doProtoOnce(ctx context.Context, targetURL string, reqBytes []b
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, 0, 0, err
+		return nil, 0, nil, err
 	}
 
 	defer resp.Body.Close()
@@ -363,7 +497,7 @@ func (c *Client) doProtoOnce(ctx context.Context, targetURL string, reqBytes []b
 
 	body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxAPIResponseSize))
 	if readErr != nil {
-		return nil, resp.StatusCode, 0, readErr
+		return nil, resp.StatusCode, resp.Header, readErr
 	}
 
 	if resp.StatusCode < http.StatusBadRequest && strings.EqualFold(resp.Header.Get("X-Goog-Safety-Encoding"), "base64") {
@@ -373,44 +507,7 @@ func (c *Client) doProtoOnce(ctx context.Context, targetURL string, reqBytes []b
 		}
 	}
 
-	return body, resp.StatusCode, parseRetryAfter(resp.Header.Get("Retry-After")), nil
-}
-
-func (c *Client) shouldRetryHTTP(ctx context.Context, endpoint string, attempt, status int, retryAfter time.Duration, reqErr error) (bool, error) {
-	if reqErr != nil {
-		if ctx.Err() != nil || attempt >= maxHTTPRetries {
-			return false, reqErr
-		}
-
-		backoff := time.Duration(attempt+1) * time.Second
-		c.logger.Warnf("Network error on /api/%s (%v), backing off %s (attempt %d/%d)",
-			endpoint, reqErr, backoff, attempt+1, maxHTTPRetries)
-
-		return true, sleepContext(ctx, backoff)
-	}
-
-	switch {
-	case (status == http.StatusUnauthorized || status == http.StatusForbidden) && attempt == 0:
-		refreshErr := c.handleUnauthorized(ctx)
-		if refreshErr != nil {
-			return false, fmt.Errorf("googlechatclient: HTTP %d on /api/%s (XSRF refresh failed: %w)", status, endpoint, refreshErr)
-		}
-
-		return true, nil
-	case status == http.StatusTooManyRequests && attempt < maxHTTPRetries:
-		c.logger.Warnf("Rate limited (429) on /api/%s, waiting %s (attempt %d/%d)",
-			endpoint, retryAfter, attempt+1, maxHTTPRetries)
-
-		return true, sleepContext(ctx, retryAfter)
-	case status >= http.StatusInternalServerError && attempt < maxHTTPRetries:
-		backoff := time.Duration(attempt+1) * time.Second
-		c.logger.Warnf("Transient HTTP %d on /api/%s, backing off %s (attempt %d/%d)",
-			status, endpoint, backoff, attempt+1, maxHTTPRetries)
-
-		return true, sleepContext(ctx, backoff)
-	default:
-		return false, nil
-	}
+	return body, resp.StatusCode, resp.Header, nil
 }
 
 func decodeBase64Flexible(raw []byte) ([]byte, error) {
@@ -427,35 +524,71 @@ func decodeBase64Flexible(raw []byte) ([]byte, error) {
 	return base64.RawStdEncoding.DecodeString(string(trimmed))
 }
 
-func parseRetryAfter(raw string) time.Duration {
-	s := strings.TrimSpace(raw)
-	if s == "" {
-		return 2 * time.Second
-	}
+func parseRateLimitWaitSeconds(h http.Header) (int64, bool) {
+	if raw := strings.TrimSpace(h.Get("Retry-After")); raw != "" {
+		secs, err := strconv.ParseInt(raw, 10, 64)
+		if err == nil {
+			return secs, true
+		}
 
-	secs, err := strconv.Atoi(s)
-	if err == nil && secs > 0 {
-		return min(time.Duration(secs)*time.Second, 30*time.Second)
-	}
-
-	t, err := http.ParseTime(s)
-	if err == nil {
-		d := time.Until(t)
-		if d > 0 {
-			return min(d, 30*time.Second)
+		t, parseErr := http.ParseTime(raw)
+		if parseErr == nil {
+			return int64(time.Until(t).Seconds()), true
 		}
 	}
 
-	return 2 * time.Second
+	if raw := strings.TrimSpace(h.Get("X-RateLimit-Reset")); raw != "" { //nolint:canonicalheader
+		val, err := strconv.ParseInt(raw, 10, 64)
+		if err == nil {
+			if val > 1000000 {
+				return val - time.Now().Unix(), true
+			}
+
+			return val, true
+		}
+	}
+
+	return 0, false
+}
+
+func (c *Client) sleepWithContext(ctx context.Context, d time.Duration) (bool, error) {
+	if c.IsAborted(ctx) {
+		if ctx != nil && ctx.Err() != nil {
+			return false, ctx.Err()
+		}
+
+		return false, context.Canceled
+	}
+
+	err := sleepContext(ctx, d)
+	if err != nil {
+		return false, err
+	}
+
+	if c.IsAborted(ctx) {
+		return false, context.Canceled
+	}
+
+	return true, nil
 }
 
 func sleepContext(ctx context.Context, d time.Duration) error {
 	if d <= 0 {
-		return ctx.Err()
+		if ctx != nil {
+			return ctx.Err()
+		}
+
+		return nil
 	}
 
 	t := time.NewTimer(d)
 	defer t.Stop()
+
+	if ctx == nil {
+		<-t.C
+
+		return nil
+	}
 
 	select {
 	case <-ctx.Done():

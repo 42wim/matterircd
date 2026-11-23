@@ -81,14 +81,15 @@ type protoReaction struct {
 }
 
 type protoQuotedMessage struct {
-	Group       protoGroupRef
-	TopicID     string
-	MessageID   string
-	CreatorID   string
-	Creator     *protoUser
-	TextBody    string
-	Annotations []protoAnnotation
-	Deleted     bool
+	Group         protoGroupRef
+	TopicID       string
+	MessageID     string
+	CreatorID     string
+	Creator       *protoUser
+	TextBody      string
+	Annotations   []protoAnnotation
+	Deleted       bool
+	UnknownFields []int32
 }
 
 type protoMessage struct {
@@ -1137,6 +1138,10 @@ func decodeQuotedMessageMetadata(b []byte) *protoQuotedMessage {
 		case 7:
 			if typ == protowire.BytesType {
 				q.Annotations = append(q.Annotations, decodeAnnotation(decodeBytes(val)))
+			}
+		default:
+			if num > 14 {
+				q.UnknownFields = append(q.UnknownFields, int32(num))
 			}
 		}
 

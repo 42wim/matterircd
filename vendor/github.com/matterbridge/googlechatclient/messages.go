@@ -17,7 +17,7 @@ const (
 	defaultHistoryLimit = 50
 	maxHistoryLimit     = 200
 	defaultReplyLimit   = 10
-	typingDebounce      = 4 * time.Second
+	typingDebounce      = 3 * time.Second
 	maxSearchConvs      = 25
 	searchMsgsPerConv   = 40
 )
@@ -347,7 +347,7 @@ func (c *Client) GetMessagesSince(ctx context.Context, convID string, since time
 	var filtered []*ChatMessage
 
 	for _, m := range all {
-		if m.CreateAt >= sinceMs {
+		if m.CreateAt > sinceMs {
 			filtered = append(filtered, m)
 		}
 	}
@@ -357,7 +357,10 @@ func (c *Client) GetMessagesSince(ctx context.Context, convID string, since time
 
 func (c *Client) catchUpMessagesSince(ctx context.Context, convID string, since time.Time, limit int) ([]*ChatMessage, error) {
 	ref := c.protoGroupRefFor(convID)
-	reqBytes := encodeCatchUpGroupRequest(ref, since.UnixMicro(), clampedInt32(limit))
+	// Advance past the sub-millisecond tail of `since` (matching slackclient) so
+	// messages whose microsecond fraction was truncated into millisecond cursors
+	// are not returned a second time on reconnect/replay.
+	reqBytes := encodeCatchUpGroupRequest(ref, since.UnixMicro()+999, clampedInt32(limit))
 
 	respBytes, err := c.doProto(ctx, "catch_up_group", reqBytes)
 	if err != nil {
@@ -445,7 +448,7 @@ func (c *Client) upsertCatchUpMessage(
 		return
 	}
 
-	if msg.CreateAt < sinceMs {
+	if msg.CreateAt <= sinceMs {
 		return
 	}
 
@@ -615,7 +618,7 @@ func (c *Client) protoMessageToChatMessage(pm *protoMessage, fallbackConvID, fal
 		EditAt:          usecToMillis(pm.EditTimeUsec),
 		DeleteAt:        usecToMillis(pm.DeleteTimeUsec),
 		IsSystem:        pm.MessageType == protoMsgTypeSystem,
-		QuotedMessage:   c.protoQuotedToQuotedMessage(pm.Quoted),
+		QuotedMessage:   c.protoQuotedToQuotedMessage(pm.Quoted, convID, text),
 		Mentions:        mentions,
 		Attachments:     attachments,
 		Reactions:       c.protoReactionsToMap(pm.Reactions),
@@ -624,9 +627,15 @@ func (c *Client) protoMessageToChatMessage(pm *protoMessage, fallbackConvID, fal
 	return msg
 }
 
-func (c *Client) protoQuotedToQuotedMessage(pq *protoQuotedMessage) *QuotedMessage {
+func (c *Client) protoQuotedToQuotedMessage(pq *protoQuotedMessage, destConvID, destText string) *QuotedMessage {
 	if pq == nil {
 		return nil
+	}
+
+	c.rememberGroupRef(pq.Group)
+
+	if len(pq.UnknownFields) > 0 {
+		c.logger.Debugf("QuotedMessageMetadata extra fields on message %s: %v", pq.MessageID, pq.UnknownFields)
 	}
 
 	fromID, displayName := c.extractQuotedCreator(pq)
@@ -640,13 +649,18 @@ func (c *Client) protoQuotedToQuotedMessage(pq *protoQuotedMessage) *QuotedMessa
 		return nil
 	}
 
+	isCrossConv := pq.Group.ID != "" && destConvID != "" && pq.Group.ID != destConvID
+	isForwarded := isCrossConv || strings.TrimSpace(destText) == ""
+
 	return &QuotedMessage{
-		ID:          pq.MessageID,
-		TopicID:     pq.TopicID,
-		FromID:      fromID,
-		DisplayName: displayName,
-		Text:        quotedText,
-		Deleted:     pq.Deleted,
+		ID:             pq.MessageID,
+		ConversationID: pq.Group.ID,
+		TopicID:        pq.TopicID,
+		FromID:         fromID,
+		DisplayName:    displayName,
+		Text:           quotedText,
+		Deleted:        pq.Deleted,
+		IsForwarded:    isForwarded,
 	}
 }
 
