@@ -11,6 +11,8 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"runtime/debug"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -19,7 +21,6 @@ import (
 
 	bolt "go.etcd.io/bbolt"
 
-	"github.com/42wim/matterircd/ai"
 	"github.com/42wim/matterircd/config"
 	irckit "github.com/42wim/matterircd/mm-go-irckit"
 	"github.com/google/gops/agent"
@@ -40,7 +41,7 @@ var (
 	LastViewedSaveDBs map[string]*bolt.DB
 )
 
-//nolint:funlen,gocognit,gocyclo
+//nolint:funlen,gocyclo
 func main() {
 	ourlog := logrus.New()
 	ourlog.Formatter = &prefixed.TextFormatter{
@@ -50,7 +51,7 @@ func main() {
 	}
 	logger = ourlog.WithFields(logrus.Fields{"prefix": project})
 	config.SetLogger(logger)
-	ai.SetLogger(logger)
+	setAILogger(logger)
 
 	// config related. instantiate a new config.Config to store flags
 	flagConfig := flag.String("conf", "matterircd.toml", "config file")
@@ -73,11 +74,11 @@ func main() {
 	pflag.Parse()
 
 	if flag.Lookup("version").Value.String() == "true" {
-		fmt.Printf("%s %s %s\n", project, version, githash)
+		fmt.Printf("%s %s %s (%s)\n", project, version, githash, buildFeatures())
 		return
 	}
 
-	logger.Infof("Running version %s %s", version, githash)
+	logger.Infof("Running version %s %s (%s)", version, githash, buildFeatures())
 
 	if strings.Contains(version, "-dev") {
 		logger.Infof("WARNING: THIS IS A DEVELOPMENT VERSION. Things may break.")
@@ -206,104 +207,7 @@ func main() {
 
 	LastViewedSaveDBs = protoDBs
 
-	aiCfg := cfg.Current().AI
-	if aiCfg.Enabled { //nolint:nestif
-		provider := aiCfg.Provider
-		if provider == "" {
-			provider = ai.AIGeminiProvider
-		}
-
-		model := ai.GetModel(provider, aiCfg.Model, aiCfg.Models)
-		token := aiCfg.GetToken(provider)
-
-		switch strings.ToLower(provider) {
-		case ai.AICopilotProvider, ai.AIGitHubProvider:
-			if token == "" {
-				logger.Warn("AI summarization enabled, but token is missing")
-				break
-			}
-
-			_, err := ai.NewCopilotClient(token, model)
-			if err != nil {
-				logger.Errorf("AI summarization setup error: %v", err)
-				break
-			}
-
-			logger.Infof("AI summarization enabled (default provider: %s, model: %s)", provider, model)
-		case ai.AIOpenRouterProvider:
-			if token == "" {
-				logger.Warn("AI summarization enabled, but token is missing")
-				break
-			}
-
-			baseURL := aiCfg.GetBaseURL(provider)
-
-			client, err := ai.NewOpenRouterClient(token, baseURL, model)
-			if err != nil {
-				logger.Errorf("AI summarization setup error: %v", err)
-				break
-			}
-
-			logger.Infof("AI summarization enabled (default provider: %s, model: %s, url: %s)", provider, model, client.BaseURL())
-		case ai.AIOpenAIProvider, ai.AIHetznerProvider, ai.AIOllamaProvider, ai.AILocalProvider, ai.AIvLLMProvider:
-			baseURL := aiCfg.GetBaseURL(provider)
-			if baseURL == "" {
-				logger.Warnf("AI summarization enabled for %s, but url is missing", provider)
-				break
-			}
-
-			if token == "" && (strings.Contains(baseURL, "api.openai.com") || strings.Contains(baseURL, "inference.hetzner.com")) {
-				logger.Warn("AI summarization enabled, but token is missing")
-				break
-			}
-
-			client, err := ai.NewOpenAIClient(token, baseURL, model)
-			if err != nil {
-				logger.Errorf("AI summarization setup error: %v", err)
-				break
-			}
-
-			logger.Infof("AI summarization enabled (default provider: %s, model: %s, url: %s)", provider, model, client.BaseURL())
-		default:
-			if aiCfg.ServiceAccountFile == "" && token == "" {
-				logger.Warn("AI summarization enabled, but service_account_file or token is missing")
-				break
-			}
-
-			if aiCfg.ServiceAccountFile != "" {
-				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancel()
-
-				client, err := ai.NewGeminiClient(ctx, aiCfg.ServiceAccountFile, aiCfg.Project, aiCfg.Location, model)
-				if err != nil {
-					logger.Errorf("AI summarization setup error: %v", err)
-					break
-				}
-
-				logger.Infof(
-					"AI summarization enabled (default provider: %s, model: %s, project: %s, region: %s)",
-					provider, model, client.Project(), aiCfg.Location,
-				)
-
-				break
-			}
-
-			baseURL := aiCfg.GetBaseURL(provider)
-
-			client, err := ai.NewGeminiAPIKeyClient(token, baseURL, model)
-			if err != nil {
-				logger.Errorf("AI summarization setup error: %v", err)
-				break
-			}
-
-			logger.Infof(
-				"AI summarization enabled (default provider: %s, model: %s, url: %s)",
-				provider, model, client.BaseURL(),
-			)
-		}
-	} else {
-		logger.Debug("AI summarization is disabled")
-	}
+	initAI(logger, cfg.Current().AI)
 
 	// Start serving connections asynchronously
 	if tlsSocket != nil {
@@ -594,4 +498,24 @@ func start(socket net.Listener) {
 			}
 		}()
 	}
+}
+
+func buildFeatures() string {
+	var features []string
+
+	if info, ok := debug.ReadBuildInfo(); ok {
+		for _, setting := range info.Settings {
+			if setting.Key == "-tags" {
+				if slices.Contains(strings.Split(setting.Value, ","), "goolm") {
+					features = append(features, "goolm")
+				}
+
+				break
+			}
+		}
+	}
+
+	features = append(features, aiFeature)
+
+	return strings.Join(features, ", ")
 }
