@@ -84,6 +84,12 @@ func (g *GoogleChat) handlePosted(msg *googlechatclient.Message) {
 		return
 	}
 
+	if post.ID != "" && g.replayedMsgCache.Contains(post.ID) {
+		g.replayedMsgCache.Remove(post.ID)
+
+		return
+	}
+
 	g.ensureConversationSynced(g.ctx, post.ConversationID)
 
 	ev := g.chatMessageToEvent(g.ctx, post, "posted")
@@ -263,6 +269,10 @@ func (g *GoogleChat) handleMemberChange(msg *googlechatclient.Message, added boo
 	}
 
 	g.ensureConversationSynced(g.ctx, msg.Channel)
+
+	if g.isDMConversation(msg.Channel) {
+		return
+	}
 
 	actor := g.resolveUserInfo(g.ctx, msg.UserID, "")
 	users := make([]*bridge.UserInfo, 0, len(msg.Members))

@@ -12,6 +12,7 @@
         - [Slack user commands](#slack-user-commands)
         - [Matrix user commands](#matrix-user-commands)
         - [Microsoft Teams user commands](#microsoft-teams-user-commands)
+        - [Google Chat user commands](#google-chat-user-commands)
         - [Rocket.Chat user commands](#rocketchat-user-commands)
         - [Mastodon user commands](#mastodon-user-commands)
     - [Docker](#docker)
@@ -27,13 +28,13 @@
 
 [![Join the IRC chat at https://web.libera.chat/gamja/?channels=#matterircd](https://img.shields.io/badge/IRC-matterircd-green.svg)](https://web.libera.chat/gamja/?channels=#matterircd)
 
-Minimal IRC server which integrates with [mattermost](https://www.mattermost.org), [slack](https://www.slack.com), [matrix](https://matrix.org), [Microsoft Teams](https://teams.cloud.microsoft/), [Rocket.Chat](https://rocket.chat/), and Mastodon.  
+Minimal IRC server which integrates with [mattermost](https://www.mattermost.org), [slack](https://www.slack.com), [matrix](https://matrix.org), [Microsoft Teams](https://teams.cloud.microsoft/), [Google Chat](https://chat.google.com/), [Rocket.Chat](https://rocket.chat/), and Mastodon.  
 Tested on FreeBSD / Linux / Windows
 
 ## Compatibility
 
 - Matterircd works with mattermost 10.x, 11.x, slack, matrix, and mastodon
-- Microsoft Teams (EXPERIMENTAL) and Rocket.Chat (EXPERIMENTAL) support is also available
+- Microsoft Teams (EXPERIMENTAL), Google Chat (EXPERIMENTAL), and Rocket.Chat (EXPERIMENTAL) support is also available
 
 Master branch of matterircd should always work against latest STABLE mattermost release.
 
@@ -262,6 +263,56 @@ To extract `skypetoken_asm` from your browser:
 To connect automatically without typing `/msg msteams login` every time, pass `msteams [work|personal|<tenant>]` as your IRC server password (e.g. `password = "msteams personal";` in `irssi`).
 
 Settings are in the `[msteams]` section in [matterircd.toml.example](https://github.com/42wim/matterircd/blob/master/matterircd.toml.example).
+
+### Google Chat user commands
+
+(EXPERIMENTAL, work in progress)
+
+Supports both Google Workspace (`work`) and personal `@gmail.com` (`personal`) accounts, including modern inline-threaded Spaces, 1:1 DMs, and Group DMs.
+
+#### 1. `TokenSaveFile` login (recommended)
+
+Google Chat authenticates using browser session cookies from `https://chat.google.com` (`SID`, `HSID`, `SSID`, `OSID`, `SAPISID`, and optionally `COMPASS`). Because full Google cookie headers often exceed IRC's 512-byte line limit, configure `TokenSaveFile` under `[googlechat]` in `matterircd.toml` and write a `0600` JSON file (or paste a browser DevTools cookie JSON export or raw `Cookie:` header directly):
+
+```json
+{
+  "account_type": "auto",
+  "auth_user": 0,
+  "cookies": {
+    "SID": "...",
+    "HSID": "...",
+    "SSID": "...",
+    "APISID": "...",
+    "SAPISID": "...",
+    "OSID": "...",
+    "COMPASS": "dynamite=..."
+  }
+}
+```
+
+Then log in via:
+
+```
+/msg googlechat login [work|personal|<authuser>]
+```
+
+To extract cookies from your browser:
+- Sign in to `https://chat.google.com` (Firefox or Chromium without Chrome's Device Bound Session Credentials is recommended if sessions expire frequently).
+- Open DevTools -> **Network** -> select any request to `chat.google.com` -> copy the `Cookie` header (or export cookies for `chat.google.com` / `.google.com` via Storage/Application).
+- If you are signed into multiple Google accounts in the same browser session, set `AuthUser = 1` (matching `/u/1/` in the URL) or pass the index on login (`/msg googlechat login 1`).
+- `matterircd` automatically refreshes the `X-Framework-Xsrf-Token` and persists rotated session cookies back to `TokenSaveFile`.
+
+#### 2. Inline cookie login
+
+```
+/msg googlechat login cookie "SID=...; HSID=...; SSID=...; OSID=...; SAPISID=..." [work|personal]
+```
+
+#### 3. Auto-login via IRC `PASS`
+
+To connect automatically without typing `/msg googlechat login` every time, pass `googlechat [work|personal|<authuser>]` as your IRC server password (e.g. `password = "googlechat work";` in `irssi`).
+
+Settings are in the `[googlechat]` section in [matterircd.toml.example](https://github.com/42wim/matterircd/blob/master/matterircd.toml.example).
 
 ### Rocket.Chat user commands
 

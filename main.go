@@ -158,6 +158,11 @@ func main() {
 		mtFile = mmFile
 	}
 
+	gcFile := rc.GoogleChat.LastViewedSaveFile
+	if gcFile == "" {
+		gcFile = mmFile
+	}
+
 	rcFile := rc.RocketChat.LastViewedSaveFile
 	if rcFile == "" {
 		rcFile = mmFile
@@ -168,6 +173,7 @@ func main() {
 		"matrix":     mxFile,
 		"slack":      slFile,
 		"msteams":    mtFile,
+		"googlechat": gcFile,
 		"rocketchat": rcFile,
 	}
 
@@ -327,12 +333,13 @@ func main() {
 func setupDBReloadHook(cfg *config.Config) {
 	rc := cfg.Current()
 
-	var lastMMFile, lastMXFile, lastSLFile, lastMTFile, lastRCFile atomic.Value
+	var lastMMFile, lastMXFile, lastSLFile, lastMTFile, lastGCFile, lastRCFile atomic.Value
 
 	lastMMFile.Store(rc.Mattermost.LastViewedSaveFile)
 	lastMXFile.Store(rc.Matrix.LastViewedSaveFile)
 	lastSLFile.Store(rc.Slack.LastViewedSaveFile)
 	lastMTFile.Store(rc.MSTeams.LastViewedSaveFile)
+	lastGCFile.Store(rc.GoogleChat.LastViewedSaveFile)
 	lastRCFile.Store(rc.RocketChat.LastViewedSaveFile)
 
 	cfg.RegisterReloadHook(func(newRC *config.RuntimeConfig) {
@@ -362,6 +369,13 @@ func setupDBReloadHook(cfg *config.Config) {
 
 		if lastMT != newMTFile {
 			logger.Warnf("msteams.LastViewedSaveFile changed from %q to %q, a matterircd restart is required for it to take effect", lastMT, newMTFile)
+		}
+
+		newGCFile := newRC.GoogleChat.LastViewedSaveFile
+		lastGC := lastGCFile.Swap(newGCFile)
+
+		if lastGC != newGCFile {
+			logger.Warnf("googlechat.LastViewedSaveFile changed from %q to %q, a matterircd restart is required for it to take effect", lastGC, newGCFile)
 		}
 
 		newRCFile := newRC.RocketChat.LastViewedSaveFile

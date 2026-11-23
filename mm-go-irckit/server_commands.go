@@ -592,12 +592,8 @@ func isBareThreadID(msg string) bool {
 		return true
 	}
 
-	if strings.HasPrefix(id, "sl") && len(id) >= 36 && len(id) <= 82 {
-		return isAllInAlphabet(id[2:], "0123456789abcdefghijklmnopqrstuv")
-	}
-
-	if strings.HasPrefix(id, "mt") && len(id) == 18 {
-		return isAllInAlphabet(id[2:], "0123456789abcdefghijklmnopqrstuv")
+	if isPrefixedThreadID(id) {
+		return true
 	}
 
 	switch len(id) {
@@ -610,6 +606,22 @@ func isBareThreadID(msg string) bool {
 	default:
 		return false
 	}
+}
+
+func isPrefixedThreadID(id string) bool {
+	if strings.HasPrefix(id, "sl") && len(id) >= 36 && len(id) <= 82 {
+		return isAllInAlphabet(id[2:], "0123456789abcdefghijklmnopqrstuv")
+	}
+
+	if strings.HasPrefix(id, "mt") && len(id) == 18 {
+		return isAllInAlphabet(id[2:], "0123456789abcdefghijklmnopqrstuv")
+	}
+
+	if strings.HasPrefix(id, "gc") && len(id) == 13 {
+		return isAllInAlphabet(id[2:], "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_-")
+	}
+
+	return false
 }
 
 func isAllInAlphabet(s, validChars string) bool {
@@ -846,9 +858,9 @@ func awayNotice(s Server, u *User, br bridge.Bridger, toUser *User) {
 }
 
 var (
-	parseModifyMsgRegExp     = regexp.MustCompile(`^s(\/(?:!!|[0-9a-f]{3}|[0-9A-Za-z]{17}|[0-9a-z]{26}|\$[0-9A-Za-z\-_\.\+\/]{43}|sl[0-9a-v]{34,80}|mt[0-9a-v]{16})?\/)(.*)`)
-	parseReactionToMsgRegExp = regexp.MustCompile(`^\@\@(!!|[0-9a-f]{3}|[0-9A-Za-z]{17}|[0-9a-z]{26}|\$[0-9A-Za-z\-_\.\+\/]{43}|sl[0-9a-v]{34,80}|mt[0-9a-v]{16})\s+([\-\+]):(\S+):\s*$`)
-	parseThreadIDRegExp      = regexp.MustCompile(`(?s)^\@\@(?:(!!|[0-9a-f]{3}|[0-9A-Za-z]{17}|[0-9a-z]{26}|\$[0-9A-Za-z\-_\.\+\/]{43}|sl[0-9a-v]{34,80}|mt[0-9a-v]{16})\s)(.*)`)
+	parseModifyMsgRegExp     = regexp.MustCompile(`^s(\/(?:!!|[0-9a-f]{3}|[0-9A-Za-z]{17}|[0-9a-z]{26}|\$[0-9A-Za-z\-_\.\+\/]{43}|sl[0-9a-v]{34,80}|mt[0-9a-v]{16}|gc[0-9A-Za-z_-]{11})?\/)(.*)`)
+	parseReactionToMsgRegExp = regexp.MustCompile(`^\@\@(!!|[0-9a-f]{3}|[0-9A-Za-z]{17}|[0-9a-z]{26}|\$[0-9A-Za-z\-_\.\+\/]{43}|sl[0-9a-v]{34,80}|mt[0-9a-v]{16}|gc[0-9A-Za-z_-]{11})\s+([\-\+]):(\S+):\s*$`)
+	parseThreadIDRegExp      = regexp.MustCompile(`(?s)^\@\@(?:(!!|[0-9a-f]{3}|[0-9A-Za-z]{17}|[0-9a-z]{26}|\$[0-9A-Za-z\-_\.\+\/]{43}|sl[0-9a-v]{34,80}|mt[0-9a-v]{16}|gc[0-9A-Za-z_-]{11})\s)(.*)`)
 )
 
 func parseReactionToMsg(s Server, u *User, msg *irc.Message, channelID string) bool {
@@ -941,8 +953,8 @@ func parseModifyMsg(s Server, u *User, msg *irc.Message, channelID string) bool 
 		}
 
 		u.msgLastMutex.RUnlock()
-	// Matrix event ID (e.g. '$<43chars>') or Slack encoded ID (e.g. 'sl<base32>')
-	case strings.HasPrefix(matches[1], "/$"), strings.HasPrefix(matches[1], "/sl"):
+	// Matrix event ID (e.g. '$<43chars>'), Slack encoded ID (e.g. 'sl<base32>'), or Google Chat ID ('gc<11chars>')
+	case strings.HasPrefix(matches[1], "/$"), strings.HasPrefix(matches[1], "/sl"), strings.HasPrefix(matches[1], "/gc"):
 		msgID = matches[1][1 : len(matches[1])-1]
 	// Mattermost (26) or Rocket.Chat (17) message/thread ID (e.g. 'cfrakpwix7y8pgzux6ta76pm9c')
 	case len(matches[1]) == 28, len(matches[1]) == 19:
@@ -1053,7 +1065,7 @@ func parseThreadID(u *User, msg *irc.Message, channelID string) (string, string)
 	//   https://spec.matrix.org/latest/appendices/#common-identifier-format
 	case len(matches[1]) == 44:
 		return matches[1], matches[2]
-	case strings.HasPrefix(matches[1], "sl"), strings.HasPrefix(matches[1], "mt"):
+	case strings.HasPrefix(matches[1], "sl"), strings.HasPrefix(matches[1], "mt"), strings.HasPrefix(matches[1], "gc"):
 		return matches[1], matches[2]
 	default:
 		logger.Errorf("parseThreadID: could not parse reply ID %q", matches[1])
