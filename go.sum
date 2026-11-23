@@ -141,8 +141,8 @@ github.com/matterbridge/googlechatclient v0.0.0-20261123081111-879e1dcaa802 h1:4
 github.com/matterbridge/googlechatclient v0.0.0-20261123081111-879e1dcaa802/go.mod h1:7BZ2kjdA7KHBMHObHqqm4dpwDWmrvIWln0HGWaR7xXE=
 github.com/matterbridge/logrus-prefixed-formatter v0.5.3-0.20200523233437-d971309a77ba h1:XleOY4IjAEIcxAh+IFwT5JT5Ze3RHiYz6m+4ZfZ0rc0=
 github.com/matterbridge/logrus-prefixed-formatter v0.5.3-0.20200523233437-d971309a77ba/go.mod h1:iXGEotOvwI1R1SjLxRc+BF5rUORTMtE0iMZBT2lxqAU=
-github.com/matterbridge/matrixclient v0.0.0-20261122225927-483cb4298971 h1:xly4QN476hI0meagzeJWmax5nCAgdeL+KUaFYg/WOeY=
-github.com/matterbridge/matrixclient v0.0.0-20261122225927-483cb4298971/go.mod h1:AFIuB2IFtVMwI/Ub19NtqQHSf+Bavre457YcFJv28gA=
+github.com/matterbridge/matrixclient v0.0.0-20261123084925-6c4899716447 h1:toUMuCHE8A7TACmd57Hk8E/BMUrzOT34FA8Dn5JuE/Q=
+github.com/matterbridge/matrixclient v0.0.0-20261123084925-6c4899716447/go.mod h1:0qtzg48RCcP16IWnaqXpz0pLPKUVngaRDIDQflRu62k=
 github.com/matterbridge/matterclient v0.0.0-20261116034806-3087b48d325c h1:+gdD53Aj1qYoq4H98U5S1XHO8jQFPmxnPxx3HC8WBBY=
 github.com/matterbridge/matterclient v0.0.0-20261116034806-3087b48d325c/go.mod h1:69rJRgvrpV13ZyoA7q1HjHwaM6CSkXQPhCdDFRxwNj0=
 github.com/matterbridge/msteamsclient v0.0.0-20261123010033-dfcaa45ee055 h1:AXOkynlgUZrsi0Q428Z49W/OtjD20Gq+cc/L8LZ8exM=
