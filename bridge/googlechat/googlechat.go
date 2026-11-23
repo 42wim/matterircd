@@ -1068,6 +1068,51 @@ func (g *GoogleChat) GetPostChannelID(_ context.Context, postID string) string {
 	return rp.convID
 }
 
+func (g *GoogleChat) GetPost(ctx context.Context, postID string) (*bridge.QuotedPost, error) {
+	rp, ok := g.resolvePostID(postID)
+	if !ok {
+		return nil, errors.New("unknown post " + postID)
+	}
+
+	msg := g.gc.GetCachedPost(rp.rawMsgID)
+	if msg == nil {
+		topicID := rp.topicID
+		if topicID == "" {
+			topicID = rp.rawMsgID
+		}
+
+		msgs, err := g.gc.GetThreadMessages(ctx, rp.convID, topicID, defaultScrollback)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, m := range msgs {
+			if m != nil && m.ID == rp.rawMsgID {
+				msg = m
+				break
+			}
+		}
+	}
+
+	if msg == nil {
+		return nil, errors.New("post not found: " + postID)
+	}
+
+	parentID := ""
+	if msg.RootMessageID != "" && msg.RootMessageID != msg.ID {
+		parentID = encodeGoogleChatID(msg.RootMessageID)
+	} else if msg.TopicID != "" && msg.TopicID != msg.ID {
+		parentID = encodeGoogleChatID(msg.TopicID)
+	}
+
+	return &bridge.QuotedPost{
+		ID:       encodeGoogleChatID(msg.ID),
+		ParentID: parentID,
+		Text:     msg.ContentText,
+		Author:   g.resolveUserInfo(ctx, msg.FromID, msg.DisplayName),
+	}, nil
+}
+
 func (g *GoogleChat) GetPostThread(ctx context.Context, postID string) []*bridge.Event {
 	rp, ok := g.resolvePostID(postID)
 	if !ok {

@@ -509,6 +509,8 @@ func (c *Client) handleMessage(_ context.Context, ev *event.Event) {
 		return
 	}
 
+	c.cacheEvent(ev)
+
 	if c.handleEditMessage(ev, content) {
 		return
 	}
@@ -549,6 +551,9 @@ func (c *Client) handleEditMessage(ev *event.Event, content *event.MessageEventC
 		return false
 	}
 
+	// Evict the original target so direct Event(targetID) calls don't serve pre-edit content.
+	c.evictEvent(targetID)
+
 	if _, ok := c.handler.(EditHandler); !ok {
 		return false
 	}
@@ -578,6 +583,8 @@ func (c *Client) handleEditMessage(ev *event.Event, content *event.MessageEventC
 }
 
 func (c *Client) handleReaction(_ context.Context, ev *event.Event) {
+	c.cacheEvent(ev)
+
 	if !c.synced.Load() {
 		c.resolvePending(ev.RoomID, ev.ID)
 
@@ -602,16 +609,17 @@ func (c *Client) handleReaction(_ context.Context, ev *event.Event) {
 }
 
 func (c *Client) handleRedaction(ctx context.Context, ev *event.Event) {
-	_, ok := c.handler.(RedactionHandler)
-	if !ok || !c.synced.Load() {
-		c.resolvePending(ev.RoomID, ev.ID)
-
-		return
-	}
-
 	targetID := ev.Redacts
 	if content := ev.Content.AsRedaction(); content != nil && content.Redacts != "" {
 		targetID = content.Redacts
+	}
+
+	_, ok := c.handler.(RedactionHandler)
+	if !ok || !c.synced.Load() {
+		c.evictEvent(targetID)
+		c.resolvePending(ev.RoomID, ev.ID)
+
+		return
 	}
 
 	if targetID == "" {
@@ -621,6 +629,7 @@ func (c *Client) handleRedaction(ctx context.Context, ev *event.Event) {
 	}
 
 	targetType, isEdit := c.redactedTarget(ctx, ev.RoomID, targetID)
+	c.evictEvent(targetID)
 
 	c.deliverOrdered(ev.RoomID, ev.ID, 0, false, &Redaction{
 		RoomID:     ev.RoomID,
@@ -639,6 +648,13 @@ func (c *Client) handleRedaction(ctx context.Context, ev *event.Event) {
 // homeserver still returns it on the redacted event, most prune it with the rest
 // of the content, so isEdit false does not prove the target was not an edit.
 func (c *Client) redactedTarget(ctx context.Context, roomID id.RoomID, eventID id.EventID) (event.Type, bool) {
+	if cached := c.GetCachedEvent(eventID); cached != nil {
+		rel, _ := cached.Content.Raw["m.relates_to"].(map[string]any)
+		relType, _ := rel["rel_type"].(string)
+
+		return cached.Type, event.RelationType(relType) == event.RelReplace
+	}
+
 	remaining := time.Until(time.Unix(0, c.lookupUntil.Load()))
 	if remaining <= 0 {
 		return event.Type{}, false

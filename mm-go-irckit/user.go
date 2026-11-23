@@ -222,8 +222,9 @@ func (u *User) Encode(msgs ...*irc.Message) error {
 }
 
 var (
-	replyRegExp  = regexp.MustCompile(`^\@\@(?:!!|[0-9a-z]{26}|[0-9A-Za-z]{17}|[0-9a-f]{3}|\$[0-9A-Za-z\-_\.\+\/]{43}|sl[0-9a-v]{34,80}|mt[0-9a-v]{16}|gc[0-9A-Za-z_-]{11})\s`)
-	modifyRegExp = regexp.MustCompile(`^s/(?:!!|[0-9a-z]{26}|[0-9A-Za-z]{17}|[0-9a-f]{3}|\$[0-9A-Za-z\-_\.\+\/]{43}|sl[0-9a-v]{34,80}|mt[0-9a-v]{16}|gc[0-9A-Za-z_-]{11})?/`)
+	replyRegExp           = regexp.MustCompile(`^\@\@(?:!!|[0-9a-z]{26}|[0-9A-Za-z]{17}|[0-9a-f]{3}|\$[0-9A-Za-z\-_\.\+\/]{43}|sl[0-9a-v]{34,80}|mt[0-9a-v]{16}|gc[0-9A-Za-z_-]{11})\s`)
+	unthreadedQuoteRegExp = regexp.MustCompile(`^>\@\@(?:!!|[0-9a-z]{26}|[0-9A-Za-z]{17}|[0-9a-f]{3}|\$[0-9A-Za-z\-_\.\+\/]{43}|sl[0-9a-v]{34,80}|mt[0-9a-v]{16}|gc[0-9A-Za-z_-]{11})\s`)
+	modifyRegExp          = regexp.MustCompile(`^s/(?:!!|[0-9a-z]{26}|[0-9A-Za-z]{17}|[0-9a-f]{3}|\$[0-9A-Za-z\-_\.\+\/]{43}|sl[0-9a-v]{34,80}|mt[0-9a-v]{16}|gc[0-9A-Za-z_-]{11})?/`)
 )
 
 // threadPrefix returns the thread ("@@id ") that text is a reply to, or an empty string.
@@ -353,8 +354,9 @@ func (u *User) Decode() {
 					continue
 				}
 
-				// If starting a thread reply, flush any previous message buffer first.
-				if strings.HasPrefix(msg.Trailing, "@@") && replyRegExp.MatchString(msg.Trailing) {
+				// If starting a thread reply or quote reply, flush any previous message buffer first.
+				if (strings.HasPrefix(msg.Trailing, "@@") && replyRegExp.MatchString(msg.Trailing)) ||
+					(strings.HasPrefix(msg.Trailing, ">@@") && unthreadedQuoteRegExp.MatchString(msg.Trailing)) {
 					logger.Trace("flushing buffer because of replies to threads")
 					flush()
 				}

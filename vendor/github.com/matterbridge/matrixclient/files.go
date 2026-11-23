@@ -56,6 +56,8 @@ func (c *Client) SendFile(ctx context.Context, roomID id.RoomID, parentID id.Eve
 	for attempt := 0; ; attempt++ {
 		resp, err := c.mc.SendMessageEvent(ctx, roomID, event.EventMessage, &content, mautrix.ReqSendEvent{TransactionID: txnID})
 		if err == nil {
+			c.cacheSentMessageEvent(roomID, resp.EventID, &content)
+
 			return resp.EventID, nil
 		}
 

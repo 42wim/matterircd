@@ -1,3 +1,6 @@
-vendor/github.com/matterbridge/matrixclient/** linguist-generated=false
 vendor/github.com/matterbridge/matterclient/** linguist-generated=false
+vendor/github.com/matterbridge/matrixclient/** linguist-generated=false
 vendor/github.com/matterbridge/slackclient/** linguist-generated=false
+vendor/github.com/matterbridge/msteamsclient/** linguist-generated=false
+vendor/github.com/matterbridge/rocketchatclient/** linguist-generated=false
+vendor/github.com/matterbridge/googlechatclient/** linguist-generated=false

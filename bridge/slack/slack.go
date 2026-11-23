@@ -1198,6 +1198,60 @@ func (s *Slack) slackMsgToEvent(ctx context.Context, channelID string, m slack.M
 	}
 }
 
+func (s *Slack) GetPost(ctx context.Context, postID string) (*bridge.QuotedPost, error) {
+	channelID, ts, ok := decodeSlackID(postID)
+	if !ok {
+		return nil, errors.New("invalid Slack post ID: " + postID)
+	}
+
+	if cached, ok := s.getCachedPostOnly(channelID, ts); ok && cached.message != "" {
+		parentID := ""
+		if cached.rootTS != "" && cached.rootTS != ts {
+			parentID = encodeSlackID(channelID, cached.rootTS)
+		}
+
+		return &bridge.QuotedPost{
+			ID:       postID,
+			ParentID: parentID,
+			Text:     cached.message,
+			Author:   cached.sender,
+		}, nil
+	}
+
+	rootTS := s.resolveThreadRoot(ctx, channelID, ts)
+
+	msgs, err := s.sc.GetConversationReplies(ctx, channelID, rootTS)
+	if err != nil {
+		return nil, err
+	}
+
+	for i := range msgs {
+		m := &msgs[i]
+		if m.Timestamp != ts {
+			continue
+		}
+
+		parentID := ""
+		if m.ThreadTimestamp != "" && m.ThreadTimestamp != ts {
+			parentID = encodeSlackID(channelID, m.ThreadTimestamp)
+		}
+
+		text := s.cleanupMessage(m.Text)
+		if text == "" && len(m.Attachments) > 0 {
+			text = firstNonEmpty(m.Attachments[0].Fallback, m.Attachments[0].Text)
+		}
+
+		return &bridge.QuotedPost{
+			ID:       postID,
+			ParentID: parentID,
+			Text:     text,
+			Author:   s.msgAuthorGhost(ctx, &m.Msg),
+		}, nil
+	}
+
+	return nil, errors.New("post not found: " + postID)
+}
+
 func (s *Slack) GetPostThread(ctx context.Context, postID string) []*bridge.Event {
 	channelID, ts, ok := decodeSlackID(postID)
 	if !ok {

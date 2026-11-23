@@ -1727,6 +1727,36 @@ func (m *Matrix) GetPostSizeLimit() int {
 	return 4000
 }
 
+func (m *Matrix) GetPost(ctx context.Context, postID string) (*bridge.QuotedPost, error) {
+	roomID, ok := m.roomOf(postID)
+	if !ok {
+		return nil, errors.New("unknown post " + postID)
+	}
+
+	evID := id.EventID(postID)
+
+	resp, body, err := m.fetchEventWithBody(ctx, roomID, evID)
+	if err != nil {
+		return nil, err
+	}
+
+	if body == "" && m.msgTextCache != nil {
+		body, _ = m.msgTextCache.Get(evID)
+	}
+
+	var parentID string
+	if rootID := m.resolveThreadRoot(ctx, roomID, evID); rootID != "" && rootID != evID {
+		parentID = rootID.String()
+	}
+
+	return &bridge.QuotedPost{
+		ID:       postID,
+		ParentID: parentID,
+		Text:     body,
+		Author:   m.GetUser(ctx, resp.Sender.String()),
+	}, nil
+}
+
 func (m *Matrix) GetPostThread(ctx context.Context, postID string) []*bridge.Event {
 	roomID, ok := m.roomOf(postID)
 	if !ok {

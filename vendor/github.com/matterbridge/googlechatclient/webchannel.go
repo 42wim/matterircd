@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/jpillora/backoff"
+	"github.com/sirupsen/logrus"
 )
 
 const (
@@ -146,7 +147,12 @@ func (c *Client) subscribeGroups(ctx context.Context, sess *webChannelSession, r
 	sess.subMu.Unlock()
 
 	for chunk := range slices.Chunk(pending, streamGroupSubBatchSize) {
-		subErr := c.sendStreamEvent(ctx, sess, encodeStreamGroupSubscriptionRequest(chunk))
+		kind := "subscribe"
+		if c.apiTraceEnabled() {
+			kind = fmt.Sprintf("subscribe(%d)", len(chunk))
+		}
+
+		subErr := c.sendStreamEvent(ctx, sess, kind, encodeStreamGroupSubscriptionRequest(chunk))
 		if subErr != nil {
 			c.logger.Warnf("WebChannel group subscription failed: %v", subErr)
 
@@ -215,7 +221,7 @@ func (c *Client) runWebChannelSession(ctx context.Context, reconnecting bool) er
 	}
 	sess.rid.Store(1)
 
-	err = c.sendStreamEvent(sessionCtx, sess, encodeStreamPingRequest(true))
+	err = c.sendStreamEvent(sessionCtx, sess, "initial_ping", encodeStreamPingRequest(true))
 	if err != nil {
 		return fmt.Errorf("initial ping: %w", err)
 	}
@@ -426,17 +432,23 @@ func extractSIDFromInitPayload(raw string) string {
 	return ""
 }
 
-func (c *Client) sendStreamEvent(ctx context.Context, sess *webChannelSession, protoBytes []byte) error {
+func (c *Client) sendStreamEvent(ctx context.Context, sess *webChannelSession, kind string, protoBytes []byte) error {
+	aid := sess.aid.Load()
+
 	params := url.Values{}
 	params.Set("VER", webChannelVersion)
 	params.Set("RID", strconv.FormatInt(sess.rid.Add(1), 10))
 	params.Set("SID", sess.sid)
-	params.Set("AID", strconv.FormatInt(sess.aid.Load(), 10))
+	params.Set("AID", strconv.FormatInt(aid, 10))
 	params.Set("CI", "0")
 	params.Set("t", "1")
 
 	if sess.sessionID != "" {
 		params.Set("csessionid", sess.sessionID)
+	}
+
+	if c.apiTraceEnabled() {
+		c.apiLogger.Tracef("webchannel send: %s (aid=%d, bytes=%d)", kind, aid, len(protoBytes))
 	}
 
 	payloadJSON, err := json.Marshal(struct {
@@ -505,7 +517,7 @@ func (c *Client) runWebChannelKeepalive(ctx context.Context, cancel context.Canc
 		case <-ctx.Done():
 			return
 		case <-pingTicker.C:
-			pingErr := c.sendStreamEvent(ctx, sess, encodeStreamPingRequest(true))
+			pingErr := c.sendStreamEvent(ctx, sess, "ping", encodeStreamPingRequest(true))
 			if pingErr != nil {
 				abort(fmt.Errorf("keepalive ping: %w", pingErr))
 
@@ -556,6 +568,40 @@ func (c *Client) streamWebChannelLoop(ctx context.Context, sess *webChannelSessi
 	}
 }
 
+type webChannelPollStats struct {
+	noop   int
+	stop   int
+	msg    int
+	edit   int
+	del    int
+	react  int
+	typing int
+	status int
+	group  int
+	member int
+	read   int
+	world  int
+	other  int
+}
+
+func (c *Client) apiTraceEnabled() bool {
+	return c.apiLogger != nil && c.apiLogger.Logger.IsLevelEnabled(logrus.TraceLevel)
+}
+
+func (c *Client) logWebChannelPollSummary(duration time.Duration, aid int64, stats *webChannelPollStats) {
+	if stats == nil || !c.apiTraceEnabled() {
+		return
+	}
+
+	c.apiLogger.Tracef(
+		"webchannel poll (%s, aid=%d): noop=%d msg=%d edit=%d del=%d react=%d typing=%d status=%d group=%d member=%d read=%d world=%d other=%d",
+		duration.Round(time.Millisecond), aid,
+		stats.noop, stats.msg, stats.edit, stats.del, stats.react,
+		stats.typing, stats.status, stats.group, stats.member,
+		stats.read, stats.world, stats.other,
+	)
+}
+
 func (c *Client) readWebChannelLongPoll(ctx context.Context, sess *webChannelSession) error {
 	params := url.Values{}
 	params.Set("VER", webChannelVersion)
@@ -579,6 +625,8 @@ func (c *Client) readWebChannelLongPoll(ctx context.Context, sess *webChannelSes
 
 	c.applyAuthHeaders(req)
 
+	pollStart := time.Now()
+
 	resp, err := c.streamClient.Do(req)
 	if err != nil {
 		return err
@@ -594,10 +642,15 @@ func (c *Client) readWebChannelLongPoll(ctx context.Context, sess *webChannelSes
 		return fmt.Errorf("long-poll HTTP %d: %s", resp.StatusCode, truncateBody(body))
 	}
 
-	return c.consumeWebChannelChunks(ctx, sess, resp.Body)
+	var stats webChannelPollStats
+
+	err = c.consumeWebChannelChunks(ctx, sess, resp.Body, &stats)
+	c.logWebChannelPollSummary(time.Since(pollStart), sess.aid.Load(), &stats)
+
+	return err
 }
 
-func (c *Client) consumeWebChannelChunks(ctx context.Context, sess *webChannelSession, r io.Reader) error {
+func (c *Client) consumeWebChannelChunks(ctx context.Context, sess *webChannelSession, r io.Reader, stats *webChannelPollStats) error {
 	reader := bufio.NewReaderSize(r, 64*1024)
 
 	for ctx.Err() == nil {
@@ -619,7 +672,7 @@ func (c *Client) consumeWebChannelChunks(ctx context.Context, sess *webChannelSe
 		if parseErr != nil || chunkLen <= 0 || chunkLen > maxWebChannelChunkSize {
 			// Some Google WebChannel responses emit raw JSON without a length prefix.
 			if strings.HasPrefix(trimmed, "[") {
-				c.processWebChannelChunk(sess, []byte(trimmed))
+				c.processWebChannelChunk(sess, []byte(trimmed), stats)
 			}
 
 			continue
@@ -637,13 +690,13 @@ func (c *Client) consumeWebChannelChunks(ctx context.Context, sess *webChannelSe
 		}
 
 		c.lastWsActivity.Store(time.Now().UnixNano())
-		c.processWebChannelChunk(sess, buf)
+		c.processWebChannelChunk(sess, buf, stats)
 	}
 
 	return ctx.Err()
 }
 
-func (c *Client) processWebChannelChunk(sess *webChannelSession, raw []byte) {
+func (c *Client) processWebChannelChunk(sess *webChannelSession, raw []byte, stats *webChannelPollStats) {
 	var frames [][]json.RawMessage
 
 	err := json.Unmarshal(bytes.TrimSpace(raw), &frames)
@@ -667,11 +720,11 @@ func (c *Client) processWebChannelChunk(sess *webChannelSession, raw []byte) {
 			}
 		}
 
-		c.processWebChannelFramePayload(frame[1])
+		c.processWebChannelFramePayload(frame[1], stats)
 	}
 }
 
-func (c *Client) processWebChannelFramePayload(payload json.RawMessage) {
+func (c *Client) processWebChannelFramePayload(payload json.RawMessage, stats *webChannelPollStats) {
 	// Control arrays look like ["noop"] or ["stop"].
 	var envelopes []struct {
 		Data string `json:"data"`
@@ -679,6 +732,8 @@ func (c *Client) processWebChannelFramePayload(payload json.RawMessage) {
 
 	err := json.Unmarshal(payload, &envelopes)
 	if err != nil {
+		c.recordWebChannelControl(payload, stats)
+
 		return
 	}
 
@@ -697,7 +752,39 @@ func (c *Client) processWebChannelFramePayload(payload json.RawMessage) {
 			continue
 		}
 
-		c.handleProtoEvent(ev)
+		c.handleProtoEvent(ev, stats)
+	}
+}
+
+func (c *Client) recordWebChannelControl(payload json.RawMessage, stats *webChannelPollStats) {
+	var ctrl []string
+
+	err := json.Unmarshal(payload, &ctrl)
+	if err != nil || len(ctrl) == 0 {
+		return
+	}
+
+	switch ctrl[0] {
+	case "noop":
+		if stats != nil {
+			stats.noop++
+		}
+	case "stop":
+		if stats != nil {
+			stats.stop++
+		}
+
+		if c.apiTraceEnabled() {
+			c.apiLogger.Trace("webchannel recv: control stop")
+		}
+	default:
+		if stats != nil {
+			stats.other++
+		}
+
+		if c.apiTraceEnabled() {
+			c.apiLogger.Tracef("webchannel recv: control %s", ctrl[0])
+		}
 	}
 }
 
@@ -711,7 +798,7 @@ func (c *Client) rememberGroupRef(ref protoGroupRef) {
 	c.Users.mu.Unlock()
 }
 
-func (c *Client) handleProtoEvent(ev *protoEvent) {
+func (c *Client) handleProtoEvent(ev *protoEvent, stats *webChannelPollStats) {
 	if ev == nil {
 		return
 	}
@@ -719,18 +806,28 @@ func (c *Client) handleProtoEvent(ev *protoEvent) {
 	c.rememberGroupRef(ev.Group)
 
 	if ev.WorldItem != nil {
+		if stats != nil {
+			stats.world++
+		}
+
 		c.upsertWorldItem(ev.WorldItem)
 	}
 
 	for i := range ev.Bodies {
-		c.handleProtoEventBody(ev, &ev.Bodies[i])
+		c.handleProtoEventBody(ev, &ev.Bodies[i], stats)
 	}
 }
 
-func (c *Client) handleProtoEventBody(ev *protoEvent, body *protoEventBody) {
+func (c *Client) handleProtoEventBody(ev *protoEvent, body *protoEventBody, stats *webChannelPollStats) {
 	evType := body.EventType
 	if evType == 0 {
 		evType = ev.Type
+	}
+
+	recordProtoEventBody(evType, stats)
+
+	if c.apiTraceEnabled() {
+		c.traceProtoEventBody(ev, body, evType)
 	}
 
 	switch evType {
@@ -754,6 +851,133 @@ func (c *Client) handleProtoEventBody(ev *protoEvent, body *protoEventBody) {
 		c.handleUserStatusBody(body)
 	case protoEventGroupViewed, protoEventGroupReadState:
 		c.handleReadStateBody(ev, body)
+	}
+}
+
+func recordProtoEventBody(evType int32, stats *webChannelPollStats) {
+	if stats == nil {
+		return
+	}
+
+	switch evType {
+	case protoEventMessagePosted, protoEventTopicCreated:
+		stats.msg++
+	case protoEventMessageUpdated:
+		stats.edit++
+	case protoEventMessageDeleted:
+		stats.del++
+	case protoEventMessageReacted, protoEventBatchReactions:
+		stats.react++
+	case protoEventTypingChanged:
+		stats.typing++
+	case protoEventGroupUpdated:
+		stats.group++
+	case protoEventMembershipChanged:
+		stats.member++
+	case protoEventUserStatusUpdated:
+		stats.status++
+	case protoEventGroupViewed, protoEventGroupReadState:
+		stats.read++
+	default:
+		stats.other++
+	}
+}
+
+func (c *Client) traceProtoEventBody(ev *protoEvent, body *protoEventBody, evType int32) {
+	if c.traceProtoMessageEvent(ev, body, evType) {
+		return
+	}
+
+	switch evType {
+	case protoEventTypingChanged:
+		c.apiLogger.Tracef("webchannel recv: typing group=%s user=%s state=%s",
+			firstNonEmpty(body.TypingGroup.ID, ev.Group.ID),
+			firstNonEmpty(body.TypingUserID, ev.UserID),
+			typingStateLabel(body.TypingState),
+		)
+	case protoEventGroupUpdated:
+		groupID := ev.Group.ID
+		if body.GroupUpdated != nil && body.GroupUpdated.Group.ID != "" {
+			groupID = body.GroupUpdated.Group.ID
+		}
+
+		c.apiLogger.Tracef("webchannel recv: group_updated group=%s op=%d", groupID, body.GroupUpdateOp)
+	case protoEventMembershipChanged:
+		if body.Membership != nil {
+			c.apiLogger.Tracef("webchannel recv: membership_changed group=%s user=%s state=%d",
+				firstNonEmpty(body.Membership.Group.ID, ev.Group.ID), body.Membership.UserID, body.Membership.State)
+		}
+	case protoEventUserStatusUpdated:
+		if body.UserStatus != nil {
+			c.apiLogger.Tracef("webchannel recv: user_status user=%s dnd=%v presence_shared=%v custom=%v",
+				body.UserStatus.UserID, body.UserStatus.DND, body.UserStatus.PresenceShared,
+				body.UserStatus.CustomText != "" || body.UserStatus.CustomEmoji != "")
+		}
+	case protoEventGroupViewed, protoEventGroupReadState:
+		groupID := firstNonEmpty(body.GroupViewed.ID, firstNonEmpty(body.ReadStateGroup.ID, ev.Group.ID))
+		c.apiLogger.Tracef("webchannel recv: read_state group=%s type=%d", groupID, evType)
+	default:
+		c.apiLogger.Tracef("webchannel recv: unknown event_type=%d group=%s", evType, ev.Group.ID)
+	}
+}
+
+func (c *Client) traceProtoMessageEvent(ev *protoEvent, body *protoEventBody, evType int32) bool {
+	switch evType {
+	case protoEventMessagePosted, protoEventMessageUpdated:
+		kind := "message_posted"
+		if evType == protoEventMessageUpdated {
+			kind = "message_updated"
+		}
+
+		if body.MessagePosted != nil {
+			creatorID := ""
+			if body.MessagePosted.Creator != nil {
+				creatorID = body.MessagePosted.Creator.ID
+			}
+
+			c.apiLogger.Tracef("webchannel recv: %s group=%s msg=%s user=%s system=%v",
+				kind, firstNonEmpty(body.MessagePosted.Group.ID, ev.Group.ID),
+				body.MessagePosted.MessageID, creatorID, body.MessagePosted.MessageType == protoMsgTypeSystem)
+		}
+	case protoEventTopicCreated:
+		if body.TopicCreated != nil {
+			c.apiLogger.Tracef("webchannel recv: topic_created group=%s topic=%s replies=%d system=%v",
+				firstNonEmpty(body.TopicCreated.Group.ID, ev.Group.ID),
+				body.TopicCreated.TopicID, len(body.TopicCreated.Replies), body.TopicCreated.IsSystem)
+		}
+	case protoEventMessageDeleted:
+		c.apiLogger.Tracef("webchannel recv: message_deleted group=%s msg=%s",
+			firstNonEmpty(body.DeletedGroup.ID, ev.Group.ID), body.DeletedMsgID)
+	case protoEventMessageReacted:
+		c.apiLogger.Tracef("webchannel recv: reaction group=%s msg=%s user=%s opt=%d",
+			firstNonEmpty(body.ReactGroup.ID, ev.Group.ID), body.ReactMsgID,
+			firstNonEmpty(body.ReactUserID, ev.UserID), body.ReactOption)
+	case protoEventBatchReactions:
+		c.apiLogger.Tracef("webchannel recv: batch_reactions group=%s msg=%s summaries=%d",
+			firstNonEmpty(body.BatchGroup.ID, ev.Group.ID), body.BatchMsgID, len(body.BatchSummaries))
+	default:
+		return false
+	}
+
+	return true
+}
+
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+
+	return b
+}
+
+func typingStateLabel(state int32) string {
+	switch state {
+	case protoTypingStarted:
+		return "started"
+	case protoTypingStopped:
+		return "stopped"
+	default:
+		return strconv.Itoa(int(state))
 	}
 }
 

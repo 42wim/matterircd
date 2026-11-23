@@ -134,6 +134,28 @@ type ChannelRolePrefixer interface {
 	ChannelUserPrefix(channelID, userID string) string
 }
 
+// QuotedPost holds the raw text and author metadata of a post being quoted in a reply.
+type QuotedPost struct {
+	ID       string
+	ParentID string
+	Text     string
+	Author   *UserInfo
+}
+
+// PostGetter is optionally implemented by bridges that can retrieve a single post's
+// raw content and author for quote-in-reply formatting.
+type PostGetter interface {
+	GetPost(ctx context.Context, postID string) (*QuotedPost, error)
+}
+
+// QuoteSender is optionally implemented by bridges that support native wire-level
+// quoted replies instead of Markdown blockquotes. It returns the created message ID
+// and the thread parent ID (empty when posted unthreaded).
+type QuoteSender interface {
+	MsgChannelQuote(ctx context.Context, channelID, quotedPostID string, threaded bool, text string) (string, string, error)
+	MsgUserQuote(ctx context.Context, userID, quotedPostID string, threaded bool, text string) (string, string, error)
+}
+
 type Credentials struct {
 	Login    string
 	Team     string

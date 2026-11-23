@@ -48,6 +48,8 @@ func (c *Client) messageFromEvent(ctx context.Context, ev *event.Event) *Message
 		return nil
 	}
 
+	c.cacheEvent(ev)
+
 	msg := &Message{
 		RoomID:    ev.RoomID,
 		EventID:   ev.ID,
@@ -183,6 +185,12 @@ func (c *Client) messagesPage(ctx context.Context, roomID id.RoomID, from string
 	for attempt := 0; ; attempt++ {
 		resp, err := c.mc.Messages(ctx, roomID, from, "", mautrix.DirectionBackward, filter, limit)
 		if err == nil {
+			for _, ev := range resp.Chunk {
+				if ev != nil && ev.RoomID == "" {
+					ev.RoomID = roomID
+				}
+			}
+
 			return resp.Chunk, resp.End, nil
 		}
 
