@@ -940,8 +940,10 @@ func recordProtoEventBody(evType int32, stats *webChannelPollStats) {
 		stats.member++
 	case protoEventUserStatusUpdated:
 		stats.status++
-	case protoEventGroupViewed, protoEventGroupReadState:
+	case protoEventGroupViewed, protoEventTopicViewed, protoEventGroupReadState, protoEventReadReceiptChanged, protoEventMarkAsUnread:
 		stats.read++
+	case protoEventGroupNoOp:
+		stats.noop++
 	default:
 		stats.other++
 	}
@@ -981,8 +983,34 @@ func (c *Client) traceProtoEventBody(ev *protoEvent, body *protoEventBody, evTyp
 		groupID := firstNonEmpty(body.GroupViewed.ID, firstNonEmpty(body.ReadStateGroup.ID, ev.Group.ID))
 		c.apiLogger.Tracef("webchannel recv: read_state group=%s type=%d", groupID, evType)
 	default:
-		c.apiLogger.Tracef("webchannel recv: unknown event_type=%d group=%s", evType, ev.Group.ID)
+		if label := auxiliaryEventLabel(evType); label != "" {
+			c.apiLogger.Tracef("webchannel recv: %s group=%s", label, ev.Group.ID)
+		} else {
+			c.apiLogger.Tracef("webchannel recv: unknown event_type=%d group=%s", evType, ev.Group.ID)
+		}
 	}
+}
+
+var auxiliaryEventLabels = map[int32]string{
+	protoEventTopicViewed:               "topic_viewed",
+	protoEventTopicMuteChanged:          "topic_mute_changed",
+	protoEventUserSettingsChanged:       "user_settings_changed",
+	protoEventGroupStarred:              "group_starred",
+	protoEventGroupUnreadTopicCount:     "unread_topic_count",
+	protoEventGroupHideChanged:          "group_hide_changed",
+	protoEventGroupNotificationSettings: "group_notification_settings",
+	protoEventRetentionSettingsUpdated:  "retention_settings_updated",
+	protoEventMessageSmartReplies:       "smart_replies",
+	protoEventGroupDeleted:              "group_deleted",
+	protoEventSessionReady:              "session_ready",
+	protoEventGroupSortTimestampChanged: "group_sort_timestamp",
+	protoEventReadReceiptChanged:        "read_receipt_changed",
+	protoEventMarkAsUnread:              "mark_as_unread",
+	protoEventGroupNoOp:                 "group_noop",
+}
+
+func auxiliaryEventLabel(evType int32) string {
+	return auxiliaryEventLabels[evType]
 }
 
 func (c *Client) traceProtoMessageEvent(ev *protoEvent, body *protoEventBody, evType int32) bool {

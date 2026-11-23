@@ -104,6 +104,9 @@ type Client struct {
 	lastReauth time.Time
 	authMu     sync.RWMutex
 	tokenState TokenState
+	boqAT      string
+	boqSID     string
+	boqBL      string
 
 	// streamMu guards the active WebChannel session and HTTP cancel func so
 	// Reconnect/Logout and dynamic group subscriptions operate safely without blocking.
