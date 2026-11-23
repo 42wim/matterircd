@@ -758,7 +758,17 @@ func (c *Client) handleProtoEventBody(ev *protoEvent, body *protoEventBody) {
 }
 
 func (c *Client) handleMessageEventBody(ev *protoEvent, body *protoEventBody, isEdit bool) {
+	var (
+		prevTopic    string
+		hasPrevTopic bool
+	)
+
 	if body.MessageGroup != nil {
+		if prev := c.GetChannel(body.MessageGroup.Group.ID); prev != nil {
+			prevTopic = prev.Topic
+			hasPrevTopic = true
+		}
+
 		c.upsertConversationFromProto(body.MessageGroup)
 	}
 
@@ -777,23 +787,7 @@ func (c *Client) handleMessageEventBody(ev *protoEvent, body *protoEventBody, is
 		msg.EditAt = time.Now().UnixMilli()
 	}
 
-	c.cachePost(msg)
-	c.touchConversation(msg.ConversationID, msg.CreateAt)
-
-	evType := EventPosted
-	if isEdit || msg.EditAt > 0 {
-		evType = EventPostEdited
-	}
-
-	c.emitMessage(&Message{
-		Type:      evType,
-		Channel:   msg.ConversationID,
-		UserID:    msg.FromID,
-		Username:  msg.DisplayName,
-		Text:      msg.ContentText,
-		Post:      msg,
-		Timestamp: timeFromMillis(msg.CreateAt),
-	})
+	c.emitIncomingChatMessage(msg, prevTopic, hasPrevTopic, isEdit)
 }
 
 func (c *Client) handleTopicCreatedBody(ev *protoEvent, body *protoEventBody) {
@@ -814,18 +808,57 @@ func (c *Client) handleTopicCreatedBody(ev *protoEvent, body *protoEventBody) {
 			continue
 		}
 
-		c.cachePost(msg)
-		c.touchConversation(msg.ConversationID, msg.CreateAt)
-		c.emitMessage(&Message{
-			Type:      EventPosted,
-			Channel:   msg.ConversationID,
-			UserID:    msg.FromID,
-			Username:  msg.DisplayName,
-			Text:      msg.ContentText,
-			Post:      msg,
-			Timestamp: timeFromMillis(msg.CreateAt),
-		})
+		if body.TopicCreated.IsSystem {
+			msg.IsSystem = true
+		}
+
+		c.emitIncomingChatMessage(msg, "", false, false)
 	}
+}
+
+func (c *Client) emitIncomingChatMessage(msg *ChatMessage, prevTopic string, hasPrevTopic, isEdit bool) {
+	if msg.TopicChanged {
+		newTopic := strings.TrimSpace(msg.NewTopic)
+		changed := c.setConversationTopic(msg.ConversationID, newTopic)
+
+		if hasPrevTopic {
+			changed = prevTopic != newTopic
+		}
+
+		if changed {
+			c.emitMessage(&Message{
+				Type:      EventChannelTopic,
+				Channel:   msg.ConversationID,
+				UserID:    msg.FromID,
+				Topic:     newTopic,
+				Timestamp: timeFromMillis(msg.CreateAt),
+			})
+		}
+
+		if msg.ContentText == "" || msg.ContentText == "Space Updated" {
+			return
+		}
+
+		msg.TopicChanged = false
+	}
+
+	c.cachePost(msg)
+	c.touchConversation(msg.ConversationID, msg.CreateAt)
+
+	evType := EventPosted
+	if isEdit || msg.EditAt > 0 {
+		evType = EventPostEdited
+	}
+
+	c.emitMessage(&Message{
+		Type:      evType,
+		Channel:   msg.ConversationID,
+		UserID:    msg.FromID,
+		Username:  msg.DisplayName,
+		Text:      msg.ContentText,
+		Post:      msg,
+		Timestamp: timeFromMillis(msg.CreateAt),
+	})
 }
 
 func (c *Client) handleMessageDeletedBody(ev *protoEvent, body *protoEventBody) {

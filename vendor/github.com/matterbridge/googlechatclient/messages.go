@@ -565,6 +565,10 @@ func (c *Client) flattenTopics(topics []*protoTopic, convID string) []*ChatMessa
 				continue
 			}
 
+			if t.IsSystem {
+				msg.IsSystem = true
+			}
+
 			c.cachePost(msg)
 			out = append(out, msg)
 		}
@@ -597,6 +601,15 @@ func (c *Client) protoMessageToChatMessage(pm *protoMessage, fallbackConvID, fal
 
 	mentions, attachments, text := c.extractMentionsAndAttachments(pm)
 	fromID, displayName := c.extractMessageCreator(pm)
+	isSystem, topicChanged, newTopic, initiator, newName := c.extractSystemMetadata(pm)
+
+	if fromID == "" && initiator != "" {
+		fromID = initiator
+	}
+
+	if newName != "" && (text == "" || text == "Space Updated") {
+		text = "Space renamed to: " + newName
+	}
 
 	// In Google Chat inline threads, a top-level post has MessageID == TopicID,
 	// whereas an inline reply has MessageID != TopicID (or IsInlineReply == true).
@@ -617,7 +630,9 @@ func (c *Client) protoMessageToChatMessage(pm *protoMessage, fallbackConvID, fal
 		CreateAt:        usecToMillis(pm.CreateTimeUsec),
 		EditAt:          usecToMillis(pm.EditTimeUsec),
 		DeleteAt:        usecToMillis(pm.DeleteTimeUsec),
-		IsSystem:        pm.MessageType == protoMsgTypeSystem,
+		IsSystem:        isSystem,
+		TopicChanged:    topicChanged,
+		NewTopic:        newTopic,
 		QuotedMessage:   c.protoQuotedToQuotedMessage(pm.Quoted, convID, text),
 		Mentions:        mentions,
 		Attachments:     attachments,
@@ -625,6 +640,46 @@ func (c *Client) protoMessageToChatMessage(pm *protoMessage, fallbackConvID, fal
 	}
 
 	return msg
+}
+
+func (c *Client) extractSystemMetadata(pm *protoMessage) (bool, bool, string, string, string) {
+	isSystem := pm.MessageType == protoMsgTypeSystem
+
+	var (
+		topicChanged bool
+		newTopic     string
+		initiator    string
+		newName      string
+	)
+
+	for _, ann := range pm.Annotations {
+		if ann.RoomUpdated {
+			isSystem = true
+
+			if ann.RoomInitiator != "" {
+				initiator = ann.RoomInitiator
+			}
+
+			if ann.RoomDescUpdated {
+				topicChanged = true
+				newTopic = ann.RoomNewDesc
+			}
+
+			if ann.RoomNewName != "" {
+				newName = ann.RoomNewName
+			}
+
+			if len(ann.RoomUnknownFields) > 0 {
+				c.logger.Debugf("RoomUpdatedMetadata extra fields on message %s: %v", pm.MessageID, ann.RoomUnknownFields)
+			}
+		}
+
+		if ann.MemberChanged || ann.MemberAction != 0 {
+			isSystem = true
+		}
+	}
+
+	return isSystem, topicChanged, newTopic, initiator, newName
 }
 
 func (c *Client) protoQuotedToQuotedMessage(pq *protoQuotedMessage, destConvID, destText string) *QuotedMessage {

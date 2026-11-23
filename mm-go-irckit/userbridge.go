@@ -236,7 +236,7 @@ func (u *User) handleChannelTopicEvent(event *bridge.ChannelTopicEvent) bool {
 			_ = u.syncChannel(event.ChannelID, u.br.GetChannelName(u.ctx, event.ChannelID))
 		}
 
-		if tu.Ghost && !ch.HasUser(tu) {
+		if tu.Ghost && !isServiceUser(tu) && !ch.HasUser(tu) {
 			_ = ch.Join(tu)
 		}
 

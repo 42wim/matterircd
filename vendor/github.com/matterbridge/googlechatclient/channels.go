@@ -867,20 +867,55 @@ func (c *Client) SetChannelTopic(ctx context.Context, convID, topic string) erro
 		return errors.New("googlechatclient: cannot set description on a DM")
 	}
 
+	trimmed := strings.TrimSpace(topic)
+	prevTopic, hadConv := c.setConversationTopicOptimistic(convID, trimmed)
+
 	_, err := c.doProto(ctx, "update_group", encodeUpdateGroupDescriptionRequest(convID, topic))
 	if err != nil {
+		if hadConv {
+			c.Users.mu.Lock()
+
+			if conv := c.Users.conversations[convID]; conv != nil && conv.Topic == trimmed {
+				conv.Topic = prevTopic
+			}
+
+			c.Users.mu.Unlock()
+		}
+
 		return fmt.Errorf("googlechatclient: update_group: %w", err)
 	}
 
-	c.Users.mu.Lock()
+	return nil
+}
 
-	if conv := c.Users.conversations[convID]; conv != nil {
-		conv.Topic = topic
+func (c *Client) setConversationTopicOptimistic(convID, topic string) (string, bool) {
+	c.Users.mu.Lock()
+	defer c.Users.mu.Unlock()
+
+	conv := c.Users.conversations[convID]
+	if conv == nil {
+		return "", false
 	}
 
-	c.Users.mu.Unlock()
+	prev := conv.Topic
+	conv.Topic = topic
 
-	return nil
+	return prev, true
+}
+
+func (c *Client) setConversationTopic(convID, topic string) bool {
+	c.Users.mu.Lock()
+	defer c.Users.mu.Unlock()
+
+	conv := c.Users.conversations[convID]
+	if conv == nil {
+		return true
+	}
+
+	changed := conv.Topic != topic
+	conv.Topic = topic
+
+	return changed
 }
 
 // MarkConversationRead updates Google Chat's read watermark for convID.

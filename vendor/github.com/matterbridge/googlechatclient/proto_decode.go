@@ -47,30 +47,34 @@ type protoMembership struct {
 }
 
 type protoAnnotation struct {
-	Type           int32
-	StartIndex     int32
-	Length         int32
-	MentionUserID  string
-	MentionName    string
-	MentionType    int32
-	FormatType     int32
-	URL            string
-	URLTitle       string
-	UploadToken    string
-	UploadName     string
-	UploadMIME     string
-	DriveID        string
-	DriveTitle     string
-	DriveMIME      string
-	DriveURL       string
-	MeetURL        string
-	RoomNewName    string
-	RoomNewDesc    string
-	RoomInitiator  string
-	MemberAction   int32
-	MemberActorID  string
-	MemberTargetID []string
-	CustomEmoji    string
+	Type              int32
+	StartIndex        int32
+	Length            int32
+	MentionUserID     string
+	MentionName       string
+	MentionType       int32
+	FormatType        int32
+	URL               string
+	URLTitle          string
+	UploadToken       string
+	UploadName        string
+	UploadMIME        string
+	DriveID           string
+	DriveTitle        string
+	DriveMIME         string
+	DriveURL          string
+	MeetURL           string
+	RoomUpdated       bool
+	RoomDescUpdated   bool
+	RoomNewName       string
+	RoomNewDesc       string
+	RoomInitiator     string
+	RoomUnknownFields []int32
+	MemberChanged     bool
+	MemberAction      int32
+	MemberActorID     string
+	MemberTargetID    []string
+	CustomEmoji       string
 }
 
 type protoReaction struct {
@@ -970,6 +974,8 @@ func decodeVideoCallMetadata(b []byte, a *protoAnnotation) {
 }
 
 func decodeRoomUpdatedMetadata(b []byte, a *protoAnnotation) {
+	a.RoomUpdated = true
+
 	_ = walkFields(b, func(num protowire.Number, typ protowire.Type, val []byte) error {
 		if typ != protowire.BytesType {
 			return nil
@@ -987,20 +993,49 @@ func decodeRoomUpdatedMetadata(b []byte, a *protoAnnotation) {
 				a.RoomNewName = name
 			}
 		case 7:
-			_ = walkFields(decodeBytes(val), func(n2 protowire.Number, t2 protowire.Type, v2 []byte) error {
-				if n2 == 1 && t2 == protowire.BytesType {
-					a.RoomNewDesc = decodeFirstString(decodeBytes(v2))
-				}
-
-				return nil
-			})
+			decodeGroupDetailsUpdatedMetadata(decodeBytes(val), a)
+		default:
+			a.RoomUnknownFields = append(a.RoomUnknownFields, int32(num))
 		}
 
 		return nil
 	})
 }
 
+func decodeGroupDetailsUpdatedMetadata(b []byte, a *protoAnnotation) {
+	var (
+		newDesc        string
+		prevDesc       string
+		hasNewDetails  bool
+		hasPrevDetails bool
+	)
+
+	_ = walkFields(b, func(num protowire.Number, typ protowire.Type, val []byte) error {
+		if typ != protowire.BytesType {
+			return nil
+		}
+
+		switch num {
+		case 1:
+			hasNewDetails = true
+			newDesc = decodeFirstString(decodeBytes(val))
+		case 2:
+			hasPrevDetails = true
+			prevDesc = decodeFirstString(decodeBytes(val))
+		}
+
+		return nil
+	})
+
+	if newDesc != prevDesc || (hasNewDetails && !hasPrevDetails) {
+		a.RoomDescUpdated = true
+		a.RoomNewDesc = newDesc
+	}
+}
+
 func decodeMembershipChangedMetadata(b []byte, a *protoAnnotation) {
+	a.MemberChanged = true
+
 	_ = walkFields(b, func(num protowire.Number, typ protowire.Type, val []byte) error {
 		switch num {
 		case 1:
