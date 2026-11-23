@@ -2195,6 +2195,45 @@ func (r *RocketChat) GetPostChannelID(ctx context.Context, postID string) string
 	return msg.RoomID
 }
 
+func (r *RocketChat) GetPost(ctx context.Context, postID string) (*bridge.QuotedPost, error) {
+	msg, err := r.rc.ResolveMessage(ctx, postID)
+	if err != nil {
+		return nil, err
+	}
+
+	if msg == nil {
+		return nil, errors.New("post not found: " + postID)
+	}
+
+	var author *bridge.UserInfo
+	if msg.User.ID != "" {
+		author = r.GetUser(ctx, msg.User.ID)
+	}
+
+	if author == nil && msg.User.Username != "" {
+		author = &bridge.UserInfo{
+			Nick:        msg.User.Username,
+			Username:    msg.User.Username,
+			DisplayName: msg.User.Name,
+		}
+	}
+
+	text := msg.Text
+	if text == "" && len(msg.Attachments) > 0 {
+		text = msg.Attachments[0].Text
+		if text == "" {
+			text = msg.Attachments[0].Description
+		}
+	}
+
+	return &bridge.QuotedPost{
+		ID:       msg.ID,
+		ParentID: msg.ThreadID,
+		Text:     text,
+		Author:   author,
+	}, nil
+}
+
 func (r *RocketChat) GetPostThread(ctx context.Context, postID string) []*bridge.Event {
 	if postID == "" {
 		return []*bridge.Event{}

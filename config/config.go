@@ -130,6 +130,10 @@ type BridgeConfig struct {
 	ThreadContext    string
 	ShowContextMulti bool
 
+	// Quote in reply settings
+	QuoteThreaded bool
+	QuoteAuthor   string
+
 	DirectoryURL string
 }
 
@@ -317,6 +321,31 @@ type MastodonConfig struct {
 	AccessToken  string
 }
 
+func (c *Config) buildBridgeConfig(section string) BridgeConfig {
+	return BridgeConfig{
+		Restrict: append([]string(nil), c.v.GetStringSlice(section+".Restrict")...),
+
+		JoinOnly:    append([]string(nil), c.v.GetStringSlice(section+".JoinOnly")...),
+		JoinExclude: append([]string(nil), c.v.GetStringSlice(section+".JoinExclude")...),
+		JoinInclude: append([]string(nil), c.v.GetStringSlice(section+".JoinInclude")...),
+		JoinDM:      c.v.GetBool(section + ".JoinDM"),
+
+		ShowJoinPart:   c.v.GetBool(section + ".ShowJoinPart"),
+		ShowOnlyJoined: c.v.GetBool(section + ".ShowOnlyJoined"),
+		PartFake:       c.v.GetBool(section + ".PartFake"),
+
+		PrefixContext:    c.v.GetBool(section + ".PrefixContext"),
+		SuffixContext:    c.v.GetBool(section + ".SuffixContext"),
+		ShowContextMulti: c.v.GetBool(section + ".ShowContextMulti"),
+		ThreadContext:    c.v.GetString(section + ".ThreadContext"),
+
+		QuoteThreaded: c.v.GetBool(section + ".QuoteThreaded"),
+		QuoteAuthor:   c.v.GetString(section + ".QuoteAuthor"),
+
+		DirectoryURL: c.v.GetString(section + ".DirectoryURL"),
+	}
+}
+
 func (c *Config) buildSharedConfig(section string) SharedConfig {
 	return SharedConfig{
 		CollapseScrollback: c.v.GetBool(section + ".CollapseScrollback"),
@@ -406,142 +435,13 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 		MaxPostLimit:       c.v.GetInt("ai.max_post_limit"),
 	}
 
-	mmBridge := BridgeConfig{
-		Restrict: append([]string(nil), c.v.GetStringSlice("mattermost.Restrict")...),
-
-		JoinOnly:    append([]string(nil), c.v.GetStringSlice("mattermost.JoinOnly")...),
-		JoinExclude: append([]string(nil), c.v.GetStringSlice("mattermost.JoinExclude")...),
-		JoinInclude: append([]string(nil), c.v.GetStringSlice("mattermost.JoinInclude")...),
-		JoinDM:      c.v.GetBool("mattermost.JoinDM"),
-
-		ShowJoinPart:   c.v.GetBool("mattermost.ShowJoinPart"),
-		ShowOnlyJoined: c.v.GetBool("mattermost.ShowOnlyJoined"),
-		PartFake:       c.v.GetBool("mattermost.PartFake"),
-
-		PrefixContext:    c.v.GetBool("mattermost.PrefixContext"),
-		SuffixContext:    c.v.GetBool("mattermost.SuffixContext"),
-		ShowContextMulti: c.v.GetBool("mattermost.ShowContextMulti"),
-		ThreadContext:    c.v.GetString("mattermost.ThreadContext"),
-
-		DirectoryURL: c.v.GetString("mattermost.DirectoryURL"),
-	}
-	slBridge := BridgeConfig{
-		Restrict: append([]string(nil), c.v.GetStringSlice("slack.Restrict")...),
-
-		JoinOnly:    append([]string(nil), c.v.GetStringSlice("slack.JoinOnly")...),
-		JoinExclude: append([]string(nil), c.v.GetStringSlice("slack.JoinExclude")...),
-		JoinInclude: append([]string(nil), c.v.GetStringSlice("slack.JoinInclude")...),
-		JoinDM:      c.v.GetBool("slack.JoinDM"),
-
-		ShowJoinPart:   c.v.GetBool("slack.ShowJoinPart"),
-		ShowOnlyJoined: c.v.GetBool("slack.ShowOnlyJoined"),
-		PartFake:       c.v.GetBool("slack.PartFake"),
-
-		PrefixContext:    c.v.GetBool("slack.PrefixContext"),
-		SuffixContext:    c.v.GetBool("slack.SuffixContext"),
-		ShowContextMulti: c.v.GetBool("slack.ShowContextMulti"),
-		ThreadContext:    c.v.GetString("slack.ThreadContext"),
-
-		DirectoryURL: c.v.GetString("slack.DirectoryURL"),
-	}
-	mdBridge := BridgeConfig{
-		Restrict: append([]string(nil), c.v.GetStringSlice("mastodon.Restrict")...),
-
-		JoinOnly:    append([]string(nil), c.v.GetStringSlice("mastodon.JoinOnly")...),
-		JoinExclude: append([]string(nil), c.v.GetStringSlice("mastodon.JoinExclude")...),
-		JoinInclude: append([]string(nil), c.v.GetStringSlice("mastodon.JoinInclude")...),
-		JoinDM:      c.v.GetBool("mastodon.JoinDM"),
-
-		ShowJoinPart:   c.v.GetBool("mastodon.ShowJoinPart"),
-		ShowOnlyJoined: c.v.GetBool("mastodon.ShowOnlyJoined"),
-		PartFake:       c.v.GetBool("mastodon.PartFake"),
-
-		PrefixContext:    c.v.GetBool("mastodon.PrefixContext"),
-		SuffixContext:    c.v.GetBool("mastodon.SuffixContext"),
-		ShowContextMulti: c.v.GetBool("mastodon.ShowContextMulti"),
-		ThreadContext:    c.v.GetString("mastodon.ThreadContext"),
-
-		DirectoryURL: c.v.GetString("mastodon.DirectoryURL"),
-	}
-
-	mxBridge := BridgeConfig{
-		Restrict: append([]string(nil), c.v.GetStringSlice("matrix.Restrict")...),
-
-		JoinOnly:    append([]string(nil), c.v.GetStringSlice("matrix.JoinOnly")...),
-		JoinExclude: append([]string(nil), c.v.GetStringSlice("matrix.JoinExclude")...),
-		JoinInclude: append([]string(nil), c.v.GetStringSlice("matrix.JoinInclude")...),
-		JoinDM:      c.v.GetBool("matrix.JoinDM"),
-
-		ShowJoinPart:   c.v.GetBool("matrix.ShowJoinPart"),
-		ShowOnlyJoined: c.v.GetBool("matrix.ShowOnlyJoined"),
-		PartFake:       c.v.GetBool("matrix.PartFake"),
-
-		PrefixContext:    c.v.GetBool("matrix.PrefixContext"),
-		SuffixContext:    c.v.GetBool("matrix.SuffixContext"),
-		ShowContextMulti: c.v.GetBool("matrix.ShowContextMulti"),
-		ThreadContext:    c.v.GetString("matrix.ThreadContext"),
-
-		DirectoryURL: c.v.GetString("matrix.DirectoryURL"),
-	}
-	mtBridge := BridgeConfig{
-		Restrict: append([]string(nil), c.v.GetStringSlice("msteams.Restrict")...),
-
-		JoinOnly:    append([]string(nil), c.v.GetStringSlice("msteams.JoinOnly")...),
-		JoinExclude: append([]string(nil), c.v.GetStringSlice("msteams.JoinExclude")...),
-		JoinInclude: append([]string(nil), c.v.GetStringSlice("msteams.JoinInclude")...),
-		JoinDM:      c.v.GetBool("msteams.JoinDM"),
-
-		ShowJoinPart:   c.v.GetBool("msteams.ShowJoinPart"),
-		ShowOnlyJoined: c.v.GetBool("msteams.ShowOnlyJoined"),
-		PartFake:       c.v.GetBool("msteams.PartFake"),
-
-		PrefixContext:    c.v.GetBool("msteams.PrefixContext"),
-		SuffixContext:    c.v.GetBool("msteams.SuffixContext"),
-		ShowContextMulti: c.v.GetBool("msteams.ShowContextMulti"),
-		ThreadContext:    c.v.GetString("msteams.ThreadContext"),
-
-		DirectoryURL: c.v.GetString("msteams.DirectoryURL"),
-	}
-
-	gcBridge := BridgeConfig{
-		Restrict: append([]string(nil), c.v.GetStringSlice("googlechat.Restrict")...),
-
-		JoinOnly:    append([]string(nil), c.v.GetStringSlice("googlechat.JoinOnly")...),
-		JoinExclude: append([]string(nil), c.v.GetStringSlice("googlechat.JoinExclude")...),
-		JoinInclude: append([]string(nil), c.v.GetStringSlice("googlechat.JoinInclude")...),
-		JoinDM:      c.v.GetBool("googlechat.JoinDM"),
-
-		ShowJoinPart:   c.v.GetBool("googlechat.ShowJoinPart"),
-		ShowOnlyJoined: c.v.GetBool("googlechat.ShowOnlyJoined"),
-		PartFake:       c.v.GetBool("googlechat.PartFake"),
-
-		PrefixContext:    c.v.GetBool("googlechat.PrefixContext"),
-		SuffixContext:    c.v.GetBool("googlechat.SuffixContext"),
-		ShowContextMulti: c.v.GetBool("googlechat.ShowContextMulti"),
-		ThreadContext:    c.v.GetString("googlechat.ThreadContext"),
-
-		DirectoryURL: c.v.GetString("googlechat.DirectoryURL"),
-	}
-
-	rcBridge := BridgeConfig{
-		Restrict: append([]string(nil), c.v.GetStringSlice("rocketchat.Restrict")...),
-
-		JoinOnly:    append([]string(nil), c.v.GetStringSlice("rocketchat.JoinOnly")...),
-		JoinExclude: append([]string(nil), c.v.GetStringSlice("rocketchat.JoinExclude")...),
-		JoinInclude: append([]string(nil), c.v.GetStringSlice("rocketchat.JoinInclude")...),
-		JoinDM:      c.v.GetBool("rocketchat.JoinDM"),
-
-		ShowJoinPart:   c.v.GetBool("rocketchat.ShowJoinPart"),
-		ShowOnlyJoined: c.v.GetBool("rocketchat.ShowOnlyJoined"),
-		PartFake:       c.v.GetBool("rocketchat.PartFake"),
-
-		PrefixContext:    c.v.GetBool("rocketchat.PrefixContext"),
-		SuffixContext:    c.v.GetBool("rocketchat.SuffixContext"),
-		ShowContextMulti: c.v.GetBool("rocketchat.ShowContextMulti"),
-		ThreadContext:    c.v.GetString("rocketchat.ThreadContext"),
-
-		DirectoryURL: c.v.GetString("rocketchat.DirectoryURL"),
-	}
+	mmBridge := c.buildBridgeConfig("mattermost")
+	slBridge := c.buildBridgeConfig("slack")
+	mdBridge := c.buildBridgeConfig("mastodon")
+	mxBridge := c.buildBridgeConfig("matrix")
+	mtBridge := c.buildBridgeConfig("msteams")
+	gcBridge := c.buildBridgeConfig("googlechat")
+	rcBridge := c.buildBridgeConfig("rocketchat")
 
 	mmFormatter := FormatterConfig{
 		DisableEmoji: c.v.GetBool("mattermost.DisableEmoji"),
@@ -1061,6 +961,11 @@ func Load(cfgfile string, flags *pflag.FlagSet) (*Config, error) {
 	v.SetDefault("googlechat.JoinReplayDuration", "15m")
 	v.SetDefault("matrix.ReplaceColonChar", "[]")
 	v.SetDefault("rocketchat.JoinReplayDuration", "15m")
+
+	for _, section := range []string{"mattermost", "slack", "mastodon", "matrix", "msteams", "googlechat", "rocketchat"} {
+		v.SetDefault(section+".QuoteThreaded", section != "googlechat")
+		v.SetDefault(section+".QuoteAuthor", "displayname")
+	}
 
 	c := &Config{
 		v: v,

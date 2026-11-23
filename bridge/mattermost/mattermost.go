@@ -2253,6 +2253,35 @@ func (m *Mattermost) GetPosts(ctx context.Context, channelID string, limit int) 
 	return m.postListToEvents(ctx, m.mc.GetPosts(ctx, channelID, limit), "scrollback", 0)
 }
 
+func (m *Mattermost) GetPost(ctx context.Context, postID string) (*bridge.QuotedPost, error) {
+	post, err := m.mc.GetPost(ctx, postID)
+	if err != nil {
+		return nil, err
+	}
+
+	if post == nil {
+		return nil, errors.New("post not found: " + postID)
+	}
+
+	text := post.Message
+	if text == "" {
+		if attachments := post.Attachments(); len(attachments) > 0 {
+			if attachments[0].Fallback != "" {
+				text = attachments[0].Fallback
+			} else if attachments[0].Text != "" {
+				text = attachments[0].Text
+			}
+		}
+	}
+
+	return &bridge.QuotedPost{
+		ID:       post.Id,
+		ParentID: post.RootId,
+		Text:     text,
+		Author:   m.GetUser(ctx, post.UserId),
+	}, nil
+}
+
 func (m *Mattermost) GetPostThread(ctx context.Context, postID string) []*bridge.Event {
 	return m.postListToEvents(ctx, m.mc.GetPostThread(ctx, postID), "details", 0)
 }

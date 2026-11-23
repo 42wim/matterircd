@@ -1039,6 +1039,34 @@ func (m *MSTeams) GetPostChannelID(_ context.Context, postID string) string {
 	return convID
 }
 
+func (m *MSTeams) GetPost(ctx context.Context, postID string) (*bridge.QuotedPost, error) {
+	convID, rawMsgID, ok := m.resolvePostID(postID)
+	if !ok {
+		return nil, errors.New("unknown post " + postID)
+	}
+
+	msg, err := m.mc.GetMessage(ctx, convID, rawMsgID)
+	if err != nil {
+		return nil, err
+	}
+
+	if msg == nil {
+		return nil, errors.New("post not found: " + postID)
+	}
+
+	parentID := ""
+	if msg.RootMessageID != "" && msg.RootMessageID != msg.ID {
+		parentID = encodeTeamsID(convID, msg.RootMessageID)
+	}
+
+	return &bridge.QuotedPost{
+		ID:       encodeTeamsID(convID, msg.ID),
+		ParentID: parentID,
+		Text:     msg.ContentText,
+		Author:   m.resolveUserInfo(ctx, msg.FromMRI, msg.DisplayName),
+	}, nil
+}
+
 func (m *MSTeams) GetPostThread(ctx context.Context, postID string) []*bridge.Event {
 	convID, rawMsgID, ok := m.resolvePostID(postID)
 	if !ok {

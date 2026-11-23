@@ -5,7 +5,9 @@
     - [view reactions](#view-reactions)
     - [view threads](#view-threads)
     - [reply to threads](#reply-to-threads)
+    - [quote in reply](#quote-in-reply)
     - [modify/delete your own messages](#modifydelete-your-own-messages)
+    - [add/remove reactions to messages/posts from other users](#addremove-reactions-to-messagesposts-from-other-users)
 
 <!-- /TOC -->
 
@@ -72,6 +74,33 @@ With `@@number` you can reply to a message and it'll be threaded in mattermost
 21:56 <wim> [003->002] lala
 21:56 <wimtest> @@001 xyz
 ```
+
+## quote in reply
+
+With `@@<id> @> <message>` you can quote the original message and include your reply underneath it.
+Using `>@@<id> <message>` always posts the quote as a top-level (unthreaded) message in the channel or DM.
+Both forms support `!!` to quote the last message you sent, 3-hex context IDs (`001`), and native bridge message IDs.
+
+```irc
+21:55 <wim> [001] Original message content here
+21:56 <wimtest> @@001 @> My message follows it
+21:57 <wimtest> >@@001 Quoting this back into the main channel
+21:58 <wimtest> @@!! @> Following up on my last message
+```
+
+This sends a Markdown blockquote followed by your message:
+
+```markdown
+> **wim** wrote:
+> Original message content here
+
+My message follows it
+```
+
+Per-bridge configuration options in `matterircd.toml`:
+
+- `QuoteThreaded`: Controls whether `@@<id> @> <message>` replies inside the original message's thread (defaults to `true`, except `googlechat` which defaults to `false`). `>@@<id> <message>` always sends unthreaded regardless of this setting.
+- `QuoteAuthor`: Controls author attribution in Markdown quotes: `"displayname"` (default), `"nick"`, or `"off"` / `"none"` to omit the author header.
 
 ## modify/delete your own messages
 
