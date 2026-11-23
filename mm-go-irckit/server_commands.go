@@ -2084,11 +2084,16 @@ func parseCTCP(s Server, u *User, target string, text string) bool {
 		return true
 
 	case "VERSION":
+		ver := fmt.Sprintf("%s %s", s.Name(), s.Version())
+		if features := s.Features(); features != "" {
+			ver += " [" + features + "]"
+		}
+
 		_ = u.Encode(&irc.Message{
 			Prefix:   prefix,
 			Command:  irc.NOTICE,
 			Params:   []string{u.Nick},
-			Trailing: fmt.Sprintf("\x01VERSION %s %s\x01", s.Name(), s.Version()),
+			Trailing: fmt.Sprintf("\x01VERSION %s\x01", ver),
 		})
 
 		return true

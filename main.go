@@ -78,7 +78,11 @@ func main() {
 		return
 	}
 
-	logger.Infof("Running version %s %s %s", version, githash, buildFeatures())
+	if tags := buildTags(); tags != "" {
+		logger.Infof("Running version %s %s %s", version, githash, tags)
+	} else {
+		logger.Infof("Running version %s %s", version, githash)
+	}
 
 	if strings.Contains(version, "-dev") {
 		logger.Infof("WARNING: THIS IS A DEVELOPMENT VERSION. Things may break.")
@@ -477,6 +481,9 @@ func start(socket net.Listener) {
 		fullVersion = version + " (" + githash + ")"
 	}
 
+	_, enabled, _ := buildFeatureInfo()
+	features := strings.Join(enabled, ", ")
+
 	for {
 		conn, err := socket.Accept()
 		if err != nil {
@@ -485,7 +492,7 @@ func start(socket net.Listener) {
 		}
 
 		go func() {
-			newsrv := irckit.ServerConfig{Name: project, Version: fullVersion}.Server()
+			newsrv := irckit.ServerConfig{Name: project, Version: fullVersion, Features: features}.Server()
 
 			logger.Infof("New connection: %s", conn.RemoteAddr())
 
@@ -500,7 +507,7 @@ func start(socket net.Listener) {
 	}
 }
 
-func buildFeatures() string {
+func buildFeatureInfo() ([]string, []string, []string) {
 	var (
 		tags     []string
 		enabled  []string
@@ -532,6 +539,21 @@ func buildFeatures() string {
 	} else {
 		disabled = append(disabled, "AI")
 	}
+
+	return tags, enabled, disabled
+}
+
+func buildTags() string {
+	tags, _, _ := buildFeatureInfo()
+	if len(tags) == 0 {
+		return ""
+	}
+
+	return "[" + strings.Join(tags, ", ") + "]"
+}
+
+func buildFeatures() string {
+	tags, enabled, disabled := buildFeatureInfo()
 
 	var statusParts []string
 	if len(enabled) > 0 {
