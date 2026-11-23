@@ -32,8 +32,10 @@ const (
 	protoRoleOwner   = 4
 	protoRoleManager = 6
 
-	protoPresenceActive   = 1
-	protoPresenceInactive = 2
+	protoPresenceActive          = 1
+	protoPresenceInactive        = 2
+	protoPresenceUnknown         = 3
+	protoPresenceSharingDisabled = 4
 
 	protoDndAvailable = 1
 	protoDndActive    = 2
@@ -52,13 +54,26 @@ const (
 
 	protoMsgTypeSystem = 2
 
+	protoAnnotationURL         = 1
 	protoAnnotationUserMention = 6
 	protoAnnotationFormatData  = 8
 
 	protoMentionUser = 3
 	protoMentionAll  = 4
 
-	protoFormatItalic = 2
+	protoFormatBold             = 1
+	protoFormatItalic           = 2
+	protoFormatStrike           = 3
+	protoFormatSourceCode       = 4
+	protoFormatMonospace        = 5
+	protoFormatHidden           = 6
+	protoFormatMonospaceBlock   = 7
+	protoFormatUnderline        = 8
+	protoFormatFontColor        = 9
+	protoFormatBulletedList     = 10
+	protoFormatBulletedListItem = 11
+	protoFormatClientHidden     = 12
+	protoFormatSearchHighlight  = 13
 
 	protoEventGroupViewed       = 3
 	protoEventGroupUpdated      = 5

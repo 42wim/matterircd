@@ -99,7 +99,14 @@ func (c *Client) collectMissingUserIDs(memberIDs []string, seen map[string]struc
 func (c *Client) syncSpaceMembersIfNeeded(ctx context.Context, convIDs map[string]struct{}) {
 	for id := range convIDs {
 		conv := c.GetChannel(id)
-		if conv == nil || conv.Type != ConversationSpace || len(conv.Members) > 0 {
+		if conv == nil {
+			continue
+		}
+
+		isGroupOrSpace := conv.Type == ConversationSpace || conv.Type == ConversationGroupDM
+		needsMembers := len(conv.Members) == 0 || (conv.DisplayName == "" && len(conv.Members) <= 1)
+
+		if !isGroupOrSpace || !needsMembers {
 			continue
 		}
 
@@ -291,8 +298,27 @@ func applyReadStateToConv(conv *Conversation, rs *protoGroupReadState) {
 		conv.LastPostAt = usecToMillis(rs.LastHeadMsgUsec)
 	}
 
-	if rs.HideTimeUsec > 0 && rs.HideTimeUsec >= rs.LastHeadMsgUsec {
+	latestUsec := max(rs.LastHeadMsgUsec, conv.LastPostAt*1000)
+	if rs.HideTimeUsec > 0 && rs.HideTimeUsec >= latestUsec {
 		conv.IsHidden = true
+	} else if latestUsec > rs.HideTimeUsec {
+		conv.IsHidden = false
+	}
+}
+
+func (c *Client) touchConversation(convID string, postAtMs int64) {
+	if convID == "" {
+		return
+	}
+
+	c.Users.mu.Lock()
+	defer c.Users.mu.Unlock()
+
+	if conv := c.Users.conversations[convID]; conv != nil {
+		conv.IsHidden = false
+		if postAtMs > conv.LastPostAt {
+			conv.LastPostAt = postAtMs
+		}
 	}
 }
 

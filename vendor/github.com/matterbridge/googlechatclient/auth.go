@@ -17,14 +17,17 @@ import (
 )
 
 const (
-	chatOriginURL      = "https://chat.google.com"
-	mailOriginURL      = "https://mail.google.com"
-	defaultBrowserUA   = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-	maxAuthHTMLSize    = 8 << 20 // 8 MiB
-	wizGlobalDataStart = ">window.WIZ_global_data = "
-	wizGlobalDataEnd   = ";</script>"
-	moleWorldHSParam   = `["h_hs",null,null,[1,0],null,null,"gmail.pinto-server_20230730.06_p0",1,null,[15,38,36,35,26,30,41,18,24,11,21,14,6],null,null,"3Mu86PSulM4.en..es5",0,null,null,[0]]`
-	reauthCooldown     = 10 * time.Second
+	chatOriginURL        = "https://chat.google.com"
+	mailOriginURL        = "https://mail.google.com"
+	rotateCookiesURL     = "https://accounts.google.com/RotateCookies"
+	rotateCookiesBody    = `[0, "-0000000000000000000"]`
+	defaultBrowserUA     = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+	maxAuthHTMLSize      = 8 << 20 // 8 MiB
+	wizGlobalDataStart   = ">window.WIZ_global_data = "
+	wizGlobalDataEnd     = ";</script>"
+	moleWorldHSParam     = `["h_hs",null,null,[1,0],null,null,"gmail.pinto-server_20230730.06_p0",1,null,[15,38,36,35,26,30,41,18,24,11,21,14,6],null,null,"3Mu86PSulM4.en..es5",0,null,null,[0]]`
+	reauthCooldown       = 10 * time.Second
+	cookieRotateInterval = 9 * time.Minute
 )
 
 // ParseCookies parses browser cookies from a JSON TokenState, a browser DevTools
@@ -163,7 +166,7 @@ func (c *Client) Authenticate(ctx context.Context) error {
 		return errors.New("googlechatclient: missing required browser cookies (SID, HSID, SSID, OSID)")
 	}
 
-	err := c.refreshXSRFToken(ctx)
+	err := c.refreshXSRFWithRecovery(ctx)
 	if err != nil {
 		return err
 	}
@@ -289,6 +292,12 @@ func (c *Client) refreshXSRFToken(ctx context.Context) error {
 
 	if resp.StatusCode >= http.StatusMultipleChoices && resp.StatusCode < http.StatusBadRequest {
 		loc := resp.Header.Get("Location")
+
+		u, parseErr := url.Parse(loc)
+		if parseErr == nil && u.Host != "" {
+			c.logger.Debugf("/mole/world redirected (%d) to %s%s", resp.StatusCode, u.Host, u.Path)
+		}
+
 		if strings.Contains(loc, "accounts.google.com") {
 			return errors.New("googlechatclient: authentication failed (cookies expired or redirected to Google sign-in)")
 		}
@@ -405,6 +414,7 @@ func (c *Client) fetchSelfIdentity(ctx context.Context) error {
 	c.Unlock()
 
 	c.CacheUser(me)
+	c.applyUserStatusUpdate(st)
 
 	return nil
 }
@@ -459,7 +469,12 @@ func (c *Client) handleUnauthorized(ctx context.Context) error {
 		return nil
 	}
 
-	err := c.refreshXSRFToken(ctx)
+	rotErr := c.RotateCookies(ctx)
+	if rotErr != nil {
+		c.logger.Debugf("RotateCookies during reauth failed: %v", rotErr)
+	}
+
+	err := c.refreshXSRFWithRecovery(ctx)
 	if err != nil {
 		return err
 	}
@@ -468,6 +483,24 @@ func (c *Client) handleUnauthorized(ctx context.Context) error {
 	c.notifyTokenUpdate(c.TokenState())
 
 	return nil
+}
+
+func (c *Client) refreshXSRFWithRecovery(ctx context.Context) error {
+	err := c.refreshXSRFToken(ctx)
+	if err == nil {
+		return nil
+	}
+
+	// Attempt a cookie rotation in case __Secure-1PSIDTS/__Secure-3PSIDTS expired
+	// while the underlying session cookies are still valid.
+	rotErr := c.RotateCookies(ctx)
+	if rotErr != nil {
+		c.logger.Debugf("RotateCookies during auth recovery failed: %v", rotErr)
+
+		return err
+	}
+
+	return c.refreshXSRFToken(ctx)
 }
 
 func (c *Client) applyAuthHeaders(req *http.Request) {
@@ -511,11 +544,61 @@ func (c *Client) applyCookieAndAuthUserHeaders(req *http.Request) {
 	}
 }
 
+// RotateCookies calls accounts.google.com/RotateCookies to refresh short-lived
+// session security cookies (__Secure-1PSIDTS / __Secure-3PSIDTS) and persists
+// any updated cookies via OnTokenUpdate.
+func (c *Client) RotateCookies(ctx context.Context) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, rotateCookiesURL, strings.NewReader(rotateCookiesBody))
+	if err != nil {
+		return fmt.Errorf("googlechatclient: build RotateCookies request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", chatOriginURL)
+	req.Header.Set("Referer", chatOriginURL+"/")
+	req.Header.Set("User-Agent", defaultBrowserUA)
+	c.applyCookieAndAuthUserHeaders(req)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("googlechatclient: RotateCookies: %w", err)
+	}
+
+	defer resp.Body.Close()
+
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+	c.absorbResponseCookies(resp.Cookies())
+
+	if resp.StatusCode >= http.StatusBadRequest {
+		return fmt.Errorf("googlechatclient: RotateCookies returned HTTP %d", resp.StatusCode)
+	}
+
+	return nil
+}
+
+func (c *Client) runCookieRotation(ctx context.Context) {
+	ticker := time.NewTicker(cookieRotateInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			err := c.RotateCookies(ctx)
+			if err != nil && ctx.Err() == nil {
+				c.logger.Debugf("Background RotateCookies failed: %v", err)
+			}
+		}
+	}
+}
+
 func (c *Client) absorbResponseCookies(cookies []*http.Cookie) {
 	if len(cookies) == 0 {
 		return
 	}
 
+	now := time.Now()
 	changed := false
 
 	c.authMu.Lock()
@@ -525,7 +608,7 @@ func (c *Client) absorbResponseCookies(cookies []*http.Cookie) {
 	}
 
 	for _, ck := range cookies {
-		if ck == nil || ck.Name == "" || ck.Value == "" {
+		if isStaleCookie(ck, now) {
 			continue
 		}
 
@@ -543,7 +626,7 @@ func (c *Client) absorbResponseCookies(cookies []*http.Cookie) {
 	}
 
 	if changed {
-		c.tokenState.UpdatedAt = time.Now().UTC()
+		c.tokenState.UpdatedAt = now.UTC()
 	}
 
 	c.authMu.Unlock()
@@ -551,6 +634,16 @@ func (c *Client) absorbResponseCookies(cookies []*http.Cookie) {
 	if changed {
 		c.notifyTokenUpdate(c.TokenState())
 	}
+}
+
+func isStaleCookie(ck *http.Cookie, now time.Time) bool {
+	if ck == nil || ck.Name == "" || ck.Value == "" {
+		return true
+	}
+
+	// Ignore deletion/expired Set-Cookie directives so valid session tokens
+	// are never overwritten with empty/expired markers.
+	return ck.MaxAge < 0 || strings.EqualFold(ck.Value, "deleted") || (!ck.Expires.IsZero() && ck.Expires.Before(now))
 }
 
 func formatCookieHeader(cookies map[string]string, csessionid string) string {

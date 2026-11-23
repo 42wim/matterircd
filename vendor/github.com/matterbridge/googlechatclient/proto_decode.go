@@ -20,13 +20,14 @@ type protoUser struct {
 }
 
 type protoUserStatus struct {
-	UserID           string
-	DND              bool
-	DNDExpiryUsec    int64
-	PresenceShared   bool
-	CustomText       string
-	CustomEmoji      string
-	CustomExpiryUsec int64
+	UserID            string
+	DND               bool
+	DNDExpiryUsec     int64
+	PresenceShared    bool
+	HasPresenceShared bool
+	CustomText        string
+	CustomEmoji       string
+	CustomExpiryUsec  int64
 }
 
 type protoUserPresence struct {
@@ -616,6 +617,7 @@ func decodeUserStatus(b []byte) *protoUserStatus {
 		case 5:
 			if typ == protowire.VarintType {
 				st.PresenceShared = decodeVarint(val) != 0
+				st.HasPresenceShared = true
 			}
 		case 6:
 			if typ == protowire.BytesType {
