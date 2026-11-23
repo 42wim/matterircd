@@ -625,6 +625,71 @@ func (g *GoogleChat) MsgChannelThread(ctx context.Context, channelID, parentID, 
 	return encoded, nil
 }
 
+func (g *GoogleChat) MsgUserQuote(ctx context.Context, userID, quotedPostID string, threaded bool, text string) (string, string, error) {
+	conv, err := g.gc.GetOrCreateDM(ctx, []string{userID})
+	if err != nil {
+		return "", "", err
+	}
+
+	g.dmChannelCache.Add(userID, conv.ID)
+
+	return g.MsgChannelQuote(ctx, conv.ID, quotedPostID, threaded, text)
+}
+
+func (g *GoogleChat) MsgChannelQuote(ctx context.Context, channelID, quotedPostID string, threaded bool, text string) (string, string, error) {
+	rp, ok := g.resolvePostInChannel(channelID, quotedPostID)
+	if !ok {
+		return "", "", errors.New("unknown post " + quotedPostID)
+	}
+
+	quotedMsg, err := g.fetchChatMessage(ctx, rp)
+	if err != nil {
+		return "", "", err
+	}
+
+	if quotedMsg == nil {
+		return "", "", errors.New("post not found: " + quotedPostID)
+	}
+
+	g.rememberMessageMeta(quotedMsg.ID, rp.convID, quotedMsg.TopicID, g.isDMConversation(rp.convID))
+
+	quotedTopicID := quotedMsg.TopicID
+	if quotedTopicID == "" {
+		quotedTopicID = quotedMsg.ID
+	}
+
+	quote := googlechatclient.QuoteRef{
+		ConversationID:     rp.convID,
+		TopicID:            quotedTopicID,
+		MessageID:          quotedMsg.ID,
+		LastUpdateTimeUsec: quotedMsg.LastUpdateTimeUsec,
+	}
+
+	sendText := g.prepareOutgoingText(text)
+
+	if threaded {
+		msg, sendErr := g.gc.SendQuotedMessageThread(ctx, channelID, quotedTopicID, sendText, quote)
+		if sendErr != nil {
+			return "", "", sendErr
+		}
+
+		encoded := encodeGoogleChatID(msg.ID)
+		g.recordSentPost(msg.ID, encoded, channelID, quotedTopicID, sendText)
+
+		return encoded, encodeGoogleChatID(quotedTopicID), nil
+	}
+
+	msg, sendErr := g.gc.SendQuotedMessage(ctx, channelID, sendText, quote)
+	if sendErr != nil {
+		return "", "", sendErr
+	}
+
+	encoded := encodeGoogleChatID(msg.ID)
+	g.recordSentPost(msg.ID, encoded, channelID, msg.TopicID, sendText)
+
+	return encoded, "", nil
+}
+
 func (g *GoogleChat) prepareOutgoingText(text string) string {
 	sendText := googleChatActionText(text)
 	fc := g.cfg.GoogleChat().Formatter
@@ -1068,35 +1133,90 @@ func (g *GoogleChat) GetPostChannelID(_ context.Context, postID string) string {
 	return rp.convID
 }
 
-func (g *GoogleChat) GetPost(ctx context.Context, postID string) (*bridge.QuotedPost, error) {
-	rp, ok := g.resolvePostID(postID)
-	if !ok {
-		return nil, errors.New("unknown post " + postID)
+func findChatMessageByID(msgs []*googlechatclient.ChatMessage, rawMsgID string) *googlechatclient.ChatMessage {
+	for _, m := range msgs {
+		if m != nil && m.ID == rawMsgID {
+			return m
+		}
 	}
 
-	msg := g.gc.GetCachedPost(rp.rawMsgID)
-	if msg == nil {
-		topicID := rp.topicID
-		if topicID == "" {
-			topicID = rp.rawMsgID
+	return nil
+}
+
+func (g *GoogleChat) resolvePostInChannel(channelID, postID string) (resolvedPost, bool) {
+	if rp, ok := g.resolvePostID(postID); ok {
+		return rp, true
+	}
+
+	if channelID == "" {
+		return resolvedPost{}, false
+	}
+
+	rawMsgID, decoded := decodeGoogleChatID(postID)
+	if !decoded {
+		trimmed := strings.TrimSpace(postID)
+		if !isValidGoogleChatRawID(trimmed) {
+			return resolvedPost{}, false
 		}
 
-		msgs, err := g.gc.GetThreadMessages(ctx, rp.convID, topicID, defaultScrollback)
+		rawMsgID = trimmed
+	}
+
+	return resolvedPost{
+		convID:   channelID,
+		topicID:  rawMsgID,
+		rawMsgID: rawMsgID,
+		isDM:     g.isDMConversation(channelID),
+	}, true
+}
+
+func (g *GoogleChat) fetchChatMessage(ctx context.Context, rp resolvedPost) (*googlechatclient.ChatMessage, error) {
+	if msg := g.gc.GetCachedPost(rp.rawMsgID); msg != nil {
+		return msg, nil
+	}
+
+	topicID := rp.topicID
+	if topicID == "" {
+		topicID = rp.rawMsgID
+	}
+
+	msgs, err := g.gc.GetThreadMessages(ctx, rp.convID, topicID, defaultScrollback)
+	if err == nil {
+		if msg := findChatMessageByID(msgs, rp.rawMsgID); msg != nil {
+			return msg, nil
+		}
+	}
+
+	// If rawMsgID was an inline reply inside another topic after a restart,
+	// list_messages(topicID=rawMsgID) won't match it; fall back to recent topics.
+	recent, rErr := g.gc.GetMessages(ctx, rp.convID, defaultScrollback)
+	if rErr != nil {
 		if err != nil {
 			return nil, err
 		}
 
-		for _, m := range msgs {
-			if m != nil && m.ID == rp.rawMsgID {
-				msg = m
-				break
-			}
-		}
+		return nil, rErr
+	}
+
+	return findChatMessageByID(recent, rp.rawMsgID), nil
+}
+
+func (g *GoogleChat) GetPost(ctx context.Context, channelID, postID string) (*bridge.QuotedPost, error) {
+	rp, ok := g.resolvePostInChannel(channelID, postID)
+	if !ok {
+		return nil, errors.New("unknown post " + postID)
+	}
+
+	msg, err := g.fetchChatMessage(ctx, rp)
+	if err != nil {
+		return nil, err
 	}
 
 	if msg == nil {
 		return nil, errors.New("post not found: " + postID)
 	}
+
+	g.rememberMessageMeta(msg.ID, rp.convID, msg.TopicID, g.isDMConversation(rp.convID))
 
 	parentID := ""
 	if msg.RootMessageID != "" && msg.RootMessageID != msg.ID {

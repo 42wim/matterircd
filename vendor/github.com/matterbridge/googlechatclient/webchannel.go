@@ -368,25 +368,89 @@ func (c *Client) initWebChannelSID(ctx context.Context) (string, error) {
 
 	c.absorbResponseCookies(resp.Cookies())
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return "", err
-	}
-
 	if resp.StatusCode >= http.StatusBadRequest {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+
 		return "", fmt.Errorf("HTTP %d: %s", resp.StatusCode, truncateBody(body))
 	}
 
 	headerVal := resp.Header.Get("X-Http-Initial-Response")
 	if sid := extractSIDFromInitPayload(headerVal); sid != "" {
+		if c.apiTraceEnabled() {
+			c.apiLogger.Trace("webchannel init: sid received (source=header)")
+		}
+
 		return sid, nil
 	}
 
-	if sid := extractSIDFromInitPayload(string(body)); sid != "" {
+	sid, err := readSIDFromInitBody(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return "", err
+	}
+
+	if sid != "" {
+		if c.apiTraceEnabled() {
+			c.apiLogger.Trace("webchannel init: sid received (source=body)")
+		}
+
 		return sid, nil
 	}
 
 	return "", errors.New("missing SID in WebChannel init response")
+}
+
+// readSIDFromInitBody reads the WebChannel init response incrementally so we
+// return as soon as the first frame yields a SID instead of blocking on
+// io.ReadAll until Google closes the chunked stream (~60s).
+func readSIDFromInitBody(r io.Reader) (string, error) {
+	const maxInitFrames = 16
+
+	reader := bufio.NewReaderSize(r, 8*1024)
+
+	for range maxInitFrames {
+		frame, eof, err := readInitFrame(reader)
+		if err != nil {
+			return "", err
+		}
+
+		if sid := extractSIDFromInitPayload(frame); sid != "" {
+			return sid, nil
+		}
+
+		if eof {
+			return "", nil
+		}
+	}
+
+	return "", nil
+}
+
+func readInitFrame(reader *bufio.Reader) (string, bool, error) {
+	line, err := reader.ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return "", false, err
+	}
+
+	eof := errors.Is(err, io.EOF)
+	trimmed := strings.TrimSpace(line)
+
+	if trimmed == "" {
+		return "", eof, nil
+	}
+
+	chunkLen, parseErr := strconv.Atoi(trimmed)
+	if parseErr == nil && chunkLen > 0 && chunkLen <= maxWebChannelChunkSize {
+		buf := make([]byte, chunkLen)
+
+		_, readErr := io.ReadFull(reader, buf)
+		if readErr != nil && !errors.Is(readErr, io.EOF) && !errors.Is(readErr, io.ErrUnexpectedEOF) {
+			return "", false, readErr
+		}
+
+		return string(buf), readErr != nil, nil
+	}
+
+	return trimmed, eof, nil
 }
 
 // extractSIDFromInitPayload parses Google's WebChannel init JSON array:
@@ -935,9 +999,11 @@ func (c *Client) traceProtoMessageEvent(ev *protoEvent, body *protoEventBody, ev
 				creatorID = body.MessagePosted.Creator.ID
 			}
 
-			c.apiLogger.Tracef("webchannel recv: %s group=%s msg=%s user=%s system=%v",
+			c.apiLogger.Tracef("webchannel recv: %s group=%s msg=%s user=%s system=%v edited=%v",
 				kind, firstNonEmpty(body.MessagePosted.Group.ID, ev.Group.ID),
-				body.MessagePosted.MessageID, creatorID, body.MessagePosted.MessageType == protoMsgTypeSystem)
+				body.MessagePosted.MessageID, creatorID,
+				body.MessagePosted.MessageType == protoMsgTypeSystem,
+				body.MessagePosted.EditTimeUsec > 0)
 		}
 	case protoEventTopicCreated:
 		if body.TopicCreated != nil {
@@ -1007,11 +1073,26 @@ func (c *Client) handleMessageEventBody(ev *protoEvent, body *protoEventBody, is
 		return
 	}
 
-	if isEdit && msg.EditAt == 0 {
-		msg.EditAt = time.Now().UnixMilli()
+	if isEdit && c.isNonEditMessageUpdate(msg) {
+		c.cachePost(msg)
+
+		return
 	}
 
 	c.emitIncomingChatMessage(msg, prevTopic, hasPrevTopic, isEdit)
+}
+
+// isNonEditMessageUpdate reports whether a MESSAGE_UPDATED event is a
+// server-side metadata/link-preview unfurl rather than a user edit.
+func (c *Client) isNonEditMessageUpdate(msg *ChatMessage) bool {
+	prev := c.GetCachedPost(msg.ID)
+	sameContent := prev == nil || (prev.ContentText == msg.ContentText && len(prev.Attachments) == len(msg.Attachments))
+
+	if msg.EditAt == 0 {
+		return sameContent
+	}
+
+	return prev != nil && prev.EditAt == msg.EditAt && sameContent
 }
 
 func (c *Client) handleTopicCreatedBody(ev *protoEvent, body *protoEventBody) {

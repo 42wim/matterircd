@@ -1727,10 +1727,15 @@ func (m *Matrix) GetPostSizeLimit() int {
 	return 4000
 }
 
-func (m *Matrix) GetPost(ctx context.Context, postID string) (*bridge.QuotedPost, error) {
-	roomID, ok := m.roomOf(postID)
-	if !ok {
-		return nil, errors.New("unknown post " + postID)
+func (m *Matrix) GetPost(ctx context.Context, channelID, postID string) (*bridge.QuotedPost, error) {
+	roomID := id.RoomID(channelID)
+	if roomID == "" {
+		var ok bool
+
+		roomID, ok = m.roomOf(postID)
+		if !ok {
+			return nil, errors.New("unknown post " + postID)
+		}
 	}
 
 	evID := id.EventID(postID)

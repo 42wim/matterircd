@@ -46,6 +46,8 @@ const (
 	protoReactionAdd    = 1
 	protoReactionRemove = 2
 
+	protoQuoteTypeReply = 1
+
 	protoAttrOneToOneHumanDM = 1
 	protoAttrOneToOneBotDM   = 2
 	protoAttrGroupDM         = 3
@@ -253,7 +255,29 @@ func encodeInviteeMemberInfo(userID, email string) []byte {
 }
 
 func encodeMessageInfo() []byte {
-	return appendBoolField(nil, 1, true)
+	return encodeMessageInfoWithQuote(nil)
+}
+
+func encodeMessageInfoWithQuote(quote []byte) []byte {
+	b := appendBoolField(nil, 1, true)
+	if len(quote) > 0 {
+		b = appendBytesField(b, 3, quote)
+	}
+
+	return b
+}
+
+func encodeQuotedMessagePayload(ref protoGroupRef, topicID, msgID string, lastUpdateUsec int64) []byte {
+	var b []byte
+
+	b = appendBytesField(b, 1, encodeMessageID(ref, topicID, msgID))
+	if lastUpdateUsec > 0 {
+		b = appendVarintField(b, 2, uint64(lastUpdateUsec))
+	}
+
+	b = appendVarintField(b, 4, protoQuoteTypeReply)
+
+	return b
 }
 
 func encodeOutgoingAnnotation(ann outgoingAnnotation) []byte {
@@ -379,7 +403,7 @@ func encodeGetUserPresenceRequest(userIDs []string) []byte {
 	return b
 }
 
-func encodeCreateTopicRequest(ref protoGroupRef, text, localID string, anns []outgoingAnnotation) []byte {
+func encodeCreateTopicRequest(ref protoGroupRef, text, localID string, anns []outgoingAnnotation, quote []byte) []byte {
 	var b []byte
 
 	b = appendStringField(b, 2, text)
@@ -390,13 +414,13 @@ func encodeCreateTopicRequest(ref protoGroupRef, text, localID string, anns []ou
 	b = appendStringField(b, 4, localID)
 	b = appendBytesField(b, 5, encodeGroupID(ref))
 	b = appendBoolField(b, 8, true) // history_v2
-	b = appendBytesField(b, 9, encodeMessageInfo())
+	b = appendBytesField(b, 9, encodeMessageInfoWithQuote(quote))
 	b = appendBytesField(b, 100, encodeRequestHeader())
 
 	return b
 }
 
-func encodeCreateMessageRequest(ref protoGroupRef, topicID, text, localID string, anns []outgoingAnnotation) []byte {
+func encodeCreateMessageRequest(ref protoGroupRef, topicID, text, localID string, anns []outgoingAnnotation, quote []byte) []byte {
 	var b []byte
 
 	b = appendBytesField(b, 1, encodeMessageParentID(ref, topicID))
@@ -407,7 +431,7 @@ func encodeCreateMessageRequest(ref protoGroupRef, topicID, text, localID string
 	}
 
 	b = appendStringField(b, 4, localID)
-	b = appendBytesField(b, 7, encodeMessageInfo())
+	b = appendBytesField(b, 7, encodeMessageInfoWithQuote(quote))
 	b = appendBytesField(b, 100, encodeRequestHeader())
 
 	return b

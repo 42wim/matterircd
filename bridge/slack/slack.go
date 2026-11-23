@@ -1198,7 +1198,7 @@ func (s *Slack) slackMsgToEvent(ctx context.Context, channelID string, m slack.M
 	}
 }
 
-func (s *Slack) GetPost(ctx context.Context, postID string) (*bridge.QuotedPost, error) {
+func (s *Slack) GetPost(ctx context.Context, _, postID string) (*bridge.QuotedPost, error) {
 	channelID, ts, ok := decodeSlackID(postID)
 	if !ok {
 		return nil, errors.New("invalid Slack post ID: " + postID)
