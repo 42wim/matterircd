@@ -238,7 +238,7 @@ func isKnownNonFormatAnnotation(ann protoAnnotation) bool {
 		return true
 	}
 
-	return ann.RoomNewName != "" || ann.RoomNewDesc != "" || ann.MemberAction != 0
+	return ann.RoomUpdated || ann.RoomNewName != "" || ann.RoomNewDesc != "" || ann.MemberChanged || ann.MemberAction != 0
 }
 
 func isPlainURLText(vis, rawURL string) bool {

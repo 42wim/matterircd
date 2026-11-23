@@ -11,6 +11,8 @@ import (
 )
 
 const (
+	systemUser = "system"
+
 	channelTypeDirect = "D"
 	channelTypePublic = "O"
 	channelTypeGroup  = "G"
@@ -389,12 +391,28 @@ func (g *GoogleChat) chatMessageToEvent(ctx context.Context, post *googlechatcli
 		return nil
 	}
 
+	isDM := g.isDMConversation(post.ConversationID)
+
+	if post.TopicChanged && !isDM && (post.ContentText == "" || post.ContentText == "Space Updated") {
+		return &bridge.Event{
+			Type: "channel_topic",
+			Data: &bridge.ChannelTopicEvent{
+				ChannelID: post.ConversationID,
+				Text:      post.NewTopic,
+				UserID:    post.FromID,
+			},
+		}
+	}
+
+	if post.IsSystem {
+		return g.systemMessageToEvent(ctx, post, isDM, eventKind)
+	}
+
 	sender := g.resolveUserInfo(ctx, post.FromID, post.DisplayName)
 	if sender == nil {
 		return nil
 	}
 
-	isDM := g.isDMConversation(post.ConversationID)
 	encodedID := encodeGoogleChatID(post.ID)
 	g.rememberMessageMeta(post.ID, post.ConversationID, post.TopicID, isDM)
 
@@ -412,6 +430,31 @@ func (g *GoogleChat) chatMessageToEvent(ctx context.Context, post *googlechatcli
 	}
 
 	return g.buildMessageBridgeEvent(post, sender, files, text, encodedID, parentID, eventKind)
+}
+
+func (g *GoogleChat) systemMessageToEvent(
+	ctx context.Context,
+	post *googlechatclient.ChatMessage,
+	isDM bool,
+	eventKind string,
+) *bridge.Event {
+	text := strings.TrimSpace(post.ContentText)
+	if text == "" {
+		return nil
+	}
+
+	var sender *bridge.UserInfo
+	if isDM {
+		sender = g.resolveUserInfo(ctx, post.FromID, post.DisplayName)
+	} else {
+		sender = &bridge.UserInfo{Nick: systemUser}
+	}
+
+	if sender == nil {
+		return nil
+	}
+
+	return g.buildMessageBridgeEvent(post, sender, nil, text, "", "", eventKind)
 }
 
 func (g *GoogleChat) buildMessageBridgeEvent(

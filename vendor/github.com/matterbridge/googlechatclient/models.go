@@ -101,6 +101,8 @@ type ChatMessage struct {
 	EditAt          int64
 	DeleteAt        int64
 	IsSystem        bool
+	TopicChanged    bool
+	NewTopic        string
 	QuotedMessage   *QuotedMessage
 	Mentions        []Mention
 	Attachments     []Attachment
