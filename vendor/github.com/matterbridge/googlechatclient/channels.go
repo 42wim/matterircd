@@ -154,6 +154,10 @@ func (c *Client) SyncConversation(ctx context.Context, convID string) (*Conversa
 		conv = c.GetChannel(conv.ID)
 	}
 
+	if conv != nil && !conv.IsHidden {
+		c.subscribeGroup(ctx, protoGroupRef{ID: conv.ID, IsDM: conv.IsDMGroup})
+	}
+
 	return conv, nil
 }
 
@@ -737,7 +741,10 @@ func (c *Client) GetOrCreateDM(ctx context.Context, memberIDs []string) (*Conver
 		Memberships: memberships,
 	}
 
-	return c.mergeGetGroupResponse(group.Group.ID, group.Group, resp), nil
+	conv := c.mergeGetGroupResponse(group.Group.ID, group.Group, resp)
+	c.subscribeGroup(ctx, group.Group)
+
+	return conv, nil
 }
 
 // CreateSpace creates a new modern inline-threaded Google Chat Space.
@@ -762,6 +769,7 @@ func (c *Client) CreateSpace(ctx context.Context, name string) (*Conversation, e
 	}
 
 	conv := c.upsertConversationFromProto(group)
+	c.subscribeGroup(ctx, group.Group)
 
 	return conv, nil
 }
@@ -893,6 +901,7 @@ func (c *Client) MarkConversationRead(ctx context.Context, convID string, ts tim
 	}
 
 	c.updateChannelLastViewed(convID, ts.UnixMilli())
+	c.subscribeGroup(ctx, ref)
 
 	return nil
 }

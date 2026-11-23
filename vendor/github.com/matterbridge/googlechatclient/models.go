@@ -107,14 +107,16 @@ type ChatMessage struct {
 	Reactions       map[string][]ReactionUser
 }
 
-// QuotedMessage describes the original message quoted by a Google Chat reply.
+// QuotedMessage describes the original message quoted or forwarded by a Google Chat message.
 type QuotedMessage struct {
-	ID          string
-	TopicID     string
-	FromID      string
-	DisplayName string
-	Text        string
-	Deleted     bool
+	ID             string
+	ConversationID string
+	TopicID        string
+	FromID         string
+	DisplayName    string
+	Text           string
+	Deleted        bool
+	IsForwarded    bool
 }
 
 // Mention records an @mention target embedded in a Google Chat message.

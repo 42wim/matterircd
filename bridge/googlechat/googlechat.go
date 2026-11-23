@@ -183,7 +183,7 @@ func (g *GoogleChat) buildClient(
 	gc.PollFallback = rc.GoogleChat.PollFallback
 	gc.OnAuthPrompt = onAuthPrompt
 	gc.OnWsConnect = func() {
-		if rc.GoogleChat.ForceSyncOnReconnect {
+		if g.cfg.Current().GoogleChat.ForceSyncOnReconnect {
 			_ = gc.UpdateChannels(g.ctx)
 			g.rebuildNames()
 		}
@@ -504,6 +504,8 @@ func (g *GoogleChat) Join(ctx context.Context, channelName string) (string, stri
 	if convID == "" {
 		return "", "", fmt.Errorf("channel %s not found", channelName)
 	}
+
+	g.gc.SubscribeConversation(ctx, convID)
 
 	return convID, g.Topic(ctx, convID), nil
 }
@@ -1127,10 +1129,10 @@ func (g *GoogleChat) SendTyping(ctx context.Context, channelName string) {
 		return
 	}
 
-	now := time.Now().Unix()
+	now := time.Now().UnixMilli()
 	last := lastPtr.Load()
 
-	if now-last < 4 || !lastPtr.CompareAndSwap(last, now) {
+	if now-last < 4000 || !lastPtr.CompareAndSwap(last, now) {
 		return
 	}
 
@@ -1141,7 +1143,10 @@ func (g *GoogleChat) SendTyping(ctx context.Context, channelName string) {
 
 	logger.Tracef("Sending +typing: %s (%s)", channelName, convID)
 
-	_ = g.gc.SendTyping(ctx, convID, topicID)
+	err := g.gc.SendTyping(ctx, convID, topicID)
+	if err != nil {
+		logger.Debugf("SendTyping(%s) failed: %v", convID, err)
+	}
 }
 
 func (g *GoogleChat) resolveTypingTarget(ctx context.Context, target string) (string, string) {

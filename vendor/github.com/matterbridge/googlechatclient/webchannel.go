@@ -11,8 +11,10 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -23,12 +25,14 @@ const (
 	webChannelVersion        = "8"
 	webChannelClientVersion  = "22"
 	webChannelKeepaliveIntvl = 2 * time.Minute
-	webChannelWatchdogIntvl  = 1 * time.Minute
+	webChannelWatchdogIntvl  = 30 * time.Second
+	webChannelSuspendDrift   = 15 * time.Second
 	webChannelIdleTimeout    = 5 * time.Minute
 	pollFallbackInterval     = 5 * time.Second
 	maxWebChannelChunkSize   = 8 << 20 // 8 MiB
 	maxEventBackoff          = 2 * time.Minute
 	minEventBackoff          = 2 * time.Second
+	streamGroupSubBatchSize  = 50
 )
 
 func (c *Client) startWebChannel(ctx context.Context) {
@@ -95,11 +99,89 @@ func (c *Client) webChannelLoop(ctx context.Context) {
 }
 
 type webChannelSession struct {
-	sid       string
-	aid       int64
-	rid       atomic.Int64
-	ofs       atomic.Int64
-	sessionID string
+	sid        string
+	aid        atomic.Int64
+	rid        atomic.Int64
+	ofs        atomic.Int64
+	sessionID  string
+	subMu      sync.Mutex
+	subscribed map[string]struct{}
+}
+
+func (c *Client) setActiveSession(sess *webChannelSession) {
+	c.streamMu.Lock()
+	c.activeSess = sess
+	c.streamMu.Unlock()
+}
+
+func (c *Client) currentActiveSession() *webChannelSession {
+	c.streamMu.Lock()
+	defer c.streamMu.Unlock()
+
+	return c.activeSess
+}
+
+func (c *Client) subscribeGroups(ctx context.Context, sess *webChannelSession, refs []protoGroupRef) {
+	if sess == nil || len(refs) == 0 {
+		return
+	}
+
+	var pending []protoGroupRef
+
+	sess.subMu.Lock()
+
+	for _, ref := range refs {
+		if ref.ID == "" {
+			continue
+		}
+
+		if _, ok := sess.subscribed[ref.ID]; ok {
+			continue
+		}
+
+		sess.subscribed[ref.ID] = struct{}{}
+		pending = append(pending, ref)
+	}
+
+	sess.subMu.Unlock()
+
+	for chunk := range slices.Chunk(pending, streamGroupSubBatchSize) {
+		subErr := c.sendStreamEvent(ctx, sess, encodeStreamGroupSubscriptionRequest(chunk))
+		if subErr != nil {
+			c.logger.Warnf("WebChannel group subscription failed: %v", subErr)
+
+			sess.subMu.Lock()
+
+			for _, ref := range chunk {
+				delete(sess.subscribed, ref.ID)
+			}
+
+			sess.subMu.Unlock()
+		}
+	}
+}
+
+func (c *Client) subscribeGroup(ctx context.Context, ref protoGroupRef) {
+	if ref.ID == "" {
+		return
+	}
+
+	sess := c.currentActiveSession()
+	if sess == nil {
+		return
+	}
+
+	c.subscribeGroups(ctx, sess, []protoGroupRef{ref})
+}
+
+// SubscribeConversation subscribes the active WebChannel stream to real-time
+// group events (including typing indicators) for convID.
+func (c *Client) SubscribeConversation(ctx context.Context, convID string) {
+	if convID == "" {
+		return
+	}
+
+	c.subscribeGroup(ctx, c.protoGroupRefFor(convID))
 }
 
 func (c *Client) runWebChannelSession(ctx context.Context, reconnecting bool) error {
@@ -108,8 +190,13 @@ func (c *Client) runWebChannelSession(ctx context.Context, reconnecting bool) er
 
 	defer func() {
 		cancel()
+		c.setActiveSession(nil)
 		c.setActiveStreamCancel(nil)
 	}()
+
+	if reconnecting {
+		c.rotateCookiesIfStale(sessionCtx)
+	}
 
 	err := c.registerWebChannel(sessionCtx)
 	if err != nil {
@@ -122,8 +209,9 @@ func (c *Client) runWebChannelSession(ctx context.Context, reconnecting bool) er
 	}
 
 	sess := &webChannelSession{
-		sid:       sid,
-		sessionID: c.currentCSessionID(),
+		sid:        sid,
+		sessionID:  c.currentCSessionID(),
+		subscribed: make(map[string]struct{}),
 	}
 	sess.rid.Store(1)
 
@@ -132,30 +220,34 @@ func (c *Client) runWebChannelSession(ctx context.Context, reconnecting bool) er
 		return fmt.Errorf("initial ping: %w", err)
 	}
 
-	if refs := c.allGroupRefs(); len(refs) > 0 {
-		subErr := c.sendStreamEvent(sessionCtx, sess, encodeStreamGroupSubscriptionRequest(refs))
-		if subErr != nil {
-			c.logger.Warnf("WebChannel group subscription failed: %v", subErr)
-		}
-	}
+	c.setActiveSession(sess)
+	c.subscribeGroups(sessionCtx, sess, c.allGroupRefs())
 
 	c.markStreamConnected(reconnecting)
 
-	if reconnecting && c.ForceSyncOnReconnect {
-		syncErr := c.UpdateChannels(sessionCtx)
-		if syncErr != nil {
-			c.logger.Warnf("Channel resync on reconnect failed: %v", syncErr)
-		}
-	}
-
 	keepaliveErrCh := make(chan error, 1)
 
-	go c.runWebChannelKeepalive(sessionCtx, sess, keepaliveErrCh)
+	go c.runWebChannelKeepalive(sessionCtx, cancel, sess, keepaliveErrCh)
 
 	streamErr := c.streamWebChannelLoop(sessionCtx, sess, keepaliveErrCh)
 	c.markStreamDisconnected(streamErr)
 
 	return streamErr
+}
+
+func (c *Client) rotateCookiesIfStale(ctx context.Context) {
+	c.authMu.RLock()
+	updatedAt := c.tokenState.UpdatedAt
+	c.authMu.RUnlock()
+
+	if !updatedAt.IsZero() && time.Since(updatedAt.Round(0)) < cookieRotateInterval {
+		return
+	}
+
+	err := c.RotateCookies(ctx)
+	if err != nil && ctx.Err() == nil {
+		c.logger.Debugf("Reconnect RotateCookies failed: %v", err)
+	}
 }
 
 func (c *Client) markStreamConnected(reconnecting bool) {
@@ -339,7 +431,7 @@ func (c *Client) sendStreamEvent(ctx context.Context, sess *webChannelSession, p
 	params.Set("VER", webChannelVersion)
 	params.Set("RID", strconv.FormatInt(sess.rid.Add(1), 10))
 	params.Set("SID", sess.sid)
-	params.Set("AID", strconv.FormatInt(sess.aid, 10))
+	params.Set("AID", strconv.FormatInt(sess.aid.Load(), 10))
 	params.Set("CI", "0")
 	params.Set("t", "1")
 
@@ -388,12 +480,25 @@ func (c *Client) sendStreamEvent(ctx context.Context, sess *webChannelSession, p
 	return nil
 }
 
-func (c *Client) runWebChannelKeepalive(ctx context.Context, sess *webChannelSession, errCh chan<- error) {
+func (c *Client) runWebChannelKeepalive(ctx context.Context, cancel context.CancelFunc, sess *webChannelSession, errCh chan<- error) {
 	pingTicker := time.NewTicker(webChannelKeepaliveIntvl)
 	defer pingTicker.Stop()
 
 	watchdogTicker := time.NewTicker(webChannelWatchdogIntvl)
 	defer watchdogTicker.Stop()
+
+	// Strip monotonic reading via .Round(0) so wall-clock jumps across laptop
+	// suspend/resume are detected immediately on the first tick after wake.
+	prevWall := time.Now().Round(0)
+
+	abort := func(err error) {
+		select {
+		case errCh <- err:
+		default:
+		}
+
+		cancel()
+	}
 
 	for {
 		select {
@@ -402,22 +507,26 @@ func (c *Client) runWebChannelKeepalive(ctx context.Context, sess *webChannelSes
 		case <-pingTicker.C:
 			pingErr := c.sendStreamEvent(ctx, sess, encodeStreamPingRequest(true))
 			if pingErr != nil {
-				select {
-				case errCh <- fmt.Errorf("keepalive ping: %w", pingErr):
-				default:
-				}
+				abort(fmt.Errorf("keepalive ping: %w", pingErr))
 
 				return
 			}
 
 			_, _ = c.doProto(ctx, "heartbeat", encodeHeartbeatRequest(true))
 		case <-watchdogTicker.C:
+			nowWall := time.Now().Round(0)
+			wallDelta := nowWall.Sub(prevWall)
+			prevWall = nowWall
+
+			if wallDelta > webChannelWatchdogIntvl+webChannelSuspendDrift {
+				abort(fmt.Errorf("WebChannel wall-clock jump detected (%s, system suspend/resume)", wallDelta.Round(time.Second)))
+
+				return
+			}
+
 			lastNano := c.lastWsActivity.Load()
 			if lastNano > 0 && time.Since(time.Unix(0, lastNano)) > webChannelIdleTimeout {
-				select {
-				case errCh <- errors.New("WebChannel watchdog idle timeout"):
-				default:
-				}
+				abort(errors.New("WebChannel watchdog idle timeout"))
 
 				return
 			}
@@ -452,7 +561,7 @@ func (c *Client) readWebChannelLongPoll(ctx context.Context, sess *webChannelSes
 	params.Set("VER", webChannelVersion)
 	params.Set("RID", "rpc")
 	params.Set("SID", sess.sid)
-	params.Set("AID", strconv.FormatInt(sess.aid, 10))
+	params.Set("AID", strconv.FormatInt(sess.aid.Load(), 10))
 	params.Set("CI", "0")
 	params.Set("t", "1")
 	params.Set("TYPE", "xmlhttp")
@@ -550,8 +659,12 @@ func (c *Client) processWebChannelChunk(sess *webChannelSession, raw []byte) {
 		}
 
 		var aid int64
-		if json.Unmarshal(frame[0], &aid) == nil && aid > sess.aid {
-			sess.aid = aid
+		if json.Unmarshal(frame[0], &aid) == nil {
+			for cur := sess.aid.Load(); aid > cur; cur = sess.aid.Load() {
+				if sess.aid.CompareAndSwap(cur, aid) {
+					break
+				}
+			}
 		}
 
 		c.processWebChannelFramePayload(frame[1])
@@ -907,6 +1020,12 @@ func (c *Client) emitSingleReaction(convID, topicID, msgID, userID, emoji string
 }
 
 func (c *Client) handleTypingBody(ev *protoEvent, body *protoEventBody) {
+	if body.TypingState != protoTypingStarted && body.TypingState != protoTypingStopped {
+		return
+	}
+
+	c.rememberGroupRef(body.TypingGroup)
+
 	convID := body.TypingGroup.ID
 	if convID == "" {
 		convID = ev.Group.ID
@@ -929,6 +1048,7 @@ func (c *Client) handleTypingBody(ev *protoEvent, body *protoEventBody) {
 	c.emitMessage(&Message{
 		Type:      evType,
 		Channel:   convID,
+		Topic:     body.TypingTopicID,
 		UserID:    userID,
 		Timestamp: time.Now(),
 	})

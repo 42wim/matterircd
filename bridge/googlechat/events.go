@@ -14,6 +14,13 @@ const (
 	channelTypeDirect = "D"
 	channelTypePublic = "O"
 	channelTypeGroup  = "G"
+
+	blockquoteCharNonUnicode = "|"
+	blockquoteCharUnicode    = "▕"
+	previewCharNonUnicode    = "|"
+	previewCharUnicode       = "🮇"
+	previewSpaceNonUnicode   = " "
+	previewSpaceUnicode      = "\u00a0"
 )
 
 func (g *GoogleChat) handleGoogleChat() {
@@ -230,10 +237,19 @@ func (g *GoogleChat) handleTyping(msg *googlechatclient.Message) {
 		return
 	}
 
+	g.ensureConversationSynced(g.ctx, msg.Channel)
+
 	sender := g.resolveUserInfo(g.ctx, msg.UserID, msg.Username)
 	if sender == nil {
 		return
 	}
+
+	parentID := ""
+	if msg.Topic != "" {
+		parentID = encodeGoogleChatID(msg.Topic)
+	}
+
+	logger.Tracef("Received typing from %s in %s (topic=%s)", sender.Nick, msg.Channel, msg.Topic)
 
 	g.sendEvent(&bridge.Event{
 		Type: "typing",
@@ -242,6 +258,7 @@ func (g *GoogleChat) handleTyping(msg *googlechatclient.Message) {
 			ChannelType: g.bridgeChannelType(msg.Channel),
 			Receiver:    g.dmReceiverFor(msg.Channel, sender),
 			Sender:      sender,
+			ParentID:    parentID,
 		},
 	})
 }
@@ -454,6 +471,10 @@ func (g *GoogleChat) resolveIncomingParentID(
 		return parentID
 	}
 
+	if post.QuotedMessage != nil && post.QuotedMessage.IsForwarded {
+		return ""
+	}
+
 	return quotedEncoded
 }
 
@@ -471,9 +492,18 @@ func (g *GoogleChat) cacheQuotedContext(
 		topicID = q.ID
 	}
 
-	g.rememberMessageMeta(q.ID, post.ConversationID, topicID, isDM)
+	sourceConvID := q.ConversationID
+	sourceIsDM := isDM
 
-	if q.Text != "" && !g.msgParentCache.Contains(encoded) {
+	if sourceConvID == "" {
+		sourceConvID = post.ConversationID
+	} else if sourceConvID != post.ConversationID {
+		sourceIsDM = g.isDMConversation(sourceConvID)
+	}
+
+	g.rememberMessageMeta(q.ID, sourceConvID, topicID, sourceIsDM)
+
+	if !q.IsForwarded && q.Text != "" && !g.msgParentCache.Contains(encoded) {
 		quotedUser := g.resolveUserInfo(ctx, q.FromID, q.DisplayName)
 		g.cachePostContext(encoded, "", quotedUser, q.Text, shorten)
 	}
@@ -490,7 +520,9 @@ func (g *GoogleChat) formatIncomingText(
 	text := post.ContentText
 	useUnicode := rc.GoogleChat.Formatter.Unicode
 
-	if !rc.GoogleChat.HideReplies {
+	if post.QuotedMessage != nil && post.QuotedMessage.IsForwarded {
+		text = g.appendForwardedPreview(ctx, text, post.QuotedMessage, rc)
+	} else if !rc.GoogleChat.HideReplies {
 		text = g.appendReplyContext(ctx, text, post, parentID, rc.GoogleChat.ShortenRepliesTo)
 	}
 
@@ -502,6 +534,156 @@ func (g *GoogleChat) formatIncomingText(
 	}
 
 	return text
+}
+
+func (g *GoogleChat) appendForwardedPreview(
+	ctx context.Context,
+	baseText string,
+	q *googlechatclient.QuotedMessage,
+	rc *config.RuntimeConfig,
+) string {
+	if q == nil {
+		return baseText
+	}
+
+	body := strings.TrimRight(q.Text, " \t\r\n")
+	if body == "" && q.Deleted {
+		body = "(deleted)"
+	}
+
+	if body == "" {
+		return baseText
+	}
+
+	author := g.forwardedAuthorName(ctx, q)
+	channel := g.forwardedChannelName(q)
+
+	var b strings.Builder
+
+	b.Grow(len(baseText) + len(body) + 128)
+	b.WriteString(baseText)
+
+	if b.Len() > 0 {
+		b.WriteByte('\n')
+	}
+
+	b.WriteString(utils.AttachmentMarkerStart)
+	b.WriteByte('\n')
+	g.renderForwardedPreview(&b, author, channel, body, rc)
+	b.WriteByte('\n')
+	b.WriteString(utils.AttachmentMarkerEnd)
+
+	return b.String()
+}
+
+func (g *GoogleChat) forwardedAuthorName(ctx context.Context, q *googlechatclient.QuotedMessage) string {
+	if u := g.resolveUserInfo(ctx, q.FromID, q.DisplayName); u != nil && u.Nick != "" {
+		return u.Nick
+	}
+
+	if q.DisplayName != "" {
+		return q.DisplayName
+	}
+
+	return "unknown"
+}
+
+func (g *GoogleChat) forwardedChannelName(q *googlechatclient.QuotedMessage) string {
+	if q.ConversationID == "" || g.isDMConversation(q.ConversationID) {
+		return ""
+	}
+
+	if name := g.ircChannelName(q.ConversationID); name != "" {
+		return "#" + name
+	}
+
+	return ""
+}
+
+func forwardedPreviewStyle(fc config.FormatterConfig) (string, utils.ProcessMessageOpts) {
+	prefixChar := previewCharNonUnicode
+	spaceChar := previewSpaceNonUnicode
+	blockquoteChar := blockquoteCharNonUnicode
+	codeBlockPrefix := fc.CodeBlockPrefix
+
+	if fc.Unicode {
+		prefixChar = previewCharUnicode
+		spaceChar = previewSpaceUnicode
+		blockquoteChar = blockquoteCharUnicode
+
+		if strings.ContainsAny(codeBlockPrefix, "┃🮇▎") {
+			codeBlockPrefix = strings.Replace(codeBlockPrefix, "┃", "│", 1)
+			codeBlockPrefix = strings.Replace(codeBlockPrefix, "🮇", "▕", 1)
+			codeBlockPrefix = strings.Replace(codeBlockPrefix, "▎", "▏", 1)
+		}
+	}
+
+	if fc.MarkdownBlockQuoteChar != "" {
+		blockquoteChar = fc.MarkdownBlockQuoteChar
+	}
+
+	opts := utils.ProcessMessageOpts{
+		DisableEmoji:       fc.DisableEmoji,
+		CustomEmoji:        fc.CustomEmoji,
+		DisableMarkdown:    fc.DisableMarkdown,
+		SyntaxHighlighting: fc.SyntaxHighlighting,
+		CodeBlockPrefix:    codeBlockPrefix,
+		CodeBlockSeparator: fc.CodeBlockSeparator,
+		BlockquoteChar:     blockquoteChar,
+		InlineCodeChar:     fc.MarkdownInlineCode,
+		PreserveNewLines:   fc.PreserveNewLines,
+	}
+
+	return prefixChar + spaceChar, opts
+}
+
+func (g *GoogleChat) renderForwardedPreview(
+	b *strings.Builder,
+	author, channel, body string,
+	rc *config.RuntimeConfig,
+) {
+	prefix, opts := forwardedPreviewStyle(rc.GoogleChat.Formatter)
+
+	b.WriteString(prefix)
+	b.WriteString("\x02@")
+	b.WriteString(author)
+	b.WriteString("\x02 wrote")
+
+	if channel != "" {
+		b.WriteString(" in \x1d")
+		b.WriteString(channel)
+		b.WriteByte('\x1d')
+	}
+
+	b.WriteByte(':')
+
+	trimmedBQ := strings.TrimSpace(opts.BlockquoteChar)
+	trimmedCB := strings.TrimSpace(opts.CodeBlockPrefix)
+
+	var pendingLines []string
+
+	utils.ProcessMessageText(body, opts, func(line string) {
+		line = strings.TrimRight(line, " \t\r")
+		trimmed := strings.TrimSpace(line)
+
+		if trimmed == "" || trimmed == trimmedCB || trimmed == trimmedBQ {
+			pendingLines = append(pendingLines, line)
+
+			return
+		}
+
+		for _, pending := range pendingLines {
+			b.WriteByte('\n')
+			b.WriteString(prefix)
+			b.WriteString(pending)
+		}
+
+		pendingLines = pendingLines[:0]
+
+		b.WriteByte('\n')
+		b.WriteString(prefix)
+		b.WriteString(line)
+	})
 }
 
 func (g *GoogleChat) appendReplyContext(
