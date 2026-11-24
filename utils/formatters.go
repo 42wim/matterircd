@@ -1168,7 +1168,7 @@ func replacePattern(s string, delim string, ircStart, ircEnd string, checkWordBo
 
 const (
 	BlockQuoteCharDefault   = ">"
-	horizontalRuleLine      = "────────────────────"
+	horizontalRuleLine      = "━━━━━━━━━━━━━━━━━━━━"
 	horizontalRuleLineASCII = "--------------------"
 )
 
