@@ -79,6 +79,7 @@ func TestProcessMessageTextCodeBlockInlineClose(t *testing.T) {
 	}
 }
 
+//nolint:funlen
 func TestProcessMessageTextCodeBlockMidLineBackticks(t *testing.T) {
 	opts := ProcessMessageOpts{
 		CodeBlockPrefix:    "🮇 ",
@@ -104,6 +105,40 @@ func TestProcessMessageTextCodeBlockMidLineBackticks(t *testing.T) {
 			wantLines: []string{
 				"🮇 \x16markdown\x16",
 				"🮇 Use ``\x1b[38;5;124m`code`\x1b[0m`` here",
+			},
+		},
+		{
+			name: "diff code block containing removed/added markdown fences is not prematurely closed",
+			input: "```diff\n" +
+				"-  ```\n" +
+				"-  command=\"rsync\"\n" +
+				"-  ```\n" +
+				"+```\n" +
+				"+echo hi\n" +
+				"+```\n" +
+				"```",
+			wantLines: []string{
+				"🮇 \x16diff\x16",
+				"🮇 \x1b[38;5;124m-  ```\x1b[0m",
+				"🮇 \x1b[38;5;124m-  command=\"rsync\"\x1b[0m",
+				"🮇 \x1b[38;5;124m-  ```\x1b[0m",
+				"🮇 \x1b[38;5;34m+```\x1b[0m",
+				"🮇 \x1b[38;5;34m+echo hi\x1b[0m",
+				"🮇 \x1b[38;5;34m+```\x1b[0m",
+			},
+		},
+		{
+			name: "four-backtick fence containing triple-backtick lines is not prematurely closed",
+			input: "````markdown\n" +
+				"```bash\n" +
+				"echo hi\n" +
+				"```\n" +
+				"````",
+			wantLines: []string{
+				"🮇 \x16markdown\x16",
+				"🮇 \x1b[38;5;124m```bash\x1b[0m",
+				"🮇 \x1b[38;5;2mecho\x1b[0m hi",
+				"🮇 \x1b[38;5;124m```\x1b[0m",
 			},
 		},
 	}

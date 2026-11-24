@@ -815,22 +815,15 @@ func ProcessMessageText(text string, opts ProcessMessageOpts, yield func(line st
 				}
 			}
 
-			isPrefixClose := strings.HasPrefix(trimmed, codeBlockMarker)
-
-			closeIdx := -1
-			if isPrefixClose {
-				closeIdx = strings.Index(line, codeBlockMarker)
-			} else if idx := strings.LastIndex(line, codeBlockMarker); idx >= 0 {
-				after := strings.TrimSpace(line[idx+len(codeBlockMarker):])
-				if after == "" || strings.HasPrefix(after, "\x1d(") {
-					closeIdx = idx
-				}
-			}
-
+			closeIdx, closeEnd, isPrefixClose := findCodeBlockClose(line, trimmed, codeBlockMarker)
 			if closeIdx >= 0 {
 				if !isPrefixClose && strings.TrimSpace(line[:closeIdx]) != "" {
 					contentBefore := origLine
 					if idxOrig := strings.LastIndex(contentBefore, codeBlockMarker); idxOrig >= 0 {
+						for idxOrig > 0 && contentBefore[idxOrig-1] == codeBlockMarker[0] {
+							idxOrig--
+						}
+
 						contentBefore = contentBefore[:idxOrig]
 					}
 
@@ -853,7 +846,7 @@ func ProcessMessageText(text string, opts ProcessMessageOpts, yield func(line st
 				FormatFullCodeBlock(codeBuilder.String(), lexer, currentIndent, opts, yield)
 				codeBuilder.Reset() // Frees builder state for next block
 
-				trailing := strings.TrimSpace(line[closeIdx+len(codeBlockMarker):])
+				trailing := strings.TrimSpace(line[closeEnd:])
 				if trailing != "" {
 					lastBlockWasCode = false
 					trailing = FormatMarkdownAndEmoji(
@@ -901,15 +894,7 @@ func ProcessMessageText(text string, opts ProcessMessageOpts, yield func(line st
 			}
 		}
 
-		isBacktick := strings.HasPrefix(fenceTrimmed, "```")
-		isTilde := strings.HasPrefix(fenceTrimmed, "~~~")
-
-		if isBacktick || isTilde { //nolint:nestif
-			marker := "```"
-			if isTilde {
-				marker = "~~~"
-			}
-
+		if marker, fenceLexer, ok := parseCodeFenceOpen(fenceTrimmed); ok { //nolint:nestif
 			if formattedQuotePrefix != "" {
 				inQuotedCodeBlock = true
 				currentIndent = formattedQuotePrefix
@@ -926,7 +911,7 @@ func ProcessMessageText(text string, opts ProcessMessageOpts, yield func(line st
 
 			inCodeBlock = true
 			codeBlockMarker = marker
-			lexer = strings.TrimSpace(strings.TrimPrefix(fenceTrimmed, marker))
+			lexer = fenceLexer
 
 			// Logic for back-to-back code blocks
 			if lastBlockWasCode && opts.CodeBlockSeparator != "" {
@@ -962,6 +947,61 @@ func ProcessMessageText(text string, opts ProcessMessageOpts, yield func(line st
 			yield("")
 		}
 	}
+}
+
+func parseCodeFenceOpen(s string) (string, string, bool) {
+	if len(s) < 3 || (s[0] != '`' && s[0] != '~') {
+		return "", "", false
+	}
+
+	fenceChar := s[0]
+	n := 0
+
+	for n < len(s) && s[n] == fenceChar {
+		n++
+	}
+
+	if n < 3 {
+		return "", "", false
+	}
+
+	return s[:n], strings.TrimSpace(s[n:]), true
+}
+
+func findCodeBlockClose(line, trimmed, marker string) (int, int, bool) {
+	fenceChar := marker[0]
+	isPrefix := strings.HasPrefix(trimmed, marker)
+
+	var idx int
+	if isPrefix {
+		idx = strings.Index(line, marker)
+	} else {
+		idx = strings.LastIndex(line, marker)
+		if idx < 0 {
+			return -1, -1, false
+		}
+
+		for idx > 0 && line[idx-1] == fenceChar {
+			idx--
+		}
+
+		// Do not treat diff-prefixed fence lines (e.g. "-```", "-  ```", "+```") as inline closes
+		if before := strings.TrimSpace(line[:idx]); before == "-" || before == "+" {
+			return -1, -1, false
+		}
+	}
+
+	end := idx + len(marker)
+	for end < len(line) && line[end] == fenceChar {
+		end++
+	}
+
+	after := strings.TrimSpace(line[end:])
+	if after != "" && !strings.HasPrefix(after, "\x1d(") {
+		return -1, -1, false
+	}
+
+	return idx, end, isPrefix
 }
 
 func splitQuotePrefix(line, blockQuoteChar, inlineCodeChar string) (string, string, bool) {
