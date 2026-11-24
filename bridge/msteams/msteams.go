@@ -859,8 +859,12 @@ func (m *MSTeams) GetUserChannels(_ context.Context, userID string) ([]string, e
 	out := make([]string, 0)
 
 	for _, conv := range convs {
+		if conv.Type == msteamsclient.ConversationDM || conv.Type == msteamsclient.ConversationSelfNote {
+			continue
+		}
+
 		if slices.Contains(conv.Members, userID) {
-			out = append(out, conv.ID)
+			out = append(out, m.ircChannelName(conv.ID))
 		}
 	}
 
@@ -1233,6 +1237,10 @@ func (m *MSTeams) resolveUserInfo(ctx context.Context, mri, fallbackDisplay stri
 		return nil
 	}
 
+	m.namesMu.RLock()
+	oldNick := m.nickByMRI[mri]
+	m.namesMu.RUnlock()
+
 	u := m.mc.GetUser(mri)
 	if u == nil {
 		resolved, _ := m.mc.ResolveUsers(ctx, []string{mri})
@@ -1245,17 +1253,32 @@ func (m *MSTeams) resolveUserInfo(ctx context.Context, mri, fallbackDisplay stri
 			DisplayName: fallbackDisplay,
 		}
 		m.mc.CacheUser(u)
-
-		if fallbackDisplay != "" {
-			m.rebuildNames()
-		}
 	} else if u.DisplayName == "" && fallbackDisplay != "" {
 		u.DisplayName = fallbackDisplay
 		m.mc.CacheUser(u)
+	}
+
+	// Rebuild nicks if msteamsclient learned a display name / email (e.g. from a
+	// message's IMDisplayName or a thread roster) after we previously assigned a
+	// fallback user-<hash> nick, and notify IRC so any existing ghost is renamed.
+	fallbackNick := "user-" + shortHash(mri)
+	hasIdentity := u.DisplayName != "" || u.Email != "" || u.UPN != ""
+
+	if hasIdentity && (oldNick == "" || oldNick == fallbackNick) {
 		m.rebuildNames()
 	}
 
-	return m.userToUserInfo(u)
+	info := m.userToUserInfo(u)
+	if oldNick != "" && info.Nick != "" && info.Nick != oldNick && m.connected.Load() {
+		m.sendEvent(&bridge.Event{
+			Type: "user_updated",
+			Data: &bridge.UserUpdateEvent{
+				User: info,
+			},
+		})
+	}
+
+	return info
 }
 
 func (m *MSTeams) userToUserInfo(u *msteamsclient.User) *bridge.UserInfo {
@@ -1272,14 +1295,19 @@ func (m *MSTeams) userToUserInfo(u *msteamsclient.User) *bridge.UserInfo {
 	}
 
 	isMe := m.isOwnMRI(u.MRI)
-	dirURL := utils.ExpandDirectoryURL(
-		m.cfg.MSTeams().Bridge.DirectoryURL,
-		nick,
-		u.Email,
-		u.Email,
-		u.GivenName,
-		u.Surname,
-	)
+	isExternal := u.IsExternal || (!isMe && strings.HasPrefix(u.MRI, "8:live:") && m.mc.TokenState().AccountType != msteamsclient.AccountPersonal)
+
+	dirURL := ""
+	if !isExternal {
+		dirURL = utils.ExpandDirectoryURL(
+			m.cfg.MSTeams().Bridge.DirectoryURL,
+			nick,
+			u.Email,
+			u.Email,
+			u.GivenName,
+			u.Surname,
+		)
+	}
 
 	position := u.JobTitle
 	if u.Location != "" {
