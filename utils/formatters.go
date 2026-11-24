@@ -1072,14 +1072,6 @@ const (
 	horizontalRuleLine    = "────────────────────"
 )
 
-type inlineStyle uint8
-
-const (
-	inlineStyleNormal inlineStyle = iota
-	inlineStyleHeading
-	inlineStyleTableHeader
-)
-
 type tableAlign uint8
 
 const (
@@ -1243,10 +1235,8 @@ func findMatchingParen(s string, start int) int {
 	return -1
 }
 
-func writeLinkOrImage(b *strings.Builder, linkText string, urlID int, isImage, inHeading bool) {
-	if !inHeading {
-		b.WriteByte('\x1f')
-	}
+func writeLinkOrImage(b *strings.Builder, linkText string, urlID int, isImage bool) {
+	b.WriteByte('\x1f')
 
 	switch {
 	case isImage && linkText != "":
@@ -1259,11 +1249,7 @@ func writeLinkOrImage(b *strings.Builder, linkText string, urlID int, isImage, i
 		b.WriteString(linkText)
 	}
 
-	if !inHeading {
-		b.WriteByte('\x1f')
-	}
-
-	b.WriteString("\u00a0(\x1d\x00")
+	b.WriteString("\x1f\u00a0(\x1d\x00")
 	b.WriteString(strconv.Itoa(urlID))
 	b.WriteString("\x00\x1d)")
 }
@@ -1272,7 +1258,7 @@ func writeLinkOrImage(b *strings.Builder, linkText string, urlID int, isImage, i
 // storing URLs in tokens so subsequent emphasis passes do not mangle them.
 //
 //nolint:funlen
-func replaceLinksAndImages(msg string, tokens *[]string, inHeading bool) string {
+func replaceLinksAndImages(msg string, tokens *[]string) string {
 	var b strings.Builder
 
 	start, i := 0, 0
@@ -1335,7 +1321,7 @@ func replaceLinksAndImages(msg string, tokens *[]string, inHeading bool) string 
 		urlID := len(*tokens)
 		*tokens = append(*tokens, restoreTokens(rawURL, *tokens, "", ""))
 
-		writeLinkOrImage(&b, linkText, urlID, isImage, inHeading)
+		writeLinkOrImage(&b, linkText, urlID, isImage)
 
 		start = closeParen + 1
 		i = start
@@ -1423,25 +1409,25 @@ func restoreTokens(s string, tokens []string, open, closeCode string) string {
 	return b.String()
 }
 
-func formatInlineMarkdown(msg, inlineCode string, style inlineStyle) string {
+func formatInlineMarkdown(msg, inlineCode string, bold bool) string {
 	if msg == "" {
 		return msg
 	}
 
-	if style == inlineStyleNormal && !strings.ContainsAny(msg, "*_`~[\\") {
+	if !bold && !strings.ContainsAny(msg, "*_`~[\\") {
 		return msg
 	}
 
 	work, tokens := tokenizeCodeAndEscapes(msg, inlineCode)
 
 	if strings.ContainsRune(work, '[') {
-		work = replaceLinksAndImages(work, &tokens, style == inlineStyleHeading)
+		work = replaceLinksAndImages(work, &tokens)
 	}
 
 	boldItalicStart, boldItalicEnd := "\x02\x1d", "\x1d\x02"
 	boldStart, boldEnd := "\x02", "\x02"
 
-	if style != inlineStyleNormal {
+	if bold {
 		boldItalicStart, boldItalicEnd = "\x1d", "\x1d"
 		boldStart, boldEnd = "", ""
 	}
@@ -1462,14 +1448,11 @@ func formatInlineMarkdown(msg, inlineCode string, style inlineStyle) string {
 		work = replacePattern(work, "~~", "\x1e", "\x1e", false)
 	}
 
-	switch style {
-	case inlineStyleHeading:
-		return restoreTokens(work, tokens, "\x02\x1f", "\x1f\x02")
-	case inlineStyleTableHeader:
+	if bold {
 		return restoreTokens(work, tokens, "\x02", "\x02")
-	default:
-		return restoreTokens(work, tokens, "", "")
 	}
+
+	return restoreTokens(work, tokens, "", "")
 }
 
 func trimLeadingSpacesMax3(line string) (string, bool) {
@@ -1518,10 +1501,10 @@ func isHorizontalRule(line string) bool {
 }
 
 // parseHeading parses a CommonMark ATX heading (# through ###### followed by space/tab).
-func parseHeading(line string) (string, bool) {
+func parseHeading(line string) (int, string, bool) {
 	rest, ok := trimLeadingSpacesMax3(line)
 	if !ok || rest[0] != '#' {
-		return "", false
+		return 0, "", false
 	}
 
 	hashes := 0
@@ -1530,12 +1513,12 @@ func parseHeading(line string) (string, bool) {
 	}
 
 	if hashes > 6 || hashes >= len(rest) || (rest[hashes] != ' ' && rest[hashes] != '\t') {
-		return "", false
+		return 0, "", false
 	}
 
 	content := strings.TrimSpace(rest[hashes:])
 	if content == "" {
-		return "", false
+		return 0, "", false
 	}
 
 	// Strip optional CommonMark closing '#' sequence preceded by space/tab
@@ -1544,7 +1527,7 @@ func parseHeading(line string) (string, bool) {
 		content = strings.TrimSpace(trimmedRight)
 	}
 
-	return content, content != ""
+	return hashes, content, content != ""
 }
 
 func isNonTableBlock(line string) bool {
@@ -1553,7 +1536,7 @@ func isNonTableBlock(line string) bool {
 		return true
 	}
 
-	_, ok := parseHeading(line)
+	_, _, ok := parseHeading(line)
 
 	return ok
 }
@@ -1696,21 +1679,22 @@ func Markdown2irc(msg string, blockQuoteChar string, inlineCode string) string {
 		return quotePrefix + horizontalRuleLine
 	}
 
-	// ATX Heading (# through ######)
-	if headingText, ok := parseHeading(content); ok {
-		formatted := formatInlineMarkdown(headingText, inlineCode, inlineStyleHeading)
+	// ATX Heading (# through ######): wrapped in '=' per level, bold text for H1-H2 only
+	if level, headingText, ok := parseHeading(content); ok {
+		marker := strings.Repeat("=", level)
+		formatted := formatInlineMarkdown(headingText, inlineCode, level <= 2)
 
-		return quotePrefix + formatted
+		return quotePrefix + marker + " " + formatted + " " + marker
 	}
 
 	// Unordered list (-, *, +)
 	if listPrefix, itemText, ok := parseUnorderedList(content); ok {
-		formatted := formatInlineMarkdown(itemText, inlineCode, inlineStyleNormal)
+		formatted := formatInlineMarkdown(itemText, inlineCode, false)
 
 		return quotePrefix + listPrefix + formatted
 	}
 
-	formatted := formatInlineMarkdown(content, inlineCode, inlineStyleNormal)
+	formatted := formatInlineMarkdown(content, inlineCode, false)
 	if !hasQuote {
 		return formatted
 	}
@@ -1990,7 +1974,7 @@ func ircDisplayWidth(s string) int {
 	return StringWidth(s)
 }
 
-func formatTableRowCells(row []string, numCols int, colWidths []int, opts ProcessMessageOpts, style inlineStyle) ([]string, []int) {
+func formatTableRowCells(row []string, numCols int, colWidths []int, opts ProcessMessageOpts, bold bool) ([]string, []int) {
 	fmtCells := make([]string, numCols)
 	widths := make([]int, numCols)
 
@@ -1999,7 +1983,7 @@ func formatTableRowCells(row []string, numCols int, colWidths []int, opts Proces
 			continue
 		}
 
-		cell := formatInlineMarkdown(row[c], opts.InlineCodeChar, style)
+		cell := formatInlineMarkdown(row[c], opts.InlineCodeChar, bold)
 		if !opts.DisableEmoji {
 			cell = EmojiReplaceAliases(cell, opts.CustomEmoji)
 		}
@@ -2074,13 +2058,13 @@ func formatTable(header []string, aligns []tableAlign, body [][]string, prefix s
 		colWidths[i] = 1
 	}
 
-	fmtHeader, hdrWidths := formatTableRowCells(header, numCols, colWidths, opts, inlineStyleTableHeader)
+	fmtHeader, hdrWidths := formatTableRowCells(header, numCols, colWidths, opts, true)
 
 	fmtBody := make([][]string, len(body))
 	bodyWidths := make([][]int, len(body))
 
 	for r, row := range body {
-		fmtBody[r], bodyWidths[r] = formatTableRowCells(row, numCols, colWidths, opts, inlineStyleNormal)
+		fmtBody[r], bodyWidths[r] = formatTableRowCells(row, numCols, colWidths, opts, false)
 	}
 
 	yield(buildTableBorder(prefix, colWidths, "┌", "┬", "┐"))

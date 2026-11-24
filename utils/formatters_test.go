@@ -241,23 +241,26 @@ func TestMarkdown2ircHeadings(t *testing.T) {
 		bq    string
 		want  string
 	}{
-		{name: "h1", input: "# Heading 1", want: "\x02\x1fHeading 1\x1f\x02"},
-		{name: "h2", input: "## Heading 2", want: "\x02\x1fHeading 2\x1f\x02"},
-		{name: "h6", input: "###### Heading 6", want: "\x02\x1fHeading 6\x1f\x02"},
+		{name: "h1 bold with unbolded markers", input: "# Heading 1", want: "= \x02Heading 1\x02 ="},
+		{name: "h2 bold with unbolded markers", input: "## Heading 2", want: "== \x02Heading 2\x02 =="},
+		{name: "h3 normal text", input: "### Heading 3", want: "=== Heading 3 ==="},
+		{name: "h6 normal text", input: "###### Heading 6", want: "====== Heading 6 ======"},
 		{name: "seven hashes not heading", input: "####### Not a heading", want: "####### Not a heading"},
 		{name: "hashtag not heading", input: "#channel", want: "#channel"},
 		{name: "empty heading ignored", input: "#   ", want: "#   "},
-		{name: "up to 3 leading spaces", input: "   ## Indented", want: "\x02\x1fIndented\x1f\x02"},
+		{name: "up to 3 leading spaces", input: "   ## Indented", want: "== \x02Indented\x02 =="},
 		{name: "4 leading spaces not heading", input: "    # Code indent", want: "    # Code indent"},
-		{name: "closing hashes stripped", input: "## Title ##", want: "\x02\x1fTitle\x1f\x02"},
-		{name: "non-space trailing hash kept", input: "## C#", want: "\x02\x1fC#\x1f\x02"},
-		{name: "bold inside heading does not double toggle", input: "# **Bold** and *italic*", want: "\x02\x1fBold and \x1ditalic\x1d\x1f\x02"},
-		{name: "link inside heading does not double underline", input: "# See [docs](https://example.com)", want: "\x02\x1fSee docs\u00a0(\x1dhttps://example.com\x1d)\x1f\x02"},
-		{name: "inline code in middle of heading", input: "# Use `foo` now", want: "\x02\x1fUse " + codeStart + "foo" + codeEnd + "\x02\x1f now\x1f\x02"},
-		{name: "inline code at end of heading", input: "# Use `foo`", want: "\x02\x1fUse " + codeStart + "foo" + codeEnd},
-		{name: "inline code only heading", input: "# `foo`", want: codeStart + "foo" + codeEnd},
-		{name: "quoted heading", input: "> # Quoted", bq: "🮇 ", want: "🮇 \x02\x1fQuoted\x1f\x02"},
-		{name: "pre-replaced quoted heading", input: "🮇 # Quoted", bq: "🮇", want: "🮇 \x02\x1fQuoted\x1f\x02"},
+		{name: "closing hashes stripped", input: "## Title ##", want: "== \x02Title\x02 =="},
+		{name: "non-space trailing hash kept", input: "## C#", want: "== \x02C#\x02 =="},
+		{name: "bold inside h1 does not double toggle", input: "# **Bold** and *italic*", want: "= \x02Bold and \x1ditalic\x1d\x02 ="},
+		{name: "bold inside h3 renders bold", input: "### **Bold** and *italic*", want: "=== \x02Bold\x02 and \x1ditalic\x1d ==="},
+		{name: "link inside h1 keeps underline", input: "# See [docs](https://example.com)", want: "= \x02See \x1fdocs\x1f\u00a0(\x1dhttps://example.com\x1d)\x02 ="},
+		{name: "inline code in middle of h1", input: "# Use `foo` now", want: "= \x02Use " + codeStart + "foo" + codeEnd + "\x02 now\x02 ="},
+		{name: "inline code at end of h1", input: "# Use `foo`", want: "= \x02Use " + codeStart + "foo" + codeEnd + " ="},
+		{name: "inline code only h1", input: "# `foo`", want: "= " + codeStart + "foo" + codeEnd + " ="},
+		{name: "quoted h1", input: "> # Quoted", bq: "🮇 ", want: "🮇 = \x02Quoted\x02 ="},
+		{name: "quoted h3", input: "> ### Quoted", bq: "🮇 ", want: "🮇 === Quoted ==="},
+		{name: "pre-replaced quoted heading", input: "🮇 # Quoted", bq: "🮇", want: "🮇 = \x02Quoted\x02 ="},
 		{name: "escaped hash not heading", input: `\# Escaped`, want: "# Escaped"},
 	}
 
@@ -353,7 +356,7 @@ func TestMarkdown2ircImagesAndLinks(t *testing.T) {
 		{"link with balanced parentheses in URL", "[Go](https://en.wikipedia.org/wiki/Go_(programming_language))", "\x1fGo\x1f\u00a0(\x1dhttps://en.wikipedia.org/wiki/Go_(programming_language)\x1d)"},
 		{"escaped bang before link", `\![docs](https://example.com)`, "!\x1fdocs\x1f\u00a0(\x1dhttps://example.com\x1d)"},
 		{"escaped image", `\!\[alt](https://example.com/a.png)`, "![alt](https://example.com/a.png)"},
-		{"image inside heading", "# ![icon](https://example.com/i.png) Title", "\x02\x1f[image: icon]\u00a0(\x1dhttps://example.com/i.png\x1d) Title\x1f\x02"},
+		{"image inside heading", "# ![icon](https://example.com/i.png) Title", "= \x02\x1f[image: icon]\x1f\u00a0(\x1dhttps://example.com/i.png\x1d) Title\x02 ="},
 	}
 
 	for _, tc := range tests {
@@ -546,7 +549,7 @@ func TestProcessMessageTextTables(t *testing.T) {
 				"| Apples | 12 |\n\n" +
 				"---",
 			wantLines: []string{
-				"\x02\x1fReport\x1f\x02",
+				"= \x02Report\x02 =",
 				"",
 				"┌────────┬─────┐",
 				"│ \x02Item\x02   │ \x02Qty\x02 │",
