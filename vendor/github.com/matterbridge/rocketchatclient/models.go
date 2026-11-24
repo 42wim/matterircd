@@ -113,17 +113,44 @@ type UserEmail struct {
 
 // User represents a normalized Rocket.Chat user.
 type User struct {
-	ID         string      `json:"_id"`
-	Username   string      `json:"username"`
-	Name       string      `json:"name"`
-	Emails     []UserEmail `json:"emails,omitempty"`
-	Status     string      `json:"status"`
-	StatusConn string      `json:"statusConnection,omitempty"`
-	StatusText string      `json:"statusText,omitempty"`
-	Type       string      `json:"type,omitempty"`
-	Active     bool        `json:"active"`
-	Roles      []string    `json:"roles,omitempty"`
-	UTCOffset  float64     `json:"utcOffset,omitempty"`
+	ID           string      `json:"_id"`
+	Username     string      `json:"username"`
+	Name         string      `json:"name"`
+	Emails       []UserEmail `json:"emails,omitempty"`
+	Status       string      `json:"status"`
+	StatusConn   string      `json:"statusConnection,omitempty"`
+	StatusText   string      `json:"statusText,omitempty"`
+	Type         string      `json:"type,omitempty"`
+	Active       bool        `json:"active"`
+	Roles        []string    `json:"roles,omitempty"`
+	UTCOffset    float64     `json:"utcOffset,omitempty"`
+	HasUTCOffset bool        `json:"-"`
+	LastLogin    Timestamp   `json:"lastLogin,omitzero"`
+}
+
+// UnmarshalJSON decodes a Rocket.Chat user while distinguishing an explicit
+// utcOffset of 0 (UTC+0) from an omitted or null utcOffset field.
+func (u *User) UnmarshalJSON(data []byte) error {
+	type userAlias User
+
+	var aux struct {
+		userAlias
+
+		UTCOffset *float64 `json:"utcOffset"`
+	}
+
+	err := json.Unmarshal(data, &aux)
+	if err != nil {
+		return err
+	}
+
+	*u = User(aux.userAlias)
+	if aux.UTCOffset != nil {
+		u.UTCOffset = *aux.UTCOffset
+		u.HasUTCOffset = true
+	}
+
+	return nil
 }
 
 // Room represents a Rocket.Chat public channel, private group, or direct message room.

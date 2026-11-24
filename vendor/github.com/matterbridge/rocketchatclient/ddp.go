@@ -1469,12 +1469,7 @@ func (c *Client) handleNotifyRoom(fields *ddpFields, emit bool) {
 }
 
 func (c *Client) handleRoomTyping(roomID string, args []json.RawMessage, emit bool) {
-	if !emit || roomID == "" || len(args) < 2 || c.handler == nil {
-		return
-	}
-
-	th, ok := c.handler.(TypingHandler)
-	if !ok {
+	if !emit || roomID == "" || len(args) < 2 {
 		return
 	}
 
@@ -1490,6 +1485,17 @@ func (c *Client) handleRoomTyping(roomID string, args []json.RawMessage, emit bo
 
 	err = json.Unmarshal(args[1], &typing)
 	if err != nil || !typing {
+		return
+	}
+
+	c.cache.recordUserActivityByUsername(username, time.Now().UnixMilli())
+
+	if c.handler == nil {
+		return
+	}
+
+	th, ok := c.handler.(TypingHandler)
+	if !ok {
 		return
 	}
 
@@ -1596,6 +1602,7 @@ func (c *Client) processIncomingMessage(ctx context.Context, msg *Message) {
 	}
 
 	c.seedMessageUsers(msg)
+	c.recordMessageActivity(msg)
 
 	prevMeta, seen := c.cache.recordSeenMessage(msg)
 	c.cache.cacheMessage(msg)
@@ -1613,10 +1620,7 @@ func (c *Client) processIncomingMessage(ctx context.Context, msg *Message) {
 		return
 	}
 
-	reactionEvents := c.cache.diffReactions(msg.RoomID, msg.ID, msg.Reactions)
-	for i := range reactionEvents {
-		c.handler.OnReaction(&reactionEvents[i])
-	}
+	c.emitReactionEvents(c.cache.diffReactions(msg.RoomID, msg.ID, msg.Reactions))
 
 	if !isEdit || (editTS == prevMeta.editedAt && msg.Text == prevMeta.text) {
 		return
@@ -1628,6 +1632,37 @@ func (c *Client) processIncomingMessage(ctx context.Context, msg *Message) {
 
 	c.prefetchThreadParent(ctx, msg.ThreadID)
 	c.handler.OnEdit(msg)
+}
+
+func (c *Client) recordMessageActivity(msg *Message) {
+	msgTS := msg.Timestamp.Time.UnixMilli()
+	if msg.Timestamp.Time.IsZero() {
+		msgTS = time.Now().UnixMilli()
+	}
+
+	c.cache.recordUserActivity(msg.User.ID, msgTS)
+
+	if msg.EditedAt != nil && !msg.EditedAt.Time.IsZero() && msg.EditedBy != nil && msg.EditedBy.ID != "" {
+		c.cache.recordUserActivity(msg.EditedBy.ID, msg.EditedAt.Time.UnixMilli())
+	}
+}
+
+func (c *Client) emitReactionEvents(events []ReactionEvent) {
+	if len(events) == 0 {
+		return
+	}
+
+	nowMS := time.Now().UnixMilli()
+
+	for i := range events {
+		if events[i].UserID != "" {
+			c.cache.recordUserActivity(events[i].UserID, nowMS)
+		} else if events[i].Username != "" {
+			c.cache.recordUserActivityByUsername(events[i].Username, nowMS)
+		}
+
+		c.handler.OnReaction(&events[i])
+	}
 }
 
 func (c *Client) handleSystemMessage(ctx context.Context, msg *Message) {
