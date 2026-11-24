@@ -997,7 +997,7 @@ func findCodeBlockClose(line, trimmed, marker string) (int, int, bool) {
 	}
 
 	after := strings.TrimSpace(line[end:])
-	if after != "" && !strings.HasPrefix(after, "\x1d(") {
+	if after != "" && !strings.HasPrefix(after, "\x1d(") && !strings.HasPrefix(after, "(re @") {
 		return -1, -1, false
 	}
 

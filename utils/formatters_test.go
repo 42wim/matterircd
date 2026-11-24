@@ -16,7 +16,7 @@ func collectProcessedLines(text string, opts ProcessMessageOpts) []string {
 	return lines
 }
 
-//nolint:dupword,goconst
+//nolint:dupword,funlen,goconst
 func TestProcessMessageTextCodeBlockInlineClose(t *testing.T) {
 	opts := ProcessMessageOpts{
 		CodeBlockPrefix:    "🮇 ",
@@ -37,6 +37,14 @@ func TestProcessMessageTextCodeBlockInlineClose(t *testing.T) {
 				"🮇 Testing again",
 				"🮇 Testing bash code block",
 				"\x1d(✏️edited)\x1d",
+			},
+		},
+		{
+			name:  "standard closing fence with reply suffix",
+			input: "```\nhello\n``` (re @user: previous msg)",
+			wantLines: []string{
+				"🮇 hello",
+				"(re @user: previous msg)",
 			},
 		},
 		{
