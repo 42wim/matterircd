@@ -150,11 +150,12 @@ type PostGetter interface {
 }
 
 // QuoteSender is optionally implemented by bridges that support native wire-level
-// quoted replies instead of Markdown blockquotes. It returns the created message ID
-// and the thread parent ID (empty when posted unthreaded).
+// quoted replies instead of Markdown blockquotes. When threaded is true, threadID
+// optionally specifies a target thread different from quotedPostID. It returns the
+// created message ID and the thread parent ID (empty when posted unthreaded).
 type QuoteSender interface {
-	MsgChannelQuote(ctx context.Context, channelID, quotedPostID string, threaded bool, text string) (string, string, error)
-	MsgUserQuote(ctx context.Context, userID, quotedPostID string, threaded bool, text string) (string, string, error)
+	MsgChannelQuote(ctx context.Context, channelID, threadID, quotedPostID string, threaded bool, text string) (string, string, error)
+	MsgUserQuote(ctx context.Context, userID, threadID, quotedPostID string, threaded bool, text string) (string, string, error)
 }
 
 type Credentials struct {
