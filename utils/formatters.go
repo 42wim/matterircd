@@ -638,7 +638,24 @@ func ProcessMessageText(text string, opts ProcessMessageOpts, yield func(line st
 		codeBlockMarker   string
 		lexer             string
 		currentIndent     string // Tracks leading whitespace for nested blocks
+		tbl               tableParser
 	)
+
+	emitLine := func(l string) {
+		flushEmptyLines(emptyLines, opts.PreserveNewLines, hasContent, yield)
+		emptyLines = 0
+		hasContent = true
+		lastBlockWasCode = false
+
+		yield(FormatMarkdownAndEmoji(l, opts.DisableMarkdown, opts.DisableEmoji, opts.BlockquoteChar, opts.InlineCodeChar, opts.CustomEmoji))
+	}
+
+	flushTable := func() {
+		if tbl.flush(opts, emitLine, yield) {
+			hasContent = true
+			lastBlockWasCode = false
+		}
+	}
 
 	for text != "" {
 		line, rest, _ := strings.Cut(text, "\n")
@@ -649,6 +666,8 @@ func ProcessMessageText(text string, opts ProcessMessageOpts, yield func(line st
 		trimmed := strings.TrimSpace(line)
 
 		if strings.Contains(line, AttachmentMarkerStart) {
+			flushTable()
+
 			line = strings.ReplaceAll(line, AttachmentMarkerStart, "")
 			inAttachment = true
 			trimmed = strings.TrimSpace(line)
@@ -673,6 +692,8 @@ func ProcessMessageText(text string, opts ProcessMessageOpts, yield func(line st
 
 		// Bypass Markdown/Emoji parsing for lines originating from message attachments
 		if inAttachment || wasInAttachment {
+			flushTable()
+
 			if trimmed == "" {
 				emptyLines++
 			} else {
@@ -764,6 +785,13 @@ func ProcessMessageText(text string, opts ProcessMessageOpts, yield func(line st
 			continue
 		}
 
+		if tbl.consume(line, trimmed, opts, emitLine, flushTable, func() {
+			flushEmptyLines(emptyLines, opts.PreserveNewLines, hasContent, yield)
+			emptyLines = 0
+		}) {
+			continue
+		}
+
 		formattedQuotePrefix := ""
 		fenceTrimmed := trimmed
 
@@ -820,27 +848,14 @@ func ProcessMessageText(text string, opts ProcessMessageOpts, yield func(line st
 		if trimmed == "" {
 			// Buffer empty lines
 			emptyLines++
-		} else {
-			// Normal text line - flush buffered empty lines first
-			flushEmptyLines(emptyLines, opts.PreserveNewLines, hasContent, yield)
-			emptyLines = 0
-			hasContent = true
-			lastBlockWasCode = false
-
-			line = FormatMarkdownAndEmoji(
-				line,
-				opts.DisableMarkdown,
-				opts.DisableEmoji,
-				opts.BlockquoteChar,
-				opts.InlineCodeChar,
-				opts.CustomEmoji,
-			)
-
-			yield(line)
+		} else if !tbl.tryStart(line, opts) {
+			emitLine(line)
 		}
 	}
 
 	// Flush remaining state if EOF reached
+	flushTable()
+
 	if inCodeBlock {
 		FormatFullCodeBlock(codeBuilder.String(), lexer, currentIndent, opts, yield)
 	} else if opts.PreserveNewLines == "all" || opts.PreserveNewLines == "" {
@@ -1052,129 +1067,282 @@ func replacePattern(s string, delim string, ircStart, ircEnd string, checkWordBo
 	return b.String()
 }
 
-// replaceCode simulates the `+([^`]+)`+ regex for backticks
-func replaceCode(msg, startCode, endCode string) string {
-	var b strings.Builder
+const (
+	BlockQuoteCharDefault = ">"
+	horizontalRuleLine    = "────────────────────"
+)
 
-	start := 0
-	i := 0
+type inlineStyle uint8
 
-	for i < len(msg) {
-		idx := strings.IndexByte(msg[i:], '`')
+const (
+	inlineStyleNormal inlineStyle = iota
+	inlineStyleHeading
+	inlineStyleTableHeader
+)
+
+type tableAlign uint8
+
+const (
+	tableAlignLeft tableAlign = iota
+	tableAlignCenter
+	tableAlignRight
+)
+
+var unorderedListBullets = [3]string{"•", "◦", "▪"}
+
+func isASCIIPunctuation(c byte) bool {
+	return (c >= '!' && c <= '/') ||
+		(c >= ':' && c <= '@') ||
+		(c >= '[' && c <= '`') ||
+		(c >= '{' && c <= '~')
+}
+
+func inlineCodeDelims(inlineCode string) (string, string) {
+	inlineCodeStart := "\x0f`\x11\x02\x030,14"
+	inlineCodeEnd := "\x11\x0f`"
+
+	if inlineCode != "" {
+		inlineCodeStart = inlineCode
+		// Remove fence if not present
+		if !strings.Contains(inlineCode, "`") {
+			inlineCodeEnd = "\x11\x0f"
+		}
+	}
+
+	return inlineCodeStart, inlineCodeEnd
+}
+
+func appendToken(b *strings.Builder, tokens *[]string, totalLen int, prefix, tok string) {
+	if len(*tokens) == 0 {
+		b.Grow(totalLen + 32)
+	}
+
+	b.WriteString(prefix)
+
+	id := len(*tokens)
+	*tokens = append(*tokens, tok)
+
+	b.WriteByte('\x00')
+	b.WriteString(strconv.Itoa(id))
+	b.WriteByte('\x00')
+}
+
+// parseCodeSpan parses a CommonMark inline code span starting at msg[i] == '`',
+// returning the inner code, the index after the closing backticks, and whether a match was found.
+func parseCodeSpan(msg string, i int) (string, int, bool) {
+	runLen := 1
+	for i+runLen < len(msg) && msg[i+runLen] == '`' {
+		runLen++
+	}
+
+	for pos := i + runLen; pos < len(msg); {
+		idx := strings.IndexByte(msg[pos:], '`')
 		if idx == -1 {
 			break
 		}
 
-		absoluteIdx := i + idx
+		pos += idx
+		end := pos + 1
 
-		runLen := 1
-		for absoluteIdx+runLen < len(msg) && msg[absoluteIdx+runLen] == '`' {
-			runLen++
+		for end < len(msg) && msg[end] == '`' {
+			end++
 		}
 
-		searchStart := absoluteIdx + runLen
+		if end-pos == runLen {
+			code := msg[i+runLen : pos]
+			if len(code) >= 2 && code[0] == ' ' && code[len(code)-1] == ' ' && strings.Trim(code, " ") != "" {
+				code = code[1 : len(code)-1]
+			}
 
-		closeIdx := strings.IndexByte(msg[searchStart:], '`')
-		if closeIdx == -1 {
-			break
+			return code, end, true
 		}
 
-		absoluteCloseIdx := searchStart + closeIdx
-
-		closeRunLen := 1
-		for absoluteCloseIdx+closeRunLen < len(msg) && msg[absoluteCloseIdx+closeRunLen] == '`' {
-			closeRunLen++
-		}
-
-		if start == 0 {
-			b.Grow(len(msg) + 32)
-		}
-
-		b.WriteString(msg[start:absoluteIdx])
-		b.WriteString(startCode)
-		b.WriteString(msg[absoluteIdx+runLen : absoluteCloseIdx])
-		b.WriteString(endCode)
-
-		start = absoluteCloseIdx + closeRunLen
-		i = start
+		pos = end
 	}
 
-	if start == 0 {
-		return msg
+	return "", i + runLen, false
+}
+
+// tokenizeCodeAndEscapes replaces inline code spans (`...`), backslash-escaped
+// ASCII punctuation (\*), and literal NUL bytes with indexed placeholders.
+func tokenizeCodeAndEscapes(msg, inlineCode string) (string, []string) {
+	if !strings.ContainsAny(msg, "`\\\x00") {
+		return msg, nil
+	}
+
+	var (
+		b                  strings.Builder
+		tokens             []string
+		codeStart, codeEnd string
+		start, i           int
+	)
+
+	for i < len(msg) {
+		switch msg[i] {
+		case '\x00':
+			appendToken(&b, &tokens, len(msg), msg[start:i], "\x00")
+
+			i++
+			start = i
+		case '\\':
+			if i+1 < len(msg) && isASCIIPunctuation(msg[i+1]) {
+				appendToken(&b, &tokens, len(msg), msg[start:i], msg[i+1:i+2])
+
+				i += 2
+				start = i
+
+				continue
+			}
+
+			i++
+		case '`':
+			code, nextIdx, ok := parseCodeSpan(msg, i)
+			if !ok {
+				i = nextIdx
+
+				continue
+			}
+
+			if codeStart == "" {
+				codeStart, codeEnd = inlineCodeDelims(inlineCode)
+			}
+
+			appendToken(&b, &tokens, len(msg), msg[start:i], codeStart+code+codeEnd)
+
+			i = nextIdx
+			start = i
+		default:
+			i++
+		}
+	}
+
+	if len(tokens) == 0 {
+		return msg, nil
 	}
 
 	b.WriteString(msg[start:])
 
-	return b.String()
+	return b.String(), tokens
 }
 
-// replaceLinks simulates the `\[([^\]]+)\]\(([^\)]+)\)` regex for Markdown links
-func replaceLinks(msg string) string {
+func findMatchingParen(s string, start int) int {
+	depth := 1
+
+	for i := start; i < len(s); i++ {
+		switch s[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+
+	return -1
+}
+
+func writeLinkOrImage(b *strings.Builder, linkText string, urlID int, isImage, inHeading bool) {
+	if !inHeading {
+		b.WriteByte('\x1f')
+	}
+
+	switch {
+	case isImage && linkText != "":
+		b.WriteString("[image: ")
+		b.WriteString(linkText)
+		b.WriteByte(']')
+	case isImage:
+		b.WriteString("[image]")
+	default:
+		b.WriteString(linkText)
+	}
+
+	if !inHeading {
+		b.WriteByte('\x1f')
+	}
+
+	b.WriteString("\u00a0(\x1d\x00")
+	b.WriteString(strconv.Itoa(urlID))
+	b.WriteString("\x00\x1d)")
+}
+
+// replaceLinksAndImages converts Markdown links [text](url) and images ![alt](url),
+// storing URLs in tokens so subsequent emphasis passes do not mangle them.
+//
+//nolint:funlen
+func replaceLinksAndImages(msg string, tokens *[]string, inHeading bool) string {
 	var b strings.Builder
 
-	start := 0
-	i := 0
+	start, i := 0, 0
 
 	for i < len(msg) {
-		// Find opening bracket
 		idx := strings.IndexByte(msg[i:], '[')
 		if idx == -1 {
 			break
 		}
 
-		absoluteIdx := i + idx
+		openBracket := i + idx
 
-		// Find closing bracket
-		closeBracketIdx := strings.IndexByte(msg[absoluteIdx+1:], ']')
-		if closeBracketIdx == -1 {
-			// No more complete brackets
+		closeOff := strings.IndexByte(msg[openBracket+1:], ']')
+		if closeOff == -1 {
 			break
 		}
 
-		absoluteCloseBracketIdx := absoluteIdx + 1 + closeBracketIdx
+		closeBracket := openBracket + 1 + closeOff
 
-		// Ensure '(' immediately follows ']'
-		if absoluteCloseBracketIdx+1 >= len(msg) || msg[absoluteCloseBracketIdx+1] != '(' {
-			// Not a markdown link, advance and continue searching
-			i = absoluteCloseBracketIdx + 1
+		if inner := strings.IndexByte(msg[openBracket+1:closeBracket], '['); inner >= 0 {
+			i = openBracket + 1 + inner
+
 			continue
 		}
 
-		absoluteParenIdx := absoluteCloseBracketIdx + 1
+		if closeBracket+1 >= len(msg) || msg[closeBracket+1] != '(' {
+			i = closeBracket + 1
 
-		// Find closing parenthesis
-		closeParenIdx := strings.IndexByte(msg[absoluteParenIdx+1:], ')')
-		if closeParenIdx == -1 {
-			i = absoluteParenIdx + 1
 			continue
 		}
 
-		absoluteCloseParenIdx := absoluteParenIdx + 1 + closeParenIdx
+		closeParen := findMatchingParen(msg, closeBracket+2)
+		if closeParen == -1 {
+			i = closeBracket + 2
 
-		// Valid link found, lazy allocation
+			continue
+		}
+
+		isImage := openBracket > start && msg[openBracket-1] == '!'
+		linkText := msg[openBracket+1 : closeBracket]
+		rawURL := msg[closeBracket+2 : closeParen]
+
+		if rawURL == "" || (!isImage && linkText == "") {
+			i = closeParen + 1
+
+			continue
+		}
+
+		matchStart := openBracket
+		if isImage {
+			matchStart--
+		}
+
 		if start == 0 {
 			b.Grow(len(msg) + 32)
 		}
 
-		b.WriteString(msg[start:absoluteIdx])
+		b.WriteString(msg[start:matchStart])
 
-		// Underline the text: \x1F + text + \x1F
-		b.WriteString("\x1f")
-		b.WriteString(msg[absoluteIdx+1 : absoluteCloseBracketIdx])
-		b.WriteString("\x1f ") // Close underline and add the space
+		urlID := len(*tokens)
+		*tokens = append(*tokens, restoreTokens(rawURL, *tokens, "", ""))
 
-		// Italicize the URL with parenthesis: (\x1D + url + \x1D)
-		b.WriteString("(\x1d")
-		b.WriteString(msg[absoluteParenIdx+1 : absoluteCloseParenIdx])
-		b.WriteString("\x1d)")
+		writeLinkOrImage(&b, linkText, urlID, isImage, inHeading)
 
-		// Move start pointer past the matched link
-		start = absoluteCloseParenIdx + 1
+		start = closeParen + 1
 		i = start
 	}
 
 	if start == 0 {
-		return msg // Zero allocations if no valid links were found
+		return msg
 	}
 
 	b.WriteString(msg[start:])
@@ -1182,87 +1350,751 @@ func replaceLinks(msg string) string {
 	return b.String()
 }
 
-const BlockQuoteCharDefault = ">"
-
+// restoreTokens expands \x00<id>\x00 placeholders, optionally wrapping runs
+// between inline code resets (\x0f) in open/closeCode IRC control codes.
+//
 //nolint:funlen,gocyclo
-func Markdown2irc(msg string, blockQuoteChar string, inlineCode string) string {
-	if !strings.ContainsAny(msg, "*_`>~[") {
+func restoreTokens(s string, tokens []string, open, closeCode string) string {
+	if s == "" || len(tokens) == 0 || !strings.ContainsRune(s, '\x00') {
+		if s == "" {
+			return ""
+		}
+
+		return open + s + closeCode
+	}
+
+	var b strings.Builder
+	b.Grow(len(s) + len(open) + len(closeCode) + 32)
+
+	styled := false
+	writeChunk := func(chunk string) {
+		if chunk == "" {
+			return
+		}
+
+		if open != "" && !styled {
+			b.WriteString(open)
+
+			styled = true
+		}
+
+		b.WriteString(chunk)
+	}
+
+	for i := 0; i < len(s); {
+		idx := strings.IndexByte(s[i:], '\x00')
+		if idx == -1 {
+			writeChunk(s[i:])
+
+			break
+		}
+
+		writeChunk(s[i : i+idx])
+
+		pos := i + idx
+
+		endOff := strings.IndexByte(s[pos+1:], '\x00')
+		if endOff == -1 {
+			writeChunk(s[pos:])
+
+			break
+		}
+
+		nextIdx := pos + endOff + 2
+
+		id, err := strconv.Atoi(s[pos+1 : pos+1+endOff])
+		if err != nil || id < 0 || id >= len(tokens) {
+			writeChunk(s[pos:nextIdx])
+		} else if tok := tokens[id]; open != "" && strings.ContainsRune(tok, '\x0f') {
+			b.WriteString(tok)
+
+			styled = false
+		} else {
+			writeChunk(tok)
+		}
+
+		i = nextIdx
+	}
+
+	if styled {
+		b.WriteString(closeCode)
+	}
+
+	return b.String()
+}
+
+func formatInlineMarkdown(msg, inlineCode string, style inlineStyle) string {
+	if msg == "" {
 		return msg
 	}
 
-	// Bold & Italic 0x02+0x1d - Asterisk processing
-	if strings.Contains(msg, "*") {
-		msg = replacePattern(msg, "***", "\x02\x1d", "\x1d\x02", false)
-		msg = replacePattern(msg, "**", "\x02", "\x02", false)
-		msg = replacePattern(msg, "*", "\x1d", "\x1d", false)
+	if style == inlineStyleNormal && !strings.ContainsAny(msg, "*_`~[\\") {
+		return msg
 	}
 
-	// Bold & Italic 0x02+0x1d - Underscore processing
-	if strings.Contains(msg, "_") {
-		msg = replacePattern(msg, "___", "\x02\x1d", "\x1d\x02", true)
-		msg = replacePattern(msg, "__", "\x02", "\x02", true)
-		msg = replacePattern(msg, "_", "\x1d", "\x1d", true)
+	work, tokens := tokenizeCodeAndEscapes(msg, inlineCode)
+
+	if strings.ContainsRune(work, '[') {
+		work = replaceLinksAndImages(work, &tokens, style == inlineStyleHeading)
 	}
 
-	// Strikethrough 0x1E processing
-	if strings.Contains(msg, "~") {
-		msg = replacePattern(msg, "~~", "\x1e", "\x1e", false)
+	boldItalicStart, boldItalicEnd := "\x02\x1d", "\x1d\x02"
+	boldStart, boldEnd := "\x02", "\x02"
+
+	if style != inlineStyleNormal {
+		boldItalicStart, boldItalicEnd = "\x1d", "\x1d"
+		boldStart, boldEnd = "", ""
 	}
 
-	// Code / Monospace 0x11 processing
-	if strings.Contains(msg, "`") {
-		inlineCodeStart := "\x0f`\x11\x02\x030,14"
-		inlineCodeEnd := "\x11\x0f`"
+	if strings.ContainsRune(work, '*') {
+		work = replacePattern(work, "***", boldItalicStart, boldItalicEnd, false)
+		work = replacePattern(work, "**", boldStart, boldEnd, false)
+		work = replacePattern(work, "*", "\x1d", "\x1d", false)
+	}
 
-		if inlineCode != "" {
-			inlineCodeStart = inlineCode
-			// Remove fence if not present
-			if !strings.Contains(inlineCode, "`") {
-				inlineCodeEnd = "\x11\x0f"
-			}
+	if strings.ContainsRune(work, '_') {
+		work = replacePattern(work, "___", boldItalicStart, boldItalicEnd, true)
+		work = replacePattern(work, "__", boldStart, boldEnd, true)
+		work = replacePattern(work, "_", "\x1d", "\x1d", true)
+	}
+
+	if strings.ContainsRune(work, '~') {
+		work = replacePattern(work, "~~", "\x1e", "\x1e", false)
+	}
+
+	switch style {
+	case inlineStyleHeading:
+		return restoreTokens(work, tokens, "\x02\x1f", "\x1f\x02")
+	case inlineStyleTableHeader:
+		return restoreTokens(work, tokens, "\x02", "\x02")
+	default:
+		return restoreTokens(work, tokens, "", "")
+	}
+}
+
+func trimLeadingSpacesMax3(line string) (string, bool) {
+	i := 0
+	for i < len(line) && line[i] == ' ' {
+		i++
+		if i > 3 {
+			return "", false
 		}
-		// Not all IRC clients support monospace (0x11) so keep the fence
-		msg = replaceCode(msg, inlineCodeStart, inlineCodeEnd)
 	}
 
-	// Links processing [text](url)
-	if strings.Contains(msg, "[") {
-		msg = replaceLinks(msg)
+	if i >= len(line) {
+		return "", false
 	}
 
-	// Block quotes
+	return line[i:], true
+}
+
+// isHorizontalRule checks for CommonMark thematic breaks (3+ matching '-', '*', or '_'
+// with optional spaces/tabs and up to 3 leading spaces).
+func isHorizontalRule(line string) bool {
+	rest, ok := trimLeadingSpacesMax3(line)
+	if !ok {
+		return false
+	}
+
+	marker := rest[0]
+	if marker != '-' && marker != '*' && marker != '_' {
+		return false
+	}
+
+	count := 0
+
+	for i := range len(rest) {
+		switch rest[i] {
+		case marker:
+			count++
+		case ' ', '\t':
+			// allowed between or after markers
+		default:
+			return false
+		}
+	}
+
+	return count >= 3
+}
+
+// parseHeading parses a CommonMark ATX heading (# through ###### followed by space/tab).
+func parseHeading(line string) (string, bool) {
+	rest, ok := trimLeadingSpacesMax3(line)
+	if !ok || rest[0] != '#' {
+		return "", false
+	}
+
+	hashes := 0
+	for hashes < len(rest) && rest[hashes] == '#' {
+		hashes++
+	}
+
+	if hashes > 6 || hashes >= len(rest) || (rest[hashes] != ' ' && rest[hashes] != '\t') {
+		return "", false
+	}
+
+	content := strings.TrimSpace(rest[hashes:])
+	if content == "" {
+		return "", false
+	}
+
+	// Strip optional CommonMark closing '#' sequence preceded by space/tab
+	trimmedRight := strings.TrimRight(content, "#")
+	if len(trimmedRight) < len(content) && (trimmedRight == "" || trimmedRight[len(trimmedRight)-1] == ' ' || trimmedRight[len(trimmedRight)-1] == '\t') {
+		content = strings.TrimSpace(trimmedRight)
+	}
+
+	return content, content != ""
+}
+
+func isNonTableBlock(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
+		return true
+	}
+
+	_, ok := parseHeading(line)
+
+	return ok
+}
+
+// parseUnorderedList parses a Markdown unordered list item (-, *, + followed by space/tab)
+// and normalizes the marker to a bullet character based on nesting depth.
+func parseUnorderedList(line string) (string, string, bool) {
+	i, indentWidth := 0, 0
+	for i < len(line) && (line[i] == ' ' || line[i] == '\t') {
+		if line[i] == '\t' {
+			indentWidth += 2
+		} else {
+			indentWidth++
+		}
+
+		i++
+	}
+
+	if i+1 >= len(line) || (line[i] != '-' && line[i] != '*' && line[i] != '+') || (line[i+1] != ' ' && line[i+1] != '\t') {
+		return "", "", false
+	}
+
+	rest := strings.TrimLeft(line[i+1:], " \t")
+	if rest == "" {
+		return "", "", false
+	}
+
+	bullet := unorderedListBullets[(indentWidth/2)%len(unorderedListBullets)]
+
+	return line[:i] + bullet + " ", rest, true
+}
+
+func skipInlineSpace(s string, idx int) int {
+	for idx < len(s) && (s[idx] == ' ' || s[idx] == '\t') {
+		idx++
+	}
+
+	return idx
+}
+
+// parseMarkdownQuotePrefix splits and formats any leading blockquote prefix on msg.
+// It supports both raw '>' markers and pre-replaced blockQuoteChar prefixes.
+//
+//nolint:funlen,gocyclo
+func parseMarkdownQuotePrefix(msg, blockQuoteChar string) (string, string, bool, bool) {
 	trimmedText := strings.TrimLeft(msg, " \t")
-	if strings.HasPrefix(trimmedText, BlockQuoteCharDefault) && blockQuoteChar != BlockQuoteCharDefault {
-		var newPrefix strings.Builder
-		newPrefix.Grow(len(trimmedText)) // Pre-allocate exactly what we need
-
-		idx := 0
-
-	ParseLoop:
-		for idx < len(trimmedText) {
-			switch trimmedText[idx] {
-			case '>':
-				newPrefix.WriteString(blockQuoteChar)
-
-				idx++
-				// Markdown allows one optional space immediately after a '>'
-				if idx < len(trimmedText) && trimmedText[idx] == ' ' {
-					idx++
-				}
-			case ' ', '\t':
-				// Skip any extra spaces between nested quote markers
-				idx++
-			default:
-				break ParseLoop
-			}
-		}
-
-		// Zero-allocation write of the remaining string
-		newPrefix.WriteString(trimmedText[idx:])
-		msg = newPrefix.String()
+	if trimmedText == "" {
+		return "", msg, false, false
 	}
 
-	return msg
+	hasCustomBQ := blockQuoteChar != "" && blockQuoteChar != BlockQuoteCharDefault
+	isPreReplaced := hasCustomBQ && strings.HasPrefix(trimmedText, blockQuoteChar) &&
+		(blockQuoteChar != "|" || !strings.ContainsRune(trimmedText[len(blockQuoteChar):], '|'))
+
+	if !isPreReplaced && trimmedText[0] != '>' {
+		return "", msg, false, false
+	}
+
+	var pre strings.Builder
+
+	idx := 0
+	changed := false
+
+	if isPreReplaced {
+		for strings.HasPrefix(trimmedText[idx:], blockQuoteChar) {
+			pre.WriteString(blockQuoteChar)
+			idx += len(blockQuoteChar)
+
+			next := skipInlineSpace(trimmedText, idx)
+			if strings.HasPrefix(trimmedText[next:], blockQuoteChar) || (next < len(trimmedText) && trimmedText[next] == '>') {
+				idx = next
+
+				continue
+			}
+
+			if idx < len(trimmedText) && trimmedText[idx] == ' ' {
+				pre.WriteByte(' ')
+
+				idx++
+			}
+
+			break
+		}
+	}
+
+	for idx < len(trimmedText) && trimmedText[idx] == '>' {
+		if hasCustomBQ {
+			pre.WriteString(blockQuoteChar)
+
+			changed = true
+		}
+
+		idx++
+		if idx < len(trimmedText) && trimmedText[idx] == ' ' {
+			idx++
+		}
+
+		if next := skipInlineSpace(trimmedText, idx); next < len(trimmedText) && trimmedText[next] == '>' {
+			idx = next
+		}
+	}
+
+	if !isPreReplaced && !hasCustomBQ {
+		return msg[:len(msg)-len(trimmedText)+idx], trimmedText[idx:], true, false
+	}
+
+	return pre.String(), trimmedText[idx:], true, changed
+}
+
+func hasMarkdownBlockTrigger(trimmedStart, blockQuoteChar string) bool {
+	if trimmedStart == "" {
+		return false
+	}
+
+	switch trimmedStart[0] {
+	case '#', '-', '+', '>', '*', '_':
+		return true
+	}
+
+	return blockQuoteChar != "" && blockQuoteChar != BlockQuoteCharDefault && strings.HasPrefix(trimmedStart, blockQuoteChar)
+}
+
+func Markdown2irc(msg string, blockQuoteChar string, inlineCode string) string {
+	if msg == "" {
+		return msg
+	}
+
+	trimmedStart := strings.TrimLeft(msg, " \t")
+	if !hasMarkdownBlockTrigger(trimmedStart, blockQuoteChar) && !strings.ContainsAny(msg, "*_`~[\\") {
+		return msg
+	}
+
+	quotePrefix, content, hasQuote, quoteChanged := parseMarkdownQuotePrefix(msg, blockQuoteChar)
+	if !hasQuote {
+		content = msg
+	}
+
+	// Horizontal rule (must precede unordered list since "* * *" and "- - -" match both)
+	if isHorizontalRule(content) {
+		return quotePrefix + horizontalRuleLine
+	}
+
+	// ATX Heading (# through ######)
+	if headingText, ok := parseHeading(content); ok {
+		formatted := formatInlineMarkdown(headingText, inlineCode, inlineStyleHeading)
+
+		return quotePrefix + formatted
+	}
+
+	// Unordered list (-, *, +)
+	if listPrefix, itemText, ok := parseUnorderedList(content); ok {
+		formatted := formatInlineMarkdown(itemText, inlineCode, inlineStyleNormal)
+
+		return quotePrefix + listPrefix + formatted
+	}
+
+	formatted := formatInlineMarkdown(content, inlineCode, inlineStyleNormal)
+	if !hasQuote {
+		return formatted
+	}
+
+	if !quoteChanged && formatted == content {
+		return msg
+	}
+
+	return quotePrefix + formatted
+}
+
+type tableParser struct {
+	hasPending  bool
+	pendingLine string
+	active      bool
+	header      []string
+	aligns      []tableAlign
+	body        [][]string
+	prefix      string
+	quoted      bool
+}
+
+func (p *tableParser) flush(opts ProcessMessageOpts, emitLine func(string), yield func(string)) bool {
+	if p.hasPending {
+		line := p.pendingLine
+		*p = tableParser{}
+
+		emitLine(line)
+
+		return false
+	}
+
+	if !p.active {
+		return false
+	}
+
+	header, aligns, body, prefix := p.header, p.aligns, p.body, p.prefix
+	*p = tableParser{}
+
+	formatTable(header, aligns, body, prefix, opts, yield)
+
+	return true
+}
+
+func (p *tableParser) tryStart(line string, opts ProcessMessageOpts) bool {
+	if opts.DisableMarkdown || !strings.ContainsRune(line, '|') {
+		return false
+	}
+
+	prefix, content, quoted := extractTableLine(line, opts)
+	if isNonTableBlock(content) || isHorizontalRule(content) {
+		return false
+	}
+
+	cells, ok := splitTableRow(content)
+	if !ok {
+		return false
+	}
+
+	p.hasPending = true
+	p.pendingLine = line
+	p.header = cells
+	p.prefix = prefix
+	p.quoted = quoted
+
+	return true
+}
+
+func (p *tableParser) consume(line, trimmed string, opts ProcessMessageOpts, emitLine func(string), flushTable, flushEmpty func()) bool {
+	if !p.hasPending && !p.active {
+		return false
+	}
+
+	if trimmed == "" {
+		flushTable()
+
+		return false
+	}
+
+	tPrefix, tContent, tQuoted := extractTableLine(line, opts)
+	if tQuoted != p.quoted || (tQuoted && tPrefix != p.prefix) {
+		flushTable()
+
+		return false
+	}
+
+	rowPart, suffix := stripTableTrailingSuffix(tContent)
+
+	if p.hasPending {
+		aligns, ok := parseTableDelimiterRow(rowPart, len(p.header))
+		if !ok {
+			flushTable()
+
+			return false
+		}
+
+		flushEmpty()
+
+		p.hasPending = false
+		p.pendingLine = ""
+		p.active = true
+		p.aligns = aligns
+
+		if suffix != "" {
+			flushTable()
+			emitLine(suffix)
+		}
+
+		return true
+	}
+
+	if !isNonTableBlock(tContent) {
+		if cells, ok := splitTableRow(rowPart); ok {
+			p.body = append(p.body, cells)
+
+			if suffix != "" {
+				flushTable()
+				emitLine(suffix)
+			}
+
+			return true
+		}
+	}
+
+	flushTable()
+
+	return false
+}
+
+// extractTableLine splits a candidate table row into its leading prefix (blockquote or indent)
+// and table content, without misinterpreting leading table pipes when BlockquoteChar is "|".
+func extractTableLine(line string, opts ProcessMessageOpts) (string, string, bool) {
+	trimmed := strings.TrimLeft(line, " \t")
+	if trimmed == "" {
+		return "", "", false
+	}
+
+	isQuote := strings.HasPrefix(trimmed, BlockQuoteCharDefault) ||
+		(opts.BlockquoteChar != "" && opts.BlockquoteChar != BlockQuoteCharDefault &&
+			strings.HasPrefix(trimmed, opts.BlockquoteChar) &&
+			(opts.BlockquoteChar != "|" || strings.HasPrefix(strings.TrimLeft(trimmed[1:], " \t"), "|")))
+
+	if isQuote {
+		if qp, qrest, ok := splitQuotePrefix(line, opts.BlockquoteChar, opts.InlineCodeChar); ok {
+			return qp, strings.TrimSpace(qrest), true
+		}
+	}
+
+	return line[:len(line)-len(trimmed)], strings.TrimSpace(trimmed), false
+}
+
+func stripTableTrailingSuffix(line string) (string, string) {
+	lastPipe := strings.LastIndexByte(line, '|')
+	if lastPipe >= 0 {
+		if after := strings.TrimSpace(line[lastPipe+1:]); strings.HasPrefix(after, "\x1d(") && strings.HasSuffix(after, ")\x1d") {
+			return line[:lastPipe+1], after
+		}
+	}
+
+	return line, ""
+}
+
+// splitTableRow splits a GFM pipe table row into trimmed cells, respecting
+// escaped pipes (\|) and inline code spans (`...`).
+//
+//nolint:funlen,gocyclo
+func splitTableRow(line string) ([]string, bool) {
+	trimmed := strings.TrimSpace(line)
+	if !strings.ContainsRune(trimmed, '|') {
+		return nil, false
+	}
+
+	var (
+		cells     []string
+		cell      strings.Builder
+		pipeCount int
+	)
+
+	endedOnPipe := false
+
+	for i := 0; i < len(trimmed); {
+		endedOnPipe = false
+
+		switch trimmed[i] {
+		case '`':
+			_, nextIdx, ok := parseCodeSpan(trimmed, i)
+
+			span := trimmed[i:nextIdx]
+			if ok {
+				span = strings.ReplaceAll(span, `\|`, "|")
+			}
+
+			cell.WriteString(span)
+
+			i = nextIdx
+		case '\\':
+			if i+1 < len(trimmed) && (trimmed[i+1] == '|' || trimmed[i+1] == '\\') {
+				cell.WriteString(trimmed[i : i+2])
+
+				i += 2
+
+				continue
+			}
+
+			cell.WriteByte(trimmed[i])
+
+			i++
+		case '|':
+			cells = append(cells, strings.TrimSpace(cell.String()))
+			cell.Reset()
+
+			pipeCount++
+			endedOnPipe = true
+			i++
+		default:
+			cell.WriteByte(trimmed[i])
+
+			i++
+		}
+	}
+
+	if pipeCount == 0 {
+		return nil, false
+	}
+
+	cells = append(cells, strings.TrimSpace(cell.String()))
+
+	if trimmed[0] == '|' && cells[0] == "" {
+		cells = cells[1:]
+	}
+
+	if endedOnPipe && len(cells) > 0 && cells[len(cells)-1] == "" {
+		cells = cells[:len(cells)-1]
+	}
+
+	return cells, len(cells) > 0
+}
+
+func parseTableDelimiterRow(line string, expectedCols int) ([]tableAlign, bool) {
+	cells, ok := splitTableRow(line)
+	if !ok || len(cells) != expectedCols {
+		return nil, false
+	}
+
+	aligns := make([]tableAlign, len(cells))
+
+	for i, c := range cells {
+		leftColon := strings.HasPrefix(c, ":")
+		c = strings.TrimPrefix(c, ":")
+		rightColon := strings.HasSuffix(c, ":")
+		c = strings.TrimSuffix(c, ":")
+
+		if c == "" || strings.Trim(c, "-") != "" {
+			return nil, false
+		}
+
+		switch {
+		case leftColon && rightColon:
+			aligns[i] = tableAlignCenter
+		case rightColon:
+			aligns[i] = tableAlignRight
+		}
+	}
+
+	return aligns, true
+}
+
+func ircDisplayWidth(s string) int {
+	if strings.ContainsRune(s, '\x03') {
+		s = stripIrcColors(s)
+	}
+
+	if strings.ContainsRune(s, '\x04') {
+		s = stripHexColors(s)
+	}
+
+	return StringWidth(s)
+}
+
+func formatTableRowCells(row []string, numCols int, colWidths []int, opts ProcessMessageOpts, style inlineStyle) ([]string, []int) {
+	fmtCells := make([]string, numCols)
+	widths := make([]int, numCols)
+
+	for c := range min(len(row), numCols) {
+		if row[c] == "" {
+			continue
+		}
+
+		cell := formatInlineMarkdown(row[c], opts.InlineCodeChar, style)
+		if !opts.DisableEmoji {
+			cell = EmojiReplaceAliases(cell, opts.CustomEmoji)
+		}
+
+		fmtCells[c] = cell
+		widths[c] = ircDisplayWidth(cell)
+		colWidths[c] = max(colWidths[c], widths[c])
+	}
+
+	return fmtCells, widths
+}
+
+func buildTableBorder(prefix string, colWidths []int, left, mid, right string) string {
+	var b strings.Builder
+	b.WriteString(prefix)
+	b.WriteString(left)
+
+	for c, w := range colWidths {
+		if c > 0 {
+			b.WriteString(mid)
+		}
+
+		b.WriteString(strings.Repeat("─", w+2))
+	}
+
+	b.WriteString(right)
+
+	return b.String()
+}
+
+func buildTableRow(prefix string, cells []string, widths, colWidths []int, aligns []tableAlign) string {
+	var b strings.Builder
+	b.WriteString(prefix)
+	b.WriteString("│")
+
+	for c, cell := range cells {
+		pad := colWidths[c] - widths[c]
+		leftPad, rightPad := 0, pad
+
+		switch aligns[c] {
+		case tableAlignRight:
+			leftPad, rightPad = pad, 0
+		case tableAlignCenter:
+			leftPad = pad / 2
+			rightPad = pad - leftPad
+		}
+
+		b.WriteByte(' ')
+		b.WriteString(strings.Repeat(" ", leftPad))
+		b.WriteString(cell)
+		b.WriteString(strings.Repeat(" ", rightPad))
+		b.WriteString(" │")
+	}
+
+	return b.String()
+}
+
+// formatTable renders a GFM table using Unicode box-drawing characters and
+// visual-width-aware column padding/alignment.
+func formatTable(header []string, aligns []tableAlign, body [][]string, prefix string, opts ProcessMessageOpts, yield func(string)) {
+	numCols := len(header)
+	for _, row := range body {
+		numCols = max(numCols, len(row))
+	}
+
+	for len(aligns) < numCols {
+		aligns = append(aligns, tableAlignLeft)
+	}
+
+	colWidths := make([]int, numCols)
+	for i := range colWidths {
+		colWidths[i] = 1
+	}
+
+	fmtHeader, hdrWidths := formatTableRowCells(header, numCols, colWidths, opts, inlineStyleTableHeader)
+
+	fmtBody := make([][]string, len(body))
+	bodyWidths := make([][]int, len(body))
+
+	for r, row := range body {
+		fmtBody[r], bodyWidths[r] = formatTableRowCells(row, numCols, colWidths, opts, inlineStyleNormal)
+	}
+
+	yield(buildTableBorder(prefix, colWidths, "┌", "┬", "┐"))
+	yield(buildTableRow(prefix, fmtHeader, hdrWidths, colWidths, aligns))
+
+	if len(fmtBody) > 0 {
+		yield(buildTableBorder(prefix, colWidths, "├", "┼", "┤"))
+
+		for r := range fmtBody {
+			yield(buildTableRow(prefix, fmtBody[r], bodyWidths[r], colWidths, aligns))
+		}
+	}
+
+	yield(buildTableBorder(prefix, colWidths, "└", "┴", "┘"))
 }
 
 // WrapMessage soft-wraps msg into lines of at most maxLen bytes, breaking
