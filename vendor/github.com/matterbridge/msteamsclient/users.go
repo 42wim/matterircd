@@ -268,11 +268,7 @@ func (c *Client) ResolveUsers(ctx context.Context, mris []string) (map[string]*U
 	}
 
 	ep := c.Endpoints()
-	if ep.MiddleTier == "" {
-		return result, nil
-	}
-
-	if c.effectiveAccountType() == AccountPersonal && c.currentRefreshToken() == "" {
+	if ep.MiddleTier == "" || c.effectiveAccountType() == AccountPersonal {
 		return result, nil
 	}
 
@@ -364,7 +360,7 @@ func (c *Client) SearchUsers(ctx context.Context, query string, limit int) ([]*U
 
 func (c *Client) searchUsersMiddleTier(ctx context.Context, query string, limit int, seen map[string]struct{}) []*User {
 	ep := c.Endpoints()
-	if ep.MiddleTier == "" {
+	if ep.MiddleTier == "" || c.effectiveAccountType() == AccountPersonal {
 		return nil
 	}
 
