@@ -676,6 +676,7 @@ func forwardedPreviewStyle(fc config.FormatterConfig) (string, utils.ProcessMess
 		CodeBlockSeparator: fc.CodeBlockSeparator,
 		BlockquoteChar:     blockquoteChar,
 		InlineCodeChar:     fc.MarkdownInlineCode,
+		Unicode:            fc.Unicode,
 		PreserveNewLines:   fc.PreserveNewLines,
 	}
 

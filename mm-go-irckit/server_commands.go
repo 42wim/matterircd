@@ -1900,6 +1900,7 @@ func CmdTopic(s Server, u *User, msg *irc.Message) error {
 			blockQuoteCharDefault,
 			inlineCode,
 			customEmoji,
+			u.br.FormatterConfig().Unicode,
 		)
 
 		return s.EncodeMessage(u, irc.RPL_TOPIC, []string{u.Nick, channelname}, t)

@@ -31,6 +31,7 @@ type ProcessMessageOpts struct {
 	CodeBlockSeparator string
 	BlockquoteChar     string
 	InlineCodeChar     string
+	Unicode            bool
 
 	PreserveNewLines string // "all" (default), "max-one", or "none" / "zero"
 }
@@ -219,6 +220,7 @@ func formatSummaryText(text string, opts SummaryOpts) string {
 			opts.BlockquoteChar,
 			opts.InlineCodeChar,
 			opts.CustomEmoji,
+			opts.Unicode,
 		)
 	}
 
@@ -297,7 +299,7 @@ func formatSummaryText(text string, opts SummaryOpts) string {
 			continue
 		}
 
-		writePart(Markdown2irc(line, opts.BlockquoteChar, opts.InlineCodeChar))
+		writePart(Markdown2irc(line, opts.BlockquoteChar, opts.InlineCodeChar, opts.Unicode))
 	}
 
 	if inCode {
@@ -401,9 +403,9 @@ func FormatFullCodeBlock(text, lexer, indent string, opts ProcessMessageOpts, yi
 // FormatMarkdownAndEmoji applies Markdown formatting and Emoji alias replacement.
 // It utilizes a fast-path single-pass check to bypass processing entirely if no
 // trigger characters are present, drastically reducing allocations and CPU usage.
-func FormatMarkdownAndEmoji(msg string, disableMarkdown bool, disableEmoji bool, blockQuoteChar string, inlineCode string, customEmoji map[string]string) string {
+func FormatMarkdownAndEmoji(msg string, disableMarkdown bool, disableEmoji bool, blockQuoteChar string, inlineCode string, customEmoji map[string]string, useUnicode ...bool) string {
 	if !disableMarkdown {
-		msg = Markdown2irc(msg, blockQuoteChar, inlineCode)
+		msg = Markdown2irc(msg, blockQuoteChar, inlineCode, useUnicode...)
 	}
 
 	if !disableEmoji {
@@ -743,7 +745,7 @@ func ProcessMessageText(text string, opts ProcessMessageOpts, yield func(line st
 		hasContent = true
 		lastBlockWasCode = false
 
-		yield(FormatMarkdownAndEmoji(l, opts.DisableMarkdown, opts.DisableEmoji, opts.BlockquoteChar, opts.InlineCodeChar, opts.CustomEmoji))
+		yield(FormatMarkdownAndEmoji(l, opts.DisableMarkdown, opts.DisableEmoji, opts.BlockquoteChar, opts.InlineCodeChar, opts.CustomEmoji, opts.Unicode))
 	}
 
 	flushTable := func() {
@@ -861,6 +863,7 @@ func ProcessMessageText(text string, opts ProcessMessageOpts, yield func(line st
 						opts.BlockquoteChar,
 						opts.InlineCodeChar,
 						opts.CustomEmoji,
+						opts.Unicode,
 					)
 
 					yield(trailing)
@@ -1164,8 +1167,9 @@ func replacePattern(s string, delim string, ircStart, ircEnd string, checkWordBo
 }
 
 const (
-	BlockQuoteCharDefault = ">"
-	horizontalRuleLine    = "────────────────────"
+	BlockQuoteCharDefault   = ">"
+	horizontalRuleLine      = "────────────────────"
+	horizontalRuleLineASCII = "--------------------"
 )
 
 type tableAlign uint8
@@ -1176,7 +1180,33 @@ const (
 	tableAlignRight
 )
 
-var unorderedListBullets = [3]string{"•", "◦", "▪"}
+type tableBoxChars struct {
+	topLeft, topMid, topRight string
+	midLeft, midMid, midRight string
+	botLeft, botMid, botRight string
+	horiz, vert               string
+}
+
+var (
+	unorderedListBullets      = [3]string{"•", "◦", "▪"}
+	unorderedListBulletsASCII = [3]string{"*", "-", "+"}
+
+	headingMarkers      = [6]string{"═══", "━━", "──", "─", "┄", "·"}
+	headingMarkersASCII = [6]string{"===", "==", "--", "-", "..", "."}
+
+	tableBoxUnicode = tableBoxChars{
+		"┌", "┬", "┐",
+		"├", "┼", "┤",
+		"└", "┴", "┘",
+		"─", "│",
+	}
+	tableBoxASCII = tableBoxChars{
+		"+", "+", "+",
+		"+", "+", "+",
+		"+", "+", "+",
+		"-", "|",
+	}
+)
 
 func isASCIIPunctuation(c byte) bool {
 	return (c >= '!' && c <= '/') ||
@@ -1639,7 +1669,7 @@ func isNonTableBlock(line string) bool {
 
 // parseUnorderedList parses a Markdown unordered list item (-, *, + followed by space/tab)
 // and normalizes the marker to a bullet character based on nesting depth.
-func parseUnorderedList(line string) (string, string, bool) {
+func parseUnorderedList(line string, useUnicode bool) (string, string, bool) {
 	i, indentWidth := 0, 0
 	for i < len(line) && (line[i] == ' ' || line[i] == '\t') {
 		if line[i] == '\t' {
@@ -1660,7 +1690,12 @@ func parseUnorderedList(line string) (string, string, bool) {
 		return "", "", false
 	}
 
-	bullet := unorderedListBullets[(indentWidth/2)%len(unorderedListBullets)]
+	bullets := &unorderedListBulletsASCII
+	if useUnicode {
+		bullets = &unorderedListBullets
+	}
+
+	bullet := bullets[(indentWidth/2)%len(bullets)]
 
 	return line[:i] + bullet + " ", rest, true
 }
@@ -1775,7 +1810,7 @@ func splitTrailingActionSuffix(s string) (string, string) {
 	return body, s[len(body):]
 }
 
-func Markdown2irc(msg string, blockQuoteChar string, inlineCode string) string {
+func Markdown2irc(msg string, blockQuoteChar string, inlineCode string, useUnicode ...bool) string {
 	if msg == "" {
 		return msg
 	}
@@ -1784,6 +1819,8 @@ func Markdown2irc(msg string, blockQuoteChar string, inlineCode string) string {
 	if !hasMarkdownBlockTrigger(trimmedStart, blockQuoteChar) && !strings.ContainsAny(msg, "*_`~[\\") {
 		return msg
 	}
+
+	enableUnicode := len(useUnicode) > 0 && useUnicode[0]
 
 	quotePrefix, content, hasQuote, quoteChanged := parseMarkdownQuotePrefix(msg, blockQuoteChar)
 	if !hasQuote {
@@ -1794,19 +1831,29 @@ func Markdown2irc(msg string, blockQuoteChar string, inlineCode string) string {
 
 	// Horizontal rule (must precede unordered list since "* * *" and "- - -" match both)
 	if isHorizontalRule(blockBody) {
-		return quotePrefix + horizontalRuleLine + actionSuffix
+		hr := horizontalRuleLineASCII
+		if enableUnicode {
+			hr = horizontalRuleLine
+		}
+
+		return quotePrefix + hr + actionSuffix
 	}
 
-	// ATX Heading (# through ######): wrapped in '=' per level, bold text for H1-H2 only
+	// ATX Heading (# through ######): weighted markers per level, bold text for H1-H2 only
 	if level, headingText, ok := parseHeading(blockBody); ok {
-		marker := strings.Repeat("=", level)
+		markers := &headingMarkersASCII
+		if enableUnicode {
+			markers = &headingMarkers
+		}
+
+		marker := markers[level-1]
 		formatted := formatInlineMarkdown(headingText, inlineCode, level <= 2)
 
 		return quotePrefix + marker + " " + formatted + " " + marker + actionSuffix
 	}
 
 	// Unordered list (-, *, +)
-	if listPrefix, itemText, ok := parseUnorderedList(content); ok {
+	if listPrefix, itemText, ok := parseUnorderedList(content, enableUnicode); ok {
 		formatted := formatInlineMarkdown(itemText, inlineCode, false)
 
 		return quotePrefix + listPrefix + formatted
@@ -2114,7 +2161,7 @@ func formatTableRowCells(row []string, numCols int, colWidths []int, opts Proces
 	return fmtCells, widths
 }
 
-func buildTableBorder(prefix string, colWidths []int, left, mid, right string) string {
+func buildTableBorder(prefix string, colWidths []int, left, horiz, mid, right string) string {
 	var b strings.Builder
 	b.WriteString(prefix)
 	b.WriteString(left)
@@ -2124,7 +2171,7 @@ func buildTableBorder(prefix string, colWidths []int, left, mid, right string) s
 			b.WriteString(mid)
 		}
 
-		b.WriteString(strings.Repeat("─", w+2))
+		b.WriteString(strings.Repeat(horiz, w+2))
 	}
 
 	b.WriteString(right)
@@ -2132,10 +2179,10 @@ func buildTableBorder(prefix string, colWidths []int, left, mid, right string) s
 	return b.String()
 }
 
-func buildTableRow(prefix string, cells []string, widths, colWidths []int, aligns []tableAlign) string {
+func buildTableRow(prefix string, cells []string, widths, colWidths []int, aligns []tableAlign, vert string) string {
 	var b strings.Builder
 	b.WriteString(prefix)
-	b.WriteString("│")
+	b.WriteString(vert)
 
 	for c, cell := range cells {
 		pad := colWidths[c] - widths[c]
@@ -2153,14 +2200,15 @@ func buildTableRow(prefix string, cells []string, widths, colWidths []int, align
 		b.WriteString(strings.Repeat(" ", leftPad))
 		b.WriteString(cell)
 		b.WriteString(strings.Repeat(" ", rightPad))
-		b.WriteString(" │")
+		b.WriteByte(' ')
+		b.WriteString(vert)
 	}
 
 	return b.String()
 }
 
-// formatTable renders a GFM table using Unicode box-drawing characters and
-// visual-width-aware column padding/alignment.
+// formatTable renders a GFM table using Unicode box-drawing characters (or ASCII when
+// opts.Unicode is false) and visual-width-aware column padding/alignment.
 func formatTable(header []string, aligns []tableAlign, body [][]string, prefix string, opts ProcessMessageOpts, yield func(string)) {
 	numCols := len(header)
 	for _, row := range body {
@@ -2185,18 +2233,23 @@ func formatTable(header []string, aligns []tableAlign, body [][]string, prefix s
 		fmtBody[r], bodyWidths[r] = formatTableRowCells(row, numCols, colWidths, opts, false)
 	}
 
-	yield(buildTableBorder(prefix, colWidths, "┌", "┬", "┐"))
-	yield(buildTableRow(prefix, fmtHeader, hdrWidths, colWidths, aligns))
+	box := &tableBoxASCII
+	if opts.Unicode {
+		box = &tableBoxUnicode
+	}
+
+	yield(buildTableBorder(prefix, colWidths, box.topLeft, box.horiz, box.topMid, box.topRight))
+	yield(buildTableRow(prefix, fmtHeader, hdrWidths, colWidths, aligns, box.vert))
 
 	if len(fmtBody) > 0 {
-		yield(buildTableBorder(prefix, colWidths, "├", "┼", "┤"))
+		yield(buildTableBorder(prefix, colWidths, box.midLeft, box.horiz, box.midMid, box.midRight))
 
 		for r := range fmtBody {
-			yield(buildTableRow(prefix, fmtBody[r], bodyWidths[r], colWidths, aligns))
+			yield(buildTableRow(prefix, fmtBody[r], bodyWidths[r], colWidths, aligns, box.vert))
 		}
 	}
 
-	yield(buildTableBorder(prefix, colWidths, "└", "┴", "┘"))
+	yield(buildTableBorder(prefix, colWidths, box.botLeft, box.horiz, box.botMid, box.botRight))
 }
 
 // WrapMessage soft-wraps msg into lines of at most maxLen bytes, breaking

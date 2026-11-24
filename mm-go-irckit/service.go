@@ -785,6 +785,7 @@ func details(u *User, toUser *User, args []string, service string) {
 		CodeBlockSeparator: codeBlockSeparator,
 		BlockquoteChar:     blockQuoteChar,
 		InlineCodeChar:     inlineCode,
+		Unicode:            u.br.FormatterConfig().Unicode,
 		PreserveNewLines:   preserveNewLines,
 	}
 
@@ -1116,6 +1117,7 @@ func dispatchHistoricalEvent(u *User, toUser *User, event *bridge.Event, searchC
 		CodeBlockSeparator: codeBlockSeparator,
 		BlockquoteChar:     blockQuoteChar,
 		InlineCodeChar:     inlineCode,
+		Unicode:            u.br.FormatterConfig().Unicode,
 		PreserveNewLines:   preserveNewLines,
 	}
 
@@ -2260,6 +2262,7 @@ func summarize(u *User, toUser *User, args []string, service string) {
 		CodeBlockSeparator: codeBlockSeparator,
 		BlockquoteChar:     blockQuoteChar,
 		InlineCodeChar:     inlineCode,
+		Unicode:            u.br.FormatterConfig().Unicode,
 		PreserveNewLines:   preserveNewLines,
 	}
 

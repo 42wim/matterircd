@@ -236,40 +236,49 @@ func TestMarkdown2ircHeadings(t *testing.T) {
 	codeEnd := "\x11\x0f`"
 
 	tests := []struct {
-		name  string
-		input string
-		bq    string
-		want  string
+		name    string
+		input   string
+		bq      string
+		unicode bool
+		want    string
 	}{
-		{name: "h1 bold with unbolded markers", input: "# Heading 1", want: "= \x02Heading 1\x02 ="},
-		{name: "h2 bold with unbolded markers", input: "## Heading 2", want: "== \x02Heading 2\x02 =="},
-		{name: "h3 normal text", input: "### Heading 3", want: "=== Heading 3 ==="},
-		{name: "h6 normal text", input: "###### Heading 6", want: "====== Heading 6 ======"},
-		{name: "seven hashes not heading", input: "####### Not a heading", want: "####### Not a heading"},
-		{name: "hashtag not heading", input: "#channel", want: "#channel"},
-		{name: "empty heading ignored", input: "#   ", want: "#   "},
-		{name: "up to 3 leading spaces", input: "   ## Indented", want: "== \x02Indented\x02 =="},
-		{name: "4 leading spaces not heading", input: "    # Code indent", want: "    # Code indent"},
-		{name: "closing hashes stripped", input: "## Title ##", want: "== \x02Title\x02 =="},
-		{name: "non-space trailing hash kept", input: "## C#", want: "== \x02C#\x02 =="},
-		{name: "bold inside h1 does not double toggle", input: "# **Bold** and *italic*", want: "= \x02Bold and \x1ditalic\x1d\x02 ="},
-		{name: "bold inside h3 renders bold", input: "### **Bold** and *italic*", want: "=== \x02Bold\x02 and \x1ditalic\x1d ==="},
-		{name: "link inside h1 keeps underline", input: "# See [docs](https://example.com)", want: "= \x02See \x1fdocs\x1f\u00a0(\x1dhttps://example.com\x1d)\x02 ="},
-		{name: "inline code in middle of h1", input: "# Use `foo` now", want: "= \x02Use " + codeStart + "foo" + codeEnd + "\x02 now\x02 ="},
-		{name: "inline code at end of h1", input: "# Use `foo`", want: "= \x02Use " + codeStart + "foo" + codeEnd + " ="},
-		{name: "inline code only h1", input: "# `foo`", want: "= " + codeStart + "foo" + codeEnd + " ="},
-		{name: "quoted h1", input: "> # Quoted", bq: "🮇 ", want: "🮇 = \x02Quoted\x02 ="},
-		{name: "quoted h3", input: "> ### Quoted", bq: "🮇 ", want: "🮇 === Quoted ==="},
-		{name: "pre-replaced quoted heading", input: "🮇 # Quoted", bq: "🮇", want: "🮇 = \x02Quoted\x02 ="},
-		{name: "heading with trailing edited suffix", input: "# Title \x1d(✏️edited)\x1d", want: "= \x02Title\x02 = \x1d(✏️edited)\x1d"},
-		{name: "quoted heading with trailing edited suffix", input: "> ## Title \x1d(✏️edited)\x1d", bq: "🮇 ", want: "🮇 == \x02Title\x02 == \x1d(✏️edited)\x1d"},
-		{name: "escaped hash not heading", input: `\# Escaped`, want: "# Escaped"},
+		{name: "h1 unicode", input: "# Heading 1", unicode: true, want: "═══ \x02Heading 1\x02 ═══"},
+		{name: "h2 unicode", input: "## Heading 2", unicode: true, want: "━━ \x02Heading 2\x02 ━━"},
+		{name: "h3 unicode", input: "### Heading 3", unicode: true, want: "── Heading 3 ──"},
+		{name: "h4 unicode", input: "#### Heading 4", unicode: true, want: "─ Heading 4 ─"},
+		{name: "h5 unicode", input: "##### Heading 5", unicode: true, want: "┄ Heading 5 ┄"},
+		{name: "h6 unicode", input: "###### Heading 6", unicode: true, want: "· Heading 6 ·"},
+		{name: "h1 ascii", input: "# Heading 1", want: "=== \x02Heading 1\x02 ==="},
+		{name: "h2 ascii", input: "## Heading 2", want: "== \x02Heading 2\x02 =="},
+		{name: "h3 ascii", input: "### Heading 3", want: "-- Heading 3 --"},
+		{name: "h4 ascii", input: "#### Heading 4", want: "- Heading 4 -"},
+		{name: "h5 ascii", input: "##### Heading 5", want: ".. Heading 5 .."},
+		{name: "h6 ascii", input: "###### Heading 6", want: ". Heading 6 ."},
+		{name: "seven hashes not heading", input: "####### Not a heading", unicode: true, want: "####### Not a heading"},
+		{name: "hashtag not heading", input: "#channel", unicode: true, want: "#channel"},
+		{name: "empty heading ignored", input: "#   ", unicode: true, want: "#   "},
+		{name: "up to 3 leading spaces", input: "   ## Indented", unicode: true, want: "━━ \x02Indented\x02 ━━"},
+		{name: "4 leading spaces not heading", input: "    # Code indent", unicode: true, want: "    # Code indent"},
+		{name: "closing hashes stripped", input: "## Title ##", unicode: true, want: "━━ \x02Title\x02 ━━"},
+		{name: "non-space trailing hash kept", input: "## C#", unicode: true, want: "━━ \x02C#\x02 ━━"},
+		{name: "bold inside h1 does not double toggle", input: "# **Bold** and *italic*", unicode: true, want: "═══ \x02Bold and \x1ditalic\x1d\x02 ═══"},
+		{name: "bold inside h3 renders bold", input: "### **Bold** and *italic*", unicode: true, want: "── \x02Bold\x02 and \x1ditalic\x1d ──"},
+		{name: "link inside h1 keeps underline", input: "# See [docs](https://example.com)", unicode: true, want: "═══ \x02See \x1fdocs\x1f\u00a0(\x1dhttps://example.com\x1d)\x02 ═══"},
+		{name: "inline code in middle of h1", input: "# Use `foo` now", unicode: true, want: "═══ \x02Use " + codeStart + "foo" + codeEnd + "\x02 now\x02 ═══"},
+		{name: "inline code at end of h1", input: "# Use `foo`", unicode: true, want: "═══ \x02Use " + codeStart + "foo" + codeEnd + " ═══"},
+		{name: "inline code only h1", input: "# `foo`", unicode: true, want: "═══ " + codeStart + "foo" + codeEnd + " ═══"},
+		{name: "quoted h1", input: "> # Quoted", bq: "🮇 ", unicode: true, want: "🮇 ═══ \x02Quoted\x02 ═══"},
+		{name: "quoted h3", input: "> ### Quoted", bq: "🮇 ", unicode: true, want: "🮇 ── Quoted ──"},
+		{name: "pre-replaced quoted heading", input: "🮇 # Quoted", bq: "🮇", unicode: true, want: "🮇 ═══ \x02Quoted\x02 ═══"},
+		{name: "heading with trailing edited suffix", input: "# Title \x1d(✏️edited)\x1d", unicode: true, want: "═══ \x02Title\x02 ═══ \x1d(✏️edited)\x1d"},
+		{name: "quoted heading with trailing edited suffix", input: "> ## Title \x1d(✏️edited)\x1d", bq: "🮇 ", unicode: true, want: "🮇 ━━ \x02Title\x02 ━━ \x1d(✏️edited)\x1d"},
+		{name: "escaped hash not heading", input: `\# Escaped`, unicode: true, want: "# Escaped"},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := Markdown2irc(tc.input, tc.bq, ""); got != tc.want {
-				t.Errorf("Markdown2irc(%q, %q, \"\") = %q, want %q", tc.input, tc.bq, got, tc.want)
+			if got := Markdown2irc(tc.input, tc.bq, "", tc.unicode); got != tc.want {
+				t.Errorf("Markdown2irc(%q, %q, \"\", %v) = %q, want %q", tc.input, tc.bq, tc.unicode, got, tc.want)
 			}
 		})
 	}
@@ -278,70 +287,78 @@ func TestMarkdown2ircHeadings(t *testing.T) {
 //nolint:goconst
 func TestMarkdown2ircUnorderedLists(t *testing.T) {
 	tests := []struct {
-		name  string
-		input string
-		bq    string
-		want  string
+		name    string
+		input   string
+		bq      string
+		unicode bool
+		want    string
 	}{
-		{name: "dash level 0", input: "- item", want: "• item"},
-		{name: "asterisk level 0", input: "* item", want: "• item"},
-		{name: "plus level 0", input: "+ item", want: "• item"},
-		{name: "nested level 1 (2 spaces)", input: "  - nested 1", want: "  ◦ nested 1"},
-		{name: "nested level 2 (4 spaces)", input: "    - nested 2", want: "    ▪ nested 2"},
-		{name: "nested level 3 cycles (6 spaces)", input: "      - nested 3", want: "      • nested 3"},
-		{name: "tab nested level 1", input: "\t- tabbed 1", want: "\t◦ tabbed 1"},
-		{name: "tab nested level 2", input: "\t\t- tabbed 2", want: "\t\t▪ tabbed 2"},
-		{name: "list item with formatting", input: "* item with *italic* and **bold**", want: "• item with \x1ditalic\x1d and \x02bold\x02"},
-		{name: "task list checkbox left untouched", input: "- [ ] todo item", want: "• [ ] todo item"},
-		{name: "checked task list left untouched", input: "- [x] done item", want: "• [x] done item"},
-		{name: "flag not a list", input: "--verbose", want: "--verbose"},
-		{name: "negative number not a list", input: "-42", want: "-42"},
-		{name: "plus number not a list", input: "+1", want: "+1"},
-		{name: "empty marker not a list", input: "- ", want: "- "},
-		{name: "quoted list item", input: "> - quoted", bq: "🮇 ", want: "🮇 • quoted"},
-		{name: "quoted nested list item preserves indent", input: ">   - nested", bq: "🮇 ", want: "🮇   ◦ nested"},
-		{name: "escaped dash not a list", input: `\- literal`, want: "- literal"},
-		{name: "escaped asterisk not a list", input: `\* literal`, want: "* literal"},
+		{name: "dash level 0 unicode", input: "- item", unicode: true, want: "• item"},
+		{name: "asterisk level 0 unicode", input: "* item", unicode: true, want: "• item"},
+		{name: "plus level 0 unicode", input: "+ item", unicode: true, want: "• item"},
+		{name: "nested level 1 unicode (2 spaces)", input: "  - nested 1", unicode: true, want: "  ◦ nested 1"},
+		{name: "nested level 2 unicode (4 spaces)", input: "    - nested 2", unicode: true, want: "    ▪ nested 2"},
+		{name: "nested level 3 unicode cycles (6 spaces)", input: "      - nested 3", unicode: true, want: "      • nested 3"},
+		{name: "level 0 ascii", input: "- item", want: "* item"},
+		{name: "nested level 1 ascii", input: "  - nested 1", want: "  - nested 1"},
+		{name: "nested level 2 ascii", input: "    - nested 2", want: "    + nested 2"},
+		{name: "nested level 3 ascii cycles", input: "      - nested 3", want: "      * nested 3"},
+		{name: "tab nested level 1", input: "\t- tabbed 1", unicode: true, want: "\t◦ tabbed 1"},
+		{name: "tab nested level 2", input: "\t\t- tabbed 2", unicode: true, want: "\t\t▪ tabbed 2"},
+		{name: "list item with formatting", input: "* item with *italic* and **bold**", unicode: true, want: "• item with \x1ditalic\x1d and \x02bold\x02"},
+		{name: "task list checkbox left untouched", input: "- [ ] todo item", unicode: true, want: "• [ ] todo item"},
+		{name: "checked task list left untouched", input: "- [x] done item", unicode: true, want: "• [x] done item"},
+		{name: "flag not a list", input: "--verbose", unicode: true, want: "--verbose"},
+		{name: "negative number not a list", input: "-42", unicode: true, want: "-42"},
+		{name: "plus number not a list", input: "+1", unicode: true, want: "+1"},
+		{name: "empty marker not a list", input: "- ", unicode: true, want: "- "},
+		{name: "quoted list item", input: "> - quoted", bq: "🮇 ", unicode: true, want: "🮇 • quoted"},
+		{name: "quoted nested list item preserves indent", input: ">   - nested", bq: "🮇 ", unicode: true, want: "🮇   ◦ nested"},
+		{name: "escaped dash not a list", input: `\- literal`, unicode: true, want: "- literal"},
+		{name: "escaped asterisk not a list", input: `\* literal`, unicode: true, want: "* literal"},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := Markdown2irc(tc.input, tc.bq, ""); got != tc.want {
-				t.Errorf("Markdown2irc(%q, %q, \"\") = %q, want %q", tc.input, tc.bq, got, tc.want)
+			if got := Markdown2irc(tc.input, tc.bq, "", tc.unicode); got != tc.want {
+				t.Errorf("Markdown2irc(%q, %q, \"\", %v) = %q, want %q", tc.input, tc.bq, tc.unicode, got, tc.want)
 			}
 		})
 	}
 }
 
+//nolint:goconst
 func TestMarkdown2ircHorizontalRules(t *testing.T) {
 	tests := []struct {
-		name  string
-		input string
-		bq    string
-		want  string
+		name    string
+		input   string
+		bq      string
+		unicode bool
+		want    string
 	}{
-		{name: "three dashes", input: "---", want: horizontalRuleLine},
-		{name: "many dashes", input: "-------", want: horizontalRuleLine},
-		{name: "three asterisks", input: "***", want: horizontalRuleLine},
-		{name: "three underscores", input: "___", want: horizontalRuleLine},
-		{name: "spaced dashes", input: "- - -", want: horizontalRuleLine},
-		{name: "spaced asterisks", input: "* * *", want: horizontalRuleLine},
-		{name: "spaced underscores", input: "_ _ _", want: horizontalRuleLine},
-		{name: "leading and trailing spaces", input: "   ---   ", want: horizontalRuleLine},
-		{name: "4 leading spaces not HR", input: "    ---", want: "    ---"},
-		{name: "two dashes not HR", input: "--", want: "--"},
-		{name: "mixed markers not HR", input: "-*-", want: "-*-"},
-		{name: "bold italic not HR", input: "***bold italic***", want: "\x02\x1dbold italic\x1d\x02"},
-		{name: "quoted HR", input: "> ---", bq: "🮇 ", want: "🮇 " + horizontalRuleLine},
-		{name: "HR with trailing pinned suffix", input: "--- \x1d(📌pinned)\x1d", want: horizontalRuleLine + " \x1d(📌pinned)\x1d"},
-		{name: "quoted HR with trailing edited suffix", input: "> --- \x1d(✏️edited)\x1d", bq: "🮇 ", want: "🮇 " + horizontalRuleLine + " \x1d(✏️edited)\x1d"},
-		{name: "escaped HR", input: `\---`, want: "---"},
+		{name: "three dashes unicode", input: "---", unicode: true, want: horizontalRuleLine},
+		{name: "three dashes ascii", input: "---", want: horizontalRuleLineASCII},
+		{name: "many dashes", input: "-------", unicode: true, want: horizontalRuleLine},
+		{name: "three asterisks", input: "***", unicode: true, want: horizontalRuleLine},
+		{name: "three underscores", input: "___", unicode: true, want: horizontalRuleLine},
+		{name: "spaced dashes", input: "- - -", unicode: true, want: horizontalRuleLine},
+		{name: "spaced asterisks", input: "* * *", unicode: true, want: horizontalRuleLine},
+		{name: "spaced underscores", input: "_ _ _", unicode: true, want: horizontalRuleLine},
+		{name: "leading and trailing spaces", input: "   ---   ", unicode: true, want: horizontalRuleLine},
+		{name: "4 leading spaces not HR", input: "    ---", unicode: true, want: "    ---"},
+		{name: "two dashes not HR", input: "--", unicode: true, want: "--"},
+		{name: "mixed markers not HR", input: "-*-", unicode: true, want: "-*-"},
+		{name: "bold italic not HR", input: "***bold italic***", unicode: true, want: "\x02\x1dbold italic\x1d\x02"},
+		{name: "quoted HR", input: "> ---", bq: "🮇 ", unicode: true, want: "🮇 " + horizontalRuleLine},
+		{name: "HR with trailing pinned suffix", input: "--- \x1d(📌pinned)\x1d", unicode: true, want: horizontalRuleLine + " \x1d(📌pinned)\x1d"},
+		{name: "quoted HR with trailing edited suffix", input: "> --- \x1d(✏️edited)\x1d", bq: "🮇 ", unicode: true, want: "🮇 " + horizontalRuleLine + " \x1d(✏️edited)\x1d"},
+		{name: "escaped HR", input: `\---`, unicode: true, want: "---"},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := Markdown2irc(tc.input, tc.bq, ""); got != tc.want {
-				t.Errorf("Markdown2irc(%q, %q, \"\") = %q, want %q", tc.input, tc.bq, got, tc.want)
+			if got := Markdown2irc(tc.input, tc.bq, "", tc.unicode); got != tc.want {
+				t.Errorf("Markdown2irc(%q, %q, \"\", %v) = %q, want %q", tc.input, tc.bq, tc.unicode, got, tc.want)
 			}
 		})
 	}
@@ -360,7 +377,7 @@ func TestMarkdown2ircImagesAndLinks(t *testing.T) {
 		{"link with balanced parentheses in URL", "[Go](https://en.wikipedia.org/wiki/Go_(programming_language))", "\x1fGo\x1f\u00a0(\x1dhttps://en.wikipedia.org/wiki/Go_(programming_language)\x1d)"},
 		{"escaped bang before link", `\![docs](https://example.com)`, "!\x1fdocs\x1f\u00a0(\x1dhttps://example.com\x1d)"},
 		{"escaped image", `\!\[alt](https://example.com/a.png)`, "![alt](https://example.com/a.png)"},
-		{"image inside heading", "# ![icon](https://example.com/i.png) Title", "= \x02\x1f[image: icon]\x1f\u00a0(\x1dhttps://example.com/i.png\x1d) Title\x02 ="},
+		{"image inside heading", "# ![icon](https://example.com/i.png) Title", "=== \x02\x1f[image: icon]\x1f\u00a0(\x1dhttps://example.com/i.png\x1d) Title\x02 ==="},
 	}
 
 	for _, tc := range tests {
@@ -421,8 +438,8 @@ func TestProcessMessageTextTables(t *testing.T) {
 		wantLines []string
 	}{
 		{
-			name: "aligned table with left right center",
-			opts: ProcessMessageOpts{DisableEmoji: true},
+			name: "aligned table with left right center (unicode)",
+			opts: ProcessMessageOpts{DisableEmoji: true, Unicode: true},
 			input: "| Name | Score | Status |\n" +
 				"| :--- | ---: | :---: |\n" +
 				"| Alice | 100 | OK |\n" +
@@ -437,8 +454,24 @@ func TestProcessMessageTextTables(t *testing.T) {
 			},
 		},
 		{
+			name: "aligned table with left right center (ascii)",
+			opts: ProcessMessageOpts{DisableEmoji: true, Unicode: false},
+			input: "| Name | Score | Status |\n" +
+				"| :--- | ---: | :---: |\n" +
+				"| Alice | 100 | OK |\n" +
+				"| Bob | 9 | Pass |",
+			wantLines: []string{
+				"+-------+-------+--------+",
+				"| \x02Name\x02  | \x02Score\x02 | \x02Status\x02 |",
+				"+-------+-------+--------+",
+				"| Alice |   100 |   OK   |",
+				"| Bob   |     9 |  Pass  |",
+				"+-------+-------+--------+",
+			},
+		},
+		{
 			name: "table without outer pipes",
-			opts: ProcessMessageOpts{DisableEmoji: true},
+			opts: ProcessMessageOpts{DisableEmoji: true, Unicode: true},
 			input: "Col1 | Col2\n" +
 				"--- | ---\n" +
 				"a | b",
@@ -452,7 +485,7 @@ func TestProcessMessageTextTables(t *testing.T) {
 		},
 		{
 			name: "table with inline markdown, inline code pipe, and escaped pipe",
-			opts: ProcessMessageOpts{DisableEmoji: true},
+			opts: ProcessMessageOpts{DisableEmoji: true, Unicode: true},
 			input: "| **Col** | Code | Escaped |\n" +
 				"| --- | --- | --- |\n" +
 				"| *val* | `a | b` | x \\| y |\n" +
@@ -468,7 +501,7 @@ func TestProcessMessageTextTables(t *testing.T) {
 		},
 		{
 			name: "header-only table without body rows",
-			opts: ProcessMessageOpts{DisableEmoji: true},
+			opts: ProcessMessageOpts{DisableEmoji: true, Unicode: true},
 			input: "| A | B |\n" +
 				"| - | - |",
 			wantLines: []string{
@@ -479,7 +512,7 @@ func TestProcessMessageTextTables(t *testing.T) {
 		},
 		{
 			name: "short body row padded to header column count",
-			opts: ProcessMessageOpts{DisableEmoji: true},
+			opts: ProcessMessageOpts{DisableEmoji: true, Unicode: true},
 			input: "| A | B | C |\n" +
 				"| - | - | - |\n" +
 				"| 1 |",
@@ -493,7 +526,7 @@ func TestProcessMessageTextTables(t *testing.T) {
 		},
 		{
 			name: "non-table pipe lines are emitted normally",
-			opts: ProcessMessageOpts{DisableEmoji: true},
+			opts: ProcessMessageOpts{DisableEmoji: true, Unicode: true},
 			input: "echo foo | grep bar\n" +
 				"just normal text",
 			wantLines: []string{
@@ -508,16 +541,16 @@ func TestProcessMessageTextTables(t *testing.T) {
 				"| - | - |\n" +
 				"| a | b |",
 			wantLines: []string{
-				"┌───┬───┐",
-				"│ \x02K\x02 │ \x02V\x02 │",
-				"├───┼───┤",
-				"│ a │ b │",
-				"└───┴───┘",
+				"+---+---+",
+				"| \x02K\x02 | \x02V\x02 |",
+				"+---+---+",
+				"| a | b |",
+				"+---+---+",
 			},
 		},
 		{
 			name: "quoted table preserves blockquote prefix",
-			opts: ProcessMessageOpts{DisableEmoji: true, BlockquoteChar: "\x0310🮇\x0f\u00a0"},
+			opts: ProcessMessageOpts{DisableEmoji: true, Unicode: true, BlockquoteChar: "\x0310🮇\x0f\u00a0"},
 			input: "> | A | B |\n" +
 				"> | - | - |\n" +
 				"> | 1 | 2 |",
@@ -531,7 +564,7 @@ func TestProcessMessageTextTables(t *testing.T) {
 		},
 		{
 			name: "table with trailing edited suffix",
-			opts: ProcessMessageOpts{DisableEmoji: true},
+			opts: ProcessMessageOpts{DisableEmoji: true, Unicode: true},
 			input: "| A | B |\n" +
 				"| - | - |\n" +
 				"| 1 | 2 | \x1d(✏️edited)\x1d",
@@ -546,14 +579,14 @@ func TestProcessMessageTextTables(t *testing.T) {
 		},
 		{
 			name: "table surrounded by text and heading",
-			opts: ProcessMessageOpts{DisableEmoji: true, PreserveNewLines: "max-one"},
+			opts: ProcessMessageOpts{DisableEmoji: true, Unicode: true, PreserveNewLines: "max-one"},
 			input: "# Report\n\n" +
 				"| Item | Qty |\n" +
 				"| --- | --: |\n" +
 				"| Apples | 12 |\n\n" +
 				"---",
 			wantLines: []string{
-				"= \x02Report\x02 =",
+				"═══ \x02Report\x02 ═══",
 				"",
 				"┌────────┬─────┐",
 				"│ \x02Item\x02   │ \x02Qty\x02 │",
@@ -566,7 +599,7 @@ func TestProcessMessageTextTables(t *testing.T) {
 		},
 		{
 			name: "escaped backticks inside table cells do not swallow column separator",
-			opts: ProcessMessageOpts{DisableEmoji: true},
+			opts: ProcessMessageOpts{DisableEmoji: true, Unicode: true},
 			input: "| A | B |\n" +
 				"| - | - |\n" +
 				"| \\`a | b\\` |",
@@ -576,6 +609,26 @@ func TestProcessMessageTextTables(t *testing.T) {
 				"├────┼────┤",
 				"│ `a │ b` │",
 				"└────┴────┘",
+			},
+		},
+		{
+			name: "table surrounded by text and heading (ascii)",
+			opts: ProcessMessageOpts{DisableEmoji: true, Unicode: false, PreserveNewLines: "max-one"},
+			input: "# Report\n\n" +
+				"| Item | Qty |\n" +
+				"| --- | --: |\n" +
+				"| Apples | 12 |\n\n" +
+				"---",
+			wantLines: []string{
+				"=== \x02Report\x02 ===",
+				"",
+				"+--------+-----+",
+				"| \x02Item\x02   | \x02Qty\x02 |",
+				"+--------+-----+",
+				"| Apples |  12 |",
+				"+--------+-----+",
+				"",
+				horizontalRuleLineASCII,
 			},
 		},
 		{
@@ -612,20 +665,32 @@ func TestFormatAndShortenSummaryMultiline(t *testing.T) {
 		want  string
 	}{
 		{
-			name:  "heading on line 1 does not bleed into body",
-			opts:  SummaryOpts{DisableEmoji: true},
+			name:  "heading on line 1 does not bleed into body (unicode)",
+			opts:  SummaryOpts{DisableEmoji: true, Unicode: true},
 			input: "# Title\nBody text",
-			want:  "= \x02Title\x02 = Body text",
+			want:  "═══ \x02Title\x02 ═══ Body text",
 		},
 		{
-			name:  "multiline list formatted per line",
-			opts:  SummaryOpts{DisableEmoji: true},
+			name:  "heading on line 1 does not bleed into body (ascii)",
+			opts:  SummaryOpts{DisableEmoji: true, Unicode: false},
+			input: "# Title\nBody text",
+			want:  "=== \x02Title\x02 === Body text",
+		},
+		{
+			name:  "multiline list formatted per line (unicode)",
+			opts:  SummaryOpts{DisableEmoji: true, Unicode: true},
 			input: "- first\n- second",
 			want:  "• first • second",
 		},
 		{
+			name:  "multiline list formatted per line (ascii)",
+			opts:  SummaryOpts{DisableEmoji: true, Unicode: false},
+			input: "- first\n- second",
+			want:  "* first * second",
+		},
+		{
 			name:  "fenced code block rendered as inline code",
-			opts:  SummaryOpts{DisableEmoji: true},
+			opts:  SummaryOpts{DisableEmoji: true, Unicode: true},
 			input: "Check:\n```go\nfmt.Println(1)\n```",
 			want:  "Check: " + codeStart + "go fmt.Println(1)" + codeEnd,
 		},

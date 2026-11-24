@@ -247,6 +247,7 @@ func (u *User) handleChannelTopicEvent(event *bridge.ChannelTopicEvent) bool {
 			blockQuoteCharDefault,
 			inlineCode,
 			customEmoji,
+			u.br.FormatterConfig().Unicode,
 		)
 
 		err := setChannelTopic(ch, tu, topic)
@@ -393,6 +394,7 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) bool {
 		CodeBlockSeparator: codeBlockSeparator,
 		BlockquoteChar:     blockQuoteChar,
 		InlineCodeChar:     inlineCode,
+		Unicode:            u.br.FormatterConfig().Unicode,
 		PreserveNewLines:   preserveNewLines,
 	}
 
@@ -775,6 +777,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) bool
 		CodeBlockSeparator: codeBlockSeparator,
 		BlockquoteChar:     blockQuoteChar,
 		InlineCodeChar:     inlineCode,
+		Unicode:            u.br.FormatterConfig().Unicode,
 		PreserveNewLines:   preserveNewLines,
 	}
 
@@ -2001,6 +2004,7 @@ func (u *User) replayHistoryEvents(brchannel *bridge.ChannelInfo, since int64, l
 		CodeBlockSeparator: codeBlockSeparator,
 		BlockquoteChar:     blockQuoteChar,
 		InlineCodeChar:     inlineCode,
+		Unicode:            u.br.FormatterConfig().Unicode,
 		PreserveNewLines:   preserveNewLines,
 	}
 
@@ -2302,6 +2306,7 @@ func (u *User) syncChannel(id string, name string) error {
 			blockQuoteCharDefault,
 			inlineCode,
 			customEmoji,
+			u.br.FormatterConfig().Unicode,
 		)
 
 		ch.Topic(svc, topic)

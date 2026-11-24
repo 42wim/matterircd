@@ -2806,7 +2806,7 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 			if !isFallbackDup {
 				outFallback := fallbackText
 				if !disableMarkdown {
-					outFallback = utils.Markdown2irc(outFallback, blockquoteChar, inlineCode)
+					outFallback = utils.Markdown2irc(outFallback, blockquoteChar, inlineCode, useUnicode)
 				}
 
 				if !disableEmoji {
@@ -2898,6 +2898,7 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 			CodeBlockSeparator: codeBlockSeparator,
 			BlockquoteChar:     blockquoteChar,
 			InlineCodeChar:     inlineCode,
+			Unicode:            useUnicode,
 			PreserveNewLines:   preserveNewLines,
 		}
 
@@ -3010,6 +3011,7 @@ func (m *Mattermost) formatAttachmentFields(b *strings.Builder, fields []*model.
 					opts.BlockquoteChar,
 					opts.InlineCodeChar,
 					opts.CustomEmoji,
+					opts.Unicode,
 				)
 			}
 
@@ -3356,6 +3358,7 @@ func (m *Mattermost) parsePreviewPost(b *strings.Builder, user string, channel s
 			CodeBlockSeparator: codeBlockSeparator,
 			BlockquoteChar:     blockquoteChar,
 			InlineCodeChar:     inlineCode,
+			Unicode:            useUnicode,
 			PreserveNewLines:   preserveNewLines,
 		}
 
