@@ -120,7 +120,7 @@ github.com/matterbridge/googlechatclient
 # github.com/matterbridge/logrus-prefixed-formatter v0.5.3-0.20200523233437-d971309a77ba
 ## explicit
 github.com/matterbridge/logrus-prefixed-formatter
-# github.com/matterbridge/matrixclient v0.0.0-20261124102336-65e30b6f781d
+# github.com/matterbridge/matrixclient v0.0.0-20261124110414-056b29bfcd29
 ## explicit; go 1.26.0
 github.com/matterbridge/matrixclient
 github.com/matterbridge/matrixclient/e2ee
