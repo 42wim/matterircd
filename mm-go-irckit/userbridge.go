@@ -1945,8 +1945,6 @@ func (u *User) replayHistoryEvents(brchannel *bridge.ChannelInfo, since int64, l
 		return true
 	}
 
-	spoof := u.createSpoof(brchannel)
-
 	channame := brchannel.Name
 	if !brchannel.DM {
 		channame = "#" + brchannel.Name
@@ -1976,6 +1974,11 @@ func (u *User) replayHistoryEvents(brchannel *bridge.ChannelInfo, since int64, l
 		// Only Matrix, MSTeams, GoogleChat, and RocketChat report a failed fetch as nil, an empty result is not one.
 		return events != nil || (u.br.Protocol() != serviceMatrix && u.br.Protocol() != serviceMsTeams && u.br.Protocol() != serviceGoogleChat && u.br.Protocol() != serviceRocketChat)
 	}
+
+	// Create the spoof helper after fetching replay events so any federated/external
+	// DM peer whose display name was learned from the fetched messages resolves to
+	// their real nick instead of a pre-fetch fallback (e.g. user-<hash>).
+	spoof := u.createSpoof(brchannel)
 
 	showReplayHdr := true
 
