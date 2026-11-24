@@ -1928,11 +1928,44 @@ func (r *RocketChat) StatusUser(ctx context.Context, userID string) (string, err
 		return rocketchatclient.StatusOffline, nil
 	}
 
-	if u.StatusText != "" {
-		return u.Status + ": " + u.StatusText, nil
+	prefix := u.Status
+	localTime := r.rc.GetUserLocalTime(userID)
+
+	// Presence activity is in milliseconds.
+	lastActivity := r.rc.GetUserLastActivity(userID) / 1000
+
+	var lastOnline string
+
+	if lastActivity > 0 {
+		diff := max(0, time.Now().Unix()-lastActivity)
+		if prefix == rocketchatclient.StatusOnline {
+			lastOnline = utils.FormatLastOnline(lastActivity, true)
+		} else if diff >= 20*60 {
+			lastOnline = utils.FormatLastOnline(lastActivity)
+		}
 	}
 
-	return u.Status, nil
+	var details string
+
+	switch {
+	case lastOnline != "" && localTime != "":
+		details = lastOnline + ", local time: " + localTime
+	case lastOnline != "":
+		details = lastOnline
+	case localTime != "":
+		details = "local time: " + localTime
+	}
+
+	status := prefix
+	if details != "" {
+		status += " (" + details + ")"
+	}
+
+	if u.StatusText != "" {
+		status += ": " + u.StatusText
+	}
+
+	return status, nil
 }
 
 func (r *RocketChat) StatusUsers(ctx context.Context) (map[string]string, error) {
@@ -1949,7 +1982,8 @@ func (r *RocketChat) StatusUsers(ctx context.Context) (map[string]string, error)
 }
 
 func (r *RocketChat) IsOnline(status string) bool {
-	return status == rocketchatclient.StatusOnline || strings.HasPrefix(status, rocketchatclient.StatusOnline+": ")
+	return status == rocketchatclient.StatusOnline ||
+		(strings.HasPrefix(status, rocketchatclient.StatusOnline+" (") && !strings.Contains(status, "): "))
 }
 
 func (r *RocketChat) HasCustomStatus(userID string) bool {

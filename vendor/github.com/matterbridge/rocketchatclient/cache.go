@@ -18,6 +18,7 @@ type stateCache struct {
 
 	usersByID    map[string]*User
 	usersByName  map[string]*User
+	lastActivity map[string]int64
 	roomsByID    map[string]*Room
 	subsByRoomID map[string]*Subscription
 	roomRoles    map[string]map[string][]string
@@ -54,6 +55,7 @@ func newStateCache(sentSize, msgSize, reactionSize int) (*stateCache, error) {
 	return &stateCache{
 		usersByID:     make(map[string]*User),
 		usersByName:   make(map[string]*User),
+		lastActivity:  make(map[string]int64),
 		roomsByID:     make(map[string]*Room),
 		subsByRoomID:  make(map[string]*Subscription),
 		roomRoles:     make(map[string]map[string][]string),
@@ -133,15 +135,7 @@ func (sc *stateCache) upsertUser(u *User) {
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
 
-	if prev, ok := sc.usersByID[cp.ID]; ok && prev.Username != "" && prev.Username != cp.Username {
-		delete(sc.usersByName, prev.Username)
-	}
-
-	sc.usersByID[cp.ID] = cp
-
-	if cp.Username != "" {
-		sc.usersByName[cp.Username] = cp
-	}
+	sc.upsertUserLocked(cp)
 }
 
 func (sc *stateCache) upsertUsers(users []User) {
@@ -157,18 +151,78 @@ func (sc *stateCache) upsertUsers(users []User) {
 			continue
 		}
 
-		cp := cloneUser(&users[i])
+		sc.upsertUserLocked(cloneUser(&users[i]))
+	}
+}
 
-		if prev, ok := sc.usersByID[cp.ID]; ok && prev.Username != "" && prev.Username != cp.Username {
+func (sc *stateCache) upsertUserLocked(cp *User) {
+	if prev, ok := sc.usersByID[cp.ID]; ok {
+		if prev.Username != "" && prev.Username != cp.Username {
 			delete(sc.usersByName, prev.Username)
 		}
 
-		sc.usersByID[cp.ID] = cp
+		if !cp.HasUTCOffset && prev.HasUTCOffset {
+			cp.UTCOffset = prev.UTCOffset
+			cp.HasUTCOffset = true
+		}
 
-		if cp.Username != "" {
-			sc.usersByName[cp.Username] = cp
+		if cp.LastLogin.Time.IsZero() && !prev.LastLogin.Time.IsZero() {
+			cp.LastLogin = prev.LastLogin
 		}
 	}
+
+	sc.usersByID[cp.ID] = cp
+
+	if cp.Username != "" {
+		sc.usersByName[cp.Username] = cp
+	}
+
+	if !cp.LastLogin.Time.IsZero() {
+		sc.recordActivityLocked(cp.ID, cp.LastLogin.Time.UnixMilli())
+	}
+}
+
+func (sc *stateCache) recordActivityLocked(userID string, tsMillis int64) {
+	if userID == "" || tsMillis <= 0 {
+		return
+	}
+
+	if tsMillis > sc.lastActivity[userID] {
+		sc.lastActivity[userID] = tsMillis
+	}
+}
+
+func (sc *stateCache) recordUserActivity(userID string, tsMillis int64) {
+	if userID == "" || tsMillis <= 0 {
+		return
+	}
+
+	sc.mu.Lock()
+	sc.recordActivityLocked(userID, tsMillis)
+	sc.mu.Unlock()
+}
+
+func (sc *stateCache) recordUserActivityByUsername(username string, tsMillis int64) {
+	if username == "" || tsMillis <= 0 {
+		return
+	}
+
+	sc.mu.Lock()
+	if u, ok := sc.usersByName[username]; ok && u != nil && u.ID != "" {
+		sc.recordActivityLocked(u.ID, tsMillis)
+	}
+	sc.mu.Unlock()
+}
+
+func (sc *stateCache) userLastActivity(userID string) int64 {
+	if userID == "" {
+		return 0
+	}
+
+	sc.mu.RLock()
+	defer sc.mu.RUnlock()
+
+	return sc.lastActivity[userID]
 }
 
 func (sc *stateCache) seedUserRef(ref UserRef) {
@@ -216,11 +270,19 @@ func (sc *stateCache) updateUserPresence(userID, username, status, statusText st
 			sc.usersByName[username] = u
 		}
 
+		if status == StatusOnline {
+			sc.recordActivityLocked(userID, time.Now().UnixMilli())
+		}
+
 		return "", true
 	}
 
 	prev := u.Status
 	u.Status = status
+
+	if status == StatusOnline {
+		sc.recordActivityLocked(userID, time.Now().UnixMilli())
+	}
 
 	if statusText != "" {
 		u.StatusText = statusText

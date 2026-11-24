@@ -130,7 +130,7 @@ github.com/matterbridge/matterclient
 # github.com/matterbridge/msteamsclient v0.0.0-20261124042714-c4315e2367ae
 ## explicit; go 1.26.2
 github.com/matterbridge/msteamsclient
-# github.com/matterbridge/rocketchatclient v0.0.0-20261117095619-335f44b67feb
+# github.com/matterbridge/rocketchatclient v0.0.0-20261124043422-482490cd2f58
 ## explicit; go 1.26.2
 github.com/matterbridge/rocketchatclient
 # github.com/matterbridge/slackclient v0.0.0-20261117092932-0a28e681e8a0
