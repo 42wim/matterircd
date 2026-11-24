@@ -35,6 +35,7 @@ const (
 	defaultAuthTTL      = 86400 * time.Second
 	maxAuthResponseSize = 1 << 20 // 1 MiB
 	formKeyClientID     = "client_id"
+	formKeyRefreshToken = "refresh_token"
 
 	// ScopeSpacesWork and related OAuth2 scopes for Microsoft Teams backend services.
 	ScopeSpacesWork     = "https://api.spaces.skype.com/.default offline_access openid profile"
@@ -560,10 +561,10 @@ func (c *Client) refreshSession(ctx context.Context) error {
 
 func (c *Client) exchangeRefreshToken(ctx context.Context, refreshToken, scope string) (*oauthTokenResponse, error) {
 	form := url.Values{
-		"grant_type":    {"refresh_token"},
-		formKeyClientID: {c.effectiveClientID()},
-		"refresh_token": {refreshToken},
-		"scope":         {scope},
+		"grant_type":        {formKeyRefreshToken},
+		formKeyClientID:     {c.effectiveClientID()},
+		formKeyRefreshToken: {refreshToken},
+		"scope":             {scope},
 	}
 
 	endpoint := c.oauthAuthority() + "/token"
@@ -896,7 +897,7 @@ func (c *Client) postForm(ctx context.Context, endpoint string, form url.Values)
 
 	// Browser SPA refresh tokens from teams.live.com require a cross-origin
 	// Origin header (otherwise Entra/MSA rejects them with AADSTS9002327).
-	if c.effectiveAccountType() == AccountPersonal && form.Get("grant_type") == "refresh_token" {
+	if c.effectiveAccountType() == AccountPersonal && form.Get("grant_type") == formKeyRefreshToken {
 		req.Header.Set("Origin", "https://teams.live.com")
 	}
 
