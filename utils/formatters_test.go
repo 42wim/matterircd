@@ -261,6 +261,8 @@ func TestMarkdown2ircHeadings(t *testing.T) {
 		{name: "quoted h1", input: "> # Quoted", bq: "🮇 ", want: "🮇 = \x02Quoted\x02 ="},
 		{name: "quoted h3", input: "> ### Quoted", bq: "🮇 ", want: "🮇 === Quoted ==="},
 		{name: "pre-replaced quoted heading", input: "🮇 # Quoted", bq: "🮇", want: "🮇 = \x02Quoted\x02 ="},
+		{name: "heading with trailing edited suffix", input: "# Title \x1d(✏️edited)\x1d", want: "= \x02Title\x02 = \x1d(✏️edited)\x1d"},
+		{name: "quoted heading with trailing edited suffix", input: "> ## Title \x1d(✏️edited)\x1d", bq: "🮇 ", want: "🮇 == \x02Title\x02 == \x1d(✏️edited)\x1d"},
 		{name: "escaped hash not heading", input: `\# Escaped`, want: "# Escaped"},
 	}
 
@@ -331,6 +333,8 @@ func TestMarkdown2ircHorizontalRules(t *testing.T) {
 		{name: "mixed markers not HR", input: "-*-", want: "-*-"},
 		{name: "bold italic not HR", input: "***bold italic***", want: "\x02\x1dbold italic\x1d\x02"},
 		{name: "quoted HR", input: "> ---", bq: "🮇 ", want: "🮇 " + horizontalRuleLine},
+		{name: "HR with trailing pinned suffix", input: "--- \x1d(📌pinned)\x1d", want: horizontalRuleLine + " \x1d(📌pinned)\x1d"},
+		{name: "quoted HR with trailing edited suffix", input: "> --- \x1d(✏️edited)\x1d", bq: "🮇 ", want: "🮇 " + horizontalRuleLine + " \x1d(✏️edited)\x1d"},
 		{name: "escaped HR", input: `\---`, want: "---"},
 	}
 
@@ -561,6 +565,20 @@ func TestProcessMessageTextTables(t *testing.T) {
 			},
 		},
 		{
+			name: "escaped backticks inside table cells do not swallow column separator",
+			opts: ProcessMessageOpts{DisableEmoji: true},
+			input: "| A | B |\n" +
+				"| - | - |\n" +
+				"| \\`a | b\\` |",
+			wantLines: []string{
+				"┌────┬────┐",
+				"│ \x02A\x02  │ \x02B\x02  │",
+				"├────┼────┤",
+				"│ `a │ b` │",
+				"└────┴────┘",
+			},
+		},
+		{
 			name: "disable markdown bypasses table parsing",
 			opts: ProcessMessageOpts{DisableMarkdown: true, DisableEmoji: true},
 			input: "| A | B |\n" +
@@ -579,6 +597,50 @@ func TestProcessMessageTextTables(t *testing.T) {
 			got := collectProcessedLines(tc.input, tc.opts)
 			if !slices.Equal(got, tc.wantLines) {
 				t.Errorf("got:\n%q\nwant:\n%q", got, tc.wantLines)
+			}
+		})
+	}
+}
+
+func TestFormatAndShortenSummaryMultiline(t *testing.T) {
+	codeStart, codeEnd := "\x0f`\x11\x02\x030,14", "\x11\x0f`"
+
+	tests := []struct {
+		name  string
+		opts  SummaryOpts
+		input string
+		want  string
+	}{
+		{
+			name:  "heading on line 1 does not bleed into body",
+			opts:  SummaryOpts{DisableEmoji: true},
+			input: "# Title\nBody text",
+			want:  "= \x02Title\x02 = Body text",
+		},
+		{
+			name:  "multiline list formatted per line",
+			opts:  SummaryOpts{DisableEmoji: true},
+			input: "- first\n- second",
+			want:  "• first • second",
+		},
+		{
+			name:  "fenced code block rendered as inline code",
+			opts:  SummaryOpts{DisableEmoji: true},
+			input: "Check:\n```go\nfmt.Println(1)\n```",
+			want:  "Check: " + codeStart + "go fmt.Println(1)" + codeEnd,
+		},
+		{
+			name:  "disable markdown preserves raw text with spaces",
+			opts:  SummaryOpts{DisableMarkdown: true, DisableEmoji: true},
+			input: "# Title\n**raw**",
+			want:  "# Title **raw**",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := FormatAndShortenSummary(tc.input, tc.opts); got != tc.want {
+				t.Errorf("FormatAndShortenSummary(%q) = %q, want %q", tc.input, got, tc.want)
 			}
 		})
 	}

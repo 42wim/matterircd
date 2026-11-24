@@ -157,18 +157,7 @@ func FormatAndShortenSummary(text string, opts SummaryOpts) string {
 		return ""
 	}
 
-	// Replace all newlines with space upfront to simplify processing.
-	// strings.ReplaceAll is highly optimized and allocation-free if there's no match.
-	text = strings.ReplaceAll(text, "\n", " ")
-
-	text = FormatMarkdownAndEmoji(
-		text,
-		opts.DisableMarkdown,
-		opts.DisableEmoji,
-		opts.BlockquoteChar,
-		opts.InlineCodeChar,
-		opts.CustomEmoji,
-	)
+	text = formatSummaryText(text, opts)
 
 	if opts.MaxLength <= 0 || len(text) <= opts.MaxLength {
 		return text
@@ -214,6 +203,113 @@ func FormatAndShortenSummary(text string, opts SummaryOpts) string {
 	}
 
 	return b.String()
+}
+
+// formatSummaryText formats multi-line summary text per line before collapsing
+// newlines into spaces so block-level constructs (e.g. headings) do not bleed
+// across lines, while rendering fenced code blocks as inline code.
+//
+//nolint:funlen
+func formatSummaryText(text string, opts SummaryOpts) string {
+	if !strings.ContainsRune(text, '\n') {
+		return FormatMarkdownAndEmoji(
+			text,
+			opts.DisableMarkdown,
+			opts.DisableEmoji,
+			opts.BlockquoteChar,
+			opts.InlineCodeChar,
+			opts.CustomEmoji,
+		)
+	}
+
+	if opts.DisableMarkdown {
+		text = strings.ReplaceAll(text, "\n", " ")
+		if !opts.DisableEmoji {
+			text = EmojiReplaceAliases(text, opts.CustomEmoji)
+		}
+
+		return text
+	}
+
+	var (
+		b          strings.Builder
+		codeBuf    strings.Builder
+		inCode     bool
+		codeMarker string
+		codeStart  string
+		codeEnd    string
+	)
+
+	b.Grow(len(text) + 32)
+
+	first := true
+	writePart := func(part string) {
+		if !first {
+			b.WriteByte(' ')
+		}
+
+		first = false
+
+		b.WriteString(part)
+	}
+
+	flushCode := func() {
+		if codeStart == "" {
+			codeStart, codeEnd = inlineCodeDelims(opts.InlineCodeChar)
+		}
+
+		writePart(codeStart + codeBuf.String() + codeEnd)
+		codeBuf.Reset()
+	}
+
+	for text != "" {
+		line, rest, _ := strings.Cut(text, "\n")
+		text = rest
+		line = strings.TrimSuffix(line, "\r")
+		trimmed := strings.TrimSpace(line)
+
+		if inCode {
+			if strings.HasPrefix(trimmed, codeMarker) {
+				inCode = false
+
+				flushCode()
+
+				continue
+			}
+
+			if codeBuf.Len() > 0 {
+				codeBuf.WriteByte(' ')
+			}
+
+			codeBuf.WriteString(line)
+
+			continue
+		}
+
+		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
+			codeMarker = trimmed[:3]
+			inCode = true
+
+			if lang := strings.TrimSpace(trimmed[3:]); lang != "" {
+				codeBuf.WriteString(lang)
+			}
+
+			continue
+		}
+
+		writePart(Markdown2irc(line, opts.BlockquoteChar, opts.InlineCodeChar))
+	}
+
+	if inCode {
+		flushCode()
+	}
+
+	res := b.String()
+	if !opts.DisableEmoji {
+		res = EmojiReplaceAliases(res, opts.CustomEmoji)
+	}
+
+	return res
 }
 
 // FormatFullCodeBlock handles syntax highlighting entirely in-memory and yields lines
@@ -1659,6 +1755,26 @@ func hasMarkdownBlockTrigger(trimmedStart, blockQuoteChar string) bool {
 	return blockQuoteChar != "" && blockQuoteChar != BlockQuoteCharDefault && strings.HasPrefix(trimmedStart, blockQuoteChar)
 }
 
+// splitTrailingActionSuffix separates an appended IRC action suffix
+// (e.g. " \x1d(✏️edited)\x1d") from the end of a line.
+func splitTrailingActionSuffix(s string) (string, string) {
+	if !strings.HasSuffix(s, ")\x1d") {
+		return s, ""
+	}
+
+	idx := strings.LastIndex(s, "\x1d(")
+	if idx <= 0 {
+		return s, ""
+	}
+
+	body := strings.TrimRight(s[:idx], " \t")
+	if body == "" {
+		return s, ""
+	}
+
+	return body, s[len(body):]
+}
+
 func Markdown2irc(msg string, blockQuoteChar string, inlineCode string) string {
 	if msg == "" {
 		return msg
@@ -1674,17 +1790,19 @@ func Markdown2irc(msg string, blockQuoteChar string, inlineCode string) string {
 		content = msg
 	}
 
+	blockBody, actionSuffix := splitTrailingActionSuffix(content)
+
 	// Horizontal rule (must precede unordered list since "* * *" and "- - -" match both)
-	if isHorizontalRule(content) {
-		return quotePrefix + horizontalRuleLine
+	if isHorizontalRule(blockBody) {
+		return quotePrefix + horizontalRuleLine + actionSuffix
 	}
 
 	// ATX Heading (# through ######): wrapped in '=' per level, bold text for H1-H2 only
-	if level, headingText, ok := parseHeading(content); ok {
+	if level, headingText, ok := parseHeading(blockBody); ok {
 		marker := strings.Repeat("=", level)
 		formatted := formatInlineMarkdown(headingText, inlineCode, level <= 2)
 
-		return quotePrefix + marker + " " + formatted + " " + marker
+		return quotePrefix + marker + " " + formatted + " " + marker + actionSuffix
 	}
 
 	// Unordered list (-, *, +)
@@ -1891,7 +2009,7 @@ func splitTableRow(line string) ([]string, bool) {
 
 			i = nextIdx
 		case '\\':
-			if i+1 < len(trimmed) && (trimmed[i+1] == '|' || trimmed[i+1] == '\\') {
+			if i+1 < len(trimmed) && (trimmed[i+1] == '|' || trimmed[i+1] == '\\' || trimmed[i+1] == '`') {
 				cell.WriteString(trimmed[i : i+2])
 
 				i += 2

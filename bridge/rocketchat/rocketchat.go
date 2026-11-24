@@ -38,12 +38,6 @@ const (
 // roomMentionRegexp matches Rocket.Chat's @all and @here along with Mattermost/Matrix @channel and @room.
 var roomMentionRegexp = regexp.MustCompile(`@(?:room|channel|all|here)(?:\W|$)`)
 
-var markdownReplacer = strings.NewReplacer(
-	"\n", " ",
-	"```", "`",
-	"~~~", "`",
-)
-
 var logger = newLogger()
 
 func newLogger() *logrus.Entry {
@@ -1186,26 +1180,17 @@ func (r *RocketChat) formatSummary(msg string, maxLen int, uncounted string) str
 	fc := &r.cfg.RocketChat().Formatter
 	unicode := fc.Unicode
 
-	if !fc.DisableMarkdown {
-		msg = markdownReplacer.Replace(msg)
-
-		blockquoteChar := "|"
-		if unicode {
-			blockquoteChar = "▕"
-		}
-
-		msg = utils.Markdown2irc(msg, blockquoteChar, fc.MarkdownInlineCode)
-	} else {
-		msg = strings.ReplaceAll(msg, "\n", " ")
-	}
-
-	if !fc.DisableEmoji {
-		msg = utils.EmojiReplaceAliases(msg, fc.CustomEmoji)
+	blockquoteChar := "|"
+	if unicode {
+		blockquoteChar = "▕"
 	}
 
 	return utils.FormatAndShortenSummary(msg, utils.SummaryOpts{
-		DisableMarkdown: true,
-		DisableEmoji:    true,
+		DisableMarkdown: fc.DisableMarkdown,
+		DisableEmoji:    fc.DisableEmoji,
+		CustomEmoji:     fc.CustomEmoji,
+		BlockquoteChar:  blockquoteChar,
+		InlineCodeChar:  fc.MarkdownInlineCode,
 		MaxLength:       maxLen,
 		UncountedPrefix: uncounted,
 		Unicode:         unicode,
