@@ -926,6 +926,53 @@ func (m *Matrix) MsgUserThread(ctx context.Context, userID, parentID, text strin
 	return m.recordSent(ctx, "", eventID, rootID.String(), text), nil
 }
 
+func (m *Matrix) MsgUserQuote(ctx context.Context, userID, threadID, quotedPostID string, threaded bool, text string) (string, string, error) {
+	logger.Debugf("msguserquote: sending quoted reply '%s' '%s' '%s' (threaded=%v) '%s'", userID, threadID, quotedPostID, threaded, text)
+
+	uid, ok := m.resolveUserID(userID)
+	if !ok {
+		return "", "", errors.New("unknown user " + userID)
+	}
+
+	roomID := m.mc.DirectRoom(uid)
+
+	var rootID id.EventID
+
+	if threaded {
+		targetID := id.EventID(quotedPostID)
+		if threadID != "" {
+			targetID = id.EventID(threadID)
+		}
+
+		rootID = m.resolveThreadRoot(ctx, roomID, targetID)
+	}
+
+	m.beginSend(text)
+
+	eventID, err := m.mc.SendDirectReply(ctx, uid, rootID, id.EventID(quotedPostID), text)
+	m.endSend(text, eventID, err)
+
+	if err != nil {
+		logger.Error("msguserquote sending message: error ", err)
+
+		return "", "", err
+	}
+
+	roomID = m.mc.DirectRoom(uid)
+	if roomID != "" {
+		m.msgRoomCache.Add(eventID, roomID)
+		m.cacheText(eventID, text)
+
+		if rootID != "" {
+			m.msgThreadRootCache.Add(eventID, rootID)
+		} else {
+			m.msgThreadRootCache.Add(eventID, eventID)
+		}
+	}
+
+	return m.recordSent(ctx, "", eventID, rootID.String(), text), rootID.String(), nil
+}
+
 func (m *Matrix) beginSend(text string) {
 	m.sentMu.Lock()
 	m.pendingSends[text]++
@@ -1026,6 +1073,43 @@ func (m *Matrix) MsgChannelThread(ctx context.Context, channelID, parentID, text
 	}
 
 	return m.recordSent(ctx, channelID, eventID, rootID.String(), text), nil
+}
+
+func (m *Matrix) MsgChannelQuote(ctx context.Context, channelID, threadID, quotedPostID string, threaded bool, text string) (string, string, error) {
+	logger.Debugf("msgchannelquote: sending quoted reply '%s' '%s' '%s' (threaded=%v) '%s'", m.roomLabel(id.RoomID(channelID)), threadID, quotedPostID, threaded, text)
+
+	roomID := id.RoomID(channelID)
+
+	var rootID id.EventID
+
+	if threaded {
+		targetID := id.EventID(quotedPostID)
+		if threadID != "" {
+			targetID = id.EventID(threadID)
+		}
+
+		rootID = m.resolveThreadRoot(ctx, roomID, targetID)
+	}
+
+	m.beginSend(text)
+
+	eventID, err := m.mc.SendReply(ctx, roomID, rootID, id.EventID(quotedPostID), text)
+	m.endSend(text, eventID, err)
+
+	if err != nil {
+		return "", "", err
+	}
+
+	m.msgRoomCache.Add(eventID, roomID)
+	m.cacheText(eventID, text)
+
+	if rootID != "" {
+		m.msgThreadRootCache.Add(eventID, rootID)
+	} else {
+		m.msgThreadRootCache.Add(eventID, eventID)
+	}
+
+	return m.recordSent(ctx, channelID, eventID, rootID.String(), text), rootID.String(), nil
 }
 
 func (m *Matrix) ModifyPost(ctx context.Context, msgID, text string) error {

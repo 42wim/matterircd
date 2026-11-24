@@ -985,11 +985,35 @@ func (c *Client) Send(ctx context.Context, roomID id.RoomID, parentID id.EventID
 		content.RelatesTo = &event.RelatesTo{Type: event.RelThread, EventID: parentID}
 	}
 
+	return c.sendMessage(ctx, roomID, &content)
+}
+
+// SendReply sends a native Matrix rich reply referencing replyToID, optionally inside threadRootID.
+func (c *Client) SendReply(ctx context.Context, roomID id.RoomID, threadRootID, replyToID id.EventID, text string) (id.EventID, error) {
+	content := event.MessageEventContent{MsgType: event.MsgText, Body: text}
+
+	switch {
+	case replyToID != "":
+		content.RelatesTo = &event.RelatesTo{
+			InReplyTo: &event.InReplyTo{EventID: replyToID},
+		}
+		if threadRootID != "" {
+			content.RelatesTo.Type = event.RelThread
+			content.RelatesTo.EventID = threadRootID
+		}
+	case threadRootID != "":
+		content.RelatesTo = &event.RelatesTo{Type: event.RelThread, EventID: threadRootID}
+	}
+
+	return c.sendMessage(ctx, roomID, &content)
+}
+
+func (c *Client) sendMessage(ctx context.Context, roomID id.RoomID, content *event.MessageEventContent) (id.EventID, error) {
 	txnID := c.mc.TxnID()
 	for attempt := 0; ; attempt++ {
-		resp, err := c.mc.SendMessageEvent(ctx, roomID, event.EventMessage, &content, mautrix.ReqSendEvent{TransactionID: txnID})
+		resp, err := c.mc.SendMessageEvent(ctx, roomID, event.EventMessage, content, mautrix.ReqSendEvent{TransactionID: txnID})
 		if err == nil {
-			c.cacheSentMessageEvent(roomID, resp.EventID, &content)
+			c.cacheSentMessageEvent(roomID, resp.EventID, content)
 
 			return resp.EventID, nil
 		}
@@ -1105,68 +1129,89 @@ func (c *Client) singlePeerLocked(ch *Channel) (id.UserID, bool) {
 	return peer, true
 }
 
+func (c *Client) ensureDirectRoom(ctx context.Context, userID id.UserID) (id.RoomID, error) {
+	roomID := c.DirectRoom(userID)
+	if roomID != "" {
+		c.Lock()
+		c.queueDirectLocked(ctx, roomID)
+		c.Unlock()
+
+		return roomID, nil
+	}
+
+	c.Lock()
+	c.creatingDirect[userID]++
+	c.Unlock()
+
+	req := &mautrix.ReqCreateRoom{
+		Preset:   "trusted_private_chat",
+		Invite:   []id.UserID{userID},
+		IsDirect: true,
+	}
+
+	var (
+		resp *mautrix.RespCreateRoom
+		err  error
+	)
+
+	for attempt := 0; ; attempt++ {
+		resp, err = c.mc.CreateRoom(ctx, req)
+		if err == nil {
+			break
+		}
+
+		retry, herr := c.HandleRetry(ctx, "CreateRoom", err, attempt, maxAPIRetries)
+		if herr != nil {
+			c.Lock()
+			c.doneCreatingDirectLocked(userID)
+			c.Unlock()
+
+			return "", herr
+		}
+
+		if !retry {
+			c.Lock()
+			c.doneCreatingDirectLocked(userID)
+			c.Unlock()
+
+			return "", err
+		}
+	}
+
+	roomID = resp.RoomID
+
+	// Classify as a DM before the slow m.direct write so a concurrent
+	// Rooms() does not expose it as a channel; pendingDirect keeps
+	// handleDM from dropping the mark.
+	c.Lock()
+	c.joinedRooms[roomID] = struct{}{}
+	c.pendingDirect[roomID] = pendingAssoc{user: userID}
+	c.addDirectLocked(roomID, userID)
+	c.doneCreatingDirectLocked(userID)
+	c.queueDirectLocked(ctx, roomID)
+	c.Unlock()
+
+	return roomID, nil
+}
+
 // SendDirect sends a message to userID, creating the direct room if needed.
 func (c *Client) SendDirect(ctx context.Context, userID id.UserID, parentID id.EventID, text string) (id.EventID, error) {
-	roomID := c.DirectRoom(userID)
-	if roomID == "" {
-		c.Lock()
-		c.creatingDirect[userID]++
-		c.Unlock()
-
-		req := &mautrix.ReqCreateRoom{
-			Preset:   "trusted_private_chat",
-			Invite:   []id.UserID{userID},
-			IsDirect: true,
-		}
-
-		var (
-			resp *mautrix.RespCreateRoom
-			err  error
-		)
-
-		for attempt := 0; ; attempt++ {
-			resp, err = c.mc.CreateRoom(ctx, req)
-			if err == nil {
-				break
-			}
-
-			retry, herr := c.HandleRetry(ctx, "CreateRoom", err, attempt, maxAPIRetries)
-			if herr != nil {
-				c.Lock()
-				c.doneCreatingDirectLocked(userID)
-				c.Unlock()
-
-				return "", herr
-			}
-
-			if !retry {
-				c.Lock()
-				c.doneCreatingDirectLocked(userID)
-				c.Unlock()
-
-				return "", err
-			}
-		}
-
-		roomID = resp.RoomID
-
-		// Classify as a DM before the slow m.direct write so a concurrent
-		// Rooms() does not expose it as a channel; pendingDirect keeps
-		// handleDM from dropping the mark.
-		c.Lock()
-		c.joinedRooms[roomID] = struct{}{}
-		c.pendingDirect[roomID] = pendingAssoc{user: userID}
-		c.addDirectLocked(roomID, userID)
-		c.doneCreatingDirectLocked(userID)
-		c.queueDirectLocked(ctx, roomID)
-		c.Unlock()
-	} else {
-		c.Lock()
-		c.queueDirectLocked(ctx, roomID)
-		c.Unlock()
+	roomID, err := c.ensureDirectRoom(ctx, userID)
+	if err != nil {
+		return "", err
 	}
 
 	return c.Send(ctx, roomID, parentID, text)
+}
+
+// SendDirectReply sends a native Matrix rich reply to userID, creating the direct room if needed.
+func (c *Client) SendDirectReply(ctx context.Context, userID id.UserID, threadRootID, replyToID id.EventID, text string) (id.EventID, error) {
+	roomID, err := c.ensureDirectRoom(ctx, userID)
+	if err != nil {
+		return "", err
+	}
+
+	return c.SendReply(ctx, roomID, threadRootID, replyToID, text)
 }
 
 func (c *Client) cacheEvent(ev *event.Event) {
@@ -1213,9 +1258,23 @@ func (c *Client) cacheSentMessageEvent(roomID id.RoomID, eventID id.EventID, con
 	}
 
 	if content.RelatesTo != nil {
-		raw["m.relates_to"] = map[string]any{
-			"rel_type": string(content.RelatesTo.Type),
-			"event_id": string(content.RelatesTo.EventID),
+		rel := map[string]any{}
+		if content.RelatesTo.Type != "" {
+			rel["rel_type"] = string(content.RelatesTo.Type)
+		}
+
+		if content.RelatesTo.EventID != "" {
+			rel["event_id"] = string(content.RelatesTo.EventID)
+		}
+
+		if content.RelatesTo.InReplyTo != nil && content.RelatesTo.InReplyTo.EventID != "" {
+			rel["m.in_reply_to"] = map[string]any{
+				"event_id": string(content.RelatesTo.InReplyTo.EventID),
+			}
+		}
+
+		if len(rel) > 0 {
+			raw["m.relates_to"] = rel
 		}
 	}
 
