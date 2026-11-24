@@ -141,7 +141,7 @@ func (c *Client) UpdateLastViewed(ctx context.Context, roomID id.RoomID, eventID
 
 // Edit replaces the text of an event we sent.
 func (c *Client) Edit(ctx context.Context, roomID id.RoomID, eventID id.EventID, text string) (id.EventID, error) {
-	content := event.MessageEventContent{MsgType: event.MsgText, Body: text}
+	content := newTextMessageContent(text)
 	content.SetEdit(eventID)
 
 	txnID := c.mc.TxnID()

@@ -980,7 +980,7 @@ func (c *Client) Join(ctx context.Context, roomIDOrAlias string) (id.RoomID, err
 
 // Send sends a text message, as a thread reply when parentID is set.
 func (c *Client) Send(ctx context.Context, roomID id.RoomID, parentID id.EventID, text string) (id.EventID, error) {
-	content := event.MessageEventContent{MsgType: event.MsgText, Body: text}
+	content := newTextMessageContent(text)
 	if parentID != "" {
 		content.RelatesTo = &event.RelatesTo{Type: event.RelThread, EventID: parentID}
 	}
@@ -990,7 +990,7 @@ func (c *Client) Send(ctx context.Context, roomID id.RoomID, parentID id.EventID
 
 // SendReply sends a native Matrix rich reply referencing replyToID, optionally inside threadRootID.
 func (c *Client) SendReply(ctx context.Context, roomID id.RoomID, threadRootID, replyToID id.EventID, text string) (id.EventID, error) {
-	content := event.MessageEventContent{MsgType: event.MsgText, Body: text}
+	content := newTextMessageContent(text)
 
 	switch {
 	case replyToID != "":
