@@ -628,6 +628,20 @@ func TestProcessMessageTextTables(t *testing.T) {
 			},
 		},
 		{
+			name: "pipe-less table cell starting with (re is not stripped as reply suffix",
+			opts: ProcessMessageOpts{DisableEmoji: true, Unicode: true},
+			input: "Topic | Note\n" +
+				"--- | ---\n" +
+				"Build | (re testing)",
+			wantLines: []string{
+				"┌───────┬──────────────┐",
+				"│ \x02Topic\x02 │ \x02Note\x02         │",
+				"├───────┼──────────────┤",
+				"│ Build │ (re testing) │",
+				"└───────┴──────────────┘",
+			},
+		},
+		{
 			name: "table surrounded by text and heading",
 			opts: ProcessMessageOpts{DisableEmoji: true, Unicode: true, PreserveNewLines: "max-one"},
 			input: "# Report\n\n" +
@@ -743,6 +757,12 @@ func TestFormatAndShortenSummaryMultiline(t *testing.T) {
 			opts:  SummaryOpts{DisableEmoji: true, Unicode: true},
 			input: "Check:\n```go\nfmt.Println(1)\n```",
 			want:  "Check: " + codeStart + "go fmt.Println(1)" + codeEnd,
+		},
+		{
+			name:  "four-backtick fenced code block containing triple backticks",
+			opts:  SummaryOpts{DisableEmoji: true, Unicode: true},
+			input: "Check:\n````md\n```\ncode\n```\n````",
+			want:  "Check: " + codeStart + "md ``` code ```" + codeEnd,
 		},
 		{
 			name:  "disable markdown preserves raw text with spaces",

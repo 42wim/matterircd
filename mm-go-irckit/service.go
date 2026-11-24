@@ -1158,6 +1158,10 @@ func dispatchHistoricalEvent(u *User, toUser *User, event *bridge.Event, searchC
 		if !showContext {
 			currMsgID = ""
 			currParentID = ""
+		} else if i == 0 && !showMulti && u.br.BridgeConfig().PrefixContext && nick != systemUser && isTableTopBorder(line) && (currMsgID != "" || currParentID != "") {
+			formatScrollbackMsg(u, channelID, channelName, scrollbackUser, nick, tsStr, timeTag, currMsgID, currParentID, "")
+			currMsgID = ""
+			currParentID = ""
 		}
 
 		if isAction {

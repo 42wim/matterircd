@@ -271,7 +271,7 @@ func formatSummaryText(text string, opts SummaryOpts) string {
 		trimmed := strings.TrimSpace(line)
 
 		if inCode {
-			if strings.HasPrefix(trimmed, codeMarker) {
+			if closeIdx, _, _ := findCodeBlockClose(line, trimmed, codeMarker); closeIdx >= 0 {
 				inCode = false
 
 				flushCode()
@@ -288,11 +288,11 @@ func formatSummaryText(text string, opts SummaryOpts) string {
 			continue
 		}
 
-		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
-			codeMarker = trimmed[:3]
+		if marker, lang, ok := parseCodeFenceOpen(trimmed); ok {
+			codeMarker = marker
 			inCode = true
 
-			if lang := strings.TrimSpace(trimmed[3:]); lang != "" {
+			if lang != "" {
 				codeBuf.WriteString(lang)
 			}
 
@@ -2056,7 +2056,7 @@ func stripTableTrailingSuffix(line string) (string, string) {
 	if lastPipe >= 0 {
 		after := strings.TrimSpace(line[lastPipe+1:])
 		if (strings.HasPrefix(after, "\x1d(") && strings.HasSuffix(after, ")\x1d")) ||
-			(strings.HasPrefix(after, "(re ") && strings.HasSuffix(after, ")")) {
+			(strings.HasPrefix(after, "(re @") && strings.HasSuffix(after, ")")) {
 			return line[:lastPipe+1], after
 		}
 	}
