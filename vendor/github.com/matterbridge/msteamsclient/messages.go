@@ -146,6 +146,46 @@ func (c *Client) SendMessageThread(ctx context.Context, conversationID, parentID
 	return c.postMessage(ctx, conversationID, "", quotedHTML, text)
 }
 
+// SendQuotedMessage posts a message embedding a native Teams Reply blockquote referencing
+// quotedMessageID. For Teams channels (@thread.tacv2) with rootMessageID set, the message
+// is posted inside that channel thread; for 1:1, group, and meeting chats, rootMessageID is ignored.
+func (c *Client) SendQuotedMessage(ctx context.Context, conversationID, rootMessageID, quotedMessageID, text string) (*ChatMessage, error) {
+	if quotedMessageID == "" {
+		return nil, errors.New("msteamsclient: quoted message ID is required")
+	}
+
+	quoted, err := c.GetMessage(ctx, conversationID, quotedMessageID)
+	if err != nil {
+		return nil, err
+	}
+
+	parentMRI := ""
+	parentAuthor := ""
+	parentSnippet := ""
+
+	if quoted != nil {
+		parentMRI = quoted.FromMRI
+		parentAuthor = quoted.DisplayName
+		parentSnippet = firstLineSnippet(quoted.ContentText, 120)
+
+		if parentAuthor == "" && parentMRI != "" {
+			if u := c.GetUser(parentMRI); u != nil && u.DisplayName != "" {
+				parentAuthor = u.DisplayName
+			}
+		}
+	}
+
+	bodyHTML := TextToHTML(text)
+	quotedHTML := WrapReplyQuoteHTML(parentMRI, parentAuthor, quotedMessageID, parentSnippet, bodyHTML)
+
+	targetRoot := ""
+	if IsTeamsChannel(conversationID) {
+		targetRoot = rootMessageID
+	}
+
+	return c.postMessage(ctx, conversationID, targetRoot, quotedHTML, text)
+}
+
 func (c *Client) postMessage(ctx context.Context, conversationID, rootMessageID, htmlContent, plainText string) (*ChatMessage, error) {
 	ep := c.Endpoints()
 	if ep.ChatService == "" {
