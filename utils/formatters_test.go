@@ -578,6 +578,21 @@ func TestProcessMessageTextTables(t *testing.T) {
 			},
 		},
 		{
+			name: "table with trailing reply suffix",
+			opts: ProcessMessageOpts{DisableEmoji: true, Unicode: true},
+			input: "| A | B |\n" +
+				"| - | - |\n" +
+				"| 1 | 2 | (re @user: hello)",
+			wantLines: []string{
+				"┌───┬───┐",
+				"│ \x02A\x02 │ \x02B\x02 │",
+				"├───┼───┤",
+				"│ 1 │ 2 │",
+				"└───┴───┘",
+				"(re @user: hello)",
+			},
+		},
+		{
 			name: "table surrounded by text and heading",
 			opts: ProcessMessageOpts{DisableEmoji: true, Unicode: true, PreserveNewLines: "max-one"},
 			input: "# Report\n\n" +

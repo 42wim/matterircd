@@ -408,8 +408,16 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) bool {
 		}
 
 		if showContext || addPrefix {
-			line = prefix + line + suffix
 			addPrefix = false
+
+			if prefix != "" && (strings.HasPrefix(line, "┌") || strings.HasPrefix(line, "+-")) {
+				sendErr = u.msgSpoofDMTime(event.Sender, event.Receiver, strings.TrimRight(prefix, " \t")+suffix, timeTag, len(prefix)+len(suffix))
+				if sendErr != nil {
+					return
+				}
+			} else {
+				line = prefix + line + suffix
+			}
 		}
 
 		sendErr = u.msgSpoofDMTime(event.Sender, event.Receiver, line, timeTag, len(line))
@@ -791,8 +799,16 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) bool
 		}
 
 		if showContext || addPrefix {
-			line = prefix + line + suffix
 			addPrefix = false
+
+			if prefix != "" && (strings.HasPrefix(line, "┌") || strings.HasPrefix(line, "+-")) {
+				sendErr = spoofChannelWithPrefixTime(ch, senderPrefix, strings.TrimRight(prefix, " \t")+suffix, cmd, timeTag, len(prefix)+len(suffix))
+				if sendErr != nil {
+					return
+				}
+			} else {
+				line = prefix + line + suffix
+			}
 		}
 
 		sendErr = spoofChannelWithPrefixTime(ch, senderPrefix, line, cmd, timeTag, len(line))

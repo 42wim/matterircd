@@ -2014,7 +2014,9 @@ func extractTableLine(line string, opts ProcessMessageOpts) (string, string, boo
 func stripTableTrailingSuffix(line string) (string, string) {
 	lastPipe := strings.LastIndexByte(line, '|')
 	if lastPipe >= 0 {
-		if after := strings.TrimSpace(line[lastPipe+1:]); strings.HasPrefix(after, "\x1d(") && strings.HasSuffix(after, ")\x1d") {
+		after := strings.TrimSpace(line[lastPipe+1:])
+		if (strings.HasPrefix(after, "\x1d(") && strings.HasSuffix(after, ")\x1d")) ||
+			(strings.HasPrefix(after, "(re ") && strings.HasSuffix(after, ")")) {
 			return line[:lastPipe+1], after
 		}
 	}
