@@ -309,6 +309,7 @@ func (c *Client) ResolveUsers(ctx context.Context, mris []string) (map[string]*U
 func (c *Client) cachedUsersAndMissing(mris []string) (map[string]*User, []string) {
 	result := make(map[string]*User, len(mris))
 	missing := make([]string, 0)
+	isWork := c.effectiveAccountType() != AccountPersonal
 
 	c.Users.mu.RLock()
 	defer c.Users.mu.RUnlock()
@@ -322,6 +323,12 @@ func (c *Client) cachedUsersAndMissing(mris []string) (map[string]*User, []strin
 			cp := *u
 			result[mri] = &cp
 
+			continue
+		}
+
+		// Work/School Middle-Tier fetchShortProfile rejects consumer MSA MRIs
+		// (8:live:...) with HTTP 400 InvalidUserId, which fails the entire batch.
+		if isWork && strings.HasPrefix(mri, "8:live:") {
 			continue
 		}
 

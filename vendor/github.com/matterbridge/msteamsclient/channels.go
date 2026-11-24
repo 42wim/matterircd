@@ -54,6 +54,7 @@ type rawConversation struct {
 		OriginalArrivalTime string `json:"originalarrivaltime"`
 		ComposeTime         string `json:"composetime"`
 		From                string `json:"from"`
+		IMDisplayName       string `json:"imdisplayname"`
 	} `json:"lastMessage"`
 	MemberProperties struct {
 		Role string `json:"role"`
@@ -200,7 +201,12 @@ func (c *Client) fetchConversations(ctx context.Context, chatService string) (ma
 		}
 
 		for i := range resp.Conversations {
-			conv := parseRawConversation(&resp.Conversations[i])
+			raw := &resp.Conversations[i]
+			if fromMRI := extractMRIFromURL(raw.LastMessage.From); fromMRI != "" && raw.LastMessage.IMDisplayName != "" {
+				c.CacheUser(&User{MRI: fromMRI, DisplayName: raw.LastMessage.IMDisplayName})
+			}
+
+			conv := parseRawConversation(raw)
 			if conv == nil {
 				continue
 			}
