@@ -15,7 +15,7 @@ require (
 	github.com/matterbridge/matrixclient v0.0.0-20261124102336-65e30b6f781d
 	github.com/matterbridge/matterclient v0.0.0-20261116034806-3087b48d325c
 	github.com/matterbridge/msteamsclient v0.0.0-20261124103100-5afc4f7a65da
-	github.com/matterbridge/rocketchatclient v0.0.0-20261124043422-482490cd2f58
+	github.com/matterbridge/rocketchatclient v0.0.0-20261124103749-0ea0f5b731fe
 	github.com/matterbridge/slackclient v0.0.0-20261117092932-0a28e681e8a0
 	github.com/mattermost/mattermost/server/public v0.3.0
 	github.com/mattn/go-mastodon v0.0.6
