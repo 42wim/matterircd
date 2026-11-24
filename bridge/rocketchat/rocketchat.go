@@ -2132,8 +2132,7 @@ func (r *RocketChat) SendTyping(ctx context.Context, channelName string) {
 
 // PostURL returns the Rocket.Chat message permalink for DETAILS output.
 func (r *RocketChat) PostURL(ctx context.Context, postID string, events []*bridge.Event) string {
-	base := r.rc.BaseURL()
-	if base == "" || postID == "" {
+	if postID == "" {
 		return ""
 	}
 
@@ -2152,30 +2151,7 @@ func (r *RocketChat) PostURL(ctx context.Context, postID string, events []*bridg
 		roomID = r.GetPostChannelID(ctx, postID)
 	}
 
-	if roomID == "" {
-		return ""
-	}
-
-	room, ok := r.rc.Room(roomID)
-	if !ok {
-		return base + "/direct/" + url.PathEscape(roomID) + "?msg=" + url.QueryEscape(postID)
-	}
-
-	var prefix, target string
-
-	switch room.Type {
-	case rocketchatclient.RoomTypePrivate:
-		prefix = "/group/"
-		target = cmp.Or(room.Name, room.ID)
-	case rocketchatclient.RoomTypeDirect:
-		prefix = "/direct/"
-		target = room.ID
-	default:
-		prefix = "/channel/"
-		target = cmp.Or(room.Name, room.ID)
-	}
-
-	return base + prefix + url.PathEscape(target) + "?msg=" + url.QueryEscape(postID)
+	return r.rc.MessagePermalink(roomID, postID)
 }
 
 func (r *RocketChat) GetFilesInfo(ctx context.Context, fileIDs []string) []*bridge.File {
@@ -2645,6 +2621,52 @@ func (r *RocketChat) MsgChannelThread(ctx context.Context, channelID, parentID, 
 	r.recordSent(ctx, channelID, msgID, parentID, sendText)
 
 	return msgID, nil
+}
+
+func (r *RocketChat) MsgUserQuote(ctx context.Context, userID, threadID, quotedPostID string, threaded bool, text string) (string, string, error) {
+	roomID := r.GetDMChannelID(ctx, userID)
+	if roomID == "" {
+		u := r.GetUser(ctx, userID)
+		if u == nil || u.Username == "" {
+			return "", "", errors.New("rocketchat: direct room not found for user " + userID)
+		}
+
+		room, err := r.rc.CreateDM(ctx, u.Username)
+		if err != nil {
+			return "", "", err
+		}
+
+		roomID = room.ID
+	}
+
+	return r.MsgChannelQuote(ctx, roomID, threadID, quotedPostID, threaded, text)
+}
+
+func (r *RocketChat) MsgChannelQuote(ctx context.Context, channelID, threadID, quotedPostID string, threaded bool, text string) (string, string, error) {
+	parentID := ""
+
+	if threaded {
+		parentID = quotedPostID
+		if threadID != "" {
+			parentID = threadID
+		}
+
+		msg, err := r.rc.ResolveMessage(ctx, parentID)
+		if err == nil && msg != nil && msg.ThreadID != "" {
+			parentID = msg.ThreadID
+		}
+	}
+
+	sendText := rocketChatActionText(text)
+
+	msgID, err := r.rc.SendQuotedMessage(ctx, channelID, parentID, quotedPostID, sendText)
+	if err != nil {
+		return "", "", err
+	}
+
+	r.recordSent(ctx, channelID, msgID, parentID, sendText)
+
+	return msgID, parentID, nil
 }
 
 func rocketChatActionText(text string) string {
