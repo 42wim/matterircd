@@ -784,7 +784,7 @@ func (g *GoogleChat) prependQuotedMessage(
 	}
 
 	if baseText != "" {
-		b.WriteString("\n\n")
+		b.WriteByte('\n')
 		b.WriteString(baseText)
 	}
 

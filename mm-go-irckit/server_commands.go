@@ -612,19 +612,66 @@ func isBareThreadID(msg string) bool {
 	return isValidThreadID(trimmed[2:])
 }
 
+// stripQuoteLimitPrefix strips an optional leading "<N><l|w|c>" (case-insensitive, N >= 1)
+// from s, returning the remaining substring.
+func stripQuoteLimitPrefix(s string) string {
+	if len(s) < 2 || s[0] < '1' || s[0] > '9' {
+		return s
+	}
+
+	i := 1
+	for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+		i++
+	}
+
+	if i < len(s) {
+		switch s[i] {
+		case 'l', 'L', 'w', 'W', 'c', 'C':
+			return s[i+1:]
+		}
+	}
+
+	return s
+}
+
 // isBareQuoteRef checks if a message consists solely of a quote reference
-// ("@@<id> @>" or ">@@<id>") without any reply body.
+// (">[<N><l|w|c>]@@<id>", "@@<id> >[<N><l|w|c>]@", or "@@<id> >[<N><l|w|c>]@@<id>")
+// without any reply body.
 func isBareQuoteRef(msg string) bool {
 	trimmed := strings.TrimSpace(msg)
 
-	if after, ok := strings.CutPrefix(trimmed, ">@@"); ok {
-		return !strings.ContainsAny(after, " \t\r\n") && isValidThreadID(after)
+	if after, ok := strings.CutPrefix(trimmed, ">"); ok {
+		if strings.ContainsAny(after, " \t\r\n") {
+			return false
+		}
+
+		rest := stripQuoteLimitPrefix(after)
+		if id, hasAt := strings.CutPrefix(rest, "@@"); hasAt {
+			return isValidThreadID(id)
+		}
+
+		return false
 	}
 
 	if after, ok := strings.CutPrefix(trimmed, "@@"); ok {
 		fields := strings.Fields(after)
+		if len(fields) != 2 || !isValidThreadID(fields[0]) {
+			return false
+		}
 
-		return len(fields) == 2 && fields[1] == "@>" && isValidThreadID(fields[0])
+		qTok, hasGT := strings.CutPrefix(fields[1], ">")
+		if !hasGT {
+			return false
+		}
+
+		rest := stripQuoteLimitPrefix(qTok)
+		if rest == "@" {
+			return true
+		}
+
+		if id, hasAt := strings.CutPrefix(rest, "@@"); hasAt {
+			return isValidThreadID(id)
+		}
 	}
 
 	return false
@@ -888,12 +935,15 @@ func awayNotice(s Server, u *User, br bridge.Bridger, toUser *User) {
 	toUser.MarkAwayNotified(now, gen)
 }
 
+const quoteIDPattern = `!!|[0-9a-f]{3}|[0-9A-Za-z]{17}|[0-9a-z]{26}|\$[0-9A-Za-z\-_\.\+\/]{43}|sl[0-9a-v]{34,80}|mt[0-9a-v]{16}|gc[0-9A-Za-z_-]{11}`
+
 var (
-	parseModifyMsgRegExp          = regexp.MustCompile(`^s(\/(?:!!|[0-9a-f]{3}|[0-9A-Za-z]{17}|[0-9a-z]{26}|\$[0-9A-Za-z\-_\.\+\/]{43}|sl[0-9a-v]{34,80}|mt[0-9a-v]{16}|gc[0-9A-Za-z_-]{11})?\/)(.*)`)
-	parseReactionToMsgRegExp      = regexp.MustCompile(`^\@\@(!!|[0-9a-f]{3}|[0-9A-Za-z]{17}|[0-9a-z]{26}|\$[0-9A-Za-z\-_\.\+\/]{43}|sl[0-9a-v]{34,80}|mt[0-9a-v]{16}|gc[0-9A-Za-z_-]{11})\s+([\-\+]):(\S+):\s*$`)
-	parseQuoteMsgRegExp           = regexp.MustCompile(`(?s)^\@\@(!!|[0-9a-f]{3}|[0-9A-Za-z]{17}|[0-9a-z]{26}|\$[0-9A-Za-z\-_\.\+\/]{43}|sl[0-9a-v]{34,80}|mt[0-9a-v]{16}|gc[0-9A-Za-z_-]{11})\s+\@>\s+(.*)`)
-	parseUnthreadedQuoteMsgRegExp = regexp.MustCompile(`(?s)^>\@\@(!!|[0-9a-f]{3}|[0-9A-Za-z]{17}|[0-9a-z]{26}|\$[0-9A-Za-z\-_\.\+\/]{43}|sl[0-9a-v]{34,80}|mt[0-9a-v]{16}|gc[0-9A-Za-z_-]{11})\s+(.*)`)
-	parseThreadIDRegExp           = regexp.MustCompile(`(?s)^\@\@(?:(!!|[0-9a-f]{3}|[0-9A-Za-z]{17}|[0-9a-z]{26}|\$[0-9A-Za-z\-_\.\+\/]{43}|sl[0-9a-v]{34,80}|mt[0-9a-v]{16}|gc[0-9A-Za-z_-]{11})\s)(.*)`)
+	parseModifyMsgRegExp          = regexp.MustCompile(`^s(\/(?:` + quoteIDPattern + `)?\/)(.*)`)
+	parseReactionToMsgRegExp      = regexp.MustCompile(`^\@\@(` + quoteIDPattern + `)\s+([\-\+]):(\S+):\s*$`)
+	parseSelfQuoteMsgRegExp       = regexp.MustCompile(`(?s)^\@\@(` + quoteIDPattern + `)\s+>(?:([1-9][0-9]*)([lLwWcC]))?\@\s+(.*)`)
+	parseCrossQuoteMsgRegExp      = regexp.MustCompile(`(?s)^\@\@(` + quoteIDPattern + `)\s+>(?:([1-9][0-9]*)([lLwWcC]))?\@\@(` + quoteIDPattern + `)\s+(.*)`)
+	parseUnthreadedQuoteMsgRegExp = regexp.MustCompile(`(?s)^>(?:([1-9][0-9]*)([lLwWcC]))?\@\@(` + quoteIDPattern + `)\s+(.*)`)
+	parseThreadIDRegExp           = regexp.MustCompile(`(?s)^\@\@(?:(` + quoteIDPattern + `)\s)(.*)`)
 )
 
 func parseReactionToMsg(s Server, u *User, msg *irc.Message, channelID string) bool {
@@ -1164,17 +1214,53 @@ func threadMsgUser(s Server, u *User, msg *irc.Message, toUser string) bool {
 	return threadMsgChannelUser(s, u, msg, toUser, true)
 }
 
-func resolveQuotePostID(u *User, rawID, channelID string) string {
+type quoteLimit struct {
+	count int
+	unit  byte // 'l', 'w', or 'c'; 0 when unset
+}
+
+type parsedQuote struct {
+	threadID          string
+	postID            string
+	text              string
+	limit             quoteLimit
+	forceThreaded     bool
+	forceUnthreaded   bool
+	hasExplicitThread bool
+}
+
+func parseQuoteLimit(countStr, unitStr string) quoteLimit {
+	if countStr == "" || unitStr == "" {
+		return quoteLimit{}
+	}
+
+	n, err := strconv.Atoi(countStr)
+	if err != nil || n <= 0 {
+		return quoteLimit{}
+	}
+
+	return quoteLimit{
+		count: n,
+		unit:  strings.ToLower(unitStr)[0],
+	}
+}
+
+func resolveQuoteID(u *User, rawID, channelID string, preferThreadRoot bool) string {
 	switch {
 	case rawID == "!!":
 		u.msgLastMutex.RLock()
 		defer u.msgLastMutex.RUnlock()
 
-		if msgLast, ok := u.msgLast[channelID]; ok {
-			return msgLast[0]
+		msgLast, ok := u.msgLast[channelID]
+		if !ok {
+			return ""
 		}
 
-		return ""
+		if preferThreadRoot && msgLast[1] != "" {
+			return msgLast[1]
+		}
+
+		return msgLast[0]
 	case len(rawID) == 3:
 		id, err := strconv.ParseInt(rawID, 16, 0)
 		if err != nil {
@@ -1192,29 +1278,39 @@ func resolveQuotePostID(u *User, rawID, channelID string) string {
 	}
 }
 
-func parseQuoteMsg(u *User, msg *irc.Message, channelID string) (string, string, bool, bool) {
-	var (
-		matches         []string
-		forceUnthreaded bool
-	)
-
+func parseQuoteMsg(u *User, msg *irc.Message, channelID string) (parsedQuote, bool) {
 	switch {
 	case strings.HasPrefix(msg.Trailing, "@@"):
-		matches = parseQuoteMsgRegExp.FindStringSubmatch(msg.Trailing)
-	case strings.HasPrefix(msg.Trailing, ">@@"):
-		matches = parseUnthreadedQuoteMsgRegExp.FindStringSubmatch(msg.Trailing)
-		forceUnthreaded = true
-	default:
-		return "", "", false, false
+		if matches := parseSelfQuoteMsgRegExp.FindStringSubmatch(msg.Trailing); len(matches) == 5 {
+			return parsedQuote{
+				postID: resolveQuoteID(u, matches[1], channelID, false),
+				text:   matches[4],
+				limit:  parseQuoteLimit(matches[2], matches[3]),
+			}, true
+		}
+
+		if matches := parseCrossQuoteMsgRegExp.FindStringSubmatch(msg.Trailing); len(matches) == 6 {
+			return parsedQuote{
+				threadID:          resolveQuoteID(u, matches[1], channelID, true),
+				postID:            resolveQuoteID(u, matches[4], channelID, false),
+				text:              matches[5],
+				limit:             parseQuoteLimit(matches[2], matches[3]),
+				forceThreaded:     true,
+				hasExplicitThread: true,
+			}, true
+		}
+	case strings.HasPrefix(msg.Trailing, ">"):
+		if matches := parseUnthreadedQuoteMsgRegExp.FindStringSubmatch(msg.Trailing); len(matches) == 5 {
+			return parsedQuote{
+				postID:          resolveQuoteID(u, matches[3], channelID, false),
+				text:            matches[4],
+				limit:           parseQuoteLimit(matches[1], matches[2]),
+				forceUnthreaded: true,
+			}, true
+		}
 	}
 
-	if len(matches) != 3 {
-		return "", "", false, false
-	}
-
-	postID := resolveQuotePostID(u, matches[1], channelID)
-
-	return postID, matches[2], forceUnthreaded, true
+	return parsedQuote{}, false
 }
 
 func stripLeadingBlockquote(text string) string {
@@ -1247,6 +1343,108 @@ func stripLeadingBlockquote(text string) string {
 	return strings.Join(lines[i:], "\n")
 }
 
+func isASCIIWhitespace(b byte) bool {
+	return b == ' ' || b == '\t' || b == '\n' || b == '\r'
+}
+
+func hasUnclosedCodeFence(text string) bool {
+	fences := 0
+
+	for line := range strings.SplitSeq(text, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "```") {
+			fences++
+		}
+	}
+
+	return fences%2 == 1
+}
+
+func appendQuoteEllipsis(prefix, ellipsis string) string {
+	prefix = strings.TrimRight(prefix, " \t\r\n")
+	if hasUnclosedCodeFence(prefix) {
+		return prefix + "\n```\n" + ellipsis
+	}
+
+	return prefix + " " + ellipsis
+}
+
+func limitQuoteLines(text string, maxLines int, ellipsis string) string {
+	lines := strings.Split(text, "\n")
+	if len(lines) <= maxLines {
+		return text
+	}
+
+	kept := strings.Join(lines[:maxLines], "\n")
+	if hasUnclosedCodeFence(kept) {
+		kept += "\n```"
+	}
+
+	return kept + "\n" + ellipsis
+}
+
+func limitQuoteWords(text string, maxWords int, ellipsis string) string {
+	inWord := false
+	words := 0
+	endIdx := 0
+
+	for i := range len(text) {
+		if isASCIIWhitespace(text[i]) {
+			inWord = false
+
+			continue
+		}
+
+		if !inWord {
+			words++
+			if words > maxWords {
+				return appendQuoteEllipsis(text[:endIdx], ellipsis)
+			}
+
+			inWord = true
+		}
+
+		if words == maxWords {
+			endIdx = i + 1
+		}
+	}
+
+	return text
+}
+
+func limitQuoteBytes(text string, maxBytes int, ellipsis string) string {
+	if len(text) <= maxBytes {
+		return text
+	}
+
+	cut := maxBytes
+	for cut < len(text) && !isASCIIWhitespace(text[cut]) {
+		cut++
+	}
+
+	if strings.TrimSpace(text[cut:]) == "" {
+		return text
+	}
+
+	return appendQuoteEllipsis(text[:cut], ellipsis)
+}
+
+func applyQuoteLimit(text string, ql quoteLimit, ellipsis string) string {
+	if ql.count <= 0 || ql.unit == 0 || text == "" {
+		return text
+	}
+
+	switch ql.unit {
+	case 'l':
+		return limitQuoteLines(text, ql.count, ellipsis)
+	case 'w':
+		return limitQuoteWords(text, ql.count, ellipsis)
+	case 'c':
+		return limitQuoteBytes(text, ql.count, ellipsis)
+	default:
+		return text
+	}
+}
+
 func resolveQuoteAuthor(author *bridge.UserInfo, mode string) string {
 	if author == nil {
 		return ""
@@ -1270,7 +1468,7 @@ func resolveQuoteAuthor(author *bridge.UserInfo, mode string) string {
 	return strings.TrimSpace(name)
 }
 
-func truncateUTF8(s string, maxBytes int) string {
+func truncateUTF8(s string, maxBytes int, ellipsis string) string {
 	if maxBytes <= 0 {
 		return ""
 	}
@@ -1279,7 +1477,6 @@ func truncateUTF8(s string, maxBytes int) string {
 		return s
 	}
 
-	const ellipsis = "..."
 	if maxBytes <= len(ellipsis) {
 		return ellipsis[:maxBytes]
 	}
@@ -1292,10 +1489,18 @@ func truncateUTF8(s string, maxBytes int) string {
 	return strings.TrimRight(s[:cut], " \t\n") + ellipsis
 }
 
-func formatQuotedMessage(post *bridge.QuotedPost, replyText, quoteAuthor, protocol string, postLimit int) string {
+const quoteASCIIEllipsis = "..."
+
+func formatQuotedMessage(post *bridge.QuotedPost, replyText, quoteAuthor, protocol string, postLimit int, ql quoteLimit, unicode bool) string {
+	ellipsis := quoteASCIIEllipsis
+	if unicode {
+		ellipsis = "…"
+	}
+
 	body := strings.ReplaceAll(post.Text, "\r\n", "\n")
 	body = strings.Trim(body, "\r\n")
 	body = stripLeadingBlockquote(body)
+	body = applyQuoteLimit(body, ql, ellipsis)
 
 	var header string
 
@@ -1331,8 +1536,8 @@ func formatQuotedMessage(post *bridge.QuotedPost, replyText, quoteAuthor, protoc
 	// Reserve room for "\n\n" + replyText if the bridge advertises a post size limit.
 	if postLimit > 0 {
 		maxQuoteBytes := postLimit - len(replyText) - 2
-		if maxQuoteBytes > len(header)+4 && len(quotedBlock) > maxQuoteBytes {
-			quotedBlock = truncateUTF8(quotedBlock, maxQuoteBytes)
+		if maxQuoteBytes > len(header)+len(ellipsis)+1 && len(quotedBlock) > maxQuoteBytes {
+			quotedBlock = truncateUTF8(quotedBlock, maxQuoteBytes, ellipsis)
 		}
 	}
 
@@ -1340,20 +1545,26 @@ func formatQuotedMessage(post *bridge.QuotedPost, replyText, quoteAuthor, protoc
 }
 
 func quoteMsgChannelUser(s Server, u *User, msg *irc.Message, channelID string, toUser bool) bool {
-	postID, text, forceUnthreaded, matched := parseQuoteMsg(u, msg, channelID)
+	pq, matched := parseQuoteMsg(u, msg, channelID)
 	if !matched {
 		return false
 	}
 
 	query := msg.Params[0]
-	if postID == "" {
+	if pq.hasExplicitThread && pq.threadID == "" {
+		sendDeliveryError(s, u, query, "could not quote: thread ID not found")
+
+		return true
+	}
+
+	if pq.postID == "" {
 		sendDeliveryError(s, u, query, "could not quote: message ID not found")
 
 		return true
 	}
 
 	brCfg := u.br.BridgeConfig()
-	threaded := !forceUnthreaded && brCfg.QuoteThreaded
+	threaded := pq.forceThreaded || (!pq.forceUnthreaded && brCfg.QuoteThreaded)
 
 	var (
 		msgID        string
@@ -1363,16 +1574,16 @@ func quoteMsgChannelUser(s Server, u *User, msg *irc.Message, channelID string, 
 
 	if qs, ok := u.br.(bridge.QuoteSender); ok {
 		if toUser {
-			msgID, threadRootID, err = qs.MsgUserQuote(u.ctx, channelID, postID, threaded, text)
+			msgID, threadRootID, err = qs.MsgUserQuote(u.ctx, channelID, pq.threadID, pq.postID, threaded, pq.text)
 		} else {
-			msgID, threadRootID, err = qs.MsgChannelQuote(u.ctx, channelID, postID, threaded, text)
+			msgID, threadRootID, err = qs.MsgChannelQuote(u.ctx, channelID, pq.threadID, pq.postID, threaded, pq.text)
 		}
 	} else {
-		msgID, threadRootID, err = sendMarkdownQuote(u, channelID, postID, text, threaded, toUser)
+		msgID, threadRootID, err = sendMarkdownQuote(u, channelID, pq, threaded, toUser)
 	}
 
 	if err != nil {
-		sendDeliveryError(s, u, query, "could not quote post "+postID+": "+err.Error())
+		sendDeliveryError(s, u, query, "could not quote post "+pq.postID+": "+err.Error())
 
 		return true
 	}
@@ -1392,7 +1603,7 @@ func quoteMsgChannelUser(s Server, u *User, msg *irc.Message, channelID string, 
 	return true
 }
 
-func sendMarkdownQuote(u *User, channelID, postID, text string, threaded, toUser bool) (string, string, error) {
+func sendMarkdownQuote(u *User, channelID string, pq parsedQuote, threaded, toUser bool) (string, string, error) {
 	pg, ok := u.br.(bridge.PostGetter)
 	if !ok {
 		return "", "", errors.New("quoting is not supported on this bridge")
@@ -1403,7 +1614,7 @@ func sendMarkdownQuote(u *User, channelID, postID, text string, threaded, toUser
 		lookupChannelID = u.br.GetDMChannelID(u.ctx, channelID)
 	}
 
-	quotedPost, err := pg.GetPost(u.ctx, lookupChannelID, postID)
+	quotedPost, err := pg.GetPost(u.ctx, lookupChannelID, pq.postID)
 	if err != nil {
 		return "", "", err
 	}
@@ -1414,17 +1625,24 @@ func sendMarkdownQuote(u *User, channelID, postID, text string, threaded, toUser
 
 	formatted := formatQuotedMessage(
 		quotedPost,
-		text,
+		pq.text,
 		u.br.BridgeConfig().QuoteAuthor,
 		u.br.Protocol(),
 		u.br.GetPostSizeLimit(),
+		pq.limit,
+		u.br.FormatterConfig().Unicode,
 	)
 
 	threadRootID := ""
+
 	if threaded {
-		threadRootID = postID
-		if quotedPost.ParentID != "" {
-			threadRootID = quotedPost.ParentID
+		if pq.threadID != "" {
+			threadRootID = pq.threadID
+		} else {
+			threadRootID = pq.postID
+			if quotedPost.ParentID != "" {
+				threadRootID = quotedPost.ParentID
+			}
 		}
 	}
 
