@@ -591,6 +591,72 @@ func (m *MSTeams) MsgChannelThread(ctx context.Context, channelID, parentID, tex
 	return encoded, nil
 }
 
+func (m *MSTeams) resolveRawIDInChannel(channelID, postID string) (string, bool) {
+	if _, rawID, ok := m.resolvePostID(postID); ok {
+		return rawID, true
+	}
+
+	if channelID != "" {
+		if decodedID, _, ok := decodeTeamsID(postID); ok {
+			return decodedID, true
+		}
+	}
+
+	return "", false
+}
+
+func (m *MSTeams) MsgUserQuote(ctx context.Context, userID, threadID, quotedPostID string, threaded bool, text string) (string, string, error) {
+	convID, err := m.mc.GetOrCreateDM(ctx, userID)
+	if err != nil {
+		return "", "", err
+	}
+
+	m.dmChannelCache.Add(userID, convID)
+
+	return m.MsgChannelQuote(ctx, convID, threadID, quotedPostID, threaded, text)
+}
+
+func (m *MSTeams) MsgChannelQuote(ctx context.Context, channelID, threadID, quotedPostID string, threaded bool, text string) (string, string, error) {
+	rawQuotedID, ok := m.resolveRawIDInChannel(channelID, quotedPostID)
+	if !ok {
+		return "", "", errors.New("unknown post " + quotedPostID)
+	}
+
+	rawRootID := ""
+
+	if threaded && msteamsclient.IsTeamsChannel(channelID) {
+		rawRootID = rawQuotedID
+
+		if threadID != "" && threadID != quotedPostID {
+			if decodedThreadID, found := m.resolveRawIDInChannel(channelID, threadID); found {
+				rawRootID = decodedThreadID
+			}
+		}
+
+		rootMsg, rErr := m.mc.GetMessage(ctx, channelID, rawRootID)
+		if rErr == nil && rootMsg != nil && rootMsg.RootMessageID != "" {
+			rawRootID = rootMsg.RootMessageID
+		}
+	}
+
+	sendText := msteamsActionText(text)
+
+	msg, err := m.mc.SendQuotedMessage(ctx, channelID, rawRootID, rawQuotedID, sendText)
+	if err != nil {
+		return "", "", err
+	}
+
+	encoded := encodeTeamsID(channelID, msg.ID)
+	m.recordSentPost(encoded, channelID, sendText)
+
+	encodedRoot := ""
+	if rawRootID != "" {
+		encodedRoot = encodeTeamsID(channelID, rawRootID)
+	}
+
+	return encoded, encodedRoot, nil
+}
+
 func msteamsActionText(text string) string {
 	if after, ok := strings.CutPrefix(text, "\x01ACTION "); ok {
 		return "*" + strings.TrimSuffix(after, "\x01") + "*"
