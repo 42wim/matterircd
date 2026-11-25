@@ -12,7 +12,7 @@ require (
 	github.com/kenshaw/emoji v0.6.2
 	github.com/matterbridge/googlechatclient v0.0.0-20261123225039-b3b412f217a6
 	github.com/matterbridge/logrus-prefixed-formatter v0.5.3-0.20200523233437-d971309a77ba
-	github.com/matterbridge/matrixclient v0.0.0-20261124110414-056b29bfcd29
+	github.com/matterbridge/matrixclient v0.0.0-20261125051000-5de6f09ca9e8
 	github.com/matterbridge/matterclient v0.0.0-20261116034806-3087b48d325c
 	github.com/matterbridge/msteamsclient v0.0.0-20261124103100-5afc4f7a65da
 	github.com/matterbridge/rocketchatclient v0.0.0-20261124103749-0ea0f5b731fe

@@ -2626,6 +2626,8 @@ func (u *User) loginTo(protocol string) error {
 
 	status, _ := br.StatusUser(u.ctx, br.GetMe().User)
 	if status == "away" {
+		u.away.Store(true)
+
 		_ = u.Srv.EncodeMessage(u, irc.RPL_NOWAWAY, []string{u.Nick}, "You have been marked as being away")
 	}
 

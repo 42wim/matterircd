@@ -47,9 +47,14 @@ func DefaultCommands() Commands {
 
 func CmdAway(s Server, u *User, msg *irc.Message) error {
 	if msg.Trailing == "" {
+		u.away.Store(false)
+
 		_ = u.br.SetStatus(u.ctx, "online")
+
 		return s.EncodeMessage(u, irc.RPL_UNAWAY, []string{u.Nick}, "You are no longer marked as being away")
 	}
+
+	u.away.Store(true)
 
 	_ = u.br.SetStatus(u.ctx, "away")
 
