@@ -306,7 +306,7 @@ func TestMarkdown2ircHeadings(t *testing.T) {
 		{name: "non-space trailing hash kept", input: "## C#", unicode: true, want: "━━ \x02C#\x02 ━━"},
 		{name: "bold inside h1 does not double toggle", input: "# **Bold** and *italic*", unicode: true, want: "═══ \x02Bold and \x1ditalic\x1d\x02 ═══"},
 		{name: "bold inside h3 renders bold", input: "### **Bold** and *italic*", unicode: true, want: "── \x02Bold\x02 and \x1ditalic\x1d ──"},
-		{name: "link inside h1 keeps underline", input: "# See [docs](https://example.com)", unicode: true, want: "═══ \x02See \x1fdocs\x1f\u00a0(\x1dhttps://example.com\x1d)\x02 ═══"},
+		{name: "link inside h1 keeps underline", input: "# See [docs](https://example.com)", unicode: true, want: "═══ \x02See \x1fdocs\x1f\u00a0(https://example.com)\x02 ═══"},
 		{name: "inline code in middle of h1", input: "# Use `foo` now", unicode: true, want: "═══ \x02Use " + codeStart + "foo" + codeEnd + "\x02 now\x02 ═══"},
 		{name: "inline code at end of h1", input: "# Use `foo`", unicode: true, want: "═══ \x02Use " + codeStart + "foo" + codeEnd + " ═══"},
 		{name: "inline code only h1", input: "# `foo`", unicode: true, want: "═══ " + codeStart + "foo" + codeEnd + " ═══"},
@@ -411,16 +411,22 @@ func TestMarkdown2ircImagesAndLinks(t *testing.T) {
 	tests := []struct {
 		name, input, want string
 	}{
-		{"image with alt text", "![diagram](https://example.com/a.png)", "\x1f[image: diagram]\x1f\u00a0(\x1dhttps://example.com/a.png\x1d)"},
-		{"image with empty alt text", "![](https://example.com/a.png)", "\x1f[image]\x1f\u00a0(\x1dhttps://example.com/a.png\x1d)"},
-		{"image in sentence", "Look at ![my photo](https://example.com/_dark_/pic.png) please", "Look at \x1f[image: my photo]\x1f\u00a0(\x1dhttps://example.com/_dark_/pic.png\x1d) please"},
-		{"adjacent images", "![a](https://a.test/1.png)![b](https://a.test/2.png)", "\x1f[image: a]\x1f\u00a0(\x1dhttps://a.test/1.png\x1d)\x1f[image: b]\x1f\u00a0(\x1dhttps://a.test/2.png\x1d)"},
-		{"exclamation and space before regular link", "Hello! [click](https://example.com)", "Hello! \x1fclick\x1f\u00a0(\x1dhttps://example.com\x1d)"},
-		{"link with bold text and underscores in URL", "[**docs**](https://example.com/_api_/v1)", "\x1f\x02docs\x02\x1f\u00a0(\x1dhttps://example.com/_api_/v1\x1d)"},
-		{"link with balanced parentheses in URL", "[Go](https://en.wikipedia.org/wiki/Go_(programming_language))", "\x1fGo\x1f\u00a0(\x1dhttps://en.wikipedia.org/wiki/Go_(programming_language)\x1d)"},
-		{"escaped bang before link", `\![docs](https://example.com)`, "!\x1fdocs\x1f\u00a0(\x1dhttps://example.com\x1d)"},
+		{"image with alt text", "![diagram](https://example.com/a.png)", "\x1f[image: diagram]\x1f\u00a0(https://example.com/a.png)"},
+		{"image with empty alt text", "![](https://example.com/a.png)", "\x1f[image]\x1f\u00a0(https://example.com/a.png)"},
+		{"image in sentence", "Look at ![my photo](https://example.com/_dark_/pic.png) please", "Look at \x1f[image: my photo]\x1f\u00a0(https://example.com/_dark_/pic.png) please"},
+		{"adjacent images", "![a](https://a.test/1.png)![b](https://a.test/2.png)", "\x1f[image: a]\x1f\u00a0(https://a.test/1.png)\x1f[image: b]\x1f\u00a0(https://a.test/2.png)"},
+		{"exclamation and space before regular link", "Hello! [click](https://example.com)", "Hello! \x1fclick\x1f\u00a0(https://example.com)"},
+		{"link with bold text and underscores in URL", "[**docs**](https://example.com/_api_/v1)", "\x1f\x02docs\x02\x1f\u00a0(https://example.com/_api_/v1)"},
+		{"bold wrapping link bolds label and URL", "**[repo](https://example.com)**", "\x02\x1frepo\x1f\u00a0(https://example.com)\x02"},
+		{"italic wrapping link italicizes label and URL", "*[repo](https://example.com)*", "\x1d\x1frepo\x1f\u00a0(https://example.com)\x1d"},
+		{"link with balanced parentheses in URL", "[Go](https://en.wikipedia.org/wiki/Go_(programming_language))", "\x1fGo\x1f\u00a0(https://en.wikipedia.org/wiki/Go_(programming_language))"},
+		{"escaped bang before link", `\![docs](https://example.com)`, "!\x1fdocs\x1f\u00a0(https://example.com)"},
 		{"escaped image", `\!\[alt](https://example.com/a.png)`, "![alt](https://example.com/a.png)"},
-		{"image inside heading", "# ![icon](https://example.com/i.png) Title", "=== \x02\x1f[image: icon]\x1f\u00a0(\x1dhttps://example.com/i.png\x1d) Title\x02 ==="},
+		{"redundant exact URL link collapsed", "[https://example.com/a_b](https://example.com/a_b)", "https://example.com/a_b"},
+		{"redundant schemeless https URL link collapsed", "[portal.example.com/new/gitops_service](https://portal.example.com/new/gitops_service)", "https://portal.example.com/new/gitops_service"},
+		{"redundant mailto link collapsed", "[user@example.com](mailto:user@example.com)", "mailto:user@example.com"},
+		{"image with URL as alt is not collapsed", "![https://example.com/a.png](https://example.com/a.png)", "\x1f[image: https://example.com/a.png]\x1f\u00a0(https://example.com/a.png)"},
+		{"image inside heading", "# ![icon](https://example.com/i.png) Title", "=== \x02\x1f[image: icon]\x1f\u00a0(https://example.com/i.png) Title\x02 ==="},
 	}
 
 	for _, tc := range tests {
@@ -432,6 +438,7 @@ func TestMarkdown2ircImagesAndLinks(t *testing.T) {
 	}
 }
 
+//nolint:goconst
 func TestMarkdown2ircInlineCodeAndEscapes(t *testing.T) {
 	codeStart, codeEnd := "\x0f`\x11\x02\x030,14", "\x11\x0f`"
 
@@ -445,7 +452,16 @@ func TestMarkdown2ircInlineCodeAndEscapes(t *testing.T) {
 		{"double backtick span containing single backtick", "``use `**bold**` here``", "", codeStart + "use `**bold**` here" + codeEnd},
 		{"double backtick span with single space padding", "`` ` ``", "", codeStart + "`" + codeEnd},
 		{"unclosed backtick does not suppress emphasis", "`unclosed **bold**", "", "`unclosed \x02bold\x02"},
-		{"emphasis wrapping inline code", "**bold `code` bold**", "", "\x02bold " + codeStart + "code" + codeEnd + " bold\x02"},
+		{"emphasis wrapping inline code", "**bold `code` bold**", "", "\x02bold " + codeStart + "code" + codeEnd + "\x02 bold\x02"},
+		{"bold ending with inline code does not leak bold", "**bold `code`**", "", "\x02bold " + codeStart + "code" + codeEnd},
+		{"italic wrapping inline code", "*italic `code` italic*", "", "\x1ditalic " + codeStart + "code" + codeEnd + "\x1d italic\x1d"},
+		{"italic ending with inline code does not leak italic", "*italic `code`*", "", "\x1ditalic " + codeStart + "code" + codeEnd},
+		{"strikethrough wrapping inline code", "~~strike `code` strike~~", "", "\x1estrike " + codeStart + "code" + codeEnd + "\x1e strike\x1e"},
+		{"strikethrough ending with inline code does not leak strike", "~~strike `code`~~", "", "\x1estrike " + codeStart + "code" + codeEnd},
+		{"inline code as link label does not leak underline", "[`repo`](https://example.com) next", "\x02\x030,14", "\x1f\x02\x030,14repo\x11\x0f\u00a0(https://example.com) next"},
+		{"inline code inside link label keeps underline balanced", "[see `foo` docs](https://example.com)", "", "\x1fsee " + codeStart + "foo" + codeEnd + "\x1f docs\x1f\u00a0(https://example.com)"},
+		{"bold wrapping inline-code link stays balanced without double-bold", "**[`repo`](https://example.com)**", "\x02\x030,14", "\x02\x1f\x030,14repo\x11\x0f\x02\u00a0(https://example.com)\x02"},
+		{"bold wrapping custom bold inline code avoids double-bold", "**bold `code` bold**", "\x02\x030,14", "\x02bold \x030,14code\x11\x0f\x02 bold\x02"},
 		{"custom inline code without backtick", "`**bold**`", "\x11", "\x11**bold**\x11\x0f"},
 		{"escaped italics", `\*not italic\*`, "", "*not italic*"},
 		{"escaped bold", `\*\*not bold\*\*`, "", "**not bold**"},
