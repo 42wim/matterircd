@@ -105,6 +105,7 @@ func (c *Client) trouterSupervisor(ctx context.Context) {
 	}
 
 	consecFailures := 0
+	reconnecting := false
 
 	for {
 		if ctx.Err() != nil {
@@ -112,7 +113,8 @@ func (c *Client) trouterSupervisor(ctx context.Context) {
 		}
 
 		startedAt := time.Now()
-		err := c.runTrouterSession(ctx)
+		err := c.runTrouterSession(ctx, reconnecting)
+		reconnecting = true
 
 		if ctx.Err() != nil {
 			return
@@ -143,7 +145,7 @@ func (c *Client) trouterSupervisor(ctx context.Context) {
 	}
 }
 
-func (c *Client) runTrouterSession(ctx context.Context) error {
+func (c *Client) runTrouterSession(ctx context.Context, reconnecting bool) error {
 	c.wsReconnectMu.Lock()
 
 	sess, err := c.establishTrouter(ctx)
@@ -167,10 +169,10 @@ func (c *Client) runTrouterSession(ctx context.Context) error {
 		c.closeActiveWS()
 	}()
 
-	c.notifyWsConnected()
-
 	sessionCtx, sessionCancel := context.WithCancel(ctx)
 	defer sessionCancel()
+
+	c.notifyWsConnected(sessionCtx, sess.wsConn, reconnecting)
 
 	go c.trouterKeepaliveLoop(sessionCtx, sess)
 
@@ -1177,11 +1179,78 @@ func (c *Client) closeActiveWS() {
 	}
 }
 
-func (c *Client) notifyWsConnected() {
+func (c *Client) isCurrentWS(conn *websocket.Conn) bool {
+	c.wsMu.Lock()
+	defer c.wsMu.Unlock()
+
+	return c.wsConn == conn
+}
+
+func (c *Client) notifyWsConnected(sessionCtx context.Context, conn *websocket.Conn, reconnecting bool) {
 	c.emitMessage(&Message{
 		Type:      EventConnected,
 		Timestamp: time.Now(),
 	})
+
+	if reconnecting {
+		c.wg.Go(func() {
+			c.resyncAfterReconnect(sessionCtx, conn)
+		})
+
+		return
+	}
+
+	if c.OnWsConnect != nil {
+		c.wg.Go(func() {
+			c.OnWsConnect()
+		})
+	}
+}
+
+// resyncAfterReconnect refreshes conversations (updating LastPostAt and
+// discovering newly created chats/channels) before invoking OnWsConnect,
+// matching matterclient.resyncAfterWsReconnect so history replay does not skip
+// channels with stale LastPostAt timestamps.
+func (c *Client) resyncAfterReconnect(sessionCtx context.Context, conn *websocket.Conn) {
+	const maxAttempts = 3
+
+	var err error
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		err = c.UpdateChannels(sessionCtx)
+		if err == nil {
+			break
+		}
+
+		if sessionCtx.Err() != nil {
+			return
+		}
+
+		c.logger.Warnf("Trouter reconnect: updating channels failed %d/%d: %v", attempt, maxAttempts, err)
+
+		if attempt == maxAttempts {
+			break
+		}
+
+		if sleepContext(sessionCtx, time.Duration(attempt)*2*time.Second) != nil {
+			return
+		}
+	}
+
+	if err != nil {
+		if sessionCtx.Err() != nil || !c.isCurrentWS(conn) {
+			return
+		}
+
+		c.logger.Warn("Trouter reconnect: channel refresh failed, reconnecting stream")
+		c.Reconnect()
+
+		return
+	}
+
+	if sessionCtx.Err() != nil || !c.isCurrentWS(conn) {
+		return
+	}
 
 	if c.OnWsConnect != nil {
 		c.OnWsConnect()
