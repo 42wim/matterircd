@@ -66,6 +66,15 @@ func (c *Client) cacheChannel(ch slack.Channel) {
 	c.Unlock()
 }
 
+// InvalidateChannels clears cached conversation freshness so the next
+// GetConversations/GetChannels call re-fetches current channel metadata
+// (such as latest timestamps) on reconnect without flushing membership caches.
+func (c *Client) InvalidateChannels() {
+	c.Lock()
+	c.channelsFetchedAt = 0
+	c.Unlock()
+}
+
 // InvalidateCaches clears cached conversation freshness and membership TTL maps
 // so subsequent lookups re-fetch from the Slack API after a long disconnect.
 func (c *Client) InvalidateCaches() {
