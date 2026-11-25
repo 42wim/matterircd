@@ -2270,7 +2270,13 @@ func (m *Matrix) formatSummary(msg string, maxLen int, uncounted string) string 
 	unicode := fc.Unicode
 
 	blockquoteChar := blockquoteCharNonUnicode
-	if unicode {
+
+	switch {
+	case fc.DisableMarkdownBlockQuote || fc.DisableMarkdown:
+		blockquoteChar = utils.BlockQuoteCharDefault
+	case fc.MarkdownBlockQuoteChar != "":
+		blockquoteChar = fc.MarkdownBlockQuoteChar
+	case unicode:
 		blockquoteChar = blockquoteCharUnicode
 	}
 

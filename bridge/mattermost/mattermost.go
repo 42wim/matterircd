@@ -1310,6 +1310,19 @@ const (
 	blockquoteCharUnicode    = "▕"
 )
 
+func mattermostBlockquoteChar(fc config.FormatterConfig, useUnicode bool) string {
+	switch {
+	case fc.DisableMarkdownBlockQuote || fc.DisableMarkdown:
+		return blockQuoteCharDefault
+	case fc.MarkdownBlockQuoteChar != "":
+		return fc.MarkdownBlockQuoteChar
+	case useUnicode:
+		return blockquoteCharUnicode
+	default:
+		return blockquoteCharNonUnicode
+	}
+}
+
 //nolint:funcorder,funlen
 func (m *Mattermost) wsActionPostSkip(ctx context.Context, data *model.Post, rmsg *model.WebSocketEvent, logger *logrus.Entry) bool {
 	rc := m.cfg.Current()
@@ -1318,12 +1331,8 @@ func (m *Mattermost) wsActionPostSkip(ctx context.Context, data *model.Post, rms
 	disableEmoji := rc.Mattermost.Formatter.DisableEmoji
 	disableMarkdown := rc.Mattermost.Formatter.DisableMarkdown
 	useUnicode := rc.Mattermost.Formatter.Unicode
-	blockquoteChar := blockquoteCharNonUnicode
+	blockquoteChar := mattermostBlockquoteChar(rc.Mattermost.Formatter, useUnicode)
 	inlineCode := rc.Mattermost.Formatter.MarkdownInlineCode
-
-	if useUnicode {
-		blockquoteChar = blockquoteCharUnicode
-	}
 
 	shortenMsgLen := rc.Mattermost.ShortenRepliesTo
 
@@ -1416,10 +1425,7 @@ func (m *Mattermost) getCachedPostInfo(ctx context.Context, postID string, newLe
 		}
 	}
 
-	blockquoteChar := blockquoteCharNonUnicode
-	if unicode {
-		blockquoteChar = blockquoteCharUnicode
-	}
+	blockquoteChar := mattermostBlockquoteChar(rc.Mattermost.Formatter, unicode)
 
 	opts := utils.SummaryOpts{
 		DisableMarkdown: rc.Mattermost.Formatter.DisableMarkdown,

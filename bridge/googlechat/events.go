@@ -856,12 +856,14 @@ func (g *GoogleChat) formatSummary(text string, maxLen int) string {
 	rc := g.cfg.Current()
 
 	bq := "|"
-	if rc.GoogleChat.Formatter.Unicode {
-		bq = "▕"
-	}
 
-	if rc.GoogleChat.Formatter.MarkdownBlockQuoteChar != "" {
+	switch {
+	case rc.GoogleChat.Formatter.DisableMarkdownBlockQuote || rc.GoogleChat.Formatter.DisableMarkdown:
+		bq = utils.BlockQuoteCharDefault
+	case rc.GoogleChat.Formatter.MarkdownBlockQuoteChar != "":
 		bq = rc.GoogleChat.Formatter.MarkdownBlockQuoteChar
+	case rc.GoogleChat.Formatter.Unicode:
+		bq = "▕"
 	}
 
 	return utils.FormatAndShortenSummary(text, utils.SummaryOpts{

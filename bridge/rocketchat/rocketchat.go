@@ -1181,7 +1181,13 @@ func (r *RocketChat) formatSummary(msg string, maxLen int, uncounted string) str
 	unicode := fc.Unicode
 
 	blockquoteChar := "|"
-	if unicode {
+
+	switch {
+	case fc.DisableMarkdownBlockQuote || fc.DisableMarkdown:
+		blockquoteChar = utils.BlockQuoteCharDefault
+	case fc.MarkdownBlockQuoteChar != "":
+		blockquoteChar = fc.MarkdownBlockQuoteChar
+	case unicode:
 		blockquoteChar = "▕"
 	}
 

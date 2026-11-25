@@ -482,12 +482,14 @@ func (m *MSTeams) formatSummary(text string, maxLen int) string {
 	rc := m.cfg.Current()
 
 	bq := "|"
-	if rc.MSTeams.Formatter.Unicode {
-		bq = "▕"
-	}
 
-	if rc.MSTeams.Formatter.MarkdownBlockQuoteChar != "" {
+	switch {
+	case rc.MSTeams.Formatter.DisableMarkdownBlockQuote || rc.MSTeams.Formatter.DisableMarkdown:
+		bq = utils.BlockQuoteCharDefault
+	case rc.MSTeams.Formatter.MarkdownBlockQuoteChar != "":
 		bq = rc.MSTeams.Formatter.MarkdownBlockQuoteChar
+	case rc.MSTeams.Formatter.Unicode:
+		bq = "▕"
 	}
 
 	return utils.FormatAndShortenSummary(text, utils.SummaryOpts{
