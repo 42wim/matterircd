@@ -89,6 +89,7 @@ type Server interface { //nolint:interfacebloat
 	EncodeMessage(u *User, cmd string, params []string, trailing string) error
 
 	Version() string
+	Features() string
 }
 
 // ServerConfig produces a Server setup with configuration options.
@@ -97,6 +98,8 @@ type ServerConfig struct {
 	Name string
 	// Version string of the server (default: go-irckit).
 	Version string
+	// Features is an optional comma-separated list of enabled build features shown in CTCP VERSION replies.
+	Features string
 	// Motd is the message of the day for the server, list of message lines where each line should be max 80 chars.
 	Motd []string
 	// InviteOnly prevents regular users from joining and making new channels.
@@ -1022,4 +1025,8 @@ func (s *server) UserCount() int {
 
 func (s *server) Version() string {
 	return s.config.Version
+}
+
+func (s *server) Features() string {
+	return s.config.Features
 }

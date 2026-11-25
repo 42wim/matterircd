@@ -11,10 +11,14 @@ endif
 # Direct bypassing caches to ensure we don't get stale or out-of-date versions
 export GOPROXY=direct
 
-.PHONY: build docker docker release updatedeps
+.PHONY: build build-noai docker release updatedeps
 
 build:
 	CGO_ENABLED=$(or $(CGO_ENABLED),0) go build -tags goolm -ldflags="-X main.githash=$(GITHASH)"
+	@echo $(GITHASH)
+
+build-noai:
+	CGO_ENABLED=$(or $(CGO_ENABLED),0) go build -tags "goolm noai" -ldflags="-X main.githash=$(GITHASH)"
 	@echo $(GITHASH)
 
 docker:

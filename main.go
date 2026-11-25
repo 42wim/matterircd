@@ -11,6 +11,8 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"runtime/debug"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -19,7 +21,6 @@ import (
 
 	bolt "go.etcd.io/bbolt"
 
-	"github.com/42wim/matterircd/ai"
 	"github.com/42wim/matterircd/config"
 	irckit "github.com/42wim/matterircd/mm-go-irckit"
 	"github.com/google/gops/agent"
@@ -40,7 +41,7 @@ var (
 	LastViewedSaveDBs map[string]*bolt.DB
 )
 
-//nolint:funlen,gocognit,gocyclo
+//nolint:funlen,gocyclo
 func main() {
 	ourlog := logrus.New()
 	ourlog.Formatter = &prefixed.TextFormatter{
@@ -50,7 +51,7 @@ func main() {
 	}
 	logger = ourlog.WithFields(logrus.Fields{"prefix": project})
 	config.SetLogger(logger)
-	ai.SetLogger(logger)
+	setAILogger(logger)
 
 	// config related. instantiate a new config.Config to store flags
 	flagConfig := flag.String("conf", "matterircd.toml", "config file")
@@ -73,11 +74,15 @@ func main() {
 	pflag.Parse()
 
 	if flag.Lookup("version").Value.String() == "true" {
-		fmt.Printf("%s %s %s\n", project, version, githash)
+		fmt.Printf("%s %s %s %s\n", project, version, githash, buildFeatures())
 		return
 	}
 
-	logger.Infof("Running version %s %s", version, githash)
+	if tags := buildTags(); tags != "" {
+		logger.Infof("Running version %s %s %s", version, githash, tags)
+	} else {
+		logger.Infof("Running version %s %s", version, githash)
+	}
 
 	if strings.Contains(version, "-dev") {
 		logger.Infof("WARNING: THIS IS A DEVELOPMENT VERSION. Things may break.")
@@ -206,104 +211,7 @@ func main() {
 
 	LastViewedSaveDBs = protoDBs
 
-	aiCfg := cfg.Current().AI
-	if aiCfg.Enabled { //nolint:nestif
-		provider := aiCfg.Provider
-		if provider == "" {
-			provider = ai.AIGeminiProvider
-		}
-
-		model := ai.GetModel(provider, aiCfg.Model, aiCfg.Models)
-		token := aiCfg.GetToken(provider)
-
-		switch strings.ToLower(provider) {
-		case ai.AICopilotProvider, ai.AIGitHubProvider:
-			if token == "" {
-				logger.Warn("AI summarization enabled, but token is missing")
-				break
-			}
-
-			_, err := ai.NewCopilotClient(token, model)
-			if err != nil {
-				logger.Errorf("AI summarization setup error: %v", err)
-				break
-			}
-
-			logger.Infof("AI summarization enabled (default provider: %s, model: %s)", provider, model)
-		case ai.AIOpenRouterProvider:
-			if token == "" {
-				logger.Warn("AI summarization enabled, but token is missing")
-				break
-			}
-
-			baseURL := aiCfg.GetBaseURL(provider)
-
-			client, err := ai.NewOpenRouterClient(token, baseURL, model)
-			if err != nil {
-				logger.Errorf("AI summarization setup error: %v", err)
-				break
-			}
-
-			logger.Infof("AI summarization enabled (default provider: %s, model: %s, url: %s)", provider, model, client.BaseURL())
-		case ai.AIOpenAIProvider, ai.AIHetznerProvider, ai.AIOllamaProvider, ai.AILocalProvider, ai.AIvLLMProvider:
-			baseURL := aiCfg.GetBaseURL(provider)
-			if baseURL == "" {
-				logger.Warnf("AI summarization enabled for %s, but url is missing", provider)
-				break
-			}
-
-			if token == "" && (strings.Contains(baseURL, "api.openai.com") || strings.Contains(baseURL, "inference.hetzner.com")) {
-				logger.Warn("AI summarization enabled, but token is missing")
-				break
-			}
-
-			client, err := ai.NewOpenAIClient(token, baseURL, model)
-			if err != nil {
-				logger.Errorf("AI summarization setup error: %v", err)
-				break
-			}
-
-			logger.Infof("AI summarization enabled (default provider: %s, model: %s, url: %s)", provider, model, client.BaseURL())
-		default:
-			if aiCfg.ServiceAccountFile == "" && token == "" {
-				logger.Warn("AI summarization enabled, but service_account_file or token is missing")
-				break
-			}
-
-			if aiCfg.ServiceAccountFile != "" {
-				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancel()
-
-				client, err := ai.NewGeminiClient(ctx, aiCfg.ServiceAccountFile, aiCfg.Project, aiCfg.Location, model)
-				if err != nil {
-					logger.Errorf("AI summarization setup error: %v", err)
-					break
-				}
-
-				logger.Infof(
-					"AI summarization enabled (default provider: %s, model: %s, project: %s, region: %s)",
-					provider, model, client.Project(), aiCfg.Location,
-				)
-
-				break
-			}
-
-			baseURL := aiCfg.GetBaseURL(provider)
-
-			client, err := ai.NewGeminiAPIKeyClient(token, baseURL, model)
-			if err != nil {
-				logger.Errorf("AI summarization setup error: %v", err)
-				break
-			}
-
-			logger.Infof(
-				"AI summarization enabled (default provider: %s, model: %s, url: %s)",
-				provider, model, client.BaseURL(),
-			)
-		}
-	} else {
-		logger.Debug("AI summarization is disabled")
-	}
+	initAI(logger, cfg.Current().AI)
 
 	// Start serving connections asynchronously
 	if tlsSocket != nil {
@@ -573,6 +481,9 @@ func start(socket net.Listener) {
 		fullVersion = version + " (" + githash + ")"
 	}
 
+	_, enabled, _ := buildFeatureInfo()
+	features := strings.Join(enabled, ", ")
+
 	for {
 		conn, err := socket.Accept()
 		if err != nil {
@@ -581,7 +492,7 @@ func start(socket net.Listener) {
 		}
 
 		go func() {
-			newsrv := irckit.ServerConfig{Name: project, Version: fullVersion}.Server()
+			newsrv := irckit.ServerConfig{Name: project, Version: fullVersion, Features: features}.Server()
 
 			logger.Infof("New connection: %s", conn.RemoteAddr())
 
@@ -594,4 +505,70 @@ func start(socket net.Listener) {
 			}
 		}()
 	}
+}
+
+func buildFeatureInfo() ([]string, []string, []string) {
+	var (
+		tags     []string
+		enabled  []string
+		disabled []string
+		hasGoolm bool
+	)
+
+	if info, ok := debug.ReadBuildInfo(); ok {
+		for _, setting := range info.Settings {
+			if setting.Key == "-tags" {
+				if setting.Value != "" {
+					tags = strings.Split(setting.Value, ",")
+					hasGoolm = slices.Contains(tags, "goolm")
+				}
+
+				break
+			}
+		}
+	}
+
+	if hasGoolm {
+		enabled = append(enabled, "E2EE")
+	} else {
+		disabled = append(disabled, "E2EE")
+	}
+
+	if aiEnabled {
+		enabled = append(enabled, "AI")
+	} else {
+		disabled = append(disabled, "AI")
+	}
+
+	return tags, enabled, disabled
+}
+
+func buildTags() string {
+	tags, _, _ := buildFeatureInfo()
+	if len(tags) == 0 {
+		return ""
+	}
+
+	return "[" + strings.Join(tags, ", ") + "]"
+}
+
+func buildFeatures() string {
+	tags, enabled, disabled := buildFeatureInfo()
+
+	var statusParts []string
+	if len(enabled) > 0 {
+		statusParts = append(statusParts, "enabled: "+strings.Join(enabled, ", "))
+	}
+
+	if len(disabled) > 0 {
+		statusParts = append(statusParts, "disabled: "+strings.Join(disabled, ", "))
+	}
+
+	featureStatus := "[" + strings.Join(statusParts, "; ") + "]"
+
+	if len(tags) > 0 {
+		return "[" + strings.Join(tags, ", ") + "] " + featureStatus
+	}
+
+	return featureStatus
 }
