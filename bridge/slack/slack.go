@@ -1441,6 +1441,10 @@ func (s *Slack) handleSlackConnected() {
 		return
 	}
 
+	if s.sc != nil {
+		s.sc.InvalidateChannels()
+	}
+
 	if discAt := s.disconnectedAt.Swap(0); discAt > 0 && s.sc != nil {
 		thresh := 15 * time.Minute
 
