@@ -155,6 +155,10 @@ func New(ctx context.Context, cred Credentials, h Handler, opts ...Option) (*Cli
 		mc.UserAgent = o.userAgent
 	}
 
+	// Prevent /sync from implicitly resetting presence to online on every poll
+	// so explicit SetStatus calls (e.g. away) are not immediately overwritten.
+	mc.SyncPresence = event.PresenceOffline
+
 	mc.Client.Transport = newAPILogTransport(newTransport(&o), c.apiLogger, &c.syncDuration)
 
 	syncer, ok := mc.Syncer.(*mautrix.DefaultSyncer)
