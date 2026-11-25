@@ -54,6 +54,7 @@ type rawConversation struct {
 		OriginalArrivalTime string `json:"originalarrivaltime"`
 		ComposeTime         string `json:"composetime"`
 		From                string `json:"from"`
+		IMDisplayName       string `json:"imdisplayname"`
 	} `json:"lastMessage"`
 	MemberProperties struct {
 		Role string `json:"role"`
@@ -200,7 +201,12 @@ func (c *Client) fetchConversations(ctx context.Context, chatService string) (ma
 		}
 
 		for i := range resp.Conversations {
-			conv := parseRawConversation(&resp.Conversations[i])
+			raw := &resp.Conversations[i]
+			if fromMRI := extractMRIFromURL(raw.LastMessage.From); fromMRI != "" && raw.LastMessage.IMDisplayName != "" {
+				c.CacheUser(&User{MRI: fromMRI, DisplayName: raw.LastMessage.IMDisplayName})
+			}
+
+			conv := parseRawConversation(raw)
 			if conv == nil {
 				continue
 			}
@@ -223,24 +229,15 @@ func (c *Client) fetchCSATeams(ctx context.Context, ep RegionEndpoints) (map[str
 	channels := make(map[string]*Conversation)
 	chatMembers := make(map[string][]string)
 
-	if ep.ChatsvcAgg == "" {
-		return teams, channels, chatMembers
-	}
-
-	if c.effectiveAccountType() == AccountPersonal && c.currentRefreshToken() == "" {
+	if ep.ChatsvcAgg == "" || c.effectiveAccountType() == AccountPersonal {
 		return teams, channels, chatMembers
 	}
 
 	csaURL := ep.ChatsvcAgg + "/api/v1/teams/users/me?isPrefetch=false&enableMembershipSummary=true"
 
-	scope := ScopeChatsvcAgg
-	if c.effectiveAccountType() == AccountPersonal {
-		scope = ScopeSpacesPersonal
-	}
-
 	var resp rawCSATeamsResponse
 
-	err := c.doJSON(ctx, http.MethodGet, csaURL, authSkypeAndBearer, scope, nil, &resp)
+	err := c.doJSON(ctx, http.MethodGet, csaURL, authSkypeAndBearer, ScopeChatsvcAgg, nil, &resp)
 	if err != nil {
 		c.logger.Debugf("CSA teams/users/me sync skipped or unavailable: %v", err)
 

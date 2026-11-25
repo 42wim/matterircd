@@ -11,6 +11,7 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -346,14 +347,14 @@ func (c *Client) parseWizGlobalData(htmlBody string) error {
 
 	c.authMu.Lock()
 	c.tokenState.XSRFToken = xsrf
-	c.applyWizTokensLocked(wiz)
+	c.applyWizTokensLocked(wiz, htmlBody)
 	c.tokenState.UpdatedAt = time.Now().UTC()
 	c.authMu.Unlock()
 
 	return nil
 }
 
-func (c *Client) applyWizTokensLocked(wiz map[string]any) {
+func (c *Client) applyWizTokensLocked(wiz map[string]any, htmlBody string) {
 	if boqAT, _ := wiz["SNlM0e"].(string); boqAT != "" {
 		c.boqAT = boqAT
 	}
@@ -364,6 +365,13 @@ func (c *Client) applyWizTokensLocked(wiz map[string]any) {
 
 	if boqBL, _ := wiz["cfb2h"].(string); boqBL != "" {
 		c.boqBL = boqBL
+	}
+
+	if keys := extractGoogleAPIKeys(wiz, htmlBody); len(keys) > 0 {
+		c.apiKeys = keys
+		if c.apiKey != "" && !slices.Contains(keys, c.apiKey) {
+			c.apiKey = ""
+		}
 	}
 
 	if sapisid, _ := wiz["WZsZ1e"].(string); sapisid != "" {
@@ -377,6 +385,63 @@ func (c *Client) applyWizTokensLocked(wiz map[string]any) {
 	if email, _ := wiz["oPEP7c"].(string); email != "" && c.tokenState.Email == "" {
 		c.tokenState.Email = email
 	}
+}
+
+func extractGoogleAPIKeys(wiz map[string]any, htmlBody string) []string {
+	seen := make(map[string]struct{})
+
+	var keys []string
+
+	wizNames := make([]string, 0, len(wiz))
+	for k := range wiz {
+		wizNames = append(wizNames, k)
+	}
+
+	slices.Sort(wizNames)
+
+	for _, name := range wizNames {
+		if s, ok := wiz[name].(string); ok && isGoogleAPIKey(s) {
+			if _, dup := seen[s]; !dup {
+				seen[s] = struct{}{}
+				keys = append(keys, s)
+			}
+		}
+	}
+
+	const prefix = "AIzaSy"
+
+	for pos := 0; pos < len(htmlBody); {
+		rel := strings.Index(htmlBody[pos:], prefix)
+		if rel < 0 {
+			break
+		}
+
+		start := pos + rel
+		end := start + len(prefix)
+
+		for end < len(htmlBody) && end-start < 45 && isAPIKeyChar(htmlBody[end]) {
+			end++
+		}
+
+		if cand := htmlBody[start:end]; isGoogleAPIKey(cand) {
+			if _, dup := seen[cand]; !dup {
+				seen[cand] = struct{}{}
+				keys = append(keys, cand)
+			}
+		}
+
+		pos = end
+	}
+
+	return keys
+}
+
+func isAPIKeyChar(ch byte) bool {
+	return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_' || ch == '-'
+}
+
+func isGoogleAPIKey(s string) bool {
+	return strings.HasPrefix(s, "AIzaSy") && len(s) >= 35 && len(s) <= 45
 }
 
 func (c *Client) fetchSelfIdentity(ctx context.Context) error {

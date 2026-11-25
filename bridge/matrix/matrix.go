@@ -71,14 +71,6 @@ const (
 	roomNameResolveTimeout = 5 * time.Second
 )
 
-// markdownReplacer combines multi-line messages into a single line, making
-// code blocks single code/monospace.
-var markdownReplacer = strings.NewReplacer(
-	"\n", " ",
-	"```", "`",
-	"~~~", "`",
-)
-
 // roomUpdate is a queued room change, see queueRoomUpdate.
 type roomUpdate struct {
 	ev   *bridge.ChannelUpdateEvent
@@ -926,6 +918,53 @@ func (m *Matrix) MsgUserThread(ctx context.Context, userID, parentID, text strin
 	return m.recordSent(ctx, "", eventID, rootID.String(), text), nil
 }
 
+func (m *Matrix) MsgUserQuote(ctx context.Context, userID, threadID, quotedPostID string, threaded bool, text string) (string, string, error) {
+	logger.Debugf("msguserquote: sending quoted reply '%s' '%s' '%s' (threaded=%v) '%s'", userID, threadID, quotedPostID, threaded, text)
+
+	uid, ok := m.resolveUserID(userID)
+	if !ok {
+		return "", "", errors.New("unknown user " + userID)
+	}
+
+	roomID := m.mc.DirectRoom(uid)
+
+	var rootID id.EventID
+
+	if threaded {
+		targetID := id.EventID(quotedPostID)
+		if threadID != "" {
+			targetID = id.EventID(threadID)
+		}
+
+		rootID = m.resolveThreadRoot(ctx, roomID, targetID)
+	}
+
+	m.beginSend(text)
+
+	eventID, err := m.mc.SendDirectReply(ctx, uid, rootID, id.EventID(quotedPostID), text)
+	m.endSend(text, eventID, err)
+
+	if err != nil {
+		logger.Error("msguserquote sending message: error ", err)
+
+		return "", "", err
+	}
+
+	roomID = m.mc.DirectRoom(uid)
+	if roomID != "" {
+		m.msgRoomCache.Add(eventID, roomID)
+		m.cacheText(eventID, text)
+
+		if rootID != "" {
+			m.msgThreadRootCache.Add(eventID, rootID)
+		} else {
+			m.msgThreadRootCache.Add(eventID, eventID)
+		}
+	}
+
+	return m.recordSent(ctx, "", eventID, rootID.String(), text), rootID.String(), nil
+}
+
 func (m *Matrix) beginSend(text string) {
 	m.sentMu.Lock()
 	m.pendingSends[text]++
@@ -1026,6 +1065,43 @@ func (m *Matrix) MsgChannelThread(ctx context.Context, channelID, parentID, text
 	}
 
 	return m.recordSent(ctx, channelID, eventID, rootID.String(), text), nil
+}
+
+func (m *Matrix) MsgChannelQuote(ctx context.Context, channelID, threadID, quotedPostID string, threaded bool, text string) (string, string, error) {
+	logger.Debugf("msgchannelquote: sending quoted reply '%s' '%s' '%s' (threaded=%v) '%s'", m.roomLabel(id.RoomID(channelID)), threadID, quotedPostID, threaded, text)
+
+	roomID := id.RoomID(channelID)
+
+	var rootID id.EventID
+
+	if threaded {
+		targetID := id.EventID(quotedPostID)
+		if threadID != "" {
+			targetID = id.EventID(threadID)
+		}
+
+		rootID = m.resolveThreadRoot(ctx, roomID, targetID)
+	}
+
+	m.beginSend(text)
+
+	eventID, err := m.mc.SendReply(ctx, roomID, rootID, id.EventID(quotedPostID), text)
+	m.endSend(text, eventID, err)
+
+	if err != nil {
+		return "", "", err
+	}
+
+	m.msgRoomCache.Add(eventID, roomID)
+	m.cacheText(eventID, text)
+
+	if rootID != "" {
+		m.msgThreadRootCache.Add(eventID, rootID)
+	} else {
+		m.msgThreadRootCache.Add(eventID, eventID)
+	}
+
+	return m.recordSent(ctx, channelID, eventID, rootID.String(), text), rootID.String(), nil
 }
 
 func (m *Matrix) ModifyPost(ctx context.Context, msgID, text string) error {
@@ -2193,26 +2269,23 @@ func (m *Matrix) formatSummary(msg string, maxLen int, uncounted string) string 
 	fc := &m.cfg.Matrix().Formatter
 	unicode := fc.Unicode
 
-	if !fc.DisableMarkdown {
-		msg = markdownReplacer.Replace(msg)
+	blockquoteChar := blockquoteCharNonUnicode
 
-		blockquoteChar := blockquoteCharNonUnicode
-		if unicode {
-			blockquoteChar = blockquoteCharUnicode
-		}
-
-		msg = utils.Markdown2irc(msg, blockquoteChar, fc.MarkdownInlineCode)
-	} else {
-		msg = strings.ReplaceAll(msg, "\n", " ")
-	}
-
-	if !fc.DisableEmoji {
-		msg = utils.EmojiReplaceAliases(msg, fc.CustomEmoji)
+	switch {
+	case fc.DisableMarkdownBlockQuote || fc.DisableMarkdown:
+		blockquoteChar = utils.BlockQuoteCharDefault
+	case fc.MarkdownBlockQuoteChar != "":
+		blockquoteChar = fc.MarkdownBlockQuoteChar
+	case unicode:
+		blockquoteChar = blockquoteCharUnicode
 	}
 
 	return utils.FormatAndShortenSummary(msg, utils.SummaryOpts{
-		DisableMarkdown: true,
-		DisableEmoji:    true,
+		DisableMarkdown: fc.DisableMarkdown,
+		DisableEmoji:    fc.DisableEmoji,
+		CustomEmoji:     fc.CustomEmoji,
+		BlockquoteChar:  blockquoteChar,
+		InlineCodeChar:  fc.MarkdownInlineCode,
 		MaxLength:       maxLen,
 		UncountedPrefix: uncounted,
 		Unicode:         unicode,

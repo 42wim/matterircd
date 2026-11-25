@@ -43,12 +43,13 @@ release:
 	rm -f artifacts.json config.yaml
 
 updatedeps:
-	go get github.com/matterbridge/matterclient@master
-	go get github.com/matterbridge/matrixclient@master
-	go get github.com/matterbridge/msteamsclient@master
-	go get github.com/matterbridge/rocketchatclient@master
-	go get github.com/matterbridge/slackclient@master
-	go get github.com/matterbridge/googlechatclient@master
+	go get \
+		github.com/matterbridge/matterclient@master \
+		github.com/matterbridge/matrixclient@master \
+		github.com/matterbridge/msteamsclient@master \
+		github.com/matterbridge/rocketchatclient@master \
+		github.com/matterbridge/slackclient@master \
+		github.com/matterbridge/googlechatclient@master
 	go mod tidy && go mod vendor
 	# https://github.com/alecthomas/chroma/pull/1344
 	git checkout -q vendor/github.com/alecthomas/chroma/v2/formatters/mirc.go

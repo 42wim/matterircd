@@ -38,12 +38,6 @@ const (
 // roomMentionRegexp matches Rocket.Chat's @all and @here along with Mattermost/Matrix @channel and @room.
 var roomMentionRegexp = regexp.MustCompile(`@(?:room|channel|all|here)(?:\W|$)`)
 
-var markdownReplacer = strings.NewReplacer(
-	"\n", " ",
-	"```", "`",
-	"~~~", "`",
-)
-
 var logger = newLogger()
 
 func newLogger() *logrus.Entry {
@@ -1186,26 +1180,23 @@ func (r *RocketChat) formatSummary(msg string, maxLen int, uncounted string) str
 	fc := &r.cfg.RocketChat().Formatter
 	unicode := fc.Unicode
 
-	if !fc.DisableMarkdown {
-		msg = markdownReplacer.Replace(msg)
+	blockquoteChar := "|"
 
-		blockquoteChar := "|"
-		if unicode {
-			blockquoteChar = "▕"
-		}
-
-		msg = utils.Markdown2irc(msg, blockquoteChar, fc.MarkdownInlineCode)
-	} else {
-		msg = strings.ReplaceAll(msg, "\n", " ")
-	}
-
-	if !fc.DisableEmoji {
-		msg = utils.EmojiReplaceAliases(msg, fc.CustomEmoji)
+	switch {
+	case fc.DisableMarkdownBlockQuote || fc.DisableMarkdown:
+		blockquoteChar = utils.BlockQuoteCharDefault
+	case fc.MarkdownBlockQuoteChar != "":
+		blockquoteChar = fc.MarkdownBlockQuoteChar
+	case unicode:
+		blockquoteChar = "▕"
 	}
 
 	return utils.FormatAndShortenSummary(msg, utils.SummaryOpts{
-		DisableMarkdown: true,
-		DisableEmoji:    true,
+		DisableMarkdown: fc.DisableMarkdown,
+		DisableEmoji:    fc.DisableEmoji,
+		CustomEmoji:     fc.CustomEmoji,
+		BlockquoteChar:  blockquoteChar,
+		InlineCodeChar:  fc.MarkdownInlineCode,
 		MaxLength:       maxLen,
 		UncountedPrefix: uncounted,
 		Unicode:         unicode,
@@ -1928,11 +1919,44 @@ func (r *RocketChat) StatusUser(ctx context.Context, userID string) (string, err
 		return rocketchatclient.StatusOffline, nil
 	}
 
-	if u.StatusText != "" {
-		return u.Status + ": " + u.StatusText, nil
+	prefix := u.Status
+	localTime := r.rc.GetUserLocalTime(userID)
+
+	// Presence activity is in milliseconds.
+	lastActivity := r.rc.GetUserLastActivity(userID) / 1000
+
+	var lastOnline string
+
+	if lastActivity > 0 {
+		diff := max(0, time.Now().Unix()-lastActivity)
+		if prefix == rocketchatclient.StatusOnline {
+			lastOnline = utils.FormatLastOnline(lastActivity, true)
+		} else if diff >= 20*60 {
+			lastOnline = utils.FormatLastOnline(lastActivity)
+		}
 	}
 
-	return u.Status, nil
+	var details string
+
+	switch {
+	case lastOnline != "" && localTime != "":
+		details = lastOnline + ", local time: " + localTime
+	case lastOnline != "":
+		details = lastOnline
+	case localTime != "":
+		details = "local time: " + localTime
+	}
+
+	status := prefix
+	if details != "" {
+		status += " (" + details + ")"
+	}
+
+	if u.StatusText != "" {
+		status += ": " + u.StatusText
+	}
+
+	return status, nil
 }
 
 func (r *RocketChat) StatusUsers(ctx context.Context) (map[string]string, error) {
@@ -1949,7 +1973,8 @@ func (r *RocketChat) StatusUsers(ctx context.Context) (map[string]string, error)
 }
 
 func (r *RocketChat) IsOnline(status string) bool {
-	return status == rocketchatclient.StatusOnline || strings.HasPrefix(status, rocketchatclient.StatusOnline+": ")
+	return status == rocketchatclient.StatusOnline ||
+		(strings.HasPrefix(status, rocketchatclient.StatusOnline+" (") && !strings.Contains(status, "): "))
 }
 
 func (r *RocketChat) HasCustomStatus(userID string) bool {
@@ -2098,8 +2123,7 @@ func (r *RocketChat) SendTyping(ctx context.Context, channelName string) {
 
 // PostURL returns the Rocket.Chat message permalink for DETAILS output.
 func (r *RocketChat) PostURL(ctx context.Context, postID string, events []*bridge.Event) string {
-	base := r.rc.BaseURL()
-	if base == "" || postID == "" {
+	if postID == "" {
 		return ""
 	}
 
@@ -2118,30 +2142,7 @@ func (r *RocketChat) PostURL(ctx context.Context, postID string, events []*bridg
 		roomID = r.GetPostChannelID(ctx, postID)
 	}
 
-	if roomID == "" {
-		return ""
-	}
-
-	room, ok := r.rc.Room(roomID)
-	if !ok {
-		return base + "/direct/" + url.PathEscape(roomID) + "?msg=" + url.QueryEscape(postID)
-	}
-
-	var prefix, target string
-
-	switch room.Type {
-	case rocketchatclient.RoomTypePrivate:
-		prefix = "/group/"
-		target = cmp.Or(room.Name, room.ID)
-	case rocketchatclient.RoomTypeDirect:
-		prefix = "/direct/"
-		target = room.ID
-	default:
-		prefix = "/channel/"
-		target = cmp.Or(room.Name, room.ID)
-	}
-
-	return base + prefix + url.PathEscape(target) + "?msg=" + url.QueryEscape(postID)
+	return r.rc.MessagePermalink(roomID, postID)
 }
 
 func (r *RocketChat) GetFilesInfo(ctx context.Context, fileIDs []string) []*bridge.File {
@@ -2611,6 +2612,52 @@ func (r *RocketChat) MsgChannelThread(ctx context.Context, channelID, parentID, 
 	r.recordSent(ctx, channelID, msgID, parentID, sendText)
 
 	return msgID, nil
+}
+
+func (r *RocketChat) MsgUserQuote(ctx context.Context, userID, threadID, quotedPostID string, threaded bool, text string) (string, string, error) {
+	roomID := r.GetDMChannelID(ctx, userID)
+	if roomID == "" {
+		u := r.GetUser(ctx, userID)
+		if u == nil || u.Username == "" {
+			return "", "", errors.New("rocketchat: direct room not found for user " + userID)
+		}
+
+		room, err := r.rc.CreateDM(ctx, u.Username)
+		if err != nil {
+			return "", "", err
+		}
+
+		roomID = room.ID
+	}
+
+	return r.MsgChannelQuote(ctx, roomID, threadID, quotedPostID, threaded, text)
+}
+
+func (r *RocketChat) MsgChannelQuote(ctx context.Context, channelID, threadID, quotedPostID string, threaded bool, text string) (string, string, error) {
+	parentID := ""
+
+	if threaded {
+		parentID = quotedPostID
+		if threadID != "" {
+			parentID = threadID
+		}
+
+		msg, err := r.rc.ResolveMessage(ctx, parentID)
+		if err == nil && msg != nil && msg.ThreadID != "" {
+			parentID = msg.ThreadID
+		}
+	}
+
+	sendText := rocketChatActionText(text)
+
+	msgID, err := r.rc.SendQuotedMessage(ctx, channelID, parentID, quotedPostID, sendText)
+	if err != nil {
+		return "", "", err
+	}
+
+	r.recordSent(ctx, channelID, msgID, parentID, sendText)
+
+	return msgID, parentID, nil
 }
 
 func rocketChatActionText(text string) string {

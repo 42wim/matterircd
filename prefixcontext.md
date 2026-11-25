@@ -77,18 +77,32 @@ With `@@number` you can reply to a message and it'll be threaded in mattermost
 
 ## quote in reply
 
-With `@@<id> @> <message>` you can quote the original message and include your reply underneath it.
-Using `>@@<id> <message>` always posts the quote as a top-level (unthreaded) message in the channel or DM.
-Both forms support `!!` to quote the last message you sent, 3-hex context IDs (`001`), and native bridge message IDs.
+You can quote an existing message and include your reply underneath it using a unified `>` quote prefix:
+
+- `>@@<id> <message>` — always posts the quote as a top-level (unthreaded) message in the channel or DM.
+- `@@<id> >@ <message>` — quotes `<id>` and posts according to the bridge's `QuoteThreaded` setting.
+- `@@<thread_id> >@@<post_id> <message>` — replies inside `<thread_id>` while quoting `<post_id>` (can reference a different message or thread).
+
+All forms support `!!` (the last message you sent), 3-hex context IDs (`001`), and native bridge message IDs.
+
+For Markdown-quoted bridges (Mattermost and Slack), you can optionally limit how much of the original message is quoted by placing `<N><L|W|C>` (case-insensitive, `N >= 1`) immediately after `>`:
+
+- `L` / `l`: first `N` lines (e.g. `>5l@@001 msg`, `@@001 >5l@ msg`, `@@001 >5l@@002 msg`)
+- `W` / `w`: first `N` words (e.g. `>6w@@001 msg`, `@@001 >6w@ msg`)
+- `C` / `c`: first `N` bytes, extending to the next word boundary so words/emojis are not split mid-word (e.g. `>10c@@001 msg`, `@@001 >10c@ msg`)
+
+When truncated, an ellipsis (`...`, or `…` when `Unicode = true`) is appended. Bridges with native quote cards (Google Chat, Matrix, Microsoft Teams, and Rocket.Chat) ignore the length modifier and send their native quote attachment instead.
 
 ```irc
 21:55 <wim> [001] Original message content here
-21:56 <wimtest> @@001 @> My message follows it
+21:56 <wimtest> @@001 >@ My message follows it
 21:57 <wimtest> >@@001 Quoting this back into the main channel
-21:58 <wimtest> @@!! @> Following up on my last message
+21:58 <wimtest> >5l@@001 Quoting only the first 5 lines
+21:59 <wimtest> @@001 >6w@@002 Replying in thread 001 while quoting 6 words of 002
+22:00 <wimtest> @@!! >@ Following up on my last message
 ```
 
-This sends a Markdown blockquote followed by your message:
+On Markdown-quoted bridges (Mattermost and Slack), this sends a blockquote followed by your message:
 
 ```markdown
 > **wim** wrote:
@@ -99,8 +113,8 @@ My message follows it
 
 Per-bridge configuration options in `matterircd.toml`:
 
-- `QuoteThreaded`: Controls whether `@@<id> @> <message>` replies inside the original message's thread (defaults to `true`, except `googlechat` which defaults to `false`). `>@@<id> <message>` always sends unthreaded regardless of this setting.
-- `QuoteAuthor`: Controls author attribution in Markdown quotes: `"displayname"` (default), `"nick"`, or `"off"` / `"none"` to omit the author header.
+- `QuoteThreaded`: Controls whether `@@<id> >@ <message>` replies inside the original message's thread (defaults to `true`, except `googlechat` which defaults to `false`). `>@@<id> <message>` always sends unthreaded, and `@@<thread_id> >@@<post_id> <message>` always replies inside `<thread_id>`.
+- `QuoteAuthor`: Controls author attribution in Markdown quotes (Mattermost and Slack): `"displayname"` (default), `"nick"`, or `"off"` / `"none"` to omit the author header. Ignored by bridges that send native quote cards (Google Chat, Matrix, Microsoft Teams, and Rocket.Chat).
 
 ## modify/delete your own messages
 

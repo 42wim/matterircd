@@ -35,10 +35,11 @@ const (
 	defaultAuthTTL      = 86400 * time.Second
 	maxAuthResponseSize = 1 << 20 // 1 MiB
 	formKeyClientID     = "client_id"
+	formKeyRefreshToken = "refresh_token"
 
 	// ScopeSpacesWork and related OAuth2 scopes for Microsoft Teams backend services.
 	ScopeSpacesWork     = "https://api.spaces.skype.com/.default offline_access openid profile"
-	ScopeSpacesPersonal = "https://api.spaces.skype.com/user_impersonation offline_access openid profile"
+	ScopeSpacesPersonal = "service::api.fl.spaces.skype.com::MBI_SSL offline_access openid profile"
 	ScopeChatsvcAgg     = "https://chatsvcagg.teams.microsoft.com/.default offline_access"
 	ScopePresence       = "https://presence.teams.microsoft.com/.default offline_access"
 	ScopeSubstrate      = "https://substrate.office.com/.default offline_access"
@@ -78,8 +79,12 @@ type authsvcResponse struct {
 		SkypeToken string `json:"skypeToken"`
 		ExpiresIn  int    `json:"expiresIn"`
 	} `json:"tokens"`
-	Region     string            `json:"region"`
-	RegionGtms map[string]string `json:"regionGtms"`
+	SkypeToken struct {
+		SkypeToken string `json:"skypetoken"`
+		ExpiresIn  int    `json:"expiresIn"`
+	} `json:"skypeToken"`
+	Region     string         `json:"region"`
+	RegionGtms map[string]any `json:"regionGtms"`
 }
 
 type jwtClaims struct {
@@ -556,10 +561,10 @@ func (c *Client) refreshSession(ctx context.Context) error {
 
 func (c *Client) exchangeRefreshToken(ctx context.Context, refreshToken, scope string) (*oauthTokenResponse, error) {
 	form := url.Values{
-		"grant_type":    {"refresh_token"},
-		formKeyClientID: {c.effectiveClientID()},
-		"refresh_token": {refreshToken},
-		"scope":         {scope},
+		"grant_type":        {formKeyRefreshToken},
+		formKeyClientID:     {c.effectiveClientID()},
+		formKeyRefreshToken: {refreshToken},
+		"scope":             {scope},
 	}
 
 	endpoint := c.oauthAuthority() + "/token"
@@ -706,6 +711,11 @@ func (c *Client) postAuthsvc(ctx context.Context, endpoint, bearerToken string) 
 	err = json.Unmarshal(body, &parsed)
 	if err != nil {
 		return nil, fmt.Errorf("msteamsclient: decode authsvc response: %w", err)
+	}
+
+	if parsed.Tokens.SkypeToken == "" && parsed.SkypeToken.SkypeToken != "" {
+		parsed.Tokens.SkypeToken = parsed.SkypeToken.SkypeToken
+		parsed.Tokens.ExpiresIn = parsed.SkypeToken.ExpiresIn
 	}
 
 	if parsed.Tokens.SkypeToken == "" {
@@ -885,6 +895,12 @@ func (c *Client) postForm(ctx context.Context, endpoint string, form url.Values)
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", c.userAgent())
 
+	// Browser SPA refresh tokens from teams.live.com require a cross-origin
+	// Origin header (otherwise Entra/MSA rejects them with AADSTS9002327).
+	if c.effectiveAccountType() == AccountPersonal && form.Get("grant_type") == formKeyRefreshToken {
+		req.Header.Set("Origin", "https://teams.live.com")
+	}
+
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, 0, err
@@ -900,7 +916,7 @@ func (c *Client) postForm(ctx context.Context, endpoint string, form url.Values)
 	return body, resp.StatusCode, nil
 }
 
-func buildRegionEndpoints(acctType AccountType, region string, gtms map[string]string) RegionEndpoints {
+func buildRegionEndpoints(acctType AccountType, region string, gtms map[string]any) RegionEndpoints {
 	reg := strings.ToLower(strings.TrimSpace(region))
 	if reg == "" {
 		reg = strings.ToLower(strings.TrimSpace(lookupGTM(gtms, "region")))
@@ -993,21 +1009,25 @@ func applyConsumerEndpointDefaults(ep *RegionEndpoints, reg string) {
 	}
 }
 
-func lookupGTM(gtms map[string]string, keys ...string) string {
+func lookupGTM(gtms map[string]any, keys ...string) string {
 	if len(gtms) == 0 {
 		return ""
 	}
 
 	for _, want := range keys {
-		if v, ok := gtms[want]; ok && v != "" {
-			return v
+		if v, ok := gtms[want]; ok {
+			if s, ok := v.(string); ok && s != "" {
+				return s
+			}
 		}
 	}
 
 	for _, want := range keys {
 		for k, v := range gtms {
-			if strings.EqualFold(k, want) && v != "" {
-				return v
+			if strings.EqualFold(k, want) {
+				if s, ok := v.(string); ok && s != "" {
+					return s
+				}
 			}
 		}
 	}

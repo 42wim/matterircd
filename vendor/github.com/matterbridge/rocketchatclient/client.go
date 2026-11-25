@@ -4,6 +4,7 @@ package rocketchatclient
 
 import (
 	"context"
+	"math"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -226,6 +227,26 @@ func (c *Client) UserByUsername(username string) (*User, bool) {
 // Users returns a snapshot of all cached users.
 func (c *Client) Users() []*User {
 	return c.cache.users()
+}
+
+// GetUserLastActivity returns the last observed activity timestamp for userID
+// in Unix milliseconds, or 0 if unknown.
+func (c *Client) GetUserLastActivity(userID string) int64 {
+	return c.cache.userLastActivity(userID)
+}
+
+// GetUserLocalTime returns the current local time (HH:MM) for userID when their
+// cached profile carries a valid utcOffset, or "" otherwise.
+func (c *Client) GetUserLocalTime(userID string) string {
+	u, ok := c.cache.user(userID)
+	if !ok || !u.HasUTCOffset || u.UTCOffset < -12 || u.UTCOffset > 14 {
+		return ""
+	}
+
+	offsetSec := int(math.Round(u.UTCOffset * 3600))
+	loc := time.FixedZone("", offsetSec)
+
+	return time.Now().In(loc).Format("15:04")
 }
 
 // Room returns a cached room by ID.

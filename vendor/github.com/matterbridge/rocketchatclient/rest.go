@@ -466,6 +466,64 @@ func (c *Client) SendMessage(ctx context.Context, roomID, text, threadID string)
 	return msgID, nil
 }
 
+// MessagePermalink returns the Rocket.Chat message permalink for msgID in roomID,
+// or "" if the server base URL, roomID, or msgID is empty.
+func (c *Client) MessagePermalink(roomID, msgID string) string {
+	base := c.BaseURL()
+	if base == "" || roomID == "" || msgID == "" {
+		return ""
+	}
+
+	room, ok := c.Room(roomID)
+	if !ok {
+		return base + "/direct/" + url.PathEscape(roomID) + "?msg=" + url.QueryEscape(msgID)
+	}
+
+	var prefix, target string
+
+	switch room.Type {
+	case RoomTypePrivate:
+		prefix = "/group/"
+		target = cmp.Or(room.Name, room.ID)
+	case RoomTypeDirect:
+		prefix = "/direct/"
+		target = room.ID
+	default:
+		prefix = "/channel/"
+		target = cmp.Or(room.Name, room.ID)
+	}
+
+	return base + prefix + url.PathEscape(target) + "?msg=" + url.QueryEscape(msgID)
+}
+
+// SendQuotedMessage sends a message (optionally inside threadID) quoting quotedMsgID
+// using Rocket.Chat's native hidden permalink syntax (`[ ](<permalink>) <text>`).
+func (c *Client) SendQuotedMessage(ctx context.Context, roomID, threadID, quotedMsgID, text string) (string, error) {
+	if roomID == "" {
+		return "", errors.New("rocketchatclient: roomID is required")
+	}
+
+	if quotedMsgID == "" {
+		return "", errors.New("rocketchatclient: quotedMsgID is required")
+	}
+
+	quotedRoomID := roomID
+
+	qMsg, err := c.ResolveMessage(ctx, quotedMsgID)
+	if err == nil && qMsg != nil && qMsg.RoomID != "" {
+		quotedRoomID = qMsg.RoomID
+	}
+
+	permalink := c.MessagePermalink(quotedRoomID, quotedMsgID)
+	if permalink == "" {
+		return "", errors.New("rocketchatclient: unable to build permalink for " + quotedMsgID)
+	}
+
+	quotedText := "[ ](" + permalink + ") " + text
+
+	return c.SendMessage(ctx, roomID, quotedText, threadID)
+}
+
 // UpdateMessage edits an existing message in roomID.
 func (c *Client) UpdateMessage(ctx context.Context, roomID, msgID, text string) error {
 	if roomID == "" || msgID == "" {

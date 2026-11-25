@@ -114,23 +114,23 @@ github.com/jpillora/backoff
 # github.com/kenshaw/emoji v0.6.2
 ## explicit; go 1.22
 github.com/kenshaw/emoji
-# github.com/matterbridge/googlechatclient v0.0.0-20261123185049-456ee91b8408
+# github.com/matterbridge/googlechatclient v0.0.0-20261123225039-b3b412f217a6
 ## explicit; go 1.26.2
 github.com/matterbridge/googlechatclient
 # github.com/matterbridge/logrus-prefixed-formatter v0.5.3-0.20200523233437-d971309a77ba
 ## explicit
 github.com/matterbridge/logrus-prefixed-formatter
-# github.com/matterbridge/matrixclient v0.0.0-20261123084925-6c4899716447
+# github.com/matterbridge/matrixclient v0.0.0-20261125051000-5de6f09ca9e8
 ## explicit; go 1.26.0
 github.com/matterbridge/matrixclient
 github.com/matterbridge/matrixclient/e2ee
 # github.com/matterbridge/matterclient v0.0.0-20261116034806-3087b48d325c
 ## explicit; go 1.26.2
 github.com/matterbridge/matterclient
-# github.com/matterbridge/msteamsclient v0.0.0-20261123010033-dfcaa45ee055
+# github.com/matterbridge/msteamsclient v0.0.0-20261124103100-5afc4f7a65da
 ## explicit; go 1.26.2
 github.com/matterbridge/msteamsclient
-# github.com/matterbridge/rocketchatclient v0.0.0-20261117095619-335f44b67feb
+# github.com/matterbridge/rocketchatclient v0.0.0-20261124103749-0ea0f5b731fe
 ## explicit; go 1.26.2
 github.com/matterbridge/rocketchatclient
 # github.com/matterbridge/slackclient v0.0.0-20261117092932-0a28e681e8a0

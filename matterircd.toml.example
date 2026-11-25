@@ -261,10 +261,11 @@ SuffixContext = false
 #ThreadContext = "mattermost+post"
 #Show Context for multi-line messages and only show it at the end.
 ShowContextMulti = false
-# Quote in reply settings (@@<id> @> msg and >@@<id> msg). See prefixcontext.md.
-# Whether `@@<id> @> msg` posts inside the original message's thread (default: true).
+# Quote in reply settings (@@<id> >@ msg, @@<thread> >@@<id> msg, and >@@<id> msg,
+# with optional length limits like >5l@@<id>, >6w@@<id>, >10c@@<id>). See prefixcontext.md.
+# Whether `@@<id> >@ msg` posts inside the original message's thread (default: true).
 #QuoteThreaded = true
-# Author attribution in Markdown quotes: "displayname" (default), "nick", or "off" (disabled).
+# Author attribution in Markdown quotes (Mattermost/Slack): "displayname" (default), "nick", or "off" (disabled).
 #QuoteAuthor = "displayname"
 
 #This will show (mention yournick) after a message if it contains one of the words configured
@@ -439,7 +440,6 @@ PrefixContext = false
 #Threads are shown using Matrix event IDs
 #ThreadContext = "matrix"
 #QuoteThreaded = true
-#QuoteAuthor = "displayname"
 #Homeserver left out of channel names, so #room/ubuntu.com becomes #room
 #The value is fixed for the session: after changing it, disconnect and reconnect (an INFO
 #message is logged when a changed value is detected) for it to take effect.
@@ -542,7 +542,6 @@ PrefixContext = false
 #ShowContextMulti = false
 #ThreadContext = "msteams"
 #QuoteThreaded = true
-#QuoteAuthor = "displayname"
 #ShowJoinPart = false
 #ShowOnlyJoined = false
 #PartFake = false
@@ -615,7 +614,6 @@ PrefixContext = false
 #ShowContextMulti = false
 #ThreadContext = "googlechat"
 #QuoteThreaded = false
-#QuoteAuthor = "displayname"
 #ShowJoinPart = false
 #ShowOnlyJoined = false
 #PartFake = false
@@ -672,7 +670,6 @@ PrefixContext = false
 #ShowContextMulti = false
 #ThreadContext = "rocketchat"
 #QuoteThreaded = true
-#QuoteAuthor = "displayname"
 #ShowTopic = false
 #ShowJoinPart = false
 #ShowOnlyJoined = false

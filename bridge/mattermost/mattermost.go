@@ -1310,6 +1310,19 @@ const (
 	blockquoteCharUnicode    = "▕"
 )
 
+func mattermostBlockquoteChar(fc config.FormatterConfig, useUnicode bool) string {
+	switch {
+	case fc.DisableMarkdownBlockQuote || fc.DisableMarkdown:
+		return blockQuoteCharDefault
+	case fc.MarkdownBlockQuoteChar != "":
+		return fc.MarkdownBlockQuoteChar
+	case useUnicode:
+		return blockquoteCharUnicode
+	default:
+		return blockquoteCharNonUnicode
+	}
+}
+
 //nolint:funcorder,funlen
 func (m *Mattermost) wsActionPostSkip(ctx context.Context, data *model.Post, rmsg *model.WebSocketEvent, logger *logrus.Entry) bool {
 	rc := m.cfg.Current()
@@ -1318,12 +1331,8 @@ func (m *Mattermost) wsActionPostSkip(ctx context.Context, data *model.Post, rms
 	disableEmoji := rc.Mattermost.Formatter.DisableEmoji
 	disableMarkdown := rc.Mattermost.Formatter.DisableMarkdown
 	useUnicode := rc.Mattermost.Formatter.Unicode
-	blockquoteChar := blockquoteCharNonUnicode
+	blockquoteChar := mattermostBlockquoteChar(rc.Mattermost.Formatter, useUnicode)
 	inlineCode := rc.Mattermost.Formatter.MarkdownInlineCode
-
-	if useUnicode {
-		blockquoteChar = blockquoteCharUnicode
-	}
 
 	shortenMsgLen := rc.Mattermost.ShortenRepliesTo
 
@@ -1389,14 +1398,6 @@ func (m *Mattermost) wsActionPostSkip(ctx context.Context, data *model.Post, rms
 	return true
 }
 
-var markdownReplacer = strings.NewReplacer(
-	"\n", " ",
-	// Since we're combining multi lines into one, make code blocks single code/monospace
-	"```", "`",
-	"~~~", "`",
-)
-
-//nolint:funlen
 func (m *Mattermost) getCachedPostInfo(ctx context.Context, postID string, newLen int, uncounted string, unicode bool, logger *logrus.Entry) (CachedPost, error) {
 	rc := m.cfg.Current()
 
@@ -1424,26 +1425,14 @@ func (m *Mattermost) getCachedPostInfo(ctx context.Context, postID string, newLe
 		}
 	}
 
-	if !rc.Mattermost.Formatter.DisableMarkdown {
-		msg = markdownReplacer.Replace(msg)
-
-		blockquoteChar := blockquoteCharNonUnicode
-		if unicode {
-			blockquoteChar = blockquoteCharUnicode
-		}
-
-		msg = utils.Markdown2irc(msg, blockquoteChar, rc.Mattermost.Formatter.MarkdownInlineCode)
-	} else {
-		msg = strings.ReplaceAll(msg, "\n", " ")
-	}
-
-	if !rc.Mattermost.Formatter.DisableEmoji {
-		msg = utils.EmojiReplaceAliases(msg, rc.Mattermost.Formatter.CustomEmoji)
-	}
+	blockquoteChar := mattermostBlockquoteChar(rc.Mattermost.Formatter, unicode)
 
 	opts := utils.SummaryOpts{
-		DisableMarkdown: true,
-		DisableEmoji:    true,
+		DisableMarkdown: rc.Mattermost.Formatter.DisableMarkdown,
+		DisableEmoji:    rc.Mattermost.Formatter.DisableEmoji,
+		CustomEmoji:     rc.Mattermost.Formatter.CustomEmoji,
+		BlockquoteChar:  blockquoteChar,
+		InlineCodeChar:  rc.Mattermost.Formatter.MarkdownInlineCode,
 		MaxLength:       newLen,
 		UncountedPrefix: uncounted,
 		Unicode:         unicode,
@@ -2823,7 +2812,7 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 			if !isFallbackDup {
 				outFallback := fallbackText
 				if !disableMarkdown {
-					outFallback = utils.Markdown2irc(outFallback, blockquoteChar, inlineCode)
+					outFallback = utils.Markdown2irc(outFallback, blockquoteChar, inlineCode, useUnicode)
 				}
 
 				if !disableEmoji {
@@ -2915,6 +2904,7 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 			CodeBlockSeparator: codeBlockSeparator,
 			BlockquoteChar:     blockquoteChar,
 			InlineCodeChar:     inlineCode,
+			Unicode:            useUnicode,
 			PreserveNewLines:   preserveNewLines,
 		}
 
@@ -3027,6 +3017,7 @@ func (m *Mattermost) formatAttachmentFields(b *strings.Builder, fields []*model.
 					opts.BlockquoteChar,
 					opts.InlineCodeChar,
 					opts.CustomEmoji,
+					opts.Unicode,
 				)
 			}
 
@@ -3373,6 +3364,7 @@ func (m *Mattermost) parsePreviewPost(b *strings.Builder, user string, channel s
 			CodeBlockSeparator: codeBlockSeparator,
 			BlockquoteChar:     blockquoteChar,
 			InlineCodeChar:     inlineCode,
+			Unicode:            useUnicode,
 			PreserveNewLines:   preserveNewLines,
 		}
 

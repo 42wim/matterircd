@@ -204,5 +204,6 @@ type Presence struct {
 	CustomStatus          string
 	CustomStatusExpiresAt int64
 	ActiveUntil           int64
+	LastActivityAt        int64
 	UpdatedAt             int64
 }

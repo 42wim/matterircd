@@ -1178,6 +1178,10 @@ func (c *Client) emitIncomingChatMessage(msg *ChatMessage, prevTopic string, has
 		msg.TopicChanged = false
 	}
 
+	if !msg.IsSystem && msg.FromID != "" {
+		c.recordUserActivity(msg.FromID)
+	}
+
 	c.cachePost(msg)
 	c.touchConversation(msg.ConversationID, msg.CreateAt)
 
@@ -1249,6 +1253,8 @@ func (c *Client) handleReactionBody(ev *protoEvent, body *protoEventBody) {
 	if userID == "" {
 		userID = ev.UserID
 	}
+
+	c.recordUserActivity(userID)
 
 	ts := usecToMillis(body.ReactTimeUsec)
 	if ts == 0 {
@@ -1407,6 +1413,10 @@ func (c *Client) handleTypingBody(ev *protoEvent, body *protoEventBody) {
 
 	if convID == "" || userID == "" || userID == c.selfUserID() {
 		return
+	}
+
+	if body.TypingState == protoTypingStarted {
+		c.recordUserActivity(userID)
 	}
 
 	evType := EventTyping

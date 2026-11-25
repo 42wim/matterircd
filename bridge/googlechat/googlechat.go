@@ -625,7 +625,7 @@ func (g *GoogleChat) MsgChannelThread(ctx context.Context, channelID, parentID, 
 	return encoded, nil
 }
 
-func (g *GoogleChat) MsgUserQuote(ctx context.Context, userID, quotedPostID string, threaded bool, text string) (string, string, error) {
+func (g *GoogleChat) MsgUserQuote(ctx context.Context, userID, threadID, quotedPostID string, threaded bool, text string) (string, string, error) {
 	conv, err := g.gc.GetOrCreateDM(ctx, []string{userID})
 	if err != nil {
 		return "", "", err
@@ -633,10 +633,31 @@ func (g *GoogleChat) MsgUserQuote(ctx context.Context, userID, quotedPostID stri
 
 	g.dmChannelCache.Add(userID, conv.ID)
 
-	return g.MsgChannelQuote(ctx, conv.ID, quotedPostID, threaded, text)
+	return g.MsgChannelQuote(ctx, conv.ID, threadID, quotedPostID, threaded, text)
 }
 
-func (g *GoogleChat) MsgChannelQuote(ctx context.Context, channelID, quotedPostID string, threaded bool, text string) (string, string, error) {
+func (g *GoogleChat) resolveQuoteTargetTopic(channelID, threadID, quotedPostID, quotedTopicID string) string {
+	if threadID == "" || threadID == quotedPostID {
+		return quotedTopicID
+	}
+
+	trp, found := g.resolvePostInChannel(channelID, threadID)
+	if !found {
+		return quotedTopicID
+	}
+
+	if trp.topicID != "" {
+		return trp.topicID
+	}
+
+	if trp.rawMsgID != "" {
+		return trp.rawMsgID
+	}
+
+	return quotedTopicID
+}
+
+func (g *GoogleChat) MsgChannelQuote(ctx context.Context, channelID, threadID, quotedPostID string, threaded bool, text string) (string, string, error) {
 	rp, ok := g.resolvePostInChannel(channelID, quotedPostID)
 	if !ok {
 		return "", "", errors.New("unknown post " + quotedPostID)
@@ -668,15 +689,17 @@ func (g *GoogleChat) MsgChannelQuote(ctx context.Context, channelID, quotedPostI
 	sendText := g.prepareOutgoingText(text)
 
 	if threaded {
-		msg, sendErr := g.gc.SendQuotedMessageThread(ctx, channelID, quotedTopicID, sendText, quote)
+		targetTopicID := g.resolveQuoteTargetTopic(channelID, threadID, quotedPostID, quotedTopicID)
+
+		msg, sendErr := g.gc.SendQuotedMessageThread(ctx, channelID, targetTopicID, sendText, quote)
 		if sendErr != nil {
 			return "", "", sendErr
 		}
 
 		encoded := encodeGoogleChatID(msg.ID)
-		g.recordSentPost(msg.ID, encoded, channelID, quotedTopicID, sendText)
+		g.recordSentPost(msg.ID, encoded, channelID, targetTopicID, sendText)
 
-		return encoded, encodeGoogleChatID(quotedTopicID), nil
+		return encoded, encodeGoogleChatID(targetTopicID), nil
 	}
 
 	msg, sendErr := g.gc.SendQuotedMessage(ctx, channelID, sendText, quote)
@@ -787,11 +810,30 @@ func (g *GoogleChat) StatusUser(ctx context.Context, userID string) (string, err
 		return g.gc.GetStatus(ctx, userID), nil
 	}
 
-	status := googlechatclient.MapAvailabilityToStatus(p)
+	prefix := googlechatclient.MapAvailabilityToStatus(p)
+
+	// Presence activity is in milliseconds.
+	lastActivity := g.gc.GetUserLastActivity(userID) / 1000
+
+	var lastOnline string
+
+	if lastActivity > 0 {
+		diff := max(0, time.Now().Unix()-lastActivity)
+		if prefix == "online" {
+			lastOnline = utils.FormatLastOnline(lastActivity, true)
+		} else if diff >= 20*60 {
+			lastOnline = utils.FormatLastOnline(lastActivity)
+		}
+	}
+
+	status := prefix
+	if lastOnline != "" {
+		status += " (" + lastOnline + ")"
+	}
 
 	note := googlechatclient.FormatStatusNote(p)
 	if note != "" {
-		return fmt.Sprintf("%s: %s", status, note), nil
+		status += ": " + note
 	}
 
 	return status, nil

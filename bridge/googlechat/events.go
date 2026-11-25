@@ -565,8 +565,10 @@ func (g *GoogleChat) formatIncomingText(
 
 	if post.QuotedMessage != nil && post.QuotedMessage.IsForwarded {
 		text = g.appendForwardedPreview(ctx, text, post.QuotedMessage, rc)
+	} else if quoted, ok := g.prependQuotedMessage(ctx, text, post.QuotedMessage); ok {
+		text = quoted
 	} else if !rc.GoogleChat.HideReplies {
-		text = g.appendReplyContext(ctx, text, post, parentID, rc.GoogleChat.ShortenRepliesTo)
+		text = g.appendReplyContext(text, parentID)
 	}
 
 	switch eventKind {
@@ -674,6 +676,7 @@ func forwardedPreviewStyle(fc config.FormatterConfig) (string, utils.ProcessMess
 		CodeBlockSeparator: fc.CodeBlockSeparator,
 		BlockquoteChar:     blockquoteChar,
 		InlineCodeChar:     fc.MarkdownInlineCode,
+		Unicode:            fc.Unicode,
 		PreserveNewLines:   fc.PreserveNewLines,
 	}
 
@@ -729,25 +732,67 @@ func (g *GoogleChat) renderForwardedPreview(
 	})
 }
 
-func (g *GoogleChat) appendReplyContext(
+func (g *GoogleChat) prependQuotedMessage(
 	ctx context.Context,
-	text string,
-	post *googlechatclient.ChatMessage,
-	parentID string,
-	shorten int,
-) string {
-	if post.QuotedMessage != nil && post.QuotedMessage.Text != "" {
-		summary := g.formatSummary(post.QuotedMessage.Text, shorten)
-		if summary != "" {
-			quotedUser := g.resolveUserInfo(ctx, post.QuotedMessage.FromID, post.QuotedMessage.DisplayName)
-			if quotedUser != nil && quotedUser.Nick != "" {
-				return text + " (re @" + quotedUser.Nick + ": " + summary + ")"
-			}
+	baseText string,
+	q *googlechatclient.QuotedMessage,
+) (string, bool) {
+	if q == nil {
+		return baseText, false
+	}
 
-			return text + " (re: " + summary + ")"
+	body := strings.ReplaceAll(q.Text, "\r\n", "\n")
+	body = strings.Trim(body, "\r\n")
+
+	if body == "" && q.Deleted {
+		body = "(deleted)"
+	}
+
+	if body == "" {
+		return baseText, false
+	}
+
+	var author string
+	if u := g.resolveUserInfo(ctx, q.FromID, q.DisplayName); u != nil && u.Nick != "" {
+		author = "@" + u.Nick
+	} else {
+		author = strings.TrimSpace(q.DisplayName)
+	}
+
+	lines := strings.Split(body, "\n")
+
+	var b strings.Builder
+
+	b.Grow(len(author) + len(body) + len(lines)*2 + len(baseText) + 24)
+
+	if author != "" {
+		b.WriteString("> **")
+		b.WriteString(author)
+		b.WriteString("** wrote:\n")
+	}
+
+	for i, line := range lines {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+
+		if strings.TrimSpace(line) == "" {
+			b.WriteByte('>')
+		} else {
+			b.WriteString("> ")
+			b.WriteString(line)
 		}
 	}
 
+	if baseText != "" {
+		b.WriteByte('\n')
+		b.WriteString(baseText)
+	}
+
+	return b.String(), true
+}
+
+func (g *GoogleChat) appendReplyContext(text, parentID string) string {
 	if parentID != "" {
 		if parent, ok := g.msgParentCache.Get(parentID); ok && parent.ParentUser != nil && parent.ReplyMsg != "" {
 			return text + " (re @" + parent.ParentUser.Nick + ": " + parent.ReplyMsg + ")"
@@ -811,12 +856,14 @@ func (g *GoogleChat) formatSummary(text string, maxLen int) string {
 	rc := g.cfg.Current()
 
 	bq := "|"
-	if rc.GoogleChat.Formatter.Unicode {
-		bq = "▕"
-	}
 
-	if rc.GoogleChat.Formatter.MarkdownBlockQuoteChar != "" {
+	switch {
+	case rc.GoogleChat.Formatter.DisableMarkdownBlockQuote || rc.GoogleChat.Formatter.DisableMarkdown:
+		bq = utils.BlockQuoteCharDefault
+	case rc.GoogleChat.Formatter.MarkdownBlockQuoteChar != "":
 		bq = rc.GoogleChat.Formatter.MarkdownBlockQuoteChar
+	case rc.GoogleChat.Formatter.Unicode:
+		bq = "▕"
 	}
 
 	return utils.FormatAndShortenSummary(text, utils.SummaryOpts{
