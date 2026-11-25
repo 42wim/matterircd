@@ -232,7 +232,7 @@ func (c *Client) runWebChannelSession(ctx context.Context, reconnecting bool) er
 	c.setActiveSession(sess)
 	c.subscribeGroups(sessionCtx, sess, c.allGroupRefs())
 
-	c.markStreamConnected(reconnecting)
+	c.markStreamConnected(sessionCtx, sess, reconnecting)
 
 	keepaliveErrCh := make(chan error, 1)
 
@@ -259,7 +259,7 @@ func (c *Client) rotateCookiesIfStale(ctx context.Context) {
 	}
 }
 
-func (c *Client) markStreamConnected(reconnecting bool) {
+func (c *Client) markStreamConnected(sessionCtx context.Context, sess *webChannelSession, reconnecting bool) {
 	c.lastWsActivity.Store(time.Now().UnixNano())
 	c.wsConnected.Store(true)
 
@@ -273,6 +273,74 @@ func (c *Client) markStreamConnected(reconnecting bool) {
 		Type:      EventConnected,
 		Timestamp: time.Now(),
 	})
+
+	if reconnecting {
+		c.wg.Go(func() {
+			c.resyncAfterReconnect(sessionCtx, sess)
+		})
+
+		return
+	}
+
+	if c.OnWsConnect != nil {
+		c.wg.Go(func() {
+			c.OnWsConnect()
+		})
+	}
+}
+
+// resyncAfterReconnect refreshes conversations (updating LastPostAt and
+// discovering newly created DMs/Spaces) before invoking OnWsConnect, matching
+// matterclient.resyncAfterWsReconnect so history replay does not skip channels
+// with stale LastPostAt timestamps.
+func (c *Client) resyncAfterReconnect(sessionCtx context.Context, sess *webChannelSession) {
+	const maxAttempts = 3
+
+	var err error
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		err = c.UpdateChannels(sessionCtx)
+		if err == nil {
+			break
+		}
+
+		if sessionCtx.Err() != nil {
+			return
+		}
+
+		c.logger.Warnf("WebChannel reconnect: updating channels failed %d/%d: %v", attempt, maxAttempts, err)
+
+		if attempt == maxAttempts {
+			break
+		}
+
+		select {
+		case <-sessionCtx.Done():
+			return
+		case <-time.After(time.Duration(attempt) * 2 * time.Second):
+		}
+	}
+
+	if err != nil {
+		if sessionCtx.Err() != nil || c.currentActiveSession() != sess {
+			return
+		}
+
+		c.logger.Warn("WebChannel reconnect: channel refresh failed, reconnecting stream")
+		c.Reconnect()
+
+		return
+	}
+
+	if sessionCtx.Err() != nil || c.currentActiveSession() != sess {
+		return
+	}
+
+	c.subscribeGroups(sessionCtx, sess, c.allGroupRefs())
+
+	if sessionCtx.Err() != nil || c.currentActiveSession() != sess {
+		return
+	}
 
 	if c.OnWsConnect != nil {
 		c.OnWsConnect()
@@ -1536,7 +1604,7 @@ func (c *Client) handleReadStateBody(ev *protoEvent, body *protoEventBody) {
 }
 
 func (c *Client) runPollFallback(ctx context.Context) {
-	c.markStreamConnected(false)
+	c.markStreamConnected(ctx, nil, false)
 
 	defer c.markStreamDisconnected(ctx.Err())
 
