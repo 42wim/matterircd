@@ -166,10 +166,7 @@ func (m *MSTeams) buildClient(
 	mc.PollFallback = rc.MSTeams.PollFallback
 	mc.OnAuthPrompt = onAuthPrompt
 	mc.OnWsConnect = func() {
-		if rc.MSTeams.ForceSyncOnReconnect {
-			_ = mc.UpdateChannels(m.ctx)
-			m.rebuildNames()
-		}
+		m.rebuildNames()
 
 		if onWsConnect != nil {
 			onWsConnect()
