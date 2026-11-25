@@ -183,10 +183,7 @@ func (g *GoogleChat) buildClient(
 	gc.PollFallback = rc.GoogleChat.PollFallback
 	gc.OnAuthPrompt = onAuthPrompt
 	gc.OnWsConnect = func() {
-		if g.cfg.Current().GoogleChat.ForceSyncOnReconnect {
-			_ = gc.UpdateChannels(g.ctx)
-			g.rebuildNames()
-		}
+		g.rebuildNames()
 
 		if onWsConnect != nil {
 			onWsConnect()
