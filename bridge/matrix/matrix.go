@@ -71,14 +71,6 @@ const (
 	roomNameResolveTimeout = 5 * time.Second
 )
 
-// markdownReplacer combines multi-line messages into a single line, making
-// code blocks single code/monospace.
-var markdownReplacer = strings.NewReplacer(
-	"\n", " ",
-	"```", "`",
-	"~~~", "`",
-)
-
 // roomUpdate is a queued room change, see queueRoomUpdate.
 type roomUpdate struct {
 	ev   *bridge.ChannelUpdateEvent
@@ -2277,26 +2269,17 @@ func (m *Matrix) formatSummary(msg string, maxLen int, uncounted string) string 
 	fc := &m.cfg.Matrix().Formatter
 	unicode := fc.Unicode
 
-	if !fc.DisableMarkdown {
-		msg = markdownReplacer.Replace(msg)
-
-		blockquoteChar := blockquoteCharNonUnicode
-		if unicode {
-			blockquoteChar = blockquoteCharUnicode
-		}
-
-		msg = utils.Markdown2irc(msg, blockquoteChar, fc.MarkdownInlineCode)
-	} else {
-		msg = strings.ReplaceAll(msg, "\n", " ")
-	}
-
-	if !fc.DisableEmoji {
-		msg = utils.EmojiReplaceAliases(msg, fc.CustomEmoji)
+	blockquoteChar := blockquoteCharNonUnicode
+	if unicode {
+		blockquoteChar = blockquoteCharUnicode
 	}
 
 	return utils.FormatAndShortenSummary(msg, utils.SummaryOpts{
-		DisableMarkdown: true,
-		DisableEmoji:    true,
+		DisableMarkdown: fc.DisableMarkdown,
+		DisableEmoji:    fc.DisableEmoji,
+		CustomEmoji:     fc.CustomEmoji,
+		BlockquoteChar:  blockquoteChar,
+		InlineCodeChar:  fc.MarkdownInlineCode,
 		MaxLength:       maxLen,
 		UncountedPrefix: uncounted,
 		Unicode:         unicode,

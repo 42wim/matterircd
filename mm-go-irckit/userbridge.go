@@ -247,6 +247,7 @@ func (u *User) handleChannelTopicEvent(event *bridge.ChannelTopicEvent) bool {
 			blockQuoteCharDefault,
 			inlineCode,
 			customEmoji,
+			u.br.FormatterConfig().Unicode,
 		)
 
 		err := setChannelTopic(ch, tu, topic)
@@ -393,6 +394,7 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) bool {
 		CodeBlockSeparator: codeBlockSeparator,
 		BlockquoteChar:     blockQuoteChar,
 		InlineCodeChar:     inlineCode,
+		Unicode:            u.br.FormatterConfig().Unicode,
 		PreserveNewLines:   preserveNewLines,
 	}
 
@@ -406,8 +408,17 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) bool {
 		}
 
 		if showContext || addPrefix {
-			line = prefix + line + suffix
+			splitTablePrefix := !showContext && addPrefix && prefix != "" && isTableTopBorder(line)
 			addPrefix = false
+
+			if splitTablePrefix {
+				sendErr = u.msgSpoofDMTime(event.Sender, event.Receiver, strings.TrimRight(prefix, " \t")+suffix, timeTag, len(prefix)+len(suffix))
+				if sendErr != nil {
+					return
+				}
+			} else {
+				line = prefix + line + suffix
+			}
 		}
 
 		sendErr = u.msgSpoofDMTime(event.Sender, event.Receiver, line, timeTag, len(line))
@@ -775,6 +786,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) bool
 		CodeBlockSeparator: codeBlockSeparator,
 		BlockquoteChar:     blockQuoteChar,
 		InlineCodeChar:     inlineCode,
+		Unicode:            u.br.FormatterConfig().Unicode,
 		PreserveNewLines:   preserveNewLines,
 	}
 
@@ -788,8 +800,17 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) bool
 		}
 
 		if showContext || addPrefix {
-			line = prefix + line + suffix
+			splitTablePrefix := !showContext && addPrefix && prefix != "" && isTableTopBorder(line)
 			addPrefix = false
+
+			if splitTablePrefix {
+				sendErr = spoofChannelWithPrefixTime(ch, senderPrefix, strings.TrimRight(prefix, " \t")+suffix, cmd, timeTag, len(prefix)+len(suffix))
+				if sendErr != nil {
+					return
+				}
+			} else {
+				line = prefix + line + suffix
+			}
 		}
 
 		sendErr = spoofChannelWithPrefixTime(ch, senderPrefix, line, cmd, timeTag, len(line))
@@ -2001,6 +2022,7 @@ func (u *User) replayHistoryEvents(brchannel *bridge.ChannelInfo, since int64, l
 		CodeBlockSeparator: codeBlockSeparator,
 		BlockquoteChar:     blockQuoteChar,
 		InlineCodeChar:     inlineCode,
+		Unicode:            u.br.FormatterConfig().Unicode,
 		PreserveNewLines:   preserveNewLines,
 	}
 
@@ -2115,6 +2137,15 @@ func (u *User) replayHistoryEvents(brchannel *bridge.ChannelInfo, since int64, l
 				showContext := showMulti || (!suffixOnly && i == 0) || (suffixOnly && len(files) == 0 && i == len(lines)-1)
 				if showContext {
 					threadMsgID = u.prefixContext(brchannel.ID, msgID, parentID, "replay")
+				}
+
+				if i == 0 && !showMulti && u.br.BridgeConfig().PrefixContext && threadMsgID != "" && isTableTopBorder(line) {
+					err := spoof(nick, u.formatContextMessage(tsStr, threadMsgID, ""), timeTag)
+					if err != nil {
+						return false
+					}
+
+					threadMsgID = ""
 				}
 
 				replayMsg = u.formatContextMessage(tsStr, threadMsgID, line)
@@ -2302,6 +2333,7 @@ func (u *User) syncChannel(id string, name string) error {
 			blockQuoteCharDefault,
 			inlineCode,
 			customEmoji,
+			u.br.FormatterConfig().Unicode,
 		)
 
 		ch.Topic(svc, topic)
@@ -2746,14 +2778,26 @@ func (u *User) updateMsgMapIndex(channelID string, counter int, messageID string
 	u.msgMapIndex[channelID][counter] = messageID
 }
 
+func isTableTopBorder(line string) bool {
+	return strings.HasPrefix(line, "┌") || strings.HasPrefix(line, "+-")
+}
+
 func (u *User) formatContextMessage(ts, threadMsgID, msg string) string {
 	var formattedMsg string
 
 	switch {
 	case u.br.BridgeConfig().PrefixContext && threadMsgID != "":
-		formattedMsg = threadMsgID + " " + msg
+		if msg == "" {
+			formattedMsg = threadMsgID
+		} else {
+			formattedMsg = threadMsgID + " " + msg
+		}
 	case u.br.BridgeConfig().SuffixContext && threadMsgID != "":
-		formattedMsg = msg + " " + threadMsgID
+		if msg == "" {
+			formattedMsg = threadMsgID
+		} else {
+			formattedMsg = msg + " " + threadMsgID
+		}
 	default:
 		formattedMsg = msg
 	}

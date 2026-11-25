@@ -785,6 +785,7 @@ func details(u *User, toUser *User, args []string, service string) {
 		CodeBlockSeparator: codeBlockSeparator,
 		BlockquoteChar:     blockQuoteChar,
 		InlineCodeChar:     inlineCode,
+		Unicode:            u.br.FormatterConfig().Unicode,
 		PreserveNewLines:   preserveNewLines,
 	}
 
@@ -1116,6 +1117,7 @@ func dispatchHistoricalEvent(u *User, toUser *User, event *bridge.Event, searchC
 		CodeBlockSeparator: codeBlockSeparator,
 		BlockquoteChar:     blockQuoteChar,
 		InlineCodeChar:     inlineCode,
+		Unicode:            u.br.FormatterConfig().Unicode,
 		PreserveNewLines:   preserveNewLines,
 	}
 
@@ -1154,6 +1156,10 @@ func dispatchHistoricalEvent(u *User, toUser *User, event *bridge.Event, searchC
 		showContext := showMulti || (!suffixOnly && i == 0) || (suffixOnly && len(files) == 0 && i == len(lines)-1)
 
 		if !showContext {
+			currMsgID = ""
+			currParentID = ""
+		} else if i == 0 && !showMulti && u.br.BridgeConfig().PrefixContext && nick != systemUser && isTableTopBorder(line) && (currMsgID != "" || currParentID != "") {
+			formatScrollbackMsg(u, channelID, channelName, scrollbackUser, nick, tsStr, timeTag, currMsgID, currParentID, "")
 			currMsgID = ""
 			currParentID = ""
 		}
@@ -2260,6 +2266,7 @@ func summarize(u *User, toUser *User, args []string, service string) {
 		CodeBlockSeparator: codeBlockSeparator,
 		BlockquoteChar:     blockQuoteChar,
 		InlineCodeChar:     inlineCode,
+		Unicode:            u.br.FormatterConfig().Unicode,
 		PreserveNewLines:   preserveNewLines,
 	}
 

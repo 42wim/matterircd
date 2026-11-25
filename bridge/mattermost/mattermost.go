@@ -1389,14 +1389,6 @@ func (m *Mattermost) wsActionPostSkip(ctx context.Context, data *model.Post, rms
 	return true
 }
 
-var markdownReplacer = strings.NewReplacer(
-	"\n", " ",
-	// Since we're combining multi lines into one, make code blocks single code/monospace
-	"```", "`",
-	"~~~", "`",
-)
-
-//nolint:funlen
 func (m *Mattermost) getCachedPostInfo(ctx context.Context, postID string, newLen int, uncounted string, unicode bool, logger *logrus.Entry) (CachedPost, error) {
 	rc := m.cfg.Current()
 
@@ -1424,26 +1416,17 @@ func (m *Mattermost) getCachedPostInfo(ctx context.Context, postID string, newLe
 		}
 	}
 
-	if !rc.Mattermost.Formatter.DisableMarkdown {
-		msg = markdownReplacer.Replace(msg)
-
-		blockquoteChar := blockquoteCharNonUnicode
-		if unicode {
-			blockquoteChar = blockquoteCharUnicode
-		}
-
-		msg = utils.Markdown2irc(msg, blockquoteChar, rc.Mattermost.Formatter.MarkdownInlineCode)
-	} else {
-		msg = strings.ReplaceAll(msg, "\n", " ")
-	}
-
-	if !rc.Mattermost.Formatter.DisableEmoji {
-		msg = utils.EmojiReplaceAliases(msg, rc.Mattermost.Formatter.CustomEmoji)
+	blockquoteChar := blockquoteCharNonUnicode
+	if unicode {
+		blockquoteChar = blockquoteCharUnicode
 	}
 
 	opts := utils.SummaryOpts{
-		DisableMarkdown: true,
-		DisableEmoji:    true,
+		DisableMarkdown: rc.Mattermost.Formatter.DisableMarkdown,
+		DisableEmoji:    rc.Mattermost.Formatter.DisableEmoji,
+		CustomEmoji:     rc.Mattermost.Formatter.CustomEmoji,
+		BlockquoteChar:  blockquoteChar,
+		InlineCodeChar:  rc.Mattermost.Formatter.MarkdownInlineCode,
 		MaxLength:       newLen,
 		UncountedPrefix: uncounted,
 		Unicode:         unicode,
@@ -2823,7 +2806,7 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 			if !isFallbackDup {
 				outFallback := fallbackText
 				if !disableMarkdown {
-					outFallback = utils.Markdown2irc(outFallback, blockquoteChar, inlineCode)
+					outFallback = utils.Markdown2irc(outFallback, blockquoteChar, inlineCode, useUnicode)
 				}
 
 				if !disableEmoji {
@@ -2915,6 +2898,7 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 			CodeBlockSeparator: codeBlockSeparator,
 			BlockquoteChar:     blockquoteChar,
 			InlineCodeChar:     inlineCode,
+			Unicode:            useUnicode,
 			PreserveNewLines:   preserveNewLines,
 		}
 
@@ -3027,6 +3011,7 @@ func (m *Mattermost) formatAttachmentFields(b *strings.Builder, fields []*model.
 					opts.BlockquoteChar,
 					opts.InlineCodeChar,
 					opts.CustomEmoji,
+					opts.Unicode,
 				)
 			}
 
@@ -3373,6 +3358,7 @@ func (m *Mattermost) parsePreviewPost(b *strings.Builder, user string, channel s
 			CodeBlockSeparator: codeBlockSeparator,
 			BlockquoteChar:     blockquoteChar,
 			InlineCodeChar:     inlineCode,
+			Unicode:            useUnicode,
 			PreserveNewLines:   preserveNewLines,
 		}
 

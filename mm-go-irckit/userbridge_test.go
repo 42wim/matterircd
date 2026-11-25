@@ -681,3 +681,17 @@ func TestSavedSinceSnapshotRefcountAndServerOnly(t *testing.T) {
 	assert.False(t, ok)
 	uServerOnly.clearPendingReplay(chRef)
 }
+
+func TestIsTableTopBorderAndContextPrefix(t *testing.T) {
+	assert.True(t, isTableTopBorder("┌───┬───┐"))
+	assert.True(t, isTableTopBorder("+---+---+"))
+	assert.False(t, isTableTopBorder("│ A │ B │"))
+	assert.False(t, isTableTopBorder("hello"))
+
+	br := &replayTestBridge{protocol: serviceMattermost}
+	u, _ := newTestUserBridge(t, "[mattermost]\nPrefixContext = true\n", br)
+
+	assert.Equal(t, "[2026-11-24 13:03] [↪abc]", u.formatContextMessage("2026-11-24 13:03", "[↪abc]", ""))
+	assert.Equal(t, "[2026-11-24 13:03] ┌───┐", u.formatContextMessage("2026-11-24 13:03", "", "┌───┐"))
+	assert.Equal(t, "[2026-11-24 13:03] [↪abc] hello", u.formatContextMessage("2026-11-24 13:03", "[↪abc]", "hello"))
+}
