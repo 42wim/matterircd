@@ -459,6 +459,58 @@ func (m *MSTeams) resolveConversationMembers(ctx context.Context) {
 	if len(mris) > 0 {
 		_, _ = m.mc.ResolveUsers(ctx, mris)
 	}
+
+	// Re-read channels after GetChannelMembers, which may have reclassified
+	// unnamed 2-member threads from ConversationGroup to ConversationDM.
+	m.resolveUnnamedDMPeers(ctx, m.mc.GetChannels())
+}
+
+// resolveUnnamedDMPeers falls back to recent messages in DMs whose peer still
+// lacks a DisplayName (e.g. federated/external users on Personal accounts
+// where fetchShortProfile is unavailable and the latest message was sent by us).
+func (m *MSTeams) resolveUnnamedDMPeers(ctx context.Context, convs []*msteamsclient.Conversation) {
+	me := m.mc.Me()
+
+	myMRI := ""
+	if me != nil {
+		myMRI = me.MRI
+	}
+
+	for _, conv := range convs {
+		if conv.Type != msteamsclient.ConversationDM || conv.LastPostAt == 0 {
+			continue
+		}
+
+		members := conv.Members
+		if len(members) == 0 {
+			fetched, err := m.mc.GetChannelMembers(ctx, conv.ID)
+			if err != nil {
+				continue
+			}
+
+			members = fetched
+		}
+
+		if !m.hasUnnamedPeer(members, myMRI) {
+			continue
+		}
+
+		_, _ = m.mc.GetMessages(ctx, conv.ID, 20)
+	}
+}
+
+func (m *MSTeams) hasUnnamedPeer(members []string, myMRI string) bool {
+	for _, mri := range members {
+		if mri == "" || mri == myMRI {
+			continue
+		}
+
+		if u := m.mc.GetUser(mri); u == nil || u.DisplayName == "" {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (m *MSTeams) Invite(ctx context.Context, channelID, username string) error {
@@ -1358,7 +1410,8 @@ func (m *MSTeams) userToUserInfo(u *msteamsclient.User) *bridge.UserInfo {
 	}
 
 	isMe := m.isOwnMRI(u.MRI)
-	isExternal := u.IsExternal || (!isMe && strings.HasPrefix(u.MRI, "8:live:") && m.mc.TokenState().AccountType != msteamsclient.AccountPersonal)
+	acctType := m.mc.TokenState().AccountType
+	isExternal := u.IsExternal || (!isMe && ((acctType == msteamsclient.AccountPersonal && strings.HasPrefix(u.MRI, "8:orgid:")) || (acctType != msteamsclient.AccountPersonal && strings.HasPrefix(u.MRI, "8:live:"))))
 
 	dirURL := ""
 	if !isExternal {
