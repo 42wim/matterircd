@@ -145,8 +145,8 @@ github.com/matterbridge/matrixclient v0.0.0-20261125051000-5de6f09ca9e8 h1:b2JCA
 github.com/matterbridge/matrixclient v0.0.0-20261125051000-5de6f09ca9e8/go.mod h1:0qtzg48RCcP16IWnaqXpz0pLPKUVngaRDIDQflRu62k=
 github.com/matterbridge/matterclient v0.0.0-20261116034806-3087b48d325c h1:+gdD53Aj1qYoq4H98U5S1XHO8jQFPmxnPxx3HC8WBBY=
 github.com/matterbridge/matterclient v0.0.0-20261116034806-3087b48d325c/go.mod h1:69rJRgvrpV13ZyoA7q1HjHwaM6CSkXQPhCdDFRxwNj0=
-github.com/matterbridge/msteamsclient v0.0.0-20261125081345-b1f29610748d h1:4RDHBisGhHXU7ydggTrVCqmdBX0jwHoE200K6eqAQt0=
-github.com/matterbridge/msteamsclient v0.0.0-20261125081345-b1f29610748d/go.mod h1:CXH2cfC81TdlIm2Zh8rP3B4uethFeW2hwiWOWxIAJqg=
+github.com/matterbridge/msteamsclient v0.0.0-20261126231743-cf0986ef1cf1 h1:Ehlsm/lByHlR9xQDssgIfd+vgRGGxPS8+r3udJe+MNc=
+github.com/matterbridge/msteamsclient v0.0.0-20261126231743-cf0986ef1cf1/go.mod h1:CXH2cfC81TdlIm2Zh8rP3B4uethFeW2hwiWOWxIAJqg=
 github.com/matterbridge/rocketchatclient v0.0.0-20261126225750-3d34ddb1e01f h1:1aj0EX01CKCBRlKWSbB4KWq2+jFc1KA3vhHvoSYHurY=
 github.com/matterbridge/rocketchatclient v0.0.0-20261126225750-3d34ddb1e01f/go.mod h1:NyoYE4L4YsLI5l1HMDrQ7xThK3aZq8LcMknUj2YLW0M=
 github.com/matterbridge/slackclient v0.0.0-20261126225955-594846d05f6e h1:NKQgj8Fa4381yhaRD2XFnPqgOvU6IyNYoI7BLAXhT0s=
