@@ -1713,8 +1713,12 @@ func (m *Mattermost) handleWsActionPost(ctx context.Context, rmsg *model.WebSock
 		}
 
 		if channelType == "D" {
-			sendSystemDM("\x01ACTION updated topic to: "+topic+"\x01", "dm_topic")
-			return
+			topicText := "\x01ACTION updated topic to: " + topic + "\x01"
+			if topic == "" {
+				topicText = "\x01ACTION cleared topic\x01"
+			}
+
+			sendSystemDM(topicText, "dm_topic")
 		}
 
 		event := &bridge.Event{

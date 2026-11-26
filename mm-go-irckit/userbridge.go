@@ -76,6 +76,10 @@ type UserBridge struct {
 	// lastSent holds the most recent {msgID, threadID, targetID} we sent across all channels.
 	lastSent [3]string
 
+	dmTopicMu sync.RWMutex
+	// dmTopicPushed tracks the last formatted topic pushed via 332 RPL_TOPIC per DM channelID.
+	dmTopicPushed map[string]string
+
 	msgMapMutex      sync.RWMutex
 	msgMap           map[string]map[string]int
 	msgMapIndexMutex sync.RWMutex
@@ -110,6 +114,7 @@ func NewUserBridge(c net.Conn, srv Server, cfg *config.Config, dbs map[string]*b
 	u.msgChanLocks = make(map[string]chan struct{})
 	u.msgLast = make(map[string][2]string)
 	u.msgPrev = make(map[string][2]string)
+	u.dmTopicPushed = make(map[string]string)
 	u.msgMap = make(map[string]map[string]int)
 	u.msgMapIndex = make(map[string]map[int]string)
 	u.msgCounter = make(map[string]int)
@@ -208,7 +213,190 @@ func (u *User) handleEventChan(ctx context.Context, eventChan <-chan *bridge.Eve
 	}
 }
 
+func (u *User) formatTopic(raw string) string {
+	br := u.currentBridge()
+	if raw == "" || br == nil {
+		return ""
+	}
+
+	fc := br.FormatterConfig()
+	topic := utils.FormatMarkdownAndEmojiWithOpts(raw, utils.ProcessMessageOpts{
+		DisableMarkdown: fc.DisableMarkdown,
+		DisableEmoji:    fc.DisableEmoji,
+		BlockquoteChar:  blockQuoteCharDefault,
+		InlineCodeChar:  fc.MarkdownInlineCode,
+		LinkText:        fc.MarkdownLinkText,
+		LinkURL:         fc.MarkdownLinkURL,
+		CustomEmoji:     fc.CustomEmoji,
+		Unicode:         fc.Unicode,
+	})
+	topic = strings.ReplaceAll(topic, "\r", " ")
+	topic = strings.ReplaceAll(topic, "\n", " ")
+
+	return topic
+}
+
+func (u *User) dmPeerNick(sender, receiver *bridge.UserInfo) string {
+	if sender == nil {
+		return ""
+	}
+
+	if sender.Me {
+		if receiver == nil || receiver.Me {
+			return u.Nick
+		}
+
+		return u.createUserFromInfo(receiver).Nick
+	}
+
+	return u.createUserFromInfo(sender).Nick
+}
+
+func (u *User) resolveDMTopicTarget(channelID, fallbackUserID string) (string, bool) {
+	br := u.currentBridge()
+	if br == nil || channelID == "" {
+		return "", false
+	}
+
+	chName := br.GetChannelName(u.ctx, channelID)
+	if !br.IsDMChannelName(chName) {
+		return "", false
+	}
+
+	if dmUser := br.GetDMUser(u.ctx, chName); dmUser != nil {
+		if dmUser.Me || dmUser.User == u.User {
+			return u.Nick, true
+		}
+
+		return u.createUserFromInfo(dmUser).Nick, true
+	}
+
+	if fallbackUserID != "" && fallbackUserID == u.User {
+		return u.Nick, true
+	}
+
+	return "", true
+}
+
+func (u *User) recordDMTopic(dmChannelID, formatted string) {
+	if dmChannelID == "" {
+		return
+	}
+
+	u.dmTopicMu.Lock()
+
+	if u.dmTopicPushed == nil {
+		u.dmTopicPushed = make(map[string]string)
+	}
+
+	u.dmTopicPushed[dmChannelID] = formatted
+	u.dmTopicMu.Unlock()
+}
+
+// pushDMTopic sends a 332 RPL_TOPIC numeric targeting peerNick when a DM topic
+// is first observed (non-empty) or changes (including being cleared).
+func (u *User) pushDMTopic(dmChannelID, peerNick, rawTopic string, forceOnChange bool) error {
+	if dmChannelID == "" || peerNick == "" {
+		return nil
+	}
+
+	formatted := u.formatTopic(rawTopic)
+
+	u.dmTopicMu.Lock()
+
+	if u.dmTopicPushed == nil {
+		u.dmTopicPushed = make(map[string]string)
+	}
+
+	prev, seen := u.dmTopicPushed[dmChannelID]
+	if !forceOnChange {
+		if seen {
+			u.dmTopicMu.Unlock()
+			return nil
+		}
+
+		u.dmTopicPushed[dmChannelID] = formatted
+		u.dmTopicMu.Unlock()
+
+		if formatted == "" {
+			return nil
+		}
+	} else {
+		if seen && prev == formatted {
+			u.dmTopicMu.Unlock()
+			return nil
+		}
+
+		u.dmTopicPushed[dmChannelID] = formatted
+		u.dmTopicMu.Unlock()
+	}
+
+	err := u.Encode(&irc.Message{
+		Prefix:        u.Srv.Prefix(),
+		Command:       irc.RPL_TOPIC,
+		Params:        []string{u.Nick, peerNick},
+		Trailing:      formatted,
+		EmptyTrailing: formatted == "",
+	})
+	if err != nil {
+		u.dmTopicMu.Lock()
+
+		if cur, ok := u.dmTopicPushed[dmChannelID]; ok && cur == formatted {
+			if seen {
+				u.dmTopicPushed[dmChannelID] = prev
+			} else {
+				delete(u.dmTopicPushed, dmChannelID)
+			}
+		}
+
+		u.dmTopicMu.Unlock()
+	}
+
+	return err
+}
+
+func (u *User) maybePushDMTopic(dmChannelID, peerNick string) {
+	br := u.currentBridge()
+	if br == nil || dmChannelID == "" || peerNick == "" {
+		return
+	}
+
+	u.dmTopicMu.RLock()
+	_, seen := u.dmTopicPushed[dmChannelID]
+	u.dmTopicMu.RUnlock()
+
+	if seen {
+		return
+	}
+
+	_ = u.pushDMTopic(dmChannelID, peerNick, br.Topic(u.ctx, dmChannelID), false)
+}
+
+func (u *User) maybePushDMTopicForUser(userID, peerNick string) {
+	br := u.currentBridge()
+	if br == nil || userID == "" || peerNick == "" {
+		return
+	}
+
+	if dmChannelID := br.GetDMChannelID(u.ctx, userID); dmChannelID != "" {
+		u.maybePushDMTopic(dmChannelID, peerNick)
+	}
+}
+
 func (u *User) handleChannelTopicEvent(event *bridge.ChannelTopicEvent) bool {
+	if dmNick, isDM := u.resolveDMTopicTarget(event.ChannelID, event.UserID); isDM {
+		if dmNick != "" {
+			err := u.pushDMTopic(event.ChannelID, dmNick, event.Text, true)
+			if err != nil {
+				return false
+			}
+		}
+
+		u.saveLastViewedAt(event.ChannelID)
+
+		return true
+	}
+
 	tu, ok := u.Srv.HasUserID(event.UserID)
 	if event.UserID == u.User {
 		ok = true
@@ -225,11 +413,6 @@ func (u *User) handleChannelTopicEvent(event *bridge.ChannelTopicEvent) bool {
 		}
 	}
 
-	customEmoji := u.br.FormatterConfig().CustomEmoji
-	disableEmoji := u.br.FormatterConfig().DisableEmoji
-	disableMarkdown := u.br.FormatterConfig().DisableMarkdown
-	inlineCode := u.br.FormatterConfig().MarkdownInlineCode
-
 	if ok {
 		ch := u.Srv.Channel(event.ChannelID)
 
@@ -242,16 +425,7 @@ func (u *User) handleChannelTopicEvent(event *bridge.ChannelTopicEvent) bool {
 			_ = ch.Join(tu)
 		}
 
-		topic := utils.FormatMarkdownAndEmojiWithOpts(event.Text, utils.ProcessMessageOpts{
-			DisableMarkdown: disableMarkdown,
-			DisableEmoji:    disableEmoji,
-			BlockquoteChar:  blockQuoteCharDefault,
-			InlineCodeChar:  inlineCode,
-			LinkText:        u.br.FormatterConfig().MarkdownLinkText,
-			LinkURL:         u.br.FormatterConfig().MarkdownLinkURL,
-			CustomEmoji:     customEmoji,
-			Unicode:         u.br.FormatterConfig().Unicode,
-		})
+		topic := u.formatTopic(event.Text)
 
 		err := setChannelTopic(ch, tu, topic)
 		if err != nil {
@@ -468,6 +642,10 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) bool {
 
 	if sendErr != nil {
 		return false
+	}
+
+	if (hasEmitted || len(pendingEmpty) > 0) && event.Event != "dm_topic" {
+		u.maybePushDMTopic(event.ChannelID, u.dmPeerNick(event.Sender, event.Receiver))
 	}
 
 	if u.hasSharedCfg() && !u.sharedCfg().DisableAutoView {
@@ -924,6 +1102,10 @@ func (u *User) handleFileEvent(event *bridge.FileEvent) {
 				return
 			}
 		}
+	}
+
+	if event.ChannelType == "D" && len(event.Files) > 0 {
+		u.maybePushDMTopic(event.ChannelID, u.dmPeerNick(event.Sender, event.Receiver))
 	}
 }
 
@@ -2203,6 +2385,12 @@ func (u *User) replayHistoryEvents(brchannel *bridge.ChannelInfo, since int64, l
 		}
 	}
 
+	if !showReplayHdr && u.br.IsDMChannelName(brchannel.Name) {
+		if dmNick, isDM := u.resolveDMTopicTarget(brchannel.ID, ""); isDM && dmNick != "" {
+			u.maybePushDMTopic(brchannel.ID, dmNick)
+		}
+	}
+
 	return true
 }
 
@@ -2705,6 +2893,10 @@ func (u *User) logoutFrom(protocol string) error {
 		}()
 	}
 
+	u.dmTopicMu.Lock()
+	clear(u.dmTopicPushed)
+	u.dmTopicMu.Unlock()
+
 	u.Srv.Logout(u)
 	u.createLoginServices()
 
@@ -3196,6 +3388,10 @@ func (u *User) clearChannelState(channelID string) {
 	u.updateCounterMutex.Lock()
 	delete(u.updateCounter, channelID)
 	u.updateCounterMutex.Unlock()
+
+	u.dmTopicMu.Lock()
+	delete(u.dmTopicPushed, channelID)
+	u.dmTopicMu.Unlock()
 }
 
 func (u *User) saveLastViewedAt(channelID string, ts ...int64) {

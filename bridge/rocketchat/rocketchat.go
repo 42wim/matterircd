@@ -462,7 +462,10 @@ func (r *RocketChat) OnRoomChange(room *rocketchatclient.Room) {
 		})
 	}
 
-	if (!seen || room.Topic != prev.topic) && room.Topic != "" && (seen || r.cfg.RocketChat().ShowTopic) {
+	topicChanged := seen && room.Topic != prev.topic
+	initialTopic := !seen && !r.isOneToOneDM(room) && room.Topic != "" && r.cfg.RocketChat().ShowTopic
+
+	if topicChanged || initialTopic {
 		userID := ""
 		if room.Owner != nil {
 			userID = room.Owner.ID

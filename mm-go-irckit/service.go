@@ -1764,7 +1764,7 @@ func channelHeader(u *User, toUser *User, args []string, service string) {
 		args = args[2:]
 	}
 
-	var channelID, channelName string
+	var channelID, channelName, dmNick string
 
 	DMUser, exists := u.Srv.HasUser(channel)
 
@@ -1773,6 +1773,7 @@ func channelHeader(u *User, toUser *User, args []string, service string) {
 		channelName = strings.ReplaceAll(channel, "#", "")
 		channelID = u.br.GetChannelID(u.ctx, channelName, u.br.GetMe().TeamID)
 	case exists && DMUser.Ghost:
+		dmNick = DMUser.Nick
 		channelName = u.br.GetDMChannelName(u.User, DMUser.User)
 		channelID = u.br.GetChannelID(u.ctx, channelName, u.br.GetMe().TeamID)
 	default:
@@ -1791,11 +1792,14 @@ func channelHeader(u *User, toUser *User, args []string, service string) {
 		u.MsgUser(toUser, channel+"'s channel header is: "+currentHeader)
 
 	case "set":
-		err := u.br.SetTopic(u.ctx, channelID, strings.Join(args, " "))
+		newHeader := strings.Join(args, " ")
+
+		err := u.br.SetTopic(u.ctx, channelID, newHeader)
 		if err != nil {
 			u.MsgUser(toUser, "failed to set header: "+err.Error())
 		} else {
 			u.MsgUser(toUser, channel+"'s channel header updated successfully.")
+			_ = u.pushDMTopic(channelID, dmNick, newHeader, true)
 		}
 
 	case "update":
@@ -1840,6 +1844,7 @@ func channelHeader(u *User, toUser *User, args []string, service string) {
 			u.MsgUser(toUser, "failed to update header: "+err.Error())
 		} else {
 			u.MsgUser(toUser, channel+"'s channel header updated to: "+newHeader)
+			_ = u.pushDMTopic(channelID, dmNick, newHeader, true)
 		}
 
 	default:
