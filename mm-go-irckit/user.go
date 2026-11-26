@@ -237,8 +237,10 @@ func threadPrefix(text string) string {
 }
 
 func (u *User) threadPrefixFor(text string) string {
-	if resolver, ok := u.postIDResolver(); ok {
-		text = resolvePostIDRefs(resolver, "", text)
+	if strings.HasPrefix(text, "@@") {
+		if resolver, ok := u.postIDResolver(); ok {
+			text = resolvePostIDRefs(resolver, "", text)
+		}
 	}
 
 	return threadPrefix(text)
@@ -349,8 +351,10 @@ func (u *User) Decode() {
 				// messages to the service bots): they are not text to post, so they must not
 				// get merged with the lines around them or wait for the timer.
 				checkTrailing := msg.Trailing
-				if resolver, ok := u.postIDResolver(); ok {
-					checkTrailing = resolvePostIDRefs(resolver, "", msg.Trailing)
+				if msg.Command == irc.PRIVMSG && len(msg.Params) > 0 && hasPostIDRefPrefix(msg.Trailing) && !u.isActiveServiceBot(msg.Params[0]) {
+					if resolver, ok := u.postIDResolver(); ok {
+						checkTrailing = resolvePostIDRefs(resolver, "", msg.Trailing)
+					}
 				}
 
 				if msg.Command != irc.PRIVMSG ||

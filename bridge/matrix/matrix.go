@@ -2305,19 +2305,21 @@ func (m *Matrix) resolveCachedEventIDPrefix(roomID id.RoomID, prefix string) str
 	match := ""
 
 	for _, evID := range m.msgRoomCache.Keys() {
+		if !strings.HasPrefix(string(evID), prefix) {
+			continue
+		}
+
 		if roomID != "" {
 			if r, ok := m.msgRoomCache.Peek(evID); !ok || r != roomID {
 				continue
 			}
 		}
 
-		if strings.HasPrefix(string(evID), prefix) {
-			if match != "" {
-				return ""
-			}
-
-			match = string(evID)
+		if match != "" {
+			return ""
 		}
+
+		match = string(evID)
 	}
 
 	return match

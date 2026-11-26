@@ -752,9 +752,15 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 	// Convert IRC formatting / emphasis to markdown.
 	msg.Trailing = utils.Irc2Markdown(msg.Trailing)
 
-	if resolver, ok := u.postIDResolver(); ok {
-		if toUser, isUser := s.HasUser(query); !isUser || !isServiceUser(toUser) {
-			msg.Trailing = resolvePostIDRefs(resolver, getTargetChannelID(s, u, query), msg.Trailing)
+	origTrailing := msg.Trailing
+	resolvedTrailing := origTrailing
+
+	if hasPostIDRefPrefix(msg.Trailing) {
+		if resolver, ok := u.postIDResolver(); ok {
+			if toUser, isUser := s.HasUser(query); !isUser || !isServiceUser(toUser) {
+				resolvedTrailing = resolvePostIDRefs(resolver, getTargetChannelID(s, u, query), msg.Trailing)
+				msg.Trailing = resolvedTrailing
+			}
 		}
 	}
 
@@ -803,6 +809,10 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 
 		if threadMsgChannel(s, u, msg, ch.ID()) {
 			return nil
+		}
+
+		if msg.Trailing == resolvedTrailing {
+			msg.Trailing = origTrailing
 		}
 
 		msgID, err2 := u.br.MsgChannel(u.ctx, ch.ID(), msg.Trailing)
@@ -873,6 +883,10 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 				return nil
 			}
 
+			if msg.Trailing == resolvedTrailing {
+				msg.Trailing = origTrailing
+			}
+
 			msgID, err2 := u.br.MsgUser(u.ctx, toUser.User, msg.Trailing)
 			if err2 != nil {
 				sendDeliveryError(s, u, query, "msg \""+shortenMsg(u, msg.Trailing)+"\" could not be sent: "+err2.Error())
@@ -888,6 +902,10 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 			}
 
 		default:
+			if msg.Trailing == resolvedTrailing {
+				msg.Trailing = origTrailing
+			}
+
 			err = s.EncodeMessage(u, irc.PRIVMSG, []string{toUser.Nick}, msg.Trailing)
 		}
 
@@ -966,6 +984,10 @@ var (
 	parseUnthreadedQuoteMsgRegExp = regexp.MustCompile(`(?s)^>(?:([1-9][0-9]*)([lLwWcC]))?\@\@(` + quoteIDPattern + `)\s+(.*)`)
 	parseThreadIDRegExp           = regexp.MustCompile(`(?s)^\@\@(?:(` + quoteIDPattern + `)\s)(.*)`)
 )
+
+func hasPostIDRefPrefix(s string) bool {
+	return strings.HasPrefix(s, "@@") || strings.HasPrefix(s, ">") || strings.HasPrefix(s, "s/")
+}
 
 func (u *User) postIDResolver() (bridge.PostIDResolver, bool) {
 	if u == nil {
@@ -1090,10 +1112,12 @@ func resolvePostIDRefs(resolver bridge.PostIDResolver, channelID, text string) s
 			tok = resolved
 		}
 
-		trimmedTail := strings.TrimLeft(tail, " \t")
-		if strings.HasPrefix(trimmedTail, ">") {
-			wsLen := len(tail) - len(trimmedTail)
-			tail = tail[:wsLen] + resolveQuotePostIDRef(resolver, channelID, trimmedTail)
+		if isValidThreadID(tok) {
+			trimmedTail := strings.TrimLeft(tail, " \t")
+			if strings.HasPrefix(trimmedTail, ">") {
+				wsLen := len(tail) - len(trimmedTail)
+				tail = tail[:wsLen] + resolveQuotePostIDRef(resolver, channelID, trimmedTail)
+			}
 		}
 
 		return "@@" + tok + tail
@@ -1892,7 +1916,7 @@ func resolveThreadTarget(s Server, u *User, channelName, threadID string) string
 		return channelName
 	}
 
-	if len(cleanID) == 3 {
+	if len(cleanID) == 3 && isAllInAlphabet(cleanID, "0123456789abcdef") {
 		var channelID, postID string
 
 		if ch, ok := s.HasChannel(channelName); ok {
@@ -1913,7 +1937,8 @@ func resolveThreadTarget(s Server, u *User, channelName, threadID string) string
 		return "@@" + postID
 	}
 
-	if u.br == nil {
+	br := u.currentBridge()
+	if br == nil {
 		return ""
 	}
 
@@ -1931,7 +1956,7 @@ func resolveThreadTarget(s Server, u *User, channelName, threadID string) string
 		return "@@" + postID
 	}
 
-	postChannelID := u.br.GetPostChannelID(u.ctx, postID)
+	postChannelID := br.GetPostChannelID(u.ctx, postID)
 	if targetChannelID != "" && postChannelID == targetChannelID {
 		return "@@" + postID
 	}
