@@ -438,7 +438,105 @@ func TestMarkdown2ircImagesAndLinks(t *testing.T) {
 	}
 }
 
-//nolint:goconst
+//nolint:funlen,goconst
+func TestMarkdownLinkFormatting(t *testing.T) {
+	tests := []struct {
+		name       string
+		input      string
+		linkText   string
+		linkURL    string
+		inlineCode string
+		want       string
+	}{
+		{
+			name:     "default underline text and plain URL",
+			input:    "[View Source](https://example.com)",
+			linkText: "\x1f",
+			linkURL:  "",
+			want:     "\x1fView Source\x1f\u00a0(https://example.com)",
+		},
+		{
+			name:     "plain text and plain URL when both empty",
+			input:    "[View Source](https://example.com)",
+			linkText: "",
+			linkURL:  "",
+			want:     "View Source\u00a0(https://example.com)",
+		},
+		{
+			name:     "color-only text and color-only URL close with \\x03",
+			input:    "[View Source](https://example.com)",
+			linkText: "\x0312",
+			linkURL:  "\x0314",
+			want:     "\x0312View Source\x03\u00a0\x0314(https://example.com)\x03",
+		},
+		{
+			name:     "underline plus color on text closes with \\x1f\\x03",
+			input:    "[view source](https://example.com)",
+			linkText: "\x1f\x0314",
+			linkURL:  "",
+			want:     "\x1f\x0314view source\x1f\x03\u00a0(https://example.com)",
+		},
+		{
+			name:     "fg and bg mIRC color closes with single \\x03",
+			input:    "[docs](https://example.com)",
+			linkText: "\x02\x0300,12",
+			linkURL:  "\x0314",
+			want:     "\x02\x0300,12docs\x02\x03\u00a0\x0314(https://example.com)\x03",
+		},
+		{
+			name:     "hex color closes with \\x04",
+			input:    "[docs](https://example.com)",
+			linkText: "\x045d89ef",
+			linkURL:  "\x04888888",
+			want:     "\x045d89efdocs\x04\u00a0\x04888888(https://example.com)\x04",
+		},
+		{
+			name:     "bold and italic toggles without color",
+			input:    "[docs](https://example.com)",
+			linkText: "\x02",
+			linkURL:  "\x1d",
+			want:     "\x02docs\x02\u00a0\x1d(https://example.com)\x1d",
+		},
+		{
+			name:     "outer bold wraps colored link cleanly",
+			input:    "**[View Source](https://example.com)**",
+			linkText: "\x0312",
+			linkURL:  "\x0314",
+			want:     "\x02\x0312View Source\x03\u00a0\x0314(https://example.com)\x03\x02",
+		},
+		{
+			name:     "outer italic wraps colored link cleanly",
+			input:    "*[View Source](https://example.com)*",
+			linkText: "\x0312",
+			linkURL:  "\x0314",
+			want:     "\x1d\x0312View Source\x03\u00a0\x0314(https://example.com)\x03\x1d",
+		},
+		{
+			name:       "inline code inside underlined+colored link consumes trailing \\x1f\\x03",
+			input:      "[`repo`](https://example.com) next",
+			linkText:   "\x1f\x0314",
+			linkURL:    "\x0314",
+			inlineCode: "\x02\x030,14",
+			want:       "\x1f\x0314\x02\x030,14repo\x11\x0f\u00a0\x0314(https://example.com)\x03 next",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := ProcessMessageOpts{
+				DisableEmoji:   true,
+				InlineCodeChar: tc.inlineCode,
+				LinkText:       tc.linkText,
+				LinkURL:        tc.linkURL,
+			}
+
+			if got := FormatMarkdownAndEmojiWithOpts(tc.input, opts); got != tc.want {
+				t.Errorf("FormatMarkdownAndEmojiWithOpts(%q) = %q, want %q", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestMarkdown2ircInlineCodeAndEscapes(t *testing.T) {
 	codeStart, codeEnd := "\x0f`\x11\x02\x030,14", "\x11\x0f`"
 

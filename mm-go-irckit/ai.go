@@ -534,6 +534,8 @@ func summarize(u *User, toUser *User, args []string, service string) {
 		CodeBlockSeparator: codeBlockSeparator,
 		BlockquoteChar:     blockQuoteChar,
 		InlineCodeChar:     inlineCode,
+		LinkText:           u.br.FormatterConfig().MarkdownLinkText,
+		LinkURL:            u.br.FormatterConfig().MarkdownLinkURL,
 		Unicode:            u.br.FormatterConfig().Unicode,
 		PreserveNewLines:   preserveNewLines,
 	}

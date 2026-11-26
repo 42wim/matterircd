@@ -240,15 +240,16 @@ func (u *User) handleChannelTopicEvent(event *bridge.ChannelTopicEvent) bool {
 			_ = ch.Join(tu)
 		}
 
-		topic := utils.FormatMarkdownAndEmoji(
-			event.Text,
-			disableMarkdown,
-			disableEmoji,
-			blockQuoteCharDefault,
-			inlineCode,
-			customEmoji,
-			u.br.FormatterConfig().Unicode,
-		)
+		topic := utils.FormatMarkdownAndEmojiWithOpts(event.Text, utils.ProcessMessageOpts{
+			DisableMarkdown: disableMarkdown,
+			DisableEmoji:    disableEmoji,
+			BlockquoteChar:  blockQuoteCharDefault,
+			InlineCodeChar:  inlineCode,
+			LinkText:        u.br.FormatterConfig().MarkdownLinkText,
+			LinkURL:         u.br.FormatterConfig().MarkdownLinkURL,
+			CustomEmoji:     customEmoji,
+			Unicode:         u.br.FormatterConfig().Unicode,
+		})
 
 		err := setChannelTopic(ch, tu, topic)
 		if err != nil {
@@ -394,6 +395,8 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) bool {
 		CodeBlockSeparator: codeBlockSeparator,
 		BlockquoteChar:     blockQuoteChar,
 		InlineCodeChar:     inlineCode,
+		LinkText:           u.br.FormatterConfig().MarkdownLinkText,
+		LinkURL:            u.br.FormatterConfig().MarkdownLinkURL,
 		Unicode:            u.br.FormatterConfig().Unicode,
 		PreserveNewLines:   preserveNewLines,
 	}
@@ -786,6 +789,8 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) bool
 		CodeBlockSeparator: codeBlockSeparator,
 		BlockquoteChar:     blockQuoteChar,
 		InlineCodeChar:     inlineCode,
+		LinkText:           u.br.FormatterConfig().MarkdownLinkText,
+		LinkURL:            u.br.FormatterConfig().MarkdownLinkURL,
 		Unicode:            u.br.FormatterConfig().Unicode,
 		PreserveNewLines:   preserveNewLines,
 	}
@@ -2022,6 +2027,8 @@ func (u *User) replayHistoryEvents(brchannel *bridge.ChannelInfo, since int64, l
 		CodeBlockSeparator: codeBlockSeparator,
 		BlockquoteChar:     blockQuoteChar,
 		InlineCodeChar:     inlineCode,
+		LinkText:           u.br.FormatterConfig().MarkdownLinkText,
+		LinkURL:            u.br.FormatterConfig().MarkdownLinkURL,
 		Unicode:            u.br.FormatterConfig().Unicode,
 		PreserveNewLines:   preserveNewLines,
 	}
@@ -2326,15 +2333,16 @@ func (u *User) syncChannel(id string, name string) error {
 		svc, _ := srv.HasUser(u.br.Protocol())
 
 		rawTopic := u.br.Topic(u.ctx, ch.ID())
-		topic := utils.FormatMarkdownAndEmoji(
-			rawTopic,
-			disableMarkdown,
-			disableEmoji,
-			blockQuoteCharDefault,
-			inlineCode,
-			customEmoji,
-			u.br.FormatterConfig().Unicode,
-		)
+		topic := utils.FormatMarkdownAndEmojiWithOpts(rawTopic, utils.ProcessMessageOpts{
+			DisableMarkdown: disableMarkdown,
+			DisableEmoji:    disableEmoji,
+			BlockquoteChar:  blockQuoteCharDefault,
+			InlineCodeChar:  inlineCode,
+			LinkText:        u.br.FormatterConfig().MarkdownLinkText,
+			LinkURL:         u.br.FormatterConfig().MarkdownLinkURL,
+			CustomEmoji:     customEmoji,
+			Unicode:         u.br.FormatterConfig().Unicode,
+		})
 
 		ch.Topic(svc, topic)
 	}

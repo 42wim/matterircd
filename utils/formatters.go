@@ -31,6 +31,8 @@ type ProcessMessageOpts struct {
 	CodeBlockSeparator string
 	BlockquoteChar     string
 	InlineCodeChar     string
+	LinkText           string
+	LinkURL            string
 	Unicode            bool
 
 	PreserveNewLines string // "all" (default), "max-one", or "none" / "zero"
@@ -44,6 +46,8 @@ type SummaryOpts struct {
 	DisableMarkdown bool
 	BlockquoteChar  string
 	InlineCodeChar  string
+	LinkText        string
+	LinkURL         string
 	MaxLength       int
 	UncountedPrefix string
 	Unicode         bool
@@ -213,12 +217,14 @@ func FormatAndShortenSummary(text string, opts SummaryOpts) string {
 //nolint:funlen
 func formatSummaryText(text string, opts SummaryOpts) string {
 	if !strings.ContainsRune(text, '\n') {
-		return FormatMarkdownAndEmoji(
+		return formatMarkdownAndEmoji(
 			text,
 			opts.DisableMarkdown,
 			opts.DisableEmoji,
 			opts.BlockquoteChar,
 			opts.InlineCodeChar,
+			opts.LinkText,
+			opts.LinkURL,
 			opts.CustomEmoji,
 			opts.Unicode,
 		)
@@ -299,7 +305,7 @@ func formatSummaryText(text string, opts SummaryOpts) string {
 			continue
 		}
 
-		writePart(Markdown2irc(line, opts.BlockquoteChar, opts.InlineCodeChar, opts.Unicode))
+		writePart(markdown2irc(line, opts.BlockquoteChar, opts.InlineCodeChar, opts.LinkText, opts.LinkURL, opts.Unicode))
 	}
 
 	if inCode {
@@ -404,8 +410,30 @@ func FormatFullCodeBlock(text, lexer, indent string, opts ProcessMessageOpts, yi
 // It utilizes a fast-path single-pass check to bypass processing entirely if no
 // trigger characters are present, drastically reducing allocations and CPU usage.
 func FormatMarkdownAndEmoji(msg string, disableMarkdown bool, disableEmoji bool, blockQuoteChar string, inlineCode string, customEmoji map[string]string, useUnicode ...bool) string {
+	enableUnicode := len(useUnicode) > 0 && useUnicode[0]
+
+	return formatMarkdownAndEmoji(msg, disableMarkdown, disableEmoji, blockQuoteChar, inlineCode, defaultLinkText, "", customEmoji, enableUnicode)
+}
+
+// FormatMarkdownAndEmojiWithOpts applies Markdown formatting and Emoji alias
+// replacement using ProcessMessageOpts (including custom link styling).
+func FormatMarkdownAndEmojiWithOpts(msg string, opts ProcessMessageOpts) string {
+	return formatMarkdownAndEmoji(
+		msg,
+		opts.DisableMarkdown,
+		opts.DisableEmoji,
+		opts.BlockquoteChar,
+		opts.InlineCodeChar,
+		opts.LinkText,
+		opts.LinkURL,
+		opts.CustomEmoji,
+		opts.Unicode,
+	)
+}
+
+func formatMarkdownAndEmoji(msg string, disableMarkdown, disableEmoji bool, blockQuoteChar, inlineCode, linkText, linkURL string, customEmoji map[string]string, enableUnicode bool) string {
 	if !disableMarkdown {
-		msg = Markdown2irc(msg, blockQuoteChar, inlineCode, useUnicode...)
+		msg = markdown2irc(msg, blockQuoteChar, inlineCode, linkText, linkURL, enableUnicode)
 	}
 
 	if !disableEmoji {
@@ -745,7 +773,7 @@ func ProcessMessageText(text string, opts ProcessMessageOpts, yield func(line st
 		hasContent = true
 		lastBlockWasCode = false
 
-		yield(FormatMarkdownAndEmoji(l, opts.DisableMarkdown, opts.DisableEmoji, opts.BlockquoteChar, opts.InlineCodeChar, opts.CustomEmoji, opts.Unicode))
+		yield(FormatMarkdownAndEmojiWithOpts(l, opts))
 	}
 
 	flushTable := func() {
@@ -849,15 +877,7 @@ func ProcessMessageText(text string, opts ProcessMessageOpts, yield func(line st
 				trailing := strings.TrimSpace(line[closeEnd:])
 				if trailing != "" {
 					lastBlockWasCode = false
-					trailing = FormatMarkdownAndEmoji(
-						trailing,
-						opts.DisableMarkdown,
-						opts.DisableEmoji,
-						opts.BlockquoteChar,
-						opts.InlineCodeChar,
-						opts.CustomEmoji,
-						opts.Unicode,
-					)
+					trailing = FormatMarkdownAndEmojiWithOpts(trailing, opts)
 
 					yield(trailing)
 				}
@@ -1401,8 +1421,95 @@ func findMatchingParen(s string, start int) int {
 	return -1
 }
 
-func writeLinkOrImage(b *strings.Builder, linkText string, urlID int, isImage bool) {
-	b.WriteByte('\x1f')
+const defaultLinkText = "\x1f"
+
+func isHexDigit(c byte) bool {
+	return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
+}
+
+func skipIRCColorDigits(s string, i int) int {
+	for n := 0; n < 2 && i < len(s) && s[i] >= '0' && s[i] <= '9'; n++ {
+		i++
+	}
+
+	if i+1 < len(s) && s[i] == ',' && s[i+1] >= '0' && s[i+1] <= '9' {
+		i++
+
+		for n := 0; n < 2 && i < len(s) && s[i] >= '0' && s[i] <= '9'; n++ {
+			i++
+		}
+	}
+
+	return i
+}
+
+func skipIRCHexDigits(s string, i int) int {
+	for n := 0; n < 6 && i < len(s) && isHexDigit(s[i]); n++ {
+		i++
+	}
+
+	if i+1 < len(s) && s[i] == ',' && isHexDigit(s[i+1]) {
+		i++
+
+		for n := 0; n < 6 && i < len(s) && isHexDigit(s[i]); n++ {
+			i++
+		}
+	}
+
+	return i
+}
+
+// ircFormatClose derives the minimal IRC closing sequence for an opening format
+// string: toggle codes (\x02, \x1d, \x1e, \x1f, \x11, \x16) are emitted again
+// to toggle off, while mIRC (\x03) and hex (\x04) color codes emit bare color
+// resets (\x03 / \x04) so outer formatting is preserved.
+func ircFormatClose(open string) string {
+	switch open {
+	case "":
+		return ""
+	case defaultLinkText:
+		return defaultLinkText
+	}
+
+	var b strings.Builder
+
+	hasColor := false
+	hasHexColor := false
+
+	for i := 0; i < len(open); {
+		switch open[i] {
+		case '\x02', '\x1d', '\x1e', '\x1f', '\x11', '\x16':
+			b.WriteByte(open[i])
+
+			i++
+		case '\x03':
+			if !hasColor {
+				b.WriteByte('\x03')
+
+				hasColor = true
+			}
+
+			i++
+			i = skipIRCColorDigits(open, i)
+		case '\x04':
+			if !hasHexColor {
+				b.WriteByte('\x04')
+
+				hasHexColor = true
+			}
+
+			i++
+			i = skipIRCHexDigits(open, i)
+		default:
+			i++
+		}
+	}
+
+	return b.String()
+}
+
+func writeLinkOrImage(b *strings.Builder, linkText string, urlID int, isImage bool, linkTextOpen, linkTextClose, linkURLOpen, linkURLClose string) {
+	b.WriteString(linkTextOpen)
 
 	switch {
 	case isImage && linkText != "":
@@ -1415,9 +1522,13 @@ func writeLinkOrImage(b *strings.Builder, linkText string, urlID int, isImage bo
 		b.WriteString(linkText)
 	}
 
-	b.WriteString("\x1f\u00a0(\x00")
+	b.WriteString(linkTextClose)
+	b.WriteString("\u00a0")
+	b.WriteString(linkURLOpen)
+	b.WriteString("(\x00")
 	b.WriteString(strconv.Itoa(urlID))
 	b.WriteString("\x00)")
+	b.WriteString(linkURLClose)
 }
 
 func isRedundantLinkLabel(label, url string) bool {
@@ -1444,9 +1555,11 @@ func isRedundantLinkLabel(label, url string) bool {
 // storing URLs in tokens so subsequent emphasis passes do not mangle them.
 //
 //nolint:funlen,gocyclo
-func replaceLinksAndImages(msg string, tokens *[]string) string {
+func replaceLinksAndImages(msg string, tokens *[]string, linkTextOpen, linkURLOpen string) string {
 	var b strings.Builder
 
+	linkTextClose := ircFormatClose(linkTextOpen)
+	linkURLClose := ircFormatClose(linkURLOpen)
 	start, i := 0, 0
 
 	for i < len(msg) {
@@ -1513,7 +1626,7 @@ func replaceLinksAndImages(msg string, tokens *[]string) string {
 			b.WriteString(strconv.Itoa(urlID))
 			b.WriteByte('\x00')
 		} else {
-			writeLinkOrImage(&b, linkText, urlID, isImage)
+			writeLinkOrImage(&b, linkText, urlID, isImage, linkTextOpen, linkTextClose, linkURLOpen, linkURLClose)
 		}
 
 		start = closeParen + 1
@@ -1671,15 +1784,29 @@ func restoreTokens(s string, tokens []string, open, closeCode string) string {
 		styled = false
 		i = nextIdx
 
-		// Consume immediately-following closing toggles already cleared by \x0f.
+		// Consume immediately-following closing toggles or bare color resets
+		// already cleared by \x0f.
 		for i < len(s) {
-			bit := ircToggleBit(s[i])
-			if bit == 0 || active&bit == 0 {
-				break
+			if bit := ircToggleBit(s[i]); bit != 0 && active&bit != 0 {
+				active &^= bit
+				i++
+
+				continue
 			}
 
-			active &^= bit
-			i++
+			if s[i] == '\x03' && (i+1 >= len(s) || s[i+1] < '0' || s[i+1] > '9') {
+				i++
+
+				continue
+			}
+
+			if s[i] == '\x04' && (i+1 >= len(s) || !isHexDigit(s[i+1])) {
+				i++
+
+				continue
+			}
+
+			break
 		}
 
 		// Re-open any still-active toggles if more content follows.
@@ -1695,7 +1822,7 @@ func restoreTokens(s string, tokens []string, open, closeCode string) string {
 	return b.String()
 }
 
-func formatInlineMarkdown(msg, inlineCode string, bold bool) string {
+func formatInlineMarkdown(msg, inlineCode, linkText, linkURL string, bold bool) string {
 	if msg == "" {
 		return msg
 	}
@@ -1707,7 +1834,7 @@ func formatInlineMarkdown(msg, inlineCode string, bold bool) string {
 	work, tokens := tokenizeCodeAndEscapes(msg, inlineCode)
 
 	if strings.ContainsRune(work, '[') {
-		work = replaceLinksAndImages(work, &tokens)
+		work = replaceLinksAndImages(work, &tokens, linkText, linkURL)
 	}
 
 	boldItalicStart, boldItalicEnd := "\x02\x1d", "\x1d\x02"
@@ -1971,6 +2098,12 @@ func splitTrailingActionSuffix(s string) (string, string) {
 }
 
 func Markdown2irc(msg string, blockQuoteChar string, inlineCode string, useUnicode ...bool) string {
+	enableUnicode := len(useUnicode) > 0 && useUnicode[0]
+
+	return markdown2irc(msg, blockQuoteChar, inlineCode, defaultLinkText, "", enableUnicode)
+}
+
+func markdown2irc(msg, blockQuoteChar, inlineCode, linkText, linkURL string, enableUnicode bool) string {
 	if msg == "" {
 		return msg
 	}
@@ -1979,8 +2112,6 @@ func Markdown2irc(msg string, blockQuoteChar string, inlineCode string, useUnico
 	if !hasMarkdownBlockTrigger(trimmedStart, blockQuoteChar) && !strings.ContainsAny(msg, "*_`~[\\") {
 		return msg
 	}
-
-	enableUnicode := len(useUnicode) > 0 && useUnicode[0]
 
 	quotePrefix, content, hasQuote, quoteChanged := parseMarkdownQuotePrefix(msg, blockQuoteChar)
 	if !hasQuote {
@@ -2007,19 +2138,19 @@ func Markdown2irc(msg string, blockQuoteChar string, inlineCode string, useUnico
 		}
 
 		marker := markers[level-1]
-		formatted := formatInlineMarkdown(headingText, inlineCode, level <= 2)
+		formatted := formatInlineMarkdown(headingText, inlineCode, linkText, linkURL, level <= 2)
 
 		return quotePrefix + marker + " " + formatted + " " + marker + actionSuffix
 	}
 
 	// Unordered list (-, *, +)
 	if listPrefix, itemText, ok := parseUnorderedList(content, enableUnicode); ok {
-		formatted := formatInlineMarkdown(itemText, inlineCode, false)
+		formatted := formatInlineMarkdown(itemText, inlineCode, linkText, linkURL, false)
 
 		return quotePrefix + listPrefix + formatted
 	}
 
-	formatted := formatInlineMarkdown(content, inlineCode, false)
+	formatted := formatInlineMarkdown(content, inlineCode, linkText, linkURL, false)
 	if !hasQuote {
 		return formatted
 	}
@@ -2310,7 +2441,7 @@ func formatTableRowCells(row []string, numCols int, colWidths []int, opts Proces
 			continue
 		}
 
-		cell := formatInlineMarkdown(row[c], opts.InlineCodeChar, bold)
+		cell := formatInlineMarkdown(row[c], opts.InlineCodeChar, opts.LinkText, opts.LinkURL, bold)
 		if !opts.DisableEmoji {
 			cell = EmojiReplaceAliases(cell, opts.CustomEmoji)
 		}

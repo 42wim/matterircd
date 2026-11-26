@@ -1197,6 +1197,8 @@ func (r *RocketChat) formatSummary(msg string, maxLen int, uncounted string) str
 		CustomEmoji:     fc.CustomEmoji,
 		BlockquoteChar:  blockquoteChar,
 		InlineCodeChar:  fc.MarkdownInlineCode,
+		LinkText:        fc.MarkdownLinkText,
+		LinkURL:         fc.MarkdownLinkURL,
 		MaxLength:       maxLen,
 		UncountedPrefix: uncounted,
 		Unicode:         unicode,

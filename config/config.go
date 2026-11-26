@@ -144,6 +144,8 @@ type FormatterConfig struct {
 	DisableMarkdownBlockQuote bool
 	MarkdownBlockQuoteChar    string
 	MarkdownInlineCode        string
+	MarkdownLinkText          string
+	MarkdownLinkURL           string
 
 	SyntaxHighlighting     string
 	DisableCodeBlockPrefix bool
@@ -382,6 +384,31 @@ func (c *Config) buildSharedConfig(section string) SharedConfig {
 	}
 }
 
+func (c *Config) buildFormatterConfig(section string) FormatterConfig {
+	return FormatterConfig{
+		DisableEmoji: c.v.GetBool(section + ".DisableEmoji"),
+		CustomEmoji:  parseCustomEmoji(c.v.GetStringSlice(section + ".CustomEmoji")),
+
+		DisableMarkdown:           c.v.GetBool(section + ".DisableMarkdown"),
+		DisableMarkdownBlockQuote: c.v.GetBool(section + ".DisableMarkdownBlockQuote"),
+		MarkdownBlockQuoteChar:    unquoteString(c.v.GetString(section + ".MarkdownBlockQuoteChar")),
+		MarkdownInlineCode:        unquoteString(c.v.GetString(section + ".MarkdownInlineCode")),
+		MarkdownLinkText:          unquoteString(c.v.GetString(section + ".MarkdownLinkText")),
+		MarkdownLinkURL:           unquoteString(c.v.GetString(section + ".MarkdownLinkURL")),
+
+		DisableCodeBlockPrefix: c.v.GetBool(section + ".DisableCodeBlockPrefix"),
+		CodeBlockPrefix:        unquoteString(c.v.GetString(section + ".CodeBlockPrefix")),
+		CodeBlockSeparator:     unquoteString(c.v.GetString(section + ".CodeBlockSeparator")),
+		SyntaxHighlighting:     c.v.GetString(section + ".SyntaxHighlighting"),
+
+		Unicode: c.v.GetBool(section + ".Unicode"),
+
+		EnableIRCHexColors: c.v.GetBool(section + ".EnableIRCHexColors"),
+
+		PreserveNewLines: c.v.GetString(section + ".PreserveNewLines"),
+	}
+}
+
 //nolint:funlen
 func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 	aiURL := c.v.GetString("ai.url")
@@ -442,146 +469,13 @@ func (c *Config) buildRuntimeCfg() *RuntimeConfig {
 	gcBridge := c.buildBridgeConfig("googlechat")
 	rcBridge := c.buildBridgeConfig("rocketchat")
 
-	mmFormatter := FormatterConfig{
-		DisableEmoji: c.v.GetBool("mattermost.DisableEmoji"),
-		CustomEmoji:  parseCustomEmoji(c.v.GetStringSlice("mattermost.CustomEmoji")),
-
-		DisableMarkdown:           c.v.GetBool("mattermost.DisableMarkdown"),
-		DisableMarkdownBlockQuote: c.v.GetBool("mattermost.DisableMarkdownBlockQuote"),
-		MarkdownBlockQuoteChar:    unquoteString(c.v.GetString("mattermost.MarkdownBlockQuoteChar")),
-		MarkdownInlineCode:        unquoteString(c.v.GetString("mattermost.MarkdownInlineCode")),
-
-		DisableCodeBlockPrefix: c.v.GetBool("mattermost.DisableCodeBlockPrefix"),
-		CodeBlockPrefix:        unquoteString(c.v.GetString("mattermost.CodeBlockPrefix")),
-		CodeBlockSeparator:     unquoteString(c.v.GetString("mattermost.CodeBlockSeparator")),
-		SyntaxHighlighting:     c.v.GetString("mattermost.SyntaxHighlighting"),
-
-		Unicode: c.v.GetBool("mattermost.Unicode"),
-
-		EnableIRCHexColors: c.v.GetBool("mattermost.EnableIRCHexColors"),
-
-		PreserveNewLines: c.v.GetString("mattermost.PreserveNewLines"),
-	}
-	slFormatter := FormatterConfig{
-		DisableEmoji: c.v.GetBool("slack.DisableEmoji"),
-		CustomEmoji:  parseCustomEmoji(c.v.GetStringSlice("slack.CustomEmoji")),
-
-		DisableMarkdown:           c.v.GetBool("slack.DisableMarkdown"),
-		DisableMarkdownBlockQuote: c.v.GetBool("slack.DisableMarkdownBlockQuote"),
-		MarkdownBlockQuoteChar:    unquoteString(c.v.GetString("slack.MarkdownBlockQuoteChar")),
-		MarkdownInlineCode:        unquoteString(c.v.GetString("slack.MarkdownInlineCode")),
-
-		DisableCodeBlockPrefix: c.v.GetBool("slack.DisableCodeBlockPrefix"),
-		CodeBlockPrefix:        unquoteString(c.v.GetString("slack.CodeBlockPrefix")),
-		CodeBlockSeparator:     unquoteString(c.v.GetString("slack.CodeBlockSeparator")),
-		SyntaxHighlighting:     c.v.GetString("slack.SyntaxHighlighting"),
-
-		Unicode: c.v.GetBool("slack.Unicode"),
-
-		EnableIRCHexColors: c.v.GetBool("slack.EnableIRCHexColors"),
-
-		PreserveNewLines: c.v.GetString("slack.PreserveNewLines"),
-	}
-	mdFormatter := FormatterConfig{
-		DisableEmoji: c.v.GetBool("mastodon.DisableEmoji"),
-		CustomEmoji:  parseCustomEmoji(c.v.GetStringSlice("mastodon.CustomEmoji")),
-
-		DisableMarkdown:           c.v.GetBool("mastodon.DisableMarkdown"),
-		DisableMarkdownBlockQuote: c.v.GetBool("mastodon.DisableMarkdownBlockQuote"),
-		MarkdownBlockQuoteChar:    unquoteString(c.v.GetString("mastodon.MarkdownBlockQuoteChar")),
-		MarkdownInlineCode:        unquoteString(c.v.GetString("mastodon.MarkdownInlineCode")),
-
-		DisableCodeBlockPrefix: c.v.GetBool("mastodon.DisableCodeBlockPrefix"),
-		CodeBlockPrefix:        unquoteString(c.v.GetString("mastodon.CodeBlockPrefix")),
-		CodeBlockSeparator:     unquoteString(c.v.GetString("mastodon.CodeBlockSeparator")),
-		SyntaxHighlighting:     c.v.GetString("mastodon.SyntaxHighlighting"),
-
-		Unicode: c.v.GetBool("mastodon.Unicode"),
-
-		EnableIRCHexColors: c.v.GetBool("mastodon.EnableIRCHexColors"),
-
-		PreserveNewLines: c.v.GetString("mastodon.PreserveNewLines"),
-	}
-	mxFormatter := FormatterConfig{
-		DisableEmoji: c.v.GetBool("matrix.DisableEmoji"),
-		CustomEmoji:  parseCustomEmoji(c.v.GetStringSlice("matrix.CustomEmoji")),
-
-		DisableMarkdown:           c.v.GetBool("matrix.DisableMarkdown"),
-		DisableMarkdownBlockQuote: c.v.GetBool("matrix.DisableMarkdownBlockQuote"),
-		MarkdownBlockQuoteChar:    unquoteString(c.v.GetString("matrix.MarkdownBlockQuoteChar")),
-		MarkdownInlineCode:        unquoteString(c.v.GetString("matrix.MarkdownInlineCode")),
-
-		DisableCodeBlockPrefix: c.v.GetBool("matrix.DisableCodeBlockPrefix"),
-		CodeBlockPrefix:        unquoteString(c.v.GetString("matrix.CodeBlockPrefix")),
-		CodeBlockSeparator:     unquoteString(c.v.GetString("matrix.CodeBlockSeparator")),
-		SyntaxHighlighting:     c.v.GetString("matrix.SyntaxHighlighting"),
-
-		Unicode: c.v.GetBool("matrix.Unicode"),
-
-		EnableIRCHexColors: c.v.GetBool("matrix.EnableIRCHexColors"),
-
-		PreserveNewLines: c.v.GetString("matrix.PreserveNewLines"),
-	}
-	mtFormatter := FormatterConfig{
-		DisableEmoji: c.v.GetBool("msteams.DisableEmoji"),
-		CustomEmoji:  parseCustomEmoji(c.v.GetStringSlice("msteams.CustomEmoji")),
-
-		DisableMarkdown:           c.v.GetBool("msteams.DisableMarkdown"),
-		DisableMarkdownBlockQuote: c.v.GetBool("msteams.DisableMarkdownBlockQuote"),
-		MarkdownBlockQuoteChar:    unquoteString(c.v.GetString("msteams.MarkdownBlockQuoteChar")),
-		MarkdownInlineCode:        unquoteString(c.v.GetString("msteams.MarkdownInlineCode")),
-
-		DisableCodeBlockPrefix: c.v.GetBool("msteams.DisableCodeBlockPrefix"),
-		CodeBlockPrefix:        unquoteString(c.v.GetString("msteams.CodeBlockPrefix")),
-		CodeBlockSeparator:     unquoteString(c.v.GetString("msteams.CodeBlockSeparator")),
-		SyntaxHighlighting:     c.v.GetString("msteams.SyntaxHighlighting"),
-
-		Unicode: c.v.GetBool("msteams.Unicode"),
-
-		EnableIRCHexColors: c.v.GetBool("msteams.EnableIRCHexColors"),
-
-		PreserveNewLines: c.v.GetString("msteams.PreserveNewLines"),
-	}
-	gcFormatter := FormatterConfig{
-		DisableEmoji: c.v.GetBool("googlechat.DisableEmoji"),
-		CustomEmoji:  parseCustomEmoji(c.v.GetStringSlice("googlechat.CustomEmoji")),
-
-		DisableMarkdown:           c.v.GetBool("googlechat.DisableMarkdown"),
-		DisableMarkdownBlockQuote: c.v.GetBool("googlechat.DisableMarkdownBlockQuote"),
-		MarkdownBlockQuoteChar:    unquoteString(c.v.GetString("googlechat.MarkdownBlockQuoteChar")),
-		MarkdownInlineCode:        unquoteString(c.v.GetString("googlechat.MarkdownInlineCode")),
-
-		DisableCodeBlockPrefix: c.v.GetBool("googlechat.DisableCodeBlockPrefix"),
-		CodeBlockPrefix:        unquoteString(c.v.GetString("googlechat.CodeBlockPrefix")),
-		CodeBlockSeparator:     unquoteString(c.v.GetString("googlechat.CodeBlockSeparator")),
-		SyntaxHighlighting:     c.v.GetString("googlechat.SyntaxHighlighting"),
-
-		Unicode: c.v.GetBool("googlechat.Unicode"),
-
-		EnableIRCHexColors: c.v.GetBool("googlechat.EnableIRCHexColors"),
-
-		PreserveNewLines: c.v.GetString("googlechat.PreserveNewLines"),
-	}
-	rcFormatter := FormatterConfig{
-		DisableEmoji: c.v.GetBool("rocketchat.DisableEmoji"),
-		CustomEmoji:  parseCustomEmoji(c.v.GetStringSlice("rocketchat.CustomEmoji")),
-
-		DisableMarkdown:           c.v.GetBool("rocketchat.DisableMarkdown"),
-		DisableMarkdownBlockQuote: c.v.GetBool("rocketchat.DisableMarkdownBlockQuote"),
-		MarkdownBlockQuoteChar:    unquoteString(c.v.GetString("rocketchat.MarkdownBlockQuoteChar")),
-		MarkdownInlineCode:        unquoteString(c.v.GetString("rocketchat.MarkdownInlineCode")),
-
-		DisableCodeBlockPrefix: c.v.GetBool("rocketchat.DisableCodeBlockPrefix"),
-		CodeBlockPrefix:        unquoteString(c.v.GetString("rocketchat.CodeBlockPrefix")),
-		CodeBlockSeparator:     unquoteString(c.v.GetString("rocketchat.CodeBlockSeparator")),
-		SyntaxHighlighting:     c.v.GetString("rocketchat.SyntaxHighlighting"),
-
-		Unicode: c.v.GetBool("rocketchat.Unicode"),
-
-		EnableIRCHexColors: c.v.GetBool("rocketchat.EnableIRCHexColors"),
-
-		PreserveNewLines: c.v.GetString("rocketchat.PreserveNewLines"),
-	}
+	mmFormatter := c.buildFormatterConfig("mattermost")
+	slFormatter := c.buildFormatterConfig("slack")
+	mdFormatter := c.buildFormatterConfig("mastodon")
+	mxFormatter := c.buildFormatterConfig("matrix")
+	mtFormatter := c.buildFormatterConfig("msteams")
+	gcFormatter := c.buildFormatterConfig("googlechat")
+	rcFormatter := c.buildFormatterConfig("rocketchat")
 
 	return &RuntimeConfig{
 		GlobalConfig: GlobalConfig{
@@ -793,6 +687,7 @@ func Load(cfgfile string, flags *pflag.FlagSet) (*Config, error) {
 	for _, section := range []string{"mattermost", "slack", "mastodon", "matrix", "msteams", "googlechat", "rocketchat"} {
 		v.SetDefault(section+".QuoteThreaded", section != "googlechat")
 		v.SetDefault(section+".QuoteAuthor", "displayname")
+		v.SetDefault(section+".MarkdownLinkText", "\x1f")
 	}
 
 	c := &Config{

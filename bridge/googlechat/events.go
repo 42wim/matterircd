@@ -676,6 +676,8 @@ func forwardedPreviewStyle(fc config.FormatterConfig) (string, utils.ProcessMess
 		CodeBlockSeparator: fc.CodeBlockSeparator,
 		BlockquoteChar:     blockquoteChar,
 		InlineCodeChar:     fc.MarkdownInlineCode,
+		LinkText:           fc.MarkdownLinkText,
+		LinkURL:            fc.MarkdownLinkURL,
 		Unicode:            fc.Unicode,
 		PreserveNewLines:   fc.PreserveNewLines,
 	}
@@ -872,6 +874,8 @@ func (g *GoogleChat) formatSummary(text string, maxLen int) string {
 		DisableEmoji:    rc.GoogleChat.Formatter.DisableEmoji,
 		BlockquoteChar:  bq,
 		InlineCodeChar:  rc.GoogleChat.Formatter.MarkdownInlineCode,
+		LinkText:        rc.GoogleChat.Formatter.MarkdownLinkText,
+		LinkURL:         rc.GoogleChat.Formatter.MarkdownLinkURL,
 		CustomEmoji:     rc.GoogleChat.Formatter.CustomEmoji,
 		Unicode:         rc.GoogleChat.Formatter.Unicode,
 	})

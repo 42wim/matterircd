@@ -1898,15 +1898,16 @@ func CmdTopic(s Server, u *User, msg *irc.Message) error {
 		disableMarkdown := u.br.FormatterConfig().DisableMarkdown
 		inlineCode := u.br.FormatterConfig().MarkdownInlineCode
 
-		t = utils.FormatMarkdownAndEmoji(
-			t,
-			disableMarkdown,
-			disableEmoji,
-			blockQuoteCharDefault,
-			inlineCode,
-			customEmoji,
-			u.br.FormatterConfig().Unicode,
-		)
+		t = utils.FormatMarkdownAndEmojiWithOpts(t, utils.ProcessMessageOpts{
+			DisableMarkdown: disableMarkdown,
+			DisableEmoji:    disableEmoji,
+			BlockquoteChar:  blockQuoteCharDefault,
+			InlineCodeChar:  inlineCode,
+			LinkText:        u.br.FormatterConfig().MarkdownLinkText,
+			LinkURL:         u.br.FormatterConfig().MarkdownLinkURL,
+			CustomEmoji:     customEmoji,
+			Unicode:         u.br.FormatterConfig().Unicode,
+		})
 
 		return s.EncodeMessage(u, irc.RPL_TOPIC, []string{u.Nick, channelname}, t)
 	}
