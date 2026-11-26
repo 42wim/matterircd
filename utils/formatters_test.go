@@ -841,6 +841,87 @@ func TestProcessMessageTextTables(t *testing.T) {
 	}
 }
 
+//nolint:funlen,goconst
+func TestASCIIGridTablesInCodeBlocks(t *testing.T) {
+	unicodeOpts := ProcessMessageOpts{DisableEmoji: true, Unicode: true, CodeBlockPrefix: "🮇 "}
+
+	tests := []struct {
+		name      string
+		opts      ProcessMessageOpts
+		input     string
+		wantLines []string
+	}{
+		{
+			name:  "untagged grid table with bold header and inner pipe",
+			opts:  unicodeOpts,
+			input: "```\n$ oslb list\n+-----+--------+\n| cmd | status |\n+-----+--------+\n| a|b | ALLOC  |\n+-----+--------+\n```",
+			wantLines: []string{
+				"🮇 $ oslb list",
+				"🮇 ┌─────┬────────┐",
+				"🮇 │ \x02cmd\x02 │ \x02status\x02 │",
+				"🮇 ├─────┼────────┤",
+				"🮇 │ a|b │ ALLOC  │",
+				"🮇 └─────┴────────┘",
+			},
+		},
+		{
+			name:  "double-line header separator and bash tag",
+			opts:  unicodeOpts,
+			input: "```bash\n+---+---+\n| a | b |\n+===+===+\n| 1 | 2 |\n+---+---+\n```",
+			wantLines: []string{
+				"🮇 \x16bash\x16",
+				"🮇 ┌───┬───┐",
+				"🮇 │ \x02a\x02 │ \x02b\x02 │",
+				"🮇 ╞═══╪═══╡",
+				"🮇 │ 1 │ 2 │",
+				"🮇 └───┴───┘",
+			},
+		},
+		{
+			name:  "single-row box does not bold",
+			opts:  unicodeOpts,
+			input: "```\n+-------+\n| hello |\n+-------+\n```",
+			wantLines: []string{
+				"🮇 ┌───────┐",
+				"🮇 │ hello │",
+				"🮇 └───────┘",
+			},
+		},
+		{
+			name:  "unicode false leaves ASCII table unchanged",
+			opts:  ProcessMessageOpts{DisableEmoji: true, Unicode: false, CodeBlockPrefix: "| "},
+			input: "```\n+---+---+\n| a | b |\n+---+---+\n| 1 | 2 |\n+---+---+\n```",
+			wantLines: []string{
+				"| +---+---+",
+				"| | a | b |",
+				"| +---+---+",
+				"| | 1 | 2 |",
+				"| +---+---+",
+			},
+		},
+		{
+			name:  "diff-tagged code block is not converted",
+			opts:  unicodeOpts,
+			input: "```diff\n+---+---+\n| a | b |\n+---+---+\n```",
+			wantLines: []string{
+				"🮇 \x16diff\x16",
+				"🮇 +---+---+",
+				"🮇 | a | b |",
+				"🮇 +---+---+",
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := collectProcessedLines(tc.input, tc.opts)
+			if !slices.Equal(got, tc.wantLines) {
+				t.Errorf("got:\n%q\nwant:\n%q", got, tc.wantLines)
+			}
+		})
+	}
+}
+
 func TestFormatAndShortenSummaryMultiline(t *testing.T) {
 	codeStart, codeEnd := "\x0f`\x11\x02\x030,14", "\x11\x0f`"
 

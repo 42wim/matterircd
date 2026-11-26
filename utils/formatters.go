@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	neturl "net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -321,8 +322,6 @@ func formatSummaryText(text string, opts SummaryOpts) string {
 }
 
 // FormatFullCodeBlock handles syntax highlighting entirely in-memory and yields lines
-//
-//nolint:funlen,gocyclo
 func FormatFullCodeBlock(text, lexer, indent string, opts ProcessMessageOpts, yield func(string)) {
 	// Prepend the block's leading markdown indentation to the IRC prefix
 	prefix := indent + opts.CodeBlockPrefix
@@ -336,8 +335,21 @@ func FormatFullCodeBlock(text, lexer, indent string, opts ProcessMessageOpts, yi
 		yield(prefix + "\x16" + lexer + "\x16")
 	}
 
+	if opts.Unicode && !opts.DisableMarkdown && isASCIIGridTableLexer(lexer) {
+		if emitASCIIGridTables(text, prefix, func(seg string) {
+			highlightAndEmitCodeBlock(seg, lexer, prefix, opts, yield)
+		}, yield) {
+			return
+		}
+	}
+
+	highlightAndEmitCodeBlock(text, lexer, prefix, opts, yield)
+}
+
+func highlightAndEmitCodeBlock(text, lexer, prefix string, opts ProcessMessageOpts, yield func(string)) {
 	if opts.SyntaxHighlighting == "" || lexer == "" {
 		emitLines(text, prefix, yield)
+
 		return
 	}
 
@@ -2543,6 +2555,242 @@ func formatTable(header []string, aligns []tableAlign, body [][]string, prefix s
 	}
 
 	yield(buildTableBorder(prefix, colWidths, box.botLeft, box.horiz, box.botMid, box.botRight))
+}
+
+func isASCIIGridTableLexer(lexer string) bool {
+	switch strings.ToLower(lexer) {
+	case "", "text", "txt", "plain", "console", "shell", "sh", "bash", "zsh":
+		return true
+	default:
+		return false
+	}
+}
+
+func parseASCIIGridBorder(line string) (string, []int, byte, bool) {
+	trimmed := strings.TrimRight(line, " \t\r")
+	body := strings.TrimLeft(trimmed, " \t")
+
+	if len(body) < 3 || body[0] != '+' || body[len(body)-1] != '+' {
+		return "", nil, 0, false
+	}
+
+	var fill byte
+
+	cols := []int{0}
+	segLen := 0
+
+	for i := 1; i < len(body); i++ {
+		switch c := body[i]; c {
+		case '+':
+			if segLen == 0 {
+				return "", nil, 0, false
+			}
+
+			cols = append(cols, i)
+			segLen = 0
+		case '-', '=':
+			if fill != 0 && c != fill {
+				return "", nil, 0, false
+			}
+
+			fill = c
+			segLen++
+		default:
+			return "", nil, 0, false
+		}
+	}
+
+	if len(cols) < 2 || fill == 0 {
+		return "", nil, 0, false
+	}
+
+	return trimmed[:len(trimmed)-len(body)], cols, fill, true
+}
+
+func matchASCIIGridRow(line, indent string, cols []int) (string, []int, bool) {
+	trimmed := strings.TrimRight(line, " \t\r")
+	if !strings.HasPrefix(trimmed, indent) {
+		return "", nil, false
+	}
+
+	body := trimmed[len(indent):]
+	if body == "" || body[0] != '|' || body[len(body)-1] != '|' {
+		return "", nil, false
+	}
+
+	seps := make([]int, 0, len(cols))
+	col, ci := 0, 0
+
+	for byteIdx, r := range body {
+		if ci < len(cols) && col == cols[ci] {
+			if r != '|' {
+				return "", nil, false
+			}
+
+			seps = append(seps, byteIdx)
+			ci++
+		}
+
+		if r < 0x80 {
+			col++
+		} else {
+			col += StringWidth(string(r))
+		}
+	}
+
+	if ci != len(cols) || col-1 != cols[len(cols)-1] {
+		return "", nil, false
+	}
+
+	return body, seps, true
+}
+
+func renderASCIIGridBorder(prefix, indent string, cols []int, left, horiz, mid, right string) string {
+	var b strings.Builder
+	b.Grow(len(prefix) + len(indent) + cols[len(cols)-1]*3 + 4)
+	b.WriteString(prefix)
+	b.WriteString(indent)
+	b.WriteString(left)
+
+	for i := 1; i < len(cols); i++ {
+		if i > 1 {
+			b.WriteString(mid)
+		}
+
+		b.WriteString(strings.Repeat(horiz, cols[i]-cols[i-1]-1))
+	}
+
+	b.WriteString(right)
+
+	return b.String()
+}
+
+func renderASCIIGridRow(prefix, indent, body string, seps []int, bold bool) string {
+	var b strings.Builder
+	b.Grow(len(prefix) + len(indent) + len(body) + len(seps)*4)
+	b.WriteString(prefix)
+	b.WriteString(indent)
+
+	for i := range len(seps) - 1 {
+		b.WriteString("│")
+
+		cell := body[seps[i]+1 : seps[i+1]]
+		if !bold {
+			b.WriteString(cell)
+
+			continue
+		}
+
+		trimmedLeft := strings.TrimLeft(cell, " \t")
+		content := strings.TrimRight(trimmedLeft, " \t")
+
+		if content == "" {
+			b.WriteString(cell)
+
+			continue
+		}
+
+		lead := len(cell) - len(trimmedLeft)
+		b.WriteString(cell[:lead])
+		b.WriteByte('\x02')
+		b.WriteString(content)
+		b.WriteByte('\x02')
+		b.WriteString(cell[lead+len(content):])
+	}
+
+	b.WriteString("│")
+
+	return b.String()
+}
+
+// emitASCIIGridTables scans a code block for ASCII grid tables (+---+---+ / |...|),
+// emitting matched tables as Unicode box-drawing rows (with bold headers) via yield
+// and passing surrounding non-table segments to emitPlain.
+//
+//nolint:funlen,gocyclo
+func emitASCIIGridTables(text, prefix string, emitPlain, yield func(string)) bool {
+	if !strings.Contains(text, "+-") && !strings.Contains(text, "+=") {
+		return false
+	}
+
+	type gridRow struct {
+		isBorder bool
+		fill     byte
+		body     string
+		seps     []int
+	}
+
+	lines := strings.Split(text, "\n")
+	plainFrom := 0
+	found := false
+
+	for i := 0; i < len(lines); {
+		indent, cols, topFill, ok := parseASCIIGridBorder(lines[i])
+		if !ok {
+			i++
+
+			continue
+		}
+
+		rows := []gridRow{{isBorder: true, fill: topFill}}
+		lastBorder := -1
+		seenData, hasData := false, false
+
+		for j := i + 1; j < len(lines); j++ {
+			if bIndent, bCols, bFill, ok := parseASCIIGridBorder(lines[j]); ok && bIndent == indent && slices.Equal(bCols, cols) {
+				rows = append(rows, gridRow{isBorder: true, fill: bFill})
+				lastBorder = j
+				hasData = seenData
+			} else if body, seps, ok := matchASCIIGridRow(lines[j], indent, cols); ok {
+				rows = append(rows, gridRow{body: body, seps: seps})
+				seenData = true
+			} else {
+				break
+			}
+		}
+
+		if lastBorder <= i || !hasData {
+			i++
+
+			continue
+		}
+
+		if i > plainFrom {
+			emitPlain(strings.Join(lines[plainFrom:i], "\n"))
+		}
+
+		rows = rows[:lastBorder-i+1]
+		hasHeader := len(rows) > 3 && !rows[1].isBorder && rows[2].isBorder
+
+		for k, r := range rows {
+			switch {
+			case !r.isBorder:
+				yield(renderASCIIGridRow(prefix, indent, r.body, r.seps, hasHeader && k == 1))
+			case k == 0:
+				yield(renderASCIIGridBorder(prefix, indent, cols, "┌", "─", "┬", "┐"))
+			case k == len(rows)-1:
+				yield(renderASCIIGridBorder(prefix, indent, cols, "└", "─", "┴", "┘"))
+			case r.fill == '=':
+				yield(renderASCIIGridBorder(prefix, indent, cols, "╞", "═", "╪", "╡"))
+			default:
+				yield(renderASCIIGridBorder(prefix, indent, cols, "├", "─", "┼", "┤"))
+			}
+		}
+
+		found = true
+		i = lastBorder + 1
+		plainFrom = i
+	}
+
+	if !found {
+		return false
+	}
+
+	if plainFrom < len(lines) {
+		emitPlain(strings.Join(lines[plainFrom:], "\n"))
+	}
+
+	return true
 }
 
 // WrapMessage soft-wraps msg into lines of at most maxLen bytes, breaking
