@@ -12,10 +12,9 @@ import (
 )
 
 const (
-	teamsIDPrefix      = "mt"
 	teamsIDAlphabet    = "0123456789abcdefghijklmnopqrstuv"
 	teamsIDPayloadSz   = 10 // 6-byte uint48 msgID (ms, valid through year 10889) + 4-byte sha256(convID)[:4]
-	teamsIDEncodedLn   = 18 // len("mt") + (10*8/5) = 2 + 16
+	teamsIDEncodedLn   = 16 // (10*8/5) = 16
 	teamsIDFeistelHead = 4
 	maxUint48          = (uint64(1) << 48) - 1
 )
@@ -78,9 +77,9 @@ func convFingerprint(convID string) [4]byte {
 }
 
 // encodeTeamsID packs a Teams (conversationID, messageID) pair into a fixed
-// 18-character lowercase identifier prefixed with "mt" (mt[0-9a-v]{16}).
-// It is unambiguous against Mattermost (26 chars), Rocket.Chat (17 chars),
-// Matrix ($...), and Slack (sl...).
+// 16-character lowercase identifier ([0-9a-v]{16}).
+// It is unambiguous against Google Chat (11 chars), Rocket.Chat (17 chars),
+// Mattermost (26 chars), Slack (34-80 chars), and Matrix ($...).
 func encodeTeamsID(convID, msgID string) string {
 	if convID == "" || msgID == "" {
 		return msgID
@@ -102,20 +101,20 @@ func encodeTeamsID(convID, msgID string) string {
 
 	mixTeamsPayload(buf[:], true)
 
-	return teamsIDPrefix + teamsIDEncoding.EncodeToString(buf[:])
+	return teamsIDEncoding.EncodeToString(buf[:])
 }
 
-// decodeTeamsID decodes an mt[0-9a-v]{16} identifier into its numeric Teams
+// decodeTeamsID decodes a [0-9a-v]{16} identifier into its numeric Teams
 // message ID and 32-bit conversation fingerprint.
 func decodeTeamsID(encoded string) (string, [4]byte, bool) {
 	var zero [4]byte
 
 	s := strings.ToLower(strings.TrimSpace(encoded))
-	if len(s) != teamsIDEncodedLn || !strings.HasPrefix(s, teamsIDPrefix) {
+	if len(s) != teamsIDEncodedLn {
 		return "", zero, false
 	}
 
-	raw, err := teamsIDEncoding.DecodeString(s[len(teamsIDPrefix):])
+	raw, err := teamsIDEncoding.DecodeString(s)
 	if err != nil || len(raw) != teamsIDPayloadSz {
 		return "", zero, false
 	}

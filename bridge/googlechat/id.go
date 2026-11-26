@@ -7,9 +7,7 @@ import (
 )
 
 const (
-	googleChatIDPrefix   = "gc"
-	googleChatRawIDLen   = 11
-	googleChatTotalIDLen = len(googleChatIDPrefix) + googleChatRawIDLen // 13: gc[0-9A-Za-z_-]{11}
+	googleChatRawIDLen = 11 // [0-9A-Za-z_-]{11}
 )
 
 // isValidGoogleChatRawID reports whether s is a valid 11-character Google Chat
@@ -36,42 +34,23 @@ func isGoogleChatIDChar(c byte) bool {
 		c == '_' || c == '-'
 }
 
-// encodeGoogleChatID prefixes a native 11-character Google Chat message/topic ID
-// with "gc" to produce a 13-character identifier (gc[0-9A-Za-z_-]{11}) that is
-// unambiguous against Mattermost (26 chars), MS Teams (mt...), Rocket.Chat (17),
-// Slack (sl...), and Matrix ($...).
+// encodeGoogleChatID returns the trimmed native 11-character Google Chat
+// message/topic ID ([0-9A-Za-z_-]{11}), which is unambiguous against
+// MS Teams (16 chars), Rocket.Chat (17 chars), Mattermost (26 chars),
+// Slack (34-80 chars), and Matrix ($...).
 func encodeGoogleChatID(rawID string) string {
-	trimmed := strings.TrimSpace(rawID)
-	if trimmed == "" {
-		return ""
-	}
-
-	if len(trimmed) == googleChatTotalIDLen && strings.HasPrefix(trimmed, googleChatIDPrefix) &&
-		isValidGoogleChatRawID(trimmed[len(googleChatIDPrefix):]) {
-		return trimmed
-	}
-
-	if isValidGoogleChatRawID(trimmed) {
-		return googleChatIDPrefix + trimmed
-	}
-
-	return trimmed
+	return strings.TrimSpace(rawID)
 }
 
-// decodeGoogleChatID strips the "gc" prefix from a gc[0-9A-Za-z_-]{11} identifier
-// and returns the native 11-character Google Chat ID (preserving exact case).
+// decodeGoogleChatID validates a native 11-character Google Chat identifier
+// ([0-9A-Za-z_-]{11}), preserving exact case.
 func decodeGoogleChatID(encoded string) (string, bool) {
 	trimmed := strings.TrimSpace(encoded)
-	if len(trimmed) != googleChatTotalIDLen || !strings.HasPrefix(trimmed, googleChatIDPrefix) {
+	if !isValidGoogleChatRawID(trimmed) {
 		return "", false
 	}
 
-	raw := trimmed[len(googleChatIDPrefix):]
-	if !isValidGoogleChatRawID(raw) {
-		return "", false
-	}
-
-	return raw, true
+	return trimmed, true
 }
 
 // parseGoogleChatMessageURL extracts (convID, topicID, msgID, isDM) from Google Chat

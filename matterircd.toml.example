@@ -539,7 +539,7 @@ PrefixContext = false
 #Unicode = false
 #EnableIRCHexColors = false
 
-#Threading, replay & channel sync (set ThreadContext = "msteams" for native 23-char mt... @@id refs)
+#Threading, replay & channel sync (set ThreadContext = "msteams" for native 16-char @@id refs)
 #PrefixContext = false
 #SuffixContext = false
 #ShowContextMulti = false
@@ -611,7 +611,7 @@ PrefixContext = false
 #Unicode = false
 #EnableIRCHexColors = false
 
-#Threading, replay & channel sync (set ThreadContext = "googlechat" for native 13-char gc... @@id refs)
+#Threading, replay & channel sync (set ThreadContext = "googlechat" for native 11-char @@id refs)
 #PrefixContext = false
 #SuffixContext = false
 #ShowContextMulti = false

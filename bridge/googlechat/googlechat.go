@@ -413,12 +413,8 @@ func (g *GoogleChat) Ping(ctx context.Context, _ ...string) error {
 
 func (g *GoogleChat) NormalizePostID(msgID string) string {
 	trimmed := strings.TrimSpace(msgID)
-	if _, ok := decodeGoogleChatID(trimmed); ok {
-		return trimmed
-	}
-
-	if isValidGoogleChatRawID(trimmed) {
-		return encodeGoogleChatID(trimmed)
+	if raw, ok := decodeGoogleChatID(trimmed); ok {
+		return raw
 	}
 
 	if convID, topicID, rawMsgID, isDM, ok := parseGoogleChatMessageURL(trimmed); ok {
@@ -1213,12 +1209,7 @@ func (g *GoogleChat) resolvePostInChannel(channelID, postID string) (resolvedPos
 
 	rawMsgID, decoded := decodeGoogleChatID(postID)
 	if !decoded {
-		trimmed := strings.TrimSpace(postID)
-		if !isValidGoogleChatRawID(trimmed) {
-			return resolvedPost{}, false
-		}
-
-		rawMsgID = trimmed
+		return resolvedPost{}, false
 	}
 
 	return resolvedPost{
@@ -1440,12 +1431,7 @@ func (g *GoogleChat) resolvePostID(postID string) (resolvedPost, bool) {
 
 	rawMsgID, ok := decodeGoogleChatID(postID)
 	if !ok {
-		trimmed := strings.TrimSpace(postID)
-		if !isValidGoogleChatRawID(trimmed) {
-			return resolvedPost{}, false
-		}
-
-		rawMsgID = trimmed
+		return resolvedPost{}, false
 	}
 
 	if meta, found := g.msgMetaCache.Get(rawMsgID); found && meta.convID != "" {
