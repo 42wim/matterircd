@@ -343,33 +343,43 @@ func CmdLusers(s Server, u *User, msg *irc.Message) error {
 // CmdMode is a handler for the /MODE command.
 func CmdMode(s Server, u *User, msg *irc.Message) error {
 	modetype := ""
-	channel := msg.Params[0]
-
-	mode := "+"
-	if s.Channel(channel).IsPrivate() {
-		mode = "+p"
-	}
-
-	r := []*irc.Message{}
-
 	if len(msg.Params) > 1 {
 		modetype = msg.Params[1]
 	}
 
-	switch modetype {
-	case "":
-		r = append(r, &irc.Message{
-			Prefix:  s.Prefix(),
-			Command: irc.RPL_CHANNELMODEIS,
-			Params:  []string{u.Nick, channel, mode},
-		})
-	case "b":
-		r = append(r, &irc.Message{
-			Prefix:   s.Prefix(),
-			Command:  irc.RPL_ENDOFBANLIST,
-			Params:   []string{u.Nick, channel},
-			Trailing: "End of channel ban list",
-		})
+	if modetype != "" && modetype != "b" {
+		return nil
+	}
+
+	channels := msg.Params[0]
+	r := make([]*irc.Message, 0, strings.Count(channels, ",")+1)
+	prefix := s.Prefix()
+
+	for channel := range strings.SplitSeq(channels, ",") {
+		if channel == "" {
+			continue
+		}
+
+		switch modetype {
+		case "":
+			mode := "+"
+			if ch, exists := s.HasChannel(channel); exists && ch.IsPrivate() {
+				mode = "+p"
+			}
+
+			r = append(r, &irc.Message{
+				Prefix:  prefix,
+				Command: irc.RPL_CHANNELMODEIS,
+				Params:  []string{u.Nick, channel, mode},
+			})
+		case "b":
+			r = append(r, &irc.Message{
+				Prefix:   prefix,
+				Command:  irc.RPL_ENDOFBANLIST,
+				Params:   []string{u.Nick, channel},
+				Trailing: "End of channel ban list",
+			})
+		}
 	}
 
 	return u.Encode(r...)
