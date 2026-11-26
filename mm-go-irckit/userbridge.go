@@ -212,11 +212,12 @@ func (u *User) handleEventChan(ctx context.Context, eventChan <-chan *bridge.Eve
 }
 
 func (u *User) formatTopic(raw string) string {
-	if raw == "" || u.br == nil {
+	br := u.currentBridge()
+	if raw == "" || br == nil {
 		return ""
 	}
 
-	fc := u.br.FormatterConfig()
+	fc := br.FormatterConfig()
 	topic := utils.FormatMarkdownAndEmojiWithOpts(raw, utils.ProcessMessageOpts{
 		DisableMarkdown: fc.DisableMarkdown,
 		DisableEmoji:    fc.DisableEmoji,
@@ -250,16 +251,17 @@ func (u *User) dmPeerNick(sender, receiver *bridge.UserInfo) string {
 }
 
 func (u *User) resolveDMTopicTarget(channelID, fallbackUserID string) (string, bool) {
-	if u.br == nil || channelID == "" {
+	br := u.currentBridge()
+	if br == nil || channelID == "" {
 		return "", false
 	}
 
-	chName := u.br.GetChannelName(u.ctx, channelID)
-	if !u.br.IsDMChannelName(chName) {
+	chName := br.GetChannelName(u.ctx, channelID)
+	if !br.IsDMChannelName(chName) {
 		return "", false
 	}
 
-	if dmUser := u.br.GetDMUser(u.ctx, chName); dmUser != nil {
+	if dmUser := br.GetDMUser(u.ctx, chName); dmUser != nil {
 		if dmUser.Me || dmUser.User == u.User {
 			return u.Nick, true
 		}
@@ -352,7 +354,8 @@ func (u *User) pushDMTopic(dmChannelID, peerNick, rawTopic string, forceOnChange
 }
 
 func (u *User) maybePushDMTopic(dmChannelID, peerNick string) {
-	if u.br == nil || dmChannelID == "" || peerNick == "" {
+	br := u.currentBridge()
+	if br == nil || dmChannelID == "" || peerNick == "" {
 		return
 	}
 
@@ -364,15 +367,16 @@ func (u *User) maybePushDMTopic(dmChannelID, peerNick string) {
 		return
 	}
 
-	_ = u.pushDMTopic(dmChannelID, peerNick, u.br.Topic(u.ctx, dmChannelID), false)
+	_ = u.pushDMTopic(dmChannelID, peerNick, br.Topic(u.ctx, dmChannelID), false)
 }
 
 func (u *User) maybePushDMTopicForUser(userID, peerNick string) {
-	if u.br == nil || userID == "" || peerNick == "" {
+	br := u.currentBridge()
+	if br == nil || userID == "" || peerNick == "" {
 		return
 	}
 
-	if dmChannelID := u.br.GetDMChannelID(u.ctx, userID); dmChannelID != "" {
+	if dmChannelID := br.GetDMChannelID(u.ctx, userID); dmChannelID != "" {
 		u.maybePushDMTopic(dmChannelID, peerNick)
 	}
 }
@@ -638,7 +642,7 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) bool {
 		return false
 	}
 
-	if event.Event != "dm_topic" {
+	if (hasEmitted || len(pendingEmpty) > 0) && event.Event != "dm_topic" {
 		u.maybePushDMTopic(event.ChannelID, u.dmPeerNick(event.Sender, event.Receiver))
 	}
 
@@ -2379,7 +2383,7 @@ func (u *User) replayHistoryEvents(brchannel *bridge.ChannelInfo, since int64, l
 		}
 	}
 
-	if len(events) > 0 && u.br.IsDMChannelName(brchannel.Name) {
+	if !showReplayHdr && u.br.IsDMChannelName(brchannel.Name) {
 		if dmNick, isDM := u.resolveDMTopicTarget(brchannel.ID, ""); isDM && dmNick != "" {
 			u.maybePushDMTopic(brchannel.ID, dmNick)
 		}
