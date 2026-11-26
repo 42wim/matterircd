@@ -73,6 +73,8 @@ type UserBridge struct {
 	// per channel as {msgID, threadID}. msgPrev takes over when msgLast gets deleted.
 	msgLast map[string][2]string
 	msgPrev map[string][2]string
+	// lastSent holds the most recent {msgID, threadID, targetID} we sent across all channels.
+	lastSent [3]string
 
 	msgMapMutex      sync.RWMutex
 	msgMap           map[string]map[string]int
@@ -3128,6 +3130,14 @@ func (u *User) setMsgLast(channelID, msgID, threadID string) {
 	}
 
 	u.msgLast[channelID] = [2]string{msgID, threadID}
+	u.lastSent = [3]string{msgID, threadID, channelID}
+}
+
+func (u *User) getLastSent() (string, string, string) {
+	u.msgLastMutex.RLock()
+	defer u.msgLastMutex.RUnlock()
+
+	return u.lastSent[0], u.lastSent[1], u.lastSent[2]
 }
 
 // forgetMsgLast drops a deleted message from the last messages we sent in channelID.
@@ -3149,10 +3159,18 @@ func (u *User) forgetMsgLast(channelID, msgID string) {
 		u.msgLast[channelID] = prev
 		delete(u.msgPrev, channelID)
 
+		if u.lastSent[0] == msgID {
+			u.lastSent = [3]string{prev[0], prev[1], channelID}
+		}
+
 		return
 	}
 
 	delete(u.msgLast, channelID)
+
+	if u.lastSent[0] == msgID {
+		u.lastSent = [3]string{}
+	}
 }
 
 func (u *User) clearChannelState(channelID string) {

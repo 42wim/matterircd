@@ -930,6 +930,221 @@ func part(u *User, toUser *User, args []string, service string) {
 	}
 }
 
+func resolvePermalinkChannel(u *User, arg string) (string, string, bool) {
+	if strings.HasPrefix(arg, "#") {
+		if ch, ok := u.Srv.HasChannel(arg); ok {
+			return ch.ID(), "", true
+		}
+
+		channelID := u.br.GetChannelID(u.ctx, strings.TrimPrefix(arg, "#"), u.br.GetMe().TeamID)
+
+		return channelID, "", channelID != ""
+	}
+
+	nick := strings.TrimPrefix(arg, "@")
+	if dmUser, exists := u.Srv.HasUser(nick); exists && (dmUser.Ghost || dmUser == u) && !isServiceUser(dmUser) {
+		dmChannelID := u.br.GetDMChannelID(u.ctx, dmUser.User)
+		if dmChannelID == "" {
+			dmName := u.br.GetDMChannelName(u.User, dmUser.User)
+			dmChannelID = u.br.GetChannelID(u.ctx, dmName, u.br.GetMe().TeamID)
+		}
+
+		return dmChannelID, dmUser.User, dmChannelID != ""
+	}
+
+	return "", "", false
+}
+
+func formatPermalinkURL(u *User, channelID, postID, parentID string) string {
+	formatter, ok := u.br.(postURLFormatter)
+	if !ok || postID == "" {
+		return ""
+	}
+
+	var hintEvents []*bridge.Event
+	if channelID != "" || parentID != "" {
+		hintEvents = []*bridge.Event{{
+			Data: &bridge.ChannelMessageEvent{ChannelID: channelID, MessageID: parentID},
+		}}
+	}
+
+	return formatter.PostURL(u.ctx, postID, hintEvents)
+}
+
+func sendPermalinkReply(u, toUser *User, channelID, msgID, parentID string) {
+	if parentID != "" && parentID != msgID {
+		threadURL := formatPermalinkURL(u, channelID, parentID, "")
+		msgURL := formatPermalinkURL(u, channelID, msgID, parentID)
+
+		if threadURL != "" && msgURL != "" && threadURL != msgURL {
+			u.MsgUser(toUser, "Thread: "+threadURL)
+			u.MsgUser(toUser, "Message: "+msgURL)
+
+			return
+		}
+
+		if msgURL != "" {
+			u.MsgUser(toUser, msgURL)
+
+			return
+		}
+
+		if threadURL != "" {
+			u.MsgUser(toUser, threadURL)
+
+			return
+		}
+
+		u.MsgUser(toUser, "permalink not found")
+
+		return
+	}
+
+	if msgURL := formatPermalinkURL(u, channelID, msgID, ""); msgURL != "" {
+		u.MsgUser(toUser, msgURL)
+
+		return
+	}
+
+	u.MsgUser(toUser, "permalink not found")
+}
+
+func permalinkForChannelLatest(u, toUser *User, target, channelID string) {
+	for _, event := range slices.Backward(u.br.GetPosts(u.ctx, channelID, 1)) {
+		switch e := event.Data.(type) {
+		case *bridge.ChannelMessageEvent:
+			if e.MessageID != "" {
+				sendPermalinkReply(u, toUser, channelID, e.MessageID, e.ParentID)
+				return
+			}
+		case *bridge.DirectMessageEvent:
+			if e.MessageID != "" {
+				sendPermalinkReply(u, toUser, channelID, e.MessageID, e.ParentID)
+				return
+			}
+		}
+	}
+
+	u.MsgUser(toUser, "no messages found for "+target)
+}
+
+func permalinkForChannelID(u, toUser *User, target, channelID, dmUserID, rawArg string) {
+	rawID := strings.TrimPrefix(strings.TrimSpace(rawArg), "@@")
+
+	if rawID == "!!" {
+		lookupKey := channelID
+		if dmUserID != "" {
+			lookupKey = dmUserID
+		}
+
+		u.msgLastMutex.RLock()
+		last, ok := u.msgLast[lookupKey]
+		u.msgLastMutex.RUnlock()
+
+		if !ok || last[0] == "" {
+			u.MsgUser(toUser, "no recent message sent in "+target)
+			return
+		}
+
+		sendPermalinkReply(u, toUser, channelID, last[0], last[1])
+
+		return
+	}
+
+	if len(rawID) == 3 && isAllInAlphabet(rawID, "0123456789abcdef") {
+		postID := u.getPostIDFromHex(channelID, rawID)
+		if postID == "" && dmUserID != "" {
+			postID = u.getPostIDFromHex(dmUserID, rawID)
+		}
+
+		if postID == "" {
+			u.MsgUser(toUser, "message ID "+rawID+" not found in "+target)
+			return
+		}
+
+		sendPermalinkReply(u, toUser, channelID, postID, "")
+
+		return
+	}
+
+	var postID string
+	if resolver, ok := u.br.(interface {
+		ResolvePostID(channelID, rawID string) string
+	}); ok {
+		postID = resolver.ResolvePostID(channelID, rawID)
+	} else {
+		postID = u.br.NormalizePostID(rawID)
+	}
+
+	if postID == "" {
+		u.MsgUser(toUser, "invalid post/thread ID: "+rawArg)
+		return
+	}
+
+	sendPermalinkReply(u, toUser, channelID, postID, "")
+}
+
+func permalink(u *User, toUser *User, args []string, service string) {
+	if !isChatService(service) {
+		u.MsgUser(toUser, "not implemented")
+		return
+	}
+
+	if len(args) == 0 || (len(args) == 1 && strings.TrimPrefix(strings.TrimSpace(args[0]), "@@") == "!!") {
+		msgID, parentID, targetID := u.getLastSent()
+		if msgID == "" {
+			u.MsgUser(toUser, "no recent message found")
+			return
+		}
+
+		channelID := targetID
+		if dmChanID := u.br.GetDMChannelID(u.ctx, targetID); dmChanID != "" {
+			channelID = dmChanID
+		}
+
+		sendPermalinkReply(u, toUser, channelID, msgID, parentID)
+
+		return
+	}
+
+	if len(args) > 2 || strings.EqualFold(args[0], helpArg) {
+		u.MsgUser(toUser, "need PERMALINK [<#channel>|<user>|<post/thread ID>|!!] [post/thread ID|!!]")
+		u.MsgUser(toUser, "e.g. PERMALINK #bugs, PERMALINK alice, PERMALINK @@<id>, PERMALINK !!")
+
+		return
+	}
+
+	if len(args) == 2 {
+		channelID, dmUserID, ok := resolvePermalinkChannel(u, args[0])
+		if !ok {
+			u.MsgUser(toUser, args[0]+" not found")
+			return
+		}
+
+		permalinkForChannelID(u, toUser, args[0], channelID, dmUserID, args[1])
+
+		return
+	}
+
+	if channelID, _, ok := resolvePermalinkChannel(u, args[0]); ok {
+		permalinkForChannelLatest(u, toUser, args[0], channelID)
+		return
+	}
+
+	if strings.HasPrefix(args[0], "#") {
+		u.MsgUser(toUser, args[0]+" not found")
+		return
+	}
+
+	postID := u.br.NormalizePostID(strings.TrimPrefix(strings.TrimSpace(args[0]), "@@"))
+	if postID == "" {
+		u.MsgUser(toUser, "invalid post/thread ID: "+args[0])
+		return
+	}
+
+	sendPermalinkReply(u, toUser, "", postID, "")
+}
+
 func ping(u *User, toUser *User, args []string, service string) {
 	pingCtx, cancel := context.WithTimeout(u.ctx, 5*time.Second)
 	defer cancel()
@@ -1370,6 +1585,7 @@ var cmds = map[string]Command{
 	"login":            {handler: login, minParams: 2, maxParams: 5},
 	"logout":           {handler: logout, login: true, minParams: 0, maxParams: 0},
 	"part":             {handler: part, login: true, minParams: 1, maxParams: 1},
+	"permalink":        {handler: permalink, login: true, minParams: 0, maxParams: 2},
 	"ping":             {handler: ping, login: true, minParams: 0, maxParams: 0},
 	"replay":           {handler: replay, login: true, minParams: 1, maxParams: 2},
 	"scrollback":       {handler: scrollback, login: true, minParams: 1, maxParams: 3},

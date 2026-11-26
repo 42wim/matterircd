@@ -1861,6 +1861,37 @@ func (m *Matrix) GetPostThread(ctx context.Context, postID string) []*bridge.Eve
 	return m.msgsToEvents(msgs, "details")
 }
 
+// PostURL returns a matrix.to permalink for DETAILS and PERMALINK output.
+func (m *Matrix) PostURL(_ context.Context, postID string, events []*bridge.Event) string {
+	postID = m.NormalizePostID(postID)
+	if postID == "" {
+		return ""
+	}
+
+	roomID := ""
+
+	if len(events) > 0 {
+		switch e := events[0].Data.(type) {
+		case *bridge.ChannelMessageEvent:
+			roomID = e.ChannelID
+		case *bridge.DirectMessageEvent:
+			roomID = e.ChannelID
+		}
+	}
+
+	if roomID == "" {
+		if r, ok := m.roomOf(postID); ok {
+			roomID = r.String()
+		}
+	}
+
+	if roomID == "" {
+		return ""
+	}
+
+	return "https://matrix.to/#/" + url.PathEscape(roomID) + "/" + url.PathEscape(postID)
+}
+
 func (m *Matrix) GetReplayEvents(ctx context.Context, channelID string, since int64) []*bridge.Event {
 	return m.historySince(ctx, channelID, since, "replay")
 }

@@ -239,12 +239,83 @@ func broadcastOf(rmsg *model.WebSocketEvent) *model.WebsocketBroadcast {
 }
 
 func (m *Mattermost) NormalizePostID(msgID string) string {
-	msgID = strings.ToLower(msgID)
-	if model.IsValidId(msgID) {
-		return msgID
+	trimmed := strings.TrimSpace(msgID)
+	if _, after, ok := strings.Cut(strings.ToLower(trimmed), "/pl/"); ok {
+		if idx := strings.IndexAny(after, "/?#"); idx >= 0 {
+			after = after[:idx]
+		}
+
+		trimmed = after
+	}
+
+	trimmed = strings.ToLower(trimmed)
+	if model.IsValidId(trimmed) {
+		return trimmed
 	}
 
 	return ""
+}
+
+func (m *Mattermost) resolvePostTeam(ctx context.Context, postID string, events []*bridge.Event) string {
+	team := m.credentials.Team
+	if m.mc == nil {
+		return team
+	}
+
+	channelID := ""
+
+	if len(events) > 0 {
+		switch e := events[0].Data.(type) {
+		case *bridge.ChannelMessageEvent:
+			channelID = e.ChannelID
+		case *bridge.DirectMessageEvent:
+			channelID = e.ChannelID
+		}
+	}
+
+	if channelID == "" {
+		channelID = m.GetPostChannelID(ctx, postID)
+	}
+
+	if channelID == "" {
+		return team
+	}
+
+	ch, err := m.GetChannel(ctx, channelID)
+	if err != nil || ch == nil || ch.TeamID == "" {
+		return team
+	}
+
+	if teamName := m.GetTeamName(ctx, ch.TeamID); teamName != "" {
+		return teamName
+	}
+
+	return team
+}
+
+// PostURL returns the Mattermost post permalink for DETAILS and PERMALINK output,
+// resolving the post's team when available so multi-team instances work accurately.
+func (m *Mattermost) PostURL(ctx context.Context, postID string, events []*bridge.Event) string {
+	postID = m.NormalizePostID(postID)
+	if postID == "" {
+		return ""
+	}
+
+	proto := "https"
+	if m.cfg != nil && m.cfg.Mattermost().Insecure {
+		proto = "http" //nolint:goconst
+	}
+
+	server := strings.TrimRight(m.credentials.Server, "/")
+	server = strings.TrimPrefix(server, "https://")
+	server = strings.TrimPrefix(server, "http://")
+
+	team := m.resolvePostTeam(ctx, postID, events)
+	if server == "" || team == "" {
+		return ""
+	}
+
+	return proto + "://" + server + "/" + team + "/pl/" + postID
 }
 
 func (m *Mattermost) Ping(ctx context.Context, proto ...string) error {
