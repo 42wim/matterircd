@@ -12,11 +12,10 @@ import (
 )
 
 const (
-	slackIDPrefix      = "sl"
 	slackIDAlphabet    = "0123456789abcdefghijklmnopqrstuv"
-	slackIDMinPayload  = 21 // ceil(21*8/5) = 34 base32 chars -> 36 total chars (uniform for <=11-char channels)
-	slackIDMinLen      = 36
-	slackIDMaxLen      = 82
+	slackIDMinPayload  = 21 // ceil(21*8/5) = 34 base32 chars (uniform for <=11-char channels)
+	slackIDMinLen      = 34
+	slackIDMaxLen      = 80
 	slackIDFeistelHead = 4
 
 	slackIDVerCompact = 0x01
@@ -97,7 +96,7 @@ func mixSlackPayload(data []byte, forward bool) {
 }
 
 // encodeSlackID reversibly encodes a Slack (channelID, ts) pair into a
-// lowercase [0-9a-z] identifier prefixed with "sl".
+// lowercase [0-9a-v] identifier (34-80 chars).
 func encodeSlackID(channelID, ts string) string {
 	if channelID == "" || ts == "" || len(channelID) > 255 {
 		return ""
@@ -128,7 +127,7 @@ func encodeSlackID(channelID, ts string) string {
 
 	mixSlackPayload(payload, true)
 
-	encoded := slackIDPrefix + slackIDEncoding.EncodeToString(payload)
+	encoded := slackIDEncoding.EncodeToString(payload)
 	if len(encoded) > slackIDMaxLen {
 		return ""
 	}
@@ -177,11 +176,11 @@ func decodeRawSlackID(raw []byte) (string, string, bool) {
 // its Slack channelID and message timestamp.
 func decodeSlackID(postID string) (string, string, bool) {
 	postID = strings.ToLower(postID)
-	if !strings.HasPrefix(postID, slackIDPrefix) || len(postID) < slackIDMinLen || len(postID) > slackIDMaxLen {
+	if len(postID) < slackIDMinLen || len(postID) > slackIDMaxLen {
 		return "", "", false
 	}
 
-	raw, err := slackIDEncoding.DecodeString(postID[len(slackIDPrefix):])
+	raw, err := slackIDEncoding.DecodeString(postID)
 	if err != nil || len(raw) < slackIDMinPayload {
 		return "", "", false
 	}

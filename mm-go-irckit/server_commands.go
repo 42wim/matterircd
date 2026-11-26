@@ -593,19 +593,19 @@ func isValidThreadID(id string) bool {
 		return true
 	}
 
-	if isPrefixedThreadID(id) {
-		return true
-	}
-
 	switch len(id) {
 	case 3:
 		return isAllInAlphabet(id, "0123456789abcdef")
+	case 11:
+		return isAllInAlphabet(id, "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_-")
+	case 16:
+		return isAllInAlphabet(id, "0123456789abcdefghijklmnopqrstuv")
 	case 17:
 		return isAllInAlphabet(id, "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz")
 	case 26:
 		return isAllInAlphabet(id, "0123456789abcdefghijklmnopqrstuvwxyz")
 	default:
-		return false
+		return len(id) >= 34 && len(id) <= 80 && isAllInAlphabet(id, "0123456789abcdefghijklmnopqrstuv")
 	}
 }
 
@@ -687,22 +687,6 @@ func isBareQuoteRef(msg string) bool {
 		if id, hasAt := strings.CutPrefix(rest, "@@"); hasAt {
 			return isValidThreadID(id)
 		}
-	}
-
-	return false
-}
-
-func isPrefixedThreadID(id string) bool {
-	if strings.HasPrefix(id, "sl") && len(id) >= 36 && len(id) <= 82 {
-		return isAllInAlphabet(id[2:], "0123456789abcdefghijklmnopqrstuv")
-	}
-
-	if strings.HasPrefix(id, "mt") && len(id) == 18 {
-		return isAllInAlphabet(id[2:], "0123456789abcdefghijklmnopqrstuv")
-	}
-
-	if strings.HasPrefix(id, "gc") && len(id) == 13 {
-		return isAllInAlphabet(id[2:], "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_-")
 	}
 
 	return false
@@ -975,7 +959,7 @@ func awayNotice(s Server, u *User, br bridge.Bridger, toUser *User) {
 	toUser.MarkAwayNotified(now, gen)
 }
 
-const quoteIDPattern = `!!|[0-9a-f]{3}|[0-9A-Za-z]{17}|[0-9a-z]{26}|\$[0-9A-Za-z\-_\.\+\/]{43}|sl[0-9a-v]{34,80}|mt[0-9a-v]{16}|gc[0-9A-Za-z_-]{11}`
+const quoteIDPattern = `!!|\$[0-9A-Za-z\-_\.\+\/]{43}|[0-9a-v]{34,80}|[0-9a-z]{26}|[0-9A-Za-z]{17}|[0-9a-v]{16}|[0-9A-Za-z_-]{11}|[0-9a-f]{3}`
 
 var (
 	parseModifyMsgRegExp          = regexp.MustCompile(`^s(\/(?:` + quoteIDPattern + `)?\/)(.*)`)
@@ -1181,6 +1165,29 @@ func parseReactionToMsg(s Server, u *User, msg *irc.Message, channelID string) b
 	return true
 }
 
+func matchesBridgePostID(br bridge.Bridger, id string) bool {
+	if br == nil {
+		return isValidThreadID(id)
+	}
+
+	switch br.Protocol() {
+	case serviceMatrix:
+		return len(id) > 1 && id[0] == '$'
+	case serviceGoogleChat:
+		return len(id) == 11
+	case serviceMsTeams:
+		return len(id) == 16
+	case serviceRocketChat:
+		return len(id) == 17
+	case serviceMattermost:
+		return len(id) == 26
+	case serviceSlack:
+		return len(id) >= 34 && len(id) <= 80
+	default:
+		return false
+	}
+}
+
 //nolint:funlen,gocyclo
 func parseModifyMsg(s Server, u *User, msg *irc.Message, channelID string) bool {
 	query := msg.Params[0]
@@ -1217,12 +1224,6 @@ func parseModifyMsg(s Server, u *User, msg *irc.Message, channelID string) bool 
 		}
 
 		u.msgLastMutex.RUnlock()
-	// Matrix event ID (e.g. '$<43chars>'), Slack encoded ID (e.g. 'sl<base32>'), or Google Chat ID ('gc<11chars>')
-	case strings.HasPrefix(matches[1], "/$"), strings.HasPrefix(matches[1], "/sl"), strings.HasPrefix(matches[1], "/gc"):
-		msgID = matches[1][1 : len(matches[1])-1]
-	// Mattermost (26) or Rocket.Chat (17) message/thread ID (e.g. 'cfrakpwix7y8pgzux6ta76pm9c')
-	case len(matches[1]) == 28, len(matches[1]) == 19:
-		msgID = strings.ReplaceAll(matches[1], "/", "")
 	// matterircd message/thread ID (e.g. '004' and 'a12')
 	case len(matches[1]) == 5:
 		id, err := strconv.ParseInt(strings.ReplaceAll(matches[1], "/", ""), 16, 0)
@@ -1234,6 +1235,12 @@ func parseModifyMsg(s Server, u *User, msg *irc.Message, channelID string) bool 
 			}
 
 			u.msgMapIndexMutex.RUnlock()
+		}
+	// Native bridge message/thread ID matching the active bridge.
+	default:
+		candidate := matches[1][1 : len(matches[1])-1]
+		if matchesBridgePostID(u.br, candidate) {
+			msgID = candidate
 		}
 	}
 
@@ -1323,13 +1330,13 @@ func parseThreadID(u *User, msg *irc.Message, channelID string) (string, string)
 		if _, ok := u.msgMapIndex[channelID][int(id)]; ok {
 			return u.msgMapIndex[channelID][int(id)], matches[2]
 		}
-	case len(matches[1]) == 17, len(matches[1]) == 26:
+	case len(matches[1]) == 11, len(matches[1]) == 16, len(matches[1]) == 17, len(matches[1]) == 26:
 		return matches[1], matches[2]
 	// Matrix's Event ID format:
 	//   https://spec.matrix.org/latest/appendices/#common-identifier-format
 	case len(matches[1]) == 44:
 		return matches[1], matches[2]
-	case strings.HasPrefix(matches[1], "sl"), strings.HasPrefix(matches[1], "mt"), strings.HasPrefix(matches[1], "gc"):
+	case len(matches[1]) >= 34 && len(matches[1]) <= 80:
 		return matches[1], matches[2]
 	default:
 		logger.Errorf("parseThreadID: could not parse reply ID %q", matches[1])

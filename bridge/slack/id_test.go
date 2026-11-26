@@ -22,7 +22,6 @@ func assertSlackIDRoundTrip(t *testing.T, channelID, ts string) {
 		t.FailNow()
 	}
 
-	assert.True(t, strings.HasPrefix(id, "sl"))
 	assert.GreaterOrEqual(t, len(id), slackIDMinLen)
 	assert.LessOrEqual(t, len(id), slackIDMaxLen)
 	assert.NotEqual(t, 26, len(id), "must never match Mattermost 26-char ID length")
@@ -61,31 +60,31 @@ func TestEncodeDecodeSlackID(t *testing.T) {
 			name:      "standard channel and timestamp",
 			channelID: testSlackChannelID,
 			ts:        "1794617246.259449",
-			wantLen:   36,
+			wantLen:   34,
 		},
 		{
 			name:      "leading zeros in microseconds",
 			channelID: "C0123456789",
 			ts:        "1794617450.000300",
-			wantLen:   36,
+			wantLen:   34,
 		},
 		{
 			name:      "dm channel",
 			channelID: "D01234567",
 			ts:        "1700000000.000001",
-			wantLen:   36,
+			wantLen:   34,
 		},
 		{
 			name:      "short channel padded above 26 chars",
 			channelID: "C1",
 			ts:        "1700000000.123456",
-			wantLen:   36,
+			wantLen:   34,
 		},
 		{
 			name:      "non-standard timestamp fallback",
 			channelID: "G0123456789",
 			ts:        "01700000000.123",
-			wantLen:   49,
+			wantLen:   47,
 		},
 	}
 
@@ -109,9 +108,9 @@ func TestEncodeDecodeSlackIDInvalid(t *testing.T) {
 		"sl",
 		"zhqrffbxupgepj1yquxaftfk4a",
 		"$abc123",
-		"sl" + strings.Repeat("z", 30), // 'z' is outside base32 [0-9a-v]
-		"sl" + strings.Repeat("0", 30), // below minimum length
-		"sl" + strings.Repeat("0", 34), // exact min length, invalid Feistel payload
+		strings.Repeat("z", 34), // 'z' is outside base32 [0-9a-v]
+		strings.Repeat("0", 30), // below minimum length
+		strings.Repeat("0", 34), // exact min length, invalid Feistel payload
 	}
 
 	for _, id := range invalid {
@@ -126,9 +125,9 @@ func TestSlackIDAvalanche(t *testing.T) {
 	idA := encodeSlackID(testSlackChannelID, "1794617246.259449")
 	idB := encodeSlackID(testSlackChannelID, "1794617246.259450")
 
-	assert.Len(t, idA, 36)
-	assert.Len(t, idB, 36)
-	assert.NotEqual(t, idA[:6], idB[:6], "adjacent timestamps should not share the prefix after sl")
+	assert.Len(t, idA, 34)
+	assert.Len(t, idB, 34)
+	assert.NotEqual(t, idA[:5], idB[:5], "adjacent timestamps should not share the same leading prefix")
 }
 
 func TestSlackTSMillis(t *testing.T) {

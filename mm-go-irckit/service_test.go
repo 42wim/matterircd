@@ -133,12 +133,12 @@ func TestIsSlackToken(t *testing.T) {
 }
 
 func TestSlackIDPatterns(t *testing.T) {
-	slackID := "slfjm1dbhvpijvf4el03a39vq5p19benbsus"
+	slackID := "fjm1dbhvpijvf4el03a39vq5p19benbsus"
 
 	assert.True(t, isBareThreadID("@@"+slackID))
 	assert.False(t, isBareThreadID("@@"+slackID+" reply text"))
-	assert.False(t, isBareThreadID("@@slshort"))
-	assert.False(t, isBareThreadID("@@sle4kb6g2mq3bs2eslbs949fmvvk"))
+	assert.False(t, isBareThreadID("@@short"))
+	assert.False(t, isBareThreadID("@@e4kb6g2mq3bs2eslbs949fmvvkab"))
 
 	assert.Equal(t, "@@"+slackID+" ", threadPrefix("@@"+slackID+" hello"))
 	assert.True(t, modifyRegExp.MatchString("s/"+slackID+"/updated"))
