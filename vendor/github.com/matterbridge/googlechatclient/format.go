@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/sirupsen/logrus"
 )
 
 type textSpan struct {
@@ -540,6 +542,8 @@ func (c *Client) applySingleAnnotation(ann protoAnnotation, mentions *[]Mention,
 			name = "attachment"
 		}
 
+		c.traceUploadMetadata(name, ann.UploadRaw)
+
 		*attachments = append(*attachments, Attachment{
 			ID:          ann.UploadToken,
 			Name:        name,
@@ -577,6 +581,12 @@ func (c *Client) applySingleAnnotation(ann protoAnnotation, mentions *[]Mention,
 		}
 
 		*text += ann.MeetURL
+	}
+}
+
+func (c *Client) traceUploadMetadata(name string, raw []byte) {
+	if c.rootLogger != nil && c.rootLogger.IsLevelEnabled(logrus.TraceLevel) && len(raw) > 0 {
+		c.logger.Tracef("UploadMetadata fields for %q: %s", name, describeProtoFields(raw))
 	}
 }
 

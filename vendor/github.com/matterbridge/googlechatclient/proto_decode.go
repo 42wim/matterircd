@@ -2,6 +2,7 @@ package googlechatclient
 
 import (
 	"fmt"
+	"strings"
 
 	"google.golang.org/protobuf/encoding/protowire"
 )
@@ -59,6 +60,7 @@ type protoAnnotation struct {
 	UploadToken       string
 	UploadName        string
 	UploadMIME        string
+	UploadRaw         []byte
 	DriveID           string
 	DriveTitle        string
 	DriveMIME         string
@@ -895,6 +897,8 @@ func decodeFormatMetadata(b []byte, a *protoAnnotation) {
 }
 
 func decodeUploadMetadata(b []byte, a *protoAnnotation) {
+	a.UploadRaw = b
+
 	_ = walkFields(b, func(num protowire.Number, typ protowire.Type, val []byte) error {
 		if typ != protowire.BytesType {
 			return nil
@@ -911,6 +915,25 @@ func decodeUploadMetadata(b []byte, a *protoAnnotation) {
 
 		return nil
 	})
+}
+
+func describeProtoFields(b []byte) string {
+	var parts []string
+
+	_ = walkFields(b, func(num protowire.Number, typ protowire.Type, val []byte) error {
+		switch typ {
+		case protowire.VarintType:
+			parts = append(parts, fmt.Sprintf("f%d:varint=%d", num, decodeVarint(val)))
+		case protowire.BytesType:
+			parts = append(parts, fmt.Sprintf("f%d:bytes(%d)", num, len(decodeBytes(val))))
+		default:
+			parts = append(parts, fmt.Sprintf("f%d:type%d", num, typ))
+		}
+
+		return nil
+	})
+
+	return strings.Join(parts, " ")
 }
 
 func decodeDriveMetadata(b []byte, a *protoAnnotation) {

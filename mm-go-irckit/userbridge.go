@@ -871,6 +871,16 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) bool
 	return true
 }
 
+func formatFileDownloadMessage(f *bridge.File) string {
+	if f.Size <= 0 {
+		return "\x1ddownload file - " + f.URL + " (" + f.Name + ")\x1d"
+	}
+
+	sizeKB := max(1, f.Size/1024)
+
+	return "\x1ddownload file - " + f.URL + " (" + f.Name + ", " + strconv.FormatInt(sizeKB, 10) + "KBytes)\x1d"
+}
+
 func (u *User) handleFileEvent(event *bridge.FileEvent) {
 	if u.br.BridgeConfig().ShowOnlyJoined && event.ChannelType != "D" {
 		ch := u.getMessageChannel(event.ChannelID, event.Sender)
@@ -882,12 +892,7 @@ func (u *User) handleFileEvent(event *bridge.FileEvent) {
 	timeTag := formatLiveTimeTag(event.CreateAt, "")
 
 	for _, f := range event.Files {
-		sizeKB := f.Size / 1024
-		if sizeKB == 0 && f.Size > 0 {
-			sizeKB = 1
-		}
-
-		fileMsg := fmt.Sprintf("\x1ddownload file - %s (%s, %dKBytes)\x1d", f.URL, f.Name, sizeKB)
+		fileMsg := formatFileDownloadMessage(f)
 
 		if u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext {
 			threadMsgID := u.prefixContext(event.ChannelID, event.MessageID, event.ParentID, "posted_file")
@@ -2174,8 +2179,7 @@ func (u *User) replayHistoryEvents(brchannel *bridge.ChannelInfo, since int64, l
 		}
 
 		for i, f := range files {
-			sizeKB := max(1, f.Size/1024)
-			fileMsg := "\x1ddownload file - " + f.URL + " (" + f.Name + ", " + strconv.FormatInt(sizeKB, 10) + "KBytes)\x1d"
+			fileMsg := formatFileDownloadMessage(f)
 
 			if u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext {
 				var threadMsgID string
