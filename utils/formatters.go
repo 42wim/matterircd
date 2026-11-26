@@ -1520,8 +1520,46 @@ func ircFormatClose(open string) string {
 	return b.String()
 }
 
-func writeLinkOrImage(b *strings.Builder, linkText string, urlID int, isImage bool, linkTextOpen, linkTextClose, linkURLOpen, linkURLClose string) {
-	b.WriteString(linkTextOpen)
+type linkFormat struct {
+	textOpen, textClose   string
+	urlOpen, urlClose     string
+	parenOpen, parenClose string
+}
+
+// ircLinkParenFormat extracts bold (\x02), italic (\x1d), and color (\x03/\x04)
+// codes from a link text format string so they carry onto the URL parentheses.
+func ircLinkParenFormat(open string) string {
+	switch open {
+	case "", defaultLinkText:
+		return ""
+	}
+
+	var b strings.Builder
+
+	for i := 0; i < len(open); {
+		switch open[i] {
+		case '\x02', '\x1d':
+			b.WriteByte(open[i])
+
+			i++
+		case '\x03':
+			end := skipIRCColorDigits(open, i+1)
+			b.WriteString(open[i:end])
+			i = end
+		case '\x04':
+			end := skipIRCHexDigits(open, i+1)
+			b.WriteString(open[i:end])
+			i = end
+		default:
+			i++
+		}
+	}
+
+	return b.String()
+}
+
+func writeLinkOrImage(b *strings.Builder, linkText string, urlID int, isImage bool, lf linkFormat) {
+	b.WriteString(lf.textOpen)
 
 	switch {
 	case isImage && linkText != "":
@@ -1534,13 +1572,30 @@ func writeLinkOrImage(b *strings.Builder, linkText string, urlID int, isImage bo
 		b.WriteString(linkText)
 	}
 
-	b.WriteString(linkTextClose)
+	b.WriteString(lf.textClose)
 	b.WriteString("\u00a0")
-	b.WriteString(linkURLOpen)
+
+	if lf.parenOpen != "" {
+		b.WriteString(lf.parenOpen)
+		b.WriteByte('(')
+		b.WriteString(lf.parenClose)
+		b.WriteString(lf.urlOpen)
+		b.WriteByte('\x00')
+		b.WriteString(strconv.Itoa(urlID))
+		b.WriteByte('\x00')
+		b.WriteString(lf.urlClose)
+		b.WriteString(lf.parenOpen)
+		b.WriteByte(')')
+		b.WriteString(lf.parenClose)
+
+		return
+	}
+
+	b.WriteString(lf.urlOpen)
 	b.WriteString("(\x00")
 	b.WriteString(strconv.Itoa(urlID))
 	b.WriteString("\x00)")
-	b.WriteString(linkURLClose)
+	b.WriteString(lf.urlClose)
 }
 
 func isRedundantLinkLabel(label, url string) bool {
@@ -1570,8 +1625,15 @@ func isRedundantLinkLabel(label, url string) bool {
 func replaceLinksAndImages(msg string, tokens *[]string, linkTextOpen, linkURLOpen string) string {
 	var b strings.Builder
 
-	linkTextClose := ircFormatClose(linkTextOpen)
-	linkURLClose := ircFormatClose(linkURLOpen)
+	parenOpen := ircLinkParenFormat(linkTextOpen)
+	lf := linkFormat{
+		textOpen:   linkTextOpen,
+		textClose:  ircFormatClose(linkTextOpen),
+		urlOpen:    linkURLOpen,
+		urlClose:   ircFormatClose(linkURLOpen),
+		parenOpen:  parenOpen,
+		parenClose: ircFormatClose(parenOpen),
+	}
 	start, i := 0, 0
 
 	for i < len(msg) {
@@ -1638,7 +1700,7 @@ func replaceLinksAndImages(msg string, tokens *[]string, linkTextOpen, linkURLOp
 			b.WriteString(strconv.Itoa(urlID))
 			b.WriteByte('\x00')
 		} else {
-			writeLinkOrImage(&b, linkText, urlID, isImage, linkTextOpen, linkTextClose, linkURLOpen, linkURLClose)
+			writeLinkOrImage(&b, linkText, urlID, isImage, lf)
 		}
 
 		start = closeParen + 1
