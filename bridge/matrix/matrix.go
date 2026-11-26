@@ -389,7 +389,7 @@ func (m *Matrix) OnReconnectInfo(info matrixclient.ReconnectInfo) {
 		thresh = 15 * time.Minute
 	}
 
-	if info.Downtime < thresh {
+	if info.Downtime < thresh && len(info.LimitedRooms) == 0 {
 		return
 	}
 
