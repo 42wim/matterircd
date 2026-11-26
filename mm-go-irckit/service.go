@@ -1175,12 +1175,7 @@ func dispatchHistoricalEvent(u *User, toUser *User, event *bridge.Event, searchC
 	}
 
 	for i, f := range files {
-		sizeKB := f.Size / 1024
-		if sizeKB == 0 && f.Size > 0 {
-			sizeKB = 1
-		}
-
-		fileMsg := fmt.Sprintf("\x1ddownload file - %s (%s, %dKBytes)\x1d", f.URL, f.Name, sizeKB)
+		fileMsg := formatFileDownloadMessage(f)
 		currMsgID := msgID
 		currParentID := parentID
 		showContext := showMulti || (!suffixOnly && len(lines) == 0 && i == 0) || (suffixOnly && i == len(files)-1)
