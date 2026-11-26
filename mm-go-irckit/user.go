@@ -236,6 +236,16 @@ func threadPrefix(text string) string {
 	return replyRegExp.FindString(text)
 }
 
+func (u *User) threadPrefixFor(text string) string {
+	if strings.HasPrefix(text, "@@") {
+		if resolver, ok := u.postIDResolver(); ok {
+			text = resolvePostIDRefs(resolver, "", text)
+		}
+	}
+
+	return threadPrefix(text)
+}
+
 // Decode will receive and return a decoded message, or an error.
 //
 //nolint:funlen,gocognit,gocyclo
@@ -340,12 +350,19 @@ func (u *User) Decode() {
 				// The same goes for commands (CTCP, message modifications, reactions and the
 				// messages to the service bots): they are not text to post, so they must not
 				// get merged with the lines around them or wait for the timer.
+				checkTrailing := msg.Trailing
+				if msg.Command == irc.PRIVMSG && len(msg.Params) > 0 && hasPostIDRefPrefix(msg.Trailing) && !u.isActiveServiceBot(msg.Params[0]) {
+					if resolver, ok := u.postIDResolver(); ok {
+						checkTrailing = resolvePostIDRefs(resolver, "", msg.Trailing)
+					}
+				}
+
 				if msg.Command != irc.PRIVMSG ||
 					len(msg.Params) == 0 ||
 					u.isActiveServiceBot(msg.Params[0]) ||
 					strings.HasPrefix(msg.Trailing, "\x01") ||
-					modifyRegExp.MatchString(msg.Trailing) ||
-					(strings.HasPrefix(msg.Trailing, "@@") && parseReactionToMsgRegExp.MatchString(msg.Trailing)) {
+					modifyRegExp.MatchString(checkTrailing) ||
+					(strings.HasPrefix(checkTrailing, "@@") && parseReactionToMsgRegExp.MatchString(checkTrailing)) {
 					logger.Trace("flushing buffer because of QUIT, PART, CTCP, message modifications, reactions, service bots or a missing target")
 					flush()
 
@@ -355,8 +372,8 @@ func (u *User) Decode() {
 				}
 
 				// If starting a thread reply or quote reply, flush any previous message buffer first.
-				if (strings.HasPrefix(msg.Trailing, "@@") && replyRegExp.MatchString(msg.Trailing)) ||
-					(strings.HasPrefix(msg.Trailing, ">") && unthreadedQuoteRegExp.MatchString(msg.Trailing)) {
+				if (strings.HasPrefix(checkTrailing, "@@") && replyRegExp.MatchString(checkTrailing)) ||
+					(strings.HasPrefix(checkTrailing, ">") && unthreadedQuoteRegExp.MatchString(checkTrailing)) {
 					logger.Trace("flushing buffer because of replies to threads")
 					flush()
 				}
@@ -381,7 +398,7 @@ func (u *User) Decode() {
 						}
 
 						if len(bufferedMsg.Trailing)+len(msg.Trailing)+1 > postLimit-50 || time.Until(bufferDeadline) <= 0 {
-							replyPrefix := threadPrefix(bufferedMsg.Trailing)
+							replyPrefix := u.threadPrefixFor(bufferedMsg.Trailing)
 
 							flush()
 
@@ -402,7 +419,7 @@ func (u *User) Decode() {
 				// The message has been held for as long as it is allowed to.
 				var target, reply string
 				if bufferedMsg != nil {
-					target, reply = bufferedMsg.Params[0], threadPrefix(bufferedMsg.Trailing)
+					target, reply = bufferedMsg.Params[0], u.threadPrefixFor(bufferedMsg.Trailing)
 				}
 
 				flush()
