@@ -2,6 +2,7 @@ package msteamsclient
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -19,6 +20,8 @@ const (
 	selfNotesConvID        = "48:notes"
 	maxConversationPages   = 10
 	conversationsPageSize  = 200
+	maxCSALastPostLookups  = 20
+	minEpochMillis         = int64(1_000_000_000_000)
 )
 
 type rawConversationsResponse struct {
@@ -75,12 +78,21 @@ type rawCSATeam struct {
 }
 
 type rawCSAChannel struct {
-	ID             string `json:"id"`
-	DisplayName    string `json:"displayName"`
-	Description    string `json:"description"`
-	IsGeneral      bool   `json:"isGeneral"`
-	IsArchived     bool   `json:"isArchived"`
-	MembershipType string `json:"membershipType"`
+	ID                     string          `json:"id"`
+	DisplayName            string          `json:"displayName"`
+	Description            string          `json:"description"`
+	IsGeneral              bool            `json:"isGeneral"`
+	IsArchived             bool            `json:"isArchived"`
+	MembershipType         string          `json:"membershipType"`
+	LastMessageArrivalTime string          `json:"lastMessageArrivalTime"`
+	LastMessageID          string          `json:"lastMessageId"`
+	ConsumptionHorizon     string          `json:"consumptionHorizon"`
+	Version                json.RawMessage `json:"version"`
+	LastMessage            struct {
+		ID                  string `json:"id"`
+		OriginalArrivalTime string `json:"originalArrivalTime"`
+		ComposeTime         string `json:"composeTime"`
+	} `json:"lastMessage"`
 }
 
 type rawCSAChat struct {
@@ -150,12 +162,7 @@ func (c *Client) UpdateChannels(ctx context.Context) error {
 		}
 	}
 
-	for id, ch := range csaChans {
-		if _, exists := c.Users.conversations[id]; !exists {
-			c.Users.conversations[id] = ch
-			c.Users.joinedChannels[id] = struct{}{}
-		}
-	}
+	needLastPost := c.mergeCSAChannelsLocked(convs, csaChans)
 
 	for convID, members := range csaMembers {
 		c.setMembersLocked(convID, members)
@@ -169,9 +176,62 @@ func (c *Client) UpdateChannels(ctx context.Context) error {
 	c.Users.lastUpdated.Store(time.Now().Unix())
 	c.Users.mu.Unlock()
 
+	c.hydrateCSALastPost(ctx, needLastPost)
+
 	c.logger.Debugf("Synced %d conversations (%d teams, %d CSA channels)", len(convs), len(teams), len(csaChans))
 
 	return nil
+}
+
+func (c *Client) mergeCSAChannelsLocked(convs, csaChans map[string]*Conversation) []string {
+	var needLastPost []string
+
+	for id, ch := range csaChans {
+		target := ch
+		if existing, exists := c.Users.conversations[id]; exists {
+			mergeCSAChannel(existing, ch)
+			target = existing
+		} else {
+			c.Users.conversations[id] = ch
+			c.Users.joinedChannels[id] = struct{}{}
+		}
+
+		if target.LastViewedAt > 0 {
+			c.Users.channelLastViewedAt[id] = max(c.Users.channelLastViewedAt[id], target.LastViewedAt)
+		}
+
+		if _, inChatsvc := convs[id]; !inChatsvc && target.LastPostAt == 0 && !target.IsArchived {
+			needLastPost = append(needLastPost, id)
+		}
+	}
+
+	return needLastPost
+}
+
+func (c *Client) hydrateCSALastPost(ctx context.Context, convIDs []string) {
+	if len(convIDs) == 0 {
+		return
+	}
+
+	limit := min(len(convIDs), maxCSALastPostLookups)
+	for i := range limit {
+		if ctx.Err() != nil {
+			return
+		}
+
+		convID := convIDs[i]
+
+		msgs, err := c.GetMessages(ctx, convID, 1)
+		if err != nil || len(msgs) == 0 || msgs[0] == nil || msgs[0].CreateAt <= 0 {
+			continue
+		}
+
+		c.Users.mu.Lock()
+		if conv, ok := c.Users.conversations[convID]; ok && msgs[0].CreateAt > conv.LastPostAt {
+			conv.LastPostAt = msgs[0].CreateAt
+		}
+		c.Users.mu.Unlock()
+	}
 }
 
 func (c *Client) fetchConversations(ctx context.Context, chatService string) (map[string]*Conversation, error) {
@@ -262,15 +322,17 @@ func (c *Client) collectCSATeams(rawTeams []rawCSATeam, teams map[string]*Team, 
 		for j := range rt.Channels {
 			rc := &rt.Channels[j]
 			conv := &Conversation{
-				ID:          rc.ID,
-				Type:        ConversationChannel,
-				TeamID:      rt.ID,
-				TeamName:    rt.DisplayName,
-				DisplayName: rc.DisplayName,
-				Topic:       rc.Description,
-				IsGeneral:   rc.IsGeneral,
-				IsPrivate:   strings.EqualFold(rc.MembershipType, "private") || strings.EqualFold(rc.MembershipType, "shared"),
-				IsArchived:  rc.IsArchived || rt.IsArchived,
+				ID:           rc.ID,
+				Type:         ConversationChannel,
+				TeamID:       rt.ID,
+				TeamName:     rt.DisplayName,
+				DisplayName:  rc.DisplayName,
+				Topic:        rc.Description,
+				IsGeneral:    rc.IsGeneral,
+				IsPrivate:    strings.EqualFold(rc.MembershipType, "private") || strings.EqualFold(rc.MembershipType, "shared"),
+				IsArchived:   rc.IsArchived || rt.IsArchived,
+				LastPostAt:   parseCSAChannelLastPost(rc),
+				LastViewedAt: parseConsumptionHorizon(rc.ConsumptionHorizon),
 			}
 
 			team.Channels = append(team.Channels, conv)
@@ -365,6 +427,47 @@ func classifyRawConversation(conv *Conversation, rc *rawConversation) {
 	}
 }
 
+func parseCSAChannelLastPost(rc *rawCSAChannel) int64 {
+	if ts := parseTeamsTimeMillis(rc.LastMessage.ComposeTime, rc.LastMessage.OriginalArrivalTime); ts > 0 {
+		return ts
+	}
+
+	if ts := parseTeamsTimeMillis(rc.LastMessageArrivalTime, rc.LastMessage.ID); ts > 0 {
+		return ts
+	}
+
+	if ts := parseTeamsTimeMillis(rc.LastMessageID, ""); ts > 0 {
+		return ts
+	}
+
+	return parseTeamsVersionMillis(rc.Version)
+}
+
+func parseTeamsVersionMillis(raw json.RawMessage) int64 {
+	s := strings.TrimSpace(string(raw))
+	if s == "" || s == "null" {
+		return 0
+	}
+
+	if s[0] == '"' {
+		var str string
+
+		err := json.Unmarshal(raw, &str)
+		if err != nil {
+			return 0
+		}
+
+		s = strings.TrimSpace(str)
+	}
+
+	ms, err := strconv.ParseInt(s, 10, 64)
+	if err != nil || ms < minEpochMillis {
+		return 0
+	}
+
+	return ms
+}
+
 func mergeCSAChannel(dst, src *Conversation) {
 	dst.Type = ConversationChannel
 	dst.TeamID = src.TeamID
@@ -379,6 +482,14 @@ func mergeCSAChannel(dst, src *Conversation) {
 
 	if dst.Topic == "" && src.Topic != "" {
 		dst.Topic = src.Topic
+	}
+
+	if src.LastPostAt > dst.LastPostAt {
+		dst.LastPostAt = src.LastPostAt
+	}
+
+	if src.LastViewedAt > dst.LastViewedAt {
+		dst.LastViewedAt = src.LastViewedAt
 	}
 }
 

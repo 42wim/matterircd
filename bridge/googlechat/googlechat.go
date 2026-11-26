@@ -1140,7 +1140,7 @@ func (g *GoogleChat) GetTeamName(_ context.Context, _ string) string {
 }
 
 func (g *GoogleChat) GetPostsSince(ctx context.Context, channelID string, since int64) []*bridge.Event {
-	msgs, err := g.gc.GetMessagesSince(ctx, channelID, time.UnixMilli(since), defaultScrollback)
+	msgs, err := g.gc.GetMessagesSince(ctx, channelID, time.UnixMilli(since), maxScrollback)
 	if err != nil {
 		logger.Debugf("GetPostsSince(%s) failed: %v", channelID, err)
 
