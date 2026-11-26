@@ -37,8 +37,9 @@ func (u *User) isBareSummarizePostID(target string) bool {
 	}
 
 	proto := u.br.Protocol()
+	_, hasResolver := u.br.(bridge.PostIDResolver)
 
-	return (proto == serviceSlack || proto == serviceMsTeams || proto == serviceGoogleChat) && u.br.NormalizePostID(target) != ""
+	return (hasResolver || proto == serviceSlack || proto == serviceMsTeams || proto == serviceGoogleChat) && u.br.NormalizePostID(target) != ""
 }
 
 func (u *User) getSummarizeEvents(target string, query summarizeQuery) (string, []*bridge.Event, error) {
@@ -51,6 +52,10 @@ func (u *User) getSummarizeEvents(target string, query summarizeQuery) (string, 
 	if isThread || isBarePostID {
 		if !isThread {
 			postID = target
+		}
+
+		if normalized := u.br.NormalizePostID(postID); normalized != "" {
+			postID = normalized
 		}
 
 		events := u.br.GetPostThread(u.ctx, postID)

@@ -752,6 +752,12 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 	// Convert IRC formatting / emphasis to markdown.
 	msg.Trailing = utils.Irc2Markdown(msg.Trailing)
 
+	if resolver, ok := u.postIDResolver(); ok {
+		if toUser, isUser := s.HasUser(query); !isUser || !isServiceUser(toUser) {
+			msg.Trailing = resolvePostIDRefs(resolver, getTargetChannelID(s, u, query), msg.Trailing)
+		}
+	}
+
 	if isBareThreadID(msg.Trailing) || isBareQuoteRef(msg.Trailing) {
 		trimmed := strings.TrimSpace(msg.Trailing)
 
@@ -960,6 +966,141 @@ var (
 	parseUnthreadedQuoteMsgRegExp = regexp.MustCompile(`(?s)^>(?:([1-9][0-9]*)([lLwWcC]))?\@\@(` + quoteIDPattern + `)\s+(.*)`)
 	parseThreadIDRegExp           = regexp.MustCompile(`(?s)^\@\@(?:(` + quoteIDPattern + `)\s)(.*)`)
 )
+
+func (u *User) postIDResolver() (bridge.PostIDResolver, bool) {
+	if u == nil {
+		return nil, false
+	}
+
+	resolver, ok := u.currentBridge().(bridge.PostIDResolver)
+
+	return resolver, ok
+}
+
+func resolveBridgePostID(u *User, channelID, rawID string) string {
+	if u == nil {
+		return ""
+	}
+
+	br := u.currentBridge()
+	if br == nil {
+		return ""
+	}
+
+	if resolver, ok := br.(bridge.PostIDResolver); ok {
+		return resolver.ResolvePostID(channelID, rawID)
+	}
+
+	return br.NormalizePostID(rawID)
+}
+
+func splitFirstToken(s string) (string, string) {
+	for i := range len(s) {
+		if isASCIIWhitespace(s[i]) {
+			return s[:i], s[i:]
+		}
+	}
+
+	return s, ""
+}
+
+func resolvePostIDToken(resolver bridge.PostIDResolver, channelID, tok string) string {
+	if tok == "" || tok == "!!" || (len(tok) == 3 && isAllInAlphabet(tok, "0123456789abcdef")) {
+		return ""
+	}
+
+	resolved := resolver.ResolvePostID(channelID, tok)
+	if resolved == "" || resolved == tok {
+		return ""
+	}
+
+	return resolved
+}
+
+func resolveModifyPostIDRef(resolver bridge.PostIDResolver, channelID, text string) string {
+	rest := text[2:]
+
+	end := len(rest)
+	for i := range len(rest) {
+		if isASCIIWhitespace(rest[i]) {
+			end = i
+			break
+		}
+	}
+
+	// Scan longest-to-shortest before whitespace so full IDs containing '/'
+	// match before shorter cached prefixes.
+	for i := end - 1; i > 0; i-- {
+		if rest[i] != '/' {
+			continue
+		}
+
+		tok := rest[:i]
+		if tok == "!!" || (len(tok) == 3 && isAllInAlphabet(tok, "0123456789abcdef")) {
+			return text
+		}
+
+		resolved := resolver.ResolvePostID(channelID, tok)
+		if resolved == "" {
+			continue
+		}
+
+		if resolved == tok {
+			return text
+		}
+
+		return "s/" + resolved + rest[i:]
+	}
+
+	return text
+}
+
+func resolveQuotePostIDRef(resolver bridge.PostIDResolver, channelID, text string) string {
+	rest := stripQuoteLimitPrefix(text[1:])
+
+	after, ok := strings.CutPrefix(rest, "@@")
+	if !ok {
+		return text
+	}
+
+	tok, tail := splitFirstToken(after)
+	if resolved := resolvePostIDToken(resolver, channelID, tok); resolved != "" {
+		return text[:len(text)-len(after)] + resolved + tail
+	}
+
+	return text
+}
+
+// resolvePostIDRefs delegates shorthand/prefix post IDs inside reply, reaction,
+// quote, and edit prefixes to bridges implementing bridge.PostIDResolver so the
+// standard IRC parsers handle them transparently.
+func resolvePostIDRefs(resolver bridge.PostIDResolver, channelID, text string) string {
+	if resolver == nil || text == "" {
+		return text
+	}
+
+	switch {
+	case strings.HasPrefix(text, "s/"):
+		return resolveModifyPostIDRef(resolver, channelID, text)
+	case strings.HasPrefix(text, ">"):
+		return resolveQuotePostIDRef(resolver, channelID, text)
+	case strings.HasPrefix(text, "@@"):
+		tok, tail := splitFirstToken(text[2:])
+		if resolved := resolvePostIDToken(resolver, channelID, tok); resolved != "" {
+			tok = resolved
+		}
+
+		trimmedTail := strings.TrimLeft(tail, " \t")
+		if strings.HasPrefix(trimmedTail, ">") {
+			wsLen := len(tail) - len(trimmedTail)
+			tail = tail[:wsLen] + resolveQuotePostIDRef(resolver, channelID, trimmedTail)
+		}
+
+		return "@@" + tok + tail
+	default:
+		return text
+	}
+}
 
 func parseReactionToMsg(s Server, u *User, msg *irc.Message, channelID string) bool {
 	query := msg.Params[0]
@@ -1772,31 +1913,36 @@ func resolveThreadTarget(s Server, u *User, channelName, threadID string) string
 		return "@@" + postID
 	}
 
-	if u.br != nil {
-		postID := u.br.NormalizePostID(cleanID)
-		if postID == "" {
-			return ""
-		}
-
-		if channelName == "" {
-			return "@@" + postID
-		}
-
-		targetChannelID := getTargetChannelID(s, u, channelName)
-		postChannelID := u.br.GetPostChannelID(u.ctx, postID)
-
-		if targetChannelID != "" && postChannelID == targetChannelID {
-			return "@@" + postID
-		}
-
-		if postChannelID == "" {
-			logger.Tracef("resolveThreadTarget: channel of post %s unknown (not cached?), cannot verify it belongs to channel %s (%s)", threadID, channelName, targetChannelID)
-
-			return ""
-		}
-
-		logger.Tracef("resolveThreadTarget: post %s is in channel %s, not channel %s (%s)", threadID, postChannelID, channelName, targetChannelID)
+	if u.br == nil {
+		return ""
 	}
+
+	targetChannelID := ""
+	if channelName != "" {
+		targetChannelID = getTargetChannelID(s, u, channelName)
+	}
+
+	postID := resolveBridgePostID(u, targetChannelID, cleanID)
+	if postID == "" {
+		return ""
+	}
+
+	if channelName == "" {
+		return "@@" + postID
+	}
+
+	postChannelID := u.br.GetPostChannelID(u.ctx, postID)
+	if targetChannelID != "" && postChannelID == targetChannelID {
+		return "@@" + postID
+	}
+
+	if postChannelID == "" {
+		logger.Tracef("resolveThreadTarget: channel of post %s unknown (not cached?), cannot verify it belongs to channel %s (%s)", threadID, channelName, targetChannelID)
+
+		return ""
+	}
+
+	logger.Tracef("resolveThreadTarget: post %s is in channel %s, not channel %s (%s)", threadID, postChannelID, channelName, targetChannelID)
 
 	return ""
 }

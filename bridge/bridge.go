@@ -149,6 +149,13 @@ type PostGetter interface {
 	GetPost(ctx context.Context, channelID, postID string) (*QuotedPost, error)
 }
 
+// PostIDResolver is optionally implemented by bridges that can normalize or expand
+// shorthand, prefix, or bridge-specific post references (such as IDs missing a
+// leading sigil or cached prefixes) scoped to a channel or DM.
+type PostIDResolver interface {
+	ResolvePostID(channelID, rawID string) string
+}
+
 // QuoteSender is optionally implemented by bridges that support native wire-level
 // quoted replies instead of Markdown blockquotes. When threaded is true, threadID
 // optionally specifies a target thread different from quotedPostID. It returns the

@@ -2230,12 +2230,184 @@ func (m *Matrix) Ping(ctx context.Context, proto ...string) error {
 	return m.mc.Ping(ctx)
 }
 
-func (m *Matrix) NormalizePostID(msgID string) string {
-	if strings.HasPrefix(msgID, "$") {
-		return msgID
+const (
+	matrixEventIDBodyLen = 43
+	matrixMinPrefixLen   = 4
+)
+
+func isMatrixEventIDBody(s string) bool {
+	if s == "" {
+		return false
+	}
+
+	for i := range len(s) {
+		b := s[i]
+		if (b < '0' || b > '9') && (b < 'A' || b > 'Z') && (b < 'a' || b > 'z') &&
+			b != '-' && b != '_' && b != '.' && b != '+' && b != '/' {
+			return false
+		}
+	}
+
+	return true
+}
+
+func stripEllipsisSuffix(s string) string {
+	if trimmed, ok := strings.CutSuffix(s, "…"); ok {
+		return trimmed
+	}
+
+	return strings.TrimSuffix(s, "...")
+}
+
+func parseMatrixToURL(raw string) (id.RoomID, id.EventID, bool) {
+	lower := strings.ToLower(raw)
+	if !strings.HasPrefix(lower, "https://matrix.to/#/") && !strings.HasPrefix(lower, "http://matrix.to/#/") {
+		return "", "", false
+	}
+
+	_, frag, ok := strings.Cut(raw, "#/")
+	if !ok {
+		return "", "", false
+	}
+
+	if qIdx := strings.IndexByte(frag, '?'); qIdx >= 0 {
+		frag = frag[:qIdx]
+	}
+
+	parts := strings.Split(strings.Trim(frag, "/"), "/")
+	if len(parts) < 2 {
+		return "", "", false
+	}
+
+	roomPart, err := url.PathUnescape(parts[0])
+	if err != nil {
+		return "", "", false
+	}
+
+	evPart, err := url.PathUnescape(parts[1])
+	if err != nil || !strings.HasPrefix(evPart, "$") || len(evPart) <= 1 {
+		return "", "", false
+	}
+
+	var roomID id.RoomID
+	if strings.HasPrefix(roomPart, "!") {
+		roomID = id.RoomID(roomPart)
+	}
+
+	return roomID, id.EventID(evPart), true
+}
+
+func (m *Matrix) resolveCachedEventIDPrefix(roomID id.RoomID, prefix string) string {
+	if m.msgRoomCache == nil || len(prefix) <= 1 {
+		return ""
+	}
+
+	match := ""
+
+	for _, evID := range m.msgRoomCache.Keys() {
+		if roomID != "" {
+			if r, ok := m.msgRoomCache.Peek(evID); !ok || r != roomID {
+				continue
+			}
+		}
+
+		if strings.HasPrefix(string(evID), prefix) {
+			if match != "" {
+				return ""
+			}
+
+			match = string(evID)
+		}
+	}
+
+	return match
+}
+
+func (m *Matrix) resolveRoomID(channelID string) id.RoomID {
+	if channelID == "" {
+		return ""
+	}
+
+	if strings.HasPrefix(channelID, "!") {
+		return id.RoomID(channelID)
+	}
+
+	if m.mc != nil {
+		return m.dmRoom(channelID)
 	}
 
 	return ""
+}
+
+func (m *Matrix) resolvePrefixedEventID(roomID id.RoomID, trimmed string) string {
+	if len(trimmed) <= 1 {
+		return ""
+	}
+
+	if strings.ContainsRune(trimmed, ':') {
+		return trimmed
+	}
+
+	if len(trimmed) == matrixEventIDBodyLen+1 && isMatrixEventIDBody(trimmed[1:]) {
+		return trimmed
+	}
+
+	if m.msgRoomCache == nil {
+		return ""
+	}
+
+	if _, ok := m.msgRoomCache.Peek(id.EventID(trimmed)); ok {
+		return trimmed
+	}
+
+	if len(trimmed) <= matrixEventIDBodyLen && isMatrixEventIDBody(trimmed[1:]) {
+		return m.resolveCachedEventIDPrefix(roomID, trimmed)
+	}
+
+	return ""
+}
+
+// ResolvePostID implements bridge.PostIDResolver, normalizing a Matrix event
+// reference (with or without leading '$', bare 43-char event ID, cached prefix,
+// or matrix.to URL), optionally scoped to channelID, restoring the leading '$'.
+func (m *Matrix) ResolvePostID(channelID, rawID string) string {
+	trimmed := strings.TrimSpace(rawID)
+	if trimmed == "" {
+		return ""
+	}
+
+	if roomID, evID, ok := parseMatrixToURL(trimmed); ok {
+		if m.msgRoomCache != nil && roomID != "" {
+			m.msgRoomCache.Add(evID, roomID)
+		}
+
+		return evID.String()
+	}
+
+	trimmed = stripEllipsisSuffix(trimmed)
+	roomID := m.resolveRoomID(channelID)
+
+	if strings.HasPrefix(trimmed, "$") {
+		return m.resolvePrefixedEventID(roomID, trimmed)
+	}
+
+	if !isMatrixEventIDBody(trimmed) {
+		return ""
+	}
+
+	if len(trimmed) == matrixEventIDBodyLen {
+		return "$" + trimmed
+	}
+
+	if len(trimmed) >= matrixMinPrefixLen && len(trimmed) < matrixEventIDBodyLen {
+		return m.resolveCachedEventIDPrefix(roomID, "$"+trimmed)
+	}
+
+	return ""
+}
+
+func (m *Matrix) NormalizePostID(msgID string) string {
+	return m.ResolvePostID("", msgID)
 }
 
 func (m *Matrix) SendTyping(ctx context.Context, channelName string) {
