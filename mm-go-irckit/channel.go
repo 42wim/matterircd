@@ -389,7 +389,13 @@ func (ch *channel) SendNamesResponse(u *User) error {
 
 	estimatedMsgs := (len(names) / 20) + 2
 	messages := make([]irc.Message, 0, estimatedMsgs)
-	sharedNamReplyParams := []string{u.Nick, "=", ch.name}
+
+	chanType := "="
+	if ch.IsPrivate() {
+		chanType = "*"
+	}
+
+	sharedNamReplyParams := []string{u.Nick, chanType, ch.name}
 
 	var line strings.Builder
 	line.Grow(512)
