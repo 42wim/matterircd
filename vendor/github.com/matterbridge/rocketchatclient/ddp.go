@@ -1640,6 +1640,7 @@ func (c *Client) recordMessageActivity(msg *Message) {
 		msgTS = time.Now().UnixMilli()
 	}
 
+	c.cache.recordRoomLastMessage(msg.RoomID, msg.Timestamp.Time)
 	c.cache.recordUserActivity(msg.User.ID, msgTS)
 
 	if msg.EditedAt != nil && !msg.EditedAt.Time.IsZero() && msg.EditedBy != nil && msg.EditedBy.ID != "" {

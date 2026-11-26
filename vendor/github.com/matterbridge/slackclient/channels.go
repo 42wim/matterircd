@@ -2,8 +2,12 @@ package slackclient
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -20,7 +24,13 @@ const (
 	channelsCacheTTL       = 5 * time.Minute
 	channelMembersCacheTTL = 5 * time.Minute
 	userChannelsCacheTTL   = 5 * time.Minute
+	clientCountsTimeout    = 15 * time.Second
+	maxIMInfoFallback      = 50
 )
+
+func isActiveConversation(ch slack.Channel) bool {
+	return ch.IsMember || (ch.IsIM && ch.IsOpen && !ch.IsUserDeleted)
+}
 
 func (c *Client) IsChannelMember(channelID string) bool {
 	if channelID == "" {
@@ -61,8 +71,12 @@ func (c *Client) cacheChannel(ch slack.Channel) {
 		c.channels[ch.ID] = "#" + ch.Name
 	}
 
+	if ch.IsIM && ch.User != "" {
+		c.dmChannels[ch.User] = ch.ID
+	}
+
 	c.channelData[ch.ID] = ch
-	c.joinedChannels[ch.ID] = ch.IsMember
+	c.joinedChannels[ch.ID] = isActiveConversation(ch)
 	c.Unlock()
 }
 
@@ -121,6 +135,10 @@ func (c *Client) JoinChannel(ctx context.Context, channelName string) (string, s
 }
 
 func (c *Client) GetConversations() ([]slack.Channel, error) {
+	return c.getConversations(context.Background())
+}
+
+func (c *Client) getConversations(ctx context.Context) ([]slack.Channel, error) {
 	now := time.Now().Unix()
 
 	c.RLock()
@@ -143,28 +161,195 @@ func (c *Client) GetConversations() ([]slack.Channel, error) {
 		return nil, nil
 	}
 
-	return c.RefreshConversations()
+	return c.refreshConversations(ctx)
 }
 
-func (c *Client) RefreshConversations() ([]slack.Channel, error) {
-	if c.sc == nil {
-		return nil, nil
+type clientCountsEntry struct {
+	ID         string          `json:"id"`
+	LastRead   string          `json:"last_read"`
+	Latest     json.RawMessage `json:"latest"`
+	HasUnreads bool            `json:"has_unreads"`
+}
+
+type clientCountsResponse struct {
+	slack.SlackResponse
+
+	Channels []clientCountsEntry `json:"channels"`
+	MPIMs    []clientCountsEntry `json:"mpims"`
+	IMs      []clientCountsEntry `json:"ims"`
+}
+
+func slackLatestTS(raw json.RawMessage) string {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || trimmed == "null" {
+		return ""
 	}
 
+	if trimmed[0] == '"' {
+		var ts string
+
+		err := json.Unmarshal(raw, &ts)
+		if err == nil {
+			return ts
+		}
+
+		return ""
+	}
+
+	if trimmed[0] == '{' {
+		var msg struct {
+			Timestamp string `json:"ts"`
+		}
+
+		err := json.Unmarshal(raw, &msg)
+		if err == nil {
+			return msg.Timestamp
+		}
+	}
+
+	return ""
+}
+
+func (c *Client) fetchClientCounts(ctx context.Context) (map[string]clientCountsEntry, bool) {
+	c.RLock()
+	hc := c.httpClient
+	token := c.token
+	c.RUnlock()
+
+	if hc == nil || token == "" {
+		return nil, false
+	}
+
+	form := url.Values{"token": {token}}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, slack.APIURL+"client.counts", strings.NewReader(form.Encode()))
+	if err != nil {
+		return nil, false
+	}
+
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := hc.Do(req)
+	if err != nil {
+		c.logger.Debugf("client.counts: %s", err)
+
+		return nil, false
+	}
+
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, false
+	}
+
+	var parsed clientCountsResponse
+
+	err = json.Unmarshal(body, &parsed)
+	if err != nil || !parsed.Ok {
+		c.logger.Debugf("client.counts unavailable: err=%v slack_err=%s", err, parsed.Error)
+
+		return nil, false
+	}
+
+	counts := make(map[string]clientCountsEntry, len(parsed.Channels)+len(parsed.MPIMs)+len(parsed.IMs))
+	for _, list := range [][]clientCountsEntry{parsed.Channels, parsed.MPIMs, parsed.IMs} {
+		for _, entry := range list {
+			if entry.ID != "" {
+				counts[entry.ID] = entry
+			}
+		}
+	}
+
+	return counts, true
+}
+
+func applyClientCounts(channels []slack.Channel, counts map[string]clientCountsEntry) {
+	for i := range channels {
+		entry, ok := counts[channels[i].ID]
+		if !ok {
+			continue
+		}
+
+		if entry.LastRead != "" && channels[i].LastRead == "" {
+			channels[i].LastRead = entry.LastRead
+		}
+
+		if ts := slackLatestTS(entry.Latest); ts != "" {
+			if channels[i].Latest == nil {
+				channels[i].Latest = &slack.Message{}
+			}
+
+			channels[i].Latest.Timestamp = ts
+		}
+
+		if channels[i].IsIM && !channels[i].IsUserDeleted && (entry.HasUnreads || (channels[i].Latest != nil && channels[i].Latest.Timestamp != "")) {
+			channels[i].IsOpen = true
+		}
+	}
+}
+
+func (c *Client) enrichConversationLatest(parentCtx context.Context, channels []slack.Channel) {
+	ctx, cancel := context.WithTimeout(parentCtx, clientCountsTimeout)
+	defer cancel()
+
+	if counts, ok := c.fetchClientCounts(ctx); ok {
+		applyClientCounts(channels, counts)
+
+		return
+	}
+
+	// Fallback for non-cookie tokens where client.counts is unavailable: hydrate
+	// open IMs via conversations.info so offline DMs still carry Latest timestamps.
+	fetched := 0
+
+	for i := range channels {
+		if fetched >= maxIMInfoFallback {
+			break
+		}
+
+		ch := &channels[i]
+		if !ch.IsIM || !ch.IsOpen || ch.IsUserDeleted || (ch.Latest != nil && ch.Latest.Timestamp != "") {
+			continue
+		}
+
+		info, err := c.sc.GetConversationInfoContext(ctx, &slack.GetConversationInfoInput{
+			ChannelID: ch.ID,
+		})
+		if err != nil {
+			c.logger.Debugf("GetConversationInfo %s: %s", ch.ID, err)
+
+			break
+		}
+
+		fetched++
+
+		if info != nil {
+			if info.Latest != nil && info.Latest.Timestamp != "" {
+				ch.Latest = info.Latest
+			}
+
+			if info.LastRead != "" {
+				ch.LastRead = info.LastRead
+			}
+		}
+	}
+}
+
+func (c *Client) fetchConversationPages(ctx context.Context, types []string) ([]slack.Channel, error) {
 	var channels []slack.Channel
 
 	params := slack.GetConversationsParameters{
 		Cursor:          "",
 		ExcludeArchived: true,
 		Limit:           100,
-		Types:           []string{"public_channel", "private_channel", "mpim"},
+		Types:           types,
 	}
 
 	for {
-		conversations, nextCursor, err := c.sc.GetConversations(&params)
+		conversations, nextCursor, err := c.sc.GetConversationsContext(ctx, &params)
 		if err != nil {
-			c.logger.Error("GetConversations", err)
-			break
+			return channels, err
 		}
 
 		params.Cursor = nextCursor
@@ -176,6 +361,33 @@ func (c *Client) RefreshConversations() ([]slack.Channel, error) {
 		}
 	}
 
+	return channels, nil
+}
+
+func (c *Client) RefreshConversations() ([]slack.Channel, error) {
+	return c.refreshConversations(context.Background())
+}
+
+func (c *Client) refreshConversations(ctx context.Context) ([]slack.Channel, error) {
+	if c.sc == nil {
+		return nil, nil
+	}
+
+	channels, err := c.fetchConversationPages(ctx, []string{"public_channel", "private_channel", "mpim"})
+	if err != nil {
+		c.logger.Error("GetConversations", err)
+	}
+
+	// Fetch 1-on-1 DMs separately so tokens lacking im:read still load channels.
+	ims, imErr := c.fetchConversationPages(ctx, []string{"im"})
+	if imErr != nil {
+		c.logger.Debugf("GetConversations(im): %s", imErr)
+	} else {
+		channels = append(channels, ims...)
+	}
+
+	c.enrichConversationLatest(ctx, channels)
+
 	c.Lock()
 	for _, ch := range channels {
 		if ch.ID == "" {
@@ -186,8 +398,12 @@ func (c *Client) RefreshConversations() ([]slack.Channel, error) {
 			c.channels[ch.ID] = "#" + ch.Name
 		}
 
+		if ch.IsIM && ch.User != "" {
+			c.dmChannels[ch.User] = ch.ID
+		}
+
 		c.channelData[ch.ID] = ch
-		c.joinedChannels[ch.ID] = ch.IsMember
+		c.joinedChannels[ch.ID] = isActiveConversation(ch)
 	}
 
 	c.channelsFetchedAt = time.Now().Unix()
@@ -201,7 +417,7 @@ func (c *Client) GetChannels() []slack.Channel {
 
 	conversations, _ := c.GetConversations()
 	for _, mmchannel := range conversations {
-		if !mmchannel.IsMember {
+		if !isActiveConversation(mmchannel) {
 			continue
 		}
 
@@ -364,7 +580,7 @@ func (c *Client) GetChannelID(ctx context.Context, name string) string {
 
 	c.RUnlock()
 
-	channels, _ := c.GetConversations()
+	channels, _ := c.getConversations(ctx)
 	for _, ch := range channels {
 		if strings.EqualFold(ch.Name, strings.TrimPrefix(name, "#")) {
 			return ch.ID

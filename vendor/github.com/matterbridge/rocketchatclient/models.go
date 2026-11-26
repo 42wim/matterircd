@@ -171,23 +171,55 @@ type Room struct {
 	Owner        *UserRef  `json:"u"`
 	UpdatedAt    Timestamp `json:"_updatedAt"`
 	LastMessage  Timestamp `json:"lm"`
+	LastThreadAt Timestamp `json:"tlm"`
+}
+
+// UnmarshalJSON decodes a Rocket.Chat room and folds lastMessage.ts and tlm into LastMessage
+// when newer than lm so consumers see accurate latest-activity timestamps.
+func (r *Room) UnmarshalJSON(data []byte) error {
+	type roomAlias Room
+
+	var aux struct {
+		roomAlias
+
+		LastMessageObj *struct {
+			Timestamp Timestamp `json:"ts"`
+		} `json:"lastMessage"`
+	}
+
+	err := json.Unmarshal(data, &aux)
+	if err != nil {
+		return err
+	}
+
+	*r = Room(aux.roomAlias)
+	if aux.LastMessageObj != nil && aux.LastMessageObj.Timestamp.Time.After(r.LastMessage.Time) {
+		r.LastMessage = aux.LastMessageObj.Timestamp
+	}
+
+	if r.LastThreadAt.Time.After(r.LastMessage.Time) {
+		r.LastMessage = r.LastThreadAt
+	}
+
+	return nil
 }
 
 // Subscription represents the logged-in user's subscription state for a room.
 type Subscription struct {
-	ID        string    `json:"_id"`
-	RoomID    string    `json:"rid"`
-	Name      string    `json:"name"`
-	FName     string    `json:"fname"`
-	Type      string    `json:"t"`
-	Open      bool      `json:"open"`
-	Alert     bool      `json:"alert"`
-	Unread    int       `json:"unread"`
-	Roles     []string  `json:"roles"`
-	User      *UserRef  `json:"u"`
-	LastSeen  Timestamp `json:"ls"`
-	Timestamp Timestamp `json:"ts"`
-	UpdatedAt Timestamp `json:"_updatedAt"`
+	ID         string    `json:"_id"`
+	RoomID     string    `json:"rid"`
+	Name       string    `json:"name"`
+	FName      string    `json:"fname"`
+	Type       string    `json:"t"`
+	Open       bool      `json:"open"`
+	Alert      bool      `json:"alert"`
+	Unread     int       `json:"unread"`
+	Roles      []string  `json:"roles"`
+	User       *UserRef  `json:"u"`
+	LastSeen   Timestamp `json:"ls"`
+	LastRoomAt Timestamp `json:"lr"`
+	Timestamp  Timestamp `json:"ts"`
+	UpdatedAt  Timestamp `json:"_updatedAt"`
 }
 
 // File describes a file attached to a Rocket.Chat message.

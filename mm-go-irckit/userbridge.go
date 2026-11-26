@@ -2186,8 +2186,8 @@ func (u *User) replayHistoryEvents(brchannel *bridge.ChannelInfo, since int64, l
 			logger.Errorf("something wrong with GetReplayEvents for %s for channel %s (%s)", u.Nick, channame, brchannel.ID)
 		}
 
-		// Only Matrix, MSTeams, GoogleChat, and RocketChat report a failed fetch as nil, an empty result is not one.
-		return events != nil || (u.br.Protocol() != serviceMatrix && u.br.Protocol() != serviceMsTeams && u.br.Protocol() != serviceGoogleChat && u.br.Protocol() != serviceRocketChat)
+		// Only Matrix, Slack, MSTeams, GoogleChat, and RocketChat report a failed fetch as nil, an empty result is not one.
+		return events != nil || (u.br.Protocol() != serviceMatrix && u.br.Protocol() != serviceSlack && u.br.Protocol() != serviceMsTeams && u.br.Protocol() != serviceGoogleChat && u.br.Protocol() != serviceRocketChat)
 	}
 
 	// Create the spoof helper after fetching replay events so any federated/external
