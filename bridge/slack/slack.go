@@ -782,7 +782,9 @@ func (s *Slack) GetPostsSince(ctx context.Context, channelID string, since int64
 	msgs, err := s.sc.GetConversationHistory(ctx, channelID, oldest, 0)
 	if err != nil {
 		logger.Errorf("slack: GetPostsSince %s: %s", channelID, err)
-		return []*bridge.Event{}
+
+		// nil, unlike an empty slice, tells replay that the fetch failed.
+		return nil
 	}
 
 	return s.msgsToEvents(ctx, channelID, msgs)

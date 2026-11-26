@@ -221,14 +221,7 @@ func (r *RocketChat) OnReconnect(downtime time.Duration) {
 		return
 	}
 
-	thresh := r.cfg.RocketChat().HeavySyncThreshold
-	if thresh <= 0 {
-		thresh = 15 * time.Minute
-	}
-
-	if downtime < thresh {
-		return
-	}
+	r.seedRoomMeta()
 
 	logger.Infof("rocketchat sync recovered after %s, triggering channel synchronization", downtime.Round(time.Second))
 
@@ -1467,14 +1460,35 @@ func (r *RocketChat) groupDMName(room *rocketchatclient.Room) string {
 	return room.ID
 }
 
-func (r *RocketChat) toChannelInfo(room *rocketchatclient.Room) *bridge.ChannelInfo {
-	if room == nil {
-		return nil
-	}
-
+func (r *RocketChat) roomLastPostAt(room *rocketchatclient.Room) int64 {
 	var lastPost int64
 	if !room.LastMessage.Time.IsZero() {
 		lastPost = room.LastMessage.Time.UnixMilli()
+	}
+
+	sub, hasSub := r.rc.Subscription(room.ID)
+	hasUnread := hasSub && (sub.Unread > 0 || sub.Alert)
+
+	if lastPost == 0 || hasUnread {
+		if !room.UpdatedAt.Time.IsZero() {
+			lastPost = max(lastPost, room.UpdatedAt.Time.UnixMilli())
+		}
+
+		if hasSub && !sub.UpdatedAt.Time.IsZero() {
+			lastPost = max(lastPost, sub.UpdatedAt.Time.UnixMilli())
+		}
+	}
+
+	if lastPost == 0 && hasSub && !sub.Timestamp.Time.IsZero() {
+		lastPost = sub.Timestamp.Time.UnixMilli()
+	}
+
+	return lastPost
+}
+
+func (r *RocketChat) toChannelInfo(room *rocketchatclient.Room) *bridge.ChannelInfo {
+	if room == nil {
+		return nil
 	}
 
 	return &bridge.ChannelInfo{
@@ -1483,7 +1497,7 @@ func (r *RocketChat) toChannelInfo(room *rocketchatclient.Room) *bridge.ChannelI
 		DM:          room.Type == rocketchatclient.RoomTypeDirect,
 		Private:     room.Type == rocketchatclient.RoomTypePrivate,
 		DisplayName: cmp.Or(room.FName, room.Name),
-		LastPostAt:  lastPost,
+		LastPostAt:  r.roomLastPostAt(room),
 	}
 }
 
@@ -1681,13 +1695,22 @@ func (r *RocketChat) GetChannel(ctx context.Context, channelID string) (*bridge.
 	}
 
 	if sub, ok := r.rc.Subscription(channelID); ok {
+		var lastPost int64
+		if !sub.UpdatedAt.Time.IsZero() {
+			lastPost = sub.UpdatedAt.Time.UnixMilli()
+		}
+
+		if !sub.Timestamp.Time.IsZero() {
+			lastPost = max(lastPost, sub.Timestamp.Time.UnixMilli())
+		}
+
 		return &bridge.ChannelInfo{
 			Name:        cmp.Or(sub.Name, sub.FName, sub.RoomID),
 			ID:          sub.RoomID,
 			DM:          sub.Type == rocketchatclient.RoomTypeDirect,
 			Private:     sub.Type == rocketchatclient.RoomTypePrivate,
 			DisplayName: cmp.Or(sub.FName, sub.Name),
-			LastPostAt:  sub.Timestamp.Time.UnixMilli(),
+			LastPostAt:  lastPost,
 		}, nil
 	}
 

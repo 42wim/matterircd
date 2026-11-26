@@ -49,6 +49,8 @@ type Client struct {
 	sync.RWMutex
 
 	cred              Credentials
+	token             string
+	httpClient        *httpClient
 	sc                *slack.Client
 	rtm               *slack.RTM
 	info              *slack.Info
@@ -133,14 +135,16 @@ func (c *Client) Login() error {
 		}
 	}
 
+	hc := &httpClient{
+		cookie:    cookie,
+		logger:    c.logger,
+		apiLogger: c.apiLogger,
+	}
+
 	opts := []slack.Option{
 		slack.OptionDebug(true),
 		slack.OptionLog(slackLogAdapter{logger: c.apiLogger}),
-		slack.OptionHTTPClient(&httpClient{
-			cookie:    cookie,
-			logger:    c.logger,
-			apiLogger: c.apiLogger,
-		}),
+		slack.OptionHTTPClient(hc),
 	}
 
 	var rtmOpts []slack.RTMOption
@@ -149,12 +153,16 @@ func (c *Client) Login() error {
 		rtmOpts = append(rtmOpts, slack.RTMOptionDialer(newCookieDialer(cookie)))
 	}
 
+	c.Lock()
+	c.token = token
+	c.httpClient = hc
 	c.sc = slack.New(token, opts...)
 	c.rtm = c.sc.NewRTM(rtmOpts...)
 	c.users = make(map[string]slack.User)
 	c.presences = make(map[string]presenceEntry)
 	c.channels = make(map[string]string)
 	c.userChannels = make(map[string]userChannelsEntry)
+	c.Unlock()
 
 	go c.rtm.ManageConnection()
 
@@ -201,10 +209,12 @@ func (c *Client) Logout() error {
 		return err
 	}
 
-	c.sc = nil
 	c.connected.Store(false)
 
 	c.Lock()
+	c.sc = nil
+	c.token = ""
+	c.httpClient = nil
 	c.recentSent = nil
 	c.sending = nil
 	c.broadcastSentLocked()
@@ -416,8 +426,6 @@ type httpClient struct {
 }
 
 // taken from https://github.com/insomniacslk/irc-slack/blob/master/pkg/ircslack/irc_server.go
-//
-//nolint:gosec // thin wrapper; the request URL is built by the slack client, not user input
 func (hc *httpClient) Do(req *http.Request) (*http.Response, error) {
 	if hc.cookie != "" {
 		hc.logger.Trace("Setting auth cookie")

@@ -400,7 +400,20 @@ func ensureRoomFromSubLocked(rooms map[string]*Room, s *Subscription) {
 			existing.Type = s.Type
 		}
 
+		if s.LastRoomAt.Time.After(existing.LastMessage.Time) {
+			existing.LastMessage = s.LastRoomAt
+		}
+
 		return
+	}
+
+	lastMsg := s.LastRoomAt
+	if lastMsg.Time.IsZero() {
+		lastMsg = s.UpdatedAt
+	}
+
+	if lastMsg.Time.IsZero() {
+		lastMsg = s.Timestamp
 	}
 
 	room := &Room{
@@ -408,7 +421,7 @@ func ensureRoomFromSubLocked(rooms map[string]*Room, s *Subscription) {
 		Type:        s.Type,
 		Name:        s.Name,
 		FName:       s.FName,
-		LastMessage: s.Timestamp,
+		LastMessage: lastMsg,
 		UpdatedAt:   s.UpdatedAt,
 	}
 
@@ -509,6 +522,18 @@ func (sc *stateCache) roomMemberUsers(roomID string) ([]*User, bool) {
 func (sc *stateCache) invalidateRoomMembers() {
 	sc.mu.Lock()
 	clear(sc.roomMembers)
+	sc.mu.Unlock()
+}
+
+func (sc *stateCache) recordRoomLastMessage(roomID string, ts time.Time) {
+	if roomID == "" || ts.IsZero() {
+		return
+	}
+
+	sc.mu.Lock()
+	if room, ok := sc.roomsByID[roomID]; ok && room != nil && ts.After(room.LastMessage.Time) {
+		room.LastMessage = Timestamp{Time: ts}
+	}
 	sc.mu.Unlock()
 }
 

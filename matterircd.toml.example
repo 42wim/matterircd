@@ -405,7 +405,6 @@ PrefixContext = false
 #LastViewedSaveFile = "matterircd-slack-lastsaved.db"
 #ReplayStrategy = "hybrid"
 #MaxReplayDuration = "24h"
-#LastViewedStaleDuration = "30d"
 #DisableAutoView = false
 #CollapseScrollback = false
 # Threads are shown using Slack's encoded message/thread IDs (or "slack+post" to include post IDs).

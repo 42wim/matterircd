@@ -31,6 +31,7 @@ const (
 	meteorIDLen         = 17
 	base62Alphabet      = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 	roomActionLeave     = "leave"
+	isoMillisLayout     = "2006-01-02T15:04:05.000Z"
 )
 
 // APIError represents an error payload returned by the Rocket.Chat REST API.
@@ -1129,14 +1130,15 @@ func (c *Client) fetchHistoryPage(ctx context.Context, endpoint, roomID string, 
 	query := url.Values{}
 	query.Set("roomId", roomID)
 	query.Set("count", strconv.Itoa(count))
+	query.Set("showThreadMessages", "true")
 
 	if !oldest.IsZero() {
-		query.Set("oldest", oldest.UTC().Format(time.RFC3339Nano))
+		query.Set("oldest", oldest.UTC().Format(isoMillisLayout))
 		query.Set("inclusive", "false")
 	}
 
 	if !latest.IsZero() {
-		query.Set("latest", latest.UTC().Format(time.RFC3339Nano))
+		query.Set("latest", latest.UTC().Format(isoMillisLayout))
 	}
 
 	var resp MessagesResponse
