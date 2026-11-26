@@ -1384,6 +1384,8 @@ func (m *Mattermost) wsActionPostSkip(ctx context.Context, data *model.Post, rms
 		DisableMarkdown: disableMarkdown,
 		BlockquoteChar:  blockquoteChar,
 		InlineCodeChar:  inlineCode,
+		LinkText:        rc.Mattermost.Formatter.MarkdownLinkText,
+		LinkURL:         rc.Mattermost.Formatter.MarkdownLinkURL,
 		MaxLength:       90,
 		UncountedPrefix: "@",
 		Unicode:         useUnicode,
@@ -1433,6 +1435,8 @@ func (m *Mattermost) getCachedPostInfo(ctx context.Context, postID string, newLe
 		CustomEmoji:     rc.Mattermost.Formatter.CustomEmoji,
 		BlockquoteChar:  blockquoteChar,
 		InlineCodeChar:  rc.Mattermost.Formatter.MarkdownInlineCode,
+		LinkText:        rc.Mattermost.Formatter.MarkdownLinkText,
+		LinkURL:         rc.Mattermost.Formatter.MarkdownLinkURL,
 		MaxLength:       newLen,
 		UncountedPrefix: uncounted,
 		Unicode:         unicode,
@@ -2787,7 +2791,7 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 
 		var fallbackText, printedFallback string
 
-		if useFallback { //nolint:nestif
+		if useFallback {
 			fallbackText, _, _ = strings.Cut(attachment.Fallback, "\n")
 			fallbackText = strings.TrimSuffix(fallbackText, "\r")
 
@@ -2810,14 +2814,16 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 			// Only write to buffer if it's not a substring duplicate of the main message
 			isFallbackDup := attFallbackStr != "" && strings.Contains(rootMsg, attFallbackStr)
 			if !isFallbackDup {
-				outFallback := fallbackText
-				if !disableMarkdown {
-					outFallback = utils.Markdown2irc(outFallback, blockquoteChar, inlineCode, useUnicode)
-				}
-
-				if !disableEmoji {
-					outFallback = utils.EmojiReplaceAliases(outFallback, rc.Mattermost.Formatter.CustomEmoji)
-				}
+				outFallback := utils.FormatMarkdownAndEmojiWithOpts(fallbackText, utils.ProcessMessageOpts{
+					DisableMarkdown: disableMarkdown,
+					DisableEmoji:    disableEmoji,
+					BlockquoteChar:  blockquoteChar,
+					InlineCodeChar:  inlineCode,
+					LinkText:        rc.Mattermost.Formatter.MarkdownLinkText,
+					LinkURL:         rc.Mattermost.Formatter.MarkdownLinkURL,
+					CustomEmoji:     rc.Mattermost.Formatter.CustomEmoji,
+					Unicode:         useUnicode,
+				})
 
 				b.WriteString(outFallback)
 				b.WriteByte('\n')
@@ -2904,6 +2910,8 @@ func (m *Mattermost) parseMessageAttachments(b *strings.Builder, attachments []*
 			CodeBlockSeparator: codeBlockSeparator,
 			BlockquoteChar:     blockquoteChar,
 			InlineCodeChar:     inlineCode,
+			LinkText:           rc.Mattermost.Formatter.MarkdownLinkText,
+			LinkURL:            rc.Mattermost.Formatter.MarkdownLinkURL,
 			Unicode:            useUnicode,
 			PreserveNewLines:   preserveNewLines,
 		}
@@ -3010,15 +3018,7 @@ func (m *Mattermost) formatAttachmentFields(b *strings.Builder, fields []*model.
 			lines := strings.Split(valStr, "\n")
 
 			for k, line := range lines {
-				lines[k] = utils.FormatMarkdownAndEmoji(
-					line,
-					opts.DisableMarkdown,
-					opts.DisableEmoji,
-					opts.BlockquoteChar,
-					opts.InlineCodeChar,
-					opts.CustomEmoji,
-					opts.Unicode,
-				)
+				lines[k] = utils.FormatMarkdownAndEmojiWithOpts(line, opts)
 			}
 
 			candidates[j].lines = lines
@@ -3364,6 +3364,8 @@ func (m *Mattermost) parsePreviewPost(b *strings.Builder, user string, channel s
 			CodeBlockSeparator: codeBlockSeparator,
 			BlockquoteChar:     blockquoteChar,
 			InlineCodeChar:     inlineCode,
+			LinkText:           rc.Mattermost.Formatter.MarkdownLinkText,
+			LinkURL:            rc.Mattermost.Formatter.MarkdownLinkURL,
 			Unicode:            useUnicode,
 			PreserveNewLines:   preserveNewLines,
 		}

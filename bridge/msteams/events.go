@@ -498,6 +498,8 @@ func (m *MSTeams) formatSummary(text string, maxLen int) string {
 		DisableEmoji:    rc.MSTeams.Formatter.DisableEmoji,
 		BlockquoteChar:  bq,
 		InlineCodeChar:  rc.MSTeams.Formatter.MarkdownInlineCode,
+		LinkText:        rc.MSTeams.Formatter.MarkdownLinkText,
+		LinkURL:         rc.MSTeams.Formatter.MarkdownLinkURL,
 		CustomEmoji:     rc.MSTeams.Formatter.CustomEmoji,
 		Unicode:         rc.MSTeams.Formatter.Unicode,
 	})

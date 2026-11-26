@@ -239,6 +239,9 @@ HideReactions = false
 #DisableMarkdownBlockQuote = true
 #MarkdownBlockQuoteChar = "|"
 MarkdownInlineCode = ""
+# IRC formatting codes for Markdown links [text](url).
+#MarkdownLinkText = '\x1f'
+#MarkdownLinkURL = ""
 
 # Change behaviour on how to preserve new/empty lines ("all", "max-one", or "none")
 #PreserveNewLines = "all"
