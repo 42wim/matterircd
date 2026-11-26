@@ -1415,15 +1415,35 @@ func writeLinkOrImage(b *strings.Builder, linkText string, urlID int, isImage bo
 		b.WriteString(linkText)
 	}
 
-	b.WriteString("\x1f\u00a0(\x1d\x00")
+	b.WriteString("\x1f\u00a0(\x00")
 	b.WriteString(strconv.Itoa(urlID))
-	b.WriteString("\x00\x1d)")
+	b.WriteString("\x00)")
+}
+
+func isRedundantLinkLabel(label, url string) bool {
+	if label == url {
+		return true
+	}
+
+	if rest, ok := strings.CutPrefix(url, "https://"); ok && label == rest {
+		return true
+	}
+
+	if rest, ok := strings.CutPrefix(url, "http://"); ok && label == rest {
+		return true
+	}
+
+	if rest, ok := strings.CutPrefix(url, "mailto:"); ok && label == rest {
+		return true
+	}
+
+	return false
 }
 
 // replaceLinksAndImages converts Markdown links [text](url) and images ![alt](url),
 // storing URLs in tokens so subsequent emphasis passes do not mangle them.
 //
-//nolint:funlen
+//nolint:funlen,gocyclo
 func replaceLinksAndImages(msg string, tokens *[]string) string {
 	var b strings.Builder
 
@@ -1484,10 +1504,17 @@ func replaceLinksAndImages(msg string, tokens *[]string) string {
 
 		b.WriteString(msg[start:matchStart])
 
+		resolvedURL := restoreTokens(rawURL, *tokens, "", "")
 		urlID := len(*tokens)
-		*tokens = append(*tokens, restoreTokens(rawURL, *tokens, "", ""))
+		*tokens = append(*tokens, resolvedURL)
 
-		writeLinkOrImage(&b, linkText, urlID, isImage)
+		if !isImage && isRedundantLinkLabel(restoreTokens(linkText, *tokens, "", ""), resolvedURL) {
+			b.WriteByte('\x00')
+			b.WriteString(strconv.Itoa(urlID))
+			b.WriteByte('\x00')
+		} else {
+			writeLinkOrImage(&b, linkText, urlID, isImage)
+		}
 
 		start = closeParen + 1
 		i = start
@@ -1502,10 +1529,51 @@ func replaceLinksAndImages(msg string, tokens *[]string) string {
 	return b.String()
 }
 
-// restoreTokens expands \x00<id>\x00 placeholders, optionally wrapping runs
-// between inline code resets (\x0f) in open/closeCode IRC control codes.
+const (
+	ircToggleBold      uint8 = 1 << iota // \x02
+	ircToggleItalic                      // \x1d
+	ircToggleStrike                      // \x1e
+	ircToggleUnderline                   // \x1f
+)
+
+func ircToggleBit(c byte) uint8 {
+	switch c {
+	case '\x02':
+		return ircToggleBold
+	case '\x1d':
+		return ircToggleItalic
+	case '\x1e':
+		return ircToggleStrike
+	case '\x1f':
+		return ircToggleUnderline
+	default:
+		return 0
+	}
+}
+
+func writeIRCToggles(b *strings.Builder, mask uint8) {
+	if mask&ircToggleBold != 0 {
+		b.WriteByte('\x02')
+	}
+
+	if mask&ircToggleItalic != 0 {
+		b.WriteByte('\x1d')
+	}
+
+	if mask&ircToggleStrike != 0 {
+		b.WriteByte('\x1e')
+	}
+
+	if mask&ircToggleUnderline != 0 {
+		b.WriteByte('\x1f')
+	}
+}
+
+// restoreTokens expands \x00<id>\x00 placeholders, keeping outer IRC toggle
+// formatting (\x02, \x1d, \x1e, \x1f) balanced across inline code resets (\x0f)
+// and optionally wrapping runs in open/closeCode IRC control codes.
 //
-//nolint:funlen,gocyclo
+//nolint:funlen,gocyclo,gocognit
 func restoreTokens(s string, tokens []string, open, closeCode string) string {
 	if s == "" || len(tokens) == 0 || !strings.ContainsRune(s, '\x00') {
 		if s == "" {
@@ -1518,7 +1586,11 @@ func restoreTokens(s string, tokens []string, open, closeCode string) string {
 	var b strings.Builder
 	b.Grow(len(s) + len(open) + len(closeCode) + 32)
 
-	styled := false
+	var (
+		active uint8
+		styled bool
+	)
+
 	writeChunk := func(chunk string) {
 		if chunk == "" {
 			return
@@ -1528,6 +1600,12 @@ func restoreTokens(s string, tokens []string, open, closeCode string) string {
 			b.WriteString(open)
 
 			styled = true
+		}
+
+		for j := range len(chunk) {
+			if bit := ircToggleBit(chunk[j]); bit != 0 {
+				active ^= bit
+			}
 		}
 
 		b.WriteString(chunk)
@@ -1557,15 +1635,57 @@ func restoreTokens(s string, tokens []string, open, closeCode string) string {
 		id, err := strconv.Atoi(s[pos+1 : pos+1+endOff])
 		if err != nil || id < 0 || id >= len(tokens) {
 			writeChunk(s[pos:nextIdx])
-		} else if tok := tokens[id]; open != "" && strings.ContainsRune(tok, '\x0f') {
-			b.WriteString(tok)
 
-			styled = false
-		} else {
-			writeChunk(tok)
+			i = nextIdx
+
+			continue
 		}
 
+		tok := tokens[id]
+		if !strings.ContainsRune(tok, '\x0f') {
+			writeChunk(tok)
+
+			i = nextIdx
+
+			continue
+		}
+
+		// Avoid toggling off an attribute that is already active (e.g. custom
+		// inline code starting with \x02 inside bold text or H1/H2 headings).
+		currentActive := active
+		if styled && open == "\x02" {
+			currentActive |= ircToggleBold
+		}
+
+		for len(tok) > 0 {
+			bit := ircToggleBit(tok[0])
+			if bit == 0 || currentActive&bit == 0 {
+				break
+			}
+
+			tok = tok[1:]
+		}
+
+		b.WriteString(tok)
+
+		styled = false
 		i = nextIdx
+
+		// Consume immediately-following closing toggles already cleared by \x0f.
+		for i < len(s) {
+			bit := ircToggleBit(s[i])
+			if bit == 0 || active&bit == 0 {
+				break
+			}
+
+			active &^= bit
+			i++
+		}
+
+		// Re-open any still-active toggles if more content follows.
+		if active != 0 && i < len(s) {
+			writeIRCToggles(&b, active)
+		}
 	}
 
 	if styled {
