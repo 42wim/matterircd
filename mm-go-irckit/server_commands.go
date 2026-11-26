@@ -876,6 +876,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 
 			u.setMsgLast(toUser.User, msgID, "")
 			u.saveLastViewedAt(u.br.GetChannelID(u.ctx, toUser.User, ""))
+			u.maybePushDMTopicForUser(toUser.User, toUser.Nick)
 
 			if u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext {
 				u.prefixContext(toUser.User, msgID, "", "posted_self")
@@ -1211,6 +1212,7 @@ func threadMsgChannelUser(s Server, u *User, msg *irc.Message, channelID string,
 		u.saveLastViewedAt(channelID)
 	} else {
 		u.saveLastViewedAt(u.br.GetChannelID(u.ctx, channelID, ""))
+		u.maybePushDMTopicForUser(channelID, msg.Params[0])
 	}
 
 	if u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext {
@@ -1609,6 +1611,7 @@ func quoteMsgChannelUser(s Server, u *User, msg *irc.Message, channelID string, 
 		u.saveLastViewedAt(channelID)
 	} else {
 		u.saveLastViewedAt(u.br.GetChannelID(u.ctx, channelID, ""))
+		u.maybePushDMTopicForUser(channelID, msg.Params[0])
 	}
 
 	if brCfg.PrefixContext || brCfg.SuffixContext {
@@ -1890,34 +1893,24 @@ func CmdTopic(s Server, u *User, msg *irc.Message) error {
 		}
 
 		if msg.Trailing != "" || msg.EmptyTrailing {
-			err := u.br.SetTopic(u.ctx, dmChannelID, utils.Irc2Markdown(msg.Trailing))
+			newTopic := utils.Irc2Markdown(msg.Trailing)
+
+			err := u.br.SetTopic(u.ctx, dmChannelID, newTopic)
 			if err != nil {
 				return s.EncodeMessage(u, irc.ERR_CHANOPRIVSNEEDED, msg.Params, err.Error())
 			}
 
+			_ = u.pushDMTopic(dmChannelID, toUser.Nick, newTopic, true)
+
 			return nil
 		}
 
-		t := u.br.Topic(u.ctx, dmChannelID)
+		t := u.formatTopic(u.br.Topic(u.ctx, dmChannelID))
+		u.recordDMTopic(dmChannelID, t)
+
 		if t == "" {
 			return s.EncodeMessage(u, irc.RPL_NOTOPIC, []string{u.Nick, channelname}, "No topic is set")
 		}
-
-		customEmoji := u.br.FormatterConfig().CustomEmoji
-		disableEmoji := u.br.FormatterConfig().DisableEmoji
-		disableMarkdown := u.br.FormatterConfig().DisableMarkdown
-		inlineCode := u.br.FormatterConfig().MarkdownInlineCode
-
-		t = utils.FormatMarkdownAndEmojiWithOpts(t, utils.ProcessMessageOpts{
-			DisableMarkdown: disableMarkdown,
-			DisableEmoji:    disableEmoji,
-			BlockquoteChar:  blockQuoteCharDefault,
-			InlineCodeChar:  inlineCode,
-			LinkText:        u.br.FormatterConfig().MarkdownLinkText,
-			LinkURL:         u.br.FormatterConfig().MarkdownLinkURL,
-			CustomEmoji:     customEmoji,
-			Unicode:         u.br.FormatterConfig().Unicode,
-		})
 
 		return s.EncodeMessage(u, irc.RPL_TOPIC, []string{u.Nick, channelname}, t)
 	}

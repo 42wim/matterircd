@@ -2478,7 +2478,11 @@ func (s *Slack) handleSlackTopicEvent(rmsg *slack.MessageEvent) bool {
 		return true
 	}
 
-	rmsg.Text = "\x01ACTION updated topic to: " + topic + "\x01"
+	if topic == "" {
+		rmsg.Text = "\x01ACTION cleared topic\x01"
+	} else {
+		rmsg.Text = "\x01ACTION updated topic to: " + topic + "\x01"
+	}
 
 	return false
 }
@@ -2507,6 +2511,10 @@ func (s *Slack) handleSlackActionPost(ctx context.Context, rmsg *slack.MessageEv
 	}
 
 	eventType := ""
+	if rmsg.SubType == eventChannelTopic || rmsg.SubType == eventGroupTopic {
+		eventType = "dm_topic"
+	}
+
 	if (rmsg.SubType == eventChannelPurpose || rmsg.SubType == eventGroupPurpose) && !strings.HasPrefix(rmsg.Channel, "D") {
 		eventType = eventChannelPurpose
 
@@ -2605,6 +2613,17 @@ func (s *Slack) sendSlackActionPostMessage(
 	if strings.HasPrefix(channelID, "D") {
 		receiver := s.resolveDMReceiver(ghost, channelID)
 		s.sendDirectMessage(ghost, receiver, msg, channelID, msgID, parentID, eventType, createAt)
+
+		if eventType == "dm_topic" {
+			s.sendEvent(&bridge.Event{
+				Type: eventChannelTopic,
+				Data: &bridge.ChannelTopicEvent{
+					Text:      s.cleanupMessage(rmsg.Topic),
+					ChannelID: channelID,
+					UserID:    rmsg.User,
+				},
+			})
+		}
 
 		return
 	}

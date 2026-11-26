@@ -474,8 +474,6 @@ func (m *Matrix) handleTopic(t *matrixclient.TopicChange, direct bool, peer id.U
 				Event:     "dm_topic",
 			},
 		})
-
-		return
 	}
 
 	m.sendEvent(&bridge.Event{
