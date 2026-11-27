@@ -3018,13 +3018,25 @@ func getWrapPrefix(s string) (string, int) {
 	idx := 0
 
 	// Skip bracketed prefix tags if present (e.g. timestamp "[2006-01-02 15:04]" or thread tag "[↪@@...]")
-	for idx < len(s) && s[idx] == '[' {
-		closeIdx := strings.IndexByte(s[idx:], ']')
-		if closeIdx < 0 || closeIdx > 80 {
+	for idx < len(s) {
+		tagStart := idx
+		if s[tagStart] == '\x03' {
+			tagStart = skipIRCColorDigits(s, tagStart+1)
+		}
+
+		if tagStart >= len(s) || s[tagStart] != '[' {
 			break
 		}
 
-		idx += closeIdx + 1
+		closeIdx := strings.IndexByte(s[tagStart:], ']')
+		if closeIdx < 0 || closeIdx > 200 {
+			break
+		}
+
+		idx = tagStart + closeIdx + 1
+		if idx < len(s) && (s[idx] == '\x0f' || (s[idx] == '\x03' && (idx+1 >= len(s) || s[idx+1] < '0' || s[idx+1] > '9'))) {
+			idx++
+		}
 
 		for idx < len(s) && (s[idx] == ' ' || s[idx] == '\t') {
 			idx++

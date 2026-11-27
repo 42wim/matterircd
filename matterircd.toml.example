@@ -262,6 +262,9 @@ SuffixContext = false
 #ThreadContext = "mattermost"
 # Similar to the above, but also show the message post IDs in addition to the parent thread ID.
 #ThreadContext = "mattermost+post"
+# Deterministically colorize thread context tags using the IRC 99-color palette.
+# Valid options: "off" (default), "dark", "light", "auto", or "on" (alias for "auto").
+#ThreadContextColor = "off"
 #Show Context for multi-line messages and only show it at the end.
 ShowContextMulti = false
 # Quote in reply settings (@@<id> >@ msg, @@<thread> >@@<id> msg, and >@@<id> msg,
@@ -409,6 +412,7 @@ PrefixContext = false
 #CollapseScrollback = false
 # Threads are shown using Slack's encoded message/thread IDs (or "slack+post" to include post IDs).
 #ThreadContext = "slack"
+#ThreadContextColor = "off"
 #QuoteThreaded = true
 #QuoteAuthor = "displayname"
 #DirectoryURL = "https://directory.mydomain.local/people/{nick}"  # {nick}, {username}, {email}, {firstname}, and {lastname}
@@ -441,6 +445,7 @@ PrefixContext = false
 #ShortenRepliesTo = 0
 #Threads are shown using Matrix event IDs
 #ThreadContext = "matrix"
+#ThreadContextColor = "off"
 #QuoteThreaded = true
 #Homeserver left out of channel names, so #room/ubuntu.com becomes #room
 #The value is fixed for the session: after changing it, disconnect and reconnect (an INFO
@@ -543,6 +548,7 @@ PrefixContext = false
 #SuffixContext = false
 #ShowContextMulti = false
 #ThreadContext = "msteams"
+#ThreadContextColor = "off"
 #QuoteThreaded = true
 #ShowJoinPart = false
 #ShowOnlyJoined = false
@@ -615,6 +621,7 @@ PrefixContext = false
 #SuffixContext = false
 #ShowContextMulti = false
 #ThreadContext = "googlechat"
+#ThreadContextColor = "off"
 #QuoteThreaded = false
 #ShowJoinPart = false
 #ShowOnlyJoined = false
@@ -671,6 +678,7 @@ PrefixContext = false
 #SuffixContext = false
 #ShowContextMulti = false
 #ThreadContext = "rocketchat"
+#ThreadContextColor = "off"
 #QuoteThreaded = true
 #ShowTopic = false
 #ShowJoinPart = false

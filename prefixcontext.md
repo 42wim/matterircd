@@ -52,6 +52,8 @@ Now you can also see those reactions, in future versions this may become unicode
 You can also see who replied to what thread
 [replynumber->threadnumber]
 
+Set `ThreadContextColor` per bridge in `matterircd.toml` (`"off"` by default, or `"dark"`, `"light"`, `"auto"` / `"on"`) to deterministically colorize thread context tags using the IRC 99-color palette so replies in the same thread share a consistent color across all IRC clients.
+
 ```irc
 19:58 <@wim> [001] normal message
 19:58 <@wim> [002] another one

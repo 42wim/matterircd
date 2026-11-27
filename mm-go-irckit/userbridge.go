@@ -3037,17 +3037,20 @@ func (u *User) prefixContext(channelID, messageID, parentID, event string) strin
 		prefixChar = "↪"
 	}
 
-	tc := u.br.BridgeConfig().ThreadContext
+	brCfg := u.br.BridgeConfig()
+	tc := brCfg.ThreadContext
+	colorMode := brCfg.ThreadContextColor
+
 	if isNativeThreadContext(tc) {
 		if parentID == "" {
-			return "[@@" + messageID + "]"
+			return formatSingleThreadContext(colorMode, "@@", messageID, messageID)
 		}
 
 		if !strings.HasSuffix(tc, "+post") || parentID == messageID {
-			return "[" + prefixChar + "@@" + parentID + "]"
+			return formatSingleThreadContext(colorMode, prefixChar+"@@", parentID, parentID)
 		}
 
-		return "[" + prefixChar + "@@" + parentID + ",@@" + messageID + "]"
+		return formatDualThreadContext(colorMode, prefixChar, "@@"+parentID, "@@"+messageID, parentID, messageID)
 	}
 
 	u.msgMapMutex.Lock()
@@ -3058,13 +3061,13 @@ func (u *User) prefixContext(channelID, messageID, parentID, event string) strin
 	if parentID == "" {
 		currentcount := u.getOrCreateMsgCounterLocked(channelID, messageID, 0)
 
-		return fmt.Sprintf("[%03x]", currentcount)
+		return formatSingleThreadContext(colorMode, "", fmt.Sprintf("%03x", currentcount), messageID)
 	}
 
 	parentcount = u.getOrCreateMsgCounterLocked(channelID, parentID, 0)
 	currentcount = u.getOrCreateMsgCounterLocked(channelID, messageID, parentcount)
 
-	return fmt.Sprintf("[%s%03x,%03x]", prefixChar, parentcount, currentcount)
+	return formatDualThreadContext(colorMode, prefixChar, fmt.Sprintf("%03x", parentcount), fmt.Sprintf("%03x", currentcount), parentID, messageID)
 }
 
 func (u *User) getOrCreateMsgCounterLocked(channelID, postID string, skip int) int {
