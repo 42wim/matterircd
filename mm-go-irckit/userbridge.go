@@ -1478,13 +1478,65 @@ func (u *User) syncUsersChannel() {
 		return
 	}
 
-	if loader, ok := br.(bridge.AsyncUserLoader); ok && !loader.UsersReady() {
+	if loader, ok := br.(bridge.AsyncUserLoader); ok {
+		if !loader.UsersReady() {
+			return
+		}
+
+		if u.channelsBackfilled.CompareAndSwap(false, true) {
+			go u.backfillAndJoinUsers(br)
+		}
+
 		return
+	}
+
+	u.joinUsersChannel(br)
+}
+
+func (u *User) backfillAndJoinUsers(br bridge.Bridger) {
+	u.backfillJoinedChannelUsers(br)
+	u.joinUsersChannel(br)
+}
+
+func (u *User) joinUsersChannel(br bridge.Bridger) {
+	if u.currentBridge() != br || u.ctx == nil || u.ctx.Err() != nil {
+		return
+	}
+
+	users := u.CreateUsersFromInfo(br.GetUsers())
+	if len(users) > 0 {
+		u.Srv.BatchAdd(users)
+		u.addUsersToChannel(users, "&users", "&users")
 	}
 
 	ch := u.Srv.Channel("&users")
 	if (len(users) > 0 || ch.Len() > 0) && !ch.HasUser(u) {
 		_ = ch.Join(u)
+	}
+}
+
+func (u *User) backfillJoinedChannelUsers(br bridge.Bridger) {
+	for _, ch := range u.Channels() {
+		if u.ctx.Err() != nil {
+			return
+		}
+
+		id := ch.ID()
+		if id == "" || strings.HasPrefix(id, "&") {
+			continue
+		}
+
+		members, err := br.GetChannelUsers(u.ctx, id)
+		if err != nil || len(members) == 0 {
+			continue
+		}
+
+		batchUsers := u.CreateUsersFromInfo(members)
+		if len(batchUsers) > 0 {
+			u.Srv.BatchAdd(batchUsers)
+			u.addUsersToChannel(batchUsers, "&users", "&users")
+			u.addUsersToChannel(batchUsers, ch.String(), id)
+		}
 	}
 }
 
@@ -2820,6 +2872,7 @@ func (u *User) openBridge(protocol string, eventChan chan *bridge.Event, onWsErr
 func (u *User) loginTo(protocol string) error {
 	u.loginReady.Store(false)
 	u.initialSyncDone.Store(false)
+	u.channelsBackfilled.Store(false)
 
 	// Reset the event loop tracker in case this User struct is recycled.
 	// The new channel has to be in place before the bridge starts: it calls
@@ -2869,6 +2922,7 @@ func (u *User) loginTo(protocol string) error {
 	abort := func(err error) error {
 		u.loginReady.Store(false)
 		u.initialSyncDone.Store(false)
+		u.channelsBackfilled.Store(false)
 		_ = br.Logout(u.ctx)
 
 		u.stopEventLoop()
@@ -2930,6 +2984,7 @@ func (u *User) logoutFrom(protocol string) error {
 
 	u.loginReady.Store(false)
 	u.initialSyncDone.Store(false)
+	u.channelsBackfilled.Store(false)
 
 	// Don't hold eventLoopMutex while logging out: the logout hands an event to the
 	// event loop, and that loop is started while holding the mutex.

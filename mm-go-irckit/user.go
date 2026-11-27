@@ -72,13 +72,14 @@ type User struct {
 	capsMu sync.RWMutex
 	Caps   map[string]bool
 
-	awayNotifyMu    sync.Mutex
-	awayNotifiedAt  int64
-	awayNotifiedGen uint64
-	awayLookupBusy  atomic.Bool
-	awaySendMu      sync.Mutex
-	loginReady      atomic.Bool
-	initialSyncDone atomic.Bool
+	awayNotifyMu       sync.Mutex
+	awayNotifiedAt     int64
+	awayNotifiedGen    uint64
+	awayLookupBusy     atomic.Bool
+	awaySendMu         sync.Mutex
+	loginReady         atomic.Bool
+	initialSyncDone    atomic.Bool
+	channelsBackfilled atomic.Bool
 }
 
 func (u *User) ID() string {

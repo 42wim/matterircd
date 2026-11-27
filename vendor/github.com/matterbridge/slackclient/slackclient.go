@@ -68,6 +68,10 @@ type Client struct {
 	sentCh            chan struct{}
 	pongCh            chan struct{}
 	connected         atomic.Bool
+	usersLoaded       atomic.Bool
+	initUsersMu       sync.Mutex
+	initUsersDone     chan struct{}
+	initUsersCancel   context.CancelFunc
 
 	logger        *logrus.Entry
 	rootLogger    *logrus.Logger
@@ -163,6 +167,7 @@ func (c *Client) Login() error {
 	c.channels = make(map[string]string)
 	c.userChannels = make(map[string]userChannelsEntry)
 	c.Unlock()
+	c.resetUserPrefetch()
 
 	go c.rtm.ManageConnection()
 
@@ -210,6 +215,7 @@ func (c *Client) Logout() error {
 	}
 
 	c.connected.Store(false)
+	c.resetUserPrefetch()
 
 	c.Lock()
 	c.sc = nil
