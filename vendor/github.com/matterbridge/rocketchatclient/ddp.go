@@ -27,8 +27,7 @@ const (
 	maxReconnectBackoff  = time.Minute
 	eventQueueSize       = 2048
 	maxInitialRoomSubs   = 100
-	maxInitialUserPages  = 5
-	userHydrateTimeout   = 10 * time.Second
+	userPageTimeout      = 30 * time.Second
 	parentFetchTimeout   = 3 * time.Second
 	reconnectSyncOverlap = 5 * time.Second
 	reconnectSyncTimeout = 30 * time.Second
@@ -640,6 +639,8 @@ func (c *Client) connectOnce(parentCtx context.Context) (bool, error) {
 		if err != nil {
 			return false, err
 		}
+
+		c.startUserPrefetch(parentCtx)
 	}
 
 	endReconnectSync := c.prepareReconnectSync(connCtx, wasReady)
@@ -971,32 +972,55 @@ func (c *Client) hydrateState(ctx context.Context) error {
 	c.cache.hydrateRoomsAndSubs(roomsResp.Update, subsResp.Update)
 	c.seedUsersFromRooms(roomsResp.Update)
 
-	userCtx, cancel := context.WithTimeout(ctx, userHydrateTimeout)
-	defer cancel()
+	return nil
+}
+
+func (c *Client) startUserPrefetch(ctx context.Context) {
+	if ctx.Err() != nil {
+		return
+	}
+
+	c.userPrefetchOnce.Do(func() {
+		c.wg.Add(1)
+
+		go c.prefetchUsers(ctx)
+	})
+}
+
+func (c *Client) prefetchUsers(ctx context.Context) {
+	defer c.wg.Done()
 
 	loaded := 0
 
-	for page := range maxInitialUserPages {
-		usersResp, err := c.ListUsers(userCtx, loaded, userListPageLimit)
-		if err != nil {
-			c.logger.Warnf("users.list stopped after %d user(s) (%s); continuing with lazy user lookups", loaded, err)
+	for {
+		if ctx.Err() != nil {
+			return
+		}
 
-			break
+		pageCtx, cancel := context.WithTimeout(ctx, userPageTimeout)
+		usersResp, err := c.ListUsers(pageCtx, loaded, userListPageLimit)
+
+		cancel()
+
+		if err != nil {
+			if ctx.Err() == nil {
+				c.logger.Warnf("users.list stopped after %d user(s) (%s); continuing with lazy user lookups", loaded, err)
+			}
+
+			return
 		}
 
 		c.cache.upsertUsers(usersResp.Users)
 		loaded += len(usersResp.Users)
 
-		if len(usersResp.Users) == 0 || loaded >= usersResp.Total {
-			break
-		}
+		if len(usersResp.Users) == 0 ||
+			(usersResp.Total > 0 && loaded >= usersResp.Total) ||
+			(usersResp.Total == 0 && len(usersResp.Users) < userListPageLimit) {
+			c.logger.Debugf("users.list prefetched %d user(s)", loaded)
 
-		if page+1 == maxInitialUserPages && loaded < usersResp.Total {
-			c.logger.Infof("users.list capped at %d/%d users during startup; remaining users will resolve lazily", loaded, usersResp.Total)
+			return
 		}
 	}
-
-	return nil
 }
 
 func (c *Client) seedUsersFromRooms(rooms []Room) {
