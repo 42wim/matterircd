@@ -1545,7 +1545,23 @@ func (g *GoogleChat) userToUserInfo(u *googlechatclient.User) *bridge.UserInfo {
 		Email:       u.Email,
 		Directory:   dirURL,
 		Photo:       u.AvatarURL,
+		MentionKeys: mentionKeysForUser(nick, realName, u, isMe),
 	}
+}
+
+func mentionKeysForUser(nick, realName string, u *googlechatclient.User, isMe bool) []string {
+	if !isMe {
+		return nil
+	}
+
+	keys := make([]string, 0, 4)
+	for _, k := range []string{nick, realName, u.Email, u.ID} {
+		if k != "" && !slices.Contains(keys, k) {
+			keys = append(keys, k)
+		}
+	}
+
+	return keys
 }
 
 func (g *GoogleChat) isOwnUserID(userID string) bool {
