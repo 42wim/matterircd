@@ -409,7 +409,7 @@ func (m *MSTeams) buildMessageBridgeEvent(post *msteamsclient.ChatMessage, sende
 }
 
 func (m *MSTeams) formatIncomingText(post *msteamsclient.ChatMessage, eventKind, parentID string, rc *config.RuntimeConfig) string {
-	text := post.ContentText
+	text := m.rewriteIncomingMentions(post.ContentText, post.Mentions)
 	useUnicode := rc.MSTeams.Formatter.Unicode
 
 	if parentID != "" && !rc.MSTeams.HideReplies {
@@ -426,6 +426,48 @@ func (m *MSTeams) formatIncomingText(post *msteamsclient.ChatMessage, eventKind,
 	}
 
 	return text
+}
+
+func (m *MSTeams) rewriteIncomingMentions(text string, mentions []msteamsclient.Mention) string {
+	if text == "" || len(mentions) == 0 {
+		return text
+	}
+
+	for _, mention := range mentions {
+		name := strings.TrimSpace(mention.DisplayName)
+		if name == "" {
+			continue
+		}
+
+		repl := m.mentionReplacement(mention, name)
+		if repl == "" {
+			continue
+		}
+
+		if strings.Contains(text, "@"+name) {
+			text = strings.ReplaceAll(text, "@"+name, repl)
+		} else {
+			text = strings.ReplaceAll(text, name, repl)
+		}
+	}
+
+	return text
+}
+
+func (m *MSTeams) mentionReplacement(mention msteamsclient.Mention, displayName string) string {
+	switch {
+	case strings.HasPrefix(mention.MRI, "8:") || strings.HasPrefix(mention.MRI, "28:"):
+		nick := m.nickForMRI(mention.MRI)
+		if nick == "" {
+			return ""
+		}
+
+		return "@" + nick
+	case strings.EqualFold(mention.Type, "everyone"):
+		return "@everyone"
+	default:
+		return "@" + strings.TrimPrefix(displayName, "@")
+	}
 }
 
 func (m *MSTeams) cachePostContext(encodedID, parentID string, sender *bridge.UserInfo, plainText string, shorten int) {

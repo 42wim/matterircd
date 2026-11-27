@@ -101,12 +101,20 @@ func (u *User) isRepliedThread(channelID, threadID string) bool {
 	return slices.Contains(u.repliedThreads[channelID], threadID)
 }
 
+func (u *User) formatHighlightSuffix(tag string) string {
+	if u.br != nil && u.br.FormatterConfig().Unicode {
+		return " (\U0001F514 " + tag + ")"
+	}
+
+	return " (re " + tag + ")"
+}
+
 func (u *User) textAlreadyHighlights(text, tag string) bool {
 	if strings.Contains(text, tag) {
 		return true
 	}
 
-	if u.Nick != "" && (strings.Contains(text, "@"+u.Nick) || strings.Contains(text, "(mention "+u.Nick+")")) {
+	if u.Nick != "" && (strings.Contains(text, "@"+u.Nick) || strings.Contains(text, u.formatHighlightSuffix(u.Nick))) {
 		return true
 	}
 
@@ -143,12 +151,7 @@ func (u *User) applyRepliedHighlight(event *bridge.ChannelMessageEvent) {
 		return
 	}
 
-	if u.br != nil && u.br.FormatterConfig().Unicode {
-		event.Text += " (\U0001F514 " + tag + ")"
-		return
-	}
-
-	event.Text += " (re " + tag + ")"
+	event.Text += u.formatHighlightSuffix(tag)
 }
 
 func (u *User) loadRepliedThreads(protocol string) {

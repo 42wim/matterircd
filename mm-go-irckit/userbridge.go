@@ -500,7 +500,9 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) bool {
 			}
 
 			if strings.Contains(event.Text, m) {
-				event.Text = event.Text + " (mention " + u.Nick + ")"
+				event.Text += u.formatHighlightSuffix(u.Nick)
+
+				break
 			}
 		}
 	}
@@ -890,7 +892,9 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) bool
 			}
 
 			if strings.Contains(event.Text, m) {
-				event.Text = event.Text + " (mention " + u.Nick + ")"
+				event.Text += u.formatHighlightSuffix(u.Nick)
+
+				break
 			}
 		}
 	}

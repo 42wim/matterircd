@@ -1450,7 +1450,23 @@ func (m *MSTeams) userToUserInfo(u *msteamsclient.User) *bridge.UserInfo {
 		Email:       u.Email,
 		Directory:   dirURL,
 		Position:    position,
+		MentionKeys: mentionKeysForUser(nick, realName, u, isMe),
 	}
+}
+
+func mentionKeysForUser(nick, realName string, u *msteamsclient.User, isMe bool) []string {
+	if !isMe {
+		return nil
+	}
+
+	keys := make([]string, 0, 4)
+	for _, k := range []string{nick, realName, u.Email, u.MRI} {
+		if k != "" && !slices.Contains(keys, k) {
+			keys = append(keys, k)
+		}
+	}
+
+	return keys
 }
 
 func (m *MSTeams) isOwnMRI(mri string) bool {
