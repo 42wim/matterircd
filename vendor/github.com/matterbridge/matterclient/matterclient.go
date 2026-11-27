@@ -186,6 +186,7 @@ type Client struct {
 
 	ForceSyncOnReconnect bool
 	CacheClearCutoff     time.Duration
+	LazyPublicChannels   bool
 
 	UserAgent string
 
@@ -1001,7 +1002,10 @@ func (m *Client) initUserChannels(ctx context.Context) error {
 
 		m.logger.Debugf("found %d channels for user (%d channels, %d DMs/GMs) in team %s",
 			joinedChannels+directMessages, joinedChannels, directMessages, t.Team.Name)
-		m.logger.Debugf("found %d public channels in team %s", publicCount, t.Team.Name)
+
+		if !m.LazyPublicChannels {
+			m.logger.Debugf("found %d public channels in team %s", publicCount, t.Team.Name)
+		}
 	}
 
 	return nil

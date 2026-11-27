@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -361,7 +362,7 @@ func (m *Client) getChannelIDTeam(ctx context.Context, name string, teamID strin
 
 	m.Users.mu.RUnlock()
 
-	query := "/teams/" + teamID + "/channels/name/" + name
+	query := "/teams/" + teamID + "/channels/name/" + url.PathEscape(strings.ToLower(name))
 	retryCount := 0
 
 	for {
@@ -1148,11 +1149,14 @@ func (m *Client) UpdateChannelsTeam(ctx context.Context, teamID string) error {
 	_, hasCache := m.Users.publicChannelsSynced[teamID]
 	m.Users.mu.Unlock()
 
-	// Skip the heavy public channel crawl if we have a cache and aren't forcing a sync.
-	// We rely on WebSocket events to keep public channels updated organically.
-	if hasCache && !m.ForceSyncOnReconnect {
+	// Skip the heavy public channel crawl when lazy loading is enabled or we have a cache and aren't forcing a sync.
+	// When cached, we rely on WebSocket events to keep public channels updated organically.
+	switch {
+	case m.LazyPublicChannels:
+		m.logger.Debug("UpdateChannelsTeam: skipping public channel fetch (lazy loading enabled)")
+	case hasCache && !m.ForceSyncOnReconnect:
 		m.logger.Debug("UpdateChannelsTeam: skipping public channel fetch (using cache)")
-	} else {
+	default:
 		m.logger.Trace("UpdateChannelsTeam: fetching public channels (cache empty or ForceSyncOnReconnect enabled)")
 
 		err := m.updatePublicChannels(ctx, teamID)
@@ -1172,12 +1176,128 @@ func (m *Client) UpdateChannelsTeam(ctx context.Context, teamID string) error {
 	return nil
 }
 
+// FetchPublicChannels fetches all public channels across the user's teams on demand
+// without storing unjoined channels in the local channel cache.
+func (m *Client) FetchPublicChannels(ctx context.Context) ([]*model.Channel, error) {
+	m.RLock()
+
+	teamIDs := make([]string, 0, len(m.OtherTeams))
+	for _, t := range m.OtherTeams {
+		teamIDs = append(teamIDs, t.ID)
+	}
+
+	if len(teamIDs) == 0 && m.Team != nil && m.Team.ID != "" {
+		teamIDs = append(teamIDs, m.Team.ID)
+	}
+
+	m.RUnlock()
+
+	if len(teamIDs) == 0 {
+		return nil, errors.New("cannot fetch public channels: no teams available")
+	}
+
+	if len(teamIDs) == 1 {
+		return m.fetchPublicChannelsSlice(ctx, teamIDs[0])
+	}
+
+	fetchCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	var (
+		wg       sync.WaitGroup
+		mu       sync.Mutex
+		channels []*model.Channel
+		firstErr error
+	)
+
+	for _, teamID := range teamIDs {
+		wg.Add(1)
+
+		go func(tid string) {
+			defer wg.Done()
+
+			teamChans, err := m.fetchPublicChannelsSlice(fetchCtx, tid)
+
+			mu.Lock()
+			if err != nil {
+				if firstErr == nil {
+					firstErr = err
+
+					cancel()
+				}
+			} else {
+				channels = append(channels, teamChans...)
+			}
+			mu.Unlock()
+		}(teamID)
+	}
+
+	wg.Wait()
+
+	if firstErr != nil {
+		return nil, firstErr
+	}
+
+	return channels, nil
+}
+
+func (m *Client) fetchPublicChannelsSlice(ctx context.Context, teamID string) ([]*model.Channel, error) {
+	var channels []*model.Channel
+
+	err := m.fetchPublicChannelsTeam(ctx, teamID, func(page []ChannelSummary, _ bool) {
+		if channels == nil && len(page) > 0 {
+			channels = make([]*model.Channel, 0, len(page))
+		}
+
+		for i := range page {
+			ch := &page[i]
+			channels = append(channels, &model.Channel{
+				Id:          ch.Id,
+				UpdateAt:    ch.UpdateAt,
+				DeleteAt:    ch.DeleteAt,
+				TeamId:      teamID,
+				Type:        internChannelType(ch.Type),
+				DisplayName: ch.DisplayName,
+				Name:        ch.Name,
+				Header:      ch.Header,
+				Purpose:     ch.Purpose,
+				LastPostAt:  ch.LastPostAt,
+				CreatorId:   ch.CreatorId,
+			})
+		}
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return channels, nil
+}
+
 // updatePublicChannels caches the public channels of the team one page at a time. Every page is decoded into the same
 // slice, and cached before the next page is fetched, so only a page of channels is held on to besides the cache itself.
 // The team is only marked as synced once its last page is cached, so a crawl that fails part way is retried.
+func (m *Client) updatePublicChannels(ctx context.Context, teamID string) error {
+	return m.fetchPublicChannelsTeam(ctx, teamID, func(page []ChannelSummary, isLast bool) {
+		m.Users.mu.Lock()
+		for i := range page {
+			m.Users.cacheChannelLocked(teamID, &page[i])
+		}
+
+		if isLast {
+			if m.Users.publicChannelsSynced == nil {
+				m.Users.publicChannelsSynced = make(map[string]struct{})
+			}
+
+			m.Users.publicChannelsSynced[teamID] = struct{}{}
+		}
+		m.Users.mu.Unlock()
+	})
+}
+
+// fetchPublicChannelsTeam paginates public channels for teamID, invoking onPage for each decoded page.
 //
 //nolint:funlen
-func (m *Client) updatePublicChannels(ctx context.Context, teamID string) error {
+func (m *Client) fetchPublicChannelsTeam(ctx context.Context, teamID string, onPage func(page []ChannelSummary, isLast bool)) error {
 	const batchSize = mattermostPerPageMax
 
 	page := make([]ChannelSummary, 0, batchSize)
@@ -1187,11 +1307,15 @@ func (m *Client) updatePublicChannels(ctx context.Context, teamID string) error 
 
 	for {
 		if m.IsAborted(ctx) {
+			if ctx != nil && ctx.Err() != nil {
+				return ctx.Err()
+			}
+
 			return errors.New("login aborted")
 		}
 
 		query := "/teams/" + teamID + "/channels?page=" + strconv.Itoa(idx) + "&per_page=" + strconv.Itoa(batchSize)
-		m.apiLogger.Warnf("UpdateChannelsTeam: DoAPIGet: query %s #%d", query, retryCount)
+		m.apiLogger.Warnf("fetchPublicChannelsTeam: DoAPIGet: query %s #%d", query, retryCount)
 
 		resp, err := m.Client.DoAPIGet(ctx, query, "")
 		if err != nil {
@@ -1201,6 +1325,11 @@ func (m *Client) updatePublicChannels(ctx context.Context, teamID string) error 
 			}
 
 			shouldRetry, hErr := m.HandleRetry(ctx, "GetPublicChannelsForTeam", err, retryCount, 10, mResp)
+
+			if resp != nil && resp.Body != nil {
+				resp.Body.Close()
+			}
+
 			if hErr == nil && shouldRetry {
 				retryCount++
 
@@ -1223,21 +1352,10 @@ func (m *Client) updatePublicChannels(ctx context.Context, teamID string) error 
 			return jsonErr
 		}
 
-		m.Users.mu.Lock()
-		for i := range page {
-			m.Users.cacheChannelLocked(teamID, &page[i])
-		}
+		isLast := count < batchSize
+		onPage(page, isLast)
 
-		if count < batchSize {
-			if m.Users.publicChannelsSynced == nil {
-				m.Users.publicChannelsSynced = make(map[string]struct{})
-			}
-
-			m.Users.publicChannelsSynced[teamID] = struct{}{}
-		}
-		m.Users.mu.Unlock()
-
-		if count < batchSize {
+		if isLast {
 			return nil
 		}
 

@@ -470,6 +470,7 @@ func (m *Mattermost) loginToMattermost(ctx context.Context, onWsConnect func(), 
 	mc.OnWsDisconnect = onWsDisconnect
 	mc.AsyncUserPrefetch = true
 	mc.OnUsersLoaded = m.onUsersLoaded
+	mc.LazyPublicChannels = true
 
 	mc.Timeout = rc.ClientTimeout
 	if mc.Timeout == 0 {
@@ -662,12 +663,18 @@ func (m *Mattermost) Join(ctx context.Context, channelName string) (string, stri
 }
 
 func (m *Mattermost) List(ctx context.Context) (map[string]string, error) {
-	channelinfo := make(map[string]string)
+	publicChannels, err := m.mc.FetchPublicChannels(ctx)
+	if err != nil {
+		return nil, err
+	}
 
-	for _, channel := range append(m.mc.GetChannels(), m.mc.GetMoreChannels()...) {
+	joinedChannels := m.mc.GetChannels()
+	channelinfo := make(map[string]string, len(joinedChannels)+len(publicChannels))
+
+	addChannel := func(channel *model.Channel) {
 		// FIXME: This needs to be broken up into multiple messages to fit <510 chars
 		if m.mc.IsDMChannelName(channel.Name) {
-			continue
+			return
 		}
 
 		channelName := "#" + channel.Name
@@ -677,6 +684,14 @@ func (m *Mattermost) List(ctx context.Context) (map[string]string, error) {
 		}
 
 		channelinfo[channelName] = strings.ReplaceAll(channel.Header, "\n", " | ")
+	}
+
+	for _, channel := range joinedChannels {
+		addChannel(channel)
+	}
+
+	for _, channel := range publicChannels {
+		addChannel(channel)
 	}
 
 	return channelinfo, nil
