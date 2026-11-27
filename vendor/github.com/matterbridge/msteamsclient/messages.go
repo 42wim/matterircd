@@ -53,7 +53,7 @@ type rawChatMessage struct {
 type rawMsgProps struct {
 	EditTime   json.RawMessage `json:"edittime"`
 	DeleteTime json.RawMessage `json:"deletetime"`
-	Mentions   string          `json:"mentions"`
+	Mentions   json.RawMessage `json:"mentions"`
 	Files      string          `json:"files"`
 	Emotions   json.RawMessage `json:"emotions"`
 }
@@ -69,6 +69,10 @@ type rawEmotion struct {
 
 type rawMention struct {
 	ID          int    `json:"id"`
+	ItemID      string `json:"itemid"`
+	MRI         string `json:"mri"`
+	DisplayName string `json:"displayName"`
+	MentionType string `json:"mentionType"`
 	MentionText string `json:"mentionText"`
 	Mentioned   struct {
 		User struct {
@@ -962,28 +966,58 @@ func parseRawEmotions(propRaw json.RawMessage, topEmotions []rawEmotion) map[str
 	return out
 }
 
-func parseRawMentions(raw string) []Mention {
-	if raw == "" {
+func parseRawMentions(raw json.RawMessage) []Mention {
+	if len(raw) == 0 {
 		return nil
+	}
+
+	data := raw
+
+	var encoded string
+	if json.Unmarshal(raw, &encoded) == nil {
+		if encoded == "" {
+			return nil
+		}
+
+		data = []byte(encoded)
 	}
 
 	var parsed []rawMention
 
-	err := json.Unmarshal([]byte(raw), &parsed)
+	err := json.Unmarshal(data, &parsed)
 	if err != nil || len(parsed) == 0 {
 		return nil
 	}
 
 	out := make([]Mention, 0, len(parsed))
 	for _, m := range parsed {
-		if m.Mentioned.User.ID == "" && m.MentionText == "" {
+		mri := m.MRI
+		if mri == "" {
+			mri = m.Mentioned.User.ID
+		}
+
+		displayName := m.DisplayName
+		if displayName == "" {
+			displayName = m.MentionText
+		}
+
+		if displayName == "" {
+			displayName = m.Mentioned.User.DisplayName
+		}
+
+		mtype := m.MentionType
+		if mtype == "" {
+			mtype = m.Mentioned.User.UserType
+		}
+
+		if mri == "" && displayName == "" {
 			continue
 		}
 
 		out = append(out, Mention{
-			MRI:         m.Mentioned.User.ID,
-			DisplayName: m.MentionText,
-			Type:        m.Mentioned.User.UserType,
+			MRI:         mri,
+			DisplayName: displayName,
+			Type:        mtype,
 		})
 	}
 
