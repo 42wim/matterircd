@@ -166,6 +166,7 @@ func (m *MSTeams) buildClient(
 	mc.PollFallback = rc.MSTeams.PollFallback
 	mc.OnAuthPrompt = onAuthPrompt
 	mc.OnWsConnect = func() {
+		m.resolveConversationMembers(m.ctx)
 		m.rebuildNames()
 
 		if onWsConnect != nil {
