@@ -78,6 +78,7 @@ type User struct {
 	awayLookupBusy  atomic.Bool
 	awaySendMu      sync.Mutex
 	loginReady      atomic.Bool
+	initialSyncDone atomic.Bool
 }
 
 func (u *User) ID() string {

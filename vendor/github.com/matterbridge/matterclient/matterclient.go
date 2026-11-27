@@ -143,22 +143,24 @@ type Client struct {
 	sync.RWMutex
 	*Credentials
 
-	Team           *Team
-	OtherTeams     map[string]*Team
-	Client         *model.Client4
-	User           *model.User
-	Users          *UsersCache
-	MessageChan    chan *Message
-	WsClient       *model.WebSocketClient
-	AntiIdle       bool
-	AntiIdleChan   string
-	AntiIdleIntvl  int
-	WsQuit         bool
-	WsConnected    bool
-	OnWsConnect    func()
-	OnWsDisconnect func(err error)
-	reconnectBusy  bool
-	Timeout        int
+	Team              *Team
+	OtherTeams        map[string]*Team
+	Client            *model.Client4
+	User              *model.User
+	Users             *UsersCache
+	MessageChan       chan *Message
+	WsClient          *model.WebSocketClient
+	AntiIdle          bool
+	AntiIdleChan      string
+	AntiIdleIntvl     int
+	WsQuit            bool
+	WsConnected       bool
+	OnWsConnect       func()
+	OnWsDisconnect    func(err error)
+	AsyncUserPrefetch bool
+	OnUsersLoaded     func()
+	reconnectBusy     bool
+	Timeout           int
 
 	// wsReconnectMu serializes in-place websocket replacement between WsReceiver and checkConnection.
 	wsReconnectMu sync.Mutex
@@ -351,7 +353,7 @@ func (m *Client) Login(ctx context.Context) error {
 		return err
 	}
 
-	err = m.initUser(ctx)
+	teamsToFetch, err := m.initUserTeams(ctx)
 	if err != nil {
 		return err
 	}
@@ -365,28 +367,19 @@ func (m *Client) Login(ctx context.Context) error {
 		return fmt.Errorf("Team '%s' not found in %v", m.Credentials.Team, validTeamNames)
 	}
 
+	if !m.AsyncUserPrefetch {
+		err = m.fetchTeamsUsersSync(ctx, teamsToFetch)
+		if err != nil {
+			return err
+		}
+	}
+
 	err = m.initUserChannels(ctx)
 	if err != nil {
 		return err
 	}
 
-	// Statuses are fetched over HTTP, so overlap them with the websocket handshake.
-	m.logger.Trace("requesting initial user statuses for cache")
-
-	statusesDone := make(chan struct{})
-
-	go func() {
-		defer close(statusesDone)
-
-		_ = m.GetStatuses(ctx)
-	}()
-
-	// Connect websocket using the short-lived Login operation context.
-	// If the login operation is canceled, this will cleanly abort.
-	err = m.wsConnect(ctx)
-
-	<-statusesDone
-
+	err = m.connectWebSocket(ctx, !m.AsyncUserPrefetch || len(teamsToFetch) == 0)
 	if err != nil {
 		return err
 	}
@@ -398,7 +391,16 @@ func (m *Client) Login(ctx context.Context) error {
 	}
 
 	bgCtx, loginCancel := context.WithCancel(parentCtx)
+
+	m.Lock()
+	prevCancel := m.loginCancel
 	m.loginCancel = loginCancel
+	m.Unlock()
+
+	if prevCancel != nil {
+		prevCancel()
+	}
+
 	//nolint:contextcheck // bgCtx is derived from m.Ctx, the long-lived session context
 	m.loginCtx.Store(&bgCtx)
 
@@ -412,6 +414,9 @@ func (m *Client) Login(ctx context.Context) error {
 		m.logger.Trace("executing OnWsConnect()")
 		go m.OnWsConnect()
 	}
+
+	//nolint:contextcheck // Use the long-lived background context (bgCtx) here instead of ctx
+	m.startAsyncUserPrefetch(bgCtx, teamsToFetch)
 
 	//nolint:contextcheck // Use the long-lived background context (bgCtx) here instead of ctx
 	go m.checkConnection(bgCtx)
@@ -699,10 +704,9 @@ func (m *Client) serverAlive(ctx context.Context, b *backoff.Backoff) error {
 	}
 }
 
-// initialize user and teams
-//
-//nolint:funlen,gocognit,gocyclo
-func (m *Client) initUser(ctx context.Context) error {
+// initUserTeams fetches the user's teams, updates m.OtherTeams / m.Team, and
+// returns the teams whose user caches are missing or stale.
+func (m *Client) initUserTeams(ctx context.Context) ([]*model.Team, error) {
 	m.Lock()
 	if m.OtherTeams == nil {
 		m.OtherTeams = make(map[string]*Team)
@@ -734,119 +738,227 @@ func (m *Client) initUser(ctx context.Context) error {
 			continue
 		}
 
-		return err
+		return nil, err
 	}
 
-	const batchSize = mattermostPerPageMax
+	var teamsToFetch []*model.Team
 
 	for _, team := range teams {
 		if m.IsAborted(ctx) {
-			return errors.New("login aborted")
+			return nil, errors.New("login aborted")
 		}
 
-		m.Lock()
-
-		existingTeam, exists := m.OtherTeams[team.Id]
-		if team.Name == m.Credentials.Team {
-			m.logger.Debugf("found our team %s (id: %s)", team.Name, team.Id)
+		if m.registerTeam(team) {
+			teamsToFetch = append(teamsToFetch, team)
 		}
-		m.Unlock()
+	}
 
-		if exists && (!m.ForceSyncOnReconnect || time.Since(existingTeam.LastUserSync) < m.CacheClearCutoff) {
-			m.logger.Debugf("skipping user fetch for team %s: cache is only %v old", team.Name, time.Since(existingTeam.LastUserSync).Round(time.Second))
-			m.Lock()
-			if team.Name == m.Credentials.Team {
-				m.Team = existingTeam
-			}
-			m.Unlock()
+	return teamsToFetch, nil
+}
 
-			continue
+func (m *Client) registerTeam(team *model.Team) bool {
+	m.Lock()
+
+	existingTeam, exists := m.OtherTeams[team.Id]
+	if team.Name == m.Credentials.Team {
+		m.logger.Debugf("found our team %s (id: %s)", team.Name, team.Id)
+	}
+
+	needUsers := !exists || existingTeam.LastUserSync.IsZero() ||
+		(m.ForceSyncOnReconnect && time.Since(existingTeam.LastUserSync) >= m.CacheClearCutoff)
+
+	var cacheAge time.Duration
+	if exists && !needUsers {
+		cacheAge = time.Since(existingTeam.LastUserSync)
+	}
+
+	if !exists {
+		existingTeam = &Team{
+			Team: team,
+			ID:   team.Id,
 		}
+		m.OtherTeams[team.Id] = existingTeam
+	} else {
+		existingTeam.Team = team
+	}
 
-		m.logger.Tracef("fetching users for team %s (cache expired or missing)", team.Name)
+	if team.Name == m.Credentials.Team {
+		m.Team = existingTeam
+	}
 
-		teamUsers := make(map[string]struct{}, batchSize)
+	m.Unlock()
 
-		idx := 0
-		pageRetryCount := 0
+	if !needUsers {
+		m.logger.Debugf("skipping user fetch for team %s: cache is only %v old", team.Name, cacheAge.Round(time.Second))
+	}
 
-		for {
-			if m.IsAborted(ctx) {
-				return errors.New("login aborted")
-			}
+	return needUsers
+}
 
-			query := "/users?in_team=" + team.Id + "&page=" + strconv.Itoa(idx) + "&per_page=" + strconv.Itoa(batchSize)
-			m.apiLogger.Warnf("initUser: DoAPIGet: query %s #%d", query, retryCount)
+func (m *Client) connectWebSocket(ctx context.Context, overlapStatuses bool) error {
+	if !overlapStatuses {
+		// Connect websocket without blocking on GetStatuses; prefetchTeamsUsers
+		// will populate statuses once background team user loading finishes.
+		return m.wsConnect(ctx)
+	}
 
-			resp, err := m.Client.DoAPIGet(ctx, query, "")
-			if err != nil {
-				var mResp *model.Response
-				if resp != nil {
-					mResp = model.BuildResponse(resp)
-				}
+	// Statuses are fetched over HTTP, so overlap them with the websocket handshake.
+	m.logger.Trace("requesting initial user statuses for cache")
 
-				shouldRetry, hErr := m.HandleRetry(ctx, "GetUsersInTeam", err, pageRetryCount, 10, mResp)
-				if hErr == nil && shouldRetry {
-					pageRetryCount++
-					continue
-				}
+	statusesDone := make(chan struct{})
 
-				m.logger.Errorf("failed to fetch users for team %s: %v", team.Name, err)
+	go func() {
+		defer close(statusesDone)
 
-				return err
-			}
+		_ = m.GetStatuses(ctx)
+	}()
 
-			pageRetryCount = 0
+	// Connect websocket using the short-lived Login operation context.
+	// If the login operation is canceled, this will cleanly abort.
+	err := m.wsConnect(ctx)
 
-			count, jsonErr := m.updateUsersFromJSON(resp.Body, func(u *model.User) {
-				teamUsers[u.Id] = struct{}{}
-			})
-			resp.Body.Close()
+	<-statusesDone
 
-			if jsonErr != nil {
-				return jsonErr
-			}
+	return err
+}
 
-			if count < batchSize {
-				break
-			}
+func (m *Client) startAsyncUserPrefetch(bgCtx context.Context, teamsToFetch []*model.Team) {
+	if !m.AsyncUserPrefetch {
+		return
+	}
 
-			idx++
+	if len(teamsToFetch) > 0 {
+		go m.prefetchTeamsUsers(bgCtx, teamsToFetch)
 
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
+		return
+	}
+
+	if m.OnUsersLoaded != nil {
+		go m.OnUsersLoaded()
+	}
+}
+
+func (m *Client) fetchTeamsUsersSync(ctx context.Context, teams []*model.Team) error {
+	for _, team := range teams {
+		err := m.fetchTeamUsers(ctx, team)
+		if err != nil {
+			return err
 		}
-
-		if !exists {
-			m.logger.Debugf("found %d users in team %s", len(teamUsers), team.Name)
-		} else {
-			m.logger.Debugf("found %d users in team %s (cache expired)", len(teamUsers), team.Name)
-		}
-
-		m.Users.mu.Lock()
-		if m.Users.teams == nil {
-			m.Users.teams = make(map[string]map[string]struct{})
-		}
-
-		m.Users.teams[team.Id] = teamUsers
-		m.Users.lastUpdated.Store(time.Now().Unix())
-		m.Users.mu.Unlock()
-
-		m.Lock()
-		m.OtherTeams[team.Id] = &Team{
-			Team:         team,
-			ID:           team.Id,
-			LastUserSync: time.Now(),
-		}
-
-		if team.Name == m.Credentials.Team {
-			m.Team = m.OtherTeams[team.Id]
-		}
-		m.Unlock()
 	}
 
 	return nil
+}
+
+func (m *Client) fetchTeamUsers(ctx context.Context, team *model.Team) error {
+	const batchSize = mattermostPerPageMax
+
+	m.logger.Tracef("fetching users for team %s (cache expired or missing)", team.Name)
+
+	teamUsers := make(map[string]struct{}, batchSize)
+
+	for idx := 0; ; idx++ {
+		count, err := m.fetchTeamUsersPage(ctx, team, idx, batchSize, teamUsers)
+		if err != nil {
+			return err
+		}
+
+		if count < batchSize {
+			break
+		}
+
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+	}
+
+	m.logger.Debugf("found %d users in team %s", len(teamUsers), team.Name)
+
+	m.Users.mu.Lock()
+	if m.Users.teams == nil {
+		m.Users.teams = make(map[string]map[string]struct{})
+	}
+
+	m.Users.teams[team.Id] = teamUsers
+	m.Users.lastUpdated.Store(time.Now().Unix())
+	m.Users.mu.Unlock()
+
+	m.Lock()
+	if t, ok := m.OtherTeams[team.Id]; ok {
+		t.LastUserSync = time.Now()
+	}
+	m.Unlock()
+
+	return nil
+}
+
+func (m *Client) fetchTeamUsersPage(ctx context.Context, team *model.Team, idx, batchSize int, teamUsers map[string]struct{}) (int, error) {
+	pageRetryCount := 0
+
+	for {
+		if m.IsAborted(ctx) {
+			return 0, errors.New("login aborted")
+		}
+
+		query := "/users?in_team=" + team.Id + "&page=" + strconv.Itoa(idx) + "&per_page=" + strconv.Itoa(batchSize)
+		m.apiLogger.Warnf("initUser: DoAPIGet: query %s #%d", query, pageRetryCount)
+
+		resp, err := m.Client.DoAPIGet(ctx, query, "")
+		if err != nil {
+			var mResp *model.Response
+			if resp != nil {
+				mResp = model.BuildResponse(resp)
+			}
+
+			shouldRetry, hErr := m.HandleRetry(ctx, "GetUsersInTeam", err, pageRetryCount, 10, mResp)
+			if hErr == nil && shouldRetry {
+				pageRetryCount++
+				continue
+			}
+
+			m.logger.Errorf("failed to fetch users for team %s: %v", team.Name, err)
+
+			return 0, err
+		}
+
+		count, jsonErr := m.updateUsersFromJSON(resp.Body, func(u *model.User) {
+			teamUsers[u.Id] = struct{}{}
+		})
+		resp.Body.Close()
+
+		if jsonErr != nil {
+			return 0, jsonErr
+		}
+
+		return count, nil
+	}
+}
+
+func (m *Client) prefetchTeamsUsers(ctx context.Context, teams []*model.Team) {
+	defer func() {
+		if m.OnUsersLoaded != nil && ctx.Err() == nil && !m.IsAborted(ctx) {
+			m.OnUsersLoaded()
+		}
+	}()
+
+	for _, team := range teams {
+		if ctx.Err() != nil || m.IsAborted(ctx) {
+			return
+		}
+
+		err := m.fetchTeamUsers(ctx, team)
+		if err != nil {
+			if ctx.Err() != nil || m.IsAborted(ctx) {
+				return
+			}
+
+			m.logger.Warnf("background user prefetch stopped for team %s: %v", team.Name, err)
+		}
+	}
+
+	if ctx.Err() == nil && !m.IsAborted(ctx) {
+		m.logger.Trace("requesting user statuses after background user prefetch")
+		_ = m.GetStatuses(ctx)
+	}
 }
 
 func (m *Client) initUserChannels(ctx context.Context) error {
@@ -1674,8 +1786,13 @@ func (m *Client) reconnectLogout(ctx context.Context) {
 func (m *Client) Logout(ctx context.Context) error {
 	m.logger.Debug("logout running loginCancel to exit goroutines")
 
-	if m.loginCancel != nil {
-		m.loginCancel()
+	m.Lock()
+	cancel := m.loginCancel
+	m.loginCancel = nil
+	m.Unlock()
+
+	if cancel != nil {
+		cancel()
 	}
 
 	m.logger.Debugf("logout as %s (team: %s) on %s", m.Credentials.Login, m.Credentials.Team, m.Server)

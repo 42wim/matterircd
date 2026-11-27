@@ -190,6 +190,8 @@ func (u *User) handleEventChan(ctx context.Context, eventChan <-chan *bridge.Eve
 				u.handleChannelUpdateEvent(e)
 			case *bridge.UserUpdateEvent:
 				u.handleUserUpdateEvent(e)
+			case *bridge.UsersLoadedEvent:
+				u.syncUsersChannel()
 			case *bridge.StatusChangeEvent:
 				u.handleStatusChangeEvent(e)
 			case *bridge.ReactionAddEvent, *bridge.ReactionRemoveEvent:
@@ -1460,6 +1462,32 @@ func (u *User) addUsersToChannel(users []*User, channel string, channelID string
 	_ = ch.BatchJoin(users)
 }
 
+func (u *User) syncUsersChannel() {
+	br := u.currentBridge()
+	if br == nil || u.ctx == nil || u.ctx.Err() != nil {
+		return
+	}
+
+	users := u.CreateUsersFromInfo(br.GetUsers())
+	if len(users) > 0 {
+		u.Srv.BatchAdd(users)
+		u.addUsersToChannel(users, "&users", "&users")
+	}
+
+	if !u.initialSyncDone.Load() {
+		return
+	}
+
+	if loader, ok := br.(bridge.AsyncUserLoader); ok && !loader.UsersReady() {
+		return
+	}
+
+	ch := u.Srv.Channel("&users")
+	if (len(users) > 0 || ch.Len() > 0) && !ch.HasUser(u) {
+		_ = ch.Join(u)
+	}
+}
+
 //nolint:funlen,gocognit,gocyclo
 func (u *User) addUsersToChannels() {
 	if !sleepContext(u.ctx, time.Millisecond*500) {
@@ -1509,22 +1537,24 @@ func (u *User) addUsersToChannels() {
 		u.updateLastEventTime(globalSince)
 	}
 
+	syncBr := u.currentBridge()
+	if syncBr == nil {
+		return
+	}
+
 	srv := u.Srv
 	throttle := time.NewTicker(time.Millisecond * 8)
 
 	logger.Trace("in addUsersToChannels")
-	// add all users, also who are not on channels
-	ch := srv.Channel("&users")
-
-	// create and join the users
+	// Pre-populate already cached users silently; joining &users is deferred until
+	// initial channel synchronization, history replay, and any async user prefetch complete.
 	users := u.CreateUsersFromInfo(u.br.GetUsers())
 	if len(users) > 0 {
 		srv.BatchAdd(users)
 		u.addUsersToChannel(users, "&users", "&users")
-
-		// join ourself
-		ch.Join(u) //nolint:errcheck
 	}
+
+	var ch Channel
 
 	if u.br.Protocol() == serviceMastodon {
 		ch = srv.Channel(serviceMastodon)
@@ -1657,6 +1687,13 @@ func (u *User) addUsersToChannels() {
 			u.lastSync = syncStartTime
 		}
 		u.eventLoopMutex.Unlock()
+
+		// Initial channel sync and history replay are complete; populate and join &users
+		// (unless an AsyncUserLoader bridge is still prefetching users in the background).
+		if u.currentBridge() == syncBr && u.ctx != nil && u.ctx.Err() == nil {
+			u.initialSyncDone.Store(true)
+			u.syncUsersChannel()
+		}
 
 		// Only announce completion if it was a heavy sync and wasn't aborted
 		if isHeavySync && u.ctx != nil && u.ctx.Err() == nil {
@@ -2782,6 +2819,7 @@ func (u *User) openBridge(protocol string, eventChan chan *bridge.Event, onWsErr
 //nolint:funlen
 func (u *User) loginTo(protocol string) error {
 	u.loginReady.Store(false)
+	u.initialSyncDone.Store(false)
 
 	// Reset the event loop tracker in case this User struct is recycled.
 	// The new channel has to be in place before the bridge starts: it calls
@@ -2830,6 +2868,7 @@ func (u *User) loginTo(protocol string) error {
 	// may have started the event loop already, it has to be done before the bridge is dropped.
 	abort := func(err error) error {
 		u.loginReady.Store(false)
+		u.initialSyncDone.Store(false)
 		_ = br.Logout(u.ctx)
 
 		u.stopEventLoop()
@@ -2890,6 +2929,7 @@ func (u *User) logoutFrom(protocol string) error {
 	logger.Debug("logging out from", protocol)
 
 	u.loginReady.Store(false)
+	u.initialSyncDone.Store(false)
 
 	// Don't hold eventLoopMutex while logging out: the logout hands an event to the
 	// event loop, and that loop is started while holding the mutex.

@@ -99,6 +99,7 @@ const (
 	ddpEventRoomChange
 	ddpEventRoomRemove
 	ddpEventMember
+	ddpEventUsersLoaded
 )
 
 type ddpEvent struct {
@@ -989,6 +990,7 @@ func (c *Client) startUserPrefetch(ctx context.Context) {
 
 func (c *Client) prefetchUsers(ctx context.Context) {
 	defer c.wg.Done()
+	defer c.notifyUsersLoaded(ctx)
 
 	loaded := 0
 
@@ -1020,6 +1022,17 @@ func (c *Client) prefetchUsers(ctx context.Context) {
 
 			return
 		}
+	}
+}
+
+func (c *Client) notifyUsersLoaded(ctx context.Context) {
+	if ctx.Err() != nil {
+		return
+	}
+
+	select {
+	case c.eventCh <- ddpEvent{kind: ddpEventUsersLoaded}:
+	case <-ctx.Done():
 	}
 }
 
@@ -1114,6 +1127,12 @@ func (c *Client) dispatchEvent(ctx context.Context, ev *ddpEvent, consumerReady 
 		return
 	case ddpEventChanged:
 		c.processDDPChanged(ctx, ev.collection, ev.fields, *consumerReady)
+
+		return
+	case ddpEventUsersLoaded:
+		if ulh, ok := c.handler.(UsersLoadedHandler); ok && c.handler != nil {
+			ulh.OnUsersLoaded()
+		}
 
 		return
 	}
