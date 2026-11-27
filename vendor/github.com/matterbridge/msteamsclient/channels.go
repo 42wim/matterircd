@@ -150,6 +150,7 @@ func (c *Client) UpdateChannels(ctx context.Context) error {
 			mergeCSAChannel(ch, csaCh)
 		}
 
+		c.preserveCachedMembersLocked(id, ch)
 		c.Users.conversations[id] = ch
 		c.Users.joinedChannels[id] = struct{}{}
 
@@ -181,6 +182,17 @@ func (c *Client) UpdateChannels(ctx context.Context) error {
 	c.logger.Debugf("Synced %d conversations (%d teams, %d CSA channels)", len(convs), len(teams), len(csaChans))
 
 	return nil
+}
+
+func (c *Client) preserveCachedMembersLocked(id string, ch *Conversation) {
+	if len(ch.Members) > 0 {
+		return
+	}
+
+	if prev, ok := c.Users.conversations[id]; ok && len(prev.Members) > 0 {
+		ch.Members = slices.Clone(prev.Members)
+		reclassifyConversation(ch)
+	}
 }
 
 func (c *Client) mergeCSAChannelsLocked(convs, csaChans map[string]*Conversation) []string {
