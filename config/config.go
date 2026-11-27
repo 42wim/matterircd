@@ -170,7 +170,9 @@ type SharedConfig struct {
 
 	DisableShowOwnModified bool
 
-	ShowMentions bool
+	ShowMentions            bool
+	HighlightRepliedThreads string
+	RepliedThreadsCacheSize int
 
 	DisableDefaultMentions bool
 
@@ -359,7 +361,9 @@ func (c *Config) buildSharedConfig(section string) SharedConfig {
 
 		DisableShowOwnModified: c.v.GetBool(section + ".DisableShowOwnModified"),
 
-		ShowMentions: c.v.GetBool(section + ".ShowMentions"),
+		ShowMentions:            c.v.GetBool(section + ".ShowMentions"),
+		HighlightRepliedThreads: c.v.GetString(section + ".HighlightRepliedThreads"),
+		RepliedThreadsCacheSize: c.v.GetInt(section + ".RepliedThreadsCacheSize"),
 
 		DisableDefaultMentions: c.v.GetBool(section + ".DisableDefaultMentions"),
 
@@ -688,6 +692,8 @@ func Load(cfgfile string, flags *pflag.FlagSet) (*Config, error) {
 
 	for _, section := range []string{"mattermost", "slack", "mastodon", "matrix", "msteams", "googlechat", "rocketchat"} {
 		v.SetDefault(section+".ThreadContextColor", "off")
+		v.SetDefault(section+".HighlightRepliedThreads", "off")
+		v.SetDefault(section+".RepliedThreadsCacheSize", 100)
 		v.SetDefault(section+".QuoteThreaded", section != "googlechat")
 		v.SetDefault(section+".QuoteAuthor", "displayname")
 		v.SetDefault(section+".MarkdownLinkText", "\x1f")

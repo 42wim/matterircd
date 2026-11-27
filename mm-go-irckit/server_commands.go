@@ -807,6 +807,7 @@ func CmdPrivMsg(s Server, u *User, msg *irc.Message) error {
 		}
 
 		u.setMsgLast(ch.ID(), msgID, "")
+		u.addRepliedThread(ch.ID(), msgID)
 		u.saveLastViewedAt(ch.ID())
 
 		if u.br.BridgeConfig().PrefixContext || u.br.BridgeConfig().SuffixContext {
@@ -1160,6 +1161,8 @@ func parseReactionToMsg(s Server, u *User, msg *irc.Message, channelID string) b
 	err := u.br.AddReaction(u.ctx, msgID, emoji)
 	if err != nil {
 		sendDeliveryError(s, u, query, "reaction: "+emoji+" could not be added: "+err.Error())
+	} else if strings.HasPrefix(query, "#") {
+		u.addRepliedThread(channelID, msgID)
 	}
 
 	return true
@@ -1381,6 +1384,7 @@ func threadMsgChannelUser(s Server, u *User, msg *irc.Message, channelID string,
 	u.setMsgLast(channelID, msgID, threadID)
 
 	if !toUser {
+		u.addRepliedThread(channelID, threadID)
 		u.saveLastViewedAt(channelID)
 	} else {
 		u.saveLastViewedAt(u.br.GetChannelID(u.ctx, channelID, ""))
@@ -1780,6 +1784,7 @@ func quoteMsgChannelUser(s Server, u *User, msg *irc.Message, channelID string, 
 	u.setMsgLast(channelID, msgID, threadRootID)
 
 	if !toUser {
+		u.addRepliedThread(channelID, threadOrMsgID(threadRootID, msgID))
 		u.saveLastViewedAt(channelID)
 	} else {
 		u.saveLastViewedAt(u.br.GetChannelID(u.ctx, channelID, ""))

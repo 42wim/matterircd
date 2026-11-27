@@ -277,6 +277,10 @@ ShowContextMulti = false
 #This will show (mention yournick) after a message if it contains one of the words configured
 #in your mattermost "word that trigger mentions" notifications.
 ShowMentions = false
+# Auto-highlight replies in threads you have participated in (posted, replied, or reacted to).
+# Valid options: "off" (default), "on" / "nick" (uses @yournick), or a custom tag (e.g. "@replied").
+#HighlightRepliedThreads = "off"
+#RepliedThreadsCacheSize = 100
 # Channel wide default mentions @channel, @all, and @here are shown as IRC NOTICEs.
 # This disables that making them appear as normal PRIVMSGs.
 #DisableDefaultMentions = true
@@ -422,6 +426,8 @@ PrefixContext = false
 #HideReactions = false
 #DisableShowOwnModified = true
 #ShowMentions = false
+#HighlightRepliedThreads = "off"
+#RepliedThreadsCacheSize = 100
 #DisableDefaultMentions = false
 #JoinReplayDuration = "15m"
 #HeavySyncThreshold = "15m"
@@ -468,6 +474,8 @@ PrefixContext = false
 #HideReactions = false
 #DisableShowOwnModified = true
 #ShowMentions = false
+#HighlightRepliedThreads = "off"
+#RepliedThreadsCacheSize = 100
 #DisableDefaultMentions = false  # also covers @room, @channel, @all and @here
 #DisableAutoView = false
 #ReplayStrategy = "hybrid"
@@ -532,6 +540,8 @@ PrefixContext = false
 
 #Mentions & formatting
 #ShowMentions = false
+#HighlightRepliedThreads = "off"
+#RepliedThreadsCacheSize = 100
 #DisableDefaultMentions = false
 #HideReplies = false
 #ShortenRepliesTo = 0
@@ -605,6 +615,8 @@ PrefixContext = false
 
 #Mentions & formatting
 #ShowMentions = false
+#HighlightRepliedThreads = "off"
+#RepliedThreadsCacheSize = 100
 #DisableDefaultMentions = false
 #HideReplies = false
 #ShortenRepliesTo = 0
@@ -660,6 +672,8 @@ PrefixContext = false
 
 #Mentions & formatting
 #ShowMentions = false
+#HighlightRepliedThreads = "off"
+#RepliedThreadsCacheSize = 100
 #DisableDefaultMentions = false
 #HideReplies = false
 #ShortenRepliesTo = 0
