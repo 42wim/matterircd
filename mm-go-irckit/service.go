@@ -1730,8 +1730,10 @@ func parseCommandString(line string) ([]string, error) {
 }
 
 func lastsent(u *User, toUser *User, args []string, service string) {
+	colorMode := u.br.BridgeConfig().ThreadContextColor
+
 	for _, line := range u.br.GetLastSentMsgs() {
-		u.MsgUser(toUser, line)
+		u.MsgUser(toUser, colorizeLastSentLine(colorMode, line))
 	}
 }
 

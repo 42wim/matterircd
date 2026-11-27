@@ -124,10 +124,11 @@ type BridgeConfig struct {
 	PartFake       bool
 
 	// Threading / context related
-	PrefixContext    bool
-	SuffixContext    bool
-	ThreadContext    string
-	ShowContextMulti bool
+	PrefixContext      bool
+	SuffixContext      bool
+	ThreadContext      string
+	ThreadContextColor string
+	ShowContextMulti   bool
 
 	// Quote in reply settings
 	QuoteThreaded bool
@@ -335,10 +336,11 @@ func (c *Config) buildBridgeConfig(section string) BridgeConfig {
 		ShowOnlyJoined: c.v.GetBool(section + ".ShowOnlyJoined"),
 		PartFake:       c.v.GetBool(section + ".PartFake"),
 
-		PrefixContext:    c.v.GetBool(section + ".PrefixContext"),
-		SuffixContext:    c.v.GetBool(section + ".SuffixContext"),
-		ShowContextMulti: c.v.GetBool(section + ".ShowContextMulti"),
-		ThreadContext:    c.v.GetString(section + ".ThreadContext"),
+		PrefixContext:      c.v.GetBool(section + ".PrefixContext"),
+		SuffixContext:      c.v.GetBool(section + ".SuffixContext"),
+		ShowContextMulti:   c.v.GetBool(section + ".ShowContextMulti"),
+		ThreadContext:      c.v.GetString(section + ".ThreadContext"),
+		ThreadContextColor: c.v.GetString(section + ".ThreadContextColor"),
 
 		QuoteThreaded: c.v.GetBool(section + ".QuoteThreaded"),
 		QuoteAuthor:   c.v.GetString(section + ".QuoteAuthor"),
@@ -685,6 +687,7 @@ func Load(cfgfile string, flags *pflag.FlagSet) (*Config, error) {
 	v.SetDefault("rocketchat.JoinReplayDuration", "15m")
 
 	for _, section := range []string{"mattermost", "slack", "mastodon", "matrix", "msteams", "googlechat", "rocketchat"} {
+		v.SetDefault(section+".ThreadContextColor", "off")
 		v.SetDefault(section+".QuoteThreaded", section != "googlechat")
 		v.SetDefault(section+".QuoteAuthor", "displayname")
 		v.SetDefault(section+".MarkdownLinkText", "\x1f")
