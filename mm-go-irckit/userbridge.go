@@ -93,6 +93,10 @@ type UserBridge struct {
 	pendingReplayMu sync.Mutex
 	pendingReplay   map[string]int
 	savedSinceSnap  map[string]savedSinceSnapshot
+
+	repliedMu      sync.Mutex
+	repliedThreads map[string][]string
+	repliedDirty   bool
 }
 
 type savedSinceSnapshot struct {
@@ -121,6 +125,7 @@ func NewUserBridge(c net.Conn, srv Server, cfg *config.Config, dbs map[string]*b
 	u.updateCounter = make(map[string]time.Time)
 	u.pendingReplay = make(map[string]int)
 	u.savedSinceSnap = make(map[string]savedSinceSnapshot)
+	u.repliedThreads = make(map[string][]string)
 	u.eventChan = make(chan *bridge.Event, eventChanBufferSize)
 
 	initialMap := make(map[string]struct{})
@@ -197,16 +202,20 @@ func (u *User) handleEventChan(ctx context.Context, eventChan <-chan *bridge.Eve
 					u.saveGlobalLastEventTime(u.lastEventTime.Load())
 				}
 
+				u.flushRepliedThreads()
+
 				return
 			}
 
 		case <-flushTicker.C:
 			// Periodically flush the timestamp to BoltDB
 			u.saveGlobalLastEventTime(u.lastEventTime.Load())
+			u.flushRepliedThreads()
 
 		case <-ctx.Done():
 			// We're told to stop (the user disconnected or logged out), the logout event may not reach us
 			u.saveGlobalLastEventTime(u.lastEventTime.Load())
+			u.flushRepliedThreads()
 
 			return
 		}
@@ -886,6 +895,12 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) bool
 		}
 	}
 
+	if event.Sender != nil && event.Sender.Me && event.ChannelType != "D" && event.Event != "post_deleted" && event.Event != eventReaction {
+		u.addRepliedThread(event.ChannelID, threadOrMsgID(event.ParentID, event.MessageID))
+	} else {
+		u.applyRepliedHighlight(event)
+	}
+
 	disableMarkdown := u.br.FormatterConfig().DisableMarkdown
 	blockQuoteChar, codeBlockPrefix := u.getMarkdownBlockCodePrefix()
 	inlineCode := u.br.FormatterConfig().MarkdownInlineCode
@@ -1285,6 +1300,10 @@ func (u *User) handleReactionEvent(event any) {
 		channelType = e.ChannelType
 		reaction = e.Reaction
 		parentID = e.ParentID
+	}
+
+	if _, isAdd := event.(*bridge.ReactionAddEvent); isAdd && sender != nil && sender.Me && channelType != "D" {
+		u.addRepliedThread(channelID, threadOrMsgID(parentID, messageID))
 	}
 
 	if u.hasSharedCfg() && u.sharedCfg().HideReactions {
@@ -2854,6 +2873,8 @@ func (u *User) loginTo(protocol string) error {
 		if err != nil {
 			return abort(err)
 		}
+
+		u.loadRepliedThreads(protocol)
 	}
 
 	u.pruneInactiveServices(protocol)
@@ -2896,6 +2917,8 @@ func (u *User) logoutFrom(protocol string) error {
 	u.dmTopicMu.Lock()
 	clear(u.dmTopicPushed)
 	u.dmTopicMu.Unlock()
+
+	u.clearRepliedThreadsCache()
 
 	u.Srv.Logout(u)
 	u.createLoginServices()

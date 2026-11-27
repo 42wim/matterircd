@@ -1588,6 +1588,7 @@ var cmds = map[string]Command{
 	"permalink":        {handler: permalink, login: true, minParams: 0, maxParams: 2},
 	"ping":             {handler: ping, login: true, minParams: 0, maxParams: 0},
 	"replay":           {handler: replay, login: true, minParams: 1, maxParams: 2},
+	"replied":          {handler: repliedCmd, login: true, minParams: 0, maxParams: -1},
 	"scrollback":       {handler: scrollback, login: true, minParams: 1, maxParams: 3},
 	"search":           {handler: search, login: true, minParams: 1, maxParams: -1},
 	"searchusers":      {handler: searchUsers, login: true, minParams: 1, maxParams: -1},
