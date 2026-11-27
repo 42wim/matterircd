@@ -37,6 +37,7 @@ type Mattermost struct {
 	quitChan    []chan struct{}
 	eventChan   chan *bridge.Event
 	connected   atomic.Bool
+	usersReady  atomic.Bool
 	instanceTag string
 
 	// done is closed on logout. Nobody reads eventChan anymore after that, so it
@@ -88,6 +89,19 @@ func (m *Mattermost) FormatterConfig() *config.FormatterConfig {
 
 func (m *Mattermost) Connected() bool {
 	return m.connected.Load()
+}
+
+// UsersReady implements bridge.AsyncUserLoader.
+func (m *Mattermost) UsersReady() bool {
+	return m.usersReady.Load()
+}
+
+func (m *Mattermost) onUsersLoaded() {
+	m.usersReady.Store(true)
+	m.sendEvent(&bridge.Event{
+		Type: "users_loaded",
+		Data: &bridge.UsersLoadedEvent{},
+	})
 }
 
 func (m *Mattermost) GetLastSentMsgs() []string {
@@ -454,6 +468,8 @@ func (m *Mattermost) loginToMattermost(ctx context.Context, onWsConnect func(), 
 	mc.Ctx = ctx
 	mc.OnWsConnect = onWsConnect
 	mc.OnWsDisconnect = onWsDisconnect
+	mc.AsyncUserPrefetch = true
+	mc.OnUsersLoaded = m.onUsersLoaded
 
 	mc.Timeout = rc.ClientTimeout
 	if mc.Timeout == 0 {
@@ -683,6 +699,7 @@ func (m *Mattermost) Logout(ctx context.Context) error {
 
 func (m *Mattermost) logout(ctx context.Context) {
 	m.connected.Store(false)
+	m.usersReady.Store(false)
 
 	// The hook keeps this client (and with it everything we cached) alive.
 	if m.unregisterReloadHook != nil {

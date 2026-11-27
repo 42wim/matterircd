@@ -134,6 +134,14 @@ type ChannelRolePrefixer interface {
 	ChannelUserPrefix(channelID, userID string) string
 }
 
+// AsyncUserLoader is optionally implemented by bridges that prefetch the full
+// workspace/team user directory asynchronously after login. When UsersReady
+// returns false, mm-go-irckit defers joining the IRC client to &users until the
+// bridge emits a UsersLoadedEvent.
+type AsyncUserLoader interface {
+	UsersReady() bool
+}
+
 // QuotedPost holds the raw text and author metadata of a post being quoted in a reply.
 type QuotedPost struct {
 	ID       string
@@ -285,6 +293,8 @@ type ReactionRemoveEvent ReactionAddEvent
 type UserUpdateEvent struct {
 	User *UserInfo
 }
+
+type UsersLoadedEvent struct{}
 
 type StatusChangeEvent struct {
 	UserID string

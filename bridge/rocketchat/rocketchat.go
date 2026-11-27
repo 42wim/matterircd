@@ -64,8 +64,9 @@ type RocketChat struct {
 	initDone chan struct{}
 	readyCh  chan struct{}
 
-	connected atomic.Bool
-	ready     atomic.Bool
+	connected  atomic.Bool
+	ready      atomic.Bool
+	usersReady atomic.Bool
 
 	msgRoomCache     *lru.Cache[string, string]
 	msgTextCache     *lru.Cache[string, string]
@@ -213,6 +214,20 @@ func (r *RocketChat) seedRoomMeta() {
 		}
 	}
 	r.roomMetaMu.Unlock()
+}
+
+// UsersReady implements bridge.AsyncUserLoader.
+func (r *RocketChat) UsersReady() bool {
+	return r.usersReady.Load()
+}
+
+// OnUsersLoaded implements rocketchatclient.UsersLoadedHandler.
+func (r *RocketChat) OnUsersLoaded() {
+	r.usersReady.Store(true)
+	r.sendEvent(&bridge.Event{
+		Type: "users_loaded",
+		Data: &bridge.UsersLoadedEvent{},
+	})
 }
 
 // OnReconnect implements rocketchatclient.ReconnectHandler.
@@ -1532,6 +1547,7 @@ func (r *RocketChat) Logout(ctx context.Context) error {
 	r.logoutOnce.Do(func() {
 		r.connected.Store(false)
 		r.ready.Store(false)
+		r.usersReady.Store(false)
 
 		if r.unregisterReloadHook != nil {
 			r.unregisterReloadHook()

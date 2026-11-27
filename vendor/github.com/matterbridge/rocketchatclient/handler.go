@@ -40,3 +40,9 @@ type TypingHandler interface {
 type RoomRemoveHandler interface {
 	OnRoomRemove(roomID string)
 }
+
+// UsersLoadedHandler can optionally be implemented by a Handler to be notified when
+// the background workspace user prefetch completes (or falls back to lazy lookups).
+type UsersLoadedHandler interface {
+	OnUsersLoaded()
+}
