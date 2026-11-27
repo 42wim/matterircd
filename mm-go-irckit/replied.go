@@ -109,12 +109,20 @@ func (u *User) formatHighlightSuffix(tag string) string {
 	return " (re " + tag + ")"
 }
 
+func (u *User) formatMentionSuffix(nick string) string {
+	if u.br != nil && u.br.FormatterConfig().Unicode {
+		return " (\U0001F514 " + nick + ")"
+	}
+
+	return " (@" + nick + ")"
+}
+
 func (u *User) textAlreadyHighlights(text, tag string) bool {
 	if strings.Contains(text, tag) {
 		return true
 	}
 
-	if u.Nick != "" && (strings.Contains(text, "@"+u.Nick) || strings.Contains(text, u.formatHighlightSuffix(u.Nick))) {
+	if u.Nick != "" && (strings.Contains(text, "@"+u.Nick) || strings.Contains(text, u.formatMentionSuffix(u.Nick))) {
 		return true
 	}
 

@@ -491,21 +491,27 @@ func (u *User) getMarkdownBlockCodePrefix() (string, string) {
 	return blockQuoteChar, codeBlockPrefix
 }
 
-//nolint:funlen,gocognit,gocyclo
-func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) bool {
-	if u.hasSharedCfg() && u.sharedCfg().ShowMentions {
-		for _, m := range u.MentionKeys {
-			if m == u.Nick || m == "" {
-				continue
-			}
+func (u *User) applyShowMentions(text string) string {
+	if !u.hasSharedCfg() || !u.sharedCfg().ShowMentions {
+		return text
+	}
 
-			if strings.Contains(event.Text, m) {
-				event.Text += u.formatHighlightSuffix(u.Nick)
+	for _, m := range u.MentionKeys {
+		if m == u.Nick || m == "" {
+			continue
+		}
 
-				break
-			}
+		if strings.Contains(text, m) {
+			return text + u.formatMentionSuffix(u.Nick)
 		}
 	}
+
+	return text
+}
+
+//nolint:funlen,gocognit,gocyclo
+func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) bool {
+	event.Text = u.applyShowMentions(event.Text)
 
 	var (
 		showContext bool
@@ -885,19 +891,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) bool
 		return err == nil
 	}
 
-	if u.hasSharedCfg() && u.sharedCfg().ShowMentions {
-		for _, m := range u.MentionKeys {
-			if m == u.Nick || m == "" {
-				continue
-			}
-
-			if strings.Contains(event.Text, m) {
-				event.Text += u.formatHighlightSuffix(u.Nick)
-
-				break
-			}
-		}
-	}
+	event.Text = u.applyShowMentions(event.Text)
 
 	if event.Sender != nil && event.Sender.Me && event.ChannelType != "D" && event.Event != "post_deleted" && event.Event != eventReaction {
 		u.addRepliedThread(event.ChannelID, threadOrMsgID(event.ParentID, event.MessageID))
