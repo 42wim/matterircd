@@ -1,8 +1,12 @@
 package slackclient
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
+	"net/http"
 	"strings"
 	"time"
 
@@ -10,33 +14,337 @@ import (
 )
 
 const (
-	presenceActive = "active"
-	presenceAway   = "away"
+	presenceActive     = "active"
+	presenceAway       = "away"
+	userListPageLimit  = 200
+	edgeUsersBatchSize = 100
+	edgeUsersTimeout   = 15 * time.Second
+	edgeAPIUsersPrefix = "https://edgeapi.slack.com/cache/"
 )
 
 var errNoPresence = errors.New("slackclient: presence unavailable")
 
+// InitUsers paginates users.list into the client cache synchronously.
 func (c *Client) InitUsers() {
-	if c.sc == nil {
+	c.InitUsersContext(context.Background())
+}
+
+// InitUsersContext paginates users.list into the client cache page-by-page,
+// deduplicating concurrent callers and respecting context cancellation.
+func (c *Client) InitUsersContext(ctx context.Context) {
+	c.RLock()
+	sc := c.sc
+	c.RUnlock()
+
+	if sc == nil {
 		return
 	}
 
-	users, _ := c.sc.GetUsers()
+	c.initUsersMu.Lock()
+	if done := c.initUsersDone; done != nil {
+		c.initUsersMu.Unlock()
+
+		select {
+		case <-done:
+		case <-ctx.Done():
+		}
+
+		return
+	}
+
+	done := make(chan struct{})
+	c.initUsersDone = done
+	c.initUsersMu.Unlock()
+
+	defer func() {
+		c.initUsersMu.Lock()
+		c.initUsersDone = nil
+		c.initUsersMu.Unlock()
+
+		close(done)
+	}()
+
+	loaded := c.paginateUsers(ctx, sc)
+
+	if ctx.Err() == nil {
+		c.usersLoaded.Store(true)
+		c.logger.Debugf("users.list loaded %d user(s)", loaded)
+	}
+}
+
+func (c *Client) paginateUsers(ctx context.Context, sc *slack.Client) int {
+	p := sc.GetUsersPaginated(slack.GetUsersOptionLimit(userListPageLimit))
+	loaded := 0
+
+	for {
+		if ctx.Err() != nil {
+			return loaded
+		}
+
+		nextPage, err := p.Next(ctx)
+		if err == nil {
+			p = nextPage
+			c.upsertUsers(p.Users)
+			loaded += len(p.Users)
+
+			continue
+		}
+
+		if p.Done(err) {
+			return loaded
+		}
+
+		if rlErr, ok := errors.AsType[*slack.RateLimitedError](err); ok {
+			if !sleepContext(ctx, rlErr.RetryAfter) {
+				return loaded
+			}
+
+			continue
+		}
+
+		if ctx.Err() == nil {
+			c.logger.Warnf("users.list stopped after %d user(s): %s", loaded, err)
+		}
+
+		return loaded
+	}
+}
+
+// StartUserPrefetch starts paginated users.list prefetching in the background,
+// waiting up to waitBudget before returning so small workspaces finish inline
+// while large workspaces do not stall login. onDone is called when prefetching
+// completes (unless canceled).
+func (c *Client) StartUserPrefetch(ctx context.Context, waitBudget time.Duration, onDone func()) {
+	prefetchCtx, cancel := context.WithCancel(ctx)
+
+	c.initUsersMu.Lock()
+	prev := c.initUsersCancel
+	c.initUsersCancel = cancel
+	c.initUsersMu.Unlock()
+
+	if prev != nil {
+		prev()
+	}
+
+	finished := make(chan struct{})
+
+	go func() {
+		defer close(finished)
+		defer cancel()
+
+		c.InitUsersContext(prefetchCtx)
+
+		if prefetchCtx.Err() == nil && onDone != nil {
+			onDone()
+		}
+	}()
+
+	if waitBudget <= 0 {
+		return
+	}
+
+	timer := time.NewTimer(waitBudget)
+	defer timer.Stop()
+
+	select {
+	case <-finished:
+	case <-timer.C:
+	case <-ctx.Done():
+	}
+}
+
+func (c *Client) resetUserPrefetch() {
+	c.usersLoaded.Store(false)
+	c.cancelUserPrefetch()
+}
+
+func (c *Client) cancelUserPrefetch() {
+	c.initUsersMu.Lock()
+	cancel := c.initUsersCancel
+	c.initUsersCancel = nil
+	c.initUsersMu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
+}
+
+func (c *Client) isUserPrefetchRunning() bool {
+	c.initUsersMu.Lock()
+	running := c.initUsersDone != nil
+	c.initUsersMu.Unlock()
+
+	return running
+}
+
+func (c *Client) upsertUsers(users []slack.User) {
+	if len(users) == 0 {
+		return
+	}
 
 	c.Lock()
 	defer c.Unlock()
 
 	for _, mmuser := range users {
+		if mmuser.ID == "" {
+			continue
+		}
+
 		c.users[mmuser.ID] = mmuser
 
 		if mmuser.Presence != "" {
-			c.presences[mmuser.ID] = presenceEntry{
-				presence: slack.UserPresence{
-					Presence: mmuser.Presence,
-					Online:   mmuser.Presence == presenceActive,
-				},
+			if _, exists := c.presences[mmuser.ID]; !exists {
+				c.presences[mmuser.ID] = presenceEntry{
+					presence: slack.UserPresence{
+						Presence: mmuser.Presence,
+						Online:   mmuser.Presence == presenceActive,
+					},
+				}
 			}
 		}
+	}
+}
+
+func (c *Client) isCookieSession() bool {
+	c.RLock()
+	hc := c.httpClient
+	token := c.token
+	c.RUnlock()
+
+	return hc != nil && hc.cookie != "" && strings.HasPrefix(token, "xoxc-")
+}
+
+func (c *Client) teamID() string {
+	c.RLock()
+	info := c.info
+	c.RUnlock()
+
+	if info == nil || info.Team == nil {
+		return ""
+	}
+
+	return info.Team.ID
+}
+
+// fetchEdgeUsersInfo resolves a batch of user IDs via Slack's edgeapi cache
+// endpoint for xoxc- cookie sessions, upserting any returned users into c.users.
+func (c *Client) fetchEdgeUsersInfo(ctx context.Context, userIDs []string) {
+	c.RLock()
+	hc := c.httpClient
+	token := c.token
+	c.RUnlock()
+
+	teamID := c.teamID()
+	if hc == nil || hc.cookie == "" || !strings.HasPrefix(token, "xoxc-") || teamID == "" || len(userIDs) == 0 {
+		return
+	}
+
+	endpoint := edgeAPIUsersPrefix + teamID + "/users/info"
+
+	for start := 0; start < len(userIDs); start += edgeUsersBatchSize {
+		if ctx.Err() != nil {
+			return
+		}
+
+		end := min(start+edgeUsersBatchSize, len(userIDs))
+		if !c.fetchEdgeUsersBatch(ctx, hc, endpoint, token, userIDs[start:end]) {
+			return
+		}
+	}
+}
+
+func buildEdgeUsersPayload(token string, batch []string) ([]byte, bool) {
+	updatedIDs := make(map[string]int64, len(batch))
+	for _, uid := range batch {
+		if uid != "" {
+			updatedIDs[uid] = 0
+		}
+	}
+
+	if len(updatedIDs) == 0 {
+		return nil, false
+	}
+
+	payload := struct {
+		Token            string           `json:"token"`
+		CheckInteraction bool             `json:"check_interaction"`
+		UpdatedIDs       map[string]int64 `json:"updated_ids"`
+	}{
+		Token:            token,
+		CheckInteraction: true,
+		UpdatedIDs:       updatedIDs,
+	}
+
+	reqBody, err := json.Marshal(payload)
+	if err != nil {
+		return nil, false
+	}
+
+	return reqBody, true
+}
+
+func (c *Client) fetchEdgeUsersBatch(ctx context.Context, hc *httpClient, endpoint, token string, batch []string) bool {
+	reqBody, ok := buildEdgeUsersPayload(token, batch)
+	if !ok {
+		return true
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(reqBody))
+	if err != nil {
+		return false
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := hc.Do(req)
+	if err != nil {
+		c.logger.Debugf("edgeapi users/info: %s", err)
+
+		return false
+	}
+
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return false
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		c.logger.Debugf("edgeapi users/info: HTTP %d", resp.StatusCode)
+
+		return false
+	}
+
+	var parsed struct {
+		Results []slack.User `json:"results"`
+	}
+
+	err = json.Unmarshal(body, &parsed)
+	if err != nil {
+		c.logger.Debugf("edgeapi users/info decode: %s", err)
+
+		return false
+	}
+
+	c.upsertUsers(parsed.Results)
+
+	return true
+}
+
+func sleepContext(ctx context.Context, d time.Duration) bool {
+	if d <= 0 {
+		return ctx.Err() == nil
+	}
+
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+
+	select {
+	case <-timer.C:
+		return true
+	case <-ctx.Done():
+		return false
 	}
 }
 
@@ -249,7 +557,7 @@ func (c *Client) SearchUsers(query string) []slack.User {
 	empty := len(c.users) == 0
 	c.RUnlock()
 
-	if empty {
+	if empty && !c.usersLoaded.Load() && !c.isUserPrefetchRunning() {
 		c.InitUsers()
 	}
 
@@ -304,7 +612,7 @@ func (c *Client) GetUserByUsername(username string) *slack.User {
 	empty := len(c.users) == 0
 	c.RUnlock()
 
-	if empty && c.sc != nil {
+	if empty && c.sc != nil && !c.usersLoaded.Load() && !c.isUserPrefetchRunning() {
 		c.InitUsers()
 	}
 

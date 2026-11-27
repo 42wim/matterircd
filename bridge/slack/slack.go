@@ -50,6 +50,7 @@ type Slack struct {
 
 	sc                   *slackclient.Client
 	connected            atomic.Bool
+	usersReady           atomic.Bool
 	credentials          bridge.Credentials
 	eventChan            chan *bridge.Event
 	done                 chan struct{}
@@ -69,7 +70,10 @@ type Slack struct {
 	cfg *config.Config
 }
 
-const systemUser = "system"
+const (
+	systemUser            = "system"
+	slackUserPrefetchWait = 2 * time.Second
+)
 
 var logger = newLogger()
 
@@ -265,6 +269,7 @@ func (s *Slack) Logout(ctx context.Context) error {
 
 func (s *Slack) logout(ctx context.Context) error {
 	s.connected.Store(false)
+	s.usersReady.Store(false)
 
 	if s.done != nil {
 		close(s.done)
@@ -1366,11 +1371,12 @@ func (s *Slack) loginToSlack() (*slackclient.Client, error) {
 		return nil, err
 	}
 
-	// Populate the user cache before live RTM events and onConnect read it.
-	sc.InitUsers()
-
 	wsCtx, wsCancel := context.WithCancel(context.Background())
 	s.wsCancel = wsCancel
+
+	// Prefetch workspace users with a short inline wait budget so small
+	// workspaces finish before onConnect while large ones do not stall login.
+	sc.StartUserPrefetch(wsCtx, slackUserPrefetchWait, s.onUsersLoaded)
 
 	go s.handleSlack(wsCtx)
 	go s.onConnect()
@@ -2860,6 +2866,19 @@ func (s *Slack) createUser(slackuser *slack.User) *bridge.UserInfo {
 
 func (s *Slack) Connected() bool {
 	return s.connected.Load()
+}
+
+// UsersReady implements bridge.AsyncUserLoader.
+func (s *Slack) UsersReady() bool {
+	return s.usersReady.Load()
+}
+
+func (s *Slack) onUsersLoaded() {
+	s.usersReady.Store(true)
+	s.sendEvent(&bridge.Event{
+		Type: "users_loaded",
+		Data: &bridge.UsersLoadedEvent{},
+	})
 }
 
 func (s *Slack) recordSent(ctx context.Context, channelID, msgID, threadTS, parentID, text string) {

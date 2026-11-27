@@ -601,24 +601,61 @@ func (c *Client) MarkConversation(ctx context.Context, channelID, ts string) err
 }
 
 func (c *Client) resolveChannelUsers(members []string) []*slack.User {
-	var users []*slack.User
-
 	selfID := ""
 	if c.info != nil && c.info.User != nil {
 		selfID = c.info.User.ID
 	}
 
-	for _, user := range members {
-		if selfID != "" && selfID == user {
-			continue
-		}
+	users, missing := c.cachedChannelUsers(members, selfID)
+	if len(missing) == 0 {
+		return users
+	}
 
-		if u := c.GetUser(user); u != nil {
+	if c.isCookieSession() {
+		ctx, cancel := context.WithTimeout(context.Background(), edgeUsersTimeout)
+		c.fetchEdgeUsersInfo(ctx, missing)
+		cancel()
+
+		users, missing = c.cachedChannelUsers(members, selfID)
+	}
+
+	// Avoid firing N sequential users.info calls while background users.list
+	// is still running; missing passive members will be backfilled once loaded.
+	if len(missing) == 0 || !c.usersLoaded.Load() {
+		return users
+	}
+
+	for _, uid := range missing {
+		if u := c.GetUser(uid); u != nil {
 			users = append(users, u)
 		}
 	}
 
 	return users
+}
+
+func (c *Client) cachedChannelUsers(members []string, selfID string) ([]*slack.User, []string) {
+	users := make([]*slack.User, 0, len(members))
+
+	var missing []string
+
+	c.RLock()
+	defer c.RUnlock()
+
+	for _, uid := range members {
+		if uid == "" || (selfID != "" && selfID == uid) {
+			continue
+		}
+
+		if u, ok := c.users[uid]; ok {
+			cp := u
+			users = append(users, &cp)
+		} else {
+			missing = append(missing, uid)
+		}
+	}
+
+	return users, missing
 }
 
 func (c *Client) fetchChannelMembers(channelID string) ([]string, error) {
