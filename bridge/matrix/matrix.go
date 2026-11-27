@@ -129,6 +129,7 @@ type Matrix struct {
 	reactionMetaCache  *lru.Cache[id.EventID, reactionMeta]
 	userResolveCache   *lru.Cache[string, id.UserID]
 	userInfoCache      *lru.Cache[id.UserID, cachedUser]
+	nickCache          *lru.Cache[string, id.UserID]
 
 	pinFetchMu    sync.Mutex
 	pinFetchStart time.Time
@@ -256,6 +257,7 @@ func New(ctx context.Context, cfg *config.Config, cred bridge.Credentials, event
 	m.pendingLimited = make(map[id.RoomID]string)
 	m.userResolveCache, _ = lru.New[string, id.UserID](2048)
 	m.userInfoCache, _ = lru.New[id.UserID, cachedUser](2048)
+	m.nickCache, _ = lru.New[string, id.UserID](nickCacheSize)
 
 	if cred.Token != "" && cred.Server == "" {
 		cancel()
@@ -866,6 +868,7 @@ func (m *Matrix) Logout(ctx context.Context) error {
 
 	m.userResolveCache.Purge()
 	m.userInfoCache.Purge()
+	m.nickCache.Purge()
 	m.mc.Logout()
 	m.roomUpdateCancel()
 	m.cancel()
@@ -891,6 +894,8 @@ func (m *Matrix) MsgUserThread(ctx context.Context, userID, parentID, text strin
 	if parentID != "" {
 		rootID = m.resolveThreadRoot(ctx, roomID, id.EventID(parentID))
 	}
+
+	text = m.resolveOutboundMentions(text)
 
 	m.beginSend(text)
 
@@ -938,6 +943,8 @@ func (m *Matrix) MsgUserQuote(ctx context.Context, userID, threadID, quotedPostI
 
 		rootID = m.resolveThreadRoot(ctx, roomID, targetID)
 	}
+
+	text = m.resolveOutboundMentions(text)
 
 	m.beginSend(text)
 
@@ -1046,6 +1053,8 @@ func (m *Matrix) MsgChannelThread(ctx context.Context, channelID, parentID, text
 		rootID = m.resolveThreadRoot(ctx, roomID, id.EventID(parentID))
 	}
 
+	text = m.resolveOutboundMentions(text)
+
 	m.beginSend(text)
 
 	eventID, err := m.mc.Send(ctx, roomID, rootID, text)
@@ -1083,6 +1092,8 @@ func (m *Matrix) MsgChannelQuote(ctx context.Context, channelID, threadID, quote
 		rootID = m.resolveThreadRoot(ctx, roomID, targetID)
 	}
 
+	text = m.resolveOutboundMentions(text)
+
 	m.beginSend(text)
 
 	eventID, err := m.mc.SendReply(ctx, roomID, rootID, id.EventID(quotedPostID), text)
@@ -1116,6 +1127,8 @@ func (m *Matrix) ModifyPost(ctx context.Context, msgID, text string) error {
 	if text == "" {
 		return m.mc.Delete(ctx, roomID, targetID)
 	}
+
+	text = m.resolveOutboundMentions(text)
 
 	editID, err := m.mc.Edit(ctx, roomID, targetID, text)
 	if err != nil {
@@ -1640,6 +1653,7 @@ func (m *Matrix) createUser(userID id.UserID) *bridge.UserInfo {
 		dirTmpl:     dirTmpl,
 		isBot:       isBot,
 	})
+	m.cacheNick(nick, userID)
 
 	return &info
 }
