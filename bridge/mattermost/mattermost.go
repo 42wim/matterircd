@@ -470,6 +470,7 @@ func (m *Mattermost) loginToMattermost(ctx context.Context, onWsConnect func(), 
 	mc.OnWsDisconnect = onWsDisconnect
 	mc.AsyncUserPrefetch = true
 	mc.OnUsersLoaded = m.onUsersLoaded
+	mc.LazyPublicChannels = true
 
 	mc.Timeout = rc.ClientTimeout
 	if mc.Timeout == 0 {
@@ -662,6 +663,11 @@ func (m *Mattermost) Join(ctx context.Context, channelName string) (string, stri
 }
 
 func (m *Mattermost) List(ctx context.Context) (map[string]string, error) {
+	err := m.mc.EnsurePublicChannels(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	channelinfo := make(map[string]string)
 
 	for _, channel := range append(m.mc.GetChannels(), m.mc.GetMoreChannels()...) {

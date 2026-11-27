@@ -186,6 +186,7 @@ type Client struct {
 
 	ForceSyncOnReconnect bool
 	CacheClearCutoff     time.Duration
+	LazyPublicChannels   bool
 
 	UserAgent string
 
@@ -198,6 +199,9 @@ type Client struct {
 	// reauthMu serializes HTTP-only session re-login on 401 Unauthorized.
 	reauthMu   sync.Mutex
 	lastReauth time.Time
+
+	// publicChannelsMu serializes lazy public channel fetches across concurrent callers.
+	publicChannelsMu sync.Mutex
 
 	// OnChannelNameResolved, if set, is called after a channel name that was previously
 	// unresolved (still showing an ID) has been healed. It must not block.
@@ -1001,7 +1005,10 @@ func (m *Client) initUserChannels(ctx context.Context) error {
 
 		m.logger.Debugf("found %d channels for user (%d channels, %d DMs/GMs) in team %s",
 			joinedChannels+directMessages, joinedChannels, directMessages, t.Team.Name)
-		m.logger.Debugf("found %d public channels in team %s", publicCount, t.Team.Name)
+
+		if !m.LazyPublicChannels {
+			m.logger.Debugf("found %d public channels in team %s", publicCount, t.Team.Name)
+		}
 	}
 
 	return nil
