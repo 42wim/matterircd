@@ -560,7 +560,7 @@ func (g *GoogleChat) formatIncomingText(
 	eventKind, parentID string,
 	rc *config.RuntimeConfig,
 ) string {
-	text := post.ContentText
+	text := g.rewriteIncomingMentions(post.ContentText, post.Mentions)
 	useUnicode := rc.GoogleChat.Formatter.Unicode
 
 	if post.QuotedMessage != nil && post.QuotedMessage.IsForwarded {
@@ -576,6 +576,47 @@ func (g *GoogleChat) formatIncomingText(
 		text = utils.AppendMessageSuffix(text, utils.FormatActionSuffix(utils.SuffixEdited, useUnicode))
 	case "post_deleted":
 		text = utils.AppendMessageSuffix(text, utils.FormatActionSuffix(utils.SuffixDeleted, useUnicode))
+	}
+
+	return text
+}
+
+func (g *GoogleChat) rewriteIncomingMentions(text string, mentions []googlechatclient.Mention) string {
+	if text == "" || len(mentions) == 0 {
+		return text
+	}
+
+	for _, mention := range mentions {
+		if mention.All {
+			continue
+		}
+
+		if mention.UserID == "" {
+			continue
+		}
+
+		name := strings.TrimSpace(mention.DisplayName)
+		if name == "" {
+			if u := g.gc.GetUser(mention.UserID); u != nil {
+				name = strings.TrimSpace(u.DisplayName)
+			}
+		}
+
+		if name == "" {
+			continue
+		}
+
+		nick := g.nickForUserID(mention.UserID)
+		if nick == "" {
+			continue
+		}
+
+		repl := "@" + nick
+		if strings.Contains(text, "@"+name) {
+			text = strings.ReplaceAll(text, "@"+name, repl)
+		} else {
+			text = strings.ReplaceAll(text, name, repl)
+		}
 	}
 
 	return text
