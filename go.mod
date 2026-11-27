@@ -16,7 +16,7 @@ require (
 	github.com/matterbridge/matterclient v0.0.0-20261127225258-23864438aed7
 	github.com/matterbridge/msteamsclient v0.0.0-20261127193756-fdff429a0117
 	github.com/matterbridge/rocketchatclient v0.0.0-20261127221321-0a289b26b9d1
-	github.com/matterbridge/slackclient v0.0.0-20261126225955-594846d05f6e
+	github.com/matterbridge/slackclient v0.0.0-20261127231140-aaa08b926bc3
 	github.com/mattermost/mattermost/server/public v0.3.0
 	github.com/mattn/go-mastodon v0.0.6
 	github.com/mitchellh/mapstructure v1.5.0

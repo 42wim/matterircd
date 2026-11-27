@@ -133,7 +133,7 @@ github.com/matterbridge/msteamsclient
 # github.com/matterbridge/rocketchatclient v0.0.0-20261127221321-0a289b26b9d1
 ## explicit; go 1.26.2
 github.com/matterbridge/rocketchatclient
-# github.com/matterbridge/slackclient v0.0.0-20261126225955-594846d05f6e
+# github.com/matterbridge/slackclient v0.0.0-20261127231140-aaa08b926bc3
 ## explicit; go 1.26.2
 github.com/matterbridge/slackclient
 # github.com/mattermost/go-i18n v1.11.1-0.20211013152124-5c415071e404
