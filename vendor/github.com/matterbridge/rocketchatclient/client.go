@@ -45,9 +45,10 @@ type Client struct {
 	apiLogger     *logrus.Entry
 	rootAPILogger *logrus.Logger
 
-	cache   *stateCache
-	eventCh chan ddpEvent
-	wg      sync.WaitGroup
+	cache            *stateCache
+	eventCh          chan ddpEvent
+	wg               sync.WaitGroup
+	userPrefetchOnce sync.Once
 
 	connMu         sync.Mutex
 	activeConn     *ddpConn
