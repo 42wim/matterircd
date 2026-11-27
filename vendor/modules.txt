@@ -124,7 +124,7 @@ github.com/matterbridge/logrus-prefixed-formatter
 ## explicit; go 1.26.0
 github.com/matterbridge/matrixclient
 github.com/matterbridge/matrixclient/e2ee
-# github.com/matterbridge/matterclient v0.0.0-20261116034806-3087b48d325c
+# github.com/matterbridge/matterclient v0.0.0-20261127225258-23864438aed7
 ## explicit; go 1.26.2
 github.com/matterbridge/matterclient
 # github.com/matterbridge/msteamsclient v0.0.0-20261127193756-fdff429a0117
