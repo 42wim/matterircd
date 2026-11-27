@@ -663,18 +663,17 @@ func (m *Mattermost) Join(ctx context.Context, channelName string) (string, stri
 }
 
 func (m *Mattermost) List(ctx context.Context) (map[string]string, error) {
-	publicChannels, err := m.mc.FetchPublicChannels(ctx)
+	err := m.mc.EnsurePublicChannels(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	joinedChannels := m.mc.GetChannels()
-	channelinfo := make(map[string]string, len(joinedChannels)+len(publicChannels))
+	channelinfo := make(map[string]string)
 
-	addChannel := func(channel *model.Channel) {
+	for _, channel := range append(m.mc.GetChannels(), m.mc.GetMoreChannels()...) {
 		// FIXME: This needs to be broken up into multiple messages to fit <510 chars
 		if m.mc.IsDMChannelName(channel.Name) {
-			return
+			continue
 		}
 
 		channelName := "#" + channel.Name
@@ -684,14 +683,6 @@ func (m *Mattermost) List(ctx context.Context) (map[string]string, error) {
 		}
 
 		channelinfo[channelName] = strings.ReplaceAll(channel.Header, "\n", " | ")
-	}
-
-	for _, channel := range joinedChannels {
-		addChannel(channel)
-	}
-
-	for _, channel := range publicChannels {
-		addChannel(channel)
 	}
 
 	return channelinfo, nil

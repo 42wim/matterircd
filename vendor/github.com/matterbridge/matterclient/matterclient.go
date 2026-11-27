@@ -200,6 +200,9 @@ type Client struct {
 	reauthMu   sync.Mutex
 	lastReauth time.Time
 
+	// publicChannelsMu serializes lazy public channel fetches across concurrent callers.
+	publicChannelsMu sync.Mutex
+
 	// OnChannelNameResolved, if set, is called after a channel name that was previously
 	// unresolved (still showing an ID) has been healed. It must not block.
 	OnChannelNameResolved func(channelID, name string)
