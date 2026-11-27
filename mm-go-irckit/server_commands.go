@@ -525,7 +525,7 @@ func CmdNick(s Server, u *User, msg *irc.Message) error {
 	// only update mattermost nick if we're logged in
 	err := u.br.Nick(u.ctx, msg.Params[0])
 	if err != nil {
-		_ = s.EncodeMessage(u, irc.ERR_ERRONEUSNICKNAME, []string{u.Nick}, "Erroneus nickname")
+		_ = s.EncodeMessage(u, irc.ERR_ERRONEUSNICKNAME, []string{u.Nick}, "Erroneous nickname")
 		return err
 	}
 

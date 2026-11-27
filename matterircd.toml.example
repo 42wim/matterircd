@@ -12,7 +12,7 @@ trace = false
 #default false
 gops = false
 
-#TLS interface:port to bind to. (e.g 127.0.0.1:6697) (deault "")
+#TLS interface:port to bind to. (e.g 127.0.0.1:6697) (default "")
 #
 #TLSBind = "127.0.0.1:6697"
 
