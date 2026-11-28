@@ -16,7 +16,6 @@
 - Never introduce speculative flexibility, broad refactoring, or unrelated cleanups.
 - Avoid excessive defensive over-engineering where standard repository flow suffices.
 - Keep public APIs backward compatible unless breaking changes are explicitly requested.
-- Do not write or suggest adding unit tests or test cases unless specifically requested.
 
 ## Idioms, Networking & Performance
 

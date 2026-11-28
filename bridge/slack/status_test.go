@@ -179,6 +179,7 @@ func TestSlackClientCountsAndLookups(t *testing.T) {
 	assert.Nil(t, sc.GetUserByUsername("nonexistent"))
 
 	sc.UpdateChannel("C10", "general")
+	sc.SetChannelJoined("C10", true)
 	assert.Equal(t, 1, sc.GetChannelCount())
 	assert.Equal(t, "#general", sc.GetChannelName("C10"))
 
