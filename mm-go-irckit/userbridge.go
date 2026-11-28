@@ -1681,16 +1681,10 @@ func (u *User) addUsersToChannels() {
 		u.addUsersToChannel(users, "&users", "&users")
 	}
 
-	var ch Channel
-
 	if u.br.Protocol() == serviceMastodon {
-		ch = srv.Channel(serviceMastodon)
+		ch := srv.Channel(serviceMastodon)
 		ch.Join(u) //nolint:errcheck
 	}
-
-	// channel that receives messages from channels not joined on irc
-	ch = srv.Channel("&messages")
-	_ = ch.Join(u)
 
 	// Fetch, filter, and sort the channels alphabetically
 	var joinChannels []*bridge.ChannelInfo
@@ -1815,9 +1809,15 @@ func (u *User) addUsersToChannels() {
 		}
 		u.eventLoopMutex.Unlock()
 
-		// Initial channel sync and history replay are complete; populate and join &users
-		// (unless an AsyncUserLoader bridge is still prefetching users in the background).
+		// Initial channel sync and history replay are complete; join &messages, then
+		// populate and join &users (unless an AsyncUserLoader bridge is still
+		// prefetching users in the background).
 		if u.currentBridge() == syncBr && u.ctx != nil && u.ctx.Err() == nil {
+			msgCh := srv.Channel("&messages")
+			if !msgCh.HasUser(u) {
+				_ = msgCh.Join(u)
+			}
+
 			u.initialSyncDone.Store(true)
 			u.syncUsersChannel()
 		}
