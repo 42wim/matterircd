@@ -44,6 +44,12 @@ const maxInviteTextLen = 400
 // eventChanBufferSize gives bridges headroom while loginTo completes startup sync.
 const eventChanBufferSize = 1000
 
+const (
+	// Shed disposable events at tiered queue-fill thresholds to protect real messages.
+	shedTypingPercent = 50
+	shedStatusPercent = 75
+)
+
 type UserBridge struct {
 	Srv          Server
 	Credentials  bridge.Credentials
@@ -143,6 +149,44 @@ func NewUserBridge(c net.Conn, srv Server, cfg *config.Config, dbs map[string]*b
 	return u
 }
 
+func (u *User) isSelfUserID(userID string) bool {
+	if userID == "" {
+		return false
+	}
+
+	if br := u.currentBridge(); br != nil {
+		if me := br.GetMe(); me != nil {
+			return userID == me.User
+		}
+	}
+
+	return u.User != "" && userID == u.User
+}
+
+func (u *User) shouldShedEvent(eventChan <-chan *bridge.Event, event *bridge.Event) bool {
+	chCap := cap(eventChan)
+	if chCap <= 0 || event == nil {
+		return false
+	}
+
+	chLen := len(eventChan)
+
+	switch e := event.Data.(type) {
+	case *bridge.TypingEvent:
+		if chLen*100 >= chCap*shedTypingPercent {
+			logger.Tracef("shedding typing event (%d/%d queued)", chLen, chCap)
+			return true
+		}
+	case *bridge.StatusChangeEvent:
+		if chLen*100 >= chCap*shedStatusPercent && !u.isSelfUserID(e.UserID) {
+			logger.Tracef("shedding status change event for %s (%d/%d queued)", e.UserID, chLen, chCap)
+			return true
+		}
+	}
+
+	return false
+}
+
 //nolint:funlen,gocognit,gocyclo
 func (u *User) handleEventChan(ctx context.Context, eventChan <-chan *bridge.Event) {
 	// Flush to disk every 2 minutes to prevent I/O bottlenecks
@@ -158,6 +202,10 @@ func (u *User) handleEventChan(ctx context.Context, eventChan <-chan *bridge.Eve
 
 			if logger.Level.String() == "trace" {
 				logger.Tracef("eventchan %s", spew.Sdump(event))
+			}
+
+			if u.shouldShedEvent(eventChan, event) {
+				continue
 			}
 
 			// Process the event
