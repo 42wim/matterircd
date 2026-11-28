@@ -795,6 +795,10 @@ func (c *Client) handleTrouterChatEvent(resourceType string, resource json.RawMe
 	}
 
 	convID, _ := splitConversationAndRoot(raw.ConversationID, raw.ConversationLink, "")
+	if isInternalPseudoConversation(convID) {
+		return
+	}
+
 	fromMRI := extractMRIFromURL(raw.From)
 
 	switch raw.MessageType {
