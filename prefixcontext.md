@@ -87,7 +87,7 @@ You can quote an existing message and include your reply underneath it using a u
 - `@@<id> >@ <message>` — quotes `<id>` and posts according to the bridge's `QuoteThreaded` setting.
 - `@@<thread_id> >@@<post_id> <message>` — replies inside `<thread_id>` while quoting `<post_id>` (can reference a different message or thread).
 
-All forms support `!!` (the last message you sent), 3-hex context IDs (`001`), and native bridge message IDs.
+All forms support `!!` (the last message you sent), `!$` (the last message received from another user), 3-hex context IDs (`001`), and native bridge message IDs.
 
 For Markdown-quoted bridges (Mattermost and Slack), you can optionally limit how much of the original message is quoted by placing `<N><L|W|C>` (case-insensitive, `N >= 1`) immediately after `>`:
 
@@ -148,7 +148,7 @@ You can also modify or delete the last message you sent.
 23:25 < wimirc> s//
 ```
 
-Or start a thread with the last message you sent.
+Or reply to the last message you sent (`!!`) or the last message received from another user (`!$`). Note that in busy channels, a new message arriving while you are typing updates `!$`, so prefer an explicit `@@<id>` when multiple conversations are active.
 
 ```irc
 23:25 <@wim> [001] hi
@@ -156,6 +156,8 @@ Or start a thread with the last message you sent.
 23:25 < wimirc> hello
 23:25 < wimirc> @@!! how are you?
 23:25 <@wim> [005->003] good
+23:26 < wimirc> @@!$ glad to hear it!
+23:26 < wimirc> @@!$ +:thumbsup:
 ```
 
 ## add/remove reactions to messages/posts from other users
