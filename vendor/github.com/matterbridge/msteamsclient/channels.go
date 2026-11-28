@@ -385,13 +385,22 @@ func (c *Client) collectCSAChatMembers(rawChats []rawCSAChat, chatMembers map[st
 	}
 }
 
+func isInternalPseudoConversation(convID string) bool {
+	if strings.HasPrefix(convID, "48:") && convID != selfNotesConvID {
+		return true
+	}
+
+	// Teams internal activity/mentions/followed-thread stream threads.
+	return strings.HasPrefix(convID, "19:stream01_")
+}
+
 func parseRawConversation(rc *rawConversation) *Conversation {
 	if rc.ID == "" {
 		return nil
 	}
 
 	// Skip internal system/notification pseudo-conversations.
-	if strings.HasPrefix(rc.ID, "48:") && rc.ID != selfNotesConvID {
+	if isInternalPseudoConversation(rc.ID) {
 		return nil
 	}
 
