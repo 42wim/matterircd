@@ -54,6 +54,8 @@ You can also see who replied to what thread
 
 Set `ThreadContextColor` per bridge in `matterircd.toml` (`"off"` by default, or `"dark"`, `"light"`, `"auto"` / `"on"`) to deterministically colorize thread context tags using the IRC 99-color palette so replies in the same thread share a consistent color across all IRC clients.
 
+Set `ReplyPrefix` per bridge in `matterircd.toml` to override the reply prefix glyph shown inside thread context tags (defaults to `"->"`, or `"↪"` when `Unicode = true`).
+
 ```irc
 19:58 <@wim> [001] normal message
 19:58 <@wim> [002] another one

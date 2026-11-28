@@ -128,6 +128,7 @@ type BridgeConfig struct {
 	SuffixContext      bool
 	ThreadContext      string
 	ThreadContextColor string
+	ReplyPrefix        string
 	ShowContextMulti   bool
 
 	// Quote in reply settings
@@ -343,6 +344,7 @@ func (c *Config) buildBridgeConfig(section string) BridgeConfig {
 		ShowContextMulti:   c.v.GetBool(section + ".ShowContextMulti"),
 		ThreadContext:      c.v.GetString(section + ".ThreadContext"),
 		ThreadContextColor: c.v.GetString(section + ".ThreadContextColor"),
+		ReplyPrefix:        c.v.GetString(section + ".ReplyPrefix"),
 
 		QuoteThreaded: c.v.GetBool(section + ".QuoteThreaded"),
 		QuoteAuthor:   c.v.GetString(section + ".QuoteAuthor"),
