@@ -589,7 +589,7 @@ var colorRegExp = regexp.MustCompile(`\x03([019]?[0-9](,[019]?[0-9])?)?`) //noli
 var hexColorRegExp = regexp.MustCompile(`\x04[0-9a-fA-F]{6}`) //nolint:unused
 
 func isValidThreadID(id string) bool {
-	if id == "!!" || (len(id) > 1 && id[0] == '$') {
+	if id == "!!" || id == "!$" || (len(id) > 1 && id[0] == '$') {
 		return true
 	}
 
@@ -960,10 +960,13 @@ func awayNotice(s Server, u *User, br bridge.Bridger, toUser *User) {
 	toUser.MarkAwayNotified(now, gen)
 }
 
-const quoteIDPattern = `!!|\$[0-9A-Za-z\-_\.\+\/]{43}|[0-9a-v]{34,80}|[0-9a-z]{26}|[0-9A-Za-z]{17}|[0-9a-v]{16}|[0-9A-Za-z_-]{11}|[0-9a-f]{3}`
+const (
+	modifyIDPattern = `!!|\$[0-9A-Za-z\-_\.\+\/]{43}|[0-9a-v]{34,80}|[0-9a-z]{26}|[0-9A-Za-z]{17}|[0-9a-v]{16}|[0-9A-Za-z_-]{11}|[0-9a-f]{3}`
+	quoteIDPattern  = `!\$|` + modifyIDPattern
+)
 
 var (
-	parseModifyMsgRegExp          = regexp.MustCompile(`^s(\/(?:` + quoteIDPattern + `)?\/)(.*)`)
+	parseModifyMsgRegExp          = regexp.MustCompile(`^s(\/(?:` + modifyIDPattern + `)?\/)(.*)`)
 	parseReactionToMsgRegExp      = regexp.MustCompile(`^\@\@(` + quoteIDPattern + `)\s+([\-\+]):(\S+):\s*$`)
 	parseSelfQuoteMsgRegExp       = regexp.MustCompile(`(?s)^\@\@(` + quoteIDPattern + `)\s+>(?:([1-9][0-9]*)([lLwWcC]))?\@\s+(.*)`)
 	parseCrossQuoteMsgRegExp      = regexp.MustCompile(`(?s)^\@\@(` + quoteIDPattern + `)\s+>(?:([1-9][0-9]*)([lLwWcC]))?\@\@(` + quoteIDPattern + `)\s+(.*)`)
@@ -1013,7 +1016,7 @@ func splitFirstToken(s string) (string, string) {
 }
 
 func resolvePostIDToken(resolver bridge.PostIDResolver, channelID, tok string) string {
-	if tok == "" || tok == "!!" || (len(tok) == 3 && isAllInAlphabet(tok, "0123456789abcdef")) {
+	if tok == "" || tok == "!!" || tok == "!$" || (len(tok) == 3 && isAllInAlphabet(tok, "0123456789abcdef")) {
 		return ""
 	}
 
@@ -1112,6 +1115,38 @@ func resolvePostIDRefs(resolver bridge.PostIDResolver, channelID, text string) s
 	}
 }
 
+func (u *User) resolveHistoryPostID(channelID, rawID string, preferThreadRoot bool) (string, bool) {
+	switch rawID {
+	case "!!":
+		u.msgLastMutex.RLock()
+		msgLast, ok := u.msgLast[channelID]
+		u.msgLastMutex.RUnlock()
+
+		if !ok || msgLast[0] == "" {
+			return "", false
+		}
+
+		if preferThreadRoot && msgLast[1] != "" {
+			return msgLast[1], true
+		}
+
+		return msgLast[0], true
+	case "!$":
+		lastMsgID, lastParentID, ok := u.getMsgLastRecv(channelID)
+		if !ok {
+			return "", false
+		}
+
+		if preferThreadRoot && lastParentID != "" {
+			return lastParentID, true
+		}
+
+		return lastMsgID, true
+	default:
+		return "", false
+	}
+}
+
 func parseReactionToMsg(s Server, u *User, msg *irc.Message, channelID string) bool {
 	query := msg.Params[0]
 
@@ -1124,14 +1159,22 @@ func parseReactionToMsg(s Server, u *User, msg *irc.Message, channelID string) b
 	action := matches[2]
 	emoji := matches[3]
 
-	if msgID == "!!" {
-		u.msgLastMutex.RLock()
+	if msgID == "!!" || msgID == "!$" {
+		resolved, ok := u.resolveHistoryPostID(channelID, msgID, false)
+		if !ok && msgID == "!$" {
+			verb := "added"
+			if action == "-" {
+				verb = "removed"
+			}
 
-		if msgLast, ok := u.msgLast[channelID]; ok {
-			msgID = msgLast[0]
+			sendDeliveryError(s, u, query, "reaction: "+emoji+" could not be "+verb+": no previous received message found")
+
+			return true
 		}
 
-		u.msgLastMutex.RUnlock()
+		if ok {
+			msgID = resolved
+		}
 	}
 
 	// matterircd style prefix/suffix contexts (e.g. 001 and fa2).
@@ -1305,21 +1348,12 @@ func parseThreadID(u *User, msg *irc.Message, channelID string) (string, string)
 	}
 
 	switch {
-	case matches[1] == "!!":
-		u.msgLastMutex.RLock()
-		defer u.msgLastMutex.RUnlock()
-
-		msgLast, ok := u.msgLast[channelID]
-		if !ok {
-			return "", ""
+	case matches[1] == "!!", matches[1] == "!$":
+		if parentID, ok := u.resolveHistoryPostID(channelID, matches[1], true); ok {
+			return parentID, matches[2]
 		}
 
-		parentID := msgLast[0]
-		if msgLast[1] != "" {
-			parentID = msgLast[1]
-		}
-
-		return parentID, matches[2]
+		return "", ""
 	case len(matches[1]) == 3:
 		id, err := strconv.ParseInt(matches[1], 16, 0)
 		if err != nil {
@@ -1352,6 +1386,11 @@ func parseThreadID(u *User, msg *irc.Message, channelID string) (string, string)
 func threadMsgChannelUser(s Server, u *User, msg *irc.Message, channelID string, toUser bool) bool {
 	threadID, text := parseThreadID(u, msg, channelID)
 	if threadID == "" {
+		if after, ok := strings.CutPrefix(msg.Trailing, "@@!$"); ok && len(after) > 0 && isASCIIWhitespace(after[0]) {
+			sendDeliveryError(s, u, msg.Params[0], "could not reply: no previous received message found")
+			return true
+		}
+
 		return false
 	}
 
@@ -1440,20 +1479,9 @@ func parseQuoteLimit(countStr, unitStr string) quoteLimit {
 
 func resolveQuoteID(u *User, rawID, channelID string, preferThreadRoot bool) string {
 	switch {
-	case rawID == "!!":
-		u.msgLastMutex.RLock()
-		defer u.msgLastMutex.RUnlock()
-
-		msgLast, ok := u.msgLast[channelID]
-		if !ok {
-			return ""
-		}
-
-		if preferThreadRoot && msgLast[1] != "" {
-			return msgLast[1]
-		}
-
-		return msgLast[0]
+	case rawID == "!!", rawID == "!$":
+		resolved, _ := u.resolveHistoryPostID(channelID, rawID, preferThreadRoot)
+		return resolved
 	case len(rawID) == 3:
 		id, err := strconv.ParseInt(rawID, 16, 0)
 		if err != nil {

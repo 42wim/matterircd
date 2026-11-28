@@ -73,6 +73,9 @@ type UserBridge struct {
 	// per channel as {msgID, threadID}. msgPrev takes over when msgLast gets deleted.
 	msgLast map[string][2]string
 	msgPrev map[string][2]string
+	// msgLastRecv holds the last message received from another user per channel/DM
+	// as {msgID, parentID}, backing the "!$" shorthand.
+	msgLastRecv map[string][2]string
 	// lastSent holds the most recent {msgID, threadID, targetID} we sent across all channels.
 	lastSent [3]string
 
@@ -118,6 +121,7 @@ func NewUserBridge(c net.Conn, srv Server, cfg *config.Config, dbs map[string]*b
 	u.msgChanLocks = make(map[string]chan struct{})
 	u.msgLast = make(map[string][2]string)
 	u.msgPrev = make(map[string][2]string)
+	u.msgLastRecv = make(map[string][2]string)
 	u.dmTopicPushed = make(map[string]string)
 	u.msgMap = make(map[string]map[string]int)
 	u.msgMapIndex = make(map[string]map[int]string)
@@ -528,10 +532,14 @@ func (u *User) handleDirectMessageEvent(event *bridge.DirectMessageEvent) bool {
 	prefix := ""
 	suffix := ""
 
-	if event.Event == "dm_topic" {
+	if event.Event == eventDMTopic {
 		showContext = false
 		maxlen = 0
 	} else {
+		if isTrackableReceivedMsg(event.Sender, event.MessageID, event.Event) {
+			u.setMsgLastRecv(event.Sender.User, event.MessageID, event.ParentID)
+		}
+
 		prefixUser := event.Sender.User
 		if event.Sender.Me {
 			prefixUser = event.Receiver.User
@@ -887,7 +895,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) bool
 		senderPrefix = &irc.Prefix{Name: nick, User: nick, Host: u.Srv.Name()}
 	}
 
-	if event.Event == "channel_purpose" {
+	if event.Event == eventChannelPurpose {
 		err := spoofChannelMessage(ch, systemUser, "\x1d"+nick+" "+event.Text+"\x1d")
 
 		return err == nil
@@ -895,7 +903,7 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) bool
 
 	event.Text = u.applyShowMentions(event.Text)
 
-	if event.Sender != nil && event.Sender.Me && event.ChannelType != "D" && event.Event != "post_deleted" && event.Event != eventReaction {
+	if event.Sender != nil && event.Sender.Me && event.ChannelType != "D" && event.Event != eventPostDeleted && event.Event != eventReaction {
 		u.addRepliedThread(event.ChannelID, threadOrMsgID(event.ParentID, event.MessageID))
 	} else {
 		u.applyRepliedHighlight(event)
@@ -918,6 +926,10 @@ func (u *User) handleChannelMessageEvent(event *bridge.ChannelMessageEvent) bool
 		trimmedText := strings.TrimLeft(text, " \t")
 		if !disableMarkdown && strings.HasPrefix(trimmedText, blockQuoteCharDefault) && blockQuoteChar != blockQuoteCharDefault {
 			text = strings.Replace(text, blockQuoteCharDefault, blockQuoteChar, 1)
+		}
+
+		if isTrackableReceivedMsg(event.Sender, event.MessageID, event.Event) {
+			u.setMsgLastRecv(event.ChannelID, event.MessageID, event.ParentID)
 		}
 
 		text, prefix, suffix, showContext, maxlen = u.handleMessageThreadContext(event.ChannelID, event.MessageID, event.ParentID, event.Event, text)
@@ -1119,9 +1131,24 @@ func (u *User) handleFileEvent(event *bridge.FileEvent) {
 		}
 	}
 
+	u.recordReceivedFile(event)
+
 	if event.ChannelType == "D" && len(event.Files) > 0 {
 		u.maybePushDMTopic(event.ChannelID, u.dmPeerNick(event.Sender, event.Receiver))
 	}
+}
+
+func (u *User) recordReceivedFile(event *bridge.FileEvent) {
+	if len(event.Files) == 0 || !isTrackableReceivedMsg(event.Sender, event.MessageID, "") {
+		return
+	}
+
+	targetID := event.ChannelID
+	if event.ChannelType == "D" {
+		targetID = event.Sender.User
+	}
+
+	u.setMsgLastRecv(targetID, event.MessageID, event.ParentID)
 }
 
 func (u *User) handleChannelCreateEvent(event *bridge.ChannelCreateEvent) {
@@ -2341,11 +2368,15 @@ func (u *User) replayHistoryEvents(brchannel *bridge.ChannelInfo, since int64, l
 			createAt, text, nick, msgID, parentID, files = e.CreateAt, e.Text, u.sanitizeNick(e.Sender.Nick), e.MessageID, e.ParentID, e.Files
 			if e.Sender.Me {
 				nick = u.Nick
+			} else if isTrackableReceivedMsg(e.Sender, e.MessageID, e.Event) {
+				u.setMsgLastRecv(brchannel.ID, e.MessageID, e.ParentID)
 			}
 		case *bridge.DirectMessageEvent:
 			createAt, text, nick, msgID, parentID, files = e.CreateAt, e.Text, u.sanitizeNick(e.Sender.Nick), e.MessageID, e.ParentID, e.Files
 			if e.Sender.Me {
 				nick = u.Nick
+			} else if isTrackableReceivedMsg(e.Sender, e.MessageID, e.Event) {
+				u.setMsgLastRecv(e.Sender.User, e.MessageID, e.ParentID)
 			}
 		case *bridge.ChannelAddEvent:
 			createAt, text, nick = e.CreateAt, e.Text, systemUser
@@ -3011,6 +3042,10 @@ func (u *User) logoutFrom(protocol string) error {
 	clear(u.dmTopicPushed)
 	u.dmTopicMu.Unlock()
 
+	u.msgLastMutex.Lock()
+	clear(u.msgLastRecv)
+	u.msgLastMutex.Unlock()
+
 	u.clearRepliedThreadsCache()
 
 	u.Srv.Logout(u)
@@ -3454,6 +3489,46 @@ func (u *User) getLastSent() (string, string, string) {
 	return u.lastSent[0], u.lastSent[1], u.lastSent[2]
 }
 
+func isTrackableReceivedMsg(sender *bridge.UserInfo, msgID, eventName string) bool {
+	if msgID == "" || sender == nil || sender.Me || sender.Nick == systemUser {
+		return false
+	}
+
+	switch eventName {
+	case "post_edited", eventPostDeleted, "post_unfurl", eventReaction, "reaction_added", "reaction_removed", eventChannelPurpose, eventDMTopic:
+		return false
+	}
+
+	return true
+}
+
+func (u *User) setMsgLastRecv(channelID, msgID, parentID string) {
+	if channelID == "" || msgID == "" {
+		return
+	}
+
+	u.msgLastMutex.Lock()
+
+	if u.msgLastRecv == nil {
+		u.msgLastRecv = make(map[string][2]string)
+	}
+
+	u.msgLastRecv[channelID] = [2]string{msgID, parentID}
+	u.msgLastMutex.Unlock()
+}
+
+func (u *User) getMsgLastRecv(channelID string) (string, string, bool) {
+	if channelID == "" {
+		return "", "", false
+	}
+
+	u.msgLastMutex.RLock()
+	last, ok := u.msgLastRecv[channelID]
+	u.msgLastMutex.RUnlock()
+
+	return last[0], last[1], ok && last[0] != ""
+}
+
 // forgetMsgLast drops a deleted message from the last messages we sent in channelID.
 // When it was the last one, the previous one becomes the last one again.
 func (u *User) forgetMsgLast(channelID, msgID string) {
@@ -3505,6 +3580,7 @@ func (u *User) clearChannelState(channelID string) {
 	u.msgLastMutex.Lock()
 	delete(u.msgLast, channelID)
 	delete(u.msgPrev, channelID)
+	delete(u.msgLastRecv, channelID)
 	u.msgLastMutex.Unlock()
 
 	u.updateCounterMutex.Lock()

@@ -20,6 +20,9 @@ const (
 	repliedModeTrue               = "true"
 	repliedModeNick               = "nick"
 	eventReaction                 = "reaction"
+	eventPostDeleted              = "post_deleted"
+	eventChannelPurpose           = "channel_purpose"
+	eventDMTopic                  = "dm_topic"
 )
 
 func (u *User) repliedThreadCacheSize() int {
@@ -146,7 +149,7 @@ func (u *User) applyRepliedHighlight(event *bridge.ChannelMessageEvent) {
 	}
 
 	switch event.Event {
-	case "post_edited", "post_deleted", eventReaction, "channel_purpose":
+	case "post_edited", eventPostDeleted, eventReaction, eventChannelPurpose:
 		return
 	}
 

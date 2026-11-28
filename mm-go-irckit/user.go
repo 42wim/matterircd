@@ -226,7 +226,7 @@ func (u *User) Encode(msgs ...*irc.Message) error {
 var (
 	replyRegExp           = regexp.MustCompile(`^\@\@(?:` + quoteIDPattern + `)\s`)
 	unthreadedQuoteRegExp = regexp.MustCompile(`^>(?:[1-9][0-9]*[lLwWcC])?\@\@(?:` + quoteIDPattern + `)\s`)
-	modifyRegExp          = regexp.MustCompile(`^s/(?:` + quoteIDPattern + `)?/`)
+	modifyRegExp          = regexp.MustCompile(`^s/(?:` + modifyIDPattern + `)?/`)
 )
 
 // threadPrefix returns the thread ("@@id ") that text is a reply to, or an empty string.
