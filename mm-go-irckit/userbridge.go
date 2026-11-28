@@ -3148,12 +3148,15 @@ func (u *User) prefixContext(channelID, messageID, parentID, event string) strin
 		return ""
 	}
 
+	brCfg := u.br.BridgeConfig()
+
 	prefixChar := "->"
-	if u.br.FormatterConfig().Unicode {
+	if brCfg.ReplyPrefix != "" {
+		prefixChar = brCfg.ReplyPrefix
+	} else if u.br.FormatterConfig().Unicode {
 		prefixChar = "↪"
 	}
 
-	brCfg := u.br.BridgeConfig()
 	tc := brCfg.ThreadContext
 	colorMode := brCfg.ThreadContextColor
 
