@@ -1163,16 +1163,12 @@ func ping(u *User, toUser *User, args []string, service string) {
 	u.MsgUser(toUser, fmt.Sprintf("PONG (HTTP REST): status=OK, latency=%s", duration))
 }
 
-//nolint:funlen,gocyclo,cyclop
-func scrollback(u *User, toUser *User, args []string, service string) {
-	if service != serviceMattermost && service != serviceMatrix && service != serviceSlack && service != serviceMsTeams && service != serviceGoogleChat && service != serviceRocketChat {
-		u.MsgUser(toUser, "not implemented")
-		return
-	}
+const defaultScrollbackLimit = 60
 
+func parseScrollbackArgs(args []string) (string, int, bool, bool) {
 	var reqServerTime bool
 
-	filteredArgs := make([]string, 0, len(args))
+	filtered := make([]string, 0, len(args))
 
 	for i, arg := range args {
 		if i > 0 && (strings.EqualFold(arg, "server-time") || strings.EqualFold(arg, "--server-time")) {
@@ -1180,25 +1176,41 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 			continue
 		}
 
-		filteredArgs = append(filteredArgs, arg)
+		filtered = append(filtered, arg)
 	}
 
-	var err error
+	if len(filtered) == 0 || len(filtered) > 2 {
+		return "", 0, false, false
+	}
 
 	limit := 0
 
-	if len(filteredArgs) == 2 {
-		limit, err = strconv.Atoi(filteredArgs[1])
+	if len(filtered) == 2 {
+		var err error
+
+		limit, err = strconv.Atoi(filtered[1])
+		if err != nil || limit <= 0 {
+			return "", 0, false, false
+		}
 	}
 
-	if len(filteredArgs) == 0 || len(filteredArgs) > 2 || err != nil {
+	return filtered[0], limit, reqServerTime, true
+}
+
+//nolint:funlen,gocyclo,cyclop
+func scrollback(u *User, toUser *User, args []string, service string) {
+	if service != serviceMattermost && service != serviceMatrix && service != serviceSlack && service != serviceMsTeams && service != serviceGoogleChat && service != serviceRocketChat {
+		u.MsgUser(toUser, "not implemented")
+		return
+	}
+
+	search, limit, reqServerTime, ok := parseScrollbackArgs(args)
+	if !ok {
 		u.MsgUser(toUser, "need SCROLLBACK (#<channel>|<user>|<post/thread ID>) [lines] [server-time]")
 		u.MsgUser(toUser, "e.g. SCROLLBACK #bugs 10, SCROLLBACK @@nkrtrp6ym... server-time")
 
 		return
 	}
-
-	search := filteredArgs[0]
 
 	var channelID, searchPostID string
 
@@ -1236,7 +1248,7 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 	case strings.HasPrefix(strings.ToLower(search), postlistURL):
 		searchPostID = strings.TrimPrefix(search, postlistURL)
 	default:
-		u.MsgUser(toUser, "need SCROLLBACK (#<channel>|<user>|<post/thread ID>) <lines>")
+		u.MsgUser(toUser, "need SCROLLBACK (#<channel>|<user>|<post/thread ID>) [lines] [server-time]")
 		u.MsgUser(toUser, "e.g. SCROLLBACK #bugs 10 (show last 10 lines from #bugs)")
 
 		return
@@ -1246,7 +1258,12 @@ func scrollback(u *User, toUser *User, args []string, service string) {
 	if searchPostID != "" {
 		events = u.br.GetPostThread(u.ctx, searchPostID)
 	} else {
-		events = u.br.GetPosts(u.ctx, channelID, limit)
+		fetchLimit := limit
+		if fetchLimit == 0 {
+			fetchLimit = defaultScrollbackLimit
+		}
+
+		events = u.br.GetPosts(u.ctx, channelID, fetchLimit)
 	}
 
 	if len(events) == 0 {

@@ -2211,6 +2211,10 @@ func (r *RocketChat) GetPosts(ctx context.Context, channelID string, limit int) 
 		return []*bridge.Event{}
 	}
 
+	if limit <= 0 {
+		limit = 60
+	}
+
 	msgs, err := r.rc.GetHistory(ctx, channelID, limit, time.Time{})
 	if err != nil {
 		logger.Errorf("rocketchat: GetPosts %s: %s", channelID, err)
