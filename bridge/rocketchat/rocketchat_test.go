@@ -201,11 +201,38 @@ func newTestBridge(t *testing.T, tomlContent string, extra http.HandlerFunc) (*R
 		t.Fatal("timed out waiting for RocketChat Ready callback")
 	}
 
+	waitTestUsersLoaded(t, rc, evCh)
+
 	t.Cleanup(func() {
 		_ = rc.Logout(t.Context())
 	})
 
 	return rc, evCh, srv.URL
+}
+
+func waitTestUsersLoaded(t *testing.T, rc *RocketChat, evCh chan *bridge.Event) {
+	t.Helper()
+
+	if !rc.UsersReady() {
+		select {
+		case ev := <-evCh:
+			if _, ok := ev.Data.(*bridge.UsersLoadedEvent); !ok {
+				t.Fatalf("expected startup UsersLoadedEvent, got %T", ev.Data)
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatal("timed out waiting for RocketChat UsersLoadedEvent")
+		}
+
+		return
+	}
+
+	select {
+	case ev := <-evCh:
+		if _, ok := ev.Data.(*bridge.UsersLoadedEvent); !ok {
+			t.Fatalf("expected startup UsersLoadedEvent, got %T", ev.Data)
+		}
+	default:
+	}
 }
 
 func TestRocketChatUserInfoRolesDirectoryAndDM(t *testing.T) {
