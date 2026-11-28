@@ -695,3 +695,48 @@ func TestIsTableTopBorderAndContextPrefix(t *testing.T) {
 	assert.Equal(t, "[2026-11-24 13:03] ┌───┐", u.formatContextMessage("2026-11-24 13:03", "", "┌───┐"))
 	assert.Equal(t, "[2026-11-24 13:03] [↪abc] hello", u.formatContextMessage("2026-11-24 13:03", "[↪abc]", "hello"))
 }
+
+func TestShouldShedEvent(t *testing.T) {
+	br := &replayTestBridge{protocol: serviceMattermost}
+	u, _ := newTestUserBridge(t, "", br)
+
+	typingEv := &bridge.Event{Type: "typing", Data: &bridge.TypingEvent{}}
+	otherStatusEv := &bridge.Event{Type: "status_change", Data: &bridge.StatusChangeEvent{UserID: "other-user", Status: "online"}}
+	selfStatusEv := &bridge.Event{Type: "status_change", Data: &bridge.StatusChangeEvent{UserID: testBridgeUser, Status: "away"}}
+	msgEv := &bridge.Event{Type: "channel_message", Data: &bridge.ChannelMessageEvent{Text: "hi"}}
+
+	// Unbuffered channels never shed.
+	unbuffered := make(chan *bridge.Event)
+	assert.False(t, u.shouldShedEvent(unbuffered, typingEv))
+	assert.False(t, u.shouldShedEvent(unbuffered, otherStatusEv))
+
+	ch := make(chan *bridge.Event, 100)
+
+	// Below 50%: nothing is shed.
+	for range 49 {
+		ch <- msgEv
+	}
+
+	assert.False(t, u.shouldShedEvent(ch, typingEv))
+	assert.False(t, u.shouldShedEvent(ch, otherStatusEv))
+	assert.False(t, u.shouldShedEvent(ch, selfStatusEv))
+	assert.False(t, u.shouldShedEvent(ch, msgEv))
+
+	// At 50% (50/100): typing is shed, status changes are kept.
+	ch <- msgEv
+
+	assert.True(t, u.shouldShedEvent(ch, typingEv))
+	assert.False(t, u.shouldShedEvent(ch, otherStatusEv))
+	assert.False(t, u.shouldShedEvent(ch, selfStatusEv))
+	assert.False(t, u.shouldShedEvent(ch, msgEv))
+
+	// At 75% (75/100): typing and non-self status changes are shed; self status and messages are kept.
+	for range 25 {
+		ch <- msgEv
+	}
+
+	assert.True(t, u.shouldShedEvent(ch, typingEv))
+	assert.True(t, u.shouldShedEvent(ch, otherStatusEv))
+	assert.False(t, u.shouldShedEvent(ch, selfStatusEv))
+	assert.False(t, u.shouldShedEvent(ch, msgEv))
+}
