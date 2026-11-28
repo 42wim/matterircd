@@ -928,7 +928,7 @@ func (s *Slack) GetPosts(ctx context.Context, channelID string, limit int) []*br
 	}
 
 	if limit <= 0 {
-		limit = 100
+		limit = 60
 	}
 
 	limit = min(limit, 1000)
