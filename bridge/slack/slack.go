@@ -234,11 +234,16 @@ func (s *Slack) Join(ctx context.Context, channelName string) (string, string, e
 }
 
 func (s *Slack) List(ctx context.Context) (map[string]string, error) {
+	err := s.sc.EnsurePublicChannels(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	channelinfo := make(map[string]string)
 
 	conversations, _ := s.sc.GetConversations()
 	for _, channel := range conversations {
-		if channel.IsIM || channel.IsMpIM || channel.Name == "" {
+		if channel.IsIM || channel.IsMpIM || channel.IsArchived || channel.Name == "" {
 			continue
 		}
 
@@ -1290,28 +1295,32 @@ func (s *Slack) GetChannelID(ctx context.Context, name, teamID string) string {
 	}
 
 	if !isChan {
-		if isSlackIDWithPrefix(name, 'D') {
-			return strings.ToUpper(name)
-		}
-
-		if isSlackIDWithPrefix(name, 'U', 'W') {
-			if chID := s.GetDMChannelID(ctx, strings.ToUpper(name)); chID != "" {
-				return chID
-			}
+		if chID, resolved := s.resolveNonChannelTarget(ctx, name); resolved {
+			return chID
 		}
 	}
 
-	if chID := s.sc.GetChannelID(ctx, name); chID != "" {
-		return chID
+	return s.sc.GetChannelID(ctx, name)
+}
+
+func (s *Slack) resolveNonChannelTarget(ctx context.Context, name string) (string, bool) {
+	if isSlackIDWithPrefix(name, 'D') {
+		return strings.ToUpper(name), true
 	}
 
-	if !isChan {
-		if u := s.GetUserByUsername(ctx, name); u != nil && u.User != "" {
-			return s.GetDMChannelID(ctx, u.User)
-		}
+	if isSlackIDWithPrefix(name, 'U', 'W') {
+		return s.GetDMChannelID(ctx, strings.ToUpper(name)), true
 	}
 
-	return ""
+	if chID := s.sc.GetCachedChannelID(name); chID != "" {
+		return chID, true
+	}
+
+	if u := s.GetUserByUsername(ctx, name); u != nil && u.User != "" {
+		return s.GetDMChannelID(ctx, u.User), true
+	}
+
+	return "", false
 }
 
 func (s *Slack) allowedLogin() error {
@@ -1348,6 +1357,7 @@ func (s *Slack) loginToSlack() (*slackclient.Client, error) {
 		Token:    s.credentials.Token,
 		MFAToken: s.credentials.MFAToken,
 	})
+	sc.LazyPublicChannels = true
 
 	if rc.Debug {
 		sc.SetLogLevel("debug")
@@ -1570,9 +1580,9 @@ func (s *Slack) handleSlackItemEvent(ctx context.Context, data any) bool {
 func (s *Slack) handleSlackLifecycleEvent(data any) {
 	switch ev := data.(type) {
 	case *slack.ChannelCreatedEvent:
-		s.emitChannelCreate(ev.Channel.ID, ev.Channel.Name)
+		s.emitChannelCreate(ev.Channel.ID, ev.Channel.Name, s.isSelfUserID(ev.Channel.Creator))
 	case *slack.GroupCreatedEvent:
-		s.emitChannelCreate(ev.Channel.ID, ev.Channel.Name)
+		s.emitChannelCreate(ev.Channel.ID, ev.Channel.Name, true)
 	case *slack.ChannelRenameEvent:
 		s.emitChannelUpdate(ev.Channel.ID, ev.Channel.Name)
 	case *slack.GroupRenameEvent:
@@ -1629,14 +1639,23 @@ func (s *Slack) handleSlackTyping(ev *slack.UserTypingEvent) {
 	})
 }
 
-func (s *Slack) emitChannelCreate(channelID, name string) {
+func (s *Slack) isSelfUserID(userID string) bool {
+	return userID != "" && s.sc != nil && userID == s.sc.UserID()
+}
+
+func (s *Slack) emitChannelCreate(channelID, name string, joined bool) {
 	if channelID == "" {
 		return
 	}
 
 	s.sc.UpdateChannel(channelID, name)
-	s.sc.SetChannelJoined(channelID, true)
 	s.sc.InvalidateUserChannels("")
+
+	if !joined {
+		return
+	}
+
+	s.sc.SetChannelJoined(channelID, true)
 
 	chName := ""
 	if name != "" {

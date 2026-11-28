@@ -1,6 +1,7 @@
 package slackclient
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -25,7 +26,11 @@ const (
 	channelMembersCacheTTL = 5 * time.Minute
 	userChannelsCacheTTL   = 5 * time.Minute
 	clientCountsTimeout    = 15 * time.Second
+	edgeChannelsTimeout    = 10 * time.Second
+	edgeChannelsSearchMax  = 30
+	conversationPageLimit  = 200
 	maxIMInfoFallback      = 50
+	convTypePublicChannel  = "public_channel"
 )
 
 func isActiveConversation(ch slack.Channel) bool {
@@ -89,20 +94,51 @@ func (c *Client) InvalidateChannels() {
 	c.Unlock()
 }
 
-// InvalidateCaches clears cached conversation freshness and membership TTL maps
-// so subsequent lookups re-fetch from the Slack API after a long disconnect.
+// InvalidateCaches clears cached conversation freshness, public channel sync
+// state, and membership TTL maps so subsequent lookups re-fetch from the Slack
+// API after a long disconnect.
 func (c *Client) InvalidateCaches() {
 	c.Lock()
 	c.channelsFetchedAt = 0
+	c.publicChannelsSynced = false
 	clear(c.channelMembers)
 	clear(c.userChannels)
 	c.Unlock()
 }
 
+func isSlackChannelID(s string) bool {
+	if len(s) < 9 {
+		return false
+	}
+
+	if s[0] != 'C' && s[0] != 'G' {
+		return false
+	}
+
+	hasDigit := false
+
+	for i := 1; i < len(s); i++ {
+		ch := s[i]
+		switch {
+		case ch >= '0' && ch <= '9':
+			hasDigit = true
+		case ch >= 'A' && ch <= 'Z':
+		default:
+			return false
+		}
+	}
+
+	return hasDigit
+}
+
 func (c *Client) JoinChannel(ctx context.Context, channelName string) (string, string, error) {
 	channelID := strings.TrimSpace(channelName)
-	if resolved := c.GetChannelID(ctx, channelID); resolved != "" {
+	if resolved := c.GetCachedChannelID(channelID); resolved != "" {
 		channelID = resolved
+	} else if !isSlackChannelID(channelID) {
+		if resolved := c.GetChannelID(ctx, channelID); resolved != "" {
+			channelID = resolved
+		}
 	}
 
 	c.RLock()
@@ -342,13 +378,65 @@ func (c *Client) fetchConversationPages(ctx context.Context, types []string) ([]
 	params := slack.GetConversationsParameters{
 		Cursor:          "",
 		ExcludeArchived: true,
-		Limit:           100,
+		Limit:           conversationPageLimit,
 		Types:           types,
 	}
 
 	for {
+		if ctx.Err() != nil {
+			return channels, ctx.Err()
+		}
+
 		conversations, nextCursor, err := c.sc.GetConversationsContext(ctx, &params)
 		if err != nil {
+			if rlErr, ok := errors.AsType[*slack.RateLimitedError](err); ok {
+				if !sleepContext(ctx, rlErr.RetryAfter) {
+					return channels, ctx.Err()
+				}
+
+				continue
+			}
+
+			return channels, err
+		}
+
+		params.Cursor = nextCursor
+
+		channels = append(channels, conversations...)
+
+		if nextCursor == "" {
+			break
+		}
+	}
+
+	return channels, nil
+}
+
+func (c *Client) fetchJoinedConversationPages(ctx context.Context, types []string) ([]slack.Channel, error) {
+	var channels []slack.Channel
+
+	params := slack.GetConversationsForUserParameters{
+		Cursor:          "",
+		ExcludeArchived: true,
+		Limit:           conversationPageLimit,
+		Types:           types,
+	}
+
+	for {
+		if ctx.Err() != nil {
+			return channels, ctx.Err()
+		}
+
+		conversations, nextCursor, err := c.sc.GetConversationsForUserContext(ctx, &params)
+		if err != nil {
+			if rlErr, ok := errors.AsType[*slack.RateLimitedError](err); ok {
+				if !sleepContext(ctx, rlErr.RetryAfter) {
+					return channels, ctx.Err()
+				}
+
+				continue
+			}
+
 			return channels, err
 		}
 
@@ -373,7 +461,15 @@ func (c *Client) refreshConversations(ctx context.Context) ([]slack.Channel, err
 		return nil, nil
 	}
 
-	channels, err := c.fetchConversationPages(ctx, []string{"public_channel", "private_channel", "mpim"})
+	if c.LazyPublicChannels {
+		return c.refreshJoinedConversations(ctx)
+	}
+
+	return c.refreshAllConversations(ctx)
+}
+
+func (c *Client) refreshAllConversations(ctx context.Context) ([]slack.Channel, error) {
+	channels, err := c.fetchConversationPages(ctx, []string{convTypePublicChannel, "private_channel", "mpim"})
 	if err != nil {
 		c.logger.Error("GetConversations", err)
 	}
@@ -406,10 +502,206 @@ func (c *Client) refreshConversations(ctx context.Context) ([]slack.Channel, err
 		c.joinedChannels[ch.ID] = isActiveConversation(ch)
 	}
 
+	if err == nil {
+		c.publicChannelsSynced = true
+	}
+
 	c.channelsFetchedAt = time.Now().Unix()
 	c.Unlock()
 
 	return channels, nil
+}
+
+func (c *Client) refreshJoinedConversations(ctx context.Context) ([]slack.Channel, error) {
+	channels, err := c.fetchJoinedConversationPages(ctx, []string{convTypePublicChannel, "private_channel", "mpim"})
+	if err != nil {
+		c.logger.Error("GetConversationsForUser", err)
+	}
+
+	// users.conversations omits is_member on some responses; every non-IM
+	// channel returned for the authenticated user is joined.
+	for i := range channels {
+		if !channels[i].IsIM {
+			channels[i].IsMember = true
+		}
+	}
+
+	// Fetch 1-on-1 DMs separately so tokens lacking im:read still load channels.
+	ims, imErr := c.fetchJoinedConversationPages(ctx, []string{"im"})
+	if imErr != nil {
+		c.logger.Debugf("GetConversationsForUser(im): %s", imErr)
+	} else {
+		channels = append(channels, ims...)
+	}
+
+	c.enrichConversationLatest(ctx, channels)
+
+	return c.applyJoinedConversations(channels, err == nil, imErr == nil), nil
+}
+
+func (c *Client) applyJoinedConversations(channels []slack.Channel, reconcileNonIM, reconcileIM bool) []slack.Channel {
+	seenNonIM, seenIM := collectSeenConversationIDs(channels)
+
+	c.Lock()
+	c.reconcileJoinedMembershipLocked(seenNonIM, seenIM, reconcileNonIM, reconcileIM)
+
+	for _, ch := range channels {
+		if ch.ID == "" {
+			continue
+		}
+
+		if ch.Name != "" && !ch.IsIM {
+			c.channels[ch.ID] = "#" + ch.Name
+		}
+
+		if ch.IsIM && ch.User != "" {
+			c.dmChannels[ch.User] = ch.ID
+		}
+
+		c.channelData[ch.ID] = ch
+		c.joinedChannels[ch.ID] = isActiveConversation(ch)
+	}
+
+	if reconcileNonIM || reconcileIM {
+		c.channelsFetchedAt = time.Now().Unix()
+	}
+
+	snapshot := make([]slack.Channel, 0, len(c.channelData))
+	for _, ch := range c.channelData {
+		snapshot = append(snapshot, ch)
+	}
+
+	c.Unlock()
+
+	return snapshot
+}
+
+func collectSeenConversationIDs(channels []slack.Channel) (map[string]struct{}, map[string]struct{}) {
+	seenNonIM := make(map[string]struct{}, len(channels))
+	seenIM := make(map[string]struct{})
+
+	for _, ch := range channels {
+		if ch.ID == "" {
+			continue
+		}
+
+		if ch.IsIM {
+			seenIM[ch.ID] = struct{}{}
+		} else {
+			seenNonIM[ch.ID] = struct{}{}
+		}
+	}
+
+	return seenNonIM, seenIM
+}
+
+func (c *Client) reconcileJoinedMembershipLocked(seenNonIM, seenIM map[string]struct{}, reconcileNonIM, reconcileIM bool) {
+	for id, joined := range c.joinedChannels {
+		if !joined {
+			continue
+		}
+
+		ch, hasCh := c.channelData[id]
+		isIM := (hasCh && ch.IsIM) || strings.HasPrefix(id, "D")
+
+		if isIM {
+			if !reconcileIM {
+				continue
+			}
+
+			if _, ok := seenIM[id]; !ok {
+				c.joinedChannels[id] = false
+			}
+
+			continue
+		}
+
+		if !reconcileNonIM {
+			continue
+		}
+
+		if _, ok := seenNonIM[id]; ok {
+			continue
+		}
+
+		c.joinedChannels[id] = false
+
+		if hasCh {
+			ch.IsMember = false
+			c.channelData[id] = ch
+		}
+	}
+}
+
+// EnsurePublicChannels populates the local channel cache with workspace public
+// channels if they have not been synced yet. Already-synced caches return
+// immediately so subsequent /LIST calls reuse in-memory state (kept up to date
+// by RTM lifecycle events).
+func (c *Client) EnsurePublicChannels(ctx context.Context) error {
+	c.RLock()
+	synced := c.publicChannelsSynced
+	sc := c.sc
+	c.RUnlock()
+
+	if synced || sc == nil {
+		return nil
+	}
+
+	c.publicChannelsMu.Lock()
+	defer c.publicChannelsMu.Unlock()
+
+	c.RLock()
+	synced = c.publicChannelsSynced
+	sc = c.sc
+	c.RUnlock()
+
+	if synced || sc == nil {
+		return nil
+	}
+
+	channels, err := c.fetchConversationPages(ctx, []string{convTypePublicChannel})
+	if err != nil {
+		return err
+	}
+
+	c.mergePublicChannels(channels)
+
+	return nil
+}
+
+func (c *Client) mergePublicChannels(channels []slack.Channel) {
+	c.Lock()
+	for _, ch := range channels {
+		if ch.ID == "" {
+			continue
+		}
+
+		if ch.Name != "" && !ch.IsIM {
+			c.channels[ch.ID] = "#" + ch.Name
+		}
+
+		if existing, ok := c.channelData[ch.ID]; ok {
+			if ch.Latest == nil && existing.Latest != nil {
+				ch.Latest = existing.Latest
+			}
+
+			if ch.LastRead == "" && existing.LastRead != "" {
+				ch.LastRead = existing.LastRead
+			}
+
+			if c.joinedChannels[ch.ID] {
+				ch.IsMember = true
+			}
+		}
+
+		c.channelData[ch.ID] = ch
+		if _, known := c.joinedChannels[ch.ID]; !known {
+			c.joinedChannels[ch.ID] = isActiveConversation(ch)
+		}
+	}
+
+	c.publicChannelsSynced = true
+	c.Unlock()
 }
 
 func (c *Client) GetChannels() []slack.Channel {
@@ -555,35 +847,189 @@ func (c *Client) CreateChannel(ctx context.Context, name string, isPrivate bool)
 	return ch, nil
 }
 
-func (c *Client) GetChannelID(ctx context.Context, name string) string {
-	target := "#" + strings.TrimPrefix(name, "#")
-	upper := strings.ToUpper(strings.TrimSpace(name))
+// GetCachedChannelID resolves a channel ID or name from the local cache without
+// triggering any network requests.
+func (c *Client) GetCachedChannelID(name string) string {
+	clean := strings.TrimPrefix(strings.TrimSpace(name), "#")
+	if clean == "" {
+		return ""
+	}
+
+	target := "#" + clean
+	upper := strings.ToUpper(clean)
 
 	c.RLock()
+	defer c.RUnlock()
 
 	if _, ok := c.channels[upper]; ok {
-		c.RUnlock()
 		return upper
 	}
 
 	if _, ok := c.channelData[upper]; ok {
-		c.RUnlock()
 		return upper
 	}
 
 	for id, chName := range c.channels {
 		if strings.EqualFold(chName, target) {
-			c.RUnlock()
 			return id
 		}
 	}
 
+	return ""
+}
+
+func buildEdgeChannelSearchPayload(token, cleanName string) ([]byte, error) {
+	payload := struct {
+		Token           string `json:"token"`
+		Query           string `json:"query"`
+		Count           int    `json:"count"`
+		Fuzz            int    `json:"fuzz"`
+		CheckMembership bool   `json:"check_membership"`
+	}{
+		Token:           token,
+		Query:           cleanName,
+		Count:           edgeChannelsSearchMax,
+		Fuzz:            0,
+		CheckMembership: true,
+	}
+
+	return json.Marshal(payload)
+}
+
+// searchEdgeChannelID resolves an unjoined channel name via Slack's edgeapi
+// channels/search endpoint for xoxc- cookie sessions, caching the matched
+// channel on exact hit.
+func (c *Client) searchEdgeChannelID(ctx context.Context, cleanName string) string {
+	c.RLock()
+	hc := c.httpClient
+	token := c.token
 	c.RUnlock()
 
-	channels, _ := c.getConversations(ctx)
-	for _, ch := range channels {
-		if strings.EqualFold(ch.Name, strings.TrimPrefix(name, "#")) {
-			return ch.ID
+	teamID := c.teamID()
+	if hc == nil || hc.cookie == "" || !strings.HasPrefix(token, "xoxc-") || teamID == "" || cleanName == "" {
+		return ""
+	}
+
+	reqBody, err := buildEdgeChannelSearchPayload(token, cleanName)
+	if err != nil {
+		return ""
+	}
+
+	reqCtx, cancel := context.WithTimeout(ctx, edgeChannelsTimeout)
+	defer cancel()
+
+	endpoint := edgeAPIUsersPrefix + teamID + "/channels/search"
+
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, endpoint, bytes.NewReader(reqBody))
+	if err != nil {
+		return ""
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := hc.Do(req)
+	if err != nil {
+		c.logger.Debugf("edgeapi channels/search: %s", err)
+
+		return ""
+	}
+
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return ""
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		c.logger.Debugf("edgeapi channels/search: HTTP %d", resp.StatusCode)
+
+		return ""
+	}
+
+	ch, ok := c.parseEdgeChannelSearchMatch(body, cleanName)
+	if !ok {
+		return ""
+	}
+
+	c.cacheChannel(ch)
+
+	return ch.ID
+}
+
+func (c *Client) parseEdgeChannelSearchMatch(body []byte, cleanName string) (slack.Channel, bool) {
+	var parsed struct {
+		Results  []slack.Channel `json:"results"`
+		Channels []slack.Channel `json:"channels"`
+	}
+
+	err := json.Unmarshal(body, &parsed)
+	if err != nil {
+		c.logger.Debugf("edgeapi channels/search decode: %s", err)
+
+		return slack.Channel{}, false
+	}
+
+	candidates := parsed.Results
+	if len(candidates) == 0 {
+		candidates = parsed.Channels
+	}
+
+	for _, ch := range candidates {
+		if ch.ID == "" || ch.IsArchived {
+			continue
+		}
+
+		if strings.EqualFold(ch.Name, cleanName) || strings.EqualFold(ch.NameNormalized, cleanName) {
+			return ch, true
+		}
+	}
+
+	return slack.Channel{}, false
+}
+
+func (c *Client) GetChannelID(ctx context.Context, name string) string {
+	if id := c.GetCachedChannelID(name); id != "" {
+		return id
+	}
+
+	clean := strings.TrimPrefix(strings.TrimSpace(name), "#")
+	if clean == "" {
+		return ""
+	}
+
+	c.RLock()
+	sc := c.sc
+	fetchedAt := c.channelsFetchedAt
+	publicSynced := c.publicChannelsSynced
+	lazy := c.LazyPublicChannels
+	c.RUnlock()
+
+	if sc == nil {
+		return ""
+	}
+
+	if !lazy || fetchedAt == 0 {
+		channels, _ := c.getConversations(ctx)
+		for _, ch := range channels {
+			if strings.EqualFold(ch.Name, clean) {
+				return ch.ID
+			}
+		}
+
+		if !lazy {
+			return ""
+		}
+	}
+
+	if !publicSynced {
+		if chID := c.searchEdgeChannelID(ctx, clean); chID != "" {
+			return chID
+		}
+
+		err := c.EnsurePublicChannels(ctx)
+		if err == nil {
+			return c.GetCachedChannelID(clean)
 		}
 	}
 
@@ -917,11 +1363,28 @@ func (c *Client) RemoveChannelMember(channelID, userID string) {
 	c.Unlock()
 }
 
+// GetChannelCount returns the number of active joined non-DM channels for the current user.
 func (c *Client) GetChannelCount() int {
 	c.RLock()
 	defer c.RUnlock()
 
-	return len(c.channels)
+	count := 0
+
+	for id, joined := range c.joinedChannels {
+		if !joined {
+			continue
+		}
+
+		if ch, ok := c.channelData[id]; ok {
+			if ch.IsArchived || ch.IsIM {
+				continue
+			}
+		}
+
+		count++
+	}
+
+	return count
 }
 
 func (c *Client) InvalidateUserChannels(userID string) {
@@ -937,8 +1400,8 @@ func (c *Client) InvalidateUserChannels(userID string) {
 func (c *Client) fetchUserPublicChannels(ctx context.Context, userID string) ([]slack.Channel, []string, error) {
 	params := slack.GetConversationsForUserParameters{
 		UserID:          userID,
-		Types:           []string{"public_channel"},
-		Limit:           200,
+		Types:           []string{convTypePublicChannel},
+		Limit:           conversationPageLimit,
 		ExcludeArchived: true,
 	}
 

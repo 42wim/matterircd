@@ -48,30 +48,34 @@ type channelMembersEntry struct {
 type Client struct {
 	sync.RWMutex
 
-	cred              Credentials
-	token             string
-	httpClient        *httpClient
-	sc                *slack.Client
-	rtm               *slack.RTM
-	info              *slack.Info
-	users             map[string]slack.User
-	presences         map[string]presenceEntry
-	channels          map[string]string
-	channelData       map[string]slack.Channel
-	channelsFetchedAt int64
-	joinedChannels    map[string]bool
-	channelMembers    map[string]channelMembersEntry
-	userChannels      map[string]userChannelsEntry
-	dmChannels        map[string]string
-	recentSent        map[string][]string
-	sending           map[string]int
-	sentCh            chan struct{}
-	pongCh            chan struct{}
-	connected         atomic.Bool
-	usersLoaded       atomic.Bool
-	initUsersMu       sync.Mutex
-	initUsersDone     chan struct{}
-	initUsersCancel   context.CancelFunc
+	LazyPublicChannels bool
+
+	cred                 Credentials
+	token                string
+	httpClient           *httpClient
+	sc                   *slack.Client
+	rtm                  *slack.RTM
+	info                 *slack.Info
+	users                map[string]slack.User
+	presences            map[string]presenceEntry
+	channels             map[string]string
+	channelData          map[string]slack.Channel
+	channelsFetchedAt    int64
+	publicChannelsSynced bool
+	publicChannelsMu     sync.Mutex
+	joinedChannels       map[string]bool
+	channelMembers       map[string]channelMembersEntry
+	userChannels         map[string]userChannelsEntry
+	dmChannels           map[string]string
+	recentSent           map[string][]string
+	sending              map[string]int
+	sentCh               chan struct{}
+	pongCh               chan struct{}
+	connected            atomic.Bool
+	usersLoaded          atomic.Bool
+	initUsersMu          sync.Mutex
+	initUsersDone        chan struct{}
+	initUsersCancel      context.CancelFunc
 
 	logger        *logrus.Entry
 	rootLogger    *logrus.Logger
@@ -162,10 +166,7 @@ func (c *Client) Login() error {
 	c.httpClient = hc
 	c.sc = slack.New(token, opts...)
 	c.rtm = c.sc.NewRTM(rtmOpts...)
-	c.users = make(map[string]slack.User)
-	c.presences = make(map[string]presenceEntry)
-	c.channels = make(map[string]string)
-	c.userChannels = make(map[string]userChannelsEntry)
+	c.resetSessionCachesLocked()
 	c.Unlock()
 	c.resetUserPrefetch()
 
@@ -179,6 +180,17 @@ func (c *Client) Login() error {
 	c.connected.Store(true)
 
 	return nil
+}
+
+func (c *Client) resetSessionCachesLocked() {
+	c.users = make(map[string]slack.User)
+	c.presences = make(map[string]presenceEntry)
+	c.channels = make(map[string]string)
+	c.channelData = make(map[string]slack.Channel)
+	c.joinedChannels = make(map[string]bool)
+	c.channelsFetchedAt = 0
+	c.publicChannelsSynced = false
+	c.userChannels = make(map[string]userChannelsEntry)
 }
 
 func (c *Client) waitForInfo() error {
@@ -221,6 +233,8 @@ func (c *Client) Logout() error {
 	c.sc = nil
 	c.token = ""
 	c.httpClient = nil
+	c.channelsFetchedAt = 0
+	c.publicChannelsSynced = false
 	c.recentSent = nil
 	c.sending = nil
 	c.broadcastSentLocked()
